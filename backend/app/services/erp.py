@@ -29,6 +29,18 @@ BASE_DELAY_SECONDS = 2
 #: attempt queued but could not confirm (``ErpPostResult.pending_job_id``).
 PENDING_JOB_KEY = "erp_pending_job_id"
 
+#: ``WorkflowInstance.state_data`` keys naming a bill a failed attempt left in
+#: the ERP: a ``posted_total_mismatch`` the adapter could not void, a
+#: ``posted_total_unconfirmed`` bill, or any other failure that reports the
+#: document it created. Without them the invoice sat at ``failed`` while a live
+#: bill with the wrong total waited, unfindable, in the ERP. They are the ERP's
+#: own ids — never the provider's response body. A later successful push clears
+#: them (its ``erp_reference`` names the bill of record); a failure that reports
+#: no document leaves them, since the earlier bill is still there.
+ORPHAN_DOCUMENT_ID_KEY = "erp_orphan_document_id"
+ORPHAN_DOCUMENT_NUMBER_KEY = "erp_orphan_document_number"
+_ORPHAN_KEYS = (ORPHAN_DOCUMENT_ID_KEY, ORPHAN_DOCUMENT_NUMBER_KEY)
+
 
 @dataclass(frozen=True)
 class ErpRefs:
@@ -182,12 +194,20 @@ async def retry_erp(
             detail="Cannot retry ERP push — invoice was never approved",
         )
 
-    # Reset retry count
+    # Reset the retry count. A NEW dict, never an in-place edit: `state_data` is
+    # a plain JSONB column (no MutableDict), so mutating the loaded dict and
+    # assigning the same object back leaves SQLAlchemy's history unchanged and
+    # the reset is never written — the dispatched push then resumes from the
+    # old, exhausted counter and fails without calling the ERP.
+    #
+    # Everything else is carried over on purpose. `PENDING_JOB_KEY` stays: an
+    # ERP whose create is a background job (Blackbaud FE NXT) must poll the job
+    # an earlier attempt queued before it queues another, or the retry posts a
+    # second bill. The orphan-document keys stay: that bill is still in the ERP
+    # until a successful push supersedes it.
     instance = await get_workflow_instance(db, invoice.id)
     if instance:
-        state_data = instance.state_data or {}
-        state_data["erp_retries"] = 0
-        instance.state_data = state_data
+        instance.state_data = {**(instance.state_data or {}), "erp_retries": 0}
         instance.state = "active"
 
     await transition_invoice(
@@ -200,8 +220,50 @@ async def retry_erp(
     await db.commit()
 
 
-class ErpPostRefusedError(RuntimeError):
-    """The adapter refused the payload before calling the ERP; never retried."""
+class ErpPostFailedError(RuntimeError):
+    """The adapter reported a failed post (``ErpPostResult.success`` False).
+
+    Carries the ERP's ids for any bill the attempt left behind
+    (``ErpPostResult.erp_document_id`` / ``erp_document_number``) so the
+    failure can name it on the ``invoice.erp_failed`` audit row. The message is
+    the adapter's PII-free ``ErpPostResult.message``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        erp_document_id: str | None = None,
+        erp_document_number: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.erp_document_id = erp_document_id
+        self.erp_document_number = erp_document_number
+
+
+class ErpPostRefusedError(ErpPostFailedError):
+    """A non-retryable failure (``ErpPostResult.retryable`` False): a payload
+    refused before calling the ERP, or a created bill whose booked total could
+    not be confirmed as the approved amount. Never retried."""
+
+
+def _orphan_details(exc: BaseException, state_data: dict | None) -> dict:
+    """The ERP ids of a bill a failed push left behind, for the audit row.
+
+    The failing attempt's own report first; else what an earlier attempt of
+    this push persisted on the instance. Empty when no bill is known.
+    """
+    doc_id = getattr(exc, "erp_document_id", None)
+    doc_number = getattr(exc, "erp_document_number", None)
+    if not (doc_id or doc_number):
+        doc_id = (state_data or {}).get(ORPHAN_DOCUMENT_ID_KEY)
+        doc_number = (state_data or {}).get(ORPHAN_DOCUMENT_NUMBER_KEY)
+    details: dict[str, str] = {}
+    if doc_id:
+        details["erp_document_id"] = doc_id
+    if doc_number:
+        details["erp_document_number"] = doc_number
+    return details
 
 
 def _is_final(exc: BaseException) -> bool:
@@ -304,7 +366,11 @@ async def send_to_erp_internal(
                     InvoiceStatus.failed,
                     actor_id=actor_id,
                     action_name="invoice.erp_failed",
-                    details={"error": str(exc), "retries": attempt + 1},
+                    details={
+                        "error": str(exc),
+                        "retries": attempt + 1,
+                        **_orphan_details(exc, instance.state_data if instance else None),
+                    },
                 )
                 if instance:
                     instance.state = "failed"
@@ -333,7 +399,10 @@ async def _call_erp(
     job it queued but could not see finish (``result.pending_job_id``). It is
     kept on ``instance.state_data`` and handed back on the next attempt — a
     manual retry included — so the adapter checks that job before queueing a
-    second one. The caller's commit persists it.
+    second one. A failure that reports the bill it left in the ERP has that
+    bill's ids kept the same way (``ORPHAN_DOCUMENT_ID_KEY`` /
+    ``ORPHAN_DOCUMENT_NUMBER_KEY``) and carried on the raised error; a success
+    clears them. The caller's commit persists all of it.
     """
     config = erp_config or {"type": "mock", "integration_method": "direct"}
 
@@ -344,12 +413,26 @@ async def _call_erp(
     state = (instance.state_data if instance is not None else None) or {}
     payload.pending_job_id = state.get(PENDING_JOB_KEY)
     result = await adapter.post_invoice(payload)
-    if instance is not None and result.pending_job_id != payload.pending_job_id:
-        instance.state_data = {**state, PENDING_JOB_KEY: result.pending_job_id}
+
+    if instance is not None:
+        new_state = dict(state)
+        if result.pending_job_id != payload.pending_job_id:
+            new_state[PENDING_JOB_KEY] = result.pending_job_id
+        if result.success:
+            for key in _ORPHAN_KEYS:
+                new_state.pop(key, None)
+        elif result.erp_document_id or result.erp_document_number:
+            new_state[ORPHAN_DOCUMENT_ID_KEY] = result.erp_document_id
+            new_state[ORPHAN_DOCUMENT_NUMBER_KEY] = result.erp_document_number
+        if new_state != state:
+            instance.state_data = new_state
 
     if not result.success:
-        if not result.retryable:
-            raise ErpPostRefusedError(result.message or "ERP post refused")
-        raise RuntimeError(result.message or "ERP post failed")
+        error = ErpPostFailedError if result.retryable else ErpPostRefusedError
+        raise error(
+            result.message or ("ERP post failed" if result.retryable else "ERP post refused"),
+            erp_document_id=result.erp_document_id,
+            erp_document_number=result.erp_document_number,
+        )
 
     return result.erp_document_id or result.erp_document_number or "UNKNOWN"

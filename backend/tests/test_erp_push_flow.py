@@ -838,3 +838,353 @@ async def test_erp_refs_resolve_against_the_invoice_entitys_own_chart(realdb):
         "6200": "S-6200",
         "6300": "D-6300",
     }
+
+
+# ---------------------------------------------------------------------------
+# A refusal that leaves a bill in the ERP names it.
+#
+# `posted_total_mismatch` whose void failed, and `posted_total_unconfirmed`,
+# are non-retryable failures that come back WITH the created bill's id.
+# `_call_erp` used to raise with the message alone, so the invoice went to
+# `failed` and the live bill — booked at a total nobody approved — could not
+# be found from our side. The ids now ride the error, the workflow instance
+# (`ORPHAN_DOCUMENT_*_KEY`) and the `invoice.erp_failed` audit row; the
+# provider's response body never does.
+# ---------------------------------------------------------------------------
+
+_PROVIDER_BODY_MARKER = "SECRET-PROVIDER-BODY"
+
+
+class _NoVoidAdapter:
+    """An ERP that cannot void the bill it just created."""
+
+    async def void_invoice(self, document_id):
+        return False
+
+
+async def _posted_total_failure(kind: str):
+    """The real `check_posted_total` result for a mismatch-not-voided or an
+    unconfirmed total, carrying a provider body that must never be persisted."""
+    from app.services.erp_adapters.base import InvoicePayload
+    from app.services.erp_adapters.posted_total import check_posted_total
+
+    payload = InvoicePayload(
+        correlation_id="c", invoice_number="INV-1", vendor_name="Acme", amount=Decimal("100.00")
+    )
+    result = await check_posted_total(
+        _NoVoidAdapter(),
+        "Xero",
+        payload,
+        posted_total=Decimal("115.00") if kind == "mismatch" else None,
+        document_id="XERO-BILL-7",
+        document_number="BILL-0007",
+        raw_response={"body": _PROVIDER_BODY_MARKER},
+    )
+    assert result is not None and not result.success and not result.retryable
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["mismatch", "unconfirmed"])
+async def test_call_erp_keeps_the_id_of_a_bill_a_refusal_left_in_the_erp(kind):
+    from app.services.erp import (
+        ORPHAN_DOCUMENT_ID_KEY,
+        ORPHAN_DOCUMENT_NUMBER_KEY,
+        _call_erp,
+    )
+
+    result = await _posted_total_failure(kind)
+    if kind == "mismatch":
+        assert "could not be voided" in result.message
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return result
+
+    inst = _instance(state_data={"erp_retries": 0})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostRefusedError) as exc:
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+
+    assert exc.value.erp_document_id == "XERO-BILL-7"
+    assert exc.value.erp_document_number == "BILL-0007"
+    assert str(exc.value) == result.message
+    assert inst.state_data == {
+        "erp_retries": 0,
+        ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7",
+        ORPHAN_DOCUMENT_NUMBER_KEY: "BILL-0007",
+    }
+
+
+@pytest.mark.asyncio
+async def test_call_erp_retryable_failure_carries_the_bill_ids_too():
+    """The retryable path raises the same carrier, so a transient failure that
+    reports a created document is not dropped either."""
+    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY, ErpPostFailedError, _call_erp
+    from app.services.erp_adapters.base import ErpPostResult
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return ErpPostResult(success=False, message="X post failed", erp_document_id="D-1")
+
+    inst = _instance(state_data={})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostFailedError) as exc:
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+    assert not isinstance(exc.value, ErpPostRefusedError)
+    assert exc.value.erp_document_id == "D-1"
+    assert inst.state_data[ORPHAN_DOCUMENT_ID_KEY] == "D-1"
+
+
+@pytest.mark.asyncio
+async def test_call_erp_failure_without_a_document_keeps_the_earlier_orphan():
+    """A later attempt that reports no document does not erase the bill an
+    earlier attempt left in the ERP — it is still there."""
+    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY, _call_erp
+    from app.services.erp_adapters.base import erp_refusal
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return erp_refusal("Xero", "vendor_not_linked")
+
+    state = {"erp_retries": 0, ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7"}
+    inst = _instance(state_data=dict(state))
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostRefusedError) as exc:
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+    assert exc.value.erp_document_id is None
+    assert inst.state_data == state
+
+
+@pytest.mark.asyncio
+async def test_call_erp_success_clears_an_earlier_orphan():
+    """Once a push succeeds its `erp_reference` names the bill of record; the
+    orphan keys from an earlier failed attempt are cleared."""
+    from app.services.erp import (
+        ORPHAN_DOCUMENT_ID_KEY,
+        ORPHAN_DOCUMENT_NUMBER_KEY,
+        _call_erp,
+    )
+    from app.services.erp_adapters.base import ErpPostResult
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return ErpPostResult(success=True, erp_document_id="XERO-BILL-7")
+
+    inst = _instance(
+        state_data={
+            "erp_retries": 0,
+            ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7",
+            ORPHAN_DOCUMENT_NUMBER_KEY: "BILL-0007",
+        }
+    )
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        ref = await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+    assert ref == "XERO-BILL-7"
+    assert inst.state_data == {"erp_retries": 0}
+
+
+@pytest.mark.asyncio
+async def test_send_to_erp_failed_audit_row_names_the_bill_left_in_the_erp():
+    """Through the whole push: one attempt (non-retryable), the invoice at
+    `failed`, and the append-only `invoice.erp_failed` row carrying the bill's
+    ERP ids — never the provider's response body."""
+    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY
+
+    result = await _posted_total_failure("mismatch")
+    calls = []
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            calls.append(payload)
+            return result
+
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    inst = _instance(state_data={})
+    recorder = _AuditRecorder()
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp.get_erp_adapter", return_value=_Adapter()),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+        patch("app.services.erp.asyncio.sleep", AsyncMock()),
+    ):
+        await send_to_erp_internal(_line_items_db([]), inv, erp_config={"type": "x"})
+
+    assert len(calls) == 1
+    assert inv.status == InvoiceStatus.failed
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert fail_row["details"]["erp_document_id"] == "XERO-BILL-7"
+    assert fail_row["details"]["erp_document_number"] == "BILL-0007"
+    assert fail_row["details"]["error"] == result.message
+    assert _PROVIDER_BODY_MARKER not in json.dumps(recorder.rows, default=str)
+    assert inst.state == "failed"
+    assert inst.state_data[ORPHAN_DOCUMENT_ID_KEY] == "XERO-BILL-7"
+    assert _PROVIDER_BODY_MARKER not in json.dumps(inst.state_data)
+
+
+@pytest.mark.asyncio
+async def test_send_to_erp_failed_audit_row_falls_back_to_an_earlier_orphan():
+    """The last attempt reports no document, but an earlier one left a bill:
+    the failure row still names it."""
+    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY
+
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    inst = _instance(state_data={"erp_retries": 2, ORPHAN_DOCUMENT_ID_KEY: "D-OLD"})
+    recorder = _AuditRecorder()
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", AsyncMock(side_effect=RuntimeError("down"))),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert fail_row["details"]["erp_document_id"] == "D-OLD"
+    assert "erp_document_number" not in fail_row["details"]
+
+
+# ---------------------------------------------------------------------------
+# Against a real tenant: what these paths write is actually COMMITTED.
+#
+# `WorkflowInstance.state_data` is a plain JSONB column — no MutableDict — so
+# only a NEW dict assigned to it is seen as a change. `retry_erp` used to edit
+# the loaded dict in place and assign the same object back: SQLAlchemy saw no
+# change, the `erp_retries` reset was never written, and the push the route
+# dispatched next resumed from the exhausted counter and failed the invoice
+# again without ever calling the ERP. A mock session cannot see that; a commit
+# and a fresh read can.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_erp_failed_invoice(mk, org_id, *, state_data):
+    from app.models.invoice import Invoice
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+
+    async with mk() as s:
+        definition = WorkflowDefinition(
+            organization_id=org_id, name="ERP push", steps_config={"steps": []}
+        )
+        inv = Invoice(
+            organization_id=org_id,
+            invoice_number=f"ERP-{uuid.uuid4().hex[:8]}",
+            vendor_name="Acme",
+            amount=Decimal("100.00"),
+            currency="USD",
+            status=InvoiceStatus.failed,
+            approved_by=str(uuid.uuid4()),
+        )
+        s.add_all([definition, inv])
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                correlation_id=inv.correlation_id,
+                definition_id=definition.id,
+                invoice_id=inv.id,
+                current_step=3,
+                state="failed",
+                state_data=state_data,
+            )
+        )
+        await s.commit()
+        return inv.id
+
+
+async def _reload(mk, invoice_id):
+    from sqlalchemy import select
+
+    from app.models.invoice import Invoice
+    from app.models.workflow import AuditLog, WorkflowInstance
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        inst = (
+            await s.execute(
+                select(WorkflowInstance).where(WorkflowInstance.invoice_id == invoice_id)
+            )
+        ).scalar_one()
+        rows = (
+            (await s.execute(select(AuditLog).where(AuditLog.entity_id == invoice_id)))
+            .scalars()
+            .all()
+        )
+        return inv, inst, rows
+
+
+@pytest.mark.asyncio
+async def test_retry_erp_reset_is_committed_and_keeps_the_pending_job(realdb):
+    """The reset survives a commit and a fresh read. The pending ERP job and the
+    orphan bill are carried over: Blackbaud must poll the job an earlier attempt
+    queued before it queues another (else the retry posts a second bill), and
+    the orphan stays in the ERP until a successful push supersedes it."""
+    from sqlalchemy import select
+
+    from app.models.invoice import Invoice
+    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY, PENDING_JOB_KEY
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_erp_failed_invoice(
+        mk,
+        info.org_id,
+        state_data={
+            "erp_retries": 3,
+            "last_error": "old",
+            PENDING_JOB_KEY: "job-41",
+            ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7",
+        },
+    )
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        await retry_erp(s, inv)
+
+    inv, inst, rows = await _reload(mk, inv_id)
+    assert inv.status == InvoiceStatus.sending_to_erp
+    assert inst.state == "active"
+    assert inst.state_data == {
+        "erp_retries": 0,
+        "last_error": "old",
+        PENDING_JOB_KEY: "job-41",
+        ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7",
+    }
+    assert any(r.action == "invoice.erp_retried" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_send_to_erp_commits_the_orphan_bill_and_its_audit_row(realdb):
+    """End to end on a real tenant: retry, then a mismatch the ERP could not
+    void. The invoice is `failed`, the bill's ids are committed on the
+    instance, and the committed `invoice.erp_failed` row names the bill."""
+    from sqlalchemy import select
+
+    from app.models.invoice import Invoice
+    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY, ORPHAN_DOCUMENT_NUMBER_KEY
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_erp_failed_invoice(mk, info.org_id, state_data={"erp_retries": 3})
+    result = await _posted_total_failure("mismatch")
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return result
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        await retry_erp(s, inv)
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+            await send_to_erp_internal(s, inv, erp_config={"type": "x"})
+
+    inv, inst, rows = await _reload(mk, inv_id)
+    assert inv.status == InvoiceStatus.failed
+    assert inst.state == "failed"
+    assert inst.state_data[ORPHAN_DOCUMENT_ID_KEY] == "XERO-BILL-7"
+    assert inst.state_data[ORPHAN_DOCUMENT_NUMBER_KEY] == "BILL-0007"
+    # One attempt from a reset counter: the reset reached the database.
+    assert inst.state_data["erp_retries"] == 1
+    fail_row = next(r for r in rows if r.action == "invoice.erp_failed")
+    assert fail_row.details["erp_document_id"] == "XERO-BILL-7"
+    assert fail_row.details["erp_document_number"] == "BILL-0007"
+    assert _PROVIDER_BODY_MARKER not in json.dumps(fail_row.details)
