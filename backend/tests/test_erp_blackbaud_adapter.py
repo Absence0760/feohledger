@@ -71,6 +71,9 @@ class FakeSky:
         self.record_id = 4975
         self.invoice: dict | None = None
         self.collections: dict[str, list[dict]] = {}
+        # A transport error class raised instead of answering (timeout, reset).
+        self.process_exc: type[httpx.TransportError] | None = None
+        self.status_exc: type[httpx.TransportError] | None = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -80,6 +83,8 @@ class FakeSky:
                 return httpx.Response(self.list_status, headers=self.list_headers, json={})
             return httpx.Response(200, json={"count": len(self.invoices), "value": self.invoices})
         if path == "/accountspayable/v1/invoices/process":
+            if self.process_exc is not None:
+                raise self.process_exc("transport failure", request=request)
             if self.process_status != 200:
                 return httpx.Response(
                     self.process_status,
@@ -87,6 +92,8 @@ class FakeSky:
                 )
             return httpx.Response(200, json={"process_id": 843})
         if path.endswith("/backgroundProcess/843/status"):
+            if self.status_exc is not None:
+                raise self.status_exc("transport failure", request=request)
             if self.status_http != 200:
                 return httpx.Response(self.status_http, json={})
             status = (
@@ -468,6 +475,82 @@ def test_retry_after_the_earlier_job_failed_posts_again():
     assert result.success, result.message
     assert len(fake.of("GET", "/accountspayable/v1/invoices")) == 1  # lookup still guards it
     assert len(fake.of("POST", "/invoices/process")) == 1
+
+
+@pytest.mark.parametrize("exc", [httpx.ReadTimeout, httpx.ConnectError])
+def test_create_transport_error_is_unconfirmed_and_the_retry_looks_up_first(exc):
+    """The regression: a timeout on `POST /invoices/process` used to escape as
+    a generic error, so services/erp re-sent two seconds later — while the job
+    FE NXT had already queued was still running, so the lookup missed and a
+    second invoice was queued. No process id came back, so there is no job to
+    carry; the result is non-retryable and the operator's retry runs the
+    correlation-marker lookup before posting."""
+    fake = FakeSky()
+    fake.process_exc = exc
+    result = _post(fake)
+    assert not result.success and not result.retryable
+    assert "job_unconfirmed" in result.message
+    assert exc.__name__ in result.message
+    assert "transport failure" not in result.message
+    assert result.pending_job_id is None and result.raw_response is None
+    assert len(fake.of("POST", "/invoices/process")) == 1
+
+    # The next attempt: the job FE NXT queued has since made the invoice.
+    fake.process_exc = None
+    fake.invoices = [
+        {
+            "invoice_id": 4975,
+            "vendor_id": 136,
+            "invoice_number": "INV-1",
+            "description": f"{MARKER} Office supplies",
+            "status": "Pending",
+        }
+    ]
+    retry = _post(fake)
+    assert retry.success and retry.erp_document_id == "4975"
+    assert len(fake.of("POST", "/invoices/process")) == 1  # never a second create
+
+
+def test_garbled_create_body_is_unconfirmed_not_retryable():
+    fake = FakeSky()
+    original = fake.handler
+
+    def handler(request):
+        if request.url.path.endswith("/invoices/process"):
+            fake.requests.append(request)
+            return httpx.Response(200, content=b"<html>gateway</html>")
+        return original(request)
+
+    fake.handler = handler
+    result = _post(fake)
+    assert not result.success and not result.retryable
+    assert "job_unconfirmed" in result.message and result.pending_job_id is None
+
+
+def test_status_poll_transport_error_keeps_the_process_id():
+    fake = FakeSky()
+    fake.status_exc = httpx.ReadTimeout
+    result = _post(fake)
+    assert not result.success and not result.retryable
+    assert "job_unconfirmed" in result.message and "ReadTimeout" in result.message
+    assert result.pending_job_id == "843"
+    assert len(fake.of("GET", "/status")) == 1  # stops at once, no further reads
+
+    # The next attempt, handed the job by services/erp, reads it and never posts.
+    fake.status_exc = None
+    retry = _post(fake, pending_job_id="843")
+    assert retry.success and retry.erp_document_id == "4975"
+    assert len(fake.of("POST", "/invoices/process")) == 1
+
+
+def test_pending_job_read_transport_error_is_unconfirmed_and_keeps_the_job():
+    fake = FakeSky()
+    fake.status_exc = httpx.ConnectError
+    result = _post(fake, pending_job_id="843")
+    assert not result.success and not result.retryable
+    assert result.pending_job_id == "843"
+    assert fake.of("POST", "/invoices/process") == []
+    assert fake.of("GET", "/accountspayable/v1/invoices") == []
 
 
 def test_job_failed_is_retryable():

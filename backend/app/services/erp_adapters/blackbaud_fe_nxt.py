@@ -92,6 +92,14 @@ that job before anything else: completed → the invoice it made is the result;
 still running or unreadable → ``job_unconfirmed`` again; ended without a record
 (canceled / failed) → the normal lookup-then-post path.
 
+A transport error (``httpx.HTTPError``: timeout, connect, read) counts as "could
+not confirm" too, never as a retryable failure. On a status or result read it
+keeps the ``process_id``. On the create itself no ``process_id`` came back,
+though a timeout can land after FE NXT queued the job, so the result is
+``job_unconfirmed`` with no job: the operator's retry then runs the
+correlation-marker lookup before posting, which finds the invoice once that
+job has finished.
+
 **Idempotency.** Our ``correlation_id`` rides in the invoice ``description`` as
 ``[feoh:<correlation_id>]``. Before creating, :meth:`post_invoice` searches
 ``GET /invoices?search_text=<invoice number>`` and keeps rows with the same
@@ -236,6 +244,20 @@ def _json(resp: httpx.Response) -> Any:
     if not resp.content:
         return None
     return json.loads(resp.content, parse_float=Decimal)
+
+
+def _field(resp: httpx.Response, key: str) -> Any:
+    """``body[key]``, or None when the body is not a JSON object.
+
+    Used on 2xx responses whose shape decides what happens next: a garbled body
+    after FE NXT accepted a job must read as "unknown", never raise into
+    ``services/erp`` as a retryable error.
+    """
+    try:
+        body = _json(resp)
+    except ValueError:
+        return None
+    return body.get(key) if isinstance(body, dict) else None
 
 
 def failure_reason(resp: httpx.Response) -> str:
@@ -492,20 +514,49 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                     "vendor, invoice number and correlation marker)",
                 )
 
-            resp = await client.post(
-                f"{self._base()}{AP}/invoices/process",
-                content=dumps_exact_json(body),
-                headers=headers,
-            )
+            try:
+                resp = await client.post(
+                    f"{self._base()}{AP}/invoices/process",
+                    content=dumps_exact_json(body),
+                    headers=headers,
+                )
+            except httpx.HTTPError as exc:
+                # A timeout can land after FE NXT queued the job, and nothing
+                # we hold names it. Never let services/erp re-send seconds
+                # later, while that job may still be running: the operator's
+                # retry runs the correlation-marker lookup above before posting.
+                return _unconfirmed(
+                    f"create request {type(exc).__name__}, no process id; a retry "
+                    "searches for the invoice before posting",
+                    None,
+                )
             if resp.status_code not in (200, 201, 202):
-                # Nothing was queued: safe for services/erp to retry.
+                # FE NXT answered with a refusal: nothing was queued, so
+                # services/erp may retry.
                 return ErpPostResult(success=False, message=failure_message("post", resp))
-            process_id = (_json(resp) or {}).get("process_id")
+            process_id = _field(resp, "process_id")
             if process_id is None:
-                return _unconfirmed("no process id returned", None)
+                return _unconfirmed(
+                    "no process id returned; a retry searches for the invoice before posting",
+                    None,
+                )
             return await self._await_job(client, headers, str(process_id), payload)
 
     async def _await_job(
+        self,
+        client: httpx.AsyncClient,
+        headers: dict[str, str],
+        process_id: str,
+        payload: InvoicePayload,
+    ) -> ErpPostResult:
+        try:
+            return await self._poll_job(client, headers, process_id, payload)
+        except httpx.HTTPError as exc:
+            # The job exists; we only failed to ask about it. Keep its id so
+            # the next attempt reads it instead of queueing another.
+            return _unconfirmed(f"job read {type(exc).__name__}", process_id)
+
+    async def _poll_job(
         self,
         client: httpx.AsyncClient,
         headers: dict[str, str],
@@ -522,7 +573,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 return _unconfirmed(
                     f"status HTTP {resp.status_code} ({failure_reason(resp)})", process_id
                 )
-            status = (_json(resp) or {}).get("status")
+            status = _field(resp, "status")
             if status in _JOB_ENDED_WITHOUT_RECORD:
                 # The job ended without creating the invoice: a retry is safe,
                 # and the pre-create lookup still guards it.
@@ -536,7 +587,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 return _unconfirmed(
                     f"result HTTP {result.status_code} ({failure_reason(result)})", process_id
                 )
-            record_id = (_json(result) or {}).get("record_id")
+            record_id = _field(result, "record_id")
             if record_id is None:
                 return _unconfirmed("no record id returned", process_id)
             return ErpPostResult(

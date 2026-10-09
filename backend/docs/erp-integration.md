@@ -1580,6 +1580,18 @@ Request rules worth knowing:
   therefore polls that job first: completed → its invoice is the result (and
   the stored job is cleared); still running or unreadable → `job_unconfirmed`
   again, nothing queued; canceled/failed → the normal lookup-then-post path.
+- **Transport errors are "unconfirmed", never retryable.** Any
+  `httpx.HTTPError` (timeout, connect, read) once the create has been sent is
+  `job_unconfirmed`, not an exception for `services/erp` to back off and
+  re-send. On a status or result read the `process_id` is known and is kept
+  as `pending_job_id`. On `POST /invoices/process` itself nothing names the
+  job, yet a timeout can land after FE NXT queued it — so the result carries
+  no job and the operator's retry runs the correlation-marker lookup before
+  posting, which returns the invoice once that job has finished. A 2xx create
+  whose body is not readable is treated the same way. Residual: a manual retry
+  issued while such an unnamed job is *still running* finds nothing and posts;
+  the message says the retry searches first, so wait for the job before
+  retrying.
 - **Idempotency.** `correlation_id` rides in the description as
   `[feoh:<id>]` (description bounded to 60 characters so the marker survives).
   A row with the same vendor and invoice number, not `Deleted`, carrying our
