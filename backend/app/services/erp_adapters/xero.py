@@ -21,6 +21,13 @@ References (checked 2026-10-08):
   FeohLedger, so it lands awaiting payment) or ``"DRAFT"``.
 * ``default_tax_type`` — optional Xero ``TaxType`` code used only when a
   line's account has no default tax type of its own.
+
+After the create the bill is read back by id and its ``Total`` must equal the
+approved amount (``posted_total.check_posted_total``). The read-back also
+catches an ``Idempotency-Key`` replay of a bill an earlier attempt voided or
+deleted: Xero reports such a bill ``VOIDED`` / ``DELETED``, and the push moves
+to the next key of ``posted_total.create_attempt_key``'s sequence rather than
+checking, or reporting as posted, a bill that is no longer live.
 """
 
 from __future__ import annotations
@@ -55,12 +62,22 @@ from app.services.erp_adapters.bill_allocation import (
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
-from app.services.erp_adapters.posted_total import check_posted_total
+from app.services.erp_adapters.posted_total import (
+    MAX_CREATE_ATTEMPTS,
+    VoidOutcome,
+    check_posted_total,
+    create_attempt_key,
+    previous_bill_removed,
+)
 from app.services.erp_oauth import register_oauth_provider
 from app.utils.json_money import dumps_exact_json
 
 PROVIDER = "Xero"
 XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
+#: Xero's ``Idempotency-Key`` limit (characters).
+IDEMPOTENCY_KEY_MAX = 128
+#: Statuses in which Xero keeps a bill readable but no longer live.
+_GONE_STATUSES = frozenset({"DELETED", "VOIDED"})
 
 XERO_OAUTH = register_oauth_provider(
     OAuthProviderSpec(
@@ -352,42 +369,75 @@ class XeroAdapter(OAuthErpAdapter):
                     }
                 ]
             }
+            return await self._create(client, headers, payload, body)
+
+    async def _create(self, client, headers, payload: InvoicePayload, body: dict) -> ErpPostResult:
+        """PUT the bill, read it back, and check the total Xero booked.
+
+        Xero returns the original response for a repeated ``Idempotency-Key``,
+        so a retry after a lost response cannot create a second bill even
+        inside the lookup's race window. But a replay can name a bill an
+        earlier ``posted_total_mismatch`` (or a person) voided or deleted, so
+        the read-back decides: live → check its total; ``DELETED`` /
+        ``VOIDED`` → the next key (the ``posted_total`` module docstring
+        explains why that cannot duplicate); anything else fails the push.
+        """
+        for attempt in range(1, MAX_CREATE_ATTEMPTS + 1):
             resp = await client.put(
                 f"{_api_base()}/Invoices",
                 content=dumps_exact_json(body),
                 headers={
                     **headers,
                     "Content-Type": "application/json",
-                    # Xero returns the original response for a repeated key, so
-                    # a retry after a lost response cannot create a second bill
-                    # even inside the lookup's race window.
-                    "Idempotency-Key": payload.correlation_id,
+                    "Idempotency-Key": create_attempt_key(
+                        payload.correlation_id, attempt, IDEMPOTENCY_KEY_MAX
+                    ),
                 },
             )
-
-        if resp.status_code not in (200, 201):
-            return _failure(resp)
-        created = (_json(resp).get("Invoices") or [{}])[0]
-        # Xero computes Total from the lines and their tax types; only the
-        # approved amount counts as posted.
-        problem = await check_posted_total(
-            self,
-            PROVIDER,
-            payload,
-            posted_total=_decimal(created.get("Total")),
-            document_id=created.get("InvoiceID"),
-            document_number=created.get("InvoiceNumber") or payload.invoice_number,
-            raw_response=created,
-        )
-        if problem:
-            return problem
-        return ErpPostResult(
-            success=True,
-            erp_document_id=created.get("InvoiceID"),
-            erp_document_number=created.get("InvoiceNumber") or payload.invoice_number,
-            message="Posted to Xero",
-            raw_response=created,
-        )
+            if resp.status_code not in (200, 201):
+                return _failure(resp)
+            created = (_json(resp).get("Invoices") or [{}])[0]
+            document_id = created.get("InvoiceID")
+            document_number = created.get("InvoiceNumber") or payload.invoice_number
+            if not document_id:
+                # Nothing to read back or void: unconfirmed, never success.
+                return await check_posted_total(
+                    self,
+                    PROVIDER,
+                    payload,
+                    posted_total=None,
+                    document_id=None,
+                    document_number=document_number,
+                    raw_response=created,
+                )
+            try:
+                bill = await self._live_bill(client, headers, document_id)
+            except _HttpFailure as failure:
+                return _failure(failure.resp)
+            if bill is None:
+                continue  # a replay of a bill since voided / deleted: next key
+            # Xero computes Total from the lines and their tax types; only the
+            # approved amount counts as posted.
+            problem = await check_posted_total(
+                self,
+                PROVIDER,
+                payload,
+                posted_total=_decimal(bill.get("Total")),
+                document_id=document_id,
+                document_number=document_number,
+                raw_response=bill,
+                void_bill=self._void_outcome,
+            )
+            if problem:
+                return problem
+            return ErpPostResult(
+                success=True,
+                erp_document_id=document_id,
+                erp_document_number=document_number,
+                message="Posted to Xero",
+                raw_response=bill,
+            )
+        return previous_bill_removed(PROVIDER)
 
     # -- status / void -----------------------------------------------------
 
@@ -409,19 +459,35 @@ class XeroAdapter(OAuthErpAdapter):
             return ErpInvoiceStatus.partially_paid
         return _STATUS_MAP.get(status, ErpInvoiceStatus.unknown)
 
-    async def void_invoice(self, erp_document_id: str) -> bool:
+    async def _live_bill(self, client, headers, erp_document_id: str) -> dict | None:
+        """The bill when it is live; None only when Xero POSITIVELY reports it
+        ``DELETED`` / ``VOIDED`` (Xero keeps both readable). Any other answer —
+        a 404, an error, an empty body — raises :class:`_HttpFailure`: "can't
+        read it" is never taken for "gone"."""
+        resp = await client.get(f"{_api_base()}/Invoices/{erp_document_id}", headers=headers)
+        if resp.status_code != 200:
+            raise _HttpFailure(resp)
+        bills = _json(resp).get("Invoices") or []
+        if not bills or not isinstance(bills[0], dict):
+            raise _HttpFailure(resp)
+        if str(bills[0].get("Status") or "").upper() in _GONE_STATUSES:
+            return None
+        return bills[0]
+
+    async def _void_outcome(self, erp_document_id: str) -> VoidOutcome:
         """DRAFT/SUBMITTED bills are DELETED; an AUTHORISED bill with nothing paid
         or credited against it is VOIDED. A bill with money applied cannot be
-        voided in Xero (the payment must be removed first), so that is False.
+        voided in Xero (the payment must be removed first), so that is
+        ``NOT_VOIDED``; one already DELETED / VOIDED is ``ALREADY_GONE``.
         """
         headers = await self._headers()
         async with httpx.AsyncClient(timeout=30) as client:
             bill = await self._get_bill(client, headers, erp_document_id)
             if bill is None:
-                return False
+                return VoidOutcome.NOT_VOIDED
             status = str(bill.get("Status") or "").upper()
-            if status in ("VOIDED", "DELETED"):
-                return True
+            if status in _GONE_STATUSES:
+                return VoidOutcome.ALREADY_GONE
             if status in ("DRAFT", "SUBMITTED"):
                 target = "DELETED"
             elif status == "AUTHORISED":
@@ -429,10 +495,10 @@ class XeroAdapter(OAuthErpAdapter):
                     _decimal(bill.get("AmountCredited")) or 0
                 )
                 if applied != 0:
-                    return False
+                    return VoidOutcome.NOT_VOIDED
                 target = "VOIDED"
             else:
-                return False
+                return VoidOutcome.NOT_VOIDED
             resp = await client.post(
                 f"{_api_base()}/Invoices/{erp_document_id}",
                 content=dumps_exact_json(
@@ -440,7 +506,12 @@ class XeroAdapter(OAuthErpAdapter):
                 ),
                 headers={**headers, "Content-Type": "application/json"},
             )
-        return resp.status_code in (200, 201)
+        return VoidOutcome.VOIDED if resp.status_code in (200, 201) else VoidOutcome.NOT_VOIDED
+
+    async def void_invoice(self, erp_document_id: str) -> bool:
+        """True when the bill is voided / deleted afterwards — including one
+        that already was (a void is idempotent)."""
+        return await self._void_outcome(erp_document_id) is not VoidOutcome.NOT_VOIDED
 
     # -- reads -------------------------------------------------------------
 

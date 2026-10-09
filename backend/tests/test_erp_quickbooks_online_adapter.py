@@ -55,8 +55,18 @@ def _prefs(home: str = "USD", multi: bool = False) -> dict:
     }
 
 
+def _object_not_found() -> MagicMock:
+    """What Intuit answers a read of a deleted bill with."""
+    return _resp(400, {"Fault": {"Error": [{"Message": "Object Not Found", "code": "610"}]}})
+
+
 class _Qbo:
-    """Routes `client.request(method, url, params=…, content=…, headers=…)`."""
+    """Routes `client.request(method, url, params=…, content=…, headers=…)`.
+
+    Stateful like QuickBooks: bills live by Id until deleted; a deleted bill
+    reads as Fault 610; a repeated `requestid` replays the original create
+    response, even for a bill since deleted.
+    """
 
     def __init__(
         self, *, prefs=None, existing_bills=None, post=None, bill=None, total_shift=Decimal(0)
@@ -65,17 +75,33 @@ class _Qbo:
         self.prefs = prefs or _prefs()
         self.existing_bills = existing_bills or []
         self.post = post
-        self.bill = bill
+        self.bills: dict[str, dict] = {}
+        if bill:
+            self.bills[str(bill["Id"])] = bill
+        self.deleted: set[str] = set()
+        self.replays: dict[str, dict] = {}
+        self.next_id = 145
         # Added to the TotalAmt QuickBooks reports, as a default tax code would.
         self.total_shift = total_shift
 
-    def _created(self, content: str) -> MagicMock:
+    def _created(self, content: str, request_id: str | None) -> MagicMock:
         """Like QuickBooks: TotalAmt is computed from the lines it was sent."""
+        if request_id in self.replays:
+            return _resp(200, self.replays[request_id])
         body = json.loads(content, parse_float=Decimal)
         total = sum((line["Amount"] for line in body["Line"]), Decimal(0)) + self.total_shift
-        bill = {"Id": "145", "DocNumber": body["DocNumber"], "SyncToken": "0", "TotalAmt": total}
-        self.bill = {**bill, "Balance": total}
+        bill_id = str(self.next_id)
+        self.next_id += 1
+        bill = {"Id": bill_id, "DocNumber": body["DocNumber"], "SyncToken": "0", "TotalAmt": total}
+        self.bills[bill_id] = {**bill, "Balance": total}
+        if request_id:
+            self.replays[request_id] = {"Bill": bill}
         return _resp(200, {"Bill": bill})
+
+    def delete(self, bill_id: str) -> None:
+        """Delete a bill as a person (or an earlier push) would in QuickBooks."""
+        self.bills.pop(bill_id, None)
+        self.deleted.add(bill_id)
 
     async def request(self, method, url, params=None, content=None, headers=None):
         self.calls.append(
@@ -87,13 +113,25 @@ class _Qbo:
         if path == "query":
             return _resp(200, {"QueryResponse": {"Bill": self.existing_bills}})
         if method == "POST" and path == "bill":
-            if self.post is not None:
-                return self.post
             if (params or {}).get("operation") == "delete":
-                return _resp(200, {"Bill": {"Id": "145", "status": "Deleted"}})
-            return self._created(content)
+                bill_id = str(json.loads(content)["Id"])
+                if bill_id not in self.bills:
+                    return _object_not_found()
+                self.delete(bill_id)
+                return _resp(200, {"Bill": {"Id": bill_id, "status": "Deleted"}})
+            if self.post is not None:
+                if self.post.status_code == 200:
+                    created = json.loads(self.post.content, parse_float=Decimal).get("Bill")
+                    if created and created.get("Id") is not None:
+                        self.bills.setdefault(str(created["Id"]), created)
+                return self.post
+            return self._created(content, (params or {}).get("requestid"))
         if path.startswith("bill/"):
-            return _resp(200, {"Bill": self.bill}) if self.bill else _resp(400, {})
+            bill_id = path.split("/", 1)[1]
+            if bill_id in self.deleted:
+                return _object_not_found()
+            bill = self.bills.get(bill_id)
+            return _resp(200, {"Bill": bill}) if bill else _resp(400, {})
         if path.startswith("companyinfo/"):
             return _resp(200, {"CompanyInfo": {}})
         raise AssertionError(f"unexpected {method} {url}")
@@ -282,6 +320,137 @@ def test_a_created_bill_with_no_total_is_unconfirmed_not_success(token, no_overr
     assert not result.success and result.retryable is False
     assert result.message.startswith("QuickBooks Online post unconfirmed: posted_total_unconfirmed")
     assert result.erp_document_id == "145"
+
+
+# ---------------------------------------------------------------------------
+# post_invoice — a `requestid` replay of a bill since deleted
+# ---------------------------------------------------------------------------
+
+
+def _request_ids(qbo: _Qbo) -> list[str]:
+    return [c["params"]["requestid"] for c in qbo.posts()]
+
+
+def test_a_retry_after_a_mismatch_creates_afresh_under_the_next_request_id(token, no_override):
+    """Push 1 books a taxed total and deletes the bill. The operator fixes the
+    tax code and retries: Intuit replays push 1's response for a deleted bill,
+    so the adapter moves to the next requestid instead of re-checking a ghost."""
+    qbo = _Qbo(total_shift=Decimal("8.01"))
+    first = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    assert first.message == (
+        "QuickBooks Online post failed: posted_total_mismatch (the bill was voided)"
+    )
+    assert qbo.deleted == {"145"}
+
+    qbo.total_shift = Decimal(0)
+    qbo.calls.clear()
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+
+    assert result.success, result.message
+    assert result.erp_document_id == "146"
+    assert _request_ids(qbo) == ["corr-7d1f", "corr-7d1f#r2"]
+    assert qbo.deletes() == []
+    # Both attempts carry the same PrivateNote, so the pre-check finds either.
+    assert {json.loads(p["content"])["PrivateNote"] for p in qbo.posts()} == {
+        "FeohLedger corr-7d1f"
+    }
+
+
+def test_a_replayed_matching_total_for_a_deleted_bill_is_never_success(token, no_override):
+    """The replayed total matches, but the bill it names was deleted in
+    QuickBooks: reporting it posted would point the ledger at nothing."""
+    qbo = _Qbo()
+    assert _run_with(qbo, lambda: _adapter().post_invoice(_payload())).success
+    qbo.delete("145")
+    qbo.calls.clear()
+
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+
+    assert result.success
+    assert result.erp_document_id == "146"
+    assert set(qbo.bills) == {"146"}
+
+
+def test_a_retry_that_still_mismatches_says_the_new_bill_was_voided(token, no_override):
+    """Before the fix this read "could not be voided": the replayed bill was
+    already gone, so deleting it failed."""
+    qbo = _Qbo(total_shift=Decimal("8.01"))
+    _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    qbo.calls.clear()
+
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+
+    assert result.retryable is False
+    assert result.message == (
+        "QuickBooks Online post failed: posted_total_mismatch (the bill was voided)"
+    )
+    assert result.erp_document_id == "146"
+    assert qbo.deleted == {"145", "146"}
+
+
+def test_an_unreadable_bill_is_never_taken_for_a_deleted_one(token, no_override):
+    """Only Fault 610 / status Deleted mean gone. A 5xx on the read-back fails
+    the push (retryably) without creating a second bill."""
+    qbo = _Qbo()
+    real_request = qbo.request
+
+    async def read_back_fails(method, url, **kw):
+        if method == "GET" and "/bill/" in url:
+            qbo.calls.append({"method": method, "url": url, **kw})
+            return _resp(503, {})
+        return await real_request(method, url, **kw)
+
+    qbo.request = read_back_fails
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+
+    assert not result.success and result.retryable is True
+    assert result.message.startswith("QuickBooks Online post failed: HTTP 503 ")
+    assert _request_ids(qbo) == ["corr-7d1f"]
+
+
+def test_an_exhausted_request_id_walk_is_refused_for_good(token, no_override):
+    from app.services.erp_adapters.posted_total import MAX_CREATE_ATTEMPTS, create_attempt_key
+
+    qbo = _Qbo()
+    for attempt in range(1, MAX_CREATE_ATTEMPTS + 1):
+        bill_id = str(900 + attempt)
+        qbo.replays[create_attempt_key("corr-7d1f", attempt, 50)] = {
+            "Bill": {"Id": bill_id, "DocNumber": "INV-1", "TotalAmt": Decimal("100.10")}
+        }
+        qbo.deleted.add(bill_id)
+
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+
+    assert not result.success and result.retryable is False
+    assert result.message.startswith("QuickBooks Online post failed: previous_bill_removed")
+    assert len(qbo.posts()) == MAX_CREATE_ATTEMPTS
+    assert qbo.bills == {}
+
+
+def test_request_ids_fit_intuits_limit(token, no_override):
+    from app.services.erp_adapters.posted_total import create_attempt_key
+
+    long_id = "c" * 60
+    assert create_attempt_key(long_id, 1, 50) == "c" * 50
+    assert create_attempt_key(long_id, 2, 50) == "c" * 47 + "#r2"
+    assert create_attempt_key(long_id, 10, 50) == "c" * 46 + "#r10"
+    assert len({create_attempt_key(long_id, n, 50) for n in range(1, 11)}) == 10
+
+
+@pytest.mark.parametrize(
+    ("arrange", "expected"),
+    [
+        (lambda q: None, "voided"),
+        (lambda q: q.delete("145"), "already_gone"),
+        (lambda q: q.bills["145"].update(Balance=Decimal("40")), "not_voided"),
+    ],
+)
+def test_void_of_a_mismatched_bill_reports_three_outcomes(token, no_override, arrange, expected):
+    bill = {"Id": "145", "SyncToken": "0", "Balance": Decimal("1"), "TotalAmt": Decimal("1")}
+    qbo = _Qbo(bill=bill)
+    arrange(qbo)
+    outcome = _run_with(qbo, lambda: _adapter()._void_mismatched_bill("145"))
+    assert outcome == expected
 
 
 def test_an_earlier_bill_with_a_different_total_is_not_reported_as_posted(token, no_override):

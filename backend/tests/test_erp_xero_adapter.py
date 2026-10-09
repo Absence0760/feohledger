@@ -24,6 +24,7 @@ from app.services.erp_adapters import bill_allocation
 from app.services.erp_adapters.base import ErpInvoiceStatus, InvoicePayload, LineItemPayload
 from app.services.erp_adapters.dispatcher import get_erp_adapter
 from app.services.erp_adapters.xero import XeroAdapter
+from app.utils.json_money import dumps_exact_json
 
 TENANT = "xero-tenant-0001"
 VENDOR = "c0ffee00-0000-0000-0000-000000000001"
@@ -85,13 +86,23 @@ def _client(cm):
     return cm.return_value.__aenter__.return_value
 
 
-def _get_router(*, lookup: httpx.Response, accounts: httpx.Response | None = None):
+def _get_router(
+    *,
+    lookup: httpx.Response,
+    accounts: httpx.Response | None = None,
+    bills: dict[str, dict] | None = None,
+):
+    """``bills`` serves ``GET /Invoices/{id}`` — the read-back after a create."""
+
     async def get(url, params=None, headers=None):
         if url.endswith("/Invoices"):
             return lookup
         if url.endswith("/Accounts"):
             assert accounts is not None, "unexpected Accounts lookup"
             return accounts
+        if "/Invoices/" in url:
+            bill = (bills or {}).get(url.rsplit("/", 1)[1])
+            return _resp(200, {"Invoices": [bill]}) if bill else _resp(404, {})
         raise AssertionError(f"unexpected GET {url}")
 
     return AsyncMock(side_effect=get)
@@ -165,7 +176,9 @@ def test_posts_accpay_bill_with_exact_amounts_and_tenant_headers(token):
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _get_router(
-            lookup=_resp(200, {"Invoices": []}), accounts=_resp(200, _accounts("INPUT"))
+            lookup=_resp(200, {"Invoices": []}),
+            accounts=_resp(200, _accounts("INPUT")),
+            bills={"inv-1": {"InvoiceID": "inv-1", "Status": "AUTHORISED", "Total": 1150.10}},
         )
         client.put = AsyncMock(
             return_value=_resp(
@@ -212,7 +225,10 @@ def test_no_tax_posts_notax_and_skips_the_account_lookup(token):
     payload = _payload(amount=Decimal("500.00"), tax_amount=None)
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
-        client.get = _get_router(lookup=_resp(200, {"Invoices": []}))
+        client.get = _get_router(
+            lookup=_resp(200, {"Invoices": []}),
+            bills={"inv-2": {"InvoiceID": "inv-2", "Status": "DRAFT", "Total": 500.00}},
+        )
         client.put = AsyncMock(
             return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-2", "Total": 500.00}]})
         )
@@ -236,7 +252,9 @@ def test_header_only_tax_on_inclusive_lines_lets_xero_split_but_keeps_the_total(
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _get_router(
-            lookup=_resp(200, {"Invoices": []}), accounts=_resp(200, _accounts())
+            lookup=_resp(200, {"Invoices": []}),
+            accounts=_resp(200, _accounts()),
+            bills={"inv-3": {"InvoiceID": "inv-3", "Status": "AUTHORISED", "Total": 1150.00}},
         )
         client.put = AsyncMock(
             return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-3", "Total": 1150.00}]})
@@ -282,7 +300,9 @@ def test_a_created_bill_with_no_total_is_unconfirmed_not_success(token):
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _get_router(
-            lookup=_resp(200, {"Invoices": []}), accounts=_resp(200, _accounts())
+            lookup=_resp(200, {"Invoices": []}),
+            accounts=_resp(200, _accounts()),
+            bills={"inv-9": {"InvoiceID": "inv-9", "Status": "AUTHORISED"}},
         )
         client.put = AsyncMock(return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-9"}]}))
         client.post = AsyncMock(side_effect=AssertionError("an unconfirmed bill is not voided"))
@@ -290,6 +310,181 @@ def test_a_created_bill_with_no_total_is_unconfirmed_not_success(token):
     assert not result.success and result.retryable is False
     assert result.message.startswith("Xero post unconfirmed: posted_total_unconfirmed")
     assert result.erp_document_id == "inv-9"
+
+
+# ---------------------------------------------------------------------------
+# post_invoice: an Idempotency-Key replay of a bill since voided / deleted
+# ---------------------------------------------------------------------------
+
+
+class _XeroFake:
+    """Stateful like Xero: bills stay readable after VOIDED / DELETED, the
+    pre-create lookup filters those out, and a repeated Idempotency-Key replays
+    the original create response even when the bill has since been voided."""
+
+    def __init__(self, total_shift: Decimal = Decimal(0)):
+        self.bills: dict[str, dict] = {}
+        self.replays: dict[str, dict] = {}
+        self.keys: list[str] = []
+        self.counter = 0
+        # Added to Total, as an account's default tax type would.
+        self.total_shift = total_shift
+        self.read_back_status: int | None = None
+
+    @staticmethod
+    def _ok(body: dict) -> httpx.Response:
+        return httpx.Response(200, content=dumps_exact_json(body).encode())
+
+    async def get(self, url, params=None, headers=None):
+        if url.endswith("/Invoices"):
+            statuses = set((params or {}).get("Statuses", "").split(","))
+            return self._ok(
+                {"Invoices": [b for b in self.bills.values() if b["Status"] in statuses]}
+            )
+        if url.endswith("/Accounts"):
+            return self._ok(_accounts())
+        if "/Invoices/" in url:
+            if self.read_back_status is not None:
+                return _resp(self.read_back_status, {})
+            bill = self.bills.get(url.rsplit("/", 1)[1])
+            return self._ok({"Invoices": [bill]}) if bill else _resp(404, {})
+        raise AssertionError(f"unexpected GET {url}")
+
+    async def put(self, url, content=None, headers=None):
+        key = headers["Idempotency-Key"]
+        self.keys.append(key)
+        if key in self.replays:
+            return self._ok(self.replays[key])
+        sent = json.loads(content, parse_float=Decimal)["Invoices"][0]
+        total = sum(
+            (li["LineAmount"] + li.get("TaxAmount", Decimal(0)) for li in sent["LineItems"]),
+            Decimal(0),
+        )
+        self.counter += 1
+        bill = {
+            "InvoiceID": f"inv-{self.counter}",
+            "InvoiceNumber": sent["InvoiceNumber"],
+            "Type": "ACCPAY",
+            "Status": sent["Status"],
+            "Total": total + self.total_shift,
+            "AmountPaid": Decimal(0),
+            "AmountCredited": Decimal(0),
+        }
+        self.bills[bill["InvoiceID"]] = bill
+        self.replays[key] = {"Invoices": [dict(bill)]}
+        return self._ok({"Invoices": [dict(bill)]})
+
+    async def post(self, url, content=None, headers=None):
+        bill_id = url.rsplit("/", 1)[1]
+        target = json.loads(content)["Invoices"][0]["Status"]
+        bill = self.bills.get(bill_id)
+        if bill is None or bill["Status"] in ("VOIDED", "DELETED"):
+            return _resp(400, {})
+        bill["Status"] = target
+        return self._ok({"Invoices": [bill]})
+
+    def push(self, payload=None):
+        with patch("httpx.AsyncClient") as cm:
+            client = _client(cm)
+            client.get = AsyncMock(side_effect=self.get)
+            client.put = AsyncMock(side_effect=self.put)
+            client.post = AsyncMock(side_effect=self.post)
+            return _run(_adapter().post_invoice(payload or _payload()))
+
+
+def test_a_retry_after_a_mismatch_creates_afresh_under_the_next_key(token):
+    """Push 1 books a taxed total and voids the bill. The operator fixes the tax
+    type and retries: Xero replays push 1's response for a voided bill, so the
+    adapter moves to the next Idempotency-Key instead of re-checking a ghost."""
+    xero = _XeroFake(total_shift=Decimal("172.50"))
+    first = xero.push()
+    assert first.message == "Xero post failed: posted_total_mismatch (the bill was voided)"
+    assert xero.bills["inv-1"]["Status"] == "VOIDED"
+
+    xero.total_shift = Decimal(0)
+    xero.keys.clear()
+    result = xero.push()
+
+    assert result.success, result.message
+    assert result.erp_document_id == "inv-2"
+    assert xero.keys == ["corr-xero-1", "corr-xero-1#r2"]
+
+
+def test_a_replayed_matching_total_for_a_voided_bill_is_never_success(token):
+    """The replayed Total matches, but someone voided the bill in Xero: it is
+    not reported as posted."""
+    xero = _XeroFake()
+    assert xero.push().erp_document_id == "inv-1"
+    xero.bills["inv-1"]["Status"] = "VOIDED"
+
+    result = xero.push()
+
+    assert result.success
+    assert result.erp_document_id == "inv-2"
+    assert xero.bills["inv-2"]["Status"] == "AUTHORISED"
+
+
+def test_a_retry_that_still_mismatches_says_the_new_bill_was_voided(token):
+    """Before the fix this read "could not be voided": the replayed bill was
+    already VOIDED, so voiding it again failed."""
+    xero = _XeroFake(total_shift=Decimal("172.50"))
+    xero.push()
+
+    result = xero.push()
+
+    assert result.retryable is False
+    assert result.message == "Xero post failed: posted_total_mismatch (the bill was voided)"
+    assert result.erp_document_id == "inv-2"
+    assert {b["Status"] for b in xero.bills.values()} == {"VOIDED"}
+
+
+def test_an_unreadable_bill_is_never_taken_for_a_voided_one(token):
+    """Only DELETED / VOIDED mean gone. A 404 or 5xx on the read-back fails the
+    push (retryably) without creating a second bill."""
+    xero = _XeroFake()
+    xero.read_back_status = 503
+    result = xero.push()
+    assert not result.success and result.retryable is True
+    assert result.message.startswith("Xero post failed: HTTP 503 ")
+    assert xero.keys == ["corr-xero-1"]
+
+
+def test_an_exhausted_key_walk_is_refused_for_good(token):
+    from app.services.erp_adapters.posted_total import MAX_CREATE_ATTEMPTS, create_attempt_key
+
+    xero = _XeroFake()
+    for attempt in range(1, MAX_CREATE_ATTEMPTS + 1):
+        bill = {"InvoiceID": f"old-{attempt}", "InvoiceNumber": "SUP-1001", "Type": "ACCPAY",
+                "Status": "DELETED", "Total": Decimal("1150.00")}  # fmt: skip
+        xero.bills[bill["InvoiceID"]] = bill
+        xero.replays[create_attempt_key("corr-xero-1", attempt, 128)] = {"Invoices": [bill]}
+
+    result = xero.push()
+
+    assert not result.success and result.retryable is False
+    assert result.message.startswith("Xero post failed: previous_bill_removed")
+    assert len(xero.keys) == MAX_CREATE_ATTEMPTS
+    assert {b["Status"] for b in xero.bills.values()} == {"DELETED"}
+
+
+@pytest.mark.parametrize(
+    ("status", "paid", "expected"),
+    [
+        ("AUTHORISED", 0, "voided"),
+        ("DRAFT", 0, "voided"),
+        ("VOIDED", 0, "already_gone"),
+        ("DELETED", 0, "already_gone"),
+        ("AUTHORISED", 10, "not_voided"),
+    ],
+)
+def test_void_of_a_mismatched_bill_reports_three_outcomes(token, status, paid, expected):
+    xero = _XeroFake()
+    xero.bills["inv-1"] = {"InvoiceID": "inv-1", "Status": status, "AmountPaid": paid}
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(side_effect=xero.get)
+        client.post = AsyncMock(side_effect=xero.post)
+        assert _run(_adapter()._void_outcome("inv-1")) == expected
 
 
 def test_account_without_tax_type_is_refused_unless_a_default_is_configured(token):
@@ -305,7 +500,9 @@ def test_account_without_tax_type_is_refused_unless_a_default_is_configured(toke
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _get_router(
-            lookup=_resp(200, {"Invoices": []}), accounts=_resp(200, _accounts(None))
+            lookup=_resp(200, {"Invoices": []}),
+            accounts=_resp(200, _accounts(None)),
+            bills={"inv-4": {"InvoiceID": "inv-4", "Status": "AUTHORISED", "Total": 1150.00}},
         )
         client.put = AsyncMock(
             return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-4", "Total": 1150.00}]})

@@ -38,10 +38,17 @@ when" note), so the line rules and their codes are the other adapters':
   is off. Never posted in the home currency instead. ``currency_unknown`` when
   the company's preferences name no home currency.
 
-After the create, QuickBooks' own ``TotalAmt`` must equal ``amount``
-(``posted_total.check_posted_total``): a different total deletes the bill just
-created and fails ``posted_total_mismatch``; a missing one fails
-``posted_total_unconfirmed``. Both are non-retryable.
+After the create, the bill is read back by id, and QuickBooks' own ``TotalAmt``
+on it must equal ``amount`` (``posted_total.check_posted_total``): a different
+total deletes the bill just created and fails ``posted_total_mismatch``; a
+missing one fails ``posted_total_unconfirmed``. Both are non-retryable.
+
+The read-back is what makes ``requestid`` safe after a cleanup: Intuit replays
+the original create response for a repeated id, so a retry after a mismatch
+gets "created" back for a bill that was deleted. A read-back that QuickBooks
+answers with "Object Not Found" (Fault code 610) or ``status: Deleted`` moves to
+the next ``requestid`` of the sequence (``posted_total.create_attempt_key``);
+any other read failure fails the push without creating anything.
 """
 
 from __future__ import annotations
@@ -70,11 +77,21 @@ from app.services.erp_adapters.base import (
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
-from app.services.erp_adapters.posted_total import check_posted_total
+from app.services.erp_adapters.posted_total import (
+    MAX_CREATE_ATTEMPTS,
+    VoidOutcome,
+    check_posted_total,
+    create_attempt_key,
+    previous_bill_removed,
+)
 from app.utils.json_money import dumps_exact_json
 
 PROVIDER = "QuickBooks Online"
 MINOR_VERSION = "75"
+#: Intuit's ``requestid`` limit (characters).
+REQUEST_ID_MAX = 50
+#: Intuit's Fault code for reading a deleted (or never-existing) object.
+_OBJECT_NOT_FOUND = "610"
 #: Intuit's DocNumber limit (Bill entity reference: max 21 characters).
 DOC_NUMBER_MAX = 21
 #: Stable refusal reasons of this adapter (beside the shared ones in ``base``).
@@ -129,6 +146,15 @@ def _dec(value: Any) -> Decimal | None:
         return value if isinstance(value, Decimal) else Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _object_not_found(resp: httpx.Response) -> bool:
+    """True when Intuit's ``Fault`` names code 610 (the object is deleted)."""
+    try:
+        errors = (_json(resp).get("Fault") or {}).get("Error") or []
+    except ValueError:
+        return False
+    return any(isinstance(e, dict) and str(e.get("code")) == _OBJECT_NOT_FOUND for e in errors)
 
 
 def _quote(value: str) -> str:
@@ -289,6 +315,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                     posted_total=_dec(existing.get("TotalAmt")),
                     document_id=str(existing.get("Id")),
                     document_number=existing.get("DocNumber") or payload.invoice_number,
+                    void_bill=self._void_mismatched_bill,
                 )
                 if problem:
                     return problem
@@ -315,11 +342,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                 # the bill otherwise, and that refusal is reported as-is.
                 body["CurrencyRef"] = {"value": payload.currency.upper()}
 
-            # `requestid` makes Intuit replay the original response to a
-            # retry; the pre-check above covers its undocumented memory span.
-            resp = await self._request(
-                "POST", "bill", params={"requestid": payload.correlation_id[:50]}, body=body
-            )
+            return await self._create(payload, body)
         except erp_oauth.ErpTokenRefreshError as exc:
             # Intuit unreachable while refreshing: transient, so a plain
             # (retryable) failure.
@@ -333,33 +356,62 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         except httpx.HTTPError:
             return ErpPostResult(success=False, message=f"{PROVIDER} post failed: network_error")
 
-        if resp.status_code != 200:
-            return ErpPostResult(
-                success=False, message=erp_failure_message(PROVIDER, resp.status_code)
+    async def _create(self, payload: InvoicePayload, body: dict[str, Any]) -> ErpPostResult:
+        """POST the bill, read it back, and check the total QuickBooks booked.
+
+        `requestid` makes Intuit replay the original response to a retry (the
+        pre-check in ``post_invoice`` covers its undocumented memory span). A
+        replay can name a bill an earlier ``posted_total_mismatch`` deleted, so
+        the read-back decides: live → check its total; positively deleted →
+        the next ``requestid`` (``posted_total`` module docstring explains why
+        that cannot duplicate); anything else raises and fails the push.
+        """
+        for attempt in range(1, MAX_CREATE_ATTEMPTS + 1):
+            request_id = create_attempt_key(payload.correlation_id, attempt, REQUEST_ID_MAX)
+            resp = await self._request("POST", "bill", params={"requestid": request_id}, body=body)
+            if resp.status_code != 200:
+                return ErpPostResult(
+                    success=False, message=erp_failure_message(PROVIDER, resp.status_code)
+                )
+            created = _json(resp).get("Bill") or {}
+            document_number = created.get("DocNumber") or payload.invoice_number
+            if created.get("Id") is None:
+                # Nothing to read back or void: unconfirmed, never success.
+                return await check_posted_total(
+                    self,
+                    PROVIDER,
+                    payload,
+                    posted_total=None,
+                    document_id=None,
+                    document_number=document_number,
+                    raw_response=created,
+                )
+            document_id = str(created["Id"])
+            bill = await self._live_bill(document_id)
+            if bill is None:
+                continue  # a replay of a bill since deleted: next requestid
+            # QuickBooks computes TotalAmt itself (a company's default tax code
+            # can add tax to the lines we sent); only the approved amount counts.
+            problem = await check_posted_total(
+                self,
+                PROVIDER,
+                payload,
+                posted_total=_dec(bill.get("TotalAmt")),
+                document_id=document_id,
+                document_number=document_number,
+                raw_response=bill,
+                void_bill=self._void_mismatched_bill,
             )
-        bill = _json(resp).get("Bill") or {}
-        document_id = str(bill.get("Id")) if bill.get("Id") is not None else None
-        document_number = bill.get("DocNumber") or payload.invoice_number
-        # QuickBooks computes TotalAmt itself (a company's default tax code can
-        # add tax to the lines we sent); only the approved amount counts.
-        problem = await check_posted_total(
-            self,
-            PROVIDER,
-            payload,
-            posted_total=_dec(bill.get("TotalAmt")),
-            document_id=document_id,
-            document_number=document_number,
-            raw_response=bill,
-        )
-        if problem:
-            return problem
-        return ErpPostResult(
-            success=True,
-            erp_document_id=document_id,
-            erp_document_number=document_number,
-            message="Posted to QuickBooks Online",
-            raw_response=bill,
-        )
+            if problem:
+                return problem
+            return ErpPostResult(
+                success=True,
+                erp_document_id=document_id,
+                erp_document_number=document_number,
+                message="Posted to QuickBooks Online",
+                raw_response=bill,
+            )
+        return previous_bill_removed(PROVIDER)
 
     # -- status / void -----------------------------------------------------
 
@@ -368,6 +420,47 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         if resp.status_code != 200:
             return None
         return _json(resp).get("Bill") or None
+
+    async def _live_bill(self, bill_id: str) -> dict | None:
+        """The bill when it is live; None only when QuickBooks POSITIVELY says it
+        is deleted (Fault 610, or ``status: Deleted``). Any other answer raises
+        :class:`QboRequestError`: "can't read it" is never taken for "gone"."""
+        resp = await self._request("GET", f"bill/{bill_id}", timeout=15)
+        if resp.status_code == 200:
+            bill = _json(resp).get("Bill")
+            if not isinstance(bill, dict):
+                raise QboRequestError(resp.status_code)
+            if str(bill.get("status") or "").lower() == "deleted":
+                return None
+            return bill
+        if _object_not_found(resp):
+            return None
+        raise QboRequestError(resp.status_code)
+
+    async def _delete_untouched(self, bill: dict) -> bool:
+        balance, total = _dec(bill.get("Balance")), _dec(bill.get("TotalAmt"))
+        if balance is None or total is None or balance != total:
+            return False
+        resp = await self._request(
+            "POST",
+            "bill",
+            params={"operation": "delete"},
+            body={"Id": str(bill.get("Id")), "SyncToken": str(bill.get("SyncToken", "0"))},
+        )
+        return resp.status_code == 200
+
+    async def _void_mismatched_bill(self, bill_id: str) -> VoidOutcome:
+        """``void_invoice`` for ``check_posted_total``, telling a bill already
+        deleted apart from one this call could not delete."""
+        try:
+            bill = await self._live_bill(bill_id)
+        except QboRequestError:
+            return VoidOutcome.NOT_VOIDED
+        if bill is None:
+            return VoidOutcome.ALREADY_GONE
+        if await self._delete_untouched(bill):
+            return VoidOutcome.VOIDED
+        return VoidOutcome.NOT_VOIDED
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         bill = await self._get_bill(erp_document_id)
@@ -391,16 +484,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         bill = await self._get_bill(erp_document_id)
         if not bill:
             return False
-        balance, total = _dec(bill.get("Balance")), _dec(bill.get("TotalAmt"))
-        if balance is None or total is None or balance != total:
-            return False
-        resp = await self._request(
-            "POST",
-            "bill",
-            params={"operation": "delete"},
-            body={"Id": str(bill.get("Id")), "SyncToken": str(bill.get("SyncToken", "0"))},
-        )
-        return resp.status_code == 200
+        return await self._delete_untouched(bill)
 
     # -- reads -------------------------------------------------------------
 
