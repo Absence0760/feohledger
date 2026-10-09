@@ -139,7 +139,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**99 open: 82 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**100 open: 83 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1309,11 +1309,25 @@ scope (§260) — do not fold them into any of these.
 - [ ] **(c) No real commerce platform adapter yet.** The foundation is in
       (decisions §273): SKU identity, the `commerce_adapters` family with its
       `mock`, the post-commit push and reversal, retry, the panel and
-      tools/fake-commerce. A tenant can connect only `mock`. **Durable fix:**
-      one module per provider — Shopify, Lightspeed, Square, Cin7, WooCommerce
-      — following `backend/docs/commerce-integration.md` § How to add a
-      provider (adapter, fake-commerce module, contract test, e2e spec,
-      sub-processor registers). **Trigger:** in progress now, one PR each.
+      tools/fake-commerce. WooCommerce has landed; a tenant can otherwise
+      connect only `mock`. **Durable fix:** one module per remaining provider —
+      Shopify, Lightspeed, Square, Cin7 — following
+      `backend/docs/commerce-integration.md` § How to add a provider (adapter,
+      fake-commerce module, contract test, e2e spec, sub-processor registers).
+      **Trigger:** in progress now, one PR each.
+- [ ] **(c) A WooCommerce stock push can overwrite a concurrent storefront
+      sale.** The REST API has no relative stock change and no compare-and-set,
+      so the adapter reads `stock_quantity`, adds the receipt's delta and writes
+      the absolute result; a sale landing between the read and the write is
+      lost from the shelf count (`backend/docs/commerce-integration.md`
+      § WooCommerce, the decision note). **Durable fix:** a small companion
+      WordPress plugin exposing a REST route that calls
+      `wc_update_product_stock($product, $n, 'increase'|'decrease')` — an
+      atomic SQL increment — with the `_feoh_inventory_syncs` idempotency check
+      beside it; the adapter uses that route when the plugin answers and keeps
+      today's read → write path otherwise. **Trigger:** the first WooCommerce
+      merchant who reports a shelf count drifting after receipts, or one whose
+      order volume makes a sale inside a two-request window routine.
 - [ ] **(c) A commerce platform that connects only by OAuth consent cannot be
       connected.** The catalogue's `auth: "oauth"` renders a Connect button
       wired to `GET /api/commerce/oauth/{provider}/authorize`, which answers 501

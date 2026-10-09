@@ -718,6 +718,13 @@
 			does not gain ours.
 		</li>
 		<li>
+			<strong>Your own WooCommerce store</strong> — when you connect it, each goods
+			receipt sends product identifiers, SKUs and stock quantities to the
+			WooCommerce site you run on your own WordPress hosting. Nothing personal
+			is sent, and the site and its host are yours, so neither is a
+			sub-processor of ours.
+		</li>
+		<li>
 			<strong>Supplier catalogue punch-out</strong> — a supplier's own catalogue
 			system, which receives the buyer's session identity and the cart contents
 			during a punch-out.
@@ -876,6 +883,10 @@
 				<tr>
 					<th scope="row">7 October 2026</th>
 					<td>The databases move from the EC2 instance's own disk to Amazon RDS, in the same region. RDS is added to § 2; the EC2 row no longer holds the databases.</td>
+				</tr>
+				<tr>
+					<th scope="row">9 October 2026</th>
+					<td>Your own WooCommerce store is added to § 4 as a system you control: a goods receipt can push stock quantities to it. It is not a sub-processor.</td>
 				</tr>
 			</tbody>
 		</table>

@@ -238,7 +238,8 @@ Each item ships as **its own PR**. Item 1 (goods-receipt entry) has shipped — 
 
 - [x] Item identity on PO and receipt lines — link to `catalog_items` plus a SKU snapshot, copied onto receipt lines
 - [x] `commerce_adapters` family (`mock` default, pkgutil-discovered registry + decorator): on a goods receipt, adjust the mapped SKU's available quantity at the mapped location; idempotent per receipt line and direction; reversal on cancel
-- [ ] Shopify (Admin GraphQL inventory adjust), Lightspeed, Square, Cin7, WooCommerce — one module each, per `commerce-integration.md` § How to add a provider
+- [ ] Shopify (Admin GraphQL inventory adjust), Lightspeed, Square, Cin7 — one module each, per `commerce-integration.md` § How to add a provider
+- [x] WooCommerce — REST `/wp-json/wc/v3` on the merchant's own store, one synthetic location, idempotency key in product meta (`commerce-integration.md` § WooCommerce)
 - [x] Per-org (and per-entity) location mapping and a SKU override table; tools/fake-commerce (`pnpm commerce:up`) and `tests-e2e/commerce/`
 - [ ] Sub-processor registers updated as each real provider lands (`pnpm check:subprocessors`)
 
