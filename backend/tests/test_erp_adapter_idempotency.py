@@ -59,6 +59,33 @@ def _payload(**overrides) -> InvoicePayload:
     return InvoicePayload(**base)
 
 
+def _ns_bill(total: str | None, status: str = "open") -> MagicMock:
+    """A NetSuite ``GET /vendorBill/{id}`` response carrying ``total`` as a
+    JSON number literal (the adapter parses the raw bytes, never a float)."""
+    fields = [f'"id": "42", "status": {{"id": "{status}"}}']
+    if total is not None:
+        fields.append(f'"total": {total}')
+    resp = _mock_response(200, {})
+    resp.content = ("{" + ", ".join(fields) + "}").encode()
+    return resp
+
+
+def _ns_adapter() -> NetSuiteAdapter:
+    return NetSuiteAdapter(
+        {
+            "account_id": "123456",
+            "consumer_key": "ck",
+            "consumer_secret": "cs",
+            "token_id": "tid",
+            "token_secret": "ts",
+        }
+    )
+
+
+_NS_MISS = _mock_response(200, {"items": [], "count": 0})
+_NS_CREATED = _mock_response(204, None, headers={"Location": "https://x/vendorBill/42"})
+
+
 # ---------------------------------------------------------------------------
 # merge_dev — Idempotency-Key header
 # ---------------------------------------------------------------------------
@@ -97,62 +124,189 @@ def test_merge_dev_get_invoice_status_does_not_send_idempotency_key():
 def test_netsuite_post_invoice_short_circuits_when_external_id_already_exists():
     """A retried push finds the already-created bill by externalId and never
     issues the POST at all — the strongest possible guarantee against a
-    duplicate (issue #143's exact failure scenario)."""
-    adapter = NetSuiteAdapter(
-        {
-            "account_id": "123456",
-            "consumer_key": "ck",
-            "consumer_secret": "cs",
-            "token_id": "tid",
-            "token_secret": "ts",
-        }
-    )
+    duplicate (issue #143's exact failure scenario). It still counts only once
+    the found bill's total reads back as the approved amount."""
+    adapter = _ns_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(
-            return_value=_mock_response(200, {"items": [{"id": "9001"}], "count": 1})
+            side_effect=[
+                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
+                _ns_bill("100.00"),
+            ]
         )
         client.post = AsyncMock(
             side_effect=AssertionError("must not POST when externalId already exists")
         )
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
 
-    assert result.success
+    assert result.success, result.message
     assert result.erp_document_id == "9001"
     assert "idempotent" in result.message.lower()
-    client.get.assert_awaited_once()
     client.post.assert_not_awaited()
 
     # The lookup query carries the correlation_id as the externalId filter.
-    lookup_url = client.get.await_args.args[0]
+    lookup_url = client.get.await_args_list[0].args[0]
     assert "externalId" in lookup_url
     assert "corr-existing" in lookup_url
+    # Then the found bill itself is read back.
+    assert client.get.await_args_list[1].args[0].endswith("/vendorBill/9001")
+
+
+def test_netsuite_idempotent_hit_with_a_different_total_is_not_success():
+    """An earlier attempt's bill that NetSuite booked at a different total (a
+    tax code added tax) is not reported as posted on the retry either."""
+    adapter = _ns_adapter()
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
+                _ns_bill("110.00"),
+                # void_invoice's own status read: approved, so left alone.
+                _mock_response(200, {"status": {"id": "open"}}),
+            ]
+        )
+        client.post = AsyncMock()
+        client.delete = AsyncMock()
+        result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.message.startswith("NetSuite post failed: posted_total_mismatch")
+    assert "could not be deleted" in result.message
+    client.post.assert_not_awaited()
+    client.delete.assert_not_awaited()
+
+
+def test_netsuite_idempotent_hit_with_no_total_is_unconfirmed():
+    adapter = _ns_adapter()
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
+                _ns_bill(None),
+            ]
+        )
+        result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "9001"
+    assert result.message.startswith("NetSuite post unconfirmed: posted_total_unconfirmed")
+
+
+def test_netsuite_created_bill_whose_total_differs_is_deleted_while_pending():
+    """A tax-enabled account adds tax to the expense lines: 100.00 sent,
+    110.00 booked. The bill is still pending approval (nothing has hit the GL),
+    so it is deleted, and the push fails non-retryably saying so."""
+    adapter = _ns_adapter()
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(
+            side_effect=[
+                _NS_MISS,
+                _ns_bill("110.00", status="pendingApproval"),
+                _mock_response(200, {"status": {"id": "pendingApproval"}}),
+            ]
+        )
+        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.message == "NetSuite post failed: posted_total_mismatch (the bill was deleted)"
+    client.delete.assert_awaited_once()
+    assert client.delete.await_args.args[0].endswith("/vendorBill/42")
+
+
+def test_netsuite_created_bill_whose_total_differs_is_left_when_approved():
+    """An approved bill has posted to the GL; it is never deleted, and the
+    message says it was not."""
+    adapter = _ns_adapter()
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(
+            side_effect=[
+                _NS_MISS,
+                _ns_bill("110.00"),
+                _mock_response(200, {"status": {"id": "open"}}),
+            ]
+        )
+        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.delete = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "42"
+    assert result.message.startswith("NetSuite post failed: posted_total_mismatch (")
+    assert "could not be deleted" in result.message
+    client.delete.assert_not_awaited()
+
+
+def test_netsuite_created_bill_compares_its_total_exactly():
+    """100.00 and 100.0 are the same amount; 100.001 is not."""
+    for total, ok in (("100.0", True), ("100", True), ("100.001", False)):
+        with patch("httpx.AsyncClient") as cm:
+            client = cm.return_value.__aenter__.return_value
+            client.get = AsyncMock(
+                side_effect=[
+                    _NS_MISS,
+                    _ns_bill(total),
+                    _mock_response(200, {"status": {"id": "open"}}),
+                ]
+            )
+            client.post = AsyncMock(return_value=_NS_CREATED)
+            client.delete = AsyncMock()
+            result = _run(_ns_adapter().post_invoice(_payload()))
+        assert result.success is ok, (total, result.message)
+
+
+def test_netsuite_created_bill_that_cannot_be_read_back_is_unconfirmed():
+    """No Location, a failed read, or a record with no usable total: never
+    success, and nothing is deleted."""
+    no_location = _mock_response(204, None)
+    cases = [
+        (no_location, [_NS_MISS]),
+        (_NS_CREATED, [_NS_MISS, _mock_response(404, None)]),
+        (_NS_CREATED, [_NS_MISS, _ns_bill(None)]),
+        (_NS_CREATED, [_NS_MISS, _ns_bill('"not-a-number"')]),
+    ]
+    for created, gets in cases:
+        with patch("httpx.AsyncClient") as cm:
+            client = cm.return_value.__aenter__.return_value
+            client.get = AsyncMock(side_effect=gets)
+            client.post = AsyncMock(return_value=created)
+            client.delete = AsyncMock()
+            result = _run(_ns_adapter().post_invoice(_payload()))
+        assert result.success is False
+        assert result.retryable is False
+        assert result.message == (
+            "NetSuite post unconfirmed: posted_total_unconfirmed "
+            "(the bill was created but NetSuite reported no total)"
+        )
+        client.delete.assert_not_awaited()
 
 
 def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
     """The normal (first-attempt) path: no existing bill found → POST as
     before. Proves the idempotency check doesn't break ordinary creates."""
-    adapter = NetSuiteAdapter(
-        {
-            "account_id": "123456",
-            "consumer_key": "ck",
-            "consumer_secret": "cs",
-            "token_id": "tid",
-            "token_secret": "ts",
-        }
-    )
+    adapter = _ns_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(200, {"items": [], "count": 0}))
-        client.post = AsyncMock(
-            return_value=_mock_response(204, None, headers={"Location": "https://x/vendorBill/42"})
-        )
+        client.get = AsyncMock(side_effect=[_NS_MISS, _ns_bill("100.00")])
+        client.post = AsyncMock(return_value=_NS_CREATED)
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-new")))
 
-    assert result.success
+    assert result.success, result.message
     assert result.erp_document_id == "42"
-    client.get.assert_awaited_once()
+    assert client.get.await_count == 2  # the lookup, then the read-back
     client.post.assert_awaited_once()
+    # Synchronous create: `respond-async` would answer with a job, not the bill.
+    assert "Prefer" not in client.post.await_args.kwargs["headers"]
     # The bill names its vendor (`entity`) and the expense line's account by
     # NetSuite internal id — never `refName` text.
     import json
@@ -160,7 +314,7 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
     body = json.loads(client.post.await_args.kwargs["content"])
     assert body["entity"] == {"id": "ERP-V-1"}
     assert body["expense"]["items"] == [
-        {"account": {"id": "ERP-6000"}, "amount": 100.00, "memo": ""}
+        {"account": {"id": "ERP-6000"}, "amount": 100.00, "memo": "INV-1"}
     ]
     assert "item" not in body
 
@@ -839,8 +993,60 @@ def test_netsuite_lines_post_per_line_when_they_sum_to_the_amount():
         )
     )
     assert lines == [
-        {"account": {"id": "g-6100"}, "amount": Decimal("60.00"), "memo": ""},
-        {"account": {"id": "g-6100"}, "amount": Decimal(40), "memo": ""},
+        {"account": {"id": "g-6100"}, "amount": Decimal("60.00"), "memo": "INV-1"},
+        {"account": {"id": "g-6100"}, "amount": Decimal(40), "memo": "INV-1"},
+    ]
+
+
+def test_netsuite_lines_are_the_shared_bill_lines_projection():
+    """NetSuite keeps no line rules of its own: account, gross and memo are
+    exactly ``bill_lines.bill_lines`` for any payload, refusals included."""
+    from app.services.erp_adapters.bill_lines import bill_lines
+    from app.services.erp_adapters.netsuite import _netsuite_expense_lines
+
+    payloads = [
+        _payload(line_items=[]),
+        _payload(
+            amount=Decimal("110.00"),
+            tax_amount=Decimal("10.00"),
+            line_items=[_bc_line(total=Decimal("100.00"), description="Paper")],
+        ),
+        _payload(line_items=[_bc_line(total=None, unit_price=Decimal("100.00"))]),
+        _payload(line_items=[_bc_line(gl_account_erp_id=None)]),
+    ]
+    for payload in payloads:
+        shared = bill_lines(payload)
+        ours = _netsuite_expense_lines(payload)
+        if isinstance(shared, str):
+            assert ours == shared
+        else:
+            assert ours == [{"account": {"id": a}, "amount": g, "memo": m} for a, g, m in shared]
+
+
+def test_netsuite_refuses_a_unit_price_with_no_quantity():
+    """It used to price such a line as quantity 1, inventing a quantity the
+    invoice never stated; the shared rule refuses it."""
+    from app.services.erp_adapters.netsuite import _netsuite_expense_lines
+
+    payload = _payload(
+        amount=Decimal("100.00"),
+        line_items=[_bc_line(total=None, quantity=None, unit_price=Decimal("100.00"))],
+    )
+    assert _netsuite_expense_lines(payload) == "line_amount_missing"
+
+
+def test_netsuite_single_tax_exclusive_line_posts_its_gross():
+    """One line of 100 on a 110 bill with 10 tax: the line carries the whole
+    stated tax, so it posts at 110 — the approved amount — rather than short."""
+    from app.services.erp_adapters.netsuite import _netsuite_expense_lines
+
+    payload = _payload(
+        amount=Decimal("110.00"),
+        tax_amount=Decimal("10.00"),
+        line_items=[_bc_line(total=Decimal("100.00"), description="Paper")],
+    )
+    assert _netsuite_expense_lines(payload) == [
+        {"account": {"id": "g-6100"}, "amount": Decimal("110.00"), "memo": "Paper"}
     ]
 
 
@@ -876,9 +1082,10 @@ def test_netsuite_post_invoice_refusal_for_a_missing_line_amount_is_final():
 
 def test_netsuite_tax_exclusive_lines_are_refused_not_posted_short():
     """Lines of 100 + 50 on a 180 bill (30 tax on the header only): posting the
-    lines would book 150, short by the tax. Collapsing them onto one header
-    line would move coded expense onto the header's account, so the bill is
-    refused — the header amount is never recomputed."""
+    lines would book 150, short by the tax, and pro-rating the 30 across them
+    would invent a split the supplier never stated. So the bill is refused
+    (``tax_not_itemised``, the shared rule's reason) — the header amount is
+    never recomputed."""
     from app.services.erp_adapters.netsuite import _netsuite_expense_lines
 
     payload = _payload(
@@ -891,7 +1098,7 @@ def test_netsuite_tax_exclusive_lines_are_refused_not_posted_short():
             ),
         ],
     )
-    assert _netsuite_expense_lines(payload) == "amount_mismatch"
+    assert _netsuite_expense_lines(payload) == "tax_not_itemised"
 
 
 def test_netsuite_post_invoice_refusal_for_mismatched_lines_is_final():

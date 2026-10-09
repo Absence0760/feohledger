@@ -514,18 +514,22 @@ POST /vendorBill
   "tranDate": "2026-04-01",
   "dueDate": "2026-05-01",
   "currency": { "refName": "USD" },
-  "item": {
+  "externalId": "<correlation_id>",
+  "expense": {
     "items": [
-      {
-        "item": { "id": "456" },
-        "quantity": 10,
-        "rate": 25.00,
-        "account": { "id": "789" }
-      }
+      { "account": { "id": "789" }, "amount": 250.00, "memo": "Paper" }
     ]
   }
 }
 ```
+
+What the adapter sends: GL-coded lines on the `expense` sublist (the `item`
+sublist needs an item record we never have), amounts as exact JSON number
+literals. The create is **synchronous** — no `Prefer: respond-async`, which
+would answer 202 with a *job* in `Location` instead of the bill — and NetSuite
+answers 204 with the new record's URL in `Location`. The adapter then reads that
+record back and checks its `total` (§ NetSuite: SuiteQL syncs and void →
+Posted total).
 
 **Status:** `approvalStatus` — `1` (pending), `2` (approved). `status` — `Open`, `Paid In Full`, `Voided`
 
@@ -901,7 +905,7 @@ vendor whose number happened to equal it.
 
 | Adapter | Vendor | Accounts |
 |---|---|---|
-| `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount` = the line total, or quantity × unit price when it has none), since the `item` sublist needs an item record we never send. An uncoded line takes the header account. A coded line with no id, or a bill with no account at all, refuses `account_not_linked`. A coded line is never moved onto the header account. A line with no amount at all refuses `line_amount_missing` (it used to post as 0). NetSuite totals the bill from its lines, so lines that do not sum to exactly the approved amount (tax-exclusive lines, header-only shipping or discount) refuse `amount_mismatch` — never collapsed onto the header account, which would move coded expense there. Only an invoice with no line items posts one line for the amount on the header account. |
+| `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount`, `memo`), since the `item` sublist needs an item record we never send. The lines are the shared `bill_lines.bill_lines` projection — NetSuite keeps no line rules of its own: `amount` is the line's tax-inclusive gross (its total, else quantity × unit price; a unit price with no quantity refuses `line_amount_missing` rather than being priced as quantity 1), exact Decimal; an uncoded line takes the header account; a coded line with no id, or a bill with no account at all, refuses `account_not_linked`, never moved onto the header account; lines that do not sum to the approved amount refuse `amount_mismatch`, and several tax-exclusive lines with header-only tax refuse `tax_not_itemised`. `memo` is the line's description, else the invoice's, else its number. NetSuite then totals the bill itself, so the booked `total` is read back after the create (§ NetSuite: SuiteQL syncs and void → Posted total). |
 | `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Every line is an `Account` line on **`accountId`** = the account GUID the BC chart sync stored, never `lineObjectNumber` (the No.). The lines are the shared `bill_lines.bill_lines` rule: an uncoded line takes the header account, a coded line with no id or a bill with no account at all refuses `account_not_linked`. See § Business Central: chart, POs and void. |
 | `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id. A coded line with no id refuses `account_not_linked`; an uncoded line sends none (Merge allows it). |
 
@@ -941,7 +945,7 @@ target ERP actually supports:
 | Adapter | Mechanism |
 |---|---|
 | `merge_dev` | `X-Idempotency-Key: <correlation_id>` header on `POST /invoices` — Merge's unified API returns the ORIGINAL response for a repeated key instead of creating a second invoice. |
-| `netsuite` | Pre-create lookup: `GET /vendorBill?q=externalId IS "<correlation_id>"` (NetSuite enforces `externalId` uniqueness per record type). A match short-circuits `post_invoice` to a success referencing the existing bill; only a miss proceeds to `POST /vendorBill`. |
+| `netsuite` | Pre-create lookup: `GET /vendorBill?q=externalId IS "<correlation_id>"` (NetSuite enforces `externalId` uniqueness per record type). A match short-circuits `post_invoice` to a success referencing the existing bill — once its `total` reads back as the approved amount (the same check as a fresh create); only a miss proceeds to `POST /vendorBill`. |
 | `dynamics_365_bc` | Pre-create lookup: `GET purchaseInvoices?$filter=externalDocumentNumber eq '<correlation_id>'`. A hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount; a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` (an earlier attempt whose post step failed or whose response was lost) is finished: its total re-checked, then `Microsoft.NAV.post` re-run — never a second create. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
 
 The local `fake-erp` mock implements the matching server-side behavior (a
@@ -1765,6 +1769,27 @@ reachable through a customer-deployed RESTlet. REST does offer
 GL) and returns `False` for any approved bill, whose reversal — void, reversing
 journal, or vendor credit — is the accountant's call.
 
+**Posted total.** NetSuite totals a vendorBill itself, and on a tax-enabled
+account an expense line's tax code adds tax to what we sent — so the booked
+total can differ from the approved `payload.amount` a payment run pays. After
+the create, `post_invoice` GETs the record named by `Location` and compares its
+`total` exactly (parsed from the raw bytes as a Decimal, never a float):
+
+- equal → success;
+- different → non-retryable `posted_total_mismatch`, after deleting the bill
+  through `void_invoice`'s rule (only while still Pending Approval). The
+  message says which: `NetSuite post failed: posted_total_mismatch (the bill
+  was deleted)`, or `(the bill could not be deleted in NetSuite: it is no
+  longer pending approval or NetSuite refused)` — an approved bill is left for
+  the accountant to reverse;
+- no `Location`, an unreadable record or no usable `total` → non-retryable
+  `posted_total_unconfirmed`, never success.
+
+The `externalId` re-find applies the same check to the bill it finds, so a
+retry never reports an earlier mismatched bill as posted. This is the shape of
+`posted_total.check_posted_total`, kept in the adapter only because that
+helper's message says "voided" and NetSuite's REST service deletes.
+
 **Status mapping** reads `status.id` (`paidInFull`) or `status.refName` with
 its spaces removed (`Paid In Full`). It used to lower-case `refName` only, so a
 real paid bill (`"paid in full"`) never matched `paidinfull` and polled as
@@ -1779,17 +1804,26 @@ etag or `*`, else 412; drafts only; posting moves the etag), a 400 for an
 every purchaseInvoice (company `fake-vat-co` adds 20% VAT on top of the lines),
 and a 400 for posting a non-draft; NetSuite SuiteQL
 `vendor` and `transaction` rows (`PO-FAKE-NS-501` open USD, `PO-FAKE-NS-502`
-closed GBP) and `DELETE vendorBill/{id}` (pending approval only).
+closed GBP), `DELETE vendorBill/{id}` (pending approval only), and a `total`
+on every vendorBill — account `123` (code `6400`) carries a 10% tax code, so
+its lines book more than was sent, and vendor `28` ("Fake NetSuite Vendor
+Routed") is under approval routing, so its bills start Pending Approval. Both
+are fixed fixtures, not a shared toggle a parallel e2e worker could trip over.
 
 Tests: `test_erp_gl_sync.py`, `test_erp_po_sync.py`,
 `test_erp_vendor_sync_adapter.py` (mapping, 1000-row bound, degradation),
 `test_erp_void_invoice.py` (both voids, NetSuite status shapes),
 `test_erp_adapter_idempotency.py` (BC lines, failed lookups, the draft total
-check, draft resumption, a failed post step; NetSuite line sums),
+check, draft resumption, a failed post step; NetSuite lines as the shared
+projection, the posted-total read-back on create and on the `externalId`
+re-find), `test_erp_adapter_money_exact.py` (the read-back total parsed
+exactly),
 `test_erp_adapter_error_pii.py` (BC `account_not_linked`),
 `test_erp_base_url_overrides.py` (BC `base_url` host allowlist + SSRF guard,
-NetSuite `account_id` validation), and `frontend/tests-e2e/erp/dynamics.spec.ts`
-(the 1,200 / 20% VAT refusal against fake-erp).
+NetSuite `account_id` validation), `frontend/tests-e2e/erp/dynamics.spec.ts`
+(the 1,200 / 20% VAT refusal against fake-erp), and
+`frontend/tests-e2e/erp/netsuite.spec.ts` (a taxed bill refused, deleted when
+pending approval and left when approved).
 ## Connecting an OAuth ERP (QuickBooks Online, Xero, Sage Accounting, Blackbaud)
 
 These ERPs have no client-credentials grant: the customer's admin consents in

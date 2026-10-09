@@ -740,10 +740,14 @@ async def test_call_erp_posts_netsuite_by_vendor_and_account_id():
     created.status_code = 204
     created.headers = {"Location": "https://x/vendorBill/1001"}
     created.content = b""
+    # The read-back: NetSuite booked exactly the approved 100.00.
+    readback = AsyncMock()
+    readback.status_code = 200
+    readback.content = b'{"id": "1001", "total": 100.00}'
 
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=lookup)
+        client.get = AsyncMock(side_effect=[lookup, readback])
         client.post = AsyncMock(return_value=created)
         ref = await _call_erp(_line_items_db(rows), _invoice(), _NETSUITE_CFG)
 

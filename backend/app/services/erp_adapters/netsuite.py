@@ -13,9 +13,8 @@ import httpx
 
 from app.config import settings
 from app.services.erp_adapters.base import (
-    ACCOUNT_NOT_LINKED,
-    AMOUNT_MISMATCH,
-    LINE_AMOUNT_MISSING,
+    POSTED_TOTAL_MISMATCH,
+    POSTED_TOTAL_UNCONFIRMED,
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
@@ -27,6 +26,7 @@ from app.services.erp_adapters.base import (
     erp_failure_message,
     erp_refusal,
 )
+from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 
@@ -62,9 +62,6 @@ _PO_QUERY = (
 #: HOSTNAME (and the OAuth ``realm``), so anything outside this alphabet —
 #: ``evil.tld/x?``, ``@``, a quote — is refused rather than escaped.
 _ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
-#: Stable refusal reasons for lines that cannot be posted as approved.
 
 
 class NetSuiteConfigError(ValueError):
@@ -191,6 +188,12 @@ class NetSuiteAdapter(ErpAdapter):
                 success=False, message=erp_failure_message("NetSuite", lookup_status)
             )
         if existing_id:
+            # Our earlier attempt; it counts only if NetSuite booked the
+            # approved total (an unconfirmed first attempt lands here too).
+            existing_id = str(existing_id)
+            problem = await self._confirm_posted_total(payload, existing_id)
+            if problem:
+                return problem
             return ErpPostResult(
                 success=True,
                 erp_document_id=existing_id,
@@ -214,10 +217,12 @@ class NetSuiteAdapter(ErpAdapter):
             "expense": {"items": expense_lines},
         }
 
+        # Synchronous on purpose: `Prefer: respond-async` turns the create into
+        # a job (202, Location = the job), and the total check below needs the
+        # record's own Location.
         headers = {
             "Authorization": self._auth_header("POST", url),
             "Content-Type": "application/json",
-            "Prefer": "respond-async",
         }
 
         async with httpx.AsyncClient(timeout=30) as client:
@@ -227,6 +232,12 @@ class NetSuiteAdapter(ErpAdapter):
             # NetSuite returns the record ID in the Location header
             location = resp.headers.get("Location", "")
             doc_id = location.rsplit("/", 1)[-1] if location else None
+            # NetSuite totals the bill itself, and on a tax-enabled account an
+            # expense line's tax code adds tax to what we sent. Only the
+            # approved amount counts as posted.
+            problem = await self._confirm_posted_total(payload, doc_id or None)
+            if problem:
+                return problem
             return ErpPostResult(
                 success=True,
                 erp_document_id=doc_id,
@@ -242,6 +253,72 @@ class NetSuiteAdapter(ErpAdapter):
                 if resp.headers.get("content-type", "").startswith("application/json")
                 else None,
             )
+
+    async def _read_bill_total(self, doc_id: str) -> Decimal | None:
+        """The ``total`` NetSuite booked on a vendorBill, or None when the
+        record could not be read or carries none. Parsed exactly — never via a
+        float."""
+        url = f"{self._base_url()}/vendorBill/{quote(doc_id, safe='')}"
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers={"Authorization": self._auth_header("GET", url)})
+        if resp.status_code != 200:
+            return None
+        try:
+            record = loads_exact_json(resp.content)
+        except ValueError:
+            return None
+        if not isinstance(record, dict):
+            return None
+        return _netsuite_decimal(record.get("total"))
+
+    async def _confirm_posted_total(
+        self, payload: InvoicePayload, doc_id: str | None
+    ) -> ErpPostResult | None:
+        """None when the bill's NetSuite ``total`` is exactly ``payload.amount``.
+
+        The shape of ``posted_total.check_posted_total``, which this does not
+        call only because its message says "voided": NetSuite's REST service
+        cannot void, and ``void_invoice`` DELETES the bill, and only while it
+        is still pending approval (an approved bill has posted to the GL and is
+        the accountant's to reverse). So:
+
+        * no record id, an unreadable record, or no ``total`` → non-retryable
+          ``posted_total_unconfirmed``, never success. A manual retry re-finds
+          the bill by ``externalId`` and checks it again;
+        * a different total → non-retryable ``posted_total_mismatch``, after
+          deleting the bill where ``void_invoice`` allows it; the message says
+          whether it did.
+        """
+        total = await self._read_bill_total(doc_id) if doc_id else None
+        if total is not None and total == payload.amount:
+            return None
+        if total is None:
+            return ErpPostResult(
+                success=False,
+                erp_document_id=doc_id,
+                erp_document_number=payload.invoice_number,
+                message=f"NetSuite post unconfirmed: {POSTED_TOTAL_UNCONFIRMED} "
+                "(the bill was created but NetSuite reported no total)",
+                retryable=False,
+            )
+        try:
+            deleted = await self.void_invoice(doc_id)
+        except httpx.HTTPError:
+            # Not swallowed: the message below says the bill was not deleted.
+            deleted = False
+        outcome = (
+            "the bill was deleted"
+            if deleted
+            else "the bill could not be deleted in NetSuite: it is no longer pending approval "
+            "or NetSuite refused"
+        )
+        return ErpPostResult(
+            success=False,
+            erp_document_id=doc_id,
+            erp_document_number=payload.invoice_number,
+            message=f"NetSuite post failed: {POSTED_TOTAL_MISMATCH} ({outcome})",
+            retryable=False,
+        )
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         url = f"{self._base_url()}/vendorBill/{erp_document_id}"
@@ -473,63 +550,39 @@ def _netsuite_po_to_payload(raw: dict) -> PoPayload | None:
     )
 
 
+def _netsuite_decimal(raw: object) -> Decimal | None:
+    """A NetSuite number as an exact Decimal, or None when absent/unparseable."""
+    if raw is None or raw == "" or isinstance(raw, bool):
+        return None
+    try:
+        value = raw if isinstance(raw, Decimal) else Decimal(str(raw))
+    except (InvalidOperation, ValueError):
+        return None
+    return value if value.is_finite() else None
+
+
 def _netsuite_expense_lines(payload: InvoicePayload) -> list[dict] | str:
     """The vendorBill ``expense`` sublist, or the stable reason it is refused.
 
-    NetSuite totals a bill from its lines, so the lines must add up to the
-    approved ``payload.amount`` or the bill books a different figure. The
-    header amount is never recomputed from the lines, and a line is never
-    moved onto another account.
+    The lines are the shared ``bill_lines.bill_lines`` projection — the one
+    statement of which lines, on which account, for what gross, and every
+    refusal (``line_amount_missing``, ``account_not_linked``,
+    ``amount_mismatch``, ``tax_not_itemised``). Their grosses sum to exactly
+    ``payload.amount``; the header amount is never recomputed from them.
 
-    * No line items → one line for ``payload.amount`` on the header account
-      (``ACCOUNT_NOT_LINKED`` without one).
-    * Each line needs an account. A line coded to its own GL account must carry
-      that account's id; an uncoded line takes the header's
-      (``gl_account_erp_id``). A coded line whose account has no id refuses the
-      bill (``ACCOUNT_NOT_LINKED``) — never moved onto the header account.
-    * A line with no amount (no total, and no unit price to price it with)
-      refuses the bill (``LINE_AMOUNT_MISSING``). It used to post as 0.
-    * Lines that do not sum to exactly ``payload.amount`` — tax-exclusive
-      lines, shipping or a discount carried only on the header — refuse the
-      bill (``AMOUNT_MISMATCH``). Collapsing them onto one header line would
-      move coded expense onto the header's account.
-
-    The line amount is the line's own total; only a line with no total is
-    priced as quantity x unit price. Money stays Decimal all the way to the
-    encoder (``utils/json_money``).
+    NetSuite-specific is only the shape: each line posts on its account's
+    internal id and its amount stays a Decimal all the way to the encoder
+    (``utils/json_money``). What NetSuite then books — its own tax codes can
+    add to the lines — is checked after the create
+    (``NetSuiteAdapter._confirm_posted_total``).
     """
-    header_id = payload.gl_account_erp_id
-    if not payload.line_items:
-        if not header_id:
-            return ACCOUNT_NOT_LINKED
-        return [
-            {
-                "account": {"id": header_id},
-                "amount": payload.amount,
-                "memo": payload.description or "",
-            }
-        ]
-    lines: list[dict] = []
-    for li in payload.line_items:
-        account_id = li.gl_account_erp_id if li.gl_account else header_id
-        if not account_id:
-            return ACCOUNT_NOT_LINKED
-        if li.total is not None:
-            amount = li.total
-        elif li.unit_price is not None:
-            amount = (li.quantity if li.quantity else Decimal(1)) * li.unit_price
-        else:
-            return LINE_AMOUNT_MISSING
-        lines.append(
-            {
-                "account": {"id": account_id},
-                "amount": amount,
-                "memo": li.description or "",
-            }
-        )
-    if sum((line["amount"] for line in lines), Decimal(0)) != payload.amount:
-        return AMOUNT_MISMATCH
-    return lines
+    lines = bill_lines(payload)
+    if isinstance(lines, str):
+        return lines
+    return [
+        {"account": {"id": account_id}, "amount": gross, "memo": memo}
+        for account_id, gross, memo in lines
+    ]
 
 
 #: NetSuite ``accttype`` -> the vocabulary ``GLAccountPayload.account_type``

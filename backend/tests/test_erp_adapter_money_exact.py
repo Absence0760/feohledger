@@ -269,11 +269,24 @@ def _netsuite_adapter() -> NetSuiteAdapter:
     )
 
 
+def _netsuite_bill_readback(total_literal: str) -> MagicMock:
+    """``GET /vendorBill/{id}`` with ``total`` as a raw JSON number literal."""
+    resp = _mock_response(200, {})
+    resp.content = f'{{"id": "42", "total": {total_literal}}}'.encode()
+    return resp
+
+
 def _netsuite_post(payload) -> str:
     adapter = _netsuite_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(200, {"items": [], "count": 0}))
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"items": [], "count": 0}),
+                # NetSuite booked exactly what was approved.
+                _netsuite_bill_readback(exact_number_literal(payload.amount)),
+            ]
+        )
         client.post = AsyncMock(
             return_value=_mock_response(204, None, headers={"Location": "https://x/vendorBill/42"})
         )
@@ -281,6 +294,30 @@ def _netsuite_post(payload) -> str:
     assert result.success, result.message
     assert client.post.await_args.kwargs["headers"]["Content-Type"] == "application/json"
     return _posted_body_text(client)
+
+
+def test_netsuite_reads_the_booked_total_back_exactly():
+    """The read-back ``total`` is parsed from the raw bytes: a float parse of
+    99999999999999.99 is one cent low and would report a false mismatch, and a
+    total one cent off the approved amount is never success."""
+    for literal, ok in ((str(LOSSY_AMOUNT), True), (LOSSY_AMOUNT_AS_FLOAT, False)):
+        with patch("httpx.AsyncClient") as cm:
+            client = cm.return_value.__aenter__.return_value
+            client.get = AsyncMock(
+                side_effect=[
+                    _mock_response(200, {"items": [], "count": 0}),
+                    _netsuite_bill_readback(literal),
+                    _mock_response(200, {"status": {"id": "open"}}),
+                ]
+            )
+            client.post = AsyncMock(
+                return_value=_mock_response(
+                    204, None, headers={"Location": "https://x/vendorBill/42"}
+                )
+            )
+            client.delete = AsyncMock()
+            result = _run(_netsuite_adapter().post_invoice(_payload()))
+        assert result.success is ok, (literal, result.message)
 
 
 def test_netsuite_posts_the_exact_line_total_as_the_expense_amount():
