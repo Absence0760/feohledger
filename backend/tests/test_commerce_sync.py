@@ -514,7 +514,7 @@ def sealed_shop(monkeypatch):
         destination_keys=frozenset({"shop_domain"}),
     )
     monkeypatch.setattr(registry, "_REGISTRY", dict(registry.registered_adapters()))
-    registry.register_commerce_adapter(spec)(SealedShop)
+    registry.register_commerce_adapter("sealedshop", spec)(SealedShop)
     monkeypatch.setitem(
         provider_credentials.SECRET_FIELDS,
         "commerce",

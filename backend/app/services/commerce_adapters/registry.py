@@ -38,12 +38,19 @@ class UnknownCommerceAdapterError(ValueError):
         super().__init__(f"No commerce adapter is registered for '{self.provider}'.")
 
 
-def register_commerce_adapter(spec: CommerceProviderSpec):
-    """Class decorator: attach ``spec`` and register the adapter under ``spec.key``.
+def register_commerce_adapter(key: str, spec: CommerceProviderSpec):
+    """Class decorator: attach ``spec`` and register the adapter under ``key``.
 
-    A second registration of the same key is a programming error (two modules
-    claiming one provider), not something to resolve by import order.
+    Written ``@register_commerce_adapter("shopify", SPEC)`` at column 0, with the
+    key as a string literal: that is the shape ``pnpm check:subprocessors``
+    (``scripts/check_subprocessor_registry.mjs``) reads to find every provider
+    that receives tenant data, so a key passed only inside the spec would make
+    the provider invisible to the register guard. ``key`` must equal
+    ``spec.key``. A second registration of the same key is a programming error
+    (two modules claiming one provider), not something to resolve by import order.
     """
+    if key != spec.key:
+        raise RuntimeError(f"Commerce adapter key '{key}' does not match its spec ('{spec.key}').")
 
     def wrapper(cls: type[CommerceAdapter]) -> type[CommerceAdapter]:
         existing = _REGISTRY.get(spec.key)

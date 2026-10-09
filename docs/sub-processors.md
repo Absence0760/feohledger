@@ -424,6 +424,19 @@ Advisory only: results are suggestions and never overwrite the `Vendor` row.
 
 ---
 
+## 19.1 Commerce / inventory platforms (`services/commerce_adapters/`)
+
+Pushes received quantities from goods receipts to the business's own commerce
+platform (decisions §268). Each real provider adds its row here and on the
+published page when it lands (`backend/docs/commerce-integration.md` § How to
+add a provider).
+
+| Adapter | Processor | Service | Data categories | Processing location | Active when configured | DPA / sub-processing status |
+|---------|-----------|---------|-----------------|---------------------|------------------------|------------------------------|
+| `mock` | — (in-process) | Deterministic local stock book | none leaves process | Local | **Default — local dev and tests** | n/a |
+
+---
+
 ## 20. Infrastructure — Amazon Web Services (AWS)
 
 AWS is the **infrastructure sub-processor** for any deployed environment. Unlike

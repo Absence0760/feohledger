@@ -61,7 +61,7 @@ SPEC = CommerceProviderSpec(
 )
 
 
-@register_commerce_adapter(SPEC)
+@register_commerce_adapter("mock", SPEC)
 class MockCommerceAdapter(CommerceAdapter):
     async def test_connection(self) -> None:
         return None

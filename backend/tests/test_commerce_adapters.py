@@ -89,7 +89,7 @@ _SECRET_SPEC = CommerceProviderSpec(
 def secret_provider(monkeypatch):
     """Register `_SecretAdapter` for one test without leaking it into the registry."""
     monkeypatch.setattr(registry, "_REGISTRY", dict(registry.registered_adapters()))
-    registry.register_commerce_adapter(_SECRET_SPEC)(_SecretAdapter)
+    registry.register_commerce_adapter("secretshop", _SECRET_SPEC)(_SecretAdapter)
     yield _SecretAdapter
 
 
@@ -110,6 +110,24 @@ def test_an_unknown_provider_fails_closed_never_mock():
         get_commerce_adapter({})
 
 
+def test_every_provider_registers_in_the_shape_the_register_guard_reads():
+    """`pnpm check:subprocessors` finds providers by a column-0
+    `@register_<family>_adapter("<slug>"` line; a key passed only inside the spec
+    would hide a provider that receives tenant data from the register check."""
+    import inspect
+
+    for key, cls in registry.registered_adapters().items():
+        source = inspect.getsource(inspect.getmodule(cls))
+        assert re.search(rf'^@register_commerce_adapter\(\s*"{key}"', source, re.M), (
+            f'{cls.__module__} must register as @register_commerce_adapter("{key}", SPEC)'
+        )
+
+
+def test_the_decorator_key_must_match_the_spec():
+    with pytest.raises(RuntimeError, match="does not match"):
+        registry.register_commerce_adapter("other", _SECRET_SPEC)
+
+
 def test_two_modules_cannot_claim_one_provider(monkeypatch):
     monkeypatch.setattr(registry, "_REGISTRY", dict(registry.registered_adapters()))
 
@@ -117,7 +135,9 @@ def test_two_modules_cannot_claim_one_provider(monkeypatch):
         pass
 
     with pytest.raises(RuntimeError, match="registered twice"):
-        registry.register_commerce_adapter(dataclasses.replace(_SECRET_SPEC, key="mock"))(Other)
+        registry.register_commerce_adapter("mock", dataclasses.replace(_SECRET_SPEC, key="mock"))(
+            Other
+        )
 
 
 # --------------------------------------------------------------------------- #
