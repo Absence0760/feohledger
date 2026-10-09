@@ -304,6 +304,17 @@ class Settings(BaseSettings):
     # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
     # `state` carried across the provider's consent redirect.
     erp_oauth_state_ttl_seconds: int = 600
+    # Encryption at rest for the credentials kept in `organizations.settings.erp`
+    # (every catalogue secret, plus the OAuth access + refresh tokens) —
+    # `app/utils/credential_crypto.py`, AES-256-GCM per field. A keyring:
+    # comma-separated `<key_id>:<base64 of 32 random bytes>`; the FIRST entry
+    # encrypts, every entry decrypts (rotation: prepend a new key, run
+    # `scripts/reencrypt_erp_credentials.py`, then drop the old one —
+    # docs/secrets-rotation.md). NO hardcoded fallback: empty refuses to store
+    # or read an encrypted credential, in every environment (fail closed, never
+    # plaintext). The committed .env.development sets a NON-secret dev key;
+    # deployed envs set the real one via sops. A malformed value refuses boot.
+    credential_encryption_keys: str = ""
     # QuickBooks Online platform app (one Intuit app serves every tenant; a
     # tenant may bring its own via settings.erp.client_id/client_secret).
     # Secrets: sops in infra-secrets. Empty (the default) = no platform app —
@@ -1016,6 +1027,18 @@ class Settings(BaseSettings):
                 f"adapter (one of: {', '.join(sorted(_EXTRACTION_PROVIDERS))}); leave it "
                 "empty to derive the provider from FEOH_ANTHROPIC_API_KEY."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_credential_encryption_keys(self) -> "Settings":
+        # A typo'd keyring must not boot into "every ERP save refused" (or, after
+        # a botched rotation, "every stored credential unreadable") discovered
+        # only when a customer saves. Empty is allowed here — it fails closed at
+        # use, where the error names the setting. Parsing lives in the utils
+        # module (no service-layer import; it imports only stdlib + cryptography).
+        from app.utils.credential_crypto import parse_keyring
+
+        parse_keyring(self.credential_encryption_keys)
         return self
 
     @model_validator(mode="after")

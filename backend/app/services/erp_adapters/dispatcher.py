@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.services.erp_adapters.base import ErpAdapter
+from app.services.erp_credentials import decrypt_erp_config
 
 # Registry of available adapters by erp_type
 _ADAPTER_REGISTRY: dict[str, type[ErpAdapter]] = {}
@@ -129,6 +130,9 @@ def get_erp_adapter(erp_config: dict) -> ErpAdapter:
     against its registry for exactly this failure; here the name comes from
     per-org DB settings, so the refusal lives at the dispatcher. Same call as
     `payment_adapters.dispatcher`; see `decisions.md` §29.
+
+    The adapter receives the config with its top-level secrets DECRYPTED; the
+    caller passes the stored (encrypted) block.
     """
     load_builtin_adapters()
     adapter_key = resolve_adapter_key(erp_config)
@@ -136,7 +140,10 @@ def get_erp_adapter(erp_config: dict) -> ErpAdapter:
     if adapter_cls is None:
         raise UnknownErpAdapterError(adapter_key)
 
-    return adapter_cls(erp_config)
+    # The one decrypt on the way to an adapter: `settings.erp` secrets are
+    # stored encrypted (`services/erp_credentials`). A tampered or unreadable
+    # ciphertext raises `CredentialCryptoError` here, before any adapter runs.
+    return adapter_cls(decrypt_erp_config(erp_config))
 
 
 def list_available_adapters() -> list[str]:

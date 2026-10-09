@@ -39,6 +39,9 @@ dependencies = [
     "bcrypt>=5.0.0,<6",
     "redis>=8.1.0,<9",
     "python-jose[cryptography]>=3.5.0,<4",
+    # Imported directly by app/utils/credential_crypto.py (AES-256-GCM for ERP
+    # credentials at rest), so declared rather than left transitive.
+    "cryptography>=50.0.0,<51",
     "httpx>=0.28.1,<1",
     "PyMuPDF>=1.28.2,<2",
     "pgvector>=0.5.0,<1",

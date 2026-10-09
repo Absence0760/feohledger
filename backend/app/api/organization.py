@@ -27,6 +27,7 @@ from app.schemas.organization import (
     OrganizationResponse,
     UpdateOrganizationRequest,
 )
+from app.services import erp_credentials
 from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.billing.plan_catalog import FEATURE_SCIM
 from app.services.currency_conversion import resolve_reporting_currency
@@ -41,11 +42,36 @@ from app.services.erp_adapters import catalog as erp_catalog
 from app.services.org_settings_view import settings_for_response
 from app.services.sso import generate_scim_token
 from app.tenant import get_tenant, lock_organization, normalize_custom_domain
+from app.utils.credential_crypto import CredentialCryptoError, CredentialKeyMissingError
 from app.utils.tenant_urls import is_under_platform_domain
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/organization", tags=["organization"])
+
+
+def _encrypt_erp_or_refuse(erp: dict) -> dict:
+    """``erp`` with its credentials encrypted, or an HTTP refusal.
+
+    No keyring → 503: the server cannot hold the credential, and storing it in
+    plaintext is not an option. A value posing as a ciphertext that does not
+    decrypt for its field → 422. Neither message carries a value.
+    """
+    try:
+        return erp_credentials.encrypt_erp_config(erp)
+    except CredentialKeyMissingError:
+        logger.error("ERP credentials not saved: FEOH_CREDENTIAL_ENCRYPTION_KEYS is not set")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "ERP credentials cannot be saved: credential encryption is not configured "
+                "on this server. Ask the operator to set FEOH_CREDENTIAL_ENCRYPTION_KEYS."
+            ),
+        ) from None
+    except CredentialCryptoError:
+        raise HTTPException(
+            status_code=422, detail="An ERP secret field holds an invalid encrypted value."
+        ) from None
 
 
 class ResidencyAlignmentResponse(BaseModel):
@@ -281,16 +307,28 @@ async def update_organization(
                 raise HTTPException(status_code=422, detail="erp must be an object.")
             if isinstance(incoming_erp, dict):
                 merged_erp = erp_catalog.merge_erp_update(erp_before, incoming_erp)
-                body.settings["erp"] = merged_erp
             else:
                 # Clearing the ERP still keeps the OAuth block: only the OAuth
                 # disconnect removes it (it revokes at the provider first).
                 merged_erp = {}
                 if isinstance(erp_before, dict) and erp_catalog.OAUTH_KEY in erp_before:
                     merged_erp[erp_catalog.OAUTH_KEY] = erp_before[erp_catalog.OAUTH_KEY]
+            # The one encrypt on the settings way in: every secret is stored as
+            # ciphertext (`services/erp_credentials`), kept ones unchanged.
+            merged_erp = _encrypt_erp_or_refuse(merged_erp)
+            if isinstance(incoming_erp, dict):
+                body.settings["erp"] = merged_erp
+            else:
                 body.settings["erp"] = merged_erp or None
             await ensure_live_erp_entitled(db, org.id, body.settings.get("erp"))
-            erp_changed = erp_catalog.changed_keys(erp_before, merged_erp)
+            # Compared by VALUE: encrypting a legacy plaintext secret a save
+            # keeps is not a change the audit row should name.
+            try:
+                erp_changed = erp_catalog.changed_keys(
+                    erp_credentials.plain_view(erp_before), erp_credentials.plain_view(merged_erp)
+                )
+            except CredentialCryptoError:
+                erp_changed = erp_catalog.changed_keys(erp_before, merged_erp)
 
         # The chat webhook URL has one sanctioned writer — the audited
         # `PUT /api/organization/chat-notifications/webhook`. This generic merge
@@ -856,6 +894,17 @@ async def test_erp_connection(
 
     try:
         adapter = get_erp_adapter(erp_config)
+    except CredentialCryptoError:
+        # A stored credential this server cannot decrypt (a key id dropped
+        # from the keyring too early, or a tampered row). Say so; name no value.
+        return {
+            "success": False,
+            "message": (
+                "The saved ERP credentials could not be decrypted on this server. "
+                "Re-enter the secrets, or ask the operator to check "
+                "FEOH_CREDENTIAL_ENCRYPTION_KEYS."
+            ),
+        }
     except UnknownErpAdapterError as exc:
         # This endpoint exists to catch exactly this misconfiguration. It used
         # to CONFIRM it instead: the unknown type fell back to `mock`, whose

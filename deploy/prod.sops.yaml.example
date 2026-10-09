@@ -128,6 +128,15 @@ FEOH_APPROVAL_SIGNING_KEY: ""
 # FEOH_EMAIL_ACTION_SIGNING_KEY: ""
 # FEOH_PARTNER_LINK_SIGNING_KEY: ""
 
+# ── ERP credential encryption at rest ──
+# Keyring for the client secrets, API keys, passwords and OAuth tokens stored in
+# organizations.settings.erp (backend/app/utils/credential_crypto.py). Format
+# `<key_id>:<base64 of 32 random bytes>`; the FIRST entry encrypts, every entry
+# decrypts. Generate: echo "k$(date +%Y%m):$(openssl rand -base64 32)". Empty →
+# every ERP credential save is refused, and migration 0110 refuses to run while
+# any plaintext credential is stored. Rotation: docs/secrets-rotation.md.
+FEOH_CREDENTIAL_ENCRYPTION_KEYS: ""
+
 # ── Self-service signup + hCaptcha ──
 # FEOH_SIGNUP_ENABLED is the switch. "false" closes signup: every /api/signup/*
 # route answers 404, /signup says signup is closed, and neither hCaptcha key is

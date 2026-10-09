@@ -107,7 +107,10 @@ async def oauth_status(
     oauth = erp.get("oauth") if isinstance(erp, dict) else None
     providers = []
     for spec in sorted(erp_oauth.load_providers().values(), key=lambda s: s.key):
-        creds = erp_oauth.resolve_client_credentials(spec, erp)
+        try:
+            creds = erp_oauth.resolve_client_credentials(spec, erp)
+        except erp_oauth.ErpCredentialUnreadableError:
+            creds = None  # the stored app secret does not decrypt: not usable
         providers.append(
             ProviderStatus(
                 key=spec.key,
@@ -148,7 +151,10 @@ async def oauth_authorize(
     """
     spec = _spec_or_404(provider)
     await ensure_live_erp_entitled(db, org.id, _direct(spec.key))
-    creds = erp_oauth.resolve_client_credentials(spec, (org.settings or {}).get("erp"))
+    try:
+        creds = erp_oauth.resolve_client_credentials(spec, (org.settings or {}).get("erp"))
+    except erp_oauth.ErpCredentialUnreadableError:
+        creds = None
     if creds is None:
         raise HTTPException(
             status_code=409,
@@ -314,9 +320,12 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
     code = params.get("code") or ""
     if not code:
         return fail("missing_code")
-    creds = erp_oauth.resolve_client_credentials(
-        spec, (org.settings or {}).get("erp"), source=bound["client_source"] or None
-    )
+    try:
+        creds = erp_oauth.resolve_client_credentials(
+            spec, (org.settings or {}).get("erp"), source=bound["client_source"] or None
+        )
+    except erp_oauth.ErpCredentialUnreadableError:
+        creds = None
     if creds is None:
         return fail("provider_unavailable")
 

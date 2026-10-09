@@ -20,6 +20,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.organization import Organization
 from app.models.workflow import AuditLog
+from app.services import erp_credentials
 from app.services.erp_adapters import catalog
 from app.services.erp_adapters.dispatcher import MOCK_ADAPTER_KEY, list_available_adapters
 
@@ -343,6 +344,16 @@ async def _stored_erp(realdb, key: str = "a") -> dict:
     return dict((org.settings or {}).get("erp") or {})
 
 
+def _plain(stored: dict) -> dict:
+    """``stored`` with every secret and token decrypted — after asserting each
+    one actually IS a ciphertext in the row (nothing saved stays plaintext)."""
+    assert not erp_credentials.has_plaintext(stored), "a credential was stored in plaintext"
+    out = erp_credentials.decrypt_erp_config(stored)
+    if "oauth" in out:
+        out["oauth"] = erp_credentials.decrypt_oauth_tokens(out["oauth"])
+    return out
+
+
 @pytest.mark.asyncio
 async def test_providers_endpoint_is_admin_only(realdb):
     async with realdb.client(key="a", role="admin") as c:
@@ -398,7 +409,7 @@ async def test_patch_round_trip_keeps_masked_secrets_and_the_oauth_block(realdb)
         )
     assert resp.status_code == 200, resp.text
     assert "cs-STORED" not in resp.text
-    stored = await _stored_erp(realdb)
+    stored = _plain(await _stored_erp(realdb))
     assert stored["token_id"] == "tid-2"
     assert stored["consumer_secret"] == "cs-STORED"
     assert stored["token_secret"] == "ts-STORED"
@@ -417,7 +428,7 @@ async def test_patch_replaces_a_secret_explicitly_and_audits_names_only(realdb):
         )
     assert resp.status_code == 200, resp.text
     assert "ts-NEW-VALUE" not in resp.text
-    assert (await _stored_erp(realdb))["token_secret"] == "ts-NEW-VALUE"
+    assert _plain(await _stored_erp(realdb))["token_secret"] == "ts-NEW-VALUE"
 
     async with realdb.sessionmaker("a")() as s:
         rows = (
@@ -458,7 +469,7 @@ async def test_clearing_the_erp_keeps_the_oauth_block(realdb):
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.patch("/api/organization", json={"settings": {"erp": None}})
     assert resp.status_code == 200, resp.text
-    assert await _stored_erp(realdb) == {"oauth": {"refresh_token": "rt-KEEP"}}
+    assert _plain(await _stored_erp(realdb)) == {"oauth": {"refresh_token": "rt-KEEP"}}
 
 
 @pytest.mark.asyncio

@@ -135,6 +135,24 @@ class _FakeRedis:
         return self._kv.pop(key, None)
 
 
+#: The suite's credential-encryption keyring: the same NON-secret dev key the
+#: committed `.env.development` carries (pytest does not load that file). A test
+#: of the empty-keyring refusal or of rotation monkeypatches its own.
+TEST_CREDENTIAL_KEYS = "dev1:ZGV2LW9ubHktY3JlZGVudGlhbC1rZXktbm90LXJlYWw="
+
+
+@pytest.fixture(autouse=True)
+def _autouse_credential_keyring(monkeypatch):
+    """Configure `FEOH_CREDENTIAL_ENCRYPTION_KEYS` for every test.
+
+    With no keyring the app refuses to store an ERP credential (fail closed,
+    `app/utils/credential_crypto.py`), so every test that saves one would 503.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "credential_encryption_keys", TEST_CREDENTIAL_KEYS)
+
+
 @pytest.fixture(autouse=True)
 def _autouse_fake_redis(monkeypatch):
     """Stub Redis out of the rate limiter + webhook event dedup ledger

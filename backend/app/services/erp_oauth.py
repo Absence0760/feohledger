@@ -77,6 +77,17 @@ unavailable (fail closed, no fallback). The source used at consent is recorded
 as ``client_source`` and the refresher uses the same one: a token issued to one
 app cannot be refreshed with another's credentials.
 
+Tokens at rest
+--------------
+``access_token`` / ``refresh_token`` are stored encrypted
+(``services/erp_credentials``, AES-256-GCM per field), as is the tenant's own
+``client_secret``. This module encrypts in :func:`new_connection_block` and the
+compare-and-swap write, and decrypts in :func:`_stored_block`, :func:`revoke`
+and the credential / header helpers. A stored value this server cannot decrypt
+raises :class:`ErpCredentialUnreadableError` — a refusal, never a garbage token
+sent to the provider, and never a ``needs_reconnect`` mark (the connection may
+be fine; the keyring is not).
+
 Nothing here logs a token, a code, or the provider's response body.
 """
 
@@ -102,7 +113,9 @@ from sqlalchemy import select
 
 from app import redis as app_redis
 from app.config import settings
+from app.services import erp_credentials
 from app.services.erp_adapters.oauth_base import OAuthProviderSpec
+from app.utils.credential_crypto import CredentialCryptoError
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +166,22 @@ class ErpTokenRefreshError(ErpNotConnectedError):
         RuntimeError.__init__(self, f"{provider_key}: token refresh failed ({reason})")
         self.provider_key = provider_key
         self.reason = reason
+
+
+class ErpCredentialUnreadableError(ErpNotConnectedError):
+    """A stored token or client secret did not decrypt on this server.
+
+    A key id missing from ``FEOH_CREDENTIAL_ENCRYPTION_KEYS`` (dropped before
+    the re-encrypt ran) or a tampered row. Fixed text, no value.
+    """
+
+    def __init__(self, provider_key: str):
+        RuntimeError.__init__(
+            self,
+            f"{provider_key}: stored ERP credentials could not be decrypted "
+            "(operator: check FEOH_CREDENTIAL_ENCRYPTION_KEYS)",
+        )
+        self.provider_key = provider_key
 
 
 class OAuthStateError(ValueError):
@@ -219,7 +248,14 @@ def _tenant_credentials(spec: OAuthProviderSpec, erp_settings: Any) -> ClientCre
     if not isinstance(erp_settings, dict) or erp_settings.get("type") != spec.key:
         return None
     cid = str(erp_settings.get("client_id") or "").strip()
-    secret = str(erp_settings.get("client_secret") or "").strip()
+    try:
+        secret = erp_credentials.decrypt_secret(
+            erp_settings.get("client_secret"), key="client_secret"
+        )
+    except CredentialCryptoError:
+        logger.warning("erp_oauth: %s stored client secret unreadable", spec.key)
+        raise ErpCredentialUnreadableError(spec.key) from None
+    secret = str(secret or "").strip()
     if cid and secret:
         return ClientCredentials(cid, secret, "tenant")
     return None
@@ -240,6 +276,9 @@ def resolve_client_credentials(
 
     ``source`` pins one side (the refresher passes the consent's
     ``client_source``); None prefers the tenant's own app, then the platform's.
+    ``erp_settings`` is the STORED block; the tenant's ``client_secret`` is
+    decrypted here, and :class:`ErpCredentialUnreadableError` raised when it
+    does not decrypt.
     """
     if source == "tenant":
         return _tenant_credentials(spec, erp_settings)
@@ -356,10 +395,18 @@ class _TokenEndpointError(Exception):
 
 
 def token_headers(spec: OAuthProviderSpec, erp_settings: Any) -> dict[str, str]:
-    """Accept + the spec's ``extra_token_headers`` (e.g. a subscription key)."""
+    """Accept + the spec's ``extra_token_headers`` (e.g. a subscription key).
+
+    Raises :class:`ErpCredentialUnreadableError` when a stored secret the
+    headers need does not decrypt.
+    """
     headers = {"Accept": "application/json"}
     if spec.extra_token_headers is not None:
-        extra = spec.extra_token_headers(erp_settings if isinstance(erp_settings, dict) else {})
+        try:
+            plain = erp_credentials.decrypt_erp_config(erp_settings)
+        except CredentialCryptoError:
+            raise ErpCredentialUnreadableError(spec.key) from None
+        extra = spec.extra_token_headers(plain if isinstance(plain, dict) else {})
         headers.update({str(k): str(v) for k, v in (extra or {}).items() if v})
     return headers
 
@@ -448,10 +495,10 @@ def new_connection_block(
     org_id: uuid.UUID,
     client_source: str,
 ) -> dict[str, Any]:
-    """The ``settings.erp.oauth`` block for a fresh consent."""
+    """The ``settings.erp.oauth`` block for a fresh consent, tokens encrypted."""
     return {
         "provider": spec.key,
-        **_token_fields(token_response),
+        **erp_credentials.encrypt_oauth_tokens(_token_fields(token_response)),
         "external_tenant_id": external_tenant_id,
         "org_id": str(org_id),
         "connection_id": secrets.token_urlsafe(16),
@@ -464,10 +511,19 @@ async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bo
     """Best-effort revocation of the stored refresh token. True when the provider
     confirmed it; False when it has no revoke endpoint or the call failed."""
     url = revoke_endpoint(spec)
+    try:
+        oauth = erp_credentials.decrypt_oauth_tokens(oauth)
+    except CredentialCryptoError:
+        logger.warning("erp_oauth: %s revoke skipped, stored token unreadable", spec.key)
+        return False
     token = oauth.get("refresh_token") or oauth.get("access_token")
     if not url or not token:
         return False
-    creds = resolve_client_credentials(spec, erp_settings, source=oauth.get("client_source"))
+    try:
+        creds = resolve_client_credentials(spec, erp_settings, source=oauth.get("client_source"))
+        headers = token_headers(spec, erp_settings)
+    except ErpCredentialUnreadableError:
+        return False
     if creds is None:
         return False
     try:
@@ -475,7 +531,7 @@ async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bo
             resp = await client.post(
                 url,
                 data={"token": str(token)},
-                headers=token_headers(spec, erp_settings),
+                headers=headers,
                 auth=httpx.BasicAuth(creds.client_id, creds.client_secret),
             )
         return resp.status_code in (200, 204)
@@ -525,7 +581,11 @@ def _identity(spec: OAuthProviderSpec, erp_config: dict) -> tuple[uuid.UUID, str
 def _stored_block(
     spec: OAuthProviderSpec, org_settings: Any, connection_id: str
 ) -> tuple[dict, dict]:
-    """``(settings.erp, settings.erp.oauth)`` when it is the connection named."""
+    """``(settings.erp, settings.erp.oauth)`` when it is the connection named.
+
+    ``erp`` is as stored (its secrets encrypted); ``oauth`` comes back with its
+    tokens DECRYPTED.
+    """
     erp = (org_settings or {}).get("erp") if isinstance(org_settings, dict) else None
     oauth = erp.get("oauth") if isinstance(erp, dict) else None
     if (
@@ -536,7 +596,15 @@ def _stored_block(
         or not oauth.get("refresh_token")
     ):
         raise ErpNotConnectedError(spec.key)
-    return erp, oauth
+    return erp, _decrypted_block(spec, oauth)
+
+
+def _decrypted_block(spec: OAuthProviderSpec, oauth: dict) -> dict:
+    try:
+        return erp_credentials.decrypt_oauth_tokens(oauth)
+    except CredentialCryptoError:
+        logger.warning("erp_oauth: %s stored token unreadable (credential keyring)", spec.key)
+        raise ErpCredentialUnreadableError(spec.key) from None
 
 
 async def _read_stored(
@@ -584,12 +652,19 @@ async def _compare_and_swap(
         ):
             await session.rollback()
             raise ErpNotConnectedError(spec.key)
-        if oauth.get("refresh_token") != spent_refresh_token:
+        try:
+            plain = _decrypted_block(spec, oauth)
+        except ErpCredentialUnreadableError:
+            await session.rollback()
+            raise
+        if plain.get("refresh_token") != spent_refresh_token:
             # Someone else already rotated it; theirs is the live token.
             await session.rollback()
-            return dict(oauth)
-        new_oauth = {**oauth, **updates}
-        erp["oauth"] = new_oauth
+            return plain
+        # Stored with its tokens encrypted (a legacy plaintext block becomes
+        # uniform on its first refresh); handed back decrypted.
+        new_oauth = {**plain, **updates}
+        erp["oauth"] = erp_credentials.encrypt_oauth_tokens(new_oauth)
         current["erp"] = erp
         org.settings = current
         flag_modified(org, "settings")

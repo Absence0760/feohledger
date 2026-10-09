@@ -30,7 +30,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.organization import Organization
 from app.models.workflow import AuditLog
-from app.services import erp_oauth
+from app.services import erp_credentials, erp_oauth
 from app.services.erp_adapters import oauth_base as erp_oauth_base
 from app.services.erp_adapters.quickbooks_online import QBO_OAUTH
 
@@ -120,6 +120,15 @@ async def _org_settings(realdb, key: str = "a") -> dict:
             await s.execute(select(Organization).where(Organization.id == realdb.info(key).org_id))
         ).scalar_one()
         return dict(org.settings or {})
+
+
+def _plain(block: dict) -> dict:
+    """A stored OAuth block with its tokens decrypted — after asserting the row
+    holds them as ciphertext (tokens are encrypted at rest)."""
+    for key in erp_credentials.OAUTH_TOKEN_KEYS:
+        if block.get(key):
+            assert str(block[key]).startswith("enc:v1:"), f"{key} stored in plaintext"
+    return erp_credentials.decrypt_oauth_tokens(block)
 
 
 async def _set_settings(realdb, value: dict, key: str = "a") -> None:
@@ -392,7 +401,8 @@ async def test_callback_connects_and_redirects_home_without_secrets(realdb, plat
     assert erp["type"] == PROVIDER
     assert erp["integration_method"] == "direct"
     assert erp["environment"] == "sandbox"  # this provider's saved fields survive
-    oauth = erp["oauth"]
+    assert "SECRET" not in json.dumps(erp)
+    oauth = _plain(erp["oauth"])
     assert oauth["access_token"] == "ACCESS-SECRET-1"
     assert oauth["refresh_token"] == "REFRESH-SECRET-1"
     assert oauth["external_tenant_id"] == REALM
@@ -644,7 +654,7 @@ async def test_saving_erp_settings_keeps_the_connection(realdb):
     assert resp.status_code == 200, resp.text
     erp = (await _org_settings(realdb))["erp"]
     assert erp["environment"] == "production"
-    assert erp["oauth"] == block
+    assert _plain(erp["oauth"]) == block
 
 
 @pytest.mark.plan("scale")
@@ -662,7 +672,7 @@ async def test_switching_erp_type_keeps_the_block_bound_to_its_provider(realdb):
     assert resp.status_code == 200
     erp = (await _org_settings(realdb))["erp"]
     assert erp["type"] == "mock"
-    assert erp["oauth"] == block and erp["oauth"]["provider"] == PROVIDER
+    assert _plain(erp["oauth"]) == block and erp["oauth"]["provider"] == PROVIDER
 
 
 @pytest.mark.plan("scale")
@@ -755,7 +765,7 @@ async def test_expiring_token_is_refreshed_and_rotation_persisted(realdb, platfo
         call["auth"]._auth_header
         == httpx.BasicAuth("platform-client", "platform-secret")._auth_header
     )
-    stored = (await _org_settings(realdb))["erp"]["oauth"]
+    stored = _plain((await _org_settings(realdb))["erp"]["oauth"])
     assert stored["refresh_token"] == "REFRESH-SECRET-2"
     assert stored["access_token"] == "ACCESS-SECRET-2"
     assert stored["connection_id"] == "conn-abc"
@@ -784,7 +794,8 @@ async def test_concurrent_refreshes_spend_the_token_once(realdb, platform_app, p
 
     assert len(provider.calls) == 1, provider.calls
     assert set(tokens) == {"ACCESS-SECRET-2"}
-    assert (await _org_settings(realdb))["erp"]["oauth"]["refresh_token"] == "REFRESH-SECRET-2"
+    stored = _plain((await _org_settings(realdb))["erp"]["oauth"])
+    assert stored["refresh_token"] == "REFRESH-SECRET-2"
 
 
 async def test_compare_and_swap_keeps_a_newer_rotation(realdb, platform_app, provider, monkeypatch):
@@ -834,6 +845,71 @@ async def test_provider_outage_is_not_a_disconnect(realdb, platform_app, provide
         await erp_oauth.get_access_token(QBO_OAUTH, _config(block))
     assert "LEAKY" not in str(exc.value)
     assert "needs_reconnect" not in (await _org_settings(realdb))["erp"]["oauth"]
+
+
+# ---------- tokens at rest -----------------------------------------------------
+
+
+async def test_an_encrypted_stored_block_is_read_refreshed_and_kept_encrypted(
+    realdb, platform_app, provider
+):
+    block = _connected_block(realdb.info("a").org_id, expires_in=-10)
+    await _set_settings(realdb, {"erp": _config(erp_credentials.encrypt_oauth_tokens(block))})
+    provider.handler = lambda url, data: _resp(200, _token_body(2))
+
+    assert await erp_oauth.get_access_token(QBO_OAUTH, _config(block)) == "ACCESS-SECRET-2"
+    # The provider was sent the decrypted refresh token, never the ciphertext.
+    (call,) = provider.calls
+    assert call["data"]["refresh_token"] == "REFRESH-SECRET-1"
+    stored = (await _org_settings(realdb))["erp"]["oauth"]
+    assert "SECRET" not in json.dumps(stored)
+    assert _plain(stored)["refresh_token"] == "REFRESH-SECRET-2"
+
+
+async def test_a_tampered_stored_token_is_refused_not_sent(realdb, platform_app, provider):
+    block = _connected_block(realdb.info("a").org_id, expires_in=-10)
+    sealed = erp_credentials.encrypt_oauth_tokens(block)
+    sealed["refresh_token"] = sealed["refresh_token"][:-4] + "AAAA"
+    await _set_settings(realdb, {"erp": _config(sealed)})
+    provider.handler = lambda url, data: pytest.fail("no provider call expected")
+
+    with pytest.raises(erp_oauth.ErpCredentialUnreadableError) as exc:
+        await erp_oauth.get_access_token(QBO_OAUTH, _config(block))
+    assert isinstance(exc.value, erp_oauth.ErpNotConnectedError)
+    assert "FEOH_CREDENTIAL_ENCRYPTION_KEYS" in str(exc.value)
+    assert "enc:v1" not in str(exc.value)
+    # A keyring problem is not a revoked grant: no reconnect mark.
+    assert "needs_reconnect" not in (await _org_settings(realdb))["erp"]["oauth"]
+
+
+async def test_a_tenant_client_secret_is_decrypted_for_the_token_call(
+    realdb, platform_app, provider
+):
+    block = {**_connected_block(realdb.info("a").org_id, expires_in=-10), "client_source": "tenant"}
+    erp = erp_credentials.encrypt_erp_config(
+        {**_config(block), "client_id": "tenant-client", "client_secret": "tenant-secret"}
+    )
+    await _set_settings(realdb, {"erp": erp})
+    provider.handler = lambda url, data: _resp(200, _token_body(2))
+
+    await erp_oauth.get_access_token(QBO_OAUTH, _config(block))
+    (call,) = provider.calls
+    assert (
+        call["auth"]._auth_header == httpx.BasicAuth("tenant-client", "tenant-secret")._auth_header
+    )
+
+
+@pytest.mark.plan("scale")
+async def test_disconnect_revokes_with_the_decrypted_token(realdb, platform_app, provider):
+    block = _connected_block(realdb.info("a").org_id)
+    await _set_settings(realdb, {"erp": _config(erp_credentials.encrypt_oauth_tokens(block))})
+    provider.handler = lambda url, data: _resp(200)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/erp/oauth/disconnect")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["revoked"] is True
+    (call,) = provider.calls
+    assert call["data"] == {"token": "REFRESH-SECRET-1"}
 
 
 async def test_a_config_naming_another_org_cannot_borrow_its_token(realdb, platform_app, provider):
