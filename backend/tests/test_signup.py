@@ -655,11 +655,15 @@ def test_signup_is_open_by_default():
     assert Settings.model_fields["signup_enabled"].default is True
 
 
-def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
+def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret(monkeypatch):
     """The captcha boot check protects a public, tenant-creating endpoint; with
     signup closed there is none, so it must not make an operator hold a
     credential for a feature they turned off. While signup is open it still
     refuses to boot, exactly as before."""
+    # A deployed env also needs a non-dev credential keyring (config guard).
+    monkeypatch.setenv(
+        "FEOH_CREDENTIAL_ENCRYPTION_KEYS", "k1:cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHA="
+    )
     import pytest
     from pydantic import ValidationError
 
