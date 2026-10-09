@@ -301,9 +301,48 @@ Stored in `Organization.settings` JSONB under the key `erp`:
 }
 ```
 
-The ERP type determines which adapter is used. Credentials are stored as plain
-JSONB in `Organization.settings`, protected only by the database's storage
-encryption. Application-level encryption is tracked in `docs/followups.md`.
+The ERP type determines which adapter is used.
+
+### Credentials at rest
+
+Every credential in `settings.erp` is stored encrypted, field by field, inside
+the JSONB: each catalogue field marked `secret` (`catalog.SECRET_KEYS`, which
+includes the inbound webhook key) and the OAuth block's `access_token` /
+`refresh_token`. A stored value reads `enc:v1:<key_id>:<base64>` — AES-256-GCM
+with a fresh nonce, and the field name (`erp.client_secret`,
+`erp.oauth.refresh_token`) bound as associated data, so a ciphertext moved to
+another field, or altered by one byte, fails to decrypt instead of yielding
+garbage (`app/utils/credential_crypto.py`). Ids, base URLs and the OAuth
+block's `connection_id` / `org_id` stay readable, so routing, masking, the plan
+gate and the realm lookup need no key.
+
+| Direction | The one place | Module |
+|---|---|---|
+| Settings save (`PATCH /organization`) | after `catalog.merge_erp_update` | `api/organization._encrypt_erp_or_refuse` |
+| OAuth connect | `erp_oauth.new_connection_block` | `services/erp_oauth` |
+| OAuth refresh | the compare-and-swap write | `services/erp_oauth._compare_and_swap` |
+| To an adapter | `get_erp_adapter` decrypts the top-level secrets | `erp_adapters/dispatcher` |
+| OAuth tokens / tenant app secret | `_stored_block`, `revoke`, `resolve_client_credentials`, `token_headers` | `services/erp_oauth` |
+| Inbound ERP webhook | the HMAC key | `api/erp_webhook` |
+
+The masked read (`catalog.mask_erp_config`) never decrypts. An adapter's config
+carries the OAuth block still encrypted: adapters never read tokens, they ask
+`erp_oauth.get_access_token`, which reads the stored row.
+
+**Keys.** `FEOH_CREDENTIAL_ENCRYPTION_KEYS` is a keyring (first entry encrypts,
+all decrypt), a sops secret in deployed envs, with a non-secret dev key
+committed in `.env.development` (`docs/environment.md`). **No keyring → fail
+closed everywhere:** a save carrying a secret answers 503 and stores nothing; a
+stored ciphertext cannot be read (`/test-erp` says so, a push fails with
+`ErpCredentialUnreadableError`, the webhook drops the event). A stored value
+that does not decrypt is never marked `needs_reconnect` — the grant may be fine;
+the keyring is not. Rotation: `docs/secrets-rotation.md` § ERP credential
+encryption keyring.
+
+**Legacy plaintext.** A value without the `enc:v1:` prefix is read as-is, and
+migration `0110_erp_credentials_encrypted` encrypts every one on the control
+plane (it refuses to run while plaintext exists and no keyring is set). A save
+or a refresh also re-writes the values it touches encrypted.
 
 ### Secrets are write-only
 
@@ -933,7 +972,7 @@ Manual retry available via `POST /api/invoices/{id}/retry-erp` (resets the attem
 
 ## Security
 
-- ERP credentials stored in `Organization.settings` JSONB (encrypted at rest via PostgreSQL column encryption — future)
+- ERP credentials are encrypted at rest, per field, inside `Organization.settings` JSONB (§ Credentials at rest)
 - Webhook endpoints validate requests via signature/secret or IP whitelist
 - All ERP communication uses HTTPS
 - Credentials are never logged or included in audit trail details

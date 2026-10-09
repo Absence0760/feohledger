@@ -19,6 +19,7 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Secrets management).
 | `FEOH_HCAPTCHA_SECRET` (signup) | sops — `infra-secrets` (`feohledger/`) | **365 days** (or on suspected leak) | Bypass signup captcha |
 | `POSTGRES_PASSWORD` (single-VM Postgres superuser) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days** (or on suspected leak) | Full read/write of the control plane and every tenant DB — reachable only on the compose network, which publishes no host port |
 | `FEOH_APPROVAL_SIGNING_KEY` (invoice approval signatures) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **On suspected leak only** — rotating breaks verification of every signature made under the old key | Forge an approval signature that verifies |
+| `FEOH_CREDENTIAL_ENCRYPTION_KEYS` (ERP credentials at rest) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days**, or on suspected leak (with an overlap window, below) | Combined with a copy of the control-plane database: every tenant's ERP client secrets, API keys and OAuth refresh tokens |
 | `FEOH_EMAIL_ACTION_SIGNING_KEY` (approve-by-email links, Slack / Teams buttons) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **180 days** | Mint an approve/reject link for any reviewer (the action still runs that reviewer's segregation, threshold and CFO checks) |
 | `FEOH_PARTNER_LINK_SIGNING_KEY` (partner / reseller link codes) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **180 days** | Forge a link code that attaches a tenant to a partner without its admin's consent |
 | `FEOH_EMAIL_INTAKE_SIGNING_SECRET` (inbound email-to-invoice webhook) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days**, changed at the email provider in the same step | Post forged inbound mail, creating invoices in any tenant whose intake address is known |
@@ -181,6 +182,33 @@ connection made with the old one, so keep the window short:
    `deploy/prod.sops.yaml`.
 3. `./deploy.sh --no-pull --backend-only` — recreates the api with the new URL. The
    nightly backup reads the URL from `deploy/.env` per run, so it needs nothing else.
+
+### ERP credential encryption keyring (`FEOH_CREDENTIAL_ENCRYPTION_KEYS`)
+
+Unlike the HMAC keys this one has an overlap window: the keyring holds several
+keys, the first encrypts and every one decrypts, and each ciphertext names its
+key id. Rotate without a flag day:
+
+1. Generate a key in your own terminal: `echo "k$(date +%Y%m):$(openssl rand -base64 32)"`.
+2. **Prepend** it to the value in `feohledger/prod.sops.yaml`, keeping the old
+   entry after it (`knew:…,kold:…`). Copy the file onto the VM and run
+   `./deploy.sh --no-pull --backend-only`. New writes now use the new key; old
+   ciphertexts still read.
+3. Re-seal what is stored, inside the backend container:
+   `python scripts/reencrypt_erp_credentials.py --dry-run`, then without
+   `--dry-run`. It rewrites every value still under an older key id, one
+   organization per transaction, and is a no-op on a re-run. Exit 1 means some
+   value decrypted under no configured key — investigate before going on.
+4. Run it once more and confirm it reports `0 organization(s)`; then **drop**
+   the old entry from the keyring and deploy again.
+
+Dropping a key before step 4 is safe to notice but not to ignore: every value
+still under it fails with `ErpCredentialUnreadableError` (pushes, `/test-erp`,
+the OAuth refresh) until the key is put back. Nothing is overwritten, and no
+OAuth connection is marked for reconnect. On a suspected leak of the key itself,
+rotate as above **and** ask each tenant to rotate its ERP credentials and
+reconnect its OAuth ERPs: the old key decrypts any copy of the database taken
+while it was in use.
 
 ### HMAC signing keys (`FEOH_APPROVAL_SIGNING_KEY`, `FEOH_EMAIL_ACTION_SIGNING_KEY`, `FEOH_PARTNER_LINK_SIGNING_KEY`, `FEOH_EMAIL_INTAKE_SIGNING_SECRET`)
 
