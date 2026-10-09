@@ -183,6 +183,34 @@ def test_merge_keeps_an_omitted_secret_for_the_same_erp():
     assert merged["consumer_secret"] == "cs-STORED"
 
 
+BLACKBAUD = {
+    "type": "blackbaud_fe_nxt",
+    "integration_method": "direct",
+    "ap_account_number": "2000",
+    "currency": "USD",
+    "transaction_code_values": [{"id": 7, "value": "General"}],
+}
+
+
+def test_merge_keeps_a_key_the_form_never_renders():
+    """An API-set key the form has no field for survives a form save."""
+    form = {k: v for k, v in BLACKBAUD.items() if k != "transaction_code_values"}
+    merged = catalog.merge_erp_update(BLACKBAUD, {**form, "currency": "ZAR"})
+    assert merged["transaction_code_values"] == [{"id": 7, "value": "General"}]
+    assert merged["currency"] == "ZAR"
+
+
+def test_merge_still_clears_a_rendered_field_left_out():
+    form = {k: v for k, v in BLACKBAUD.items() if k != "project_id"}
+    merged = catalog.merge_erp_update({**BLACKBAUD, "project_id": "P-1"}, form)
+    assert "project_id" not in merged
+
+
+def test_merge_drops_unrendered_keys_when_the_erp_changes():
+    merged = catalog.merge_erp_update(BLACKBAUD, {"type": "xero", "integration_method": "direct"})
+    assert "transaction_code_values" not in merged
+
+
 def test_merge_takes_an_explicit_new_secret():
     merged = catalog.merge_erp_update(STORED, {**STORED, "consumer_secret": "cs-NEW"})
     assert merged["consumer_secret"] == "cs-NEW"

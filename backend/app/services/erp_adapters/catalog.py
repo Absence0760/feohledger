@@ -413,7 +413,8 @@ def same_connection(stored: Any, incoming: Any) -> bool:
 def merge_erp_update(stored: Any, incoming: dict) -> dict:
     """The ``settings.erp`` block a save of ``incoming`` produces.
 
-    * Non-secret keys come from ``incoming`` (the block is replaced, as before).
+    * Non-secret keys come from ``incoming``. For the same ERP, a stored key
+      the form does not render (and so never sends) is kept when omitted.
     * A secret sent blank, as :data:`SECRET_MASK`, or omitted keeps the stored
       value **only while** :func:`same_connection` holds: switching from
       Business Central to Xero must not carry one ERP's ``client_secret`` into
@@ -449,6 +450,17 @@ def merge_erp_update(stored: Any, incoming: dict) -> dict:
     for key in SECRET_KEYS:
         if key not in incoming and carry(key):
             merged[key] = stored[key]
+    if same_erp:
+        # Keys the form never renders (an API-set Blackbaud
+        # `transaction_code_values`, say) survive a save that omits them. A
+        # rendered field is always sent, so leaving it out is not a request to
+        # keep it; clearing it in the form still clears it.
+        entry = provider(catalog_key(incoming))
+        rendered = {f["name"] for f in entry["fields"]} if entry else set()
+        for key, value in stored.items():
+            if key in incoming or key in rendered or key in SECRET_KEYS or key == OAUTH_KEY:
+                continue
+            merged[key] = value
     if OAUTH_KEY in stored:
         merged[OAUTH_KEY] = stored[OAUTH_KEY]
     return merged
