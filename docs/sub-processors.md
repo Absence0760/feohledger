@@ -189,6 +189,13 @@ key and adds no sub-processor the extraction row has not already named.
 | `merge_dev` | **Merge.dev** | Unified ERP/accounting API | INV, VEND, TAX, BANK (vendor remit data) | US (Merge.dev) | Configured only | DPA — to be confirmed |
 | `dynamics_365_bc` | **Microsoft** (Dynamics 365 Business Central) | Direct ERP posting | INV, VEND, TAX | Customer's tenant region | Configured only (direct) | Covered by customer's own Microsoft agreement; our flow-down to be confirmed |
 | `netsuite` | **Oracle** (NetSuite) | Direct ERP posting | INV, VEND, TAX | Customer's account region | Configured only (direct) | Covered by customer's own Oracle agreement; our flow-down to be confirmed |
+| `quickbooks_online` | **Intuit** (QuickBooks Online) | Direct ERP posting | INV, VEND, TAX | US / customer's QuickBooks region | Configured only (direct) | Covered by customer's own Intuit agreement; our flow-down to be confirmed |
+| `xero` | **Xero** | Direct ERP posting | INV, VEND, TAX | Xero's hosting region (AU/US) | Configured only (direct) | Covered by customer's own Xero agreement; our flow-down to be confirmed |
+| `sage_accounting` | **Sage** (Business Cloud Accounting, v3.1 API) | Direct ERP posting | INV, VEND, TAX | Sage's hosting region for the customer's country | Configured only (direct) | Covered by customer's own Sage agreement; our flow-down to be confirmed |
+| `sage_accounting_za` | **Sage** (Business Cloud Accounting, South Africa) | Direct ERP posting | INV, VEND, TAX | South Africa (Sage SA) | Configured only (direct) | Covered by customer's own Sage agreement; our flow-down to be confirmed |
+| `sage_intacct` | **Sage** (Intacct) | Direct ERP posting | INV, VEND, TAX | US (Sage Intacct) | Configured only (direct) | Covered by customer's own Sage agreement; our flow-down to be confirmed |
+| `syspro` | **SYSPRO** (runs on the customer's own server) | Direct ERP posting | INV, VEND, TAX | Customer's own infrastructure | Configured only (direct) | Covered by customer's own SYSPRO / the customer's host agreement; our flow-down to be confirmed |
+| `blackbaud_fe_nxt` | **Blackbaud** (Financial Edge NXT, SKY API) | Direct ERP posting | INV, VEND, TAX | US (Blackbaud) | Configured only (direct) | Covered by customer's own Blackbaud agreement; our flow-down to be confirmed |
 
 ## 3. Virtual cards (`services/card_adapters/`)
 

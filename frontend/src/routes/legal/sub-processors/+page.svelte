@@ -337,9 +337,13 @@
 	</p>
 
 	<p>
-		Direct connections to <strong>NetSuite</strong> and
-		<strong>Microsoft Dynamics 365 Business Central</strong> are also
-		supported, and they are a different relationship — see § 4.
+		Direct connections to <strong>QuickBooks Online</strong>,
+		<strong>Xero</strong>, <strong>Sage Business Cloud Accounting</strong>
+		(including its South African edition), <strong>Sage Intacct</strong>,
+		<strong>SYSPRO</strong>, <strong>NetSuite</strong>,
+		<strong>Microsoft Dynamics 365 Business Central</strong> and
+		<strong>Blackbaud Financial Edge NXT</strong> are also supported, and
+		they are a different relationship — see § 4.
 	</p>
 
 	<h3 id="payments">3.3 Payments and cheque printing</h3>
@@ -700,9 +704,11 @@
 
 	<ul>
 		<li>
-			<strong>Direct ERP connections</strong> — NetSuite (Oracle) and Microsoft
-			Dynamics 365 Business Central. When you connect one, invoices are posted
-			into your own tenant of your own accounting system.
+			<strong>Direct ERP connections</strong> — QuickBooks Online (Intuit), Xero,
+			Sage Business Cloud Accounting and Sage Intacct (Sage), SYSPRO, NetSuite
+			(Oracle), Microsoft Dynamics 365 Business Central and Blackbaud Financial
+			Edge NXT. When you connect one, invoices are posted into your own tenant of
+			your own accounting system (for SYSPRO, your own server).
 		</li>
 		<li>
 			<strong>Your identity provider</strong> — Okta, Microsoft Entra ID,
