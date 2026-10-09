@@ -20,5 +20,5 @@ export const startErpOAuth = (provider: string) =>
 
 export const disconnectErpOAuth = () => api.post<unknown>(`${BASE}/oauth/disconnect`, {});
 
-export const testErpConnection = (erp: Record<string, string>) =>
+export const testErpConnection = (erp: Record<string, unknown>) =>
 	api.post<{ success: boolean; message: string }>('/api/organization/test-erp', erp);

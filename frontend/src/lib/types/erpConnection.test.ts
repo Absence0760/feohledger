@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildErpPayload,
+	byoAppRequired,
 	groupProviders,
 	initialValues,
 	missingRequired,
+	oauthConnectionState,
+	optionLabelKey,
+	withoutOAuthReturn,
+	type ErpOAuthStatus,
 	OAUTH_ERROR_KEYS,
 	readOAuthReturn,
 	secretIsSaved,
@@ -181,5 +186,127 @@ describe('OAUTH_ERROR_KEYS', () => {
 			}
 		}
 		expect(OAUTH_ERROR_KEYS.no_external_tenant).toBe('org.erp.oauth.error.noExternalTenant');
+	});
+});
+
+function status(overrides: Partial<ErpOAuthStatus> = {}): ErpOAuthStatus {
+	return {
+		provider: null,
+		connected: false,
+		needs_reconnect: false,
+		redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+		providers: [
+			{
+				key: 'quickbooks_online',
+				display_name: 'QuickBooks Online',
+				available: true,
+				client_source: 'platform'
+			},
+			{ key: 'xero', display_name: 'Xero', available: false, client_source: null }
+		],
+		...overrides
+	};
+}
+
+const xero: ErpProvider = { ...qbo, key: 'xero', label: 'Xero', available: true };
+
+describe('buildErpPayload: removed secrets and unrendered settings', () => {
+	it('sends a removed secret as null, unless a new value was typed', () => {
+		const removed = new Set(['consumer_secret']);
+		const blank = { account_id: '1', consumer_secret: '' };
+		expect(buildErpPayload(netsuite, blank, '', removed).consumer_secret).toBeNull();
+		const typed = { account_id: '1', consumer_secret: 'new' };
+		expect(buildErpPayload(netsuite, typed, '', removed).consumer_secret).toBe('new');
+	});
+
+	it('sends back a stored setting the form does not render, for the same ERP only', () => {
+		const stored = {
+			...storedNetsuite,
+			transaction_code_values: [{ id: 1, value: 'Ops' }],
+			oauth: { connected: true }
+		};
+		const values = { account_id: '9', consumer_secret: '' };
+		const body = buildErpPayload(netsuite, values, '', new Set(), stored);
+		expect(body.transaction_code_values).toEqual([{ id: 1, value: 'Ops' }]);
+		// The form's own value wins over what is stored; the OAuth block is never sent.
+		expect(body.account_id).toBe('9');
+		expect(body).not.toHaveProperty('oauth');
+		// A different ERP starts clean.
+		const other = buildErpPayload(syspro, values, '', new Set(), stored);
+		expect(other).not.toHaveProperty('transaction_code_values');
+	});
+});
+
+describe('byoAppRequired', () => {
+	it('is true only when the status says no app is configured for that ERP', () => {
+		expect(byoAppRequired(xero, status())).toBe(true);
+		expect(byoAppRequired(qbo, status())).toBe(false);
+		// Unknown is never a demand.
+		expect(byoAppRequired(xero, null)).toBe(false);
+		expect(byoAppRequired(netsuite, status())).toBe(false);
+		expect(byoAppRequired({ ...xero, key: 'sage_accounting' }, status())).toBe(false);
+	});
+});
+
+describe('missingRequired: removed secrets and a required own app', () => {
+	it('counts a removed required secret as missing', () => {
+		const missing = missingRequired(
+			netsuite,
+			{ account_id: '1', consumer_secret: '' },
+			storedNetsuite,
+			MASK,
+			{ cleared: new Set(['consumer_secret']) }
+		);
+		expect(missing.map((f) => f.name)).toEqual(['consumer_secret']);
+	});
+
+	it('requires the client id and secret when no app is configured', () => {
+		const values = { client_id: '', client_secret: '', environment: 'production' };
+		expect(missingRequired(xero, values, undefined, MASK)).toEqual([]);
+		const missing = missingRequired(xero, values, undefined, MASK, { requireByoApp: true });
+		expect(missing.map((f) => f.name)).toEqual(['client_id', 'client_secret']);
+	});
+});
+
+describe('oauthConnectionState', () => {
+	it('reads connected, needs-reconnect and not-connected for the ERP shown', () => {
+		const connected = status({ provider: 'xero', connected: true });
+		expect(oauthConnectionState('xero', connected)).toBe('connected');
+		const expired = status({ provider: 'xero', needs_reconnect: true });
+		expect(oauthConnectionState('xero', expired)).toBe('needs_reconnect');
+		// Connected to a different ERP is not connected to this one.
+		expect(oauthConnectionState('quickbooks_online', connected)).toBe('not_connected');
+		expect(oauthConnectionState('xero', null)).toBe('not_connected');
+	});
+});
+
+describe('withoutOAuthReturn', () => {
+	it('drops both return params and keeps the rest', () => {
+		const base = 'http://acme.localhost/organization';
+		expect(withoutOAuthReturn(new URL(`${base}?section=erp&erp_error=x`))).toBe(
+			'/organization?section=erp'
+		);
+		expect(withoutOAuthReturn(new URL(`${base}?erp_connected=xero&section=erp#top`))).toBe(
+			'/organization?section=erp#top'
+		);
+		expect(withoutOAuthReturn(new URL(`${base}?section=erp`))).toBeNull();
+	});
+});
+
+describe('optionLabelKey', () => {
+	it('labels every catalogued option value in every locale, and nothing else', async () => {
+		const { CATALOGUE_LOADERS } = await import('#lib/i18n/catalogues.ts');
+		// Blackbaud approval_status, Xero bill_status, QuickBooks environment, Merge.dev "other".
+		const values = ['Pending', 'Approved', 'AUTHORISED', 'DRAFT', 'production', 'sandbox', 'other'];
+		for (const [locale, load] of Object.entries(CATALOGUE_LOADERS)) {
+			const messages = await load();
+			for (const value of values) {
+				const key = optionLabelKey(value);
+				expect(key, value).not.toBeNull();
+				expect(messages[key!], `${locale}: ${key}`).toBeTruthy();
+			}
+		}
+		expect(optionLabelKey('sap_s4hana')).toBeNull();
+		expect(optionLabelKey('toString')).toBeNull();
 	});
 });

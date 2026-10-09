@@ -340,13 +340,18 @@ export const SETUP_GUIDES: Guide[] = [
 							'Pick your {ui:org.erp.system}. The list leads with the ERPs most used in the United States and South Africa, such as QuickBooks Online, Xero, Sage, Oracle NetSuite and Business Central. For any other ERP, choose {ui:org.erp.provider.mergeDev} and then pick it from the second list. That route needs the Scale plan.',
 							'Fill in the fields the form shows for that ERP. The form links to the ERP’s own setup guide for where to find each value.',
 							'Click {ui:org.erp.save}, then {ui:org.common.testConnection} to check that the details work.',
-							'For QuickBooks Online, Xero and Sage Business Cloud Accounting there is no password to type: save, then use the connect button and approve access in the ERP. You come back to this section, which then shows the connection.'
+							'For QuickBooks Online, Xero, Sage Business Cloud Accounting and Blackbaud Financial Edge NXT there is no password to type: click the connect button, which saves your choice, then approve access in the ERP. You come back to this section, which then shows the connection. If the connection later expires, the same button offers to reconnect.'
 						]
 					},
 					{
 						type: 'note',
 						tone: 'tip',
-						text: 'Ask whoever administers your ERP for the credentials. Once saved, a secret is never shown again, to anyone. Its field reads {ui:org.erp.secretSaved}; type a new value only to replace it.'
+						text: 'Those four connect through FeohLedger’s own app by default. If your administrator registered your organization’s own app with the ERP instead, open {ui:org.erp.oauth.byoSummary}, enter its client ID and secret, and register the {ui:org.erp.oauth.redirectUri} shown there in that app. The section opens by itself when this server has no app of its own for that ERP.'
+					},
+					{
+						type: 'note',
+						tone: 'tip',
+						text: 'Ask whoever administers your ERP for the credentials. Once saved, a secret is never shown again, to anyone. Its field says {ui:org.erp.secretSavedHint} Type a new value only to replace it, or click {ui:org.erp.secretRemove} to clear it when you next save.'
 					}
 				]
 			},
