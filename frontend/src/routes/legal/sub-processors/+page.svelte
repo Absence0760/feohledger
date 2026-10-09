@@ -731,6 +731,13 @@
 			sub-processor of ours.
 		</li>
 		<li>
+			<strong>Your own Square account</strong> — Square (Block). When you
+			connect it, each goods receipt adds the received quantity to your own
+			account's stock: the item's SKU (to look the item up), the platform's item
+			and location identifiers, the quantity, a timestamp and an opaque reference
+			of ours. No invoice, price, supplier or personal data is sent.
+		</li>
+		<li>
 			<strong>Supplier catalogue punch-out</strong> — a supplier's own catalogue
 			system, which receives the buyer's session identity and the cart contents
 			during a punch-out.
@@ -893,6 +900,10 @@
 				<tr>
 					<th scope="row">9 October 2026</th>
 					<td>Your own WooCommerce store is added to § 4 as a system you control: a goods receipt can push stock quantities to it. It is not a sub-processor.</td>
+				</tr>
+				<tr>
+					<th scope="row">9 October 2026</th>
+					<td>Square (Block) is added to § 4 as a commerce platform you can connect: a goods receipt adds the received quantity to your own Square account's stock.</td>
 				</tr>
 			</tbody>
 		</table>
