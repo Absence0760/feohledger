@@ -387,7 +387,7 @@ async def test_mock_transient_sku_is_retryable():
 
 async def test_fake_commerce_mounts_providers_and_resets(monkeypatch):
     fake = load_fake_commerce()
-    assert set(fake.PROVIDERS) == {p.name for p in _provider_files()}
+    assert set(fake.PROVIDERS) == {p.stem for p in _provider_files()}
     with use_fake_commerce(monkeypatch):
         assert settings.commerce_api_base_override == "http://fake-commerce"
         async with httpx.AsyncClient(
