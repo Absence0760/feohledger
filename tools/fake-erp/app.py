@@ -770,6 +770,9 @@ async def d365_post_purchase_invoice(
         # Like BC: only an unposted invoice can be posted.
         raise _d365_error(400, "Application_DialogException", "The invoice is already posted.")
     record["status"] = "Open"  # posted/finalized → Open (unpaid)
+    # Like BC: any change to the record moves its etag, so a DELETE carrying
+    # the draft's etag is refused once the invoice has been posted.
+    record["@odata.etag"] = f'{record["@odata.etag"][:-1]}-posted"'
     return Response(status_code=204)
 
 
@@ -2238,14 +2241,18 @@ async def d365_list_purchase_orders(request: Request, environment: str, company_
 async def d365_delete_purchase_invoice(
     request: Request, environment: str, company_id: str, doc_id: str
 ) -> Response:
-    """Like BC: If-Match is required, and only an unposted (Draft) invoice can
-    be deleted — a posted one is a posted document."""
+    """Like BC: If-Match is required and must be the record's current etag
+    (``*`` matches any), and only an unposted (Draft) invoice can be deleted —
+    a posted one is a posted document."""
     _require_d365_auth(request)
-    if not request.headers.get("if-match"):
+    if_match = request.headers.get("if-match")
+    if not if_match:
         raise _d365_error(428, "Precondition_Required", "If-Match header is required.")
     record = STATE["d365_invoices"].get(doc_id)
     if record is None:
         raise _d365_error(404, "BadRequest_NotFound", f"No purchaseInvoice with id {doc_id}.")
+    if if_match != "*" and if_match != record.get("@odata.etag"):
+        raise _d365_error(412, "Request_EntityChanged", "Another user has modified the record.")
     if record.get("status") != "Draft":
         raise _d365_error(400, "Application_DialogException", "A posted invoice cannot be deleted.")
     del STATE["d365_invoices"][doc_id]

@@ -44,7 +44,9 @@ surfaces:
   `totalAmountIncludingTax` computed from the lines (company `fake-vat-co`
   adds 20% VAT on top, like a real BC VAT company; every other company is
   untaxed); `POST …/purchaseInvoices({id})/Microsoft.NAV.post` → 204,
-  flips a `Draft` to `Open` (400 for anything already posted); `GET …/purchaseInvoices({id})`;
+  flips a `Draft` to `Open` and moves its etag (400 for anything already posted);
+  `GET …/purchaseInvoices({id})`; `DELETE …/purchaseInvoices({id})` (`If-Match`
+  must be the current etag or `*`, else 412; drafts only);
   `GET …/vendors?$top=1` (test_connection). OData base is `/d365`, i.e.
   `/d365/{environment}/api/v2.0/companies({company_id})/<resource>`.
 
