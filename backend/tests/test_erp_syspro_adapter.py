@@ -571,3 +571,12 @@ def test_unwrap_does_not_resolve_entities():
         "<string>&x;</string>"
     )
     assert "root:" not in _unwrap(raw)
+
+
+def test_xml_illegal_characters_are_dropped_and_nothing_else():
+    """XML 1.0 cannot carry the C0 controls (bar tab / LF / CR) or U+FFFE/FFFF;
+    lxml raises on them, so free text is stripped of exactly those."""
+    from app.services.erp_adapters.syspro import _clean
+
+    dirty = "a\x00b\x08c\x09d\x0ae\x0bf\x0dg\x1fh\ufffei\uffffj\x7fk\u00e9"
+    assert _clean(dirty) == "abc\x09d\x0aef\x0dghij\x7fk\u00e9"
