@@ -327,7 +327,12 @@ async def test_put_seals_audits_and_never_reads_back(realdb):
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.put(f"{URL}/erp", json={"set": {"api_key": SECRET, "account_token": "t"}})
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"erp": ["account_token", "api_key"], "payments": [], "cards": []}
+        assert resp.json() == {
+            "erp": ["account_token", "api_key"],
+            "payments": [],
+            "cards": [],
+            "commerce": [],
+        }
         assert SECRET not in resp.text
         status = await c.get(URL)
         org_resp = await c.get("/api/organization")
