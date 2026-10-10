@@ -139,7 +139,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**98 open: 81 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**99 open: 82 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1306,12 +1306,25 @@ scope (§260) — do not fold them into any of these.
       an e2e spec. **Trigger:** the first customer on one of those ERPs who
       won't use Merge.dev, or the first customer who receives goods in their
       ERP rather than in FeohLedger.
-- [ ] **(c) Received merchandise never reaches the business's commerce /
-      inventory platform.** **Durable fix:** SKU identity on PO + receipt lines
-      (link to `catalog_items`), then a `commerce_adapters` family (`mock`
-      default) that adjusts the mapped variant's quantity on each receipt,
-      idempotent per receipt line — Shopify first. **Trigger:** after PR 1
-      lands; independent of the ERP work.
+- [ ] **(c) No real commerce platform adapter yet.** The foundation is in
+      (decisions §273): SKU identity, the `commerce_adapters` family with its
+      `mock`, the post-commit push and reversal, retry, the panel and
+      tools/fake-commerce. A tenant can connect only `mock`. **Durable fix:**
+      one module per provider — Shopify, Lightspeed, Square, Cin7, WooCommerce
+      — following `backend/docs/commerce-integration.md` § How to add a
+      provider (adapter, fake-commerce module, contract test, e2e spec,
+      sub-processor registers). **Trigger:** in progress now, one PR each.
+- [ ] **(c) A commerce platform that connects only by OAuth consent cannot be
+      connected.** The catalogue's `auth: "oauth"` renders a Connect button
+      wired to `GET /api/commerce/oauth/{provider}/authorize`, which answers 501
+      `commerce_oauth_not_available`: `services/erp_oauth` (state, callback,
+      refresh lock, compare-and-swap) reads and writes `settings.erp` only.
+      None of the five planned platforms needs it — each has a key-based
+      connection. **Durable fix:** parameterise `erp_oauth` by settings block
+      (`erp` / `commerce`) and register commerce `OAuthProviderSpec`s, keeping
+      one callback route. **Trigger:** the first commerce provider shipped
+      OAuth-only, or a public Shopify / Square app listing (which requires
+      OAuth install).
 
 ### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 

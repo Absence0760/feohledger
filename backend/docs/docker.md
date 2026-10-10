@@ -139,6 +139,22 @@ The `FEOH_ERP_*_BASE` env vars point the adapters at it (the committed
 `POST /__reset` to restore fixture state. Details:
 [`erp-integration.md` § Local e2e testing](erp-integration.md#local-e2e-testing-fake-erp-server).
 
+## Fake commerce server (fake-commerce)
+
+The commerce adapters (decisions §273) run e2e against `tools/fake-commerce/` —
+a FastAPI app that auto-mounts one module per provider
+(`providers/<key>.py` at `/<key>`). Opt-in under the `commerce` profile:
+
+```bash
+docker compose --profile commerce up -d --build fake-commerce   # pnpm commerce:up (host 12113, container 8080)
+```
+
+`FEOH_COMMERCE_API_BASE_OVERRIDE=http://localhost:12113` (committed in
+`backend/.env.development`) sends each adapter to `<override>/<key>`. `GET /health`,
+`POST /__reset`, `GET /__providers`, `GET /__state/<key>`. Backend pytest loads
+the same app in process and needs no container. Details:
+[`commerce-integration.md`](commerce-integration.md) and `tools/fake-commerce/README.md`.
+
 ## Services
 
 The **Image** column names the repository and the release line it is held on.
@@ -161,6 +177,7 @@ bump.
 | stripe-mock | `stripe/stripe-mock`         | `12111`| `payments` | Stripe API mock for the `stripe_treasury` payment adapter (opt-in) |
 | Mailpit    | `axllent/mailpit`             | `1025`, `8025` | `mail` | Local SMTP sink + web inbox for the `smtp` email adapter (opt-in) |
 | fake-erp   | (built from `tools/fake-erp/`) | `12112` | `erp` | Fake Merge.dev / NetSuite / Dynamics 365 BC server for real-ERP-adapter e2e (opt-in) |
+| fake-commerce | (built from `tools/fake-commerce/`) | `12113` | `commerce` | Fake commerce / inventory platforms (one module per provider) for the commerce adapters' e2e (opt-in) |
 
 ### Image pinning
 

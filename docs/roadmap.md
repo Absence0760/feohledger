@@ -233,12 +233,13 @@ Each item ships as **its own PR**. Item 1 (goods-receipt entry) has shipped — 
 - [ ] SAP S/4HANA (OData) · Oracle Fusion Cloud ERP · Microsoft Dynamics 365 Finance & Operations · Infor CloudSuite · Epicor Kinetic — each with a fake-erp route set (`pnpm erp:up`) and a `tests-e2e/erp/` spec, mock-by-default (guard rail 7). Until one lands, these ride Merge.dev on Scale (decisions §256)
 
 ### 3. Commerce / inventory platform adapter (Shopify first)
-**Status:** Planned
-**Open:** A new adapter family that pushes received merchandise into the business's commerce / inventory system. Builds on item 1 (receipts, shipped) and needs PO / receipt lines to carry an item identity (SKU). *(c)* Tracked in [followups.md](followups.md).
+**Status:** Partial. The foundation has landed (decisions §273, `backend/docs/commerce-integration.md`): SKU identity on PO and receipt lines (migration 0111), the `commerce_adapters` family with its `mock` default, the post-commit push on receipt and its reversal on cancel, retry (manual + sweep), Organization → Commerce, the per-receipt sync status, tools/fake-commerce and a provider contract test.
+**Open:** the real provider adapters, and the OAuth consent connection for a platform that has no key-based one. *(c)* Tracked in [followups.md](followups.md).
 
-- [ ] Item identity on PO and receipt lines — link to `catalog_items` (SKU) so a received quantity names *what* arrived, not just free text
-- [ ] `commerce_adapters` family (`mock` default, registry + decorator like every other family): on a goods receipt, adjust the mapped SKU's available quantity at the mapped location; idempotent per receipt line
-- [ ] Shopify (Admin GraphQL inventory adjust) first; then Lightspeed, Square, Cin7, WooCommerce
-- [ ] Per-org SKU ↔ product-variant and location mapping; a local fake for e2e; sub-processor registers updated (`pnpm check:subprocessors`)
+- [x] Item identity on PO and receipt lines — link to `catalog_items` plus a SKU snapshot, copied onto receipt lines
+- [x] `commerce_adapters` family (`mock` default, pkgutil-discovered registry + decorator): on a goods receipt, adjust the mapped SKU's available quantity at the mapped location; idempotent per receipt line and direction; reversal on cancel
+- [ ] Shopify (Admin GraphQL inventory adjust), Lightspeed, Square, Cin7, WooCommerce — one module each, per `commerce-integration.md` § How to add a provider
+- [x] Per-org (and per-entity) location mapping and a SKU override table; tools/fake-commerce (`pnpm commerce:up`) and `tests-e2e/commerce/`
+- [ ] Sub-processor registers updated as each real provider lands (`pnpm check:subprocessors`)
 
 ---
