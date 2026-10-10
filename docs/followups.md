@@ -39,12 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-09 — enabling IAM database authentication on RDS
-(#542) opened one (c) entry (the app still signs in with the master password),
-taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
-(decisions §269–§272), merged onto the provider-credential store, opened
-eleven (c) entries, one (a) (sandbox verification) and one (b) (registering
-the platform OAuth apps) under their own heading, and rewrote two (c)
+**Last reconciled:** 2026-10-10 — Shopify, WooCommerce, Square and Lightspeed (X-Series) landed; the commerce-provider (c) entry now names only Cin7, WooCommerce's read → write race and Lightspeed R-Series each opened one (c), taking the file from 94 → 96. Before that, 2026-10-08 — the US + South Africa ERP connections
+(decisions §264–§266) opened eleven (c) entries, one (a) (sandbox verification)
+and one (b) (registering the platform OAuth apps). They also rewrote two (c)
 entries: QuickBooks Online now tracks only phases 3–5, and the Priority 14
 adapter entry now tracks the receipt pull and the enterprise ERPs. The
 branch's "payment and card secrets still plaintext" entry is not carried,
@@ -139,7 +136,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**100 open: 83 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**101 open: 84 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1306,15 +1303,15 @@ scope (§260) — do not fold them into any of these.
       an e2e spec. **Trigger:** the first customer on one of those ERPs who
       won't use Merge.dev, or the first customer who receives goods in their
       ERP rather than in FeohLedger.
-- [ ] **(c) Two of the five commerce platform adapters are not built.** The
+- [ ] **(c) One of the five commerce platform adapters is not built.** The
       foundation is in (decisions §273): SKU identity, the `commerce_adapters`
       family with its `mock`, the post-commit push and reversal, retry, the
-      panel and tools/fake-commerce. Shopify, WooCommerce and Square have
-      landed; a tenant on Lightspeed or Cin7 can still connect only `mock`.
-      **Durable fix:** one module per remaining provider — Lightspeed, Cin7 —
-      following `backend/docs/commerce-integration.md` § How to add a provider
-      (adapter, fake-commerce module, contract test, e2e spec, sub-processor
-      registers). **Trigger:** in progress now, one PR each.
+      panel and tools/fake-commerce. Shopify, WooCommerce, Square and Lightspeed
+      Retail (X-Series) have landed; a tenant on Cin7 can still connect only
+      `mock`. **Durable fix:** the Cin7 Core module, following
+      `backend/docs/commerce-integration.md` § How to add a provider (adapter,
+      fake-commerce module, contract test, e2e spec, sub-processor registers).
+      **Trigger:** in progress now.
 - [ ] **(c) A WooCommerce stock push can overwrite a concurrent storefront
       sale.** The REST API has no relative stock change and no compare-and-set,
       so the adapter reads `stock_quantity`, adds the receipt's delta and writes
@@ -1328,6 +1325,18 @@ scope (§260) — do not fold them into any of these.
       today's read → write path otherwise. **Trigger:** the first WooCommerce
       merchant who reports a shelf count drifting after receipts, or one whose
       order volume makes a sale inside a two-request window routine.
+- [ ] **(c) Lightspeed Retail R-Series cannot be connected.** The `lightspeed`
+      adapter targets X-Series (the former Vend), Lightspeed's current global
+      retail POS. R-Series (the former Lightspeed Retail / "Onsite" line, still
+      sold mainly in North America) is a different API on a different host
+      (`api.lightspeedapp.com/API/V3/Account/{accountID}`), with integer ids,
+      its own inventory model and **OAuth-only** access — there is no personal
+      token to paste. **Durable fix:** once commerce OAuth exists (the entry
+      below), a separate `lightspeed_r` module whose push writes a received
+      purchase order (or an inventory count with a reason) rather than
+      overwriting `ItemShop.qoh`, with its own fake-commerce module and contract
+      test. **Trigger:** the first customer on R-Series, or commerce OAuth
+      landing.
 - [ ] **(c) A commerce platform that connects only by OAuth consent cannot be
       connected.** The catalogue's `auth: "oauth"` renders a Connect button
       wired to `GET /api/commerce/oauth/{provider}/authorize`, which answers 501
