@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-10 — Shopify, WooCommerce, Square and Lightspeed (X-Series) landed; the commerce-provider (c) entry now names only Cin7, WooCommerce's read → write race and Lightspeed R-Series each opened one (c), taking the file from 94 → 96. Before that, 2026-10-08 — the US + South Africa ERP connections
+**Last reconciled:** 2026-10-10 — Cin7 Core landed: the last commerce-provider (c) entry closes, and two (c) entries open, one for the Cin7 Core push's limits (read-then-set, the full-list retry check, batch / bin stock) and one for Cin7 Omni, taking the file from 96 → 97. Before that, 2026-10-10 — Shopify, WooCommerce, Square and Lightspeed (X-Series) landed; the commerce-provider (c) entry now names only Cin7, WooCommerce's read → write race and Lightspeed R-Series each opened one (c), taking the file from 94 → 96. Before that, 2026-10-08 — the US + South Africa ERP connections
 (decisions §264–§266) opened eleven (c) entries, one (a) (sandbox verification)
 and one (b) (registering the platform OAuth apps). They also rewrote two (c)
 entries: QuickBooks Online now tracks only phases 3–5, and the Priority 14
@@ -136,7 +136,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**101 open: 84 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**102 open: 85 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1303,15 +1303,28 @@ scope (§260) — do not fold them into any of these.
       an e2e spec. **Trigger:** the first customer on one of those ERPs who
       won't use Merge.dev, or the first customer who receives goods in their
       ERP rather than in FeohLedger.
-- [ ] **(c) One of the five commerce platform adapters is not built.** The
-      foundation is in (decisions §273): SKU identity, the `commerce_adapters`
-      family with its `mock`, the post-commit push and reversal, retry, the
-      panel and tools/fake-commerce. Shopify, WooCommerce, Square and Lightspeed
-      Retail (X-Series) have landed; a tenant on Cin7 can still connect only
-      `mock`. **Durable fix:** the Cin7 Core module, following
-      `backend/docs/commerce-integration.md` § How to add a provider (adapter,
-      fake-commerce module, contract test, e2e spec, sub-processor registers).
-      **Trigger:** in progress now.
+- [ ] **(c) The Cin7 Core push is read-then-set, its retry check pages the
+      whole adjustment list, and it refuses batch / bin stock.** Cin7 Core v2
+      has no delta write outside its purchase flow. The adapter reads on-hand
+      and posts a completed stock adjustment to `on_hand + delta`, so a sale
+      that Cin7 records between the read and the write is overwritten.
+      `/stockadjustmentList` cannot search by reference, so every retry
+      (`attempt > 1`) pages the list, and refuses past 25,000 adjustments. A
+      batch- or serial-tracked product, or stock kept in bins, is refused
+      because the receipt names neither (`backend/docs/commerce-integration.md`
+      § Cin7 Core). **Durable fix:** move to a delta write and a reference
+      search as soon as Cin7 Core's API offers either. Until then, carry the
+      batch / bin on the PO line (an optional `commerce_batch` / bin per
+      line), add it to the adjustment, and sum availability per batch.
+      **Trigger:** a Cin7 tenant reporting a drifted on-hand count, the scan
+      cap being hit, or the first Cin7 tenant that receives batch-tracked or
+      binned stock.
+- [ ] **(c) Cin7 Omni has no adapter.** The `cin7` provider targets Cin7 Core.
+      Omni is the older, separate product, with its own API at `api.cin7.com`
+      (basic auth, `Adjustments` with a `where` filter). **Durable fix:** a
+      separate `cin7_omni` module, following § How to add a provider. Omni
+      can filter adjustments by reference, so its retry check would not need
+      the full-list scan. **Trigger:** the first customer still on Cin7 Omni.
 - [ ] **(c) A WooCommerce stock push can overwrite a concurrent storefront
       sale.** The REST API has no relative stock change and no compare-and-set,
       so the adapter reads `stock_quantity`, adds the receipt's delta and writes

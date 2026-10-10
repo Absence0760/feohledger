@@ -296,8 +296,11 @@ read → write adjust with the idempotency key in product meta); `square` (real 
 Square REST API v2, access token + sandbox/production environment, fractional
 quantities, native idempotency key plus a `reference_id` lookup before any
 re-send — the `InventoryAdjustment.attempt` field says which push it is);
-`lightspeed` (Lightspeed Retail X-Series — real; receipts land as stock orders).
-The registry imports
+`lightspeed` (Lightspeed Retail X-Series — real; receipts land as stock orders);
+`cin7` (real — Cin7 Core API v2, a completed stock adjustment set to on-hand +
+delta because Cin7 takes the new value, fractional quantities; on a retry,
+`attempt > 1`, it looks for our key in an adjustment's `Reference` before
+writing). The registry imports
 every module in the package (`pkgutil`), so **a new provider is one new module**
 — no import list and no shared catalogue: the spec passed to the decorator IS
 its catalogue entry. Selected by `Organization.settings.commerce.provider`; an

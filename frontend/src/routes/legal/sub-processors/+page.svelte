@@ -719,12 +719,15 @@
 		</li>
 		<li>
 			<strong>Commerce platforms</strong> — Shopify, Square (Block), Lightspeed
-			Retail (X-Series). When you connect your shop or account, each goods receipt
-			adds the received quantity of each item, by SKU, to the stock at the
-			location you chose (and a cancelled receipt takes it back off). Alongside
-			the SKU and quantity go the platform's item and location identifiers, a
-			timestamp or a note naming {OPERATOR.serviceName}, and an opaque reference
-			of ours. No invoice, price, supplier, bank, tax or user data is sent.
+			Retail (X-Series), Cin7 Core (Cin7). When you connect your shop or account,
+			each goods receipt adds the received quantity of each item, by SKU, to the
+			stock at the location you chose (and a cancelled receipt takes it back off).
+			Alongside the SKU and quantity go the platform's item and location
+			identifiers, a timestamp or a note naming {OPERATOR.serviceName}, and an
+			opaque reference of ours. Cin7 Core also receives the item's unit cost, which
+			is Cin7's own average cost read back from your Cin7 account, and, if you set
+			one, the account code its stock adjustment posts to. No invoice, price,
+			supplier, bank, tax or user data from {OPERATOR.serviceName} is sent.
 		</li>
 		<li>
 			<strong>Your own WooCommerce store</strong> — when you connect it, each goods
@@ -904,6 +907,10 @@
 				<tr>
 					<th scope="row">10 October 2026</th>
 					<td>Lightspeed Retail (X-Series) is added to § 4 as a commerce platform connection: your own store, receiving received-stock quantities against its own product identifiers.</td>
+				</tr>
+				<tr>
+					<th scope="row">10 October 2026</th>
+					<td>Cin7 Core (Cin7) is added to § 4 as a commerce platform connection: a goods receipt becomes a stock adjustment in your own Cin7 account, valued at Cin7's own average cost.</td>
 				</tr>
 			</tbody>
 		</table>

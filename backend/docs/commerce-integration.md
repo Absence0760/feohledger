@@ -165,6 +165,7 @@ Follow exactly. Everything except steps 2 and 7 touches only new files.
 | `woocommerce` | WooCommerce (merchant's own WordPress, REST `/wp-json/wc/v3`) | consumer key + secret, HTTPS Basic | real; one synthetic location `store`; whole units; § WooCommerce |
 | `square` | Square (REST API v2, `Square-Version` pinned) | access token (Bearer) + `environment` | real; fractional quantities; § Square |
 | `lightspeed` | Lightspeed Retail (X-Series, formerly Vend) | personal access token (Bearer) + `domain_prefix` | real; whole units; receipts land as stock orders — § Lightspeed below |
+| `cin7` | Cin7 Core (formerly DEAR Inventory), External API v2 | account id + application key (secret) headers | real; completed stock adjustment, read-then-set — see § Cin7 Core |
 
 ### Shopify (`commerce_adapters/shopify.py`)
 
@@ -455,3 +456,95 @@ its own inventory model) and is **OAuth-only**, which commerce connections do
 not support yet. It is tracked as its own entry in `docs/followups.md`, gated on
 commerce OAuth; it would be a separate `lightspeed_r` module, not a mode of this
 one.
+
+## Cin7 Core
+
+`app/services/commerce_adapters/cin7.py`; fake `tools/fake-commerce/providers/cin7.py`;
+tests `backend/tests/test_commerce_cin7.py` and `frontend/tests-e2e/commerce/cin7.spec.ts`.
+
+**Product.** Cin7 Core (formerly DEAR Inventory), API v2 at
+`https://inventory.dearsystems.com/ExternalApi/v2` (reference:
+<https://dearinventory.docs.apiary.io/>, checked 2026-10). **Cin7 Omni** — the
+older product, with its own API at `api.cin7.com` — is out of scope; it is
+tracked in `docs/followups.md`.
+
+**Connection.** `account_id` (an identifier, and a destination key: changing it
+drops the stored key) and `application_key` (secret), sent as the
+`api-auth-accountid` / `api-auth-applicationkey` headers. Optional
+`adjustment_account`: the account code Cin7 posts the adjustment's journal to.
+Leave it blank to use Cin7's default. Set it to a clearing account when Cin7
+is linked to the same books the AP side posts the bill to, or the stock gets
+debited twice. `test_connection` calls `/me`. `list_locations` pages
+`/ref/location` and leaves out fixed-asset locations. `resolve_sku` calls
+`/product?Sku=`, then filters the result again to one exact (case-insensitive)
+stock product. None, more than one, or a service is `unmapped_sku`. Item ids
+and location ids are Cin7 GUIDs.
+
+**Why a stock adjustment, read-then-set.** Cin7 Core v2 has no call that adds a
+quantity to a location outside its own purchase flow:
+
+| Endpoint | Why not (or why) |
+|---|---|
+| `/stockadjustment` | **Used.** A line's `Quantity` is the **new** on-hand value, not a delta (the reference: "New value for QuantityOnHand"; its example posts 600 against 601 on hand and journals −1). It records a `Reference` and a `Comment`, and it posts its journal to an account the tenant picks |
+| `/stockTransfer` | Moves stock between two of the tenant's locations. It cannot add stock that is not already somewhere |
+| `/inventoryWriteOff` | Decrements only, and books the decrease as a write-off expense, which is wrong for a cancelled receipt |
+| `/purchase` stock received | A true delta, but only against a Cin7 purchase with a supplier, and it accrues a payable inside Cin7. That is a second AP ledger beside FeohLedger, which is what §260 rules out |
+
+So `adjust_available`:
+
+1. pages `/stockadjustmentList` for an adjustment whose `Reference` equals the
+   idempotency key (described under **Idempotency** below);
+2. checks the location (`/ref/location?ID=`; a deprecated or missing one is
+   `unknown_location`) and reads the product's `AverageCost` (`/product?ID=`)
+   to use as `UnitCost`;
+3. reads on-hand at the location's name (`/ref/productavailability`). A row
+   with a batch (a batch- or serial-tracked product) or a bin is refused
+   `rejected`, because the receipt carries neither;
+4. posts `Status: COMPLETED`, `UpdateOnHand: true`, `Quantity = on_hand +
+   delta`, with `Reference` set to our key, `Comment` set to the reason and
+   `Account` set to `adjustment_account` when given. A total below zero is
+   refused before anything is written. A response that is not `COMPLETED` is
+   refused for an admin to finish in Cin7.
+
+Quantities go over the wire as exact JSON numbers (`_dumps`; never through
+`float`), and responses are parsed with `parse_float=Decimal`. Cin7 holds
+fractions (`supports_fractional_quantities=True`).
+
+**Residual race.** The read in step 3 and the write in step 4 are two separate
+calls. A sale or movement that Cin7 records between them is overwritten,
+because the adjustment sets an absolute value. Cin7 offers no conditional
+write that would close the gap. The window is two consecutive calls, and the
+follow-up names the trigger for revisiting it.
+
+**Idempotency.** Cin7 has no idempotency header, and `/stockadjustmentList`
+has no search parameter. On a **retry** (`InventoryAdjustment.attempt > 1`) the
+adapter pages the whole list (1000 rows a page) looking for an adjustment whose
+`Reference` is our key:
+
+- a `COMPLETED` or `VOIDED` adjustment is a replay. The adapter returns
+  `replayed=True` with its `TaskID` and writes nothing. A voided one counts
+  too: an admin who voided our adjustment in Cin7 did so on purpose;
+- a `DRAFT` adjustment is a half-finished earlier attempt. It is refused
+  (`rejected`) for an admin to complete or void in Cin7.
+
+Past `MAX_REPLAY_SCAN_PAGES` (25 pages, so 25,000 adjustments) the check
+refuses rather than assume the key is unused.
+
+The **first** push of a key (`attempt == 1`) skips the scan. That is safe
+because `commerce_sync`'s claim commits `attempts + 1` before the provider is
+called, and only a deferral that never reached the provider hands an attempt
+back. So any push that could have reached Cin7 makes every later push of the
+same key `attempt >= 2`, including a timeout after the write, a reclaimed
+`in_flight` claim and a manual retry. The key is one sync row (unique on
+receipt line and direction), so nothing else can have written it. Skipping the
+scan matters because it is the expensive part: without the skip, every receipt
+line would page the whole adjustment history against the 60-a-minute limit.
+Two pushes of the same key racing each other are prevented by the same claim,
+because only one push holds it at a time.
+
+**Rate limit and errors.** Cin7 Core allows 60 calls a minute per API
+application. A first push makes four calls (location, product, stock level
+and the write); a retry adds one or more list pages. A large receipt therefore runs
+into 429 (`rate_limited`), and the retry sweep picks the remaining lines up
+with backoff. 401 and 403 are `auth_failed`. Cin7 answers 403 for a bad key
+pair.
