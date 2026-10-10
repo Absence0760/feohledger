@@ -86,6 +86,7 @@ SECRET_FIELDS: dict[str, frozenset[str]] = {
     # adds its names in the same change.
     "commerce": frozenset(
         {
+            "access_token",  # Shopify Admin API access token
             "consumer_key",  # WooCommerce REST API key
             "consumer_secret",  # WooCommerce REST API secret
         }
