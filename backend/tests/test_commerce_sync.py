@@ -10,7 +10,8 @@ Pinned here:
   * a replayed receipt (same Idempotency-Key) plans nothing new;
   * cancelling takes back exactly what landed, and voids what never did;
   * a retryable failure is retried by the sweep with backoff and stops at the
-    attempt cap; a manual retry re-sends under the same key;
+    attempt cap; a manual retry re-sends under the same key; each push tells
+    the adapter its attempt number;
   * the SKU override and the per-entity location are honoured;
   * a provider switch, a disconnect and a fractional quantity on a whole-unit
     platform fail with stable codes rather than pushing somewhere wrong;
@@ -342,6 +343,35 @@ async def test_a_transient_failure_is_retried_with_backoff_up_to_the_cap(realdb,
             .all()
         )
     assert len(failed_audits) == 1
+
+
+async def test_each_push_tells_the_adapter_which_attempt_it_is(realdb, monkeypatch):
+    """A retry is ``attempt > 1``, so an adapter can check for a write it never heard back from."""
+    seen: list[int] = []
+    original = mock_adapter.MockCommerceAdapter.adjust_available
+
+    async def _spy(self, adjustment):
+        seen.append(adjustment.attempt)
+        return await original(self, adjustment)
+
+    monkeypatch.setattr(mock_adapter.MockCommerceAdapter, "adjust_available", _spy)
+    await _connect(realdb)
+    po_id, (li,) = await _po(realdb, [("Flaky", "1", "TRANSIENT-2")])
+    receipt = await _receive(realdb, po_id, [li], ["1"])
+    row = (await _rows(realdb, receipt["id"]))[(_line_id(receipt, li), "receive")]
+    async with realdb.sessionmaker(TENANT)() as s:
+        await s.execute(
+            update(CommerceInventorySync)
+            .where(CommerceInventorySync.id == row.id)
+            .values(last_attempt_at=datetime.now(UTC) - timedelta(hours=1))
+        )
+        await s.commit()
+    await commerce_sync.sweep_tenant(
+        realdb.info(TENANT).org_id,
+        realdb.info(TENANT).db_name,
+        {"provider": "mock", "location_id": "mock-main"},
+    )
+    assert seen == [1, 2]
 
 
 async def test_a_provider_switch_and_a_disconnect_fail_closed(realdb, monkeypatch):

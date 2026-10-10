@@ -210,6 +210,12 @@ class InventoryAdjustment:
     sku: str | None = None
     #: ``received`` or ``receipt_cancelled`` — for the provider's reason / note.
     reason: str = "received"
+    #: Which push of this key this is, 1-based (the sync row's ``attempts`` after
+    #: its claim). Above 1, an earlier push may have reached the provider without
+    #: our hearing back (a timeout after the write), so an adapter whose
+    #: idempotency cannot be relied on forever — a native key the provider
+    #: forgets — checks for the earlier write before writing again.
+    attempt: int = 1
 
 
 @dataclass(frozen=True)

@@ -525,6 +525,8 @@ async def _attempt(
             idempotency_key=row.idempotency_key,
             sku=row.sku,
             reason="received" if row.direction == DIRECTION_RECEIVE else "receipt_cancelled",
+            # The claim already counted this push.
+            attempt=max(1, row.attempts or 1),
         )
     )
     return {
