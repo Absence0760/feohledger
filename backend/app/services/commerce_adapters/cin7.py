@@ -89,6 +89,8 @@ MAX_REPLAY_SCAN_PAGES = 25
 #: stock under our key.
 _SETTLED_STATUSES = frozenset({"COMPLETED", "VOIDED"})
 
+_TASK_NUMBER = re.compile(r"^[A-Z]{1,6}-[0-9]{1,10}$")
+
 _GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 _REASON_COMMENTS = {
@@ -282,10 +284,13 @@ class Cin7CoreAdapter(CommerceAdapter):
         if prior is not None:
             status = str(prior.get("Status") or "").upper()
             if status not in _SETTLED_STATUSES:
+                # Cin7's own auto-number (``ST-00042``) helps the admin find it;
+                # anything else from the response is not echoed.
+                number = str(prior.get("StocktakeNumber") or "")
+                label = number if _TASK_NUMBER.match(number) else "draft"
                 raise CommerceRejectedError(
-                    "Cin7 holds an uncompleted stock adjustment for this line "
-                    f"({prior.get('StocktakeNumber') or 'draft'}); complete or void it in "
-                    "Cin7, then retry."
+                    f"Cin7 holds an uncompleted stock adjustment for this line ({label}); "
+                    "complete or void it in Cin7, then retry."
                 )
             return InventoryAdjustmentResult(provider_reference=str(prior["TaskID"]), replayed=True)
 
@@ -325,7 +330,11 @@ class Cin7CoreAdapter(CommerceAdapter):
         status = str(created.get("Status") or "").upper()
         if status != "COMPLETED":
             raise CommerceRejectedError(
-                f"Cin7 saved the stock adjustment as {status or 'unknown'} without completing it; "
+                # Only Cin7's documented statuses are echoed — never free text
+                # from a response body.
+                f"Cin7 saved the stock adjustment as "
+                f"{status if status in ('DRAFT', 'VOIDED') else 'not completed'} "
+                "without completing it; "
                 "complete or void it in Cin7, then retry."
             )
         return InventoryAdjustmentResult(provider_reference=task_id)
