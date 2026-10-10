@@ -222,6 +222,7 @@ async def record_goods_receipt(
         ],
         idempotency_key=(idempotency_key or "").strip() or None,
         org_settings=org.settings or {},
+        tenant_db_name=org.db_name,
     )
     if not created:
         response.status_code = 200
@@ -247,5 +248,6 @@ async def cancel_receipt(
         entity_id=entity_id,
         gr_id=gr_id,
         org_settings=org.settings or {},
+        tenant_db_name=org.db_name,
     )
     return await _detail(db, receipt)
