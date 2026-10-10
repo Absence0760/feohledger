@@ -32,8 +32,10 @@ movement Cin7 records between the read and the write is overwritten. Cin7 offers
 no conditional write to close it; the window is two consecutive calls, and it is
 documented with a tracked follow-up rather than hidden.
 
-**Idempotency.** Cin7 has no idempotency header. Before writing, the adapter
-pages ``/stockadjustmentList`` (it has no reference search) for an adjustment
+**Idempotency.** Cin7 has no idempotency header. Before re-sending a key
+(``InventoryAdjustment.attempt > 1``; the first push of a key cannot have been
+written before, see ``adjust_available``), the adapter pages
+``/stockadjustmentList`` (it has no reference search) for an adjustment
 whose ``Reference`` is our key: a completed or voided one is a replay
 (``replayed=True``, its ``TaskID`` returned, nothing written); a draft one is a
 half-finished earlier attempt and is refused for an admin to complete or void in
@@ -280,7 +282,12 @@ class Cin7CoreAdapter(CommerceAdapter):
             # Checked before the replay lookup: no adjustment this adapter
             # wrote can carry a location that is not a Cin7 id.
             raise CommerceUnknownLocationError("The mapped Cin7 location id is not a Cin7 id.")
-        prior = await self._find_by_reference(key)
+        # Only a re-send can find an earlier write: the sync service commits the
+        # claim's ``attempts + 1`` before calling, and hands an attempt back only
+        # for a deferral that never reached us, so ``attempt == 1`` is the first
+        # push of this key ever made. Skipping the full-list scan there keeps the
+        # common path at four calls under Cin7's 60-a-minute limit.
+        prior = await self._find_by_reference(key) if adjustment.attempt > 1 else None
         if prior is not None:
             status = str(prior.get("Status") or "").upper()
             if status not in _SETTLED_STATUSES:

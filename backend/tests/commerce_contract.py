@@ -43,7 +43,10 @@ What it pins (each a property the sync service relies on):
 4. ``adjust_available`` with a positive delta returns a non-empty
    ``provider_reference``; **the same idempotency key again changes nothing**
    (same reference, and the level read back — when the case can read it — moved
-   once); a negative delta under a new key is applied;
+   once); a negative delta under a new key is applied. The repeat is sent as
+   ``attempt=2``, as the sync service sends every re-send (its claim commits
+   ``attempts + 1`` before the call), so an adapter may look for an earlier
+   write only on a re-send;
 5. an unknown location raises ``CommerceUnknownLocationError`` (or a
    non-retryable ``CommerceRejectedError``);
 6. a fractional delta on a whole-units platform raises ``CommerceRejectedError``
@@ -59,7 +62,7 @@ import importlib.util
 import sys
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -186,7 +189,7 @@ async def assert_commerce_contract(case: ContractCase) -> None:
     )
     first = await adapter.adjust_available(plus)
     assert first.provider_reference, "adjust_available returned no provider reference"
-    again = await adapter.adjust_available(plus)
+    again = await adapter.adjust_available(replace(plus, attempt=2))
     assert again.provider_reference == first.provider_reference, (
         "a replayed idempotency key must return the original adjustment"
     )

@@ -52,7 +52,9 @@ def _adapter(**overrides):
     return build_adapter({**CONFIG, **overrides})
 
 
-def _adjustment(fake, delta: str, key: str, *, item=None, location=None, reason="received"):
+def _adjustment(
+    fake, delta: str, key: str, *, item=None, location=None, reason="received", attempt=1
+):
     return InventoryAdjustment(
         item_id=item or fake.PRODUCT_1,
         location_id=location or fake.MAIN,
@@ -60,6 +62,7 @@ def _adjustment(fake, delta: str, key: str, *, item=None, location=None, reason=
         idempotency_key=key,
         sku="CIN7-SKU-1",
         reason=reason,
+        attempt=attempt,
     )
 
 
@@ -197,7 +200,9 @@ async def test_a_lost_response_is_a_replay_not_a_second_adjustment(fake):
     first = await adapter.adjust_available(_adjustment(fake, "4", "feoh:line-6:receive"))
     # The push landed but the result was never recorded (a crash, a timeout
     # after Cin7 applied it); the sweep reclaims the row and pushes again.
-    again = await _adapter().adjust_available(_adjustment(fake, "4", "feoh:line-6:receive"))
+    again = await _adapter().adjust_available(
+        _adjustment(fake, "4", "feoh:line-6:receive", attempt=2)
+    )
 
     assert again.replayed is True
     assert again.provider_reference == first.provider_reference
@@ -209,7 +214,9 @@ async def test_an_adjustment_voided_in_cin7_is_still_a_replay(fake):
     first = await _adapter().adjust_available(_adjustment(fake, "4", "feoh:line-7:receive"))
     fake._ADJUSTMENTS[0]["Status"] = "VOIDED"
 
-    again = await _adapter().adjust_available(_adjustment(fake, "4", "feoh:line-7:receive"))
+    again = await _adapter().adjust_available(
+        _adjustment(fake, "4", "feoh:line-7:receive", attempt=2)
+    )
     assert again.replayed is True and again.provider_reference == first.provider_reference
     assert len(fake.adjustments()) == 1
 
@@ -228,7 +235,31 @@ async def test_a_draft_with_our_reference_is_refused_for_an_admin(fake):
         }
     )
     with pytest.raises(CommerceRejectedError, match="ST-00099"):
-        await _adapter().adjust_available(_adjustment(fake, "1", "feoh:line-8:receive"))
+        await _adapter().adjust_available(_adjustment(fake, "1", "feoh:line-8:receive", attempt=2))
+    assert len(fake.adjustments()) == 1
+
+
+async def test_a_first_push_skips_the_reference_scan(fake, monkeypatch):
+    # attempt == 1 is the first push of a key ever made (the sync service
+    # commits attempts + 1 before calling), so there is nothing to find and the
+    # full-list scan, the expensive part under Cin7's rate limit, is skipped.
+    adapter = _adapter()
+    paths: list[str] = []
+    original = adapter._call
+
+    async def counting(step, method, path, **kwargs):
+        paths.append(path)
+        return await original(step, method, path, **kwargs)
+
+    monkeypatch.setattr(adapter, "_call", counting)
+    await adapter.adjust_available(_adjustment(fake, "1", "feoh:first:receive"))
+    assert "/stockadjustmentList" not in paths
+    assert len(paths) == 4  # location, product, stock level, the write
+
+    paths.clear()
+    again = await adapter.adjust_available(_adjustment(fake, "1", "feoh:first:receive", attempt=2))
+    assert paths[0] == "/stockadjustmentList"
+    assert again.replayed is True
     assert len(fake.adjustments()) == 1
 
 
@@ -239,7 +270,9 @@ async def test_the_replay_check_pages_the_whole_list(fake, monkeypatch):
         await adapter.adjust_available(_adjustment(fake, "1", f"feoh:page-{n}:receive"))
     # The first adjustment sits on page 1, the last on page 3 — both found.
     for n in (0, 4):
-        result = await adapter.adjust_available(_adjustment(fake, "1", f"feoh:page-{n}:receive"))
+        result = await adapter.adjust_available(
+            _adjustment(fake, "1", f"feoh:page-{n}:receive", attempt=2)
+        )
         assert result.replayed is True
     assert len(fake.adjustments()) == 5
     assert fake.BOOK.available(fake.PRODUCT_1, fake.MAIN) == Decimal("5")
@@ -252,7 +285,7 @@ async def test_the_replay_check_refuses_past_its_page_bound(fake, monkeypatch):
     for n in range(3):  # the third push still fits: two pages of one cover two rows
         await adapter.adjust_available(_adjustment(fake, "1", f"feoh:cap-{n}:receive"))
     with pytest.raises(CommerceRejectedError, match="duplicate check"):
-        await adapter.adjust_available(_adjustment(fake, "1", "feoh:cap-new:receive"))
+        await adapter.adjust_available(_adjustment(fake, "1", "feoh:cap-new:receive", attempt=2))
     assert len(fake.adjustments()) == 3
 
 
@@ -309,7 +342,7 @@ async def test_http_statuses_map_to_typed_errors(fake, status, error, retryable)
 
 
 async def test_a_rate_limit_mid_adjustment_writes_nothing_and_retries(fake):
-    # The replay lookup succeeds, then Cin7's 60-a-minute limit lands.
+    # Cin7's 60-a-minute limit lands on the location lookup, before any write.
     adapter = _adapter()
     original = adapter._location
 
