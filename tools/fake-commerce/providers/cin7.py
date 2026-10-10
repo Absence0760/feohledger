@@ -82,9 +82,7 @@ def reset() -> None:
     _PRODUCTS[:] = [
         _product(PRODUCT_1, "CIN7-SKU-1", "Tennis racket", cost="42.5"),
         _product(PRODUCT_10, "CIN7-SKU-10", "Racket grip", cost="3"),
-        _product(
-            PRODUCT_BATCH, "CIN7-BATCH", "Sunscreen", cost="7", costing="FIFO - Batch"
-        ),
+        _product(PRODUCT_BATCH, "CIN7-BATCH", "Sunscreen", cost="7", costing="FIFO - Batch"),
         _product(PRODUCT_SERVICE, "CIN7-SERVICE", "Restringing", type_="Service"),
     ]
     _ADJUSTMENTS.clear()
@@ -141,9 +139,7 @@ reset()
 
 
 def _error(status: int, message: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status, content=[{"ErrorCode": status, "Exception": message}]
-    )
+    return JSONResponse(status_code=status, content=[{"ErrorCode": status, "Exception": message}])
 
 
 def _gate(request: Request) -> JSONResponse | None:

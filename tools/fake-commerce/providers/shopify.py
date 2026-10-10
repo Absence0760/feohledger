@@ -40,6 +40,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
 from providers._inventory import InventoryBook
 
 router = APIRouter()
