@@ -84,7 +84,12 @@ SECRET_FIELDS: dict[str, frozenset[str]] = {
     # (`commerce_adapters/<key>.py`, decisions §273); `tests/test_commerce_adapters.py`
     # fails when a registered provider's secret is missing here. A new provider
     # adds its names in the same change.
-    "commerce": frozenset(),
+    "commerce": frozenset(
+        {
+            "consumer_key",  # WooCommerce REST API key
+            "consumer_secret",  # WooCommerce REST API secret
+        }
+    ),
 }
 
 # Per block: secrets only a SERVICE flow writes — never the PUT endpoint, never
