@@ -78,6 +78,8 @@ def _make_db():
     generic = MagicMock()
     generic.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
     generic.scalar_one_or_none = MagicMock(return_value=None)
+    # No row for the locked re-read before an approval: decide from the double.
+    generic.one_or_none = MagicMock(return_value=None)
     db.execute = AsyncMock(side_effect=[generic] * 60)
     return db
 

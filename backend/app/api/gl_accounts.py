@@ -22,6 +22,7 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.gl_account import GLAccountCreate, GLAccountUpdate
 from app.services.audit_dispatch import dispatch_audit
+from app.services.provider_credentials import provider_config
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.search import ilike_contains
 
@@ -486,7 +487,7 @@ async def sync_gl_accounts_from_erp(
     in the tenant: a sync run under subsidiary B used to update subsidiary A's
     row rather than create B's, which is the opposite of the rule above.
     """
-    erp_config = (org.settings or {}).get("erp")
+    erp_config = await provider_config(org, "erp", db=control_db)
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configured")
     # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).

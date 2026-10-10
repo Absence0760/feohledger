@@ -193,6 +193,56 @@ class VendorUpdate(BaseModel):
         return self
 
 
+class CardRevocationItem(BaseModel):
+    """One card a vendor-ineligibility write could not close. PII-free: the
+    card id, its last four, the outcome tag and (for a card behind booked
+    money) the payment that must be voided to close it."""
+
+    card_id: str
+    last_four: str | None = None
+    outcome: str
+    payment_id: str | None = None
+
+
+class VendorCardRevocationResponse(BaseModel):
+    """What happened to the vendor's live virtual cards when it stopped being
+    payable (`services/vendor_card_revocation.py`).
+
+    - `cancelled` — closed at the provider and in our DB.
+    - `not_closed` — the provider did not confirm the close; the card is
+      STILL LIVE. Retry with `POST /api/vendors/{id}/cancel-cards`.
+    - `requires_payment_void` — the card is behind a live payment; closing it
+      is the payment void's job (`POST /api/payments/{id}/void`), which also
+      reopens the invoice. Still live until then.
+    """
+
+    vendor_id: str
+    cancelled: int = 0
+    not_closed: list[CardRevocationItem] = Field(default_factory=list)
+    requires_payment_void: list[CardRevocationItem] = Field(default_factory=list)
+
+    @classmethod
+    def from_result(cls, r) -> "VendorCardRevocationResponse":
+        def _item(c) -> CardRevocationItem:
+            return CardRevocationItem(
+                card_id=str(c.card_id),
+                last_four=c.last_four,
+                outcome=c.outcome,
+                payment_id=str(c.payment_id) if c.payment_id else None,
+            )
+
+        return cls(
+            vendor_id=str(r.vendor_id),
+            cancelled=len(r.cancelled),
+            not_closed=[_item(c) for c in r.not_closed],
+            requires_payment_void=[_item(c) for c in r.requires_payment_void],
+        )
+
+    @classmethod
+    def from_optional(cls, r) -> "VendorCardRevocationResponse | None":
+        return cls.from_result(r) if r is not None else None
+
+
 class VendorResponse(BaseModel):
     id: str
     name: str
@@ -222,6 +272,11 @@ class VendorResponse(BaseModel):
     payments_blocked_reason: str | None = None
     risk_score: str | None = None
     risk_level: str = "unknown"
+
+    # Set only by a write that left the vendor ineligible for card spend
+    # (status off `active`, payment block, sanctions match): what happened to
+    # its live virtual cards. `None` on every other read and write.
+    card_revocation: VendorCardRevocationResponse | None = None
 
     model_config = {"from_attributes": True}
 
@@ -408,6 +463,9 @@ class VendorBulkStatusSkip(BaseModel):
 class VendorBulkStatusResponse(BaseModel):
     updated: int
     skipped: list[VendorBulkStatusSkip] = Field(default_factory=list)
+    # One entry per vendor this call made ineligible that held live cards
+    # (a `rejected` target only — `active` never revokes anything).
+    card_revocations: list[VendorCardRevocationResponse] = Field(default_factory=list)
 
 
 class VendorBulkScreenRequest(BaseModel):
@@ -428,6 +486,8 @@ class VendorBulkScreenResponse(BaseModel):
 
     screened: int
     skipped: list[VendorBulkScreenSkip] = Field(default_factory=list)
+    # One entry per vendor a sanctions match blocked that held live cards.
+    card_revocations: list[VendorCardRevocationResponse] = Field(default_factory=list)
 
 
 class VendorBulkExportRequest(BaseModel):

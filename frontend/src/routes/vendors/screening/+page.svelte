@@ -39,6 +39,7 @@
 	import { formatList } from '#lib/utils/list.ts';
 	import { untrack } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BLOCK } from '#lib/types/admin.ts';
 
@@ -384,6 +385,7 @@
 				),
 				'success'
 			);
+			toastCardRevocations([updated.card_revocation]);
 			// Only clear the field the user is actually looking at — a reason
 			// typed for a vendor opened meanwhile is not this action's to wipe.
 			if (selected?.vendor_id === target.vendor_id) blockReason = '';
@@ -405,6 +407,7 @@
 			// A `match` verdict auto-blocks the vendor, so the tally can move.
 			loadCounts();
 			toast(m('vendors.screening.queue.toast.rescreened'), 'success');
+			toastCardRevocations([updated.card_revocation]);
 			// Refresh the history so the new screen appears at the top — for the
 			// vendor that was re-screened, through the sequencer, so it can't
 			// overwrite the timeline of a vendor opened meanwhile.

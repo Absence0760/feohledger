@@ -1844,6 +1844,10 @@ export const messages = {
 		'Hay un secreto de cliente guardado. No se vuelve a mostrar; escriba uno nuevo para reemplazarlo.',
 	'orgSso.secret.notConfigured': 'No hay ningún secreto de cliente guardado.',
 	'orgSso.secret.clear': 'Eliminar el secreto de cliente guardado',
+	'org.secret.keepPlaceholder': 'Déjelo en blanco para conservar el valor guardado',
+	'org.secret.configured': 'Hay un valor guardado. No se vuelve a mostrar; escriba uno nuevo para reemplazarlo.',
+	'org.secret.notConfigured': 'Todavía no hay nada guardado.',
+	'org.secret.clear': 'Eliminar el valor guardado',
 	'orgSso.register.title': 'Registre esta aplicación en su proveedor de identidad',
 	'orgSso.register.hint':
 		'Copie estos valores en la aplicación que cree en su proveedor de identidad.',
@@ -4903,6 +4907,7 @@ export const messages = {
 	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregación de funciones: un usuario que participó en la creación de esta factura no puede también aprobarla.",
+	'refusal.approvalSegregationReceiver': "Segregación de funciones: un usuario que registró una recepción de mercancías facturada en esta factura no puede también aprobarla.",
 	'refusal.approvalLevelReuse': "Ya aprobó un nivel anterior de esta cadena; se requiere un aprobador distinto.",
 	'refusal.approvalNotNamedApprover': "No es un aprobador autorizado para este paso.",
 	'refusal.approvalMaxExceeded': "El importe de la factura {amount} supera el máximo permitido de {limit}.",
@@ -5804,6 +5809,11 @@ export const messages = {
 	'vendors.modal.recomputing': 'Recalculando…',
 	'vendors.modal.rescreenNow': 'Reverificar ahora',
 	'vendors.modal.rescreenedToast': 'Proveedor reverificado',
+	'vendors.cards.notClosed': '{n, plural, one {# tarjeta virtual no se pudo cancelar en el proveedor de tarjetas y sigue activa.} other {# tarjetas virtuales no se pudieron cancelar en el proveedor de tarjetas y siguen activas.}} Reinténtelo con «Cancelar tarjetas activas» en el proveedor.',
+	'vendors.cards.requiresVoid': '{n, plural, one {# tarjeta virtual respalda un pago programado y sigue activa: anule ese pago para cancelarla.} other {# tarjetas virtuales respaldan pagos programados y siguen activas: anule esos pagos para cancelarlas.}}',
+	'vendors.cards.cancelled': '{n, plural, one {# tarjeta virtual activa cancelada} other {# tarjetas virtuales activas canceladas}}',
+	'vendors.modal.cancelLiveCards': 'Cancelar tarjetas activas',
+	'vendors.modal.cancelCardsFailed': 'No se pudieron cancelar las tarjetas del proveedor',
 	'vendors.modal.riskLevel': 'Nivel de riesgo',
 	'vendors.modal.riskRecomputedToast': 'Riesgo recalculado',
 	'vendors.modal.score.colBasis': 'De dónde sale',

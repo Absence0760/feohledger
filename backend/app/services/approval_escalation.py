@@ -37,6 +37,7 @@ from app.services.approval_chain import (
     escalation_ineligible,
     get_chain_progress,
     init_chain_for_invoice,
+    receipt_recorders,
 )
 from app.services.audit_dispatch import dispatch_audit
 from app.services.sweep_health import SWEEP_APPROVAL_ESCALATION, run_sweep_loop
@@ -162,9 +163,10 @@ async def _prepare_for_escalation(
     entered review. It only lands if an escalation actually fires: the caller
     rolls back otherwise, leaving the lazy path exactly as it was.
 
-    The returned set is the payable's implicated actors
-    (``approval_chain.escalation_ineligible``) — segregation of duties refuses
-    them at approval time, so escalation must not make them approvers.
+    The returned set is the payable's implicated actors plus whoever recorded a
+    goods receipt it is billed against (``approval_chain.escalation_ineligible``)
+    — segregation of duties refuses both at approval time, so escalation must
+    not make them approvers.
     """
     from app.services.review import resolve_approval_config
 
@@ -188,7 +190,9 @@ async def _prepare_for_escalation(
         ):
             return None
 
-    return escalation_ineligible(invoice, approval_config)
+    if approval_config.get("require_segregation", True) is False:
+        return set()
+    return escalation_ineligible(invoice, approval_config, await receipt_recorders(db, invoice))
 
 
 @dataclass

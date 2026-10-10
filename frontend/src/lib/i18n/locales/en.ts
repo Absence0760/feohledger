@@ -2002,6 +2002,10 @@ export const en = {
 		'A client secret is stored. It is never shown again; type a new one to replace it.',
 	'orgSso.secret.notConfigured': 'No client secret is stored.',
 	'orgSso.secret.clear': 'Remove the stored client secret',
+	'org.secret.keepPlaceholder': 'Leave blank to keep the stored value',
+	'org.secret.configured': 'A value is stored. It is never shown again; type a new one to replace it.',
+	'org.secret.notConfigured': 'Nothing is stored yet.',
+	'org.secret.clear': 'Remove the stored value',
 	'orgSso.register.title': 'Register this app at your identity provider',
 	'orgSso.register.hint':
 		'Copy these values into the application you create at your identity provider.',
@@ -5105,6 +5109,7 @@ export const en = {
 	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregation of duties: a user involved in creating this invoice cannot also approve it.",
+	'refusal.approvalSegregationReceiver': "Segregation of duties: a user who recorded a goods receipt this invoice is billed against cannot also approve it.",
 	'refusal.approvalLevelReuse': "You already approved an earlier level of this chain; a different approver is required.",
 	'refusal.approvalNotNamedApprover': "You are not an authorized approver for this step.",
 	'refusal.approvalMaxExceeded': "Invoice amount {amount} exceeds the maximum allowed {limit}.",
@@ -6009,6 +6014,11 @@ export const en = {
 	'vendors.modal.recomputing': 'Recomputing…',
 	'vendors.modal.rescreenNow': 'Re-screen now',
 	'vendors.modal.rescreenedToast': 'Vendor re-screened',
+	'vendors.cards.notClosed': '{n, plural, one {# virtual card could not be cancelled at the card provider and is still live.} other {# virtual cards could not be cancelled at the card provider and are still live.}} Retry with “Cancel live cards” on the vendor.',
+	'vendors.cards.requiresVoid': '{n, plural, one {# virtual card backs a scheduled payment and is still live — void that payment to cancel it.} other {# virtual cards back scheduled payments and are still live — void those payments to cancel them.}}',
+	'vendors.cards.cancelled': '{n, plural, one {# live virtual card cancelled} other {# live virtual cards cancelled}}',
+	'vendors.modal.cancelLiveCards': 'Cancel live cards',
+	'vendors.modal.cancelCardsFailed': 'Could not cancel the vendor’s cards',
 	'vendors.modal.riskLevel': 'Risk level',
 	'vendors.modal.riskRecomputedToast': 'Risk recomputed',
 	'vendors.modal.score.colBasis': 'What produced it',

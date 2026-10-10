@@ -495,6 +495,32 @@ async def test_unsupported_erp_adapter_strands_visibly_not_silently(realdb):
     assert f"/api/payments/runs/{run_id}/sync-erp" in exc_row.description
 
 
+async def test_unopenable_erp_credentials_fail_the_leg_not_silently_pay(realdb, monkeypatch):
+    """Sealed ERP credentials that cannot be opened (KMS down, a bad envelope)
+    fail each LEG like an unsupported adapter — exception row, invoice left at
+    `payment_scheduled`. Never "no ERP", which would skip the push and still
+    advance the invoice to `paid`."""
+    from app.services import payment_erp_sync
+    from app.services.credential_crypto import CredentialCryptoError
+
+    await _set_org_erp(realdb, "a", {"type": "netsuite", "integration_method": "direct"})
+    run_id, invoice_id = await _seed_run(realdb, "a")
+
+    async def _broken(org, block, *, db=None):
+        raise CredentialCryptoError("KMS Decrypt failed (EndpointConnectionError).")
+
+    monkeypatch.setattr(payment_erp_sync, "provider_config", _broken)
+    result = await _sync_payments(run_id, realdb.info("a").org_id)
+
+    assert (result.failed, result.synced, result.transitioned) == (1, 0, 0)
+    async with realdb.sessionmaker("a")() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+    assert inv.status == InvoiceStatus.payment_scheduled
+    rows = await _open_erp_reconciliation_rows(realdb, "a", invoice_id)
+    assert len(rows) == 1
+    assert "CredentialCryptoError" in rows[0].description
+
+
 async def test_failed_leg_exception_is_deduped_across_retries(realdb):
     """A second failed pass must not pile up a second open row for the same
     invoice — the queue would fill with duplicates of one strand."""

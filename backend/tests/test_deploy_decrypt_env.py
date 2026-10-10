@@ -52,6 +52,7 @@ REQUIRED = {
     "FEOH_S3_BUCKET": "feohledger-invoice-files",
     "BACKUP_S3_BUCKET": "feohledger-backups",
     "FEOH_HCAPTCHA_SECRET": "dummy-captcha-secret",
+    "FEOH_CREDENTIAL_KMS_KEY_ID": "alias/feohledger-app-production",
 }
 
 SOPS_STUB = """#!/bin/sh

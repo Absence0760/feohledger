@@ -236,6 +236,35 @@ async def send_to_erp_internal(
                 return
 
 
+#: The `invoice.erp_failed` reason when the org's sealed ERP credentials could
+#: not be opened (`services/provider_credentials`). A code, never the error text.
+ERP_CREDENTIALS_UNAVAILABLE = "erp_credentials_unavailable"
+
+
+async def fail_erp_send_without_credentials(
+    db: AsyncSession, invoice: Invoice, *, actor_id: uuid.UUID
+) -> None:
+    """Land an in-flight send at `failed` because its credentials can't be opened.
+
+    The dispatchers resolve the ERP block before any attempt. When the sealed
+    secrets cannot be opened (KMS unreachable, a bad envelope) there is no config
+    to send with — and falling back to `None` would select the MOCK adapter and
+    report the invoice posted. So the invoice goes to `failed`, where it is
+    visible and `POST /{id}/retry-erp` can re-drive it once the store is back.
+    """
+    if invoice.status != InvoiceStatus.sending_to_erp:
+        return
+    await transition_invoice(
+        db,
+        invoice,
+        InvoiceStatus.failed,
+        actor_id=actor_id,
+        action_name="invoice.erp_failed",
+        details={"error": ERP_CREDENTIALS_UNAVAILABLE, "retries": 0},
+    )
+    await db.commit()
+
+
 async def _call_erp(db: AsyncSession, invoice: Invoice, erp_config: dict | None = None) -> str:
     """Send invoice to the configured ERP via the adapter pattern.
 

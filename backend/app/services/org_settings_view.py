@@ -27,15 +27,25 @@ value when the field is left blank. Leaving either readable here would make "no
 endpoint ever returns it" false and give the settings page a silent, unaudited
 second way to see it.
 
-Admins otherwise still get the settings **verbatim** — the `/organization` page
-reads saved credentials back into its form fields, so redacting for them would
-blank a live config on the next save. Narrowing what an admin sees needs a
-"leave blank to keep" contract on the write path; that is a separate change.
+**Provider credentials are not in the JSONB at all any more.** The secrets of
+the `erp`, `payments` and `cards` blocks live sealed in `provider_credentials`
+(`services/provider_credentials`), written only by the audited
+`PUT /api/organization/credentials/{block}` and reported by
+`GET /api/organization/credentials` as names-only "is set" flags. The settings
+page uses "leave blank to keep" for them, so nothing needs them back. Every
+secret-named key in those blocks is still stripped here for every role, admin
+included, as a second line: a value that reached the JSONB by some other route
+(a hand edit, a pre-0110 backup restored) must not reappear on this response.
+
+Admins otherwise still get the settings verbatim. `extraction.api_key` is the
+remaining credential an admin reads back; it is tracked separately.
 
 Pure: no DB, no request, no I/O.
 """
 
 from __future__ import annotations
+
+from app.services.provider_credentials import strip_all_blocks
 
 # Top-level settings blocks a NON-ADMIN may read.
 #
@@ -111,7 +121,7 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """
     raw = settings or {}
     if is_admin:
-        return _without_always_redacted(raw)
+        return _without_always_redacted(strip_all_blocks(raw))
 
     projected: dict = {}
     for block, allowed_keys in NON_ADMIN_SETTINGS.items():
@@ -128,4 +138,4 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
         subset = {k: v for k, v in value.items() if k in allowed_keys}
         if subset:
             projected[block] = subset
-    return _without_always_redacted(projected)
+    return _without_always_redacted(strip_all_blocks(projected))

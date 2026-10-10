@@ -208,6 +208,9 @@ CASES = [
     # It moves no money (that already happened) but it is the exit that
     # transitions invoices to `paid`, so it sits with the execute duty.
     ("/api/payments/runs/{run_id}/sync-erp", "POST", _EXECUTE),
+    # `cards/generate` mints a funded virtual card for a payable invoice — the
+    # card rail's equivalent of executing a run, so the same gate.
+    ("/api/cards/generate", "POST", _EXECUTE),
     # --- payment.void: giving up on / reversing money. Deliberately the OTHER
     # half of the split — by default `cfo` holds both but `ap_manager` holds
     # only `payment.execute`, so an org that splits them keeps reversal away
@@ -286,6 +289,11 @@ CASES = [
     ("/api/enrichment/vendors/consolidation/merge", "POST", _VENDOR_MANAGE),
     # --- vendor.block: sticky payment block/unblock. ---
     ("/api/vendors/{vendor_id}/block", "POST", _VENDOR_BLOCK),
+    # `cancel-cards` retries the card revocation a reject / deactivate (vendor
+    # manage) or block (vendor block) already ran, so either duty may finish it
+    # (decisions §264). It never reaches a card behind a live payment — that
+    # stays with `payment.void`.
+    ("/api/vendors/{vendor_id}/cancel-cards", "POST", _VENDOR_MANAGE | _VENDOR_BLOCK),
     ("/api/vendors/{vendor_id}/unblock", "POST", _VENDOR_BLOCK),
     # --- vendor.bank_change.approve: the BEC / bank-redirect dual-control gate.
     # Its sibling `POST /change-requests/{id}/reject` is deliberately NOT here —

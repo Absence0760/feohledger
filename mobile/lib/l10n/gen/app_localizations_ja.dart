@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -338,6 +337,26 @@ class AppLocalizationsJa extends AppLocalizations {
   String get vendorRejected => '取引先を却下しました';
 
   @override
+  String vendorCardsNotClosed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count枚のバーチャルカードをカード発行会社で取り消せず、まだ有効です。Webアプリから再試行してください。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorCardsRequireVoid(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count枚のバーチャルカードは予定済みの支払に紐づいており、まだ有効です。カードを取り消すにはその支払を無効にしてください。',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get vendorActionFailed => '操作に失敗しました';
 
   @override
@@ -609,6 +628,10 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get codedRefusalApprovalSegregation =>
       '職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。';
+
+  @override
+  String get codedRefusalApprovalSegregationReceiver =>
+      '職務分掌：この請求書の対象となる入荷を記録したユーザーは、承認することもできません。';
 
   @override
   String get codedRefusalInvoiceStaleApproval =>

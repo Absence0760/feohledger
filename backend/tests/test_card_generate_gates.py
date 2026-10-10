@@ -17,10 +17,12 @@ These tests pin the three closed gaps:
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
@@ -467,3 +469,360 @@ async def test_the_card_is_minted_net_of_credits_and_takes_no_discount(realdb):
         ).scalar_one()
     # 250.00 - 50.00 credit; the accepted 2 % offer is left to a booked payment.
     assert card.amount_limit == Decimal("200.00")
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: the checks and the mint are serialised on the invoice row
+# ---------------------------------------------------------------------------
+#
+# The checks above (payable status, live card, live payment, blocking
+# exception, vendor status) used to be read unlocked, then the provider was
+# called, then the card inserted. Two concurrent requests both passed them. The
+# loser minted a real card at the provider (under a fresh idempotency key once
+# the winner's row was visible to `reissue_seq`), and the unique index then
+# refused to record it. `card_issuance.lock_invoices_for_mint` locks vendors and
+# invoices before any check (docs/decisions.md §265).
+
+
+def _count_card_mints(monkeypatch, on_call=None) -> list:
+    from app.services.card_adapters.mock_adapter import MockCardAdapter
+
+    calls: list = []
+    original = MockCardAdapter.create_card
+
+    async def counting(self, payload):
+        calls.append(payload.invoice_id)
+        if on_call is not None:
+            await on_call(len(calls))
+        return await original(self, payload)
+
+    monkeypatch.setattr(MockCardAdapter, "create_card", counting)
+    return calls
+
+
+async def _a_backend_waits_on_a_lock(mk, *, timeout_s: float = 10.0) -> bool:
+    """Poll `pg_stat_activity` until some backend on this tenant DB is blocked
+    on a row lock. This waits on the real signal (the second request has
+    reached the lock and is queued behind it), not on a sleep."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return True
+        await asyncio.sleep(0.02)
+    return False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_generates_mint_one_card(realdb, monkeypatch):
+    """The second request waits on the invoice lock while the first is at the
+    provider, then sees the first one's card and skips it. The provider is
+    called once, one card exists, and the loser answers a clean `total: 0`."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="RACE"
+    )
+    payload = {"invoice_ids": [str(invoice_id)]}
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        second: dict = {}
+
+        async def start_second_and_wait_for_it_to_queue(n: int) -> None:
+            if n != 1:
+                return
+            second["task"] = asyncio.create_task(c.post("/api/cards/generate", json=payload))
+            second["queued"] = await _a_backend_waits_on_a_lock(mk)
+
+        calls = _count_card_mints(monkeypatch, start_second_and_wait_for_it_to_queue)
+        first = await c.post("/api/cards/generate", json=payload)
+        loser = await second["task"]
+
+    assert first.status_code == 201, first.text
+    assert first.json()["total"] == 1
+    assert second["queued"], "the second request must queue on the lock, not race past it"
+    assert loser.status_code == 201, loser.text
+    assert loser.json()["total"] == 0
+    assert calls == [str(invoice_id)], "the provider must be asked for exactly one card"
+    assert len(await _cards_for(mk, invoice_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_vendor_status_change_waits_for_the_mint(realdb, monkeypatch):
+    """The vendor row is held `FOR SHARE` until the card commits, so a
+    deactivation (or a block) cannot land between the vendor check and the
+    card existing. Whatever it does about the vendor's live cards sees this
+    one."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="VLOCK"
+    )
+
+    seen: list[str] = []
+
+    async def try_to_deactivate(_n: int) -> None:
+        async with mk() as s:
+            try:
+                await s.execute(
+                    text("SELECT id FROM vendors WHERE id = :id FOR NO KEY UPDATE NOWAIT"),
+                    {"id": vendor_id},
+                )
+                await s.execute(
+                    text("UPDATE vendors SET status = 'inactive' WHERE id = :id"),
+                    {"id": vendor_id},
+                )
+                await s.commit()
+                seen.append("committed")
+            except DBAPIError as exc:
+                await s.rollback()
+                assert "could not obtain lock" in str(exc), exc
+                seen.append("lock_held")
+
+    _count_card_mints(monkeypatch, try_to_deactivate)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["total"] == 1
+    assert seen == ["lock_held"]
+
+
+class _HeldInvoiceLock:
+    """Hold `FOR NO KEY UPDATE` on one invoice from its own transaction until
+    exit. That is the lock a payment dispatch holds across its processor call
+    (`api/payments._lock_payment_invoice`), and a card INSERT's `FOR KEY SHARE`
+    does not conflict with it. So without the mint's own lock, nothing here
+    waits."""
+
+    def __init__(self, mk, invoice_id):
+        self._mk = mk
+        self._invoice_id = invoice_id
+
+    async def __aenter__(self):
+        self._session = self._mk()
+        await self._session.execute(
+            text("SELECT id FROM invoices WHERE id = :id FOR NO KEY UPDATE"),
+            {"id": self._invoice_id},
+        )
+        return self
+
+    async def __aexit__(self, *exc):
+        await self._session.rollback()
+        await self._session.close()
+
+
+@pytest.mark.asyncio
+async def test_a_locked_invoice_is_refused_with_409_before_the_provider(realdb, monkeypatch):
+    """Past the bound the request refuses by name without calling any
+    provider. The refusal is retry-safe: once the holder is gone, the same
+    request mints."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "payment_invoice_lock_timeout_ms", 200)
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="HELD"
+    )
+    calls = _count_card_mints(monkeypatch)
+    payload = {"invoice_ids": [str(invoice_id)]}
+
+    async with _HeldInvoiceLock(mk, invoice_id):
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.post("/api/cards/generate", json=payload)
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"].startswith("invoice_locked")
+    assert calls == []
+    assert await _cards_for(mk, invoice_id) == []
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        retry = await c.post("/api/cards/generate", json=payload)
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["total"] == 1
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_locked_invoice_does_not_cost_its_siblings_their_cards(realdb, monkeypatch):
+    """Each invoice is locked, minted and committed on its own, so one held
+    invoice is skipped (retry-safe: no provider call for it) while the rest of
+    the batch is minted and returned."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "payment_invoice_lock_timeout_ms", 200)
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    held = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="HELD-A"
+    )
+    free = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="FREE-B"
+    )
+    calls = _count_card_mints(monkeypatch)
+
+    async with _HeldInvoiceLock(mk, held):
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(held), str(free)]})
+    assert resp.status_code == 201, resp.text
+    assert [i["invoice_id"] for i in resp.json()["items"]] == [str(free)]
+    assert calls == [str(free)]
+    assert await _cards_for(mk, held) == []
+
+
+async def _seed_payment(mk, info, invoice_id, *, method: str, status: str, session=None):
+    """A payment on ``invoice_id`` (with its run). Written in ``session`` when
+    given (so a test can commit it from a transaction that holds a lock),
+    else in its own committed one."""
+    from app.models.payment import Payment, PaymentRun
+
+    async def _write(s):
+        run = PaymentRun(
+            organization_id=info.org_id,
+            status="submitted" if status != "pending" else "draft",
+            total_amount=Decimal("250.00"),
+            initiated_by=info.users["ap_manager"],
+            requires_cfo_approval=False,
+        )
+        s.add(run)
+        await s.flush()
+        s.add(
+            Payment(
+                invoice_id=invoice_id,
+                payment_run_id=run.id,
+                amount=Decimal("250.00"),
+                method=method,
+                status=status,
+            )
+        )
+
+    if session is not None:
+        await _write(session)
+        return
+    async with mk() as s:
+        await _write(s)
+        await s.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("invoice_status", "method", "payment_status"),
+    [
+        # An ACH that settled, with the invoice not yet `paid`.
+        (InvoiceStatus.payment_scheduled, "ach", "completed"),
+        # A run's card payment not yet executed: the run mints at execute.
+        (InvoiceStatus.approved, "virtual_card", "pending"),
+    ],
+)
+async def test_an_invoice_already_being_paid_is_not_minted_a_card(
+    realdb, monkeypatch, invoice_status, method, payment_status
+):
+    """`payment_scheduled` is payable, so an invoice whose ACH had already
+    settled (but was not yet `paid`) passed the status filter and got a card on
+    top of the wire. A live payment is a claim on the invoice, as a live card
+    is, on every rail."""
+    info = realdb.info(TENANT)
+    org_id = info.org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=invoice_status, vendor_id=vendor_id, number=f"PAID-{method}"
+    )
+    await _seed_payment(mk, info, invoice_id, method=method, status=payment_status)
+    calls = _count_card_mints(monkeypatch)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["total"] == 0
+    assert calls == []
+    assert await _cards_for(mk, invoice_id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_generate_that_waits_out_a_dispatch_sees_its_payment(realdb, monkeypatch):
+    """The two halves together. A dispatch holds the invoice while it pays it;
+    the generate queues on that lock; the dispatch commits its payment and
+    releases. The generate must then see the payment and mint nothing, rather
+    than carding an invoice that was paid while it waited."""
+    info = realdb.info(TENANT)
+    org_id = info.org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="WAITED"
+    )
+    calls = _count_card_mints(monkeypatch)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        holder = _HeldInvoiceLock(mk, invoice_id)
+        await holder.__aenter__()
+        try:
+            task = asyncio.create_task(
+                c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+            )
+            assert await _a_backend_waits_on_a_lock(mk), "generate must queue on the lock"
+            await _seed_payment(
+                mk, info, invoice_id, method="ach", status="submitted", session=holder._session
+            )
+            await holder._session.commit()
+        finally:
+            await holder.__aexit__(None, None, None)
+        resp = await task
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["total"] == 0
+    assert calls == []
+    assert await _cards_for(mk, invoice_id) == []
+
+
+@pytest.mark.asyncio
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
+async def test_an_invoice_outside_the_selected_entity_is_not_minted_a_card(realdb):
+    """Like every other money route, the mint is scoped to `X-Entity-ID`. It
+    selected by id alone, so a caller working in one subsidiary could put a
+    spendable card on another's invoice."""
+    from tests.entity_scope_probe import two_entities
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="SCOPED"
+    )
+    payload = {"invoice_ids": [str(invoice_id)]}
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        default_id, other_id = await two_entities(c, slug="cardgen-scope")
+        outside = await c.post(
+            "/api/cards/generate", json=payload, headers={"X-Entity-ID": other_id}
+        )
+        assert outside.status_code == 201, outside.text
+        assert outside.json()["total"] == 0
+        assert await _cards_for(mk, invoice_id) == []
+
+        inside = await c.post(
+            "/api/cards/generate", json=payload, headers={"X-Entity-ID": default_id}
+        )
+    assert inside.status_code == 201, inside.text
+    assert inside.json()["total"] == 1

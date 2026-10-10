@@ -96,7 +96,7 @@ Card Auto-Expires                (single-use, no further charges possible)
 | `charged` | Vendor charged the card, payment processing |
 | `completed` | Charge settled, payment confirmed |
 | `expired` | Card expired without being charged (auto-expire after N days) |
-| `cancelled` | Card manually cancelled before use |
+| `cancelled` | Card cancelled before use — manually, by a payment void, or because its vendor stopped being payable |
 | `declined` | Charge attempted but declined (over limit, wrong merchant, etc.) |
 
 ## Data Model
@@ -671,7 +671,13 @@ statuses.
     wire. Every path that books a payment now refuses an invoice holding a live
     card unless the rail is `virtual_card` (which converges on it) — see
     `payments.md` § A live card is a claim on its invoice. Cancelling the card
-    releases the claim.
+    releases the claim. The direct endpoint likewise refuses an invoice that
+    already holds a live payment.
+  - **Serialised and entity-scoped**: the direct endpoint row-locks each
+    invoice and its vendor before any of these checks and commits per invoice.
+    Concurrent requests, or a request racing a payment dispatch, therefore
+    cannot both pass the checks. It only reaches invoices in the selected
+    entity. See *The direct mint locks before it checks* below.
   - **Audit trail** — a successful mint writes a `card.generated` audit row
     (invoice id, last_four, string-Decimal `amount_limit`) via
     `dispatch_audit`, matching every other card-lifecycle event
@@ -690,7 +696,9 @@ float.
 |---|---|---|
 | `card.details_viewed` | PAN reveal (`GET /{id}/details`) | `last_four` |
 | `card.revealed_via_token` | vendor-facing single-use PAN reveal (`GET /portal/cards/{token}`) — written when the token is **claimed**, committed before the provider is called, `actor_id=None` (no internal user) | `last_four` |
-| `card.cancelled` | manual cancel (`POST /{id}/cancel`) | `last_four`, `from`, `to` |
+| `card.cancelled` | manual cancel (`POST /{id}/cancel`); payment void (`via: payment_void`); vendor made un-payable (`via: vendor_ineligible`) | `last_four`, `from`, `to`; void adds `payment_id`; vendor adds `vendor_id`, `trigger` |
+| `card.cancel_failed` | vendor made un-payable, but the provider did not confirm the close — the card is **still live** | `last_four`, `vendor_id`, `trigger`, `outcome`, `status` |
+| `card.cancel_deferred_to_void` | vendor made un-payable, card is behind a live payment — left for the payment void | `last_four`, `vendor_id`, `trigger`, `payment_id` |
 | `card.charged` | authorization webhook applies a charge | `last_four`, `from`, `to`, `amount_charged` (string Decimal) |
 | `card.settled` | settlement webhook completes + accrues the rebate | `last_four`, `from`, `to`, `rebate_amount`, `rebate_rate`, `rebate_base` (string Decimals), `rebate_base_source` (`settled` \| `charged` \| `unknown` — which figure the rebate priced off, see § Rebate base), `rebate_created` (bool — `false` if the one-per-card unique index skipped a duplicate) |
 | `card_rebate.confirmed` | `POST /rebates/{id}/confirm` (`pending` → `confirmed`) | `amount` (string Decimal), `from`, `to` |
@@ -794,6 +802,78 @@ transient, so a later `flush`/`commit` cannot re-attempt the failed insert.
 savepoints are deliberately identical in shape.) Regression coverage:
 `tests/test_payment_card_duplicate_recovery.py` (both entry points, against a
 real Postgres so the partial index actually fires).
+
+#### The direct mint locks before it checks
+
+`POST /api/cards/generate` checks several things before it calls the provider:
+payable status, live card, live payment, blocking exception, applied credits,
+vendor status and compliance. Those reads used to be unlocked, and the unique
+index above only refuses **our row**, after the provider has already issued a
+card. Two concurrent requests both passed the checks. The first committed. The
+second then read `reissue_seq = 1`, because the winner's row was now visible, so
+it sent a **fresh** idempotency key. The provider issued a second real card, and
+the index refused to record it: a spendable card that nothing in FeohLedger
+governs. A payment dispatch was no barrier either. Dispatch holds the invoice
+`FOR NO KEY UPDATE`, and a card INSERT takes only `FOR KEY SHARE`, which that
+lock does not block.
+
+The endpoint now handles **one invoice at a time**, in id order: lock, check,
+mint, commit. `card_issuance.lock_invoices_for_mint` takes the locks, and the
+per-invoice commit releases them.
+
+- **The vendor `FOR SHARE`, then the invoice `FOR NO KEY UPDATE`.** The vendor
+  comes first because that is the order `vendor_merge` uses, so the two cannot
+  deadlock. `FOR SHARE` lets two mints for the same vendor run
+  side by side, but a status change (deactivate, reject, block) waits until the
+  card is committed. Whatever that change does about the vendor's live cards
+  then sees this card. `FOR NO KEY UPDATE` is the lock dispatch takes, so a mint
+  and a dispatch on the same invoice run one after the other.
+- **Every check is a fresh statement after the lock.** Under READ COMMITTED, a
+  request that waited sees what the winner committed. It skips the invoice,
+  because it now has a live card or a live payment, and the provider is never
+  called. The loser's response is an ordinary `201` with `total: 0`.
+- **A live payment is now refused too.** `payment_scheduled` counts as payable,
+  so an invoice whose ACH had settled but was not yet `paid` used to get a card
+  on top of the wire. Without this check, waiting out a dispatch's lock would
+  only have made the mint land after the payment it should have deferred to.
+- **The wait is bounded** by `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS`, in a
+  savepoint (`utils/db_locks`, `docs/decisions.md` §233). The lock is taken
+  before any provider call, so a timeout means nothing was minted for that
+  invoice, and it is skipped. If the whole request minted nothing and at least
+  one invoice timed out, the answer is `409 invoice_locked`. Either way a retry
+  is safe.
+- **The provider call happens while one invoice's locks are held**, as it does
+  in dispatch. Committing per invoice keeps that to one provider call rather
+  than the whole batch. It also makes each card durable as soon as the provider
+  has issued it: before, a failure late in a batch rolled back cards that
+  already existed at the provider.
+- **What is not serialised:** an insert that points at the invoice, such as a
+  newly raised payment-blocking exception, takes only `FOR KEY SHARE`. Dispatch
+  has the same exposure. The main source of a fraud flag, a bank-change
+  approval, does update the vendor row, so the vendor lock holds it off.
+- **Scoped to the selected entity.** The locked SELECT runs through
+  `tenant.apply_entity_scope`, so an invoice outside `X-Entity-ID` is skipped.
+  Before, it selected by id alone, and a caller working in one subsidiary could
+  put a card on another's invoice.
+
+Pinned by the concurrency cases in `tests/test_card_generate_gates.py`, which
+run real concurrent sessions against Postgres: two generates, a generate
+against a held invoice (alone and in a batch), a generate that waits out a
+dispatch committing a payment, and a vendor status change attempted
+mid-mint.
+
+### A vendor that stops being payable takes its live cards with it
+
+Rejecting, deactivating, blocking, sanctions-matching or merging a vendor onto
+an un-payable canonical cancels the vendor's live, **unbooked** cards in the
+same transaction (`services/vendor_card_revocation.py`). Same provider-first
+leg as the void (`card_issuance.cancel_card_at_provider`), same outcome
+vocabulary. A card behind a live payment is left for the payment void and
+reported `requires_payment_void`; a card the provider did not confirm closed is
+reported `not_closed` and stays live until `POST /api/vendors/{id}/cancel-cards`
+succeeds. Full table of doors and outcomes:
+[vendor-management.md](vendor-management.md) § Leaving `active` cancels the
+vendor's live cards.
 
 ### Cancel (`POST /{id}/cancel`) — provider-first + idempotent
 
@@ -901,8 +981,11 @@ money already moved under a different, voided payment.
 
 Provider charge/settlement callbacks are **unauthenticated** (they come
 from Lithic / Nium, not a logged-in user) and verified by HMAC over the
-raw body against the owning tenant's
-`Organization.settings.cards.webhook_signing_secret`. The handler:
+raw body against the owning tenant's `cards.webhook_signing_secret` — sealed
+in `provider_credentials` with the BYOK `api_key` / `client_secret`, set through
+`PUT /api/organization/credentials/cards` and read through
+`provider_credentials.provider_config` (a secret that cannot be opened is a
+bodyless 503, our failure rather than a verdict on the event). The handler:
 
 0. bounds the body against `card_webhook_max_bytes` (default 4 MiB) BEFORE
    buffering it — a declared `Content-Length` over the cap rejects without

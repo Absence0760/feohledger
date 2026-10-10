@@ -79,14 +79,11 @@ the adapter.
     lock). Two workers refreshing at once must not each persist a different
     token.
   - Cache access tokens (60 minutes) per realm in Redis.
-  - Add `("erp", "refresh_token")` and `("erp", "access_token")` to
-    `org_settings_view.ALWAYS_REDACTED`. Admins never read them back; the only
-    writers are the callback and the refresher.
-  - Better: hold them outside `Organization.settings` entirely, in a
-    tenant-table row encrypted with the app KMS key. ERP credentials are
-    plaintext JSONB today, encrypted only at the RDS storage layer (see the
-    follow-up). This flow is the natural moment to fix it for at least the
-    new credential.
+  - Add `refresh_token` and `access_token` to the `erp` block's secret-field
+    list in `services/provider_credentials.py`, so they are sealed under the
+    app KMS key in `provider_credentials` like every other ERP secret
+    (`docs/decisions.md` §266) and never read back. The only writers are the
+    callback and the refresher, both through that service.
 - **Expiry visibility.** Record `x_refresh_token_expires_in`. Show
   "reconnect required" on the org ERP card and send an admin notification
   30 days before expiry. A dead token must surface as a notification, never

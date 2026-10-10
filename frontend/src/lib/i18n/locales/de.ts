@@ -1846,6 +1846,10 @@ export const messages = {
 		'Ein Client-Secret ist gespeichert. Es wird nie wieder angezeigt; geben Sie ein neues ein, um es zu ersetzen.',
 	'orgSso.secret.notConfigured': 'Es ist kein Client-Secret gespeichert.',
 	'orgSso.secret.clear': 'Gespeichertes Client-Secret entfernen',
+	'org.secret.keepPlaceholder': 'Leer lassen, um den gespeicherten Wert zu behalten',
+	'org.secret.configured': 'Ein Wert ist gespeichert. Er wird nie wieder angezeigt; geben Sie einen neuen ein, um ihn zu ersetzen.',
+	'org.secret.notConfigured': 'Es ist noch nichts gespeichert.',
+	'org.secret.clear': 'Gespeicherten Wert entfernen',
 	'orgSso.register.title': 'Diese App bei Ihrem Identitätsanbieter registrieren',
 	'orgSso.register.hint':
 		'Übernehmen Sie diese Werte in die Anwendung, die Sie bei Ihrem Identitätsanbieter anlegen.',
@@ -4876,6 +4880,7 @@ export const messages = {
 	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.",
+	'refusal.approvalSegregationReceiver': "Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
 	'refusal.approvalLevelReuse': "Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.",
 	'refusal.approvalNotNamedApprover': "Sie sind für diesen Schritt nicht als Freigebende(r) berechtigt.",
 	'refusal.approvalMaxExceeded': "Der Rechnungsbetrag {amount} übersteigt den zulässigen Höchstbetrag {limit}.",
@@ -5777,6 +5782,11 @@ export const messages = {
 	'vendors.modal.recomputing': 'Wird neu berechnet…',
 	'vendors.modal.rescreenNow': 'Jetzt erneut prüfen',
 	'vendors.modal.rescreenedToast': 'Lieferant erneut geprüft',
+	'vendors.cards.notClosed': '{n, plural, one {# virtuelle Karte konnte beim Kartenanbieter nicht storniert werden und ist weiterhin aktiv.} other {# virtuelle Karten konnten beim Kartenanbieter nicht storniert werden und sind weiterhin aktiv.}} Erneut versuchen mit „Aktive Karten stornieren“ beim Lieferanten.',
+	'vendors.cards.requiresVoid': '{n, plural, one {# virtuelle Karte deckt eine geplante Zahlung und ist weiterhin aktiv – stornieren Sie diese Zahlung, um die Karte zu sperren.} other {# virtuelle Karten decken geplante Zahlungen und sind weiterhin aktiv – stornieren Sie diese Zahlungen, um die Karten zu sperren.}}',
+	'vendors.cards.cancelled': '{n, plural, one {# aktive virtuelle Karte storniert} other {# aktive virtuelle Karten storniert}}',
+	'vendors.modal.cancelLiveCards': 'Aktive Karten stornieren',
+	'vendors.modal.cancelCardsFailed': 'Die Karten des Lieferanten konnten nicht storniert werden',
 	'vendors.modal.riskLevel': 'Risikostufe',
 	'vendors.modal.riskRecomputedToast': 'Risiko neu berechnet',
 	'vendors.modal.score.colBasis': 'Grundlage',

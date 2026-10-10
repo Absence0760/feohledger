@@ -44,6 +44,9 @@ from fastapi import HTTPException
 
 from app.api.portal import reveal_card
 
+# Fake orgs carry their provider secrets inline; see the fixture.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 
 def _card(**overrides) -> SimpleNamespace:
     base = dict(

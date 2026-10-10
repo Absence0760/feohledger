@@ -104,6 +104,8 @@
   "vendorRejectHint": "Als ungültig / Dublette markieren",
   "vendorVerified": "Lieferant bestätigt",
   "vendorRejected": "Lieferant abgelehnt",
+  "vendorCardsNotClosed": "{count, plural, one {{count} virtuelle Karte konnte beim Kartenanbieter nicht storniert werden und ist weiterhin aktiv. Erneut versuchen in der Web-App.} other {{count} virtuelle Karten konnten beim Kartenanbieter nicht storniert werden und sind weiterhin aktiv. Erneut versuchen in der Web-App.}}",
+  "vendorCardsRequireVoid": "{count, plural, one {{count} virtuelle Karte deckt eine geplante Zahlung und ist weiterhin aktiv – stornieren Sie diese Zahlung, um die Karte zu sperren.} other {{count} virtuelle Karten decken geplante Zahlungen und sind weiterhin aktiv – stornieren Sie diese Zahlungen, um die Karten zu sperren.}}",
   "vendorActionFailed": "Aktion fehlgeschlagen",
   "vendorSyncFailed": "ERP-Synchronisierung fehlgeschlagen: {error}",
 
@@ -184,6 +186,7 @@
   "glChartRefusalPickActive": "Wählen Sie ein aktives Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.",
   "glChartRefusalOnLines": "Positionen: {reasons}",
   "codedRefusalApprovalSegregation": "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.",
+  "codedRefusalApprovalSegregationReceiver": "Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
   "codedRefusalInvoiceStaleApproval": "Diese Rechnung wurde geändert, nachdem Sie sie geladen haben. Laden Sie sie neu und prüfen Sie die aktuelle Fassung, bevor Sie sie genehmigen.",
   "codedRefusalApprovalLevelReuse": "Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.",
   "codedRefusalApprovalNotNamedApprover": "Sie sind für diesen Schritt nicht als Freigebende(r) berechtigt.",

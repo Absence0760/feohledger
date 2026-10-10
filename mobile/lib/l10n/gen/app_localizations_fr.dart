@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -351,6 +350,32 @@ class AppLocalizationsFr extends AppLocalizations {
   String get vendorRejected => 'Fournisseur rejeté';
 
   @override
+  String vendorCardsNotClosed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count cartes virtuelles n’ont pas pu être annulées auprès du fournisseur de cartes et restent actives. Réessayez depuis l’application web.',
+      one:
+          '$count carte virtuelle n’a pas pu être annulée auprès du fournisseur de cartes et reste active. Réessayez depuis l’application web.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorCardsRequireVoid(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count cartes virtuelles couvrent des paiements programmés et restent actives — annulez ces paiements pour les clôturer.',
+      one:
+          '$count carte virtuelle couvre un paiement programmé et reste active — annulez ce paiement pour la clôturer.',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get vendorActionFailed => 'Échec de l\'action';
 
   @override
@@ -649,6 +674,10 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get codedRefusalApprovalSegregation =>
       'Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas aussi l\'approuver.';
+
+  @override
+  String get codedRefusalApprovalSegregationReceiver =>
+      'Séparation des tâches : un utilisateur ayant enregistré une réception de marchandises facturée sur cette facture ne peut pas aussi l\'approuver.';
 
   @override
   String get codedRefusalInvoiceStaleApproval =>

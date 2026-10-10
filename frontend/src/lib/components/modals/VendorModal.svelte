@@ -16,6 +16,7 @@
 		screenVendor,
 		getScreeningHistory,
 		blockVendor,
+		cancelVendorCards,
 		unblockVendor,
 		recomputeVendorRisk,
 		enrichVendor,
@@ -30,6 +31,7 @@
 		type EnrichmentFieldSuggestion
 	} from '#lib/types/vendor.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { getVendorScore, type VendorScoreResponse } from '#lib/api/enrichment.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -163,6 +165,7 @@
 			onupdated(updated);
 			history = await getScreeningHistory(vendor.id);
 			toast(m('vendors.modal.rescreenedToast'), 'success');
+			toastCardRevocations([updated.card_revocation]);
 		} catch (err) {
 			toast(errMsg(err, m('vendors.modal.screeningFailed')), 'error');
 		} finally {
@@ -191,8 +194,29 @@
 				: await blockVendor(vendor.id, 'Blocked from vendor screening review');
 			onupdated(updated);
 			toast(updated.payments_blocked ? m('vendors.modal.paymentsBlockedToast') : m('vendors.modal.paymentsUnblockedToast'), 'success');
+			toastCardRevocations([updated.card_revocation]);
 		} catch (err) {
 			toast(errMsg(err, m('vendors.modal.updateFailed')), 'error');
+		} finally {
+			busy = '';
+		}
+	}
+
+	// A vendor that can no longer be paid should hold no spendable card. The
+	// status write cancels them itself; this is the retry for a card the
+	// provider did not confirm closed (`POST /api/vendors/{id}/cancel-cards`).
+	const canCancelCards = $derived(
+		(canReScreen || canBlock) && (vendor.status !== 'active' || vendor.payments_blocked)
+	);
+
+	async function cancelLiveCards() {
+		busy = 'cards';
+		try {
+			const rev = await cancelVendorCards(vendor.id);
+			toast(m('vendors.cards.cancelled', { n: rev.cancelled }), 'success');
+			toastCardRevocations([rev]);
+		} catch (err) {
+			toast(errMsg(err, m('vendors.modal.cancelCardsFailed')), 'error');
 		} finally {
 			busy = '';
 		}
@@ -331,6 +355,11 @@
 					{:else}
 						{vendor.payments_blocked ? m('vendors.modal.unblockPayments') : m('vendors.modal.blockPayments')}
 					{/if}
+				</RowAction>
+			{/if}
+			{#if canCancelCards}
+				<RowAction variant="danger" onclick={cancelLiveCards} disabled={busy !== ''}>
+					{busy === 'cards' ? m('vendors.modal.working') : m('vendors.modal.cancelLiveCards')}
 				</RowAction>
 			{/if}
 			{#if !canReScreen && !canRecomputeRisk && !canBlock}

@@ -181,7 +181,7 @@ as `False`.
 | Flag | Effect |
 |------|--------|
 | `skip_vendor_match` | Skips `vendor_matching.match_and_link_vendor` and pins the invoice's existing `vendor_id` **and** `vendor_name` — `vendor_name` too, because that is what `PATCH /api/invoices/{id}` re-resolves a stale link from. Everything else the document says (number, dates, money, line items) is still re-read. |
-| `suppress_auto_approve` | Forces the pass to land at `ready_for_review` even when the confidence / small-amount gates would fire. |
+| `suppress_auto_approve` | Forces the pass to land at `ready_for_review` even when the confidence / small-amount gates would fire. `run_extraction` also suppresses on its own, from the row, when someone other than the reader supplied or shaped the document — see § Auto-Approve on Confidence. |
 
 Both exist for RE-extraction of an invoice that has already been triaged once.
 Today the only caller is the supplier-portal resubmit
@@ -300,6 +300,36 @@ Also checks `auto_approve_below` from the approval step config — invoices belo
 **Money-control gate.** A triggered auto-approve is REVOKED — the invoice falls back to `ready_for_review` for a human — when it would trip the same approval-step thresholds a human approval enforces (`services/review._enforce_approval_thresholds`): `max_invoice_amount` (a hard reject — an over-max invoice must never auto-approve) or `require_cfo_above` (the `system (auto-approve)` actor is not a CFO). So a high-confidence extraction of a high-value invoice can't slip a CFO-gated or over-cap amount past review. The decision lives in the pure `extraction.decide_auto_approve(ext_cfg, approval_cfg, overall_confidence=…, amount=…)` (Decimal-compared so a boundary amount isn't misjudged).
 
 Sets `approved_by="system (auto-approve)"`.
+
+**Who supplied the document gate.** Even when the gates fire, the pass lands at
+`ready_for_review` when `extraction.auto_approve_suppression(invoice, actor_id=…,
+requested=…)` returns a reason. It is decided inside `run_extraction` from the
+row itself, so it holds in both dispatch modes whoever dispatched the read:
+
+| `auto_approve_suppressed` | When |
+|---|---|
+| `requested_by_caller` | The dispatcher set `suppress_auto_approve` (an entry-only clerk's upload / extract, a supplier resubmission). |
+| `segregation_actors` | `Invoice.segregation_actor_ids` is non-empty — a clerk edited, attached, replaced or removed the file, or re-extracted it; a recurring template's author / editors; an inter-company mirror's source set. Unconditional, even when the reader is in the set. |
+| `uploaded_by_another_user` | `uploaded_by_id` is set and is not the actor asking for the read. A clerk replacing the file on their **own** upload is never stamped (they are already the uploader), so this is what stops a manager's re-extract approving that swap. |
+| `document_replaced_during_read` | `file_key` changed between the download and the decision — the approval would attach a file the figures were not read from. |
+
+The first look is unlocked and the provider call sits between it and the
+decision, while a `pending` invoice is still inside a clerk's entry window. So
+before approving, `run_extraction` re-reads `uploaded_by_id`,
+`segregation_actor_ids` and `file_key` **under `FOR UPDATE`**
+(`_locked_auto_approve_suppression`) — the lock the file routes also take. A
+swap committed during the read is seen; one that arrives later waits, and then
+meets an approved invoice the entry window refuses.
+
+An unattended approval is sound only when no employee supplied the document
+(email intake, PEPPOL, the portal) or the person asking for the read did, and
+nobody else has shaped it since. The code rides the completion audit row's
+`details.auto_approve_suppressed` (`null` when the gates did not fire, or
+fired and approved), so "the policy would have approved but a person was
+required" is visible on the trail rather than only in a log line. The cost: a
+manager re-reading another manager's upload also lands at review — the reader's
+role is never looked up, because roles change after the fact and the extraction
+worker holds no control-plane session.
 
 ## Per-Field Confidence
 

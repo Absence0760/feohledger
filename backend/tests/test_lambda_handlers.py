@@ -35,6 +35,9 @@ import pytest
 
 from app.services import audit_lambda, erp_lambda, extraction_lambda
 
+# Fake orgs carry their provider secrets inline; see the fixture.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 BASE_URL = "postgresql+asyncpg://u:p@host:5432/feohledger"
 
 

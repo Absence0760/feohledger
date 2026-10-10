@@ -67,7 +67,9 @@ refuses the invoice's uploader (∪ `segregation_actor_ids`) as its approver,
 every entry path stamps `uploaded_by_id` with whoever entered it, and a clerk
 who edits an invoice someone else entered (or nobody did — email intake,
 PEPPOL) is added to `segregation_actor_ids`, so a clerk later given approval
-can still never approve figures they keyed.
+can still never approve figures they keyed. Receiving is separated the same
+way: whoever hand-recorded a live goods receipt on the invoice's PO is refused
+as its approver (`approval_segregation_receiver`; decisions §267).
 
 The gates live in `backend/app/api/invoice_entry.py`: `INVOICE_ENTRY_ROLES`
 (admin, AP manager, AP clerk, CFO) on `POST /api/invoices`,
@@ -92,7 +94,10 @@ is **entry-only**:
   anything not `new` / `rejected`);
 - nothing they do ends in an approval: their `/complete` never fires the
   workflow's `auto_approve_below` floor, and their upload / re-extraction runs
-  with auto-approve suppressed, so the invoice always lands at review;
+  with auto-approve suppressed, so the invoice always lands at review — and
+  so does a manager's later re-extraction of a document a clerk uploaded or
+  swapped in (`run_extraction` reads the uploader and the segregation set off
+  the row and records `auto_approve_suppressed` on the audit row);
 - `import-csv` takes open AP only.
 
 Approve / reject are gated on the `invoice.approve` permission

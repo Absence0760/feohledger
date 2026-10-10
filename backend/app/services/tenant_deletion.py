@@ -82,6 +82,9 @@ CONTROL_DELETIONS: tuple[tuple[str, str], ...] = (
     # deleted org's token meter forever.
     ("assistant_usage", "DELETE FROM assistant_usage WHERE organization_id = :org"),
     ("subscriptions", "DELETE FROM subscriptions WHERE organization_id = :org"),
+    # The org's sealed provider credentials. Deleting the row is enough: the
+    # ciphertext is useless without its wrapped data key, which goes with it.
+    ("provider_credentials", "DELETE FROM provider_credentials WHERE organization_id = :org"),
     (
         "webauthn_credentials",
         "DELETE FROM webauthn_credentials WHERE user_id IN "

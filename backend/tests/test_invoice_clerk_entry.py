@@ -426,6 +426,202 @@ async def test_clerk_re_extraction_never_auto_approves(realdb, monkeypatch):
     assert dispatch.await_args.kwargs["suppress_auto_approve"] is True
 
 
+# ---------------------------------------------------------------------------
+# A manager's read of a document a clerk chose never auto-approves
+# ---------------------------------------------------------------------------
+#
+# The dispatch flag above covers the clerk's own upload and extract. The read
+# that would approve can be someone else's: a manager re-extracting after a
+# clerk swapped the file in. These run the real `run_extraction` (mock adapter,
+# MinIO) on a workflow that would auto-approve anything, so a pass that lands
+# at review proves the suppression and nothing else.
+
+_MOCK_EXTRACTION = {"extraction": {"program_type": "byok", "provider": "mock"}}
+_APPROVE_ANYTHING = {
+    "steps": [
+        {
+            "number": 1,
+            "type": "extraction",
+            "enabled": True,
+            "config": {"auto_approve_enabled": True, "auto_approve_threshold": 0.0},
+        },
+        {"number": 2, "type": "approval", "enabled": True, "config": {"required": True}},
+        {"number": 3, "type": "erp_export", "enabled": False, "config": {}},
+    ]
+}
+
+
+async def _manager_reads(
+    realdb, monkeypatch, invoice_id, *, during_read=None
+) -> tuple[Invoice, dict]:
+    """The manager's `POST /extract`, then the worker's pass exactly as the
+    dispatcher would have run it. Returns the row and the completion audit.
+
+    ``during_read`` runs once the worker has downloaded the file and before it
+    decides — the window the provider call widens."""
+    from app.models.workflow import AuditLog, WorkflowInstance
+    from app.services.extraction import run_extraction
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        inst = (
+            await s.execute(
+                select(WorkflowInstance).where(WorkflowInstance.invoice_id == invoice_id)
+            )
+        ).scalar_one()
+        inst.steps_config_snapshot = _APPROVE_ANYTHING
+        await s.commit()
+
+    dispatch = AsyncMock()
+    monkeypatch.setattr("app.services.extraction_dispatch.dispatch_extraction", dispatch)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/extract")
+    assert resp.status_code == 200, resp.text
+    (_, _, actor_id), kwargs = dispatch.await_args
+    # The manager's dispatch asks for nothing: what follows is run_extraction's own call.
+    assert kwargs["suppress_auto_approve"] is False
+
+    if during_read is not None:
+        import app.services.storage as storage
+
+        real_get = storage._get_object
+
+        async def _get_after(key):
+            data = await real_get(key)
+            await during_read()
+            return data
+
+        monkeypatch.setattr(storage, "_get_object", _get_after)
+
+    async with mk() as s:
+        row = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        await run_extraction(s, row, actor_id=actor_id, org_settings=_MOCK_EXTRACTION, **kwargs)
+    async with mk() as s:
+        audit = (
+            await s.execute(
+                select(AuditLog)
+                .where(AuditLog.entity_id == uuid.UUID(str(invoice_id)))
+                .where(
+                    AuditLog.action.in_(("invoice.auto_approved", "invoice.extraction_completed"))
+                )
+            )
+        ).scalar_one()
+    return await _row(realdb, invoice_id), audit
+
+
+async def test_a_manager_cannot_auto_approve_a_document_a_clerk_swapped_in(realdb, monkeypatch):
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, "SWAP-AUTO-001")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        swap = await c.put(
+            f"/api/invoices/{invoice_id}/file",
+            files={"file": ("other.pdf", b"%PDF-1.4 swapped", "application/pdf")},
+        )
+    assert swap.status_code == 200, swap.text
+
+    row, audit = await _manager_reads(realdb, monkeypatch, invoice_id)
+
+    assert row.segregation_actor_ids == [str(clerk_id)]
+    assert row.status is InvoiceStatus.ready_for_review
+    assert row.approved_by is None and row.approval_date is None
+    assert audit.action == "invoice.extraction_completed"
+    assert audit.details["auto_approved"] is False
+    assert audit.details["auto_approve_suppressed"] == "segregation_actors"
+
+
+async def test_a_manager_cannot_auto_approve_a_clerks_own_upload_swap(realdb, monkeypatch):
+    """A clerk replacing the file on their OWN upload is not stamped — they are
+    already the uploader — so the set alone would have missed it."""
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        invoice_id = await _clerk_create(c, "SWAP-AUTO-002")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+        swap = await c.put(
+            f"/api/invoices/{invoice_id}/file",
+            files={"file": ("other.pdf", b"%PDF-1.4 swapped", "application/pdf")},
+        )
+    assert swap.status_code == 200, swap.text
+
+    row, audit = await _manager_reads(realdb, monkeypatch, invoice_id)
+
+    assert not row.segregation_actor_ids
+    assert row.uploaded_by_id == realdb.info("a").users["ap_clerk"]
+    assert row.status is InvoiceStatus.ready_for_review
+    assert audit.details["auto_approve_suppressed"] == "uploaded_by_another_user"
+
+
+async def test_a_clerk_swap_during_the_read_is_seen_before_approving(realdb, monkeypatch):
+    """The worker's first look is unlocked and the AI call sits between it and
+    the decision, while a `pending` invoice is still inside the clerk's entry
+    window. A swap committed in that gap must reach the decision."""
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, "SWAP-AUTO-RACE")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+
+    async def _clerk_swaps():
+        async with realdb.client(key="a", role="ap_clerk") as c:
+            # Same filename: the object is overwritten in place, `file_key` unchanged.
+            swap = await c.put(
+                f"/api/invoices/{invoice_id}/file",
+                files={"file": ("invoice.pdf", b"%PDF-1.4 doctored", "application/pdf")},
+            )
+        assert swap.status_code == 200, swap.text
+
+    row, audit = await _manager_reads(realdb, monkeypatch, invoice_id, during_read=_clerk_swaps)
+
+    assert row.segregation_actor_ids == [str(clerk_id)]
+    assert row.status is InvoiceStatus.ready_for_review
+    assert audit.details["auto_approve_suppressed"] == "segregation_actors"
+
+
+async def test_a_file_replaced_during_the_read_is_never_approved(realdb, monkeypatch):
+    """A manager's own swap is not stamped, but the approval would attach a file
+    nobody's read produced the figures from."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, "SWAP-AUTO-RACE-2")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+
+    async def _manager_swaps():
+        async with realdb.client(key="a", role="ap_manager") as c:
+            swap = await c.put(
+                f"/api/invoices/{invoice_id}/file",
+                files={"file": ("corrected.pdf", b"%PDF-1.4 corrected", "application/pdf")},
+            )
+        assert swap.status_code == 200, swap.text
+
+    row, audit = await _manager_reads(realdb, monkeypatch, invoice_id, during_read=_manager_swaps)
+
+    assert row.status is InvoiceStatus.ready_for_review
+    assert audit.details["auto_approve_suppressed"] == "document_replaced_during_read"
+
+
+async def test_a_managers_own_document_still_auto_approves(realdb, monkeypatch):
+    """The control: the same workflow and read approve a document nobody else
+    touched, so the two above are the suppression and not the setup."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, "SWAP-AUTO-003")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+
+    row, audit = await _manager_reads(realdb, monkeypatch, invoice_id)
+
+    assert row.status is InvoiceStatus.approved
+    assert row.approved_by == "system (auto-approve)"
+    assert audit.action == "invoice.auto_approved"
+    assert audit.details["auto_approve_suppressed"] is None
+
+
 async def test_clerk_bulk_resubmits_rejected_and_skips_what_is_past_entry(realdb):
     async with realdb.client(key="a", role="ap_clerk") as c:
         rejected = await _clerk_create(c, "CLERK-BULK-REJ-1")

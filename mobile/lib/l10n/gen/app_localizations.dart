@@ -689,6 +689,18 @@ abstract class AppLocalizations {
   /// **'Vendor rejected'**
   String get vendorRejected;
 
+  /// No description provided for @vendorCardsNotClosed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} virtual card could not be cancelled at the card provider and is still live. Retry from the web app.} other {{count} virtual cards could not be cancelled at the card provider and are still live. Retry from the web app.}}'**
+  String vendorCardsNotClosed(int count);
+
+  /// No description provided for @vendorCardsRequireVoid.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} virtual card backs a scheduled payment and is still live — void that payment to cancel it.} other {{count} virtual cards back scheduled payments and are still live — void those payments to cancel them.}}'**
+  String vendorCardsRequireVoid(int count);
+
   /// No description provided for @vendorActionFailed.
   ///
   /// In en, this message translates to:
@@ -1132,6 +1144,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Segregation of duties: a user involved in creating this invoice cannot also approve it.'**
   String get codedRefusalApprovalSegregation;
+
+  /// Coded refusal (lib/l10n/coded_refusal_messages.dart) `approval_segregation_receiver`: the approver recorded a goods receipt the invoice is billed against.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: a user who recorded a goods receipt this invoice is billed against cannot also approve it.'**
+  String get codedRefusalApprovalSegregationReceiver;
 
   /// Coded refusal (lib/l10n/coded_refusal_messages.dart) `invoice_stale_approval`: the invoice changed after the approver loaded it, so nothing was approved.
   ///

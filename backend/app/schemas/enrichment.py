@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.schemas.vendor import VendorResponse
+from app.schemas.vendor import VendorCardRevocationResponse, VendorResponse
 
 # ---------------------------------------------------------------------------
 # Suggestions (auto-fill + price variance)
@@ -123,6 +123,10 @@ class VendorMergeResponse(BaseModel):
     # re-run where they were already retired).
     deactivated_vendor_ids: list[str]
     merged_at: str
+    # Live virtual cards the merge left on an un-payable vendor, and what
+    # happened to them (`services/vendor_card_revocation.py`). Empty when every
+    # involved vendor is still payable or holds no live card.
+    card_revocations: list[VendorCardRevocationResponse] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

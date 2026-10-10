@@ -38,6 +38,10 @@ import pytest
 
 from app.services.payment_adapters import PaymentStatus, SettlementReport
 
+# The webhook leg resolves the processor's webhook secret through the sealed
+# store; the fake org's settings stand in for it (see the fixture).
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 
 # The two rows, shared by both paths so the parity assertion is meaningful:

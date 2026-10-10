@@ -247,6 +247,17 @@ bind — and have it approved with no second person involved. Their `/complete`
 also takes only `new` → `ready_for_review`, and only where the snapshot has an
 approval step (with none, `/complete` closes a `new` invoice to `done`).
 
+**Nor does extraction for anyone else's read of a document they chose.** The
+read that would approve can be a manager's: re-extracting after a clerk swapped
+the file in. `run_extraction` therefore also suppresses on its own, from the row
+(`extraction.auto_approve_suppression`): whenever `segregation_actor_ids` is
+non-empty, or `uploaded_by_id` names someone other than the reader. The reason
+is recorded as `details.auto_approve_suppressed` on the
+`invoice.extraction_completed` audit row (`backend/docs/ai-extraction.md` §
+Auto-Approve on Confidence). `/complete`'s floor keeps its own rule — refuse
+the floor to an implicated *caller* — because there the caller acts on the
+figures in front of them rather than on a document read after the click.
+
 ### Multi-Level Approval Chains
 
 Strategy `"chain"` with `approval_chain: list[ApprovalLevelConfig]`.
@@ -306,8 +317,9 @@ a no-op, so the sweep can run on a tight interval and across overlapping
 replicas.
 
 **A target who could not approve is never added.** Segregation of duties refuses
-the payable's implicated actors (`uploaded_by_id` ∪ `segregation_actor_ids`,
-unless the approval step sets `require_segregation: false`), and
+the payable's implicated actors (`uploaded_by_id` ∪ `segregation_actor_ids`)
+and whoever recorded a goods receipt it is billed against (unless the approval
+step sets `require_segregation: false`), and
 `advance_approval_chain` refuses anyone who already approved a different level.
 `apply_escalation` filters both out of the targets (`ineligible=` from
 `approval_chain.escalation_ineligible`, plus the chain's own earlier approvals).
@@ -357,6 +369,13 @@ turns it off (`approval_chain.violates_segregation`). When enabled:
   author and material editors, or, on an inter-company mirror, the source
   payable's whole implicated set.
 - An approver in that set is refused with 403.
+- The approver must also not have hand-recorded a live goods receipt on the
+  invoice's PO (`approval_chain.receipt_recorders` →
+  `check_receiving_segregation`, 403 `approval_segregation_receiver`) —
+  receiving and approving are different duties. Checked after any
+  corrections; not part of the implicated set (decisions §267). The
+  manual-complete amount floor (`POST /invoices/{id}/complete`) honours it too:
+  a receiver completing such an invoice lands it at review, not approved.
 - With `uploaded_by_id` NULL **and** the set empty there is nothing to refuse.
   That combination means the invoice came in through a channel with no employee
   behind it — email intake, inbound PEPPOL, or the supplier portal — not

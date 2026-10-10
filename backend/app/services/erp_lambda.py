@@ -46,8 +46,16 @@ async def _process_message(body: dict) -> None:
             await control_engine.dispose()
             return
 
-    # The org's configured ERP adapter; None falls back to mock in _call_erp
-    erp_config = (org.settings or {}).get("erp")
+        # The org's configured ERP adapter, credentials unsealed through the one
+        # accessor; None falls back to mock in _call_erp.
+        from app.services.credential_crypto import CredentialCryptoError
+        from app.services.provider_credentials import provider_config
+
+        credentials_ok = True
+        try:
+            erp_config = await provider_config(org, "erp", db=ctrl_db)
+        except CredentialCryptoError:
+            erp_config, credentials_ok = None, False
 
     # Connect to the tenant DB. `org.db_name` comes off the resolved Organization
     # row above — never off the SQS body.
@@ -63,6 +71,11 @@ async def _process_message(body: dict) -> None:
             result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
             invoice = result.scalar_one_or_none()
             if not invoice:
+                return
+            if not credentials_ok:
+                from app.services.erp import fail_erp_send_without_credentials
+
+                await fail_erp_send_without_credentials(db, invoice, actor_id=actor_id)
                 return
 
             # Invoice is already in sending_to_erp state — run the ERP call
