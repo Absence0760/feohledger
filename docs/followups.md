@@ -139,7 +139,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**101 open: 84 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**100 open: 83 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1339,18 +1339,6 @@ scope (§260) — do not fold them into any of these.
       one callback route. **Trigger:** the first commerce provider shipped
       OAuth-only, or a public Shopify / Square app listing (which requires
       OAuth install).
-- [ ] **(c) Square's idempotency-key retention is undocumented.** The Square
-      adapter sends our `feoh:<line>:<direction>` key as Square's
-      `idempotency_key` and `reference_id`; a re-send Square refuses as
-      `IDEMPOTENCY_KEY_REUSED` is resolved by finding the original adjustment by
-      `reference_id`. If Square forgets a key, a late retry of a push that
-      actually landed (a timeout after Square applied it) would add the stock
-      twice. **Durable fix:** look up `reference_id` via
-      `POST /v2/inventory/changes/batch-retrieve` BEFORE writing on any retry
-      (the adapter would need the row's attempt count, or always check first).
-      **Trigger:** Square documents a retention window shorter than the sync
-      sweep's retry horizon (`FEOH_COMMERCE_SYNC_MAX_ATTEMPTS` with backoff to
-      6 h), or a doubled Square adjustment is observed.
 
 ### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 

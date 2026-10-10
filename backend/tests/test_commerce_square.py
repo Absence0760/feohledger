@@ -250,6 +250,55 @@ async def test_a_reused_key_with_a_changed_body_is_found_by_reference_id(fake, m
     assert await _available(fake, "VAR-TEE-M", "L-MAIN") == Decimal("3")
 
 
+async def _forget_keys(fake) -> None:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=fake.app)) as client:
+        resp = await client.post("http://fake-commerce/square/__forget-keys")
+        assert resp.status_code == 200
+
+
+def _writes(recorded) -> int:
+    return sum(r.url.path.endswith("/batch-create") for r in recorded.requests)
+
+
+async def test_a_forgotten_key_really_is_applied_twice_on_a_blind_resend(fake):
+    """The control: the fake forgets the way Square may, so the guard below is real."""
+    adapter = _adapter()
+    await adapter.adjust_available(_adj("3", key="feoh:line-5:receive"))
+    await _forget_keys(fake)
+    await adapter.adjust_available(_adj("3", key="feoh:line-5:receive"))
+    assert await _available(fake, "VAR-TEE-M", "L-MAIN") == Decimal("6")
+
+
+async def test_a_retry_after_square_forgot_the_key_finds_the_write_and_does_not_repeat_it(
+    fake, recorded
+):
+    """A push that landed but timed out, retried after Square's key lapsed."""
+    adapter = _adapter()
+    first = await adapter.adjust_available(_adj("3", key="feoh:line-6:receive"))
+    await _forget_keys(fake)
+    retried = await adapter.adjust_available(_adj("3", key="feoh:line-6:receive", attempt=2))
+    assert retried.replayed is True
+    assert retried.provider_reference == first.provider_reference
+    assert _writes(recorded) == 1, "the retry wrote again instead of finding the first write"
+    assert await _available(fake, "VAR-TEE-M", "L-MAIN") == Decimal("3")
+
+
+async def test_a_retry_with_no_earlier_write_looks_then_writes_once(fake, recorded):
+    """The first push never reached Square (a dropped connection): the retry applies it."""
+    result = await _adapter().adjust_available(_adj("2", key="feoh:line-8:receive", attempt=3))
+    assert result.replayed is False
+    assert [r.url.path.rsplit("/", 1)[-1] for r in recorded.requests] == [
+        "batch-retrieve",
+        "batch-create",
+    ]
+    assert await _available(fake, "VAR-TEE-M", "L-MAIN") == Decimal("2")
+
+
+async def test_a_first_push_does_not_pay_for_the_lookup(fake, recorded):
+    await _adapter().adjust_available(_adj("1"))
+    assert [r.url.path.rsplit("/", 1)[-1] for r in recorded.requests] == ["batch-create"]
+
+
 async def test_a_reused_key_with_no_matching_adjustment_is_refused_not_assumed(fake, monkeypatch):
     adapter = _adapter()
     await adapter.adjust_available(_adj("3", key="feoh:line-7:receive"))

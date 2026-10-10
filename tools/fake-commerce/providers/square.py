@@ -24,7 +24,9 @@ Fixtures — tests assert these literals:
 
 Square holds fractional stock (five decimal places), so the book is not
 whole-units-only. ``POST /square/__fail-next`` with ``{"status": 500|503|429|401}``
-makes the next API call fail with that status and Square's error body.
+makes the next API call fail with that status and Square's error body;
+``POST /square/__forget-keys`` makes Square forget every idempotency key, so a
+re-send under an old key is applied again unless the adapter checks first.
 """
 
 from __future__ import annotations
@@ -136,6 +138,13 @@ def _qty(value: Decimal) -> str:
 # --------------------------------------------------------------------------- #
 # Ops
 # --------------------------------------------------------------------------- #
+
+
+@router.post("/__forget-keys")
+async def forget_keys() -> dict:
+    """Square forgetting every idempotency key it has seen (its retention lapsing)."""
+    _KEYS.clear()
+    return {"forgotten": True}
 
 
 @router.post("/__fail-next")
@@ -284,7 +293,9 @@ async def batch_create(request: Request):
             f"{where}.catalog_object_id",
         )
     delta = quantity if transition[1] == "IN_STOCK" else -quantity
-    applied, _ = BOOK.adjust(item, location, delta, key)
+    # Replay is Square's, keyed above on `_KEYS`; the book gets a key per write so
+    # that `__forget-keys` (Square forgetting) really does apply a re-send again.
+    applied, _ = BOOK.adjust(item, location, delta, f"sq-write-{len(_CHANGES) + 1}")
     record = {
         "id": applied.reference,
         "reference_id": adj.get("reference_id"),

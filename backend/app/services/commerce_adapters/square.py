@@ -26,14 +26,15 @@ under us.
 
 **Idempotency.** Square's native ``idempotency_key`` is ours (``feoh:<line>:<direction>``,
 well under Square's 128 characters; hashed if it ever were not), and the
-adjustment's ``reference_id`` carries it too. A re-send with an identical body
-returns Square's original response. A re-send whose body differs — ``occurred_at``
-is "now" and must be within 24 hours, so a retry an hour later always differs —
-is refused ``IDEMPOTENCY_KEY_REUSED``; the adapter then finds the original
-adjustment by ``reference_id`` (``POST /v2/inventory/changes/batch-retrieve``)
-and returns it as a replay. Not finding it is a non-retryable refusal, never an
-assumed success: Square refusing the key does not prove our earlier request
-moved stock.
+adjustment's ``reference_id`` carries it too. Square does not document how long
+it remembers a key, so the key alone is not trusted on a re-send: any push after
+the first (``InventoryAdjustment.attempt > 1``) first looks for an adjustment
+carrying our ``reference_id`` (``POST /v2/inventory/changes/batch-retrieve``)
+and returns it as a replay when found. A re-send Square refuses as
+``IDEMPOTENCY_KEY_REUSED`` (the body changed — ``occurred_at`` is "now", and
+Square refuses one older than 24 hours) gets the same lookup; not finding it
+there is a non-retryable refusal, never an assumed success, because Square
+refusing the key does not prove our earlier request moved stock.
 
 Errors: Square answers ``{"errors": [{"category", "code", "field", "detail"}]}``.
 The mapping reads ``category`` / ``code`` / ``field`` only (``detail`` can echo
@@ -282,12 +283,25 @@ class SquareCommerceAdapter(CommerceAdapter):
             ],
             "ignore_unchanged_counts": True,
         }
+        if adjustment.attempt > 1:
+            # An earlier push may have landed without our hearing back, and
+            # Square does not say how long it remembers an idempotency key:
+            # look for the write before making it again.
+            existing = await self._find_by_reference(adjustment, reference)
+            if existing is not None:
+                return existing
         step = "Square inventory adjustment"
         response = await self._call(step, "POST", "/v2/inventory/changes/batch-create", body)
         if response.status_code == 400 and _first_error(response).get("code") == (
             "IDEMPOTENCY_KEY_REUSED"
         ):
-            return await self._replayed(adjustment, reference)
+            existing = await self._find_by_reference(adjustment, reference)
+            if existing is not None:
+                return existing
+            raise CommerceRejectedError(
+                "Square reports this adjustment's idempotency key as already used, but no "
+                "adjustment carrying it was found; check the item's stock history in Square."
+            )
         if not response.is_success:
             raise square_failure(step, response)
         try:
@@ -315,10 +329,15 @@ class SquareCommerceAdapter(CommerceAdapter):
             available_after=_in_stock(data, adjustment.item_id, adjustment.location_id),
         )
 
-    async def _replayed(
+    async def _find_by_reference(
         self, adjustment: InventoryAdjustment, reference: str
-    ) -> InventoryAdjustmentResult:
-        """The original adjustment for a key Square says was already used."""
+    ) -> InventoryAdjustmentResult | None:
+        """The adjustment already written under ``reference``, as a replay, or ``None``.
+
+        Pages the item's adjustments at the location
+        (``POST /v2/inventory/changes/batch-retrieve``) for our ``reference_id``.
+        Giving up after :data:`_LOOKUP_PAGES` pages answers ``None``.
+        """
         step = "Square adjustment lookup"
         cursor: str | None = None
         for _ in range(_LOOKUP_PAGES):
@@ -339,11 +358,8 @@ class SquareCommerceAdapter(CommerceAdapter):
                     )
             cursor = data.get("cursor") or None
             if not cursor:
-                break
-        raise CommerceRejectedError(
-            "Square reports this adjustment's idempotency key as already used, but no "
-            "adjustment carrying it was found; check the item's stock history in Square."
-        )
+                return None
+        return None
 
 
 def _in_stock(data: dict[str, Any], item_id: str, location_id: str) -> Decimal | None:

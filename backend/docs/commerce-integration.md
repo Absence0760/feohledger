@@ -39,8 +39,11 @@ class CommerceAdapter(ABC):
     async def adjust_available(self, adjustment: InventoryAdjustment) -> InventoryAdjustmentResult
 ```
 
-`InventoryAdjustment(item_id, location_id, delta: Decimal, idempotency_key, sku=None, reason="received"|"receipt_cancelled")`
-— `delta` is signed and never zero. `InventoryAdjustmentResult(provider_reference, available_after=None, replayed=False)`.
+`InventoryAdjustment(item_id, location_id, delta: Decimal, idempotency_key, sku=None, reason="received"|"receipt_cancelled", attempt=1)`
+— `delta` is signed and never zero. `attempt` is which push of this key it is
+(the sync row's `attempts` after its claim): above 1, an earlier push may have
+landed without our hearing back, so an adapter whose provider may forget an
+idempotency key looks for the earlier write first (§ Square). `InventoryAdjustmentResult(provider_reference, available_after=None, replayed=False)`.
 
 Errors (all `CommerceError`, each with a stable `code` and `retryable`):
 `CommerceConfigError` (`config_invalid`), `CommerceAuthError` (`auth_failed`),
@@ -332,14 +335,15 @@ tests `backend/tests/test_commerce_square.py`, `frontend/tests-e2e/commerce/squa
   `occurred_at` is the push time, since Square refuses one older than 24 hours.
   `available_after` is the `IN_STOCK` count in the response's `counts`.
 - **Idempotency.** Square's native `idempotency_key` is our key (hashed only if
-  over Square's 128 characters), and `reference_id` carries it too. An
-  identical re-send replays Square's original response. A re-send with a
-  changed body — a retry always has a new `occurred_at` — is refused
-  `IDEMPOTENCY_KEY_REUSED`; the adapter then finds the original adjustment by
+  over Square's 128 characters), and `reference_id` carries it too. Square does
+  not document how long it remembers a key, so on any push after the first
+  (`attempt > 1`) the adapter first looks for an adjustment carrying our
   `reference_id` (`POST /v2/inventory/changes/batch-retrieve`, the item at the
-  location, up to 10 pages of 1000) and returns it as `replayed`. Not finding it
-  is a non-retryable refusal, never an assumed success. Square does not document
-  how long it remembers a key (`docs/followups.md`).
+  location, up to 10 pages of 1000) and returns it as `replayed` instead of
+  writing again; a first push pays for no lookup. A re-send Square refuses as
+  `IDEMPOTENCY_KEY_REUSED` (the body changed — a retry always has a new
+  `occurred_at`) gets the same lookup, and not finding it there is a
+  non-retryable refusal, never an assumed success.
 - **Errors.** `errors[].category` first — `AUTHENTICATION_ERROR` →
   `auth_failed`, `RATE_LIMIT_ERROR` → `rate_limited`, `API_ERROR` →
   `transient` — then the status as in `http_failure`; an
@@ -349,6 +353,7 @@ tests `backend/tests/test_commerce_square.py`, `frontend/tests-e2e/commerce/squa
   copied.
 - **Fake fixtures.** Token `fake-square-token`; locations `L-MAIN`,
   `L-WAREHOUSE`, `L-CLOSED` (inactive); SKU `SQ-TEE-M` → `VAR-TEE-M`; `SQ-DUP`
-  on two variations; `POST /square/__fail-next {"status": …}`.
+  on two variations; `POST /square/__fail-next {"status": …}`;
+  `POST /square/__forget-keys` (Square's key retention lapsing).
 - **Not built:** Square OAuth (app install) — a personal or application access
   token only; tracked with the other OAuth connections (§ Providers).
