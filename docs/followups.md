@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-09 — the US + South Africa ERP connections
+**Last reconciled:** 2026-10-09 — enabling IAM database authentication on RDS
+(#542) opened one (c) entry (the app still signs in with the master password),
+taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
 (decisions §269–§272), merged onto the provider-credential store, opened
 eleven (c) entries, one (a) (sandbox verification) and one (b) (registering
 the platform OAuth apps) under their own heading, and rewrote two (c)
@@ -137,7 +139,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**97 open: 80 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**98 open: 81 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1233,6 +1235,19 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       flake. **Durable fix:** the same `-h 127.0.0.1` on each, in one change.
       **Trigger:** the next change to either compose file or CI's service
       containers, or the first unexplained "shutting down" on a fresh volume.
+- [ ] **(c) The app still signs in to RDS with the master password.** IAM
+      database authentication is now enabled on the instance
+      (`infra/database.tf`, closing Trivy AWS-0176, 2026-10-09), but it is
+      additive: `FEOH_DATABASE_URL` still carries the `postgres` master
+      password, so a leaked deploy env is still a working database login, and
+      the app runs as the superuser that can `CREATE DATABASE`. **Durable fix:**
+      a dedicated app role granted `rds_iam`, the VM instance role given
+      `rds-db:connect` on it, and the async engines minting a token per new
+      connection (asyncpg's `password` accepts a callable; tokens live 15
+      minutes, so it must be per-connection, not per-process), with tenant
+      provisioning keeping a separate, narrower path for `CREATE DATABASE`.
+      **Trigger:** the next rotation of `db_master_password`, or before the
+      first customer's data lands on the instance, whichever comes first.
 
 ### Surfaced by enforcing the plan feature gates (2026-10-07, decisions §258)
 
