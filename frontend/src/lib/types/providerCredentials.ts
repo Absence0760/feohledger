@@ -1,5 +1,5 @@
 /**
- * Tenant provider credentials (`/organization` → ERP, Payments, Virtual cards),
+ * Tenant provider credentials (`/organization` → ERP, Payments, Virtual cards, Commerce),
  * over `GET /api/organization/credentials` and
  * `PUT /api/organization/credentials/{block}`
  * (`backend/app/api/organization_credentials.py`).
@@ -11,13 +11,14 @@
  * of `services/provider_credentials.SECRET_FIELDS` — keep the two in step.
  */
 
-export type CredentialBlock = 'erp' | 'payments' | 'cards';
+export type CredentialBlock = 'erp' | 'payments' | 'cards' | 'commerce';
 
 /** Which secret paths are stored, per block. Names only. */
 export interface ProviderCredentialStatus {
 	erp: string[];
 	payments: string[];
 	cards: string[];
+	commerce: string[];
 }
 
 export interface ProviderCredentialUpdate {

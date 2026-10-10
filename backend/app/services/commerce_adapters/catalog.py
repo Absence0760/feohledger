@@ -105,7 +105,17 @@ def all_providers() -> list[dict[str, Any]]:
     """Every registered provider's entry, ``mock`` last (it is the local default)."""
     specs = [cls.spec for cls in registered_adapters().values()]
     specs.sort(key=lambda s: (s.key == "mock", s.label.lower()))
-    return [{**s.to_dict(), "available": s.selectable} for s in specs]
+    dest = destination_keys()
+    out = []
+    for s in specs:
+        entry = {**s.to_dict(), "available": s.selectable}
+        # Which of its fields say where the credentials go: the form stops
+        # showing a secret as saved once one of these changes, because the save
+        # will drop it (`secrets_to_drop`).
+        for f in entry["fields"]:
+            f["destination"] = f["name"] in dest
+        out.append(entry)
+    return out
 
 
 def provider(key: str | None) -> dict[str, Any] | None:

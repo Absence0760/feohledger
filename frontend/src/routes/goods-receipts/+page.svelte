@@ -48,6 +48,7 @@
 	import { isInspectionResult, listInspections, syncInspections } from '#lib/api/inspections.ts';
 	import RecordInspectionModal from './RecordInspectionModal.svelte';
 	import RecordReceiptModal from './RecordReceiptModal.svelte';
+	import CommerceSyncSection from './CommerceSyncSection.svelte';
 	import { cancelGoodsReceipt, type GoodsReceiptDetail } from '#lib/api/goodsReceipts.ts';
 	import {
 		GR_SOURCE_MANUAL,
@@ -783,6 +784,14 @@
 					{/each}
 				</tbody>
 			</table>
+
+			<!-- What this receipt pushed to the business's commerce platform
+			     (decisions §268); renders nothing when no platform was connected. -->
+			<CommerceSyncSection
+				receiptId={detail.id}
+				version={detail.status}
+				canRetry={canRecordReceipt}
+			/>
 
 			<!-- The 4-way quality leg for THIS delivery. `po_matching` reads the
 			     most recent of these rows (by `created_at`), so the list is

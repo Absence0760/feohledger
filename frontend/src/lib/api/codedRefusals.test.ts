@@ -464,3 +464,22 @@ describe('the goods-receipt refusals', () => {
 	});
 });
 
+describe('the commerce refusals', () => {
+	const t = (key: string) => key;
+
+	it('states every commerce connection and sync refusal', () => {
+		expect(codedRefusalText('commerce_not_configured', {}, t)).toBe('refusal.commerceNotConfigured');
+		expect(codedRefusalText('commerce_oauth_not_available', { provider: 'x' }, t)).toBe(
+			'refusal.commerceOauthNotAvailable'
+		);
+		expect(codedRefusalText('commerce_sync_not_retryable', { status: 'synced' }, t)).toBe(
+			'refusal.commerceSyncNotRetryable'
+		);
+		expect(codedRefusalText('commerce_sync_not_found', {}, t)).toBe('refusal.commerceSyncNotFound');
+		expect(codedRefusalText('commerce_unknown_entity', {}, t)).toBe('refusal.commerceUnknownEntity');
+		expect(codedRefusalText('commerce_unknown_provider', {}, t)).toBe(
+			'refusal.commerceUnknownProvider'
+		);
+	});
+});
+
