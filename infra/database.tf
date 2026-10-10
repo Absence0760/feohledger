@@ -99,6 +99,13 @@ resource "aws_db_instance" "main" {
   password_wo         = var.db_master_password
   password_wo_version = var.db_master_password_version
 
+  # IAM database authentication (Trivy AWS-0176). Additive: it lets a role
+  # granted `rds-db:connect` sign in with a 15-minute token instead of the
+  # master password, and password login keeps working alongside it. The app
+  # still connects with the password in FEOH_DATABASE_URL; moving it onto
+  # tokens is tracked in docs/followups.md. Toggling it is an in-place modify.
+  iam_database_authentication_enabled = true
+
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.db.id]
   parameter_group_name   = aws_db_parameter_group.main.name
