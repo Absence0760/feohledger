@@ -104,7 +104,7 @@ updates:
       day: monday
     open-pull-requests-limit: 5
 
-  # tools/fake-commerce pins the same base the same way (decisions §268).
+  # tools/fake-commerce pins the same base the same way (decisions §273).
   - package-ecosystem: docker
     directory: /tools/fake-commerce
     schedule:

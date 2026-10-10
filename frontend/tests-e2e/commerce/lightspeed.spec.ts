@@ -10,7 +10,7 @@ import {
 } from './helpers';
 
 /**
- * Commerce sync against Lightspeed Retail (X-Series), decisions §268: the real
+ * Commerce sync against Lightspeed Retail (X-Series), decisions §273: the real
  * `lightspeed` adapter talking to tools/fake-commerce (`pnpm commerce:up`,
  * :12113) through the committed FEOH_COMMERCE_API_BASE_OVERRIDE. Connect from
  * Organization → Commerce with a domain prefix + token, map an outlet, record a

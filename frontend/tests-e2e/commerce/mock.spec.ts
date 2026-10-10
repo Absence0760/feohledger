@@ -3,7 +3,7 @@ import { cleanup, createPo } from '../matching/setup';
 import { disconnectCommerce, recordReceipt, settledSyncs } from './helpers';
 
 /**
- * Commerce sync, mock path (decisions §268): connect the in-process `mock`
+ * Commerce sync, mock path (decisions §273): connect the in-process `mock`
  * platform from Organization → Commerce, map where stock lands, record a
  * receipt, and see each line's push on the receipt — synced for a line with a
  * SKU, skipped (`no_sku`) for one without. Needs nothing beyond the normal

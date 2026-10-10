@@ -1,4 +1,4 @@
-"""The commerce adapter contract, as a reusable test helper (decisions §268).
+"""The commerce adapter contract, as a reusable test helper (decisions §273).
 
 Every provider's test module proves its adapter honours the interface by
 calling :func:`assert_commerce_contract` — the mock's own test does, and so does

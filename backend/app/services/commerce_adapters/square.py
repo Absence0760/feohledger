@@ -1,11 +1,11 @@
-"""Square — Square REST API v2 inventory (roadmap Priority 14 item 3; decisions §268).
+"""Square — Square REST API v2 inventory (roadmap Priority 14 item 3; decisions §273).
 
 Connection: a Square **access token** (a personal / application token from the
 Developer Console, ``Authorization: Bearer``) and an **environment** —
 ``sandbox`` (``connect.squareupsandbox.com``) or ``production``
 (``connect.squareup.com``). The environment picks the host the token is sent
 to, so it is a destination key: switching it drops the stored token
-(decisions §266). OAuth app install is not built (``docs/followups.md``).
+(decisions §271). OAuth app install is not built (``docs/followups.md``).
 
 Every call carries a pinned ``Square-Version`` (:data:`SQUARE_VERSION`), so a
 Square-side default-version bump cannot change a request or response shape

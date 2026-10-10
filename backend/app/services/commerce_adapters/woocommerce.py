@@ -5,7 +5,7 @@ Reference: https://woocommerce.github.io/woocommerce-rest-api-docs/ and
 
 **Where the calls go.** ``store_url`` is the merchant's own WordPress site — an
 arbitrary, admin-supplied host — so it is a destination key (changing it drops
-the stored secrets, decisions §266), it must be ``https`` with no credentials,
+the sealed secrets, decisions §271), it must be ``https`` with no credentials,
 query or fragment in it, and every call goes through ``api_base`` (SSRF: the
 host must resolve to a public address). Redirects are never followed: a 3xx is
 a refusal, so the Basic credentials are only ever sent to the host the admin

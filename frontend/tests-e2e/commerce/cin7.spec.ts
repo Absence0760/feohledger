@@ -10,7 +10,7 @@ import {
 } from './helpers';
 
 /**
- * Commerce sync, Cin7 Core (decisions §268; backend/docs/commerce-integration.md
+ * Commerce sync, Cin7 Core (decisions §273; backend/docs/commerce-integration.md
  * § Cin7 Core): the real `cin7` adapter against tools/fake-commerce
  * (`pnpm commerce:up`, :12113). Connect from Organization → Commerce with an
  * account id and application key, map a Cin7 location, record a receipt, and

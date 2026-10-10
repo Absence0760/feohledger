@@ -10,7 +10,7 @@ import {
 } from './helpers';
 
 /**
- * Commerce sync, Shopify (decisions §268): the real `shopify` adapter against
+ * Commerce sync, Shopify (decisions §273): the real `shopify` adapter against
  * tools/fake-commerce/providers/shopify.py (`pnpm commerce:up`). Connect from
  * Organization → Commerce with a shop domain and Admin API token, map the
  * store's location, record a receipt, and see Shopify's available stock move —

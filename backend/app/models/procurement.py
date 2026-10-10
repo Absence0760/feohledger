@@ -109,7 +109,7 @@ class POLineItem(Base, TimestampMixin):
     # the line was written. `sku` is a SNAPSHOT, not a join — a catalog edit must
     # not rewrite which item an issued PO named, and a PO from an ERP or a
     # contract carries an item code with no catalog row behind it. The commerce
-    # sync pushes received quantities by this SKU (decisions §268).
+    # sync pushes received quantities by this SKU (decisions §273).
     catalog_item_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("catalog_items.id"), index=True
     )

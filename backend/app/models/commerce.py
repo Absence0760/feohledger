@@ -1,4 +1,4 @@
-"""Commerce inventory sync — tenant tables (migration 0111, decisions §268).
+"""Commerce inventory sync — tenant tables (migration 0111, decisions §273).
 
 * :class:`CommerceInventorySync` — one row per received line per direction:
   the record that a quantity was (or was not) pushed to the business's

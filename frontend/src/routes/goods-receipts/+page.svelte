@@ -786,7 +786,7 @@
 			</table>
 
 			<!-- What this receipt pushed to the business's commerce platform
-			     (decisions §268); renders nothing when no platform was connected. -->
+			     (decisions §273); renders nothing when no platform was connected. -->
 			<CommerceSyncSection
 				receiptId={detail.id}
 				version={detail.status}

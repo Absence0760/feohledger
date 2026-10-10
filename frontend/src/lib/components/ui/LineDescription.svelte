@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * A procurement line's description with its SKU beneath it, when it has one
-	 * (migration 0111, decisions §268). Shared by the PO detail, the receipt
+	 * (migration 0111, decisions §273). Shared by the PO detail, the receipt
 	 * detail and the record-receipt form, so the three show item identity the
 	 * same way — a second line rather than a column, which keeps each table
 	 * inside 320px (WCAG 1.4.10).

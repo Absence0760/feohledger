@@ -1,4 +1,4 @@
-"""Cin7 Core commerce adapter (decisions §268; backend/docs/commerce-integration.md § Cin7 Core).
+"""Cin7 Core commerce adapter (decisions §273; backend/docs/commerce-integration.md § Cin7 Core).
 
 Runs against tools/fake-commerce/providers/cin7.py in process — no container,
 no database. The contract helper pins the family-wide properties; the cases

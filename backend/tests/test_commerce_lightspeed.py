@@ -1,4 +1,4 @@
-"""Lightspeed Retail (X-Series) commerce adapter (decisions §268).
+"""Lightspeed Retail (X-Series) commerce adapter (decisions §273).
 
 Runs the adapter against ``tools/fake-commerce/providers/lightspeed.py`` in
 process (no container) through ``use_fake_commerce``. The shared contract is

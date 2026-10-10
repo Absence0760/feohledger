@@ -1,6 +1,6 @@
 /**
  * `/api/commerce` — the commerce platform connection (admin) and per-receipt
- * inventory sync status (decisions §268). Every request goes through the shared
+ * inventory sync status (decisions §273). Every request goes through the shared
  * `api` client (Bearer + X-Tenant-Slug + X-Entity-ID).
  *
  * RBAC mirrors `backend/app/api/commerce.py`: connection, locations and SKU
@@ -31,7 +31,7 @@ export const disconnectCommerce = () => api.delete(`${BASE}/settings`);
 export const testCommerceConnection = (settings?: Record<string, unknown>) =>
 	api.post<CommerceTestResult>(`${BASE}/test`, settings ?? {});
 
-/** The OAuth Connect hook (decisions §268). No provider connects by OAuth yet;
+/** The OAuth Connect hook (decisions §273). No provider connects by OAuth yet;
  *  the backend answers a coded 501 the panel shows as-is. */
 export const startCommerceOAuth = (provider: string) =>
 	api.get<{ authorize_url: string }>(`${BASE}/oauth/${encodeURIComponent(provider)}/authorize`);

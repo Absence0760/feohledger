@@ -329,7 +329,7 @@ class Settings(BaseSettings):
     erp_qbo_token_url: str = ""
     erp_qbo_revoke_url: str = ""
 
-    # Commerce / inventory sync (decisions §268, `services/commerce_sync.py`).
+    # Commerce / inventory sync (decisions §273, `services/commerce_sync.py`).
     # OPERATOR-only override that points EVERY commerce adapter at one fake
     # (tools/fake-commerce, host port 12113), each provider under its own key:
     # `<override>/<provider key>`. Trusted, so it skips the SSRF guard that

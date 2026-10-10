@@ -4,7 +4,7 @@ import type { CommerceSync } from '#lib/types/commerce.ts';
 import { API_BASE, authedTenantHeaders, expect } from '../fixtures/helpers';
 
 /**
- * Shared plumbing for the commerce/ suite (decisions §268) — the specs that
+ * Shared plumbing for the commerce/ suite (decisions §273) — the specs that
  * push received stock to a commerce platform.
  *
  * Two kinds of spec live here:

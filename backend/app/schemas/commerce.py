@@ -1,4 +1,4 @@
-"""Request bodies for ``/api/commerce`` (decisions §268).
+"""Request bodies for ``/api/commerce`` (decisions §273).
 
 Responses are hand-serialized in ``app/api/commerce.py`` (the router's
 dict-returning convention, like ``goods_receipts``).

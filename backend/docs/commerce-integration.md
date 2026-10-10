@@ -223,8 +223,8 @@ connection.
 **Connection.** Fields: `store_url`, `consumer_key`, `consumer_secret` (both
 secret; a REST key from WooCommerce → Settings → Advanced → REST API with
 Read/Write permission). `store_url` is the merchant's own WordPress site, so it
-is a **destination key** (changing it drops the stored secrets, decisions
-§266). It must be `https`, carry a host, and carry no user-info, query or
+is a **destination key** (changing it drops the sealed secrets, decisions
+§271). It must be `https`, carry a host, and carry no user-info, query or
 fragment; a sub-directory install (`https://example.com/shop`) is fine. Every
 call goes through `api_base`, which runs the SSRF check (the host must resolve
 to a public address). **Redirects are never followed** — a 3xx is a non-retryable

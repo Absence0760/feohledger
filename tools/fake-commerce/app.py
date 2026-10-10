@@ -1,5 +1,5 @@
 """fake-commerce — a deterministic HTTP fake of the commerce platforms FeohLedger
-pushes received stock to (decisions §268; backend/docs/commerce-integration.md).
+pushes received stock to (decisions §273; backend/docs/commerce-integration.md).
 
 Every provider is one module under ``providers/``, mounted automatically under
 ``/<module name>`` — the module name IS the provider key, so the backend

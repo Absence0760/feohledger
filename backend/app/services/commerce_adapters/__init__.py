@@ -1,4 +1,4 @@
-"""Commerce / inventory platform adapters (decisions §268).
+"""Commerce / inventory platform adapters (decisions §273).
 
 Pushes received quantities into the business's own commerce platform; see
 ``base.py`` for the interface and ``backend/docs/commerce-integration.md`` for

@@ -10,7 +10,7 @@ import {
 } from './helpers';
 
 /**
- * Commerce sync, Square (decisions §268): the real `square` adapter against
+ * Commerce sync, Square (decisions §273): the real `square` adapter against
  * tools/fake-commerce's Square module (`pnpm commerce:up`). Connect from
  * Organization → Commerce with an access token in the sandbox environment, map
  * the Square location, record a receipt — a fractional quantity lands exactly

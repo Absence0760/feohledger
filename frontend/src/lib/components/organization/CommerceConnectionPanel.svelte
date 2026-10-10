@@ -2,7 +2,7 @@
 	/**
 	 * Organization → Commerce: connect the business's commerce / inventory
 	 * platform, map where received stock lands, and override SKU lookups
-	 * (decisions §268). Recording a goods receipt then pushes each received
+	 * (decisions §273). Recording a goods receipt then pushes each received
 	 * line's quantity to the platform.
 	 *
 	 * The catalogue (`GET /api/commerce/providers`) drives everything the form

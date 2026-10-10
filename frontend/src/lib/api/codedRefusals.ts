@@ -407,7 +407,7 @@ const BUILDERS: Record<string, Builder> = {
 		const grNumber = str(p, 'grNumber');
 		return grNumber === null ? null : t('refusal.goodsReceiptAlreadyCancelled', { grNumber });
 	},
-	// The commerce connection and receipt sync (`api/commerce.py`, decisions §268).
+	// The commerce connection and receipt sync (`api/commerce.py`, decisions §273).
 	commerce_not_configured: fixed('refusal.commerceNotConfigured'),
 	commerce_oauth_not_available: fixed('refusal.commerceOauthNotAvailable'),
 	commerce_sync_not_retryable: fixed('refusal.commerceSyncNotRetryable'),

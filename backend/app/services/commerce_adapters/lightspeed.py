@@ -1,4 +1,4 @@
-"""Lightspeed Retail (X-Series) — the former Vend (decisions §268).
+"""Lightspeed Retail (X-Series) — the former Vend (decisions §273).
 
 API reference: https://x-series-api.lightspeedhq.com/ (date-versioned; this
 adapter pins :data:`API_VERSION`). Auth is a personal access token sent as

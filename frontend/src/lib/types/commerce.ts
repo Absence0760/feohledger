@@ -1,7 +1,7 @@
 /**
  * Commerce / inventory platform connection and receipt sync — types and the
  * pure logic the setup panel and the receipt's sync section run on
- * (decisions §268).
+ * (decisions §273).
  *
  * The provider catalogue comes from `GET /api/commerce/providers`
  * (`commerce_adapters/catalog.py`): nothing here hardcodes a provider, so a new

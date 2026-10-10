@@ -39,9 +39,17 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-10 — Cin7 Core landed: the last commerce-provider (c) entry closes, and two (c) entries open, one for the Cin7 Core push's limits (read-then-set, the full-list retry check, batch / bin stock) and one for Cin7 Omni, taking the file from 96 → 97. Before that, 2026-10-10 — Shopify, WooCommerce, Square and Lightspeed (X-Series) landed; the commerce-provider (c) entry now names only Cin7, WooCommerce's read → write race and Lightspeed R-Series each opened one (c), taking the file from 94 → 96. Before that, 2026-10-08 — the US + South Africa ERP connections
-(decisions §264–§266) opened eleven (c) entries, one (a) (sandbox verification)
-and one (b) (registering the platform OAuth apps). They also rewrote two (c)
+**Last reconciled:** 2026-10-10 — the commerce inventory sync (decisions §273)
+landed with its five providers (WooCommerce, Shopify, Square, Lightspeed
+X-Series, Cin7 Core): the Priority 14 commerce entry closes, and five (c)
+entries open — the OAuth-consent connection, WooCommerce's read → write race,
+Lightspeed R-Series, the Cin7 Core push's limits and Cin7 Omni — taking the
+file from 98 → 102. Before that, 2026-10-09 — enabling IAM database authentication on RDS
+(#542) opened one (c) entry (the app still signs in with the master password),
+taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
+(decisions §269–§272), merged onto the provider-credential store, opened
+eleven (c) entries, one (a) (sandbox verification) and one (b) (registering
+the platform OAuth apps) under their own heading, and rewrote two (c)
 entries: QuickBooks Online now tracks only phases 3–5, and the Priority 14
 adapter entry now tracks the receipt pull and the enterprise ERPs. The
 branch's "payment and card secrets still plaintext" entry is not carried,

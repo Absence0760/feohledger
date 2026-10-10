@@ -328,7 +328,7 @@ async def lifespan(app: FastAPI):
     # usage notices — never charges anything itself (see billing/ai_overage).
     if settings.billing_ai_overage_sweep_enabled:
         ai_overage_task = start_sweep(run_ai_overage_reconcile_loop(), name="billing-ai-overage")
-    # Commerce inventory push retries (decisions §268). Disabled by default; a
+    # Commerce inventory push retries (decisions §273). Disabled by default; a
     # receipt's own push runs post-commit, this is its backstop. Adjusts shelf
     # stock on the business's commerce platform — never moves money.
     commerce_task: asyncio.Task | None = None

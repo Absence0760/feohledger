@@ -1,4 +1,4 @@
-"""Push received quantities into the business's commerce platform (decisions §268).
+"""Push received quantities into the business's commerce platform (decisions §273).
 
 The shape, end to end:
 

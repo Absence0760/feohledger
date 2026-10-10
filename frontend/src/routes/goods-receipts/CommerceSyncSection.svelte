@@ -2,7 +2,7 @@
 	/**
 	 * A receipt's commerce-platform sync — one row per received line and
 	 * direction, with its status chip and a Retry for a failed push or a skip an
-	 * admin has since fixed (decisions §268). Renders nothing for a receipt that
+	 * admin has since fixed (decisions §273). Renders nothing for a receipt that
 	 * planned no sync (no platform connected when it was recorded).
 	 *
 	 * The push runs after the receipt commits, so a just-recorded receipt can

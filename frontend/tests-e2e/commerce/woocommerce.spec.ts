@@ -10,7 +10,7 @@ import {
 } from './helpers';
 
 /**
- * Commerce sync, WooCommerce (decisions §268; commerce-integration.md
+ * Commerce sync, WooCommerce (decisions §273; commerce-integration.md
  * § WooCommerce): the real adapter against tools/fake-commerce's
  * `woocommerce` module. Connect from Organization → Commerce (store URL +
  * consumer key/secret), map the one synthetic "Store" location, record a

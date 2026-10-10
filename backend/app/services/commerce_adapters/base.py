@@ -1,4 +1,4 @@
-"""The commerce / inventory platform adapter interface (decisions §268).
+"""The commerce / inventory platform adapter interface (decisions §273).
 
 FeohLedger records what was ordered, received, billed and paid; the business's
 commerce platform (Shopify, Lightspeed, Square, Cin7, WooCommerce) records what
@@ -237,7 +237,7 @@ class CommerceProviderSpec:
     key, secret, required, options). ``destination_keys`` names every field
     that says WHERE the credentials go (a shop domain, a store URL, an account
     id that becomes a hostname, an environment that picks the API host): a save
-    that changes one drops the stored secrets (decisions §266).
+    that changes one drops the sealed secrets (decisions §271).
     """
 
     key: str

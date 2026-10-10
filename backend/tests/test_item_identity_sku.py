@@ -1,4 +1,4 @@
-"""Item identity (SKU) on PO and goods-receipt lines — migration 0111, decisions §268.
+"""Item identity (SKU) on PO and goods-receipt lines — migration 0111, decisions §273.
 
 A received quantity has to name WHAT arrived for the commerce sync to push it.
 Pinned here:

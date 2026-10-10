@@ -427,7 +427,7 @@ Advisory only: results are suggestions and never overwrite the `Vendor` row.
 ## 19.1 Commerce / inventory platforms (`services/commerce_adapters/`)
 
 Pushes received quantities from goods receipts to the business's own commerce
-platform (decisions §268). Each real provider adds its row here and on the
+platform (decisions §273). Each real provider adds its row here and on the
 published page when it lands (`backend/docs/commerce-integration.md` § How to
 add a provider).
 

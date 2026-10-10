@@ -1,4 +1,4 @@
-"""Receipt → Shopify, end to end through the sync service (decisions §268). Real Postgres.
+"""Receipt → Shopify, end to end through the sync service (decisions §273). Real Postgres.
 
 The adapter-level contract lives in ``test_commerce_shopify.py``; this pins the
 same path the e2e spec drives, without a browser: connect Shopify through

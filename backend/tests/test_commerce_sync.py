@@ -1,4 +1,4 @@
-"""Receipt → commerce platform sync, end to end (decisions §268). Real Postgres.
+"""Receipt → commerce platform sync, end to end (decisions §273). Real Postgres.
 
 Pinned here:
 

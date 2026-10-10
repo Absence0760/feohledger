@@ -2,7 +2,7 @@
 
 Why
 ---
-Roadmap Priority 14 item 3 (decisions §260, §268): a goods receipt pushes the
+Roadmap Priority 14 item 3 (decisions §260, §273): a goods receipt pushes the
 received quantity into the business's commerce platform (Shopify, Square, …).
 That needs a receipt line to say WHAT arrived, and a record of each push:
 

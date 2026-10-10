@@ -1,4 +1,4 @@
-"""The Square commerce adapter (roadmap Priority 14 item 3; decisions §268).
+"""The Square commerce adapter (roadmap Priority 14 item 3; decisions §273).
 
 Held to the shared contract against tools/fake-commerce's ``square`` module,
 in process, plus what is Square's own: the pinned ``Square-Version``, the

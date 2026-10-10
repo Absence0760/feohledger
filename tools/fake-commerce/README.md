@@ -4,7 +4,7 @@ A tiny, deterministic HTTP fake of the commerce / inventory platforms FeohLedger
 pushes received stock to (Shopify, Lightspeed, Square, Cin7, WooCommerce).
 It exists so the real adapters in `backend/app/services/commerce_adapters/` run
 end to end with no merchant account (guard rail 7). Reasoning: `docs/decisions.md`
-§268; the adapter side is `backend/docs/commerce-integration.md`.
+§273; the adapter side is `backend/docs/commerce-integration.md`.
 
 ## Running it
 

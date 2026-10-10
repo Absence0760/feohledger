@@ -1,4 +1,4 @@
-"""WooCommerce commerce adapter (decisions §268; commerce-integration.md § WooCommerce).
+"""WooCommerce commerce adapter (decisions §273; commerce-integration.md § WooCommerce).
 
 Runs the shared contract against tools/fake-commerce's ``woocommerce`` module in
 process, then the provider-specific behaviour: the store URL is an SSRF-guarded

@@ -1,5 +1,5 @@
 """The commerce adapter family — registry, catalogue, credentials, base helpers,
-the mock, the contract helper and the fake-commerce harness (decisions §268).
+the mock, the contract helper and the fake-commerce harness (decisions §273).
 
 No database. Provider test modules call the same contract
 (`tests/commerce_contract.py`) the mock is held to here.

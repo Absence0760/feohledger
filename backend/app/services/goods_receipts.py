@@ -370,7 +370,7 @@ async def create_goods_receipt(
 
     await _rematch(db, org_id, po.po_number, org_settings)
     # The commerce push is PLANNED here, in this transaction, and RUN after it
-    # commits (decisions §268): one sync row per line commits with the receipt.
+    # commits (decisions §273): one sync row per line commits with the receipt.
     await commerce_sync.plan_receipt(
         db,
         org_id=org_id,
@@ -455,7 +455,7 @@ async def cancel_goods_receipt(
 
     if po_number:
         await _rematch(db, org_id, po_number, org_settings)
-    # Take back off the shelf what this receipt put on it (decisions §268).
+    # Take back off the shelf what this receipt put on it (decisions §273).
     await commerce_sync.plan_reversal(
         db,
         org_id=org_id,
