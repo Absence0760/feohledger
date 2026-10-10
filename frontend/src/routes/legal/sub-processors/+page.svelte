@@ -718,10 +718,13 @@
 			does not gain ours.
 		</li>
 		<li>
-			<strong>Commerce platforms</strong> — Shopify. When you connect your shop, each
-			goods receipt adds the received quantity of each item, by SKU, to the stock
-			at the shop location you chose (and a cancelled receipt takes it back off).
-			No supplier, bank, tax or user data is sent.
+			<strong>Commerce platforms</strong> — Shopify, Square (Block). When you
+			connect your shop or account, each goods receipt adds the received quantity
+			of each item, by SKU, to the stock at the location you chose (and a
+			cancelled receipt takes it back off). Alongside the SKU and quantity go the
+			platform's item and location identifiers, a timestamp and an opaque
+			reference of ours. No invoice, price, supplier, bank, tax or user data is
+			sent.
 		</li>
 		<li>
 			<strong>Your own WooCommerce store</strong> — when you connect it, each goods
@@ -729,13 +732,6 @@
 			WooCommerce site you run on your own WordPress hosting. Nothing personal
 			is sent, and the site and its host are yours, so neither is a
 			sub-processor of ours.
-		</li>
-		<li>
-			<strong>Your own Square account</strong> — Square (Block). When you
-			connect it, each goods receipt adds the received quantity to your own
-			account's stock: the item's SKU (to look the item up), the platform's item
-			and location identifiers, the quantity, a timestamp and an opaque reference
-			of ours. No invoice, price, supplier or personal data is sent.
 		</li>
 		<li>
 			<strong>Supplier catalogue punch-out</strong> — a supplier's own catalogue
