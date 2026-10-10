@@ -1,0 +1,16 @@
+# Direct dependencies of the fake-commerce test fixture. The image installs from
+# the generated `requirements.txt` (hash-pinned), never from this file —
+# regenerate it after editing:
+#
+#   uv pip compile requirements.in --universal --python-version 3.14 \
+#       --generate-hashes -o requirements.txt
+#
+# Dependabot also maintains that pair on its own: its pip-compile support
+# keys off a lockfile ending in `.txt` whose basename matches this file,
+# and re-applies --generate-hashes because the output already carries
+# --hash= lines.
+#
+# Keep this list minimal: fake-commerce is a deterministic in-memory fixture and
+# every dependency it grows is one more thing to pin and scan.
+fastapi>=0.142.2,<1
+uvicorn>=0.54.0,<1

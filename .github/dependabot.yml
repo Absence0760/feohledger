@@ -104,6 +104,14 @@ updates:
       day: monday
     open-pull-requests-limit: 5
 
+  # tools/fake-commerce pins the same base the same way (decisions §268).
+  - package-ecosystem: docker
+    directory: /tools/fake-commerce
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
   # Every `image:` in the two compose files is pinned `repo:tag@sha256:…`, and
   # the `docker` entries above do NOT read compose files — they read
   # Dockerfiles only. `docker-compose` is its own ecosystem; its fetcher matches
@@ -168,6 +176,18 @@ updates:
     open-pull-requests-limit: 5
     groups:
       fake-erp:
+        patterns:
+          - "*"
+
+  # fake-commerce's Python deps — the same .in/.txt pair as fake-erp's.
+  - package-ecosystem: pip
+    directory: /tools/fake-commerce
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      fake-commerce:
         patterns:
           - "*"
 

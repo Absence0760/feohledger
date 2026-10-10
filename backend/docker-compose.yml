@@ -292,6 +292,24 @@ services:
       timeout: 5s
       retries: 10
 
+  # Fake commerce / inventory platforms (Shopify, Lightspeed, Square, Cin7,
+  # WooCommerce) for the commerce adapters (decisions §268). Opt-in under the
+  # `commerce` profile (`pnpm commerce:up`). backend/.env.development sets
+  # FEOH_COMMERCE_API_BASE_OVERRIDE=http://localhost:12113, so each adapter
+  # calls http://localhost:12113/<provider key>. POST /__reset clears state.
+  # See tools/fake-commerce/.
+  fake-commerce:
+    build:
+      context: ../tools/fake-commerce
+    profiles: ["commerce"]
+    ports:
+      - "12113:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health', timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # Local SMTP sink + web inbox for outbound email. With FEOH_EMAIL_PROVIDER=smtp
   # the app's transactional mail (signup, welcome, scheduled reports) lands here
   # instead of the real internet — view rendered HTML at http://localhost:8025.

@@ -40,8 +40,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.provider_credential import ProviderCredential
 from app.services import credential_crypto
 
-# The settings blocks whose secrets live here.
-CREDENTIAL_BLOCKS: tuple[str, ...] = ("erp", "payments", "cards")
+# The settings blocks whose secrets live here (`commerce`: decisions §273).
+CREDENTIAL_BLOCKS: tuple[str, ...] = ("erp", "payments", "cards", "commerce")
 
 # Per block: the keys that are secrets. Everything else in the block is
 # configuration and stays in the JSONB. Identifiers that are not secret on their
@@ -80,6 +80,11 @@ SECRET_FIELDS: dict[str, frozenset[str]] = {
             "webhook_signing_secret",  # inbound card webhook HMAC key
         }
     ),
+    # Every field a commerce provider's spec marks `secret`
+    # (`commerce_adapters/<key>.py`, decisions §273); `tests/test_commerce_adapters.py`
+    # fails when a registered provider's secret is missing here. A new provider
+    # adds its names in the same change.
+    "commerce": frozenset(),
 }
 
 # Per block: secrets only a SERVICE flow writes — never the PUT endpoint, never
@@ -350,6 +355,14 @@ async def config_for_connection_test(
 
         public = erp_catalog.merge_erp_update(saved, public)
         same = erp_catalog.same_connection(saved, public)
+    elif block == "commerce":
+        # Same shape: the form omits the location mapping it does not render,
+        # and the stored secrets join only for the same platform at the same
+        # destination (`commerce_adapters/catalog.same_connection`, §273).
+        from app.services.commerce_adapters import catalog as commerce_catalog
+
+        public = commerce_catalog.merge_commerce_update(saved, public)
+        same = commerce_catalog.same_connection(saved, public)
     else:
         same = _comparable(block, request_cfg) == _comparable(block, saved)
     if same:
