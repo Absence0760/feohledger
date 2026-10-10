@@ -164,6 +164,7 @@ Follow exactly. Everything except steps 2 and 7 touches only new files.
 | `shopify` | Shopify (Admin GraphQL, pinned `2026-10`) | custom-app Admin API access token per shop | real; whole units only; fake `providers/shopify.py` |
 | `woocommerce` | WooCommerce (merchant's own WordPress, REST `/wp-json/wc/v3`) | consumer key + secret, HTTPS Basic | real; one synthetic location `store`; whole units; § WooCommerce |
 | `square` | Square (REST API v2, `Square-Version` pinned) | access token (Bearer) + `environment` | real; fractional quantities; § Square |
+| `lightspeed` | Lightspeed Retail (X-Series, formerly Vend) | personal access token (Bearer) + `domain_prefix` | real; whole units; receipts land as stock orders — § Lightspeed below |
 
 ### Shopify (`commerce_adapters/shopify.py`)
 
@@ -357,3 +358,100 @@ tests `backend/tests/test_commerce_square.py`, `frontend/tests-e2e/commerce/squa
   `POST /square/__forget-keys` (Square's key retention lapsing).
 - **Not built:** Square OAuth (app install) — a personal or application access
   token only; tracked with the other OAuth connections (§ Providers).
+
+## Lightspeed Retail (X-Series)
+
+`app/services/commerce_adapters/lightspeed.py`; fake `tools/fake-commerce/providers/lightspeed.py`;
+tests `backend/tests/test_commerce_lightspeed.py` and `frontend/tests-e2e/commerce/lightspeed.spec.ts`.
+
+**Connection.** Two fields: `domain_prefix` (the `<prefix>` of
+`https://<prefix>.retail.lightspeed.app`, a destination key) and `access_token`
+(a personal access token from Setup → Personal Tokens, secret). The prefix must
+be one lowercase DNS label — no dots, scheme, port or path — because it becomes
+the host the token is sent to; anything else is `config_invalid`, and the error
+names the field, never the value. Every call uses the date-based API version
+pinned as `API_VERSION` (`2026-07`): Lightspeed has frozen v2.0 ("deprecated and
+no longer receive new features"), and the consignment endpoints the write path
+uses are documented against the date-based versions. Moving the pin is a
+one-constant change, re-verified against the fake and Lightspeed's changelog.
+
+| Interface call | Lightspeed call |
+|---|---|
+| `test_connection` | `GET /api/2026-07/retailer` |
+| `list_locations` | `GET /outlets` (version-cursor pages); deleted outlets are not offered |
+| `resolve_sku` | `GET /search?type=products&sku=<lowercased>` (the index matches lowercase only), then an exact, case-insensitive SKU match over live products; none **or more than one** → `unmapped_sku` |
+| `adjust_available` | a stock order — see below |
+
+Error mapping is the shared `http_failure` (401/403 → `auth_failed`, 429 →
+`rate_limited`, 5xx → `transient`, other 4xx → `rejected`); a dropped
+connection is `transient` naming only the exception class.
+
+### Decision: received stock is a stock order, never an absolute overwrite
+
+Lightspeed offers three ways to raise on-hand at an outlet:
+
+1. **`PUT /products/{id}` with `inventory[].current_amount`** — an absolute set.
+   Lightspeed's own guide calls it "not recommended": it writes a reason-less
+   history row and corrupts cost attribution. To add a delta we would have to
+   read, add and write, and a sale rung up between the read and the write is
+   silently lost. **Rejected.**
+2. **`POST /stock_adjustments`** (date-based versions since 2026-01) — a true
+   signed delta with a reason, but the only fitting reason is a `CUSTOM` one the
+   retailer would have to create, and an adjustment carries **no reference
+   field**: nothing on it could hold our idempotency key, so a push that timed
+   out after landing could never be told apart from one that did not. **Rejected
+   for now** — it becomes the better choice the day Lightspeed adds a
+   client reference or idempotency key.
+3. **A stock order (consignment)** — what Lightspeed records a supplier delivery
+   as, with cost attribution and a proper history entry. **Chosen.**
+
+So a positive delta is a `SUPPLIER` consignment at the outlet, `status: OPEN`,
+`name` "FeohLedger goods receipt", `reference` = our idempotency key; the
+product is added with `count` and `received` = the delta; then the consignment
+is set `RECEIVED` (Lightspeed applies the stock in a background job, so
+`available_after` is not reported). A negative delta (a cancelled receipt) is a
+`RETURN` consignment with `count` = the quantity, set `SENT` — the transition at
+which a supplier return takes stock off. `provider_reference` is the consignment
+id. No `supplier_id` is sent: it is nullable, and we hold no vendor →
+Lightspeed-supplier mapping.
+
+**Idempotency by `reference`, with a bounded lookup.** Lightspeed has no
+idempotency header and its consignment list cannot filter by `reference`, so
+before writing the adapter pages through the outlet's consignments of that type
+(`type` + `outlet_id` filters, 1000 per page) for its key:
+
+- found in the terminal state (`RECEIVED` / `SENT`) → replayed, nothing written;
+- found part-way (`OPEN` — a crash or timeout between the create, the line and
+  the status call) → **resumed**: the line is added or corrected, then the
+  status is set. Never a second order;
+- found `CANCELLED` → `rejected`, not retried: someone cancelled our order in
+  Lightspeed, and re-sending would overrule them;
+- not found → created.
+
+The lookup reads at most `MAX_SCAN_PAGES` (50) pages — 50,000 stock orders of
+one type at one outlet. Past that the push is refused (`rejected`) rather than
+risk a duplicate order; the admin sees the reason on the receipt. The cost is a
+read per 1000 stock orders at the outlet on every push, acceptable at receipt
+volumes; the residual race is two concurrent pushes of the *same* key both
+missing each other's half-built order, which the sync service's
+compare-and-swap claim on the row excludes — short of a claim reclaimed after
+15 minutes while its push is somehow still running (every call has a 15 s
+timeout, so that needs a push of dozens of slow pages).
+
+**Whole units.** Consignment counts travel as numeric strings, but Lightspeed
+documents no fractional stock for X-Series products, so the adapter declares
+`supports_fractional_quantities=False` and refuses a fraction
+(`fractional_quantity`) before any call rather than let a rounded quantity
+reach the shelf count. Revisit if Lightspeed documents fractional inventory.
+
+### Why X-Series and not R-Series
+
+Lightspeed sells two unrelated retail POS products. **X-Series** (the former
+Vend) is the one Lightspeed markets globally today, has a personal-token
+connection that fits the key-based panel, and is what new Lightspeed retail
+merchants are put on. **R-Series** (the former Lightspeed Retail / Onsite line,
+mainly North America) is a different API (`api.lightspeedapp.com`, integer ids,
+its own inventory model) and is **OAuth-only**, which commerce connections do
+not support yet. It is tracked as its own entry in `docs/followups.md`, gated on
+commerce OAuth; it would be a separate `lightspeed_r` module, not a mode of this
+one.
