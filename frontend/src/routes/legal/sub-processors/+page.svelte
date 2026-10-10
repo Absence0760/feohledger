@@ -718,13 +718,13 @@
 			does not gain ours.
 		</li>
 		<li>
-			<strong>Commerce platforms</strong> — Shopify, Square (Block). When you
-			connect your shop or account, each goods receipt adds the received quantity
-			of each item, by SKU, to the stock at the location you chose (and a
-			cancelled receipt takes it back off). Alongside the SKU and quantity go the
-			platform's item and location identifiers, a timestamp and an opaque
-			reference of ours. No invoice, price, supplier, bank, tax or user data is
-			sent.
+			<strong>Commerce platforms</strong> — Shopify, Square (Block), Lightspeed
+			Retail (X-Series). When you connect your shop or account, each goods receipt
+			adds the received quantity of each item, by SKU, to the stock at the
+			location you chose (and a cancelled receipt takes it back off). Alongside
+			the SKU and quantity go the platform's item and location identifiers, a
+			timestamp or a note naming {OPERATOR.serviceName}, and an opaque reference
+			of ours. No invoice, price, supplier, bank, tax or user data is sent.
 		</li>
 		<li>
 			<strong>Your own WooCommerce store</strong> — when you connect it, each goods
@@ -900,6 +900,10 @@
 				<tr>
 					<th scope="row">9 October 2026</th>
 					<td>Square (Block) is added to § 4 as a commerce platform you can connect: a goods receipt adds the received quantity to your own Square account's stock.</td>
+				</tr>
+				<tr>
+					<th scope="row">10 October 2026</th>
+					<td>Lightspeed Retail (X-Series) is added to § 4 as a commerce platform connection: your own store, receiving received-stock quantities against its own product identifiers.</td>
 				</tr>
 			</tbody>
 		</table>
