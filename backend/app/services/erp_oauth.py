@@ -13,13 +13,12 @@ for every such adapter (``erp_adapters/oauth_base.OAuthErpAdapter``):
 
 The routes live in ``app/api/erp_oauth.py``.
 
-Stored state — ``Organization.settings.erp.oauth``
---------------------------------------------------
-::
+Stored state — two halves, written together
+-------------------------------------------
+The consent METADATA lives in ``Organization.settings.erp.oauth``::
 
     {
         "provider": "quickbooks_online",
-        "access_token": "...", "refresh_token": "...",
         "expires_at": "<ISO-8601 UTC>",
         "refresh_token_expires_at": "<ISO-8601 UTC>" | absent,
         "external_tenant_id": "<realmId / Xero tenantId / Sage business id>",
@@ -29,18 +28,23 @@ Stored state — ``Organization.settings.erp.oauth``
         "needs_reconnect": true | absent,
     }
 
-Only this module writes it (the callback, the refresher, disconnect).
-Every read sees it masked to ``{"connected": bool}``
-(``erp_adapters/catalog.mask_erp_config``), and a settings save never takes
-it from the request and keeps the stored one (``catalog.merge_erp_update``),
-even across a switch of ERP type: the block names its ``provider``, and
-:func:`get_access_token` refuses any other.
+The TOKENS are sealed in ``provider_credentials`` with the block's other
+secrets, at the service-only paths ``oauth.access_token`` and
+``oauth.refresh_token`` (``provider_credentials.SERVICE_SECRET_FIELDS``,
+decisions §266). Only this module writes either half (the callback, the
+refresher, disconnect), always through ``provider_credentials.update_secrets``
+and under the org row lock, so the two cannot disagree. The tokens are read
+here alone — never merged into an adapter's config — and every settings read
+sees the metadata as ``{"connected": bool}`` (``catalog.public_erp_config``).
+A settings save never takes the metadata from the request and keeps the stored
+block (``catalog.merge_erp_update``), even across a switch of ERP type: the
+block names its ``provider``, and :func:`get_access_token` refuses any other.
 
 How the refresher finds the org — and why it can't be pointed at another one
 ---------------------------------------------------------------------------
 An adapter is built from ``settings.erp`` alone and holds no DB session, so the
-block carries ``org_id``. The refresher never trusts the tokens in the adapter's
-config: it re-reads the org row and uses the **stored** block. Since an admin can
+block carries ``org_id``. The adapter's config carries no tokens at all: the
+refresher re-reads the org row and the sealed tokens and uses those. Since an admin can
 hand ``POST /organization/test-erp`` an arbitrary config, ``org_id`` alone would
 let tenant A's admin borrow tenant B's QuickBooks token. So the block also
 carries ``connection_id`` — 128 random bits minted at consent, never returned by
@@ -62,16 +66,17 @@ token. Two layers:
    exists). A caller that loses the lock polls the stored block until the
    winner has written a fresh token (bounded by :data:`_LOCK_WAIT_SECONDS`).
 2. **A compare-and-swap write.** The rotated tokens are persisted under a
-   short ``SELECT … FOR UPDATE`` (``tenant.lock_organization``-style), and only
-   if the stored refresh token is still the one this refresh spent. If it
+   short ``SELECT … FOR UPDATE`` of the org row — the lock every credential
+   writer takes first — and only if the sealed refresh token is still the one
+   this refresh spent. If it
    changed (the lock expired under a hung call, or a reconnect landed), the
    stored value wins and is used. This is what makes the lock's best-effort
    release (GET-then-DEL, no Lua) safe.
 
 Client credentials
 ------------------
-A tenant may bring its own provider app: ``settings.erp.client_id`` /
-``client_secret`` while ``settings.erp.type`` names the provider. Otherwise the
+A tenant may bring its own provider app: ``settings.erp.client_id`` plus the
+sealed ``client_secret`` while ``settings.erp.type`` names the provider. Otherwise the
 platform app's ``FEOH_`` settings named by the spec. Neither → the provider is
 unavailable (fail closed, no fallback). The source used at consent is recorded
 as ``client_source`` and the refresher uses the same one: a token issued to one
@@ -79,14 +84,13 @@ app cannot be refreshed with another's credentials.
 
 Tokens at rest
 --------------
-``access_token`` / ``refresh_token`` are stored encrypted
-(``services/erp_credentials``, AES-256-GCM per field), as is the tenant's own
-``client_secret``. This module encrypts in :func:`new_connection_block` and the
-compare-and-swap write, and decrypts in :func:`_stored_block`, :func:`revoke`
-and the credential / header helpers. A stored value this server cannot decrypt
-raises :class:`ErpCredentialUnreadableError` — a refusal, never a garbage token
-sent to the provider, and never a ``needs_reconnect`` mark (the connection may
-be fine; the keyring is not).
+Sealed under the app KMS key like every provider credential
+(``services/provider_credentials``). When the store cannot be opened (KMS
+unreachable, a bad envelope) this module raises
+:class:`ErpCredentialUnreadableError` — a refusal, never a garbage token sent
+to the provider, never a fall-back to ``mock``, and never a ``needs_reconnect``
+mark (the connection may be fine; the store is not). The adapters turn it into
+a failed result, so an ERP send lands at ``failed`` and is retryable.
 
 Nothing here logs a token, a code, or the provider's response body.
 """
@@ -113,9 +117,9 @@ from sqlalchemy import select
 
 from app import redis as app_redis
 from app.config import settings
-from app.services import erp_credentials
+from app.services import provider_credentials
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.erp_adapters.oauth_base import OAuthProviderSpec
-from app.utils.credential_crypto import CredentialCryptoError
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +135,11 @@ CALLBACK_PATH = "/api/erp/oauth/callback"
 #: Refresh when the access token has less than this left. Covers clock skew and
 #: a request that starts just before expiry.
 REFRESH_MARGIN = timedelta(seconds=120)
+
+#: Where the tokens are sealed (``provider_credentials.SERVICE_SECRET_FIELDS``).
+ACCESS_TOKEN_PATH = "oauth.access_token"
+REFRESH_TOKEN_PATH = "oauth.refresh_token"
+TOKEN_PATHS: tuple[str, ...] = (ACCESS_TOKEN_PATH, REFRESH_TOKEN_PATH)
 
 _STATE_PREFIX = "erp:oauth:state:"
 _LOCK_PREFIX = "erp:oauth:refresh-lock:"
@@ -169,17 +178,17 @@ class ErpTokenRefreshError(ErpNotConnectedError):
 
 
 class ErpCredentialUnreadableError(ErpNotConnectedError):
-    """A stored token or client secret did not decrypt on this server.
+    """The sealed tokens or client secret could not be opened on this server.
 
-    A key id missing from ``FEOH_CREDENTIAL_ENCRYPTION_KEYS`` (dropped before
-    the re-encrypt ran) or a tampered row. Fixed text, no value.
+    ``credential_crypto.CredentialCryptoError`` underneath: KMS unreachable or a
+    bad envelope. Fixed text, no value.
     """
 
     def __init__(self, provider_key: str):
         RuntimeError.__init__(
             self,
-            f"{provider_key}: stored ERP credentials could not be decrypted "
-            "(operator: check FEOH_CREDENTIAL_ENCRYPTION_KEYS)",
+            f"{provider_key}: stored ERP credentials could not be opened "
+            "(the credential store is unavailable)",
         )
         self.provider_key = provider_key
 
@@ -248,14 +257,7 @@ def _tenant_credentials(spec: OAuthProviderSpec, erp_settings: Any) -> ClientCre
     if not isinstance(erp_settings, dict) or erp_settings.get("type") != spec.key:
         return None
     cid = str(erp_settings.get("client_id") or "").strip()
-    try:
-        secret = erp_credentials.decrypt_secret(
-            erp_settings.get("client_secret"), key="client_secret"
-        )
-    except CredentialCryptoError:
-        logger.warning("erp_oauth: %s stored client secret unreadable", spec.key)
-        raise ErpCredentialUnreadableError(spec.key) from None
-    secret = str(secret or "").strip()
+    secret = str(erp_settings.get("client_secret") or "").strip()
     if cid and secret:
         return ClientCredentials(cid, secret, "tenant")
     return None
@@ -276,9 +278,9 @@ def resolve_client_credentials(
 
     ``source`` pins one side (the refresher passes the consent's
     ``client_source``); None prefers the tenant's own app, then the platform's.
-    ``erp_settings`` is the STORED block; the tenant's ``client_secret`` is
-    decrypted here, and :class:`ErpCredentialUnreadableError` raised when it
-    does not decrypt.
+    ``erp_settings`` is the RESOLVED block (``provider_credentials.
+    provider_config`` / :func:`resolved_erp`), so the tenant's sealed
+    ``client_secret`` is already in it.
     """
     if source == "tenant":
         return _tenant_credentials(spec, erp_settings)
@@ -397,16 +399,12 @@ class _TokenEndpointError(Exception):
 def token_headers(spec: OAuthProviderSpec, erp_settings: Any) -> dict[str, str]:
     """Accept + the spec's ``extra_token_headers`` (e.g. a subscription key).
 
-    Raises :class:`ErpCredentialUnreadableError` when a stored secret the
-    headers need does not decrypt.
+    ``erp_settings`` is the resolved block, so a sealed secret the headers need
+    (Blackbaud's subscription key) is already in it.
     """
     headers = {"Accept": "application/json"}
     if spec.extra_token_headers is not None:
-        try:
-            plain = erp_credentials.decrypt_erp_config(erp_settings)
-        except CredentialCryptoError:
-            raise ErpCredentialUnreadableError(spec.key) from None
-        extra = spec.extra_token_headers(plain if isinstance(plain, dict) else {})
+        extra = spec.extra_token_headers(erp_settings if isinstance(erp_settings, dict) else {})
         headers.update({str(k): str(v) for k, v in (extra or {}).items() if v})
     return headers
 
@@ -487,43 +485,78 @@ async def exchange_code(
         raise ErpTokenRefreshError(spec.key, "network_error") from None
 
 
-def new_connection_block(
+def _split_token_fields(fields: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """``_token_fields`` output as (JSONB metadata, sealed-store paths → token)."""
+    meta = {k: v for k, v in fields.items() if k not in ("access_token", "refresh_token")}
+    sealed = {
+        ACCESS_TOKEN_PATH: str(fields.get("access_token") or ""),
+        REFRESH_TOKEN_PATH: str(fields.get("refresh_token") or ""),
+    }
+    return meta, {k: v for k, v in sealed.items() if v}
+
+
+def new_connection(
     *,
     spec: OAuthProviderSpec,
     token_response: dict,
     external_tenant_id: str,
     org_id: uuid.UUID,
     client_source: str,
-) -> dict[str, Any]:
-    """The ``settings.erp.oauth`` block for a fresh consent, tokens encrypted."""
-    return {
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """A fresh consent: the ``settings.erp.oauth`` metadata block, and the
+    tokens to seal (``provider_credentials`` path → value)."""
+    meta, sealed = _split_token_fields(_token_fields(token_response))
+    block = {
         "provider": spec.key,
-        **erp_credentials.encrypt_oauth_tokens(_token_fields(token_response)),
+        **meta,
         "external_tenant_id": external_tenant_id,
         "org_id": str(org_id),
         "connection_id": secrets.token_urlsafe(16),
         "client_source": client_source,
         "connected_at": _iso(datetime.now(UTC)),
     }
+    return block, sealed
+
+
+def with_tokens(oauth: Any, sealed: dict[str, object]) -> dict:
+    """The metadata block with the sealed tokens merged in (in memory only)."""
+    out = dict(oauth) if isinstance(oauth, dict) else {}
+    for path in TOKEN_PATHS:
+        value = sealed.get(path)
+        if value:
+            out[path.split(".", 1)[1]] = value
+    return out
+
+
+async def resolved_erp(org_id: uuid.UUID, org_settings: Any, db) -> tuple[dict, dict]:
+    """``(settings.erp resolved for an adapter, the OAuth block WITH its tokens)``.
+
+    One read of the sealed store. Raises ``CredentialCryptoError`` when it
+    cannot be opened; the caller decides what that means for it.
+    """
+    sealed = await provider_credentials.load_secrets(org_id, "erp", db=db)
+    public = (org_settings or {}).get("erp") if isinstance(org_settings, dict) else None
+    if not isinstance(public, dict):
+        public = {}
+    erp = provider_credentials.inject_secrets(
+        "erp", provider_credentials.strip_secrets("erp", public), sealed
+    )
+    return erp, with_tokens(public.get("oauth"), sealed)
 
 
 async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bool:
-    """Best-effort revocation of the stored refresh token. True when the provider
-    confirmed it; False when it has no revoke endpoint or the call failed."""
+    """Best-effort revocation of the refresh token. True when the provider
+    confirmed it; False when it has no revoke endpoint or the call failed.
+
+    ``erp_settings`` is the resolved block and ``oauth`` carries the tokens
+    (:func:`resolved_erp`), both read before the disconnect cleared them.
+    """
     url = revoke_endpoint(spec)
-    try:
-        oauth = erp_credentials.decrypt_oauth_tokens(oauth)
-    except CredentialCryptoError:
-        logger.warning("erp_oauth: %s revoke skipped, stored token unreadable", spec.key)
-        return False
     token = oauth.get("refresh_token") or oauth.get("access_token")
     if not url or not token:
         return False
-    try:
-        creds = resolve_client_credentials(spec, erp_settings, source=oauth.get("client_source"))
-        headers = token_headers(spec, erp_settings)
-    except ErpCredentialUnreadableError:
-        return False
+    creds = resolve_client_credentials(spec, erp_settings, source=oauth.get("client_source"))
+    headers = token_headers(spec, erp_settings)
     if creds is None:
         return False
     try:
@@ -578,38 +611,30 @@ def _identity(spec: OAuthProviderSpec, erp_config: dict) -> tuple[uuid.UUID, str
     return org_id, connection_id
 
 
-def _stored_block(
-    spec: OAuthProviderSpec, org_settings: Any, connection_id: str
+def _is_connection(spec: OAuthProviderSpec, oauth: Any, connection_id: str) -> bool:
+    """Is the stored metadata block the connection to ``spec`` named?"""
+    return (
+        isinstance(oauth, dict)
+        and oauth.get("provider") == spec.key
+        and hmac.compare_digest(str(oauth.get("connection_id") or ""), connection_id)
+    )
+
+
+async def _resolved_or_unreadable(
+    spec: OAuthProviderSpec, org_id: uuid.UUID, org_settings: Any, session
 ) -> tuple[dict, dict]:
-    """``(settings.erp, settings.erp.oauth)`` when it is the connection named.
-
-    ``erp`` is as stored (its secrets encrypted); ``oauth`` comes back with its
-    tokens DECRYPTED.
-    """
-    erp = (org_settings or {}).get("erp") if isinstance(org_settings, dict) else None
-    oauth = erp.get("oauth") if isinstance(erp, dict) else None
-    if (
-        not isinstance(oauth, dict)
-        or oauth.get("provider") != spec.key
-        or not hmac.compare_digest(str(oauth.get("connection_id") or ""), connection_id)
-        or oauth.get("needs_reconnect")
-        or not oauth.get("refresh_token")
-    ):
-        raise ErpNotConnectedError(spec.key)
-    return erp, _decrypted_block(spec, oauth)
-
-
-def _decrypted_block(spec: OAuthProviderSpec, oauth: dict) -> dict:
     try:
-        return erp_credentials.decrypt_oauth_tokens(oauth)
+        return await resolved_erp(org_id, org_settings, session)
     except CredentialCryptoError:
-        logger.warning("erp_oauth: %s stored token unreadable (credential keyring)", spec.key)
+        logger.warning("erp_oauth: %s sealed credentials could not be opened", spec.key)
         raise ErpCredentialUnreadableError(spec.key) from None
 
 
 async def _read_stored(
     spec: OAuthProviderSpec, org_id: uuid.UUID, connection_id: str
 ) -> tuple[dict, dict]:
+    """``(settings.erp resolved, the OAuth block with its tokens)`` when the
+    stored connection is the one named and still usable."""
     from app.database import control_session_factory
     from app.models.organization import Organization
 
@@ -617,7 +642,25 @@ async def _read_stored(
         org_settings = (
             await session.execute(select(Organization.settings).where(Organization.id == org_id))
         ).scalar_one_or_none()
-    return _stored_block(spec, org_settings, connection_id)
+        meta = ((org_settings or {}).get("erp") or {}) if isinstance(org_settings, dict) else {}
+        oauth_meta = meta.get("oauth") if isinstance(meta, dict) else None
+        if not _is_connection(spec, oauth_meta, connection_id) or oauth_meta.get("needs_reconnect"):
+            raise ErpNotConnectedError(spec.key)
+        erp, oauth = await _resolved_or_unreadable(spec, org_id, org_settings, session)
+        # The two reads are separate statements: a reconnect committing between
+        # them would pair this connection's metadata with the NEW consent's
+        # tokens (another company's books). Re-read the metadata after the
+        # tokens; a changed connection is not the one this adapter was built for.
+        recheck = (
+            await session.execute(select(Organization.settings).where(Organization.id == org_id))
+        ).scalar_one_or_none()
+        recheck_erp = (recheck or {}).get("erp") if isinstance(recheck, dict) else None
+        recheck_oauth = recheck_erp.get("oauth") if isinstance(recheck_erp, dict) else None
+        if not _is_connection(spec, recheck_oauth, connection_id):
+            raise ErpNotConnectedError(spec.key)
+    if not oauth.get("refresh_token"):
+        raise ErpNotConnectedError(spec.key)
+    return erp, oauth
 
 
 async def _compare_and_swap(
@@ -627,8 +670,16 @@ async def _compare_and_swap(
     spent_refresh_token: str,
     updates: dict[str, Any],
 ) -> dict:
-    """Write ``updates`` into the stored block iff it still holds
-    ``spent_refresh_token``. Returns the block now stored either way."""
+    """Write ``updates`` iff the sealed refresh token is still
+    ``spent_refresh_token``. Returns the block (with tokens) now stored either way.
+
+    Tokens in ``updates`` go to the sealed store through
+    ``provider_credentials.update_secrets``; the rest is metadata in
+    ``settings.erp.oauth``. Both under the org row lock, in one transaction.
+    A token rotation is the system keeping a connection alive, not a change of
+    credential by a person, so it writes no audit row; consent and disconnect
+    do.
+    """
     from sqlalchemy.orm.attributes import flag_modified
 
     from app.database import control_session_factory
@@ -644,32 +695,32 @@ async def _compare_and_swap(
             raise ErpNotConnectedError(spec.key)
         current = dict(org.settings or {})
         erp = dict(current.get("erp") or {})
-        oauth = erp.get("oauth")
-        if (
-            not isinstance(oauth, dict)
-            or oauth.get("provider") != spec.key
-            or not hmac.compare_digest(str(oauth.get("connection_id") or ""), connection_id)
-        ):
+        if not _is_connection(spec, erp.get("oauth"), connection_id):
             await session.rollback()
             raise ErpNotConnectedError(spec.key)
         try:
-            plain = _decrypted_block(spec, oauth)
+            _, stored = await _resolved_or_unreadable(spec, org_id, current, session)
         except ErpCredentialUnreadableError:
             await session.rollback()
             raise
-        if plain.get("refresh_token") != spent_refresh_token:
+        if stored.get("refresh_token") != spent_refresh_token:
             # Someone else already rotated it; theirs is the live token.
             await session.rollback()
-            return plain
-        # Stored with its tokens encrypted (a legacy plaintext block becomes
-        # uniform on its first refresh); handed back decrypted.
-        new_oauth = {**plain, **updates}
-        erp["oauth"] = erp_credentials.encrypt_oauth_tokens(new_oauth)
+            return stored
+        meta, sealed = _split_token_fields(updates)
+        try:
+            if sealed:
+                await provider_credentials.update_secrets(session, org_id, "erp", sealed, [])
+        except CredentialCryptoError:
+            await session.rollback()
+            logger.warning("erp_oauth: %s rotated token could not be sealed", spec.key)
+            raise ErpCredentialUnreadableError(spec.key) from None
+        erp["oauth"] = {**erp["oauth"], **meta}
         current["erp"] = erp
         org.settings = current
         flag_modified(org, "settings")
         await session.commit()
-        return new_oauth
+        return {**stored, **updates}
 
 
 async def _acquire_lock(key: str) -> str | None:
@@ -779,6 +830,18 @@ async def get_access_token(
                 # "reconnect required" instead of retrying a dead token forever.
                 await _compare_and_swap(
                     spec, org_id, connection_id, spent, {"needs_reconnect": True}
+                )
+                # Rotation is routine and unaudited; a connection going down is
+                # not. Best-effort, after the commit.
+                from app.services.audit_dispatch import dispatch_auth_audit
+
+                await dispatch_auth_audit(
+                    organization_id=org_id,
+                    actor_id=None,
+                    action="organization.erp_reconnect_required",
+                    entity_id=org_id,
+                    entity_type="organization",
+                    details={"provider": spec.key},
                 )
                 logger.warning("erp_oauth: %s refresh refused for org %s", spec.key, org_id)
                 raise ErpNotConnectedError(spec.key) from None

@@ -699,9 +699,9 @@ Per-tenant secrets:
 
 | Endpoint | Settings path |
 |---|---|
-| `/api/payments/webhook/...` | `Organization.settings.payments.webhook_secret` (verified inside the adapter's `parse_webhook`). The route rejects `provider == "mock"` outright before any tenant lookup — the `mock` adapter's `parse_webhook` does no signature verification and `mock` is the default provider for un-configured tenants, so serving it publicly would accept forged status transitions (mock never delivers real webhooks). Mirrors `cards.card_webhook`'s `lithic`/`nium` allowlist and the billing route's boot-time mock refusal. |
-| `/api/cards/webhook/{provider}` | `Organization.settings.cards.webhook_signing_secret` |
-| `/api/erp/webhook/{erp_type}` | `Organization.settings.erp.webhook_signing_secret` |
+| `/api/payments/webhook/...` | `payments.webhook_secret`, sealed in `provider_credentials` (verified inside the adapter's `parse_webhook`). The route rejects `provider == "mock"` outright before any tenant lookup — the `mock` adapter's `parse_webhook` does no signature verification and `mock` is the default provider for un-configured tenants, so serving it publicly would accept forged status transitions (mock never delivers real webhooks). Mirrors `cards.card_webhook`'s `lithic`/`nium` allowlist and the billing route's boot-time mock refusal. |
+| `/api/cards/webhook/{provider}` | `cards.webhook_signing_secret`, sealed in `provider_credentials` |
+| `/api/erp/webhook/{erp_type}` | `erp.webhook_signing_secret`, sealed in `provider_credentials` |
 | `/api/email-intake/inbound/{provider}` | `FEOH_EMAIL_INTAKE_SIGNING_SECRET` (process-level HMAC key; verified in `email_intake.verify_signature`). Dedupe is `is_event_already_processed("email_intake", "<org_id>:<message_id>")` — per tenant, since one Message-ID can be addressed to several tenants (`email_intake.dedup_event_id`) — claimed right after tenant resolution and released via `release_event_claim` if invoice creation fails downstream (mirrors `api/cards.py`'s claim/release discipline) so a redelivery can retry. Recipient-token match uses `hmac.compare_digest`. |
 | `/api/peppol/inbound/{tenant_slug}` | `FEOH_PEPPOL_INBOUND_SIGNING_SECRET` (process-level HMAC key; verified by `peppol_receive.verify_inbound_signature`). Dedupe is the DB `uq_peppol_message_id` index, not Redis. |
 | `/api/catalogs/punchout/return/{tenant_slug}` | `FEOH_PUNCHOUT_RETURN_SIGNING_SECRET` (process-level HMAC key; verified in `catalogs._verify_return_signature`). Correlation is the BuyerCookie matched to a pending `PunchoutSession`. |
@@ -895,11 +895,11 @@ Stored in `Organization.settings`:
   "company": { "name", "tax_id", "address", "phone", "website", "logo_url",
                "vat_registration_number", "companies_house_number" },
   "invoice_defaults": { "currency", "payment_terms", "number_prefix", "default_gl_account", "default_cost_center" },
-  "erp": { "type", "integration_method", "credentials": { ... }, "webhook_signing_secret": "..." },
+  "erp": { "type", "integration_method", "base_url", "client_id", ... },   // secrets: see below
   "extraction": { "program_type": "platform"|"byok", "provider", "api_key", "model" },
   "cards": { "enabled": true|false, "program_type": "platform"|"byok", "provider", "region": "US"|"EU"|...,
-             "default_expiry_days": 30, "webhook_signing_secret": "...", ... },
-  "payments": { "provider", "credentials": { ... }, "webhook_secret": "...", "cfo_approval_above": Decimal,
+             "default_expiry_days": 30, ... },
+  "payments": { "provider", "org_id", "originating_account_id", "cfo_approval_above": Decimal,
                 "require_run_segregation": true, "mode": "processor"|"record_only",
                 "nacha": { "company_name", "company_id", "odfi_routing", "bank_name" } },
   "mfa": { "required": true|false },
@@ -911,7 +911,19 @@ Stored in `Organization.settings`:
 }
 ```
 
-The three `webhook_*_secret` fields are HMAC keys used by the inbound webhook handlers — see "Webhook security" above.
+**Provider secrets are not in this JSONB.** The secret keys of `erp`, `payments`
+and `cards` (API keys, OAuth client secrets, account tokens and the three
+`webhook_*_secret` HMAC keys — catalogue `services/provider_credentials.SECRET_FIELDS`)
+are envelope-encrypted under the app KMS key in the control-plane
+`provider_credentials` table. Read them ONLY through
+`provider_credentials.provider_config(org, block)` (or `resolve_block` /
+`settings_with_secrets`) — never `org.settings[block]["api_key"]`, which no longer
+holds anything. Write them only through `PUT /api/organization/credentials/{block}`;
+`PATCH /api/organization` refuses them. A mock-DB test opts into the
+`provider_store_from_settings` fixture; a realdb test seals what it needs with
+`realdb.store_provider_secrets`. See `docs/erp-integration.md` § Where the
+credentials live. `extraction.api_key` and `sso.client_secret` are still plain
+JSONB (write-only for SSO).
 
 ## Exception types
 

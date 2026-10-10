@@ -10418,7 +10418,7 @@ not built, so a Growth tenant can save and push a Merge-routed config; the
 follow-up's trigger (the first paid Growth customer or the fourth Merge
 connection) is unchanged.
 
-*Update 2026-10-08:* §264 makes Sage Intacct, SYSPRO, Sage Business Cloud
+*Update 2026-10-08:* §269 makes Sage Intacct, SYSPRO, Sage Business Cloud
 Accounting and Blackbaud direct adapters, so they come under `erp_integrations`
 on Growth like QuickBooks Online and Xero. Merge.dev on Scale remains the route
 only for ERPs without a direct adapter.
@@ -10747,7 +10747,215 @@ gain in the threat this answers. *A content hash for the in-app path*: the
 client already holds `updated_at`, and an approver looking at the full modal
 saw every field, not a chosen subset.
 
-## 264. Direct ERP adapters for the top ERPs in the US and South Africa, posting by the ERP's own ids (2026-10-08)
+## 264. A vendor that stops being payable takes its live virtual cards with it (2026-10-08)
+
+**Context.** Payment runs and `POST /api/cards/generate` refuse a vendor whose status is not `active` or which is `payments_blocked`, but both gates only stop the *next* card. A virtual card is bearer-spendable until closed, so a card minted while the vendor was payable stayed live after the vendor was rejected, deactivated, blocked or sanctions-matched. The follow-up named "inactive, rejected or merged"; the code says otherwise on two counts. A merge re-homes every duplicate's cards onto the canonical, so the retired duplicate holds none — the real case is a merge onto a canonical that is itself un-payable. And the most dangerous door, a sanctions match, sets `payments_blocked` from `screen_vendor_record`, reached from roughly ten call sites, none of which touched cards.
+
+**Decision.** One helper, `services/vendor_card_revocation.revoke_vendor_cards`, called in the caller's transaction by every door that makes a vendor un-payable (PATCH `status`, `/reject`, `/bulk/status` reject, `/block`, a sanctions match inside `screen_vendor_record`, the consolidation merge), plus an idempotent retry `POST /api/vendors/{id}/cancel-cards` (`vendor.manage` or `vendor.block`; 409 on a payable vendor). "Un-payable" is the card gates' own predicate: `status != "active"` or `payments_blocked`. Per card, with one audit row each:
+
+- live and **unbooked** (no payment, or a `voided` / `failed` / `cancelled` one) → cancelled provider-first through `card_issuance.cancel_card_at_provider`, `card.cancelled`;
+- behind a **live payment** → left live, `card.cancel_deferred_to_void`, reported `requires_payment_void`;
+- provider did not confirm → left live, `card.cancel_failed` with the outcome tag, reported `not_closed`;
+- spent, expired, already cancelled → untouched.
+
+**Why a card behind a live payment is not cancelled.** A run's card leg books the payment `completed` and the invoice `payment_scheduled` at mint. Killing that card alone leaves the books saying paid while the vendor can never be paid — the half-reversal `POST /api/cards/{id}/cancel` is deliberately unwired against (§96), and the reason that route gates on `payment.void` (§132). The payment void closes the card *and* reopens the invoice, under `payment.void`; a vendor-status edit, gated on `vendor.manage` / `vendor.block`, must not become a second door to that duty. This is the same posture an in-flight ACH payment to a deactivated vendor already has: deactivation stops future money, the void handles booked money. The card is never silently skipped — it is audited and reported, and the UI says "void that payment".
+
+**Why a provider failure does not roll back the status change.** Deactivating, rejecting or blocking a vendor is the defensive action. Refusing it because a card processor is down would also keep the vendor payable by the next run — strictly worse. So the write commits and the failure is made visible instead: per-card on the response (`card_revocation` / `card_revocations`), a `card.cancel_failed` audit row, a warning toast on web and a snackbar on mobile, and the retry endpoint (the vendor modal's **Cancel live cards**). `card_cancel_disposition` classifies any unknown outcome as retryable, so a new failure tag can never read as closed.
+
+**Why in the caller's transaction, not `services/post_commit`.** That queue is best-effort by contract — a failing job is logged by class name and dropped — and its work is lost if the process dies after the commit, which is exactly "vendor inactive, card live, nothing recorded". Running inside the transaction matches the payment void's card leg and the sanctions screen the vendor write already awaits: a crash before commit rolls the status change back and leaves at worst "dead at the provider, live in our DB" (every adapter treats re-cancelling a closed card as success). The cost is provider latency on the vendor row's lock, bounded by the adapters' HTTP timeouts and paid only when the vendor holds live cards. Each card row is taken `FOR UPDATE`, so concurrent callers serialize and the second sees `cancelled`.
+
+**Rejected.** Cancelling every live card including payment-backed ones (the books/SoD problems above); auto-voiding the payment behind the card (a `vendor.manage` holder would void payments an org withheld from them); failing the vendor write on any provider error (keeps the vendor payable); a post-commit job (cannot report its failure).
+
+**Residual.** `/cards/generate` reads the vendor's status without a vendor-row lock, so a mint racing a reject can still land a live card on the just-rejected vendor after the revocation query ran; `cancel-cards` recovers it, and the durable fix is a vendor-row lock in the mint path.
+
+Tests: `backend/tests/test_vendor_card_revocation.py`. Docs: `backend/docs/vendor-management.md` § Leaving `active` cancels the vendor's live cards, `backend/docs/virtual-cards.md`.
+
+## 265. A direct card mint locks the invoice and its vendor, checks, mints and commits one invoice at a time (2026-10-08)
+
+`POST /api/cards/generate` read every gate unlocked (payable status, live card,
+live payment, blocking exception, vendor status) and only then called the card
+provider. The unique index `uq_virtual_cards_one_live_per_invoice` refuses our
+ROW, not the provider's card, so it was no defence: two concurrent requests both
+passed the live-card check, the first committed, and the second then counted
+that card into `reissue_seq` and sent the provider a FRESH idempotency key. The
+provider issued a second real card that the index refused to record, so it was
+spendable and nothing in FeohLedger governed it. A payment dispatch was no
+barrier either: it holds the invoice `FOR NO KEY UPDATE`, which a card INSERT's
+`FOR KEY SHARE` does not conflict with.
+
+- **Lock, then check, then mint, per invoice.** `card_issuance.lock_invoices_for_mint`
+  takes the vendor `FOR SHARE` and then the invoice `FOR NO KEY UPDATE`, and
+  every gate runs after it as a fresh statement. Under READ COMMITTED a request
+  that waited sees the winner's card and skips it (`201`, `total: 0`), so the
+  provider is called once. Vendor before invoice is `vendor_merge`'s order, so
+  there is no cycle with it. The invoice lock is dispatch's own mode
+  (`_lock_payment_invoice`), so a mint and a dispatch serialise.
+- **The vendor lock is `FOR SHARE`, not `FOR UPDATE`.** It blocks the vendor
+  UPDATE that a reject, deactivate, block, bank-change approval or rescreen
+  makes until the card commits, so the revocation that runs in that write's
+  transaction (§264) sees the card. Two mints for one vendor still run side by
+  side, and FK inserts on the vendor are not blocked. `FOR UPDATE` would
+  serialise both for no gain.
+- **Bounded per §233.** `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS`, in a savepoint,
+  before any provider call. A timed-out invoice is skipped with nothing minted;
+  a request that minted nothing and timed out on at least one invoice answers
+  `409 invoice_locked`. Retry-safe either way.
+- **Commit per invoice.** The provider call happens while the lock is held, as
+  in dispatch, so the lock lasts for one provider call rather than an unbounded
+  batch. Holding every lock for the whole request would have stalled every
+  invoice writer and vendor edit on the batch for N provider calls. Per-invoice
+  commits also make each issued card durable at once; before, a failure late in
+  a batch rolled back rows for cards that already existed at the provider. Skips
+  were already per invoice, so no atomicity was lost.
+- **A live payment is a claim, refused like a live card.** `payment_scheduled`
+  is payable, so an invoice whose ACH had settled but was not yet `paid` was
+  carded on top of it. Without this the lock would only order the mint after the
+  payment it should defer to. A pending `virtual_card` run payment is refused
+  too: the run mints at execute.
+- **Entity-scoped.** The locked SELECT goes through `apply_entity_scope`. The
+  route selected by id alone, so a caller in one subsidiary could card another's
+  invoice.
+- **Not serialised:** an insert that references the invoice (a new
+  payment-blocking exception) takes only `FOR KEY SHARE`. Dispatch has the same
+  exposure; the main source of a fraud flag, a bank-change approval, updates the
+  vendor row and so waits on the vendor lock.
+
+**Rejected.** *Relying on the unique index plus the provider key*: the key is
+derived from a count the winner's commit changes, so the loser's key differs.
+*Claiming the slot with a placeholder row before the provider call* (so nothing
+is locked during the call): it needs a new card state that every live-card
+reader would have to learn, for a lock that now lasts one provider call.
+*Locking every invoice up front and committing once*: lock lifetime grows with
+the batch and has no upper bound.
+
+**The gate is `payment.execute`, not a role list.** Minting a funded card is
+the card rail's equivalent of executing a run, but the route was on
+`require_roles(admin, ap_manager, cfo)`, so an org that withheld
+`payment.execute` from a custom role could not withhold this door. It now gates
+on `require_permission(payment.execute)`; every system role the role list
+admitted holds that permission by default, so no system-role user loses access.
+Pinned in `tests/test_sod_endpoint_wiring.py`.
+
+## 266. Provider credentials are sealed under the app KMS key and write-only (2026-10-08)
+
+**Context.** The `erp`, `payments` and `cards` blocks of `Organization.settings` held live third-party secrets as plain JSONB: Merge.dev keys and account tokens, OAuth client secrets, NetSuite token secrets, processor and issuer API keys, and the three inbound webhook signing secrets. RDS storage encryption was their only protection, and the admin settings page read them back verbatim. `erp-integration.md` called this "encrypted at rest", which overstated it. The QuickBooks connect flow would have added a five-year refresh token with full access to the customer's books.
+
+**Decision.**
+- **Envelope encryption in a control-plane table.** `provider_credentials` holds one row per (organization, block). Each row's secrets are one JSON map encrypted with AES-256-GCM under a fresh data key; the data key is wrapped by the app KMS key (`FEOH_CREDENTIAL_KMS_KEY_ID`). The org id and block are both the KMS encryption context and the GCM associated data, so a row moved to another org does not open, and every unwrap is a CloudTrail event naming the org. The table is in the control plane, not per tenant: the values lived on `organizations`, every reader (public webhooks included) resolves the org there, and migration 0110 can copy and strip in one transaction. A tenant table would have needed a tenant migration reading the control plane plus a later strip pass, with no atomicity between them. Tenant DBs share the app's role, so they would have added no isolation.
+- **Local-first without a fallback in production.** With the key id unset, the data key is wrapped by an HKDF derivation of `FEOH_SECRET_KEY`, so a laptop and CI need no AWS account. A deployed environment refuses to boot without the key id (as does `alembic`, before 0110 can seal anything), and a value sealed with the local key is refused rather than opened there.
+- **One accessor, one writer, no read-back.** Adapters, connection tests and webhook verifiers read through `provider_credentials.provider_config`; a plaintext secret key left in the JSONB is ignored. `PUT /api/organization/credentials/{block}` is the only writer: it seals, then writes `organization.credentials_updated` with path names and refuses with 503 if that row can't be written, then saves. `GET` returns names only. `PATCH /api/organization` refuses secrets in these blocks and records configuration changes to them the same audit-first way (`organization.provider_config_updated`), because the configuration decides where a stored secret is sent. A connection test adds the stored secrets only when the form's configuration equals the saved one.
+- **Fail closed when a secret can't be opened.** Webhooks answer a bodyless 503 (our failure, not a verdict on the event). An ERP send lands `failed`, never the mock adapter. A payment-sync leg fails and opens `erp_reconciliation`, never "no ERP", which would mark invoices paid.
+
+**Rejected.** *A column on `organizations`*: no per-row key metadata, and it keeps the secret on the row every request loads. *Per-tenant tables*: see above. *Secrets Manager per tenant*: one secret per tenant per provider adds a network round trip and a cost line with no isolation gain over a context-bound KMS envelope. *Keeping admin read-back*: "leave blank to keep" removes the only need for it, and read-back is what made a stolen admin session a credential dump.
+
+**Not yet covered.** `extraction.api_key` / `aws_secret_access_key` and `sso.client_secret` are still plain JSONB (tracked in `docs/followups.md`).
+
+## 267. Whoever records a goods receipt cannot approve the invoice billed against it (2026-10-08)
+
+**Context.** §262 stopped an implicated person's receipt from *releasing* a
+`po_mismatch` hold, and recorded the rest as open: receiving was not one of the
+duties segregated from approval, so a manager could count the delivery in and
+then sign off the invoice billed against it — the classic three-way-match
+control, unenforced. This closes that open item.
+
+**Decision.**
+
+- **The receiver is refused at approval.** `review.approve_invoice` — the one
+  door every approval path uses (in-app single and bulk, email / Slack / Teams
+  links, mobile, the exception agents) — reads
+  `approval_chain.receipt_recorders` and `check_receiving_segregation` raises
+  403 `approval_segregation_receiver`. Its own code, not
+  `approval_segregation`: that sentence says the approver helped *create* the
+  invoice, which a receiver did not, and a refusal has to name the duty that
+  collides.
+- **"Live hand-entered receipt on the invoice's PO", precisely:** a
+  `goods_receipts` row with `source = manual`, a non-NULL
+  `recorded_by_user_id`, a status outside `po_matching.CANCELLED_GR_STATUSES`,
+  booked in the invoice's own entity, on any PO the invoice's `po_number` names
+  under the matcher's lookup (strict entity, vendor when set — every
+  same-numbered candidate, not only the newest the matcher reads) or that its
+  stored `po_match` names (`po_id`, or the multi-PO split's `po_ids`). A
+  cancelled receipt counts nothing towards the 3-way leg, so its recorder
+  vouched for nothing; a NULL-source receipt was typed by no app user; a NULL
+  recorder names nobody to refuse.
+- **Checked after corrections.** A `po_number` correction can re-point the
+  invoice at a PO the approver received; the check reads the corrected row and
+  the refusal rolls the correction back with it (every door already rolls back
+  a refused approval).
+- **One opt-out.** The approval step's `require_segregation: false` lifts it,
+  as it lifts the creator rule — an org runs one segregation policy.
+- **Bulk approve resolves the batch in two queries** (POs by number, then
+  receipts) and hands each row its set; the escalation sweep never adds a
+  receiver as an approver (`escalation_ineligible`), for the reason it never
+  adds an implicated actor.
+- **Receivers are not implicated actors.** `implicated_actors` is who shaped
+  the payable's terms, and it is what `receipts_clear_hold` measures a
+  receipt's recorder against: folded in, every typed receipt would implicate
+  its own recorder and no receipt could ever lift a hold. Nor do they reach the
+  inter-company mirror (a receiver shapes no terms the mirror copies) or the
+  exception queue (§262 already lets an uninvolved receiver's receipt lift a
+  `po_mismatch` by itself; refusing the same person by hand would be a refusal
+  the machine does not honour).
+
+**Rejected.** *Adding receivers to `segregation_actor_ids` at receipt time*: a
+receipt serves every invoice on its PO, including ones not yet received, and
+the stamp could never be withdrawn when the receipt is cancelled. *Matching only
+the matcher's newest same-numbered PO*: refusing the receiver of a sibling PO
+is the safe error.
+
+**The manual-complete amount floor honours it too.** `POST
+/invoices/{id}/complete` auto-approves below `auto_approve_below`, which makes
+the caller the effective approver; a receiver completing an invoice billed
+against their receipt lands it at review, as an implicated caller already did.
+
+**Still open (docs/followups.md).** The reverse order — approve first, then record the receipt that lifts the hold
+— needs the approver's id recorded on the invoice so `receipts_clear_hold` can
+refuse it. A multi-PO split's `po_ids` survive only until the next
+`refresh_warnings` rewrites `po_match`.
+
+## 268. An unattended approval needs the reader to be the one who supplied the document (2026-10-08)
+
+**Context.** A clerk's own upload and extract ran with `suppress_auto_approve`
+(§248), but the read that approves can be someone else's: a manager
+re-extracting after a clerk swapped the file in got it auto-approved with no
+second look. The follow-up proposed suppressing whenever
+`segregation_actor_ids` is non-empty. That misses a clerk replacing the file on
+their *own* upload — `stamp_entry_editor` never stamps the uploader — and it
+left the decision with the dispatcher.
+
+**Decision.** `run_extraction` decides from the row itself
+(`extraction.auto_approve_suppression`), so it holds in both dispatch modes,
+whoever dispatched. An extraction that would auto-approve lands at
+`ready_for_review` when the dispatcher asked for it, when
+`segregation_actor_ids` is non-empty (even if the reader is in the set), or when
+`uploaded_by_id` names someone other than the actor asking for the read. An
+unattended approval is sound only when no employee supplied the document
+(email intake, PEPPOL, the portal) or the reader did, and nobody else has
+shaped it since. The first look is unlocked, and the download and provider call
+sit before the decision while a `pending` invoice is inside the clerk's entry
+window, so the deciding read is repeated under `FOR UPDATE` (the file routes'
+lock); a `file_key` changed since the download also suppresses. The reason is
+recorded as `details.auto_approve_suppressed` on the completion audit row
+(`requested_by_caller` / `segregation_actors` / `uploaded_by_another_user` /
+`document_replaced_during_read`), so a person being required where the policy
+would have approved is on the trail, not only in a log.
+
+**Consequences.** A recurring invoice that is re-extracted never auto-approves
+(a person authored its terms, so a different person looks), nor does an
+inter-company mirror's. A manager re-reading another manager's upload lands at
+review too. The uploader's role is deliberately not looked up: roles change
+after the fact, the worker holds no control-plane session, and the cost is a
+human review, not a refusal. `/complete`'s amount floor keeps its own rule
+(refuse an implicated *caller*), because there the caller acts on figures in
+front of them rather than on a document read after the click.
+
+**Rejected.** Suppressing on the segregation set alone (misses the clerk's
+own-upload swap); keying on the uploader being entry-only (role drift, a
+control-plane read in the worker); refusing file changes while `pending`
+(closes the race too, but changes what clerks can do mid-extraction — the lock
+re-read closes the approval hole without that).
+
+## 269. Direct ERP adapters for the top ERPs in the US and South Africa, posting by the ERP's own ids (2026-10-08)
 
 **Context.** The user asked for direct sync with the five most-used ERPs in the
 US and in South Africa, plus Blackbaud. Roadmap Priority 14 item 2 had planned
@@ -10804,7 +11012,7 @@ ERPs reject (`known-issues.md`).
 - *One Sage adapter with a region switch:* the two APIs differ in auth, paths,
   resources and money format.
 
-## 265. One OAuth connect flow for every consent-based ERP (2026-10-08)
+## 270. One OAuth connect flow for every consent-based ERP (2026-10-08)
 
 **Context.** QuickBooks Online, Xero, Sage Business Cloud Accounting and
 Blackbaud SKY have no client-credentials grant. The customer's admin consents in
@@ -10827,19 +11035,26 @@ rotates on every use.
   `authEventId`; Sage `GET /businesses`). With several candidates it resolves
   to none, and the connect is refused (`no_external_tenant`). We never pick
   one of a customer's ledgers for them.
-- **The stored grant (`settings.erp.oauth`) records its provider, org and a
-  random `connection_id`.** The refresher re-reads the stored block and refuses
-  any config whose provider or connection id differs. So a crafted `/test-erp`
+- **The stored grant records its provider, org and a random `connection_id`.**
+  That metadata lives in `settings.erp.oauth`; the access and refresh tokens
+  are sealed in `provider_credentials` beside the block's other secrets (§266,
+  §272) and never reach an adapter's config. The refresher re-reads both and
+  refuses any config whose provider or connection id differs. So a crafted `/test-erp`
   body cannot borrow another tenant's token, and an ERP-type switch cannot hand
   one ERP's grant to another. The block survives an ERP switch: dropping it
   would leave a live grant unrevoked at the provider, and Disconnect is what
   revokes it.
 - **Refresh uses a Redis lock per (org, provider) plus a compare-and-swap
-  write, not an org row lock.** A row lock would be held across a 15-second
-  provider call and stall every settings writer for the tenant. The
-  compare-and-swap keeps a newer rotation that landed while the lock expired.
-- **Platform app or the tenant's own.** A tenant may save its own client
-  id/secret (the setup page's "use your own app"); otherwise the platform's
+  write, not an org row lock across the call.** A row lock would be held across
+  a 15-second provider call and stall every settings writer for the tenant. The
+  compare-and-swap — a short org row lock, the one every credential writer takes
+  first, around reading the sealed refresh token and writing the rotation
+  through `provider_credentials.update_secrets` — keeps a newer rotation that
+  landed while the lock expired. A rotation writes no audit row (the system
+  keeping a grant alive); consent and disconnect are audited first, and a row
+  that cannot be written means nothing is linked or cleared (§239's rule).
+- **Platform app or the tenant's own.** A tenant may save its own client id
+  and (sealed) secret (the setup page's "use your own app"); otherwise the platform's
   `FEOH_ERP_*_CLIENT_ID/_SECRET` apply. Neither fails closed. The refresher
   uses the same source as the consent.
 
@@ -10849,65 +11064,80 @@ rotates on every use.
 - *Revoking the grant on an ERP-type switch:* a mis-click in the dropdown
   would disconnect the customer's books.
 
-## 266. ERP secrets are write-only, and a destination change drops them (2026-10-08)
+## 271. ERP secrets: the catalogue names them, the sealed store holds them, a destination change drops them (2026-10-09)
 
-**Context.** `GET /api/organization` returned `settings.erp` verbatim, client
-secrets included, and the settings page reflected them back on every save. A
-per-provider catalogue now drives the form
-(`erp_adapters/catalog.py`, `GET /api/organization/erp/providers`).
-
-**Decision.**
-
-- **Every catalogue field marked `secret`, and the inbound webhook key, read
-  as `********` to every role.** The OAuth block reads as `{"connected":
-  bool}`, and `erp.oauth` is never writable through PATCH.
-- **A blank, masked or omitted secret keeps the stored value only while the
-  ERP and its destination are unchanged.** The destination keys are the base
-  URL, tenant, account, company and environment. Without this, a stolen admin
-  session could point `base_url` at its own host and have `/test-erp` deliver
-  the stored password there. An explicit `null` clears a secret.
-- `/test-erp` merges stored secrets by the same rule, so an unsaved form can be
-  tested without re-typing them. Each save writes an `organization.erp_updated`
-  audit row carrying key names only.
-
-**Rejected.** *A blanket keep-on-blank:* it would carry one ERP's
-`client_secret` into another's app credentials, and send the stored secret to
-any new host.
-
-## 267. ERP credentials are encrypted per field inside the JSONB (2026-10-08)
-
-**Context.** `settings.erp` held client secrets, API keys, passwords and, since
-§265, OAuth refresh tokens as plain JSONB, protected only by RDS storage
-encryption. A refresh token gives read/write access to a customer's books for
-years. The follow-up's trigger, the QuickBooks connect flow, landed with this work.
+**Context.** The ERP setup form is driven by a per-provider catalogue
+(`erp_adapters/catalog.py`, `GET /api/organization/erp/providers`), which adds
+secrets §266's store did not know: a Sage (ZA) password, SYSPRO operator and
+company passwords, a Blackbaud subscription key, and the OAuth tokens (§270).
+§266 also kept a stored secret across any configuration save, and let a
+connection test use the stored secrets only when the form equalled the saved
+configuration exactly.
 
 **Decision.**
 
-- **Each secret is encrypted on its own, in place:** every catalogue secret
-  field and the OAuth `access_token` / `refresh_token` is stored as
-  `enc:v1:<key-id>:<b64>`, AES-256-GCM with a fresh nonce. The field name is
-  bound in as associated data, so a ciphertext moved to another field fails to
-  decrypt. The settings shape is unchanged.
-- **One keyring from sops:** `FEOH_CREDENTIAL_ENCRYPTION_KEYS`. The first key
-  encrypts and every key decrypts, so rotation needs no cutover
-  (`scripts/reencrypt_erp_credentials.py`, `docs/secrets-rotation.md`).
-- **One seam each way.** `get_erp_adapter` decrypts on the way to an adapter.
-  The settings save, the OAuth callback and the refresher encrypt on the way
-  in. The masked read never decrypts.
-- **Fail closed everywhere.** With no keyring, a save returns 503 and a stored
-  ciphertext is unreadable. A malformed keyring refuses boot. A deployed
-  environment also refuses to boot with no keyring or with the public dev key
-  committed in `.env.development`, and `deploy/decrypt-env.sh` checks both
-  before a deploy starts. Legacy plaintext is read only until migration 0110
-  encrypts it.
+- **Every catalogue field marked `secret` is a §266 sealed secret.**
+  `provider_credentials.SECRET_FIELDS["erp"]` lists them, and
+  `tests/test_erp_catalog.py` fails when the catalogue names one it does not.
+  The OAuth tokens are *service-only* paths (`oauth.access_token`,
+  `oauth.refresh_token`, `SERVICE_SECRET_FIELDS`): sealed in the same row,
+  stripped from the JSONB, never merged into an adapter's config, refused by
+  `PUT /api/organization/credentials/erp`, and written only by
+  `services/erp_oauth` through the same `update_secrets` writer. A settings
+  read shows the OAuth metadata as `{"connected": bool}`, because its
+  `connection_id` is the capability the refresher checks.
+- **A save that points the block at a different destination drops the sealed
+  secrets.** The destination keys are the base URL, tenant, account, company
+  and environment (`catalog.DESTINATION_KEYS`; a test fails on a host-naming
+  field left out). Same ERP at a new destination: every secret but the inbound
+  webhook key, which is never sent anywhere. A different ERP, or the ERP
+  cleared: every secret. `PATCH /api/organization` removes them through
+  `update_secrets` in the same transaction, audited first as
+  `organization.credentials_updated` with `reason: erp_destination_changed`.
+  Without this, a stolen admin session could set SYSPRO's `base_url` to its own
+  host and receive the stored operator password on the next push. A block that
+  selected no ERP yet binds nothing, so secrets entered before the first
+  configuration save stay.
+- **A connection test uses the stored secrets while the form names the saved
+  ERP at the saved destination** (`catalog.same_connection`) — the same
+  condition under which a save keeps them. For `erp` this replaces §266's
+  exact-equality rule, which made a test fail whenever the form had an unsaved
+  non-destination change (a Xero bill status) or omitted the OAuth metadata it
+  never renders.
+- The OAuth tokens survive an ERP switch and a destination change: they are
+  bound to their provider and `connection_id`, go only to that provider's own
+  hosts, and are removed by Disconnect, which revokes them first.
 
-**Rejected.**
-- *A KMS envelope per value:* a runtime AWS dependency, plus a LocalStack
-  equivalent for local dev, for no gain over a keyring that sops already
-  protects with KMS.
-- *A separate credentials table:* it rewrites every reader of `settings.erp`.
-- *Binding the org id as well:* moving a ciphertext between orgs already
-  needs database write access.
+**Rejected.** *Keeping secrets across every save* (§266's rule for the other
+blocks): one ERP's `client_secret` would become another's app credentials, and
+the stored secret would follow any new host. *Binding each secret to a
+destination fingerprint inside the envelope*: the same protection with a second
+comparison to keep in step with the catalogue, instead of a drop the audit
+trail records.
 
-Payment, card and webhook secrets in other settings blocks are still plaintext
-(`followups.md`).
+## 272. Per-field ERP encryption inside the JSONB was built, then dropped for §266's sealed store (2026-10-09)
+
+**Context.** The ERP-connections branch (§269–§271) and §266 were built at the
+same time. The branch encrypted each ERP secret and OAuth token in place inside
+`settings.erp` (`enc:v1:<key-id>:<b64>`, AES-256-GCM, field name as associated
+data) under a keyring from sops, `FEOH_CREDENTIAL_ENCRYPTION_KEYS`, with its own
+migration 0110, a re-encrypt script and boot guards. §266 landed first.
+
+**Decision.** That mechanism is gone; ERP secrets and tokens live in §266's
+store (§271). Three reasons:
+
+- **One store.** Two encryption schemes for the same kind of value would mean
+  two rotation procedures, two failure modes and two places a reader can get
+  wrong; payment and card secrets were already in §266's.
+- **KMS instead of a keyring.** §266's data keys are wrapped by the app KMS
+  key, so every unwrap is a CloudTrail event naming the org, and no long-lived
+  symmetric key has to be distributed to every host through sops. Its
+  encryption context binds the org as well as the block, which the per-field
+  scheme did not.
+- **One audited writer.** In the JSONB, every settings save rewrote the
+  ciphertexts; §266 has exactly one writer, audit-first, which the OAuth
+  callback, the refresher, disconnect and the destination-change drop all call.
+
+**Rejected.** *Keeping both, the keyring for ERP and KMS for the rest*: see
+"one store". *Shipping the branch's migration as 0111 after 0110*: it would
+have encrypted values §266's migration had already moved out of the JSONB.

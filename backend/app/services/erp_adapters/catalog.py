@@ -6,19 +6,19 @@ entry and one set of inputs per entry. Before it, the page carried its own
 hardcoded ``ERP_TYPES`` list of mostly enterprise ERPs, most of which had no
 direct adapter, so choosing one fell silently into a generic form or Merge.dev.
 
-It is also the authority for **which ``settings.erp`` keys are secrets**.
-Every field marked ``secret`` here, plus :data:`EXTRA_SECRET_KEYS`, is
-write-only: :func:`mask_erp_config` replaces a stored value with
-:data:`SECRET_MASK` on every read, and :func:`merge_erp_update` keeps the stored
-value when a save sends it back blank or masked, but only while the save still
-names the same ERP at the same destination (:data:`DESTINATION_KEYS`).
-``settings.erp.oauth`` (the
-token block ``services/erp_oauth`` writes) is never readable and never writable
-through the settings API: reads see ``{"connected": bool}``, writes keep the
-stored block.
+It also names **which ERP fields are secrets** (:data:`SECRET_KEYS`). None of
+them is stored in ``settings.erp``: they are sealed in the control-plane
+``provider_credentials`` table (``services/provider_credentials``, decisions
+§266), written only through the audited ``PUT
+/api/organization/credentials/erp`` and never read back. What this module
+decides about them is *when they stop applying*: a save that points the block
+at a different ERP or a different destination (:data:`DESTINATION_KEYS`) drops
+them (:func:`secrets_to_drop`). ``settings.erp.oauth`` — the consent metadata
+``services/erp_oauth`` writes beside its sealed tokens — is never writable
+through the settings API, and reads see only ``{"connected": bool}``.
 
 Pure: no DB, no request, no I/O. ``tests/test_erp_catalog.py`` keeps it in step
-with the adapter registry.
+with the adapter registry and with ``provider_credentials.SECRET_FIELDS``.
 """
 
 from __future__ import annotations
@@ -26,12 +26,11 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-#: What a read shows in place of a stored secret, and what a save may send
-#: back to mean "keep the stored one".
-SECRET_MASK = "********"
-
-#: The OAuth token block. Its only writer is ``services/erp_oauth``.
+#: The OAuth consent metadata block. Its only writer is ``services/erp_oauth``;
+#: its tokens are sealed in ``provider_credentials``, not stored here.
 OAUTH_KEY = "oauth"
+#: Token keys that must never sit in the JSONB OAuth block.
+_OAUTH_TOKEN_KEYS = frozenset({"access_token", "refresh_token"})
 
 #: The routing value for the Merge.dev unified API, and the direct one.
 METHOD_MERGE_DEV = "merge_dev"
@@ -62,11 +61,12 @@ _EXISTING_LABEL_KEYS: dict[str, str] = {
 #: Central's ``tenant_id`` / ``environment`` / ``company_id`` are URL path
 #: segments; QuickBooks' ``environment`` picks its API host; SYSPRO and Intacct
 #: log in to ``company_id``). A save that changes any of them is a NEW
-#: connection: a blank, masked or omitted secret is not carried forward and has
-#: to be typed again (the inbound webhook key, :data:`EXTRA_SECRET_KEYS`, is
-#: never sent outbound and so survives). Without this, ``{"type": "syspro", "base_url":
-#: "https://attacker.tld", "operator_password": "********"}`` from an admin (or
-#: a stolen admin token) sent the stored password to attacker.tld through
+#: connection: the sealed secrets are dropped and have to be typed again
+#: (:func:`secrets_to_drop`; the inbound webhook key, :data:`EXTRA_SECRET_KEYS`,
+#: is never sent outbound and so survives), and a connection test against the
+#: changed form gets none of them. Without this, ``{"type": "syspro",
+#: "base_url": "https://attacker.tld"}`` from an admin (or a stolen admin
+#: token) sent the stored password to attacker.tld through
 #: ``POST /organization/test-erp`` or a settings PATCH. A catalogue field that
 #: names a host belongs here: ``tests/test_erp_catalog.py`` fails on any
 #: ``*_url`` / ``*host*`` field left out.
@@ -332,9 +332,12 @@ def provider(key: str | None) -> dict[str, Any] | None:
     return None
 
 
-#: Every key masked on read and kept on a blank save. A key name is a secret
-#: for every provider once ANY provider marks it secret: the dispatcher reads
-#: whichever it needs, so masking by name is the fail-closed direction.
+#: Every catalogue field marked ``secret``, plus :data:`EXTRA_SECRET_KEYS`. A
+#: key name is a secret for every provider once ANY provider marks it secret:
+#: the dispatcher reads whichever it needs, so treating it by name is the
+#: fail-closed direction. Each one is sealed in ``provider_credentials``
+#: (``services/provider_credentials.SECRET_FIELDS["erp"]`` must contain every
+#: name here — ``tests/test_erp_catalog.py``), never stored in ``settings.erp``.
 SECRET_KEYS: frozenset[str] = frozenset(
     {f["name"] for entry in all_providers() for f in entry["fields"] if f["secret"]}
     | EXTRA_SECRET_KEYS
@@ -351,37 +354,33 @@ def catalog_key(erp_config: dict | None) -> str | None:
 
 
 def oauth_connected(erp_config: dict | None) -> bool:
-    """Does the stored config hold a completed OAuth consent?"""
+    """Does the stored config hold a completed OAuth consent?
+
+    Read from the block's metadata: the consent callback writes the
+    ``connection_id`` together with the sealed tokens, and disconnect removes
+    both, so the tokens themselves never have to be opened to answer.
+    """
     if not isinstance(erp_config, dict):
         return False
     block = erp_config.get(OAUTH_KEY)
-    return isinstance(block, dict) and bool(block.get("refresh_token") or block.get("access_token"))
+    return isinstance(block, dict) and bool(block.get("connection_id"))
 
 
-def mask_erp_config(erp_config: Any) -> Any:
-    """``settings.erp`` as an admin may read it: secrets masked, tokens hidden.
+def public_erp_config(erp_config: Any) -> Any:
+    """``settings.erp`` as a settings read shows it: the OAuth block hidden.
 
-    A stored secret reads as :data:`SECRET_MASK` (an empty one stays empty, so
-    the form can tell "saved" from "never set"); the OAuth block reads as
-    ``{"connected": bool}``. Returns a new dict; never mutates its input.
+    The secrets are not in the block at all (they are sealed, and
+    ``provider_credentials.strip_secrets`` removes any copy). What is left to
+    hide is the OAuth metadata — its ``connection_id`` is the capability the
+    refresher checks (``services/erp_oauth``), so no endpoint returns it — which
+    reads as ``{"connected": bool}``. Returns a new dict.
     """
     if not isinstance(erp_config, dict):
         return erp_config
-    out: dict[str, Any] = {}
-    for key, value in erp_config.items():
-        if key == OAUTH_KEY:
-            continue
-        if key in SECRET_KEYS:
-            out[key] = SECRET_MASK if value not in (None, "") else ""
-        else:
-            out[key] = deepcopy(value)
+    out = {k: deepcopy(v) for k, v in erp_config.items() if k != OAUTH_KEY}
     if OAUTH_KEY in erp_config:
         out[OAUTH_KEY] = {"connected": oauth_connected(erp_config)}
     return out
-
-
-def _is_blank(value: Any) -> bool:
-    return value == SECRET_MASK or (isinstance(value, str) and not value.strip())
 
 
 def _destination_value(value: Any) -> Any:
@@ -391,7 +390,8 @@ def _destination_value(value: Any) -> Any:
     return value
 
 
-def _same_erp(stored: Any, incoming: Any) -> bool:
+def same_erp(stored: Any, incoming: Any) -> bool:
+    """Do two blocks select the same catalogue entry and the same ERP type?"""
     if not isinstance(stored, dict) or not isinstance(incoming, dict):
         return False
     return catalog_key(stored) == catalog_key(incoming) and stored.get("type") == incoming.get(
@@ -402,10 +402,11 @@ def _same_erp(stored: Any, incoming: Any) -> bool:
 def same_connection(stored: Any, incoming: Any) -> bool:
     """Does ``incoming`` name the same ERP, at the same destination, as ``stored``?
 
-    The one condition under which a stored secret may be carried into
-    ``incoming`` (:func:`merge_erp_update`).
+    The one condition under which the sealed secrets stay with the block across
+    a save (:func:`secrets_to_drop`), and under which a connection test may use
+    them (``provider_credentials.config_for_connection_test``).
     """
-    if not _same_erp(stored, incoming):
+    if not same_erp(stored, incoming):
         return False
     return all(
         _destination_value(stored.get(key)) == _destination_value(incoming.get(key))
@@ -413,47 +414,54 @@ def same_connection(stored: Any, incoming: Any) -> bool:
     )
 
 
+def secrets_to_drop(stored: Any, merged: Any) -> frozenset[str]:
+    """The sealed ``erp`` secrets a save from ``stored`` to ``merged`` removes.
+
+    * Same ERP, same destination — none.
+    * Same ERP, new destination — every secret but the inbound webhook's HMAC
+      key (:data:`EXTRA_SECRET_KEYS`), which verifies what the ERP sends US and
+      is never sent anywhere. Without this, ``{"type": "syspro", "base_url":
+      "https://attacker.tld"}`` from an admin (or a stolen admin token) sent the
+      stored ``operator_password`` to attacker.tld on the next push.
+    * A different ERP, or the ERP cleared — every secret: one ERP's
+      ``client_secret`` must not become another's app credentials.
+
+    The OAuth tokens are never in this set. They are bound to their provider
+    and ``connection_id`` (``services/erp_oauth`` refuses any other), are sent
+    only to that provider's own hosts, and are removed by the OAuth disconnect,
+    which revokes them first.
+
+    A stored block that selects no ERP yet binds nothing, so nothing is dropped:
+    secrets entered before the first configuration save (the credentials
+    endpoint accepts them in either order) belong to the ERP that save names.
+    """
+    if not isinstance(stored, dict) or not (stored.get("type") or stored.get("integration_method")):
+        return frozenset()
+    if same_connection(stored, merged):
+        return frozenset()
+    if same_erp(stored, merged):
+        return SECRET_KEYS - EXTRA_SECRET_KEYS
+    return SECRET_KEYS
+
+
 def merge_erp_update(stored: Any, incoming: dict) -> dict:
-    """The ``settings.erp`` block a save of ``incoming`` produces.
+    """The ``settings.erp`` CONFIGURATION a save of ``incoming`` produces.
+
+    Secrets are not part of it: the caller has refused any non-blank secret in
+    ``incoming`` (they are written through ``PUT
+    /api/organization/credentials/erp``), and any blank one is dropped here.
 
     * Non-secret keys come from ``incoming``. For the same ERP, a stored key
       the form does not render (and so never sends) is kept when omitted.
-    * A secret sent blank, as :data:`SECRET_MASK`, or omitted keeps the stored
-      value **only while** :func:`same_connection` holds: switching from
-      Business Central to Xero must not carry one ERP's ``client_secret`` into
-      the other's app credentials, and pointing SYSPRO at a new ``base_url``
-      must not send the stored password to that host. An explicit ``null``
-      clears it.
-    * ``oauth`` is never taken from ``incoming``; the stored block is kept. Its
-      tokens cannot follow a changed destination: adapters and the refresher
-      read the stored block, bound to its provider and ``connection_id``
-      (``services/erp_oauth``), and send it only to the provider's own hosts.
+    * ``oauth`` is never taken from ``incoming``; the stored block is kept, even
+      when the ERP is cleared or switched — only the OAuth disconnect removes it,
+      after revoking at the provider.
     """
     stored = stored if isinstance(stored, dict) else {}
-    same_erp = _same_erp(stored, incoming)
-    same_dest = same_erp and same_connection(stored, incoming)
-
-    def carry(key: str) -> bool:
-        # The inbound webhook's HMAC key is never sent anywhere — it verifies
-        # what the ERP sends US — so a changed destination need not drop it.
-        return bool(stored.get(key)) and (same_dest or (same_erp and key in EXTRA_SECRET_KEYS))
-
-    merged: dict[str, Any] = {}
-    for key, value in incoming.items():
-        if key == OAUTH_KEY:
-            continue
-        if key in SECRET_KEYS:
-            if value is None:
-                continue
-            if _is_blank(value):
-                if carry(key):
-                    merged[key] = stored[key]
-                continue
-        merged[key] = value
-    for key in SECRET_KEYS:
-        if key not in incoming and carry(key):
-            merged[key] = stored[key]
-    if same_erp:
+    merged: dict[str, Any] = {
+        key: value for key, value in incoming.items() if key != OAUTH_KEY and key not in SECRET_KEYS
+    }
+    if same_erp(stored, incoming):
         # Keys the form never renders (an API-set Blackbaud
         # `transaction_code_values`, say) survive a save that omits them. A
         # rendered field is always sent, so leaving it out is not a request to
@@ -465,11 +473,10 @@ def merge_erp_update(stored: Any, incoming: dict) -> dict:
                 continue
             merged[key] = value
     if OAUTH_KEY in stored:
-        merged[OAUTH_KEY] = stored[OAUTH_KEY]
+        # Minus any token copy a pre-store row or a hand edit left in it, so a
+        # save never re-persists one (the tokens are sealed, not stored here).
+        oauth = stored[OAUTH_KEY]
+        if isinstance(oauth, dict):
+            oauth = {k: v for k, v in oauth.items() if k not in _OAUTH_TOKEN_KEYS}
+        merged[OAUTH_KEY] = oauth
     return merged
-
-
-def changed_keys(before: Any, after: dict) -> list[str]:
-    """Names (never values) of the keys a save changed, for the audit row."""
-    before = before if isinstance(before, dict) else {}
-    return sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))

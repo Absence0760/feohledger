@@ -357,6 +357,10 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
     ("app.api.vendors", "bulk_screen_vendors"): (
         "audits via services/vendor_screening.screen_vendor_record (`vendor.screened`)"
     ),
+    ("app.api.vendors", "cancel_vendor_cards"): (
+        "audits via services/vendor_card_revocation.revoke_vendor_cards (`card.cancelled` / "
+        "`card.cancel_failed` / `card.cancel_deferred_to_void`, one row per card)"
+    ),
     ("app.api.workflow", "approve_invoice"): "audits via services/review.approve_invoice",
     ("app.api.workflow", "assign_reviewer"): "audits via services/review.assign_reviewer",
     ("app.api.workflow", "reject_invoice"): "audits via services/review.reject_invoice",

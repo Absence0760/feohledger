@@ -104,6 +104,8 @@
   "vendorRejectHint": "Marcar como no válido / duplicado",
   "vendorVerified": "Proveedor verificado",
   "vendorRejected": "Proveedor rechazado",
+  "vendorCardsNotClosed": "{count, plural, one {{count} tarjeta virtual no se pudo cancelar en el proveedor de tarjetas y sigue activa. Reinténtelo desde la aplicación web.} other {{count} tarjetas virtuales no se pudieron cancelar en el proveedor de tarjetas y siguen activas. Reinténtelo desde la aplicación web.}}",
+  "vendorCardsRequireVoid": "{count, plural, one {{count} tarjeta virtual respalda un pago programado y sigue activa: anule ese pago para cancelarla.} other {{count} tarjetas virtuales respaldan pagos programados y siguen activas: anule esos pagos para cancelarlas.}}",
   "vendorActionFailed": "Acción fallida",
   "vendorSyncFailed": "Error de sincronización con ERP: {error}",
 
@@ -184,6 +186,7 @@
   "glChartRefusalPickActive": "Elija una cuenta activa del plan de cuentas propio de la factura: las cuentas compartidas más las de su entidad.",
   "glChartRefusalOnLines": "Líneas de la factura: {reasons}",
   "codedRefusalApprovalSegregation": "Segregación de funciones: un usuario que participó en la creación de esta factura no puede también aprobarla.",
+  "codedRefusalApprovalSegregationReceiver": "Segregación de funciones: un usuario que registró una recepción de mercancías facturada en esta factura no puede también aprobarla.",
   "codedRefusalInvoiceStaleApproval": "Esta factura se modificó después de que la cargara. Vuelva a cargarla y revise la versión actual antes de aprobarla.",
   "codedRefusalApprovalLevelReuse": "Ya aprobó un nivel anterior de esta cadena; se requiere un aprobador distinto.",
   "codedRefusalApprovalNotNamedApprover": "No es un aprobador autorizado para este paso.",

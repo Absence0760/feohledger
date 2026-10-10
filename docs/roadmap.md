@@ -226,7 +226,7 @@ Each item ships as **its own PR**. Item 1 (goods-receipt entry) has shipped — 
 [roadmap_shipped.md](roadmap_shipped.md) § Priority 14.
 
 ### 2. Direct ERP adapters
-**Status:** Partial. Direct adapters cover the top ERPs in the US and South Africa: QuickBooks Online, Xero, Sage Business Cloud Accounting (global v3.1 and the separate South Africa API), Sage Intacct, SYSPRO, NetSuite, Business Central and Blackbaud Financial Edge NXT. They are set up from a catalogue-driven panel (decisions §264–§266; shipped in [roadmap_shipped.md](roadmap_shipped.md) § Priority 14). Merge.dev stays the route for everything else.
+**Status:** Partial. Direct adapters cover the top ERPs in the US and South Africa: QuickBooks Online, Xero, Sage Business Cloud Accounting (global v3.1 and the separate South Africa API), Sage Intacct, SYSPRO, NetSuite, Business Central and Blackbaud Financial Edge NXT. They are set up from a catalogue-driven panel (decisions §269–§272; shipped in [roadmap_shipped.md](roadmap_shipped.md) § Priority 14). Merge.dev stays the route for everything else.
 **Open:** a receipt pull on the adapter interface, and direct adapters for the large enterprise ERPs. *(c)* Tracked in [followups.md](followups.md).
 
 - [ ] Extend the `erp_adapters` interface with a goods-receipt pull, next to the PO sync, so an ERP that owns receiving feeds the 3-way match (Business Central + NetSuite first)

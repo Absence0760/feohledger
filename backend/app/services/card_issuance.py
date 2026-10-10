@@ -146,6 +146,120 @@ async def live_card_invoice_ids(db: AsyncSession, invoice_ids) -> set:
     return {i for i in rows.scalars().all() if i is not None}
 
 
+async def lock_invoices_for_mint(
+    db: AsyncSession,
+    invoice_ids,
+    *,
+    payable_statuses,
+    timeout_ms: int,
+    entity_id: uuid.UUID | None = None,
+) -> list[Invoice]:
+    """Lock the vendors and the payable invoices a direct mint will check.
+
+    What this serialises against: another mint, a payment dispatch, and any
+    invoice status writer (all of which take a conflicting invoice lock); and
+    any vendor UPDATE, which covers a status change, a block, a bank-change
+    approval and a rescreen. What it does NOT serialise: inserts that point at
+    the invoice, such as a newly raised payment-blocking exception, because an
+    FK insert takes only ``FOR KEY SHARE``. Dispatch has the same exposure.
+
+    ``POST /api/cards/generate`` reads the invoice's status, its live card, its
+    live payment, its blocking exceptions and its vendor's status, then calls
+    the card provider and inserts the card. Read unlocked, two things went wrong
+    in that window:
+
+    - **Two concurrent generates both minted.** Both saw no live card. The first
+      committed; the second then read ``reissue_seq = 1`` — the winner's row was
+      now visible — so it sent a FRESH provider idempotency key, the provider
+      issued a second real card, and the unique index refused only our row: a
+      live, spendable card at the provider that nothing in FeohLedger governs.
+    - **A payment dispatch and a generate both paid.** Dispatch holds the
+      invoice ``FOR NO KEY UPDATE`` and refuses an invoice with a live card, but
+      a card INSERT takes only ``FOR KEY SHARE``, which that lock does not block.
+
+    Lock modes and order:
+
+    - Vendors ``FOR SHARE``, then invoices ``FOR NO KEY UPDATE`` — vendor
+      before invoice, each in id order, the order ``vendor_merge`` takes them
+      in, so no cycle with it. ``FOR SHARE`` lets two mints for one vendor run
+      together but holds off a status change (deactivate / reject / block)
+      until the card is committed, so the vendor-side check cannot go stale and
+      whatever that change does about live cards sees this one.
+    - ``FOR NO KEY UPDATE`` on the invoice is the lock dispatch takes
+      (``api/payments._lock_payment_invoice``), so the two serialise, and like
+      dispatch's it leaves the ``FOR KEY SHARE`` an FK insert takes alone.
+
+    Every check the caller runs afterwards is a fresh statement under READ
+    COMMITTED, so a loser that waited sees the winner's card and skips it.
+
+    The wait is bounded by ``timeout_ms`` in a savepoint (``utils/db_locks``,
+    ``docs/decisions.md`` §233) and raises ``LockWaitTimeout`` with the caller's
+    transaction intact. It is taken before any provider call, so a timeout has
+    minted nothing and is safe to retry.
+
+    Returns the payable invoices in id order, narrowed to ``entity_id`` when one
+    is selected (``tenant.apply_entity_scope``). An invoice whose vendor changed
+    between the unlocked vendor read and the lock is left out, because its
+    vendor was not locked and so it cannot be checked against a stable one.
+
+    ``POST /api/cards/generate`` calls this once per invoice and commits after
+    each one, so locks are held for one provider call, not the whole batch.
+    """
+    from app.tenant import apply_entity_scope
+    from app.utils.db_locks import bounded_lock_wait
+
+    ids = sorted(set(invoice_ids))
+    if not ids:
+        return []
+    vendor_ids = sorted(
+        set(
+            (
+                await db.execute(
+                    select(Invoice.vendor_id).where(
+                        Invoice.id.in_(ids), Invoice.vendor_id.is_not(None)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    )
+    async with bounded_lock_wait(db, timeout_ms):
+        locked_vendors: set = set()
+        if vendor_ids:
+            locked_vendors = set(
+                (
+                    await db.execute(
+                        select(Vendor.id)
+                        .where(Vendor.id.in_(vendor_ids))
+                        .order_by(Vendor.id)
+                        .with_for_update(read=True)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        invoices = (
+            (
+                await db.execute(
+                    apply_entity_scope(
+                        select(Invoice).where(
+                            Invoice.id.in_(ids), Invoice.status.in_(payable_statuses)
+                        ),
+                        Invoice,
+                        entity_id,
+                    )
+                    .order_by(Invoice.id)
+                    .with_for_update(key_share=True)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [inv for inv in invoices if inv.vendor_id is None or inv.vendor_id in locked_vendors]
+
+
 def card_settlement_block(card: VirtualCard, amount, *, now: datetime | None = None) -> str | None:
     """Why ``card`` cannot settle a payment of ``amount`` — ``None`` if it can.
 

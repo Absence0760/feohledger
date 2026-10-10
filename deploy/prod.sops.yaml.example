@@ -64,6 +64,11 @@ BACKUP_S3_BUCKET: ""
 FEOH_ENVIRONMENT: "production"
 # openssl rand -hex 32
 FEOH_SECRET_KEY: ""
+# The app KMS key that seals tenant ERP / payment / card credentials
+# (`terraform output app_kms_key_alias`). Not a secret. Required: a deployed env
+# refuses to boot without it, and migration 0110 seals existing credentials with
+# it, so set it BEFORE the first deploy that carries that migration.
+FEOH_CREDENTIAL_KMS_KEY_ID: "alias/feohledger-app-production"
 # FEOH_REDIS_URL defaults to the local Redis container (derived in
 # compose.prod.yml). Setting it overrides the default — the whole move to
 # ElastiCache later, no compose edit needed. (FEOH_DATABASE_URL: § Database above.)
@@ -127,16 +132,6 @@ FEOH_AWS_SES_REGION: "us-east-1"
 FEOH_APPROVAL_SIGNING_KEY: ""
 # FEOH_EMAIL_ACTION_SIGNING_KEY: ""
 # FEOH_PARTNER_LINK_SIGNING_KEY: ""
-
-# ── ERP credential encryption at rest ──
-# Keyring for the client secrets, API keys, passwords and OAuth tokens stored in
-# organizations.settings.erp (backend/app/utils/credential_crypto.py). Format
-# `<key_id>:<base64 of 32 random bytes>`; the FIRST entry encrypts, every entry
-# decrypts. Generate: echo "k$(date +%Y%m):$(openssl rand -base64 32)".
-# REQUIRED: a deployed env refuses to boot without it, or with the dev key from
-# backend/.env.development (decrypt-env.sh checks both first). Rotation:
-# docs/secrets-rotation.md.
-FEOH_CREDENTIAL_ENCRYPTION_KEYS: ""
 
 # ── Self-service signup + hCaptcha ──
 # FEOH_SIGNUP_ENABLED is the switch. "false" closes signup: every /api/signup/*

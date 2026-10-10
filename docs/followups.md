@@ -39,13 +39,25 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-08 — the US + South Africa ERP connections
-(decisions §264–§266) opened eleven (c) entries, one (a) (sandbox verification)
-and one (b) (registering the platform OAuth apps). They also rewrote two (c)
+**Last reconciled:** 2026-10-09 — the US + South Africa ERP connections
+(decisions §269–§272), merged onto the provider-credential store, opened
+eleven (c) entries, one (a) (sandbox verification) and one (b) (registering
+the platform OAuth apps) under their own heading, and rewrote two (c)
 entries: QuickBooks Online now tracks only phases 3–5, and the Priority 14
-adapter entry now tracks the receipt pull and the enterprise ERPs. Encrypting ERP
-credentials (§267) replaced the plaintext-ERP-credentials entry with one for the
-payment and card blocks still in plaintext. That takes the file from 80 → 93. Before that, 2026-10-07 — a re-validation pass checked all 82 open
+adapter entry now tracks the receipt pull and the enterprise ERPs. The
+branch's "payment and card secrets still plaintext" entry is not carried,
+since §266 sealed them, and the "switching provider keeps the old sealed
+secret" entry is narrowed to payments and cards: §271 drops an ERP's sealed
+secrets on a new ERP or destination. Review of the merge added two more (c) entries (tenant deletion not revoking
+an OAuth grant; QuickBooks' realm id taken from the callback query). That takes
+the file from 82 → 97.
+Before that, 2026-10-08 — the cards / receiving-SoD /
+provider-credentials batch closed **five** (c) entries — a vendor leaving
+`active` keeping its live cards (decisions §264), `/cards/generate`'s unlocked
+checks (§265), ERP / payment / card credentials in plain JSONB (§266), the
+goods-receipt recorder approving the invoice (§267), and a manager's
+re-extraction auto-approving a clerk's swapped file (§268) — and opened seven
+under their own heading, taking the file from 80 → 82. Before that, 2026-10-07 — a re-validation pass checked all 82 open
 entries against the code on `main` (`02f7387b`) rather than against their own
 text. One had landed without being pruned — the void reversing a captured
 discount by elimination, fixed by `discount_offers.captured_by_payment_id`
@@ -125,7 +137,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**93 open: 76 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**97 open: 80 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1094,23 +1106,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       scope vendor matching to the import's entity, refuse a blank currency
       per row, and key the row errors through the message catalogue.
       **Trigger:** the next change to CSV import.
-- [ ] **(c) A manager's extraction can auto-approve a document a clerk
-      swapped in.** A clerk's own upload or extract never auto-approves, but a
-      manager who re-extracts after a clerk replaced the file can still get
-      it auto-approved with no second look. **Durable fix:** suppress
-      auto-approve whenever `segregation_actor_ids` is non-empty, with a test.
-      **Trigger:** the next change to extraction dispatch or auto-approve.
 - [ ] **(c) A custom role can't be granted invoice entry.** Entry is a role
       list by design (decisions §248). **Durable fix:** if a customer needs a
       non-clerk preparer role, add a non-sensitive permission tier the
       role-grant guards exempt, and move entry onto it. **Trigger:** the first
       customer asking for a custom preparer role.
-- [ ] **(c) Deactivating a vendor doesn't cancel its live virtual cards.** A
-      card minted before the vendor went inactive, rejected or merged stays
-      spendable; payment runs and `/cards/generate` refuse the vendor, but
-      nothing reaches cards already issued. **Durable fix:** cancel the
-      vendor's live cards when its status leaves `active`, with an audit row
-      per card. **Trigger:** the next vendor-lifecycle change.
 - [ ] **(c) The PO-match receipt leg is pro rata and not cumulative.** The
       "billed beyond received" check values receipts as `po_total × received /
       ordered`, so receiving nine cheap cables of a 900 server order reads as
@@ -1132,11 +1132,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       only logs. **Durable fix:** when `post_payment` is implemented, send
       `discount_amount` beside `amount` so the ERP books the discount taken.
       **Trigger:** the first real ERP payment-posting adapter.
-- [ ] **(c) `/cards/generate` has no row lock between its checks and the
-      mint.** Pre-existing: two concurrent calls can both pass the vendor and
-      payable checks. **Durable fix:** lock the invoice rows `FOR UPDATE`
-      before checking and minting, with a concurrency test. **Trigger:** the
-      next card-issuance change.
 - [ ] **(c) The web bundle total counts route-split content nobody loads
       together.** `MAX_TOTAL_KB` sums every chunk (one locale catalogue), so
       the help centre's lazy guide prose and diagrams (~81 KB, `/help` only)
@@ -1187,7 +1182,7 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 
 - [ ] **(c) QuickBooks Online: webhooks, a reconciliation sweep and BillPayment
       write-back.** Phases 0–2 of `backend/docs/quickbooks-online-adapter.md`
-      shipped with the US + South Africa ERP work (decisions §264–§265): ERP ids on
+      shipped with the US + South Africa ERP work (decisions §269–§270): ERP ids on
       the payload, the shared OAuth connect flow, and the adapter. Still open:
       Phase 3 (CloudEvents webhooks routed by an `erp_connections` realm index,
       plus a CDC reconciliation sweep), Phase 4 (`post_payment` → BillPayment),
@@ -1207,15 +1202,7 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       dispatcher, so the gate itself is one more check. **Trigger:**
       before the first paid Growth customer, or the fourth Merge connection
       (the first three are free), whichever comes first.
-- [ ] **(c) Payment, card and webhook secrets are still plaintext in
-      `Organization.settings`.** The ERP block is encrypted per field (decisions
-      §267, migration 0110), but `payments.credentials`, `cards.api_key`, and
-      the `payments` / `cards` webhook secrets are still plain JSONB, protected
-      only by RDS storage encryption. **Durable fix:** reuse
-      `utils/credential_crypto` with a per-block seam (encrypt on save, decrypt
-      where the adapter is built) and a backfill migration like 0110.
-      **Trigger:** the first tenant with live payment-rail or card-issuer
-      credentials.
+
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
 - [ ] **(c) The DPA does not name RDS's own backups.** `/legal/sub-processors`
@@ -1286,19 +1273,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 Three separate PRs, in this order. Inventory tracking and selling are out of
 scope (§260) — do not fold them into any of these.
 
-- [ ] **(c) Whoever records a goods receipt can still approve the invoice it
-      supports.** Receipt entry (PR 1, decisions §262) stops an implicated
-      person's receipt from *releasing* a payment hold, but the classic
-      control — receiving and approving are different people — is not
-      enforced: a manager can record the delivery and then approve the
-      invoice billed against it. **Durable fix:** include the recorders of
-      live hand-entered receipts on the invoice's PO in the approval
-      segregation check (`approval_chain.violates_segregation` gets them from
-      `goods_receipts.recorded_by_user_id`), honouring the existing
-      `require_segregation` opt-out, with the refusal coded like the other
-      approval refusals. **Trigger:** the first tenant that turns on three-way
-      matching with more than one approver, or the next change to the approval
-      chain.
 - [ ] **(c) Mobile has no goods-receipt entry.** `/goods-receipts` → Record
       receipt is web-only; mobile reads receipts only for the inspection
       picker. A warehouse or shop-floor user would naturally record a delivery
@@ -1310,7 +1284,7 @@ scope (§260) — do not fold them into any of these.
 - [ ] **(c) No adapter pulls goods receipts, and the enterprise ERPs still
       ride Merge.dev.** The US + South Africa set is now direct (QuickBooks
       Online, Xero, Sage Accounting and its SA API, Sage Intacct, SYSPRO,
-      NetSuite, Business Central, Blackbaud; decisions §264). **Durable fix:**
+      NetSuite, Business Central, Blackbaud; decisions §269). **Durable fix:**
       add a receipt pull to the `erp_adapters` interface (Business Central and
       NetSuite first), then one direct adapter per PR for SAP S/4HANA, Oracle
       Fusion, Dynamics 365 F&O, Infor and Epicor, each with fake-erp routes and
@@ -1324,7 +1298,7 @@ scope (§260) — do not fold them into any of these.
       idempotent per receipt line — Shopify first. **Trigger:** after PR 1
       lands; independent of the ERP work.
 
-### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §264–§266)
+### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 
 - [ ] **(c) The ERP OAuth callback is not bound to the browser that started it
       (login-CSRF).** A rogue tenant admin can get a victim to approve consent
@@ -1395,10 +1369,99 @@ scope (§260) — do not fold them into any of these.
       OAuth stubs for Xero, Sage and Blackbaud (QuickBooks has one), plus a
       connect → push spec for each under `tests-e2e/erp/`. **Trigger:** the
       next change to `services/erp_oauth`.
+- [ ] **(c) Deleting a tenant does not revoke its ERP OAuth grant.**
+      `services/tenant_deletion` deletes the sealed `provider_credentials` row,
+      but the refresh token stays valid at Intuit / Xero / Sage / Blackbaud
+      until it expires (up to five years for QuickBooks). **Durable fix:**
+      before the control-plane sweep, open the sealed tokens and call
+      `erp_oauth.revoke` best-effort, recording the outcome in the deletion
+      report. **Trigger:** the next change to `tenant_deletion`, or before the
+      first tenant with a live OAuth ERP is deleted.
+- [ ] **(c) QuickBooks' company id comes from the unsigned callback query.**
+      `realmId` is read from the redirect, so a tenant admin can consent to
+      their own company while naming another company's realm, which then
+      reads as `already_linked` for its real owner. Tokens are never shared —
+      it is a squatting / denial problem, not a leak. **Durable fix:** confirm
+      the realm with one API call under the new token (`GET
+      /v3/company/{realmId}/companyinfo/{realmId}`), as Xero and Sage already
+      resolve theirs. **Trigger:** with the OAuth login-CSRF binding above, or
+      before the platform Intuit app goes live.
 - [ ] **(c) SYSPRO's `void_invoice` docstring claims the same stance as
       Business Central and NetSuite**, which now delete drafts while SYSPRO
       deletes nothing. **Durable fix:** say SYSPRO never voids. **Trigger:**
       the next edit to `syspro.py`.
+
+### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
+
+- [ ] **(c) Approving first and recording the receipt second still works.**
+      §267 refuses a receiver at approval, but the reverse order is open: a
+      manager approves the invoice, then records the goods receipt that lifts
+      its "billed beyond receipt" hold. `receipts_clear_hold` and the agent
+      coordinator's `_receipts_implicated` cannot refuse the approver because
+      nothing records who approved by id — only the `approved_by` display name,
+      and the audit log, which fails open in lambda mode.
+      **Durable fix:** a tenant migration adding `invoices.approved_by_user_id`
+      (NULL for history — no honest backfill, §141's reasoning), stamped in
+      `review.approve_invoice`; `receipts_clear_hold` and
+      `_receipts_implicated` refuse a recorder who approved the invoice, with
+      tests on both doors. **Trigger:** the next change to receipt entry or the
+      approval chain, or the first tenant running three-way matching with more
+      than one approver.
+- [ ] **(c) A multi-PO split's `po_ids` vanish on the next warning refresh, and
+      the receiver check with them.** `approval_chain.receipt_recorders` reads
+      the split's PO ids from `po_match.po_ids`, but `refresh_warnings`
+      rewrites `po_match` and the combined `po_number` resolves to no PO, so a
+      receiver of one leg of a split can approve after any later edit.
+      **Durable fix:** persist the split's PO links outside the recomputed
+      `po_match` (a link table or a column the matcher only appends to) and
+      read the receiver set from it. **Trigger:** the next PO-matching change
+      touching multi-PO splits, or the first customer splitting invoices across
+      POs.
+- [ ] **(c) `/cards/generate` does not say why an invoice was skipped.** The
+      response is `total: 0` whether the invoice was ineligible, already
+      carded, already being paid, or timed out on its lock, and a retry
+      returns `total: 0` rather than the existing card.
+      **Durable fix:** per-invoice skip codes on the response (`already_carded`
+      with the card id, `live_payment`, `blocked`, `vendor_not_payable`,
+      `lock_timeout`, …) keyed through the message catalogue, and the web
+      action surfacing them. **Trigger:** the next change to the card-generate
+      UI or response shape.
+- [ ] **(c) Extraction BYOK keys are still plain JSONB.**
+      `settings.extraction.api_key` / `aws_secret_access_key` were not in §266's
+      scope and are admin-readable. **Durable fix:** add an `extraction` block
+      to `services/provider_credentials.SECRET_FIELDS`, move its readers onto
+      `provider_config`, and seal existing values in a control-plane
+      migration, as 0110 did. **Trigger:** the next extraction-adapter or BYOK
+      change, or before the first BYOK extraction customer.
+- [ ] **(c) `sso.client_secret` is plain JSONB.** It is write-only
+      (`org_settings_view.ALWAYS_REDACTED`) but not sealed;
+      `docs/secrets-rotation.md` used to claim it was encrypted and is
+      corrected. **Durable fix:** an `sso` block in `provider_credentials`,
+      read by `services/sso` through `provider_config`, written only by
+      `PUT /api/organization/sso`, with a migration sealing existing values.
+      **Trigger:** the next change to `api/organization_sso.py`, or before the
+      first SSO customer in production.
+- [ ] **(c) Switching payment or card provider keeps the old provider's sealed
+      secret.** Changing `payments.provider` (or `cards.provider`) leaves the
+      previous provider's stored key in place, and the next call sends it to
+      the new provider's host. The change is audited
+      (`organization.provider_config_updated`) but nothing clears it. The ERP
+      block no longer has this gap: a new ERP or a new destination drops its
+      sealed secrets in the same transaction (decisions §271,
+      `erp_adapters/catalog.secrets_to_drop`). **Durable fix:** the same shape
+      for `payments` / `cards` — a pure "what does this save drop" rule keyed on
+      the provider identity (and any base-URL / environment key), applied by
+      `PATCH /api/organization` through `provider_credentials.update_secrets`
+      with an audited `credentials_updated` row, plus a test. **Trigger:** the
+      next change to the payments or cards settings writers, or before the
+      first tenant with live payment-rail or card-issuer credentials.
+- [ ] **(c) A sealed value that can no longer be opened has no in-app
+      recovery.** If the KMS key is disabled or (in dev) `FEOH_SECRET_KEY`
+      changes, every save for that block returns 503, because the writer opens
+      the existing value to merge into it. **Durable fix:** an admin "clear
+      unreadable credentials" action on `/api/organization/credentials/{block}`,
+      audited, that replaces the row without opening it. **Trigger:** the first
+      key rotation or environment where it happens.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
@@ -1482,7 +1545,7 @@ as oversights.
 
 - [ ] **Verify the SYSPRO, Sage Intacct, Sage SA and Blackbaud adapters
       against a live system.** Each was built from published docs and tested
-      against fake-erp only (decisions §264). Unverified:
+      against fake-erp only (decisions §269). Unverified:
       **SYSPRO:** the APSTIN / COMFND schemas and the `ApInvoice` /
       `PorMasterHdr` / `PorMasterDetail` column names.
       **Intacct:** bill `state` values, the purchasing-document query name,
@@ -1502,7 +1565,7 @@ as oversights.
 
 - [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
       Accounting and Blackbaud.** Until then those ERPs connect only when a
-      tenant brings its own app (decisions §265). Steps: register each app
+      tenant brings its own app (decisions §270). Steps: register each app
       with the redirect URI `FEOH_API_PUBLIC_URL/api/erp/oauth/callback`. For
       Intuit, also pass the production app assessment and publish real
       Disconnect / Reconnect pages; for Blackbaud, buy a SKY API subscription.

@@ -8,11 +8,15 @@
 	 * `ERP_TYPES` list of mostly enterprise ERPs, most with no direct adapter,
 	 * behind a separate "integration method" select.
 	 *
-	 * Secrets are write-only. A saved secret arrives masked, its input starts
-	 * blank with a visible "saved" hint, and a blank secret on save or test
-	 * keeps the stored value server-side. "Remove" sends it as `null`, which
-	 * clears it. The OAuth token block is never sent from here: the provider's
-	 * callback is its only writer.
+	 * Secrets are write-only and sealed server-side (decisions §266): no read
+	 * returns one, and the panel learns which are stored by NAME from
+	 * `GET /api/organization/credentials`. Each secret is a `ui/SecretField`
+	 * (always blank, "leave blank to keep", a remove toggle). A save PATCHes the
+	 * configuration, then PUTs only what was typed or removed to
+	 * `/api/organization/credentials/erp`. Changing a destination field (host,
+	 * account, tenant, company, environment) makes the backend drop the stored
+	 * secrets, so the fields then ask for them again. The OAuth tokens are never
+	 * sent from here: the provider's callback is their only writer.
 	 *
 	 * An OAuth ERP (QuickBooks Online, Xero, Sage, Blackbaud) has one primary
 	 * action, "Connect to X", which saves the form and then opens the ERP's
@@ -28,6 +32,7 @@
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '#lib/api.ts';
+	import { getProviderCredentials, updateProviderCredentials } from '#lib/api/providerCredentials.ts';
 	import {
 		disconnectErpOAuth,
 		getErpCatalog,
@@ -38,6 +43,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import SecretField from '#lib/components/ui/SecretField.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { FEATURE_ERP_INTEGRATIONS } from '#lib/types/planFeatures.ts';
@@ -45,6 +51,8 @@
 		BYO_APP_FIELDS,
 		MERGE_DEV_PROVIDER,
 		buildErpPayload,
+		buildErpSecretUpdate,
+		buildErpTestPayload,
 		byoAppRequired,
 		groupProviders,
 		initialValues,
@@ -72,7 +80,7 @@
 		entitled,
 		onsaved
 	}: {
-		/** `settings.erp` from `GET /api/organization` (secrets masked). */
+		/** `settings.erp` from `GET /api/organization` (configuration only). */
 		stored: StoredErpConfig | undefined;
 		/** Signed-in user is not an admin: every ERP endpoint would 403. */
 		readOnly: boolean;
@@ -91,8 +99,12 @@
 	let selectedKey = $state('');
 	let mergeErpType = $state('');
 	let values = $state<Record<string, string>>({});
-	/** Saved secrets the admin chose to remove: sent as `null` on save. */
-	let cleared = $state<ReadonlySet<string>>(new Set());
+	/** Each secret field's remove toggle. Every key a `SecretField` binds is
+	 *  present from the start: Svelte 5 refuses `bind:` of `undefined` to a prop
+	 *  that declares a fallback. */
+	let clear = $state<Record<string, boolean>>({});
+	/** Which ERP secrets the server holds — names only, never a value. */
+	let storedNames = $state<string[]>([]);
 	/** Required fields a save or connect found empty (`aria-invalid`). */
 	let invalid = $state<readonly string[]>([]);
 	let saving = $state(false);
@@ -111,7 +123,6 @@
 	 *  mount and shown until the admin does something else. */
 	let oauthReturn = $state<OAuthReturn>(null);
 
-	const mask = $derived(catalog?.secret_mask ?? '');
 	const groups = $derived(catalog ? groupProviders(catalog.providers) : []);
 	const provider = $derived<ErpProvider | null>(
 		catalog?.providers.find((p) => p.key === selectedKey) ?? null
@@ -155,17 +166,22 @@
 		return key ? m(key) : fallback;
 	}
 
-	/** A secret is on file and the admin has not chosen to remove it. */
-	function secretKept(p: ErpProvider, f: ErpProviderField): boolean {
-		return secretIsSaved(p, f, stored, mask, values) && !cleared.has(f.name);
+	/** A secret is stored for the connection the form currently names. */
+	function secretStored(p: ErpProvider, f: ErpProviderField): boolean {
+		return secretIsSaved(p, f, stored, storedNames, values);
+	}
+
+	/** Every secret field's remove toggle, off. */
+	function freshClear(p: ErpProvider | undefined): Record<string, boolean> {
+		return Object.fromEntries((p?.fields ?? []).filter((f) => f.secret).map((f) => [f.name, false]));
 	}
 
 	/** Show `key`'s values on file (blank for a new choice). */
 	function select(key: string) {
 		selectedKey = key;
 		const p = catalog?.providers.find((x) => x.key === key);
-		values = p ? initialValues(p, stored, mask) : {};
-		cleared = new Set();
+		values = p ? initialValues(p, stored) : {};
+		clear = freshClear(p);
 		invalid = [];
 		confirmDisconnect = false;
 		if (key === MERGE_DEV_PROVIDER) {
@@ -195,11 +211,21 @@
 		catalogError = false;
 		try {
 			catalog = await getErpCatalog();
+			await loadStoredNames();
 			const onFile = storedKey();
 			select(onFile && catalog.providers.some((p) => p.key === onFile) ? onFile : '');
 			if (catalog.providers.some((p) => p.auth === 'oauth')) await loadOAuthStatus();
 		} catch {
 			catalogError = true;
+		}
+	}
+
+	async function loadStoredNames() {
+		try {
+			storedNames = (await getProviderCredentials()).erp;
+		} catch {
+			// Non-fatal: the fields then say nothing is stored, and a blank field
+			// still keeps whatever is — the server decides, not this list.
 		}
 	}
 
@@ -271,20 +297,11 @@
 		if (invalid.includes(name)) invalid = invalid.filter((n) => n !== name);
 	}
 
-	function removeSecret(name: string) {
-		cleared = new Set([...cleared, name]);
-		values[name] = '';
-	}
-
-	function keepSecret(name: string) {
-		cleared = new Set([...cleared].filter((n) => n !== name));
-	}
-
 	/** Required fields all filled? If not, mark them, say which, and move
 	 *  focus to the first (WCAG 3.3.1). */
 	function validate(p: ErpProvider): boolean {
-		const missing = missingRequired(p, values, stored, mask, {
-			cleared,
+		const missing = missingRequired(p, values, stored, storedNames, {
+			clear,
 			requireByoApp: byoRequired
 		});
 		invalid = missing.map((f) => f.name);
@@ -298,16 +315,24 @@
 		return false;
 	}
 
-	/** PATCH the form. The typed secrets are stored, so the form drops them
-	 *  and shows the saved hint, the same as after a reload. */
+	/** PATCH the configuration, then PUT what was typed or removed. The typed
+	 *  secrets are then stored, so the form drops them and says so, the same
+	 *  as after a reload. A configuration that saved while its secrets did not
+	 *  throws (for the caller's message) with the typed values still in place. */
 	async function persist(p: ErpProvider) {
 		const data = await api.patch<{ settings: Record<string, unknown> }>('/api/organization', {
-			settings: { erp: buildErpPayload(p, values, mergeErpType, cleared, stored) }
+			settings: { erp: buildErpPayload(p, values, mergeErpType, stored) }
 		});
 		onsaved?.(data);
 		const next = (data.settings.erp ?? undefined) as StoredErpConfig | undefined;
-		values = initialValues(p, next, mask);
-		cleared = new Set();
+		const update = buildErpSecretUpdate(p, values, clear);
+		// Without a PUT the list may still have changed: a new destination drops
+		// the stored secrets server-side.
+		storedNames = update
+			? (await updateProviderCredentials('erp', update)).erp
+			: (await getProviderCredentials()).erp;
+		values = initialValues(p, next);
+		clear = freshClear(p);
 		invalid = [];
 	}
 
@@ -334,7 +359,7 @@
 		setStatus('', null);
 		try {
 			const result = await testErpConnection(
-				buildErpPayload(provider, values, mergeErpType, cleared, stored)
+				buildErpTestPayload(provider, values, mergeErpType, stored)
 			);
 			setStatus(result.message, result.success ? 'success' : 'failure');
 		} catch (err) {
@@ -405,62 +430,47 @@
 <svelte:window onclick={onWindowClick} />
 
 {#snippet field(p: ErpProvider, f: ErpProviderField)}
-	{@const kept = secretKept(p, f)}
-	{@const isCleared = f.secret && cleared.has(f.name)}
 	{@const inputId = `${uid}-${f.name}`}
 	{@const helpId = f.help_key ? `${inputId}-help` : undefined}
-	{@const secretId = kept || isCleared ? `${inputId}-saved` : undefined}
-	{@const describedBy = [secretId, helpId].filter(Boolean).join(' ') || undefined}
 	<div class="field">
-		<label>
-			<span>{fieldLabel(f)}</span>
-			{#if f.options}
-				<select
-					id={inputId}
-					bind:value={values[f.name]}
-					name={f.name}
-					aria-describedby={describedBy}
-				>
-					{#each f.options as option (option)}
-						<option value={option}>{optionLabel(option)}</option>
-					{/each}
-				</select>
-			{:else}
-				<input
-					id={inputId}
-					type={f.secret ? 'password' : 'text'}
-					name={f.name}
-					autocomplete={f.secret ? 'new-password' : 'off'}
-					bind:value={values[f.name]}
-					oninput={() => clearInvalid(f.name)}
-					required={isRequired(f) && !kept}
-					aria-invalid={invalid.includes(f.name) ? 'true' : undefined}
-					placeholder={kept ? m('org.erp.secretSaved') : (f.placeholder ?? '')}
-					aria-describedby={describedBy}
-					data-secret-saved={f.secret ? String(kept) : undefined}
-				/>
-			{/if}
-		</label>
-		{#if secretId}
-			<div class="secret-row">
-				<p class="field-hint" id={secretId}>
-					{isCleared ? m('org.erp.secretCleared') : m('org.erp.secretSavedHint')}
-				</p>
-				{#if isCleared}
-					<button type="button" class="link-btn" onclick={() => keepSecret(f.name)}>
-						{m('org.erp.secretKeep')}
-					</button>
+		{#if f.secret}
+			<SecretField
+				id={inputId}
+				label={fieldLabel(f)}
+				bind:value={values[f.name]}
+				bind:clear={clear[f.name]}
+				configured={secretStored(p, f)}
+				placeholder={f.placeholder ?? ''}
+				required={isRequired(f)}
+				invalid={invalid.includes(f.name)}
+				describedBy={helpId}
+				oninput={() => clearInvalid(f.name)}
+				testId="erp-secret-{f.name}"
+			/>
+		{:else}
+			<label>
+				<span>{fieldLabel(f)}</span>
+				{#if f.options}
+					<select id={inputId} bind:value={values[f.name]} name={f.name} aria-describedby={helpId}>
+						{#each f.options as option (option)}
+							<option value={option}>{optionLabel(option)}</option>
+						{/each}
+					</select>
 				{:else}
-					<button
-						type="button"
-						class="link-btn"
-						aria-label={m('org.erp.secretRemoveAria', { field: m(f.label_key) })}
-						onclick={() => removeSecret(f.name)}
-					>
-						{m('org.erp.secretRemove')}
-					</button>
+					<input
+						id={inputId}
+						type="text"
+						name={f.name}
+						autocomplete="off"
+						bind:value={values[f.name]}
+						oninput={() => clearInvalid(f.name)}
+						required={isRequired(f)}
+						aria-invalid={invalid.includes(f.name) ? 'true' : undefined}
+						placeholder={f.placeholder ?? ''}
+						aria-describedby={helpId}
+					/>
 				{/if}
-			</div>
+			</label>
 		{/if}
 		{#if helpId}
 			<p class="field-hint" id={helpId}>{m(f.help_key!)}</p>
@@ -791,25 +801,6 @@
 
 	.load-failed .card-hint {
 		margin: 0;
-	}
-
-	.secret-row {
-		display: flex;
-		align-items: baseline;
-		flex-wrap: wrap;
-		gap: 4px 10px;
-	}
-
-	.link-btn {
-		background: none;
-		border: none;
-		padding: 0;
-		margin-top: 6px;
-		font: inherit;
-		font-size: 0.78rem;
-		color: var(--accent);
-		text-decoration: underline;
-		cursor: pointer;
 	}
 
 	.byo {

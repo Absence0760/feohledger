@@ -85,6 +85,10 @@ CONTROL_TABLES: frozenset[str] = frozenset(
         # user_id, the same placement as User.mfa_secret. Control-plane only,
         # never fanned to tenant DBs.
         "webauthn_credentials",
+        # Sealed ERP / payment-rail / card-issuer credentials (see app/models/
+        # provider_credential.py for why they sit beside `organizations`).
+        # Control-plane only, never fanned to tenant DBs.
+        "provider_credentials",
     }
 )
 

@@ -563,6 +563,7 @@ async def get_cash_position(
         # fabricate a balance, and the resolver additionally no-ops the provider
         # link when the org has configured no payments provider at all.
         use_provider=seed_balance,
+        org_id=org.id,
     )
     opening = balance.amount
 

@@ -84,6 +84,7 @@ async def _resolve_opening_balance(
         org_settings=org_settings,
         reporting_currency=reporting_currency,
         explicit_opening=explicit_opening,
+        org_id=org_id,
     )
 
     threshold = explicit_threshold

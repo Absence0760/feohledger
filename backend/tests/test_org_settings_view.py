@@ -8,9 +8,10 @@ incoming-webhook URL. Any one of those is enough to act as the tenant against a
 third party.
 
 Covers the pure projection (`services/org_settings_view`) and the endpoint
-wired to it. Admins keep the verbatim settings — the `/organization` page reads
-saved credentials back into its form fields, so redacting for them would blank a
-live config on the next save.
+wired to it. Admins keep the rest of the settings verbatim, but no role — admin
+included — gets an ERP / payment / card secret back: those are sealed in
+`provider_credentials` and written only through `PUT
+/api/organization/credentials/{block}` (`tests/test_provider_credentials.py`).
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models.organization import Organization
-from app.services.erp_adapters.catalog import SECRET_MASK
 from app.services.org_settings_view import (
     ALWAYS_REDACTED,
     NON_ADMIN_SETTINGS,
@@ -64,20 +64,16 @@ SECRET_VALUES = [
 # ---------- the pure projection ---------------------------------------------
 
 
-def test_admin_keeps_every_credential_except_the_write_only_ones():
-    """The admin settings page round-trips saved credentials through its form
-    fields, so an admin still sees them — all except the chat webhook URL and
-    the SSO client secret, whose only sanctioned management paths are their
-    audited endpoints."""
+def test_admin_keeps_configuration_but_no_write_only_credential():
+    """An admin keeps the configuration of every block, but never a provider
+    secret (sealed, write-only), the chat webhook URL or the SSO client secret
+    — each has its own audited writer and nothing needs it read back."""
     projected = settings_for_response(SECRETS, is_admin=True)
-    # `settings.erp` is write-only for admins too (keep-on-blank on the write
-    # path — `erp_adapters/catalog`): every secret reads as the mask.
-    assert projected["erp"]["client_secret"] == SECRET_MASK
-    assert projected["erp"]["webhook_signing_secret"] == SECRET_MASK
-    assert projected["erp"]["type"] == "netsuite"
-    assert "erp-client-secret" not in str(projected)
-    assert "erp-webhook-secret" not in str(projected)
-    assert projected["payments"]["webhook_secret"] == "pay-webhook-secret"
+    assert projected["erp"] == {"type": "netsuite", "integration_method": "direct"}
+    assert projected["payments"] == {"provider": "modern_treasury"}
+    assert projected["cards"] == {"provider": "lithic"}
+    for value in ("erp-client-secret", "erp-api-key", "pay-webhook-secret", "card-api-key"):
+        assert value not in str(projected)
     assert projected["sso"]["scim_bearer_hash"] == "deadbeef"
     # …but never these, for any role.
     assert "webhook_url" not in projected["chat_notifications"]
@@ -95,10 +91,50 @@ def test_admin_projection_does_not_mutate_the_live_settings():
     assert live["chat_notifications"]["webhook_url"] == "https://x.invalid/t"
 
 
-def test_admin_projection_is_identity_when_nothing_is_redacted():
-    """No needless copying on the common path."""
-    plain = {"company": {"address": "1 Main St"}}
-    assert settings_for_response(plain, is_admin=True) is plain
+def test_admin_projection_is_equal_when_nothing_is_redacted():
+    plain = {"company": {"address": "1 Main St"}, "erp": {"type": "mock"}}
+    assert settings_for_response(plain, is_admin=True) == plain
+
+
+def test_the_erp_oauth_block_reads_as_connected_only():
+    """The OAuth consent metadata keeps its `connection_id` — the capability the
+    token refresher checks — so it reads as `{"connected": bool}`; a token copy
+    left in the JSONB (the tokens are sealed) never reappears either."""
+    stored = {
+        "erp": {
+            "type": "quickbooks_online",
+            "integration_method": "direct",
+            "oauth": {
+                "provider": "quickbooks_online",
+                "connection_id": "conn-capability",
+                "external_tenant_id": "realm-1",
+                "refresh_token": "stray-refresh-token",
+            },
+        }
+    }
+    projected = settings_for_response(stored, is_admin=True)
+    assert projected["erp"]["oauth"] == {"connected": True}
+    assert projected["erp"]["type"] == "quickbooks_online"
+    assert "conn-capability" not in str(projected)
+    assert "stray-refresh-token" not in str(projected)
+    # The live ORM dict is untouched.
+    assert stored["erp"]["oauth"]["connection_id"] == "conn-capability"
+    assert settings_for_response({"erp": {"oauth": {}}}, is_admin=True)["erp"]["oauth"] == {
+        "connected": False
+    }
+
+
+def test_admin_projection_strips_provider_secrets_in_multi_route_entries():
+    """`payments.providers[]` entries carry their own keys; they are secrets too."""
+    live = {
+        "payments": {
+            "provider": "column",
+            "providers": [{"provider": "column", "api_key": "col-key", "bank_account_id": "b"}],
+        }
+    }
+    projected = settings_for_response(live, is_admin=True)
+    assert projected["payments"]["providers"] == [{"provider": "column", "bank_account_id": "b"}]
+    assert live["payments"]["providers"][0]["api_key"] == "col-key"  # source untouched
 
 
 def test_non_admin_gets_no_credential():
@@ -228,17 +264,19 @@ async def test_get_organization_redacts_credentials_for_non_admins(realdb, role)
 
 @pytest.mark.asyncio
 async def test_get_organization_keeps_admin_access_intact(realdb):
-    """The settings page reads saved credentials back into its form fields, so
-    an admin must still get them — all but the write-only chat webhook URL and
-    SSO client secret."""
+    """An admin keeps every block's configuration; a provider secret that is
+    somehow still in the JSONB (a hand edit, a pre-0110 backup) is stripped
+    even for them — the sealed store is the only home it has."""
     await _seed_settings(realdb)
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.get("/api/organization")
     assert resp.status_code == 200
     settings = resp.json()["settings"]
-    assert settings["erp"]["client_secret"] == SECRET_MASK  # write-only (catalog)
     assert settings["erp"]["type"] == "netsuite"
-    assert settings["payments"]["webhook_secret"] == "pay-webhook-secret"
+    assert "client_secret" not in settings["erp"]
+    assert settings["payments"] == {"provider": "modern_treasury"}
+    for value in ("erp-client-secret", "erp-api-key", "pay-webhook-secret", "card-api-key"):
+        assert value not in resp.text
     assert "webhook_url" not in settings["chat_notifications"]
     assert "zzTOPSECRETzz" not in resp.text
     assert settings["sso"]["scim_bearer_hash"] == "deadbeef"

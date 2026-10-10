@@ -108,7 +108,7 @@ falling back to a name. Then send `entity: {id}` / `account: {id}` (NetSuite)
 and `vendorId` (Business Central), and teach fake-erp to reject the old shapes
 so the e2e suite proves it.
 
-**Resolution (2026-10-08, branch `feat/erp-connections`, decisions §264).**
+**Resolution (2026-10-08, branch `feat/erp-connections`, decisions §269).**
 Done as described, plus three things the diagnosis missed:
 
 - `services/erp._resolve_erp_refs` fills both ids in two queries, whatever the

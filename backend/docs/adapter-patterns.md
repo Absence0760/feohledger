@@ -79,8 +79,8 @@ module that registers an adapter is missing from it):
 The setup form's fields, regions and secret flags come from
 `erp_adapters/catalog.py`, not from the frontend. An OAuth ERP subclasses
 `oauth_base.OAuthErpAdapter`, and its tokens come only from `services/erp_oauth`
-(decisions §265). A pre-flight refusal (`base.erp_refusal`) and a missing OAuth
-connection are final: the push is not retried (decisions §264).
+(decisions §270). A pre-flight refusal (`base.erp_refusal`) and a missing OAuth
+connection are final: the push is not retried (decisions §269).
 
 Config `integration_method: "merge_dev"|"direct"` selects whether to use Merge.dev unified API or direct adapter. Note `integration_method` **defaults to `merge_dev`**, so a config naming only a `type` routes through Merge.dev regardless of that type.
 

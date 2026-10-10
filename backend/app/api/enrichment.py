@@ -53,7 +53,7 @@ from app.schemas.enrichment import (
     VendorMergeResponse,
     VendorScoreResponse,
 )
-from app.schemas.vendor import VendorResponse
+from app.schemas.vendor import VendorCardRevocationResponse, VendorResponse
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
 from app.services.enrichment_adapters import (
@@ -64,6 +64,7 @@ from app.services.enrichment_adapters import (
     list_available_providers,
 )
 from app.services.gl_chart import load_invoice_chart
+from app.services.vendor_card_revocation import revoke_vendor_cards
 from app.services.vendor_consolidation import (
     VendorRecord,
     find_consolidation_clusters,
@@ -608,7 +609,7 @@ async def vendor_consolidation_suggestions(
 async def merge_vendor_consolidation(
     body: VendorMergeRequest,
     db: AsyncSession = Depends(get_tenant_db),
-    org: Organization = Depends(get_tenant),  # noqa: ARG001 — tenant chokepoint
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
 ):
@@ -666,6 +667,33 @@ async def merge_vendor_consolidation(
             "total_reassigned": result.total_reassigned,
         },
     )
+
+    # The merge re-homes every duplicate's virtual cards onto the canonical, so
+    # a retired duplicate holds none afterwards. The canonical can itself be
+    # un-payable (inactive / rejected / blocked) — then the cards it just
+    # inherited must not stay spendable. Every involved vendor goes through the
+    # same helper; an eligible one is a no-op.
+    involved = (
+        (
+            await db.execute(
+                select(Vendor).where(Vendor.id.in_([canonical_id, *result.duplicate_vendor_ids]))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    card_revocations = []
+    for vendor in involved:
+        revocation = await revoke_vendor_cards(
+            db,
+            vendor=vendor,
+            organization_id=org_id,
+            org_settings=org.settings,
+            actor_id=user.id,
+            trigger="vendor.merged",
+        )
+        if revocation is not None and revocation.cards:
+            card_revocations.append(VendorCardRevocationResponse.from_result(revocation))
     await db.commit()
 
     return VendorMergeResponse(
@@ -675,6 +703,7 @@ async def merge_vendor_consolidation(
         total_reassigned=result.total_reassigned,
         deactivated_vendor_ids=[str(d) for d in result.deactivated_vendor_ids],
         merged_at=datetime.now(UTC).isoformat(),
+        card_revocations=card_revocations,
     )
 
 

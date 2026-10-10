@@ -42,16 +42,49 @@ export async function resetFakeErp(): Promise<void> {
 
 /** PATCH the org's `settings.erp`. Pass `null` to unconfigure (the afterAll
  *  cleanup contract every erp spec honours). */
+// The ERP block's secret fields — mirror of the backend's
+// `provider_credentials.SECRET_FIELDS["erp"]`. They are stored sealed through
+// `PUT /api/organization/credentials/erp`; `PATCH /api/organization` refuses them.
+const ERP_SECRET_FIELDS = new Set([
+	'api_key',
+	'account_token',
+	'client_secret',
+	'consumer_secret',
+	'token_secret',
+	'password',
+	'subscription_key',
+	'operator_password',
+	'company_password',
+	'webhook_signing_secret',
+	'webhook_secret'
+]);
+
 export async function setErpSettings(
 	page: Page,
 	erp: Record<string, unknown> | null
 ): Promise<void> {
 	const headers = await authedTenantHeaders(page);
+	const entries = Object.entries(erp ?? {});
+	const config = erp
+		? Object.fromEntries(entries.filter(([key]) => !ERP_SECRET_FIELDS.has(key)))
+		: null;
+	const secrets = Object.fromEntries(
+		entries.filter(([key, value]) => ERP_SECRET_FIELDS.has(key) && typeof value === 'string')
+	) as Record<string, string>;
 	const resp = await page.request.patch(`${API_BASE}/api/organization`, {
 		headers: { ...headers, 'Content-Type': 'application/json' },
-		data: { settings: { erp } }
+		data: { settings: { erp: config } }
 	});
 	expect(resp.ok(), `PATCH /api/organization settings.erp failed (${resp.status()})`).toBe(true);
+	// Clearing the ERP clears its stored secrets too, so the next spec starts
+	// from nothing rather than inheriting another adapter's credentials.
+	const creds = await page.request.put(`${API_BASE}/api/organization/credentials/erp`, {
+		headers: { ...headers, 'Content-Type': 'application/json' },
+		data: erp ? { set: secrets } : { clear: [...ERP_SECRET_FIELDS] }
+	});
+	expect(creds.ok(), `PUT /api/organization/credentials/erp failed (${creds.status()})`).toBe(
+		true
+	);
 }
 
 /** POST /api/organization/test-erp with an empty body so the endpoint tests

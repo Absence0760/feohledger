@@ -95,7 +95,11 @@ class _VendorsScreenState extends State<VendorsScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   children: [
                     _filterChip(l.commonAll, null, current),
-                    _filterChip(l.vendorsFilterUnverified, 'unverified', current),
+                    _filterChip(
+                      l.vendorsFilterUnverified,
+                      'unverified',
+                      current,
+                    ),
                     _filterChip(l.vendorsFilterActive, 'active', current),
                     _filterChip(l.vendorsFilterInactive, 'inactive', current),
                     _filterChip(l.vendorsFilterRejected, 'rejected', current),
@@ -184,6 +188,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                 ? (verify ? l.vendorVerified : l.vendorRejected)
                 : l.vendorActionFailed,
           );
+          if (ok && !verify) _warnLiveCards();
         }
         // The list refetches on success, so consume the dismiss (return false)
         // and let the refetched list drop the row — avoids a stale gap if the
@@ -262,7 +267,9 @@ class _VendorsScreenState extends State<VendorsScreen> {
     Navigator.of(sheetContext).pop();
     final l = AppLocalizations.of(context);
     final store = VendorStore.instance;
-    final ok = verify ? await store.verify(vendor.id) : await store.reject(vendor.id);
+    final ok = verify
+        ? await store.verify(vendor.id)
+        : await store.reject(vendor.id);
     if (!mounted) return;
     A11y.announce(
       context,
@@ -270,6 +277,26 @@ class _VendorsScreenState extends State<VendorsScreen> {
           ? (verify ? l.vendorVerified : l.vendorRejected)
           : l.vendorActionFailed,
     );
+    if (ok && !verify) _warnLiveCards();
+  }
+
+  /// Rejecting a vendor cancels its live virtual cards server-side. A card
+  /// the provider did not confirm closed, or one behind a live payment, is
+  /// still spendable — say so, never let the plain "rejected" stand alone.
+  void _warnLiveCards() {
+    final v = VendorStore.instance.lastRejected;
+    if (v == null) return;
+    final l = AppLocalizations.of(context);
+    final lines = [
+      if (v.cardsNotClosed > 0) l.vendorCardsNotClosed(v.cardsNotClosed),
+      if (v.cardsRequireVoid > 0) l.vendorCardsRequireVoid(v.cardsRequireVoid),
+    ];
+    if (lines.isEmpty) return;
+    final text = lines.join('\n');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text), duration: const Duration(seconds: 12)),
+    );
+    A11y.announce(context, text);
   }
 
   Future<void> _syncErp() async {

@@ -96,7 +96,7 @@ decimal comparison rather than binary drift.
 
 ### Control-Plane Tables
 
-- `organizations` — tenant registry (name, slug, db_name, settings, plan). The secrets inside `settings.erp` (every catalogue secret field and the OAuth tokens) are stored per field as `enc:v1:<key-id>:<b64>` AES-GCM ciphertext; migration 0110 (control-plane only, data only) encrypted the plaintext already there. See `erp-integration.md` § Credentials at rest.
+- `organizations` — tenant registry (name, slug, db_name, settings, plan). `settings.erp.oauth` holds an ERP OAuth connection's metadata only; its tokens are sealed in `provider_credentials` with the block's other secrets (`erp-integration.md` § Where the credentials live).
 - `users` — all users across all tenants. Columns: `email`, `full_name`, `hashed_password` (nullable for SSO-only), `organization_id`, `is_active`, `must_change_password`, `sso_provider` + `sso_provider_id` (OIDC linkage), `mfa_secret` + `mfa_enabled` + `mfa_enrolled_at` (TOTP MFA)
 - `roles` — role definitions (admin, ap_manager, ap_clerk, cfo)
 - `user_roles` — many-to-many join table
@@ -452,6 +452,7 @@ gate fails if a model is added without being classified.
    - `Role` — name (admin, ap_manager, ap_clerk, cfo)
    - `UserRole` — junction table
    - `WebAuthnCredential` — registered passkey (credential_id, public_key, sign_count, transports) per `user_id`; the WebAuthn second factor (migration 0063)
+   - `ProviderCredential` — `provider_credentials`: one row per (organization, settings block `erp` / `payments` / `cards`) holding that block's secrets as ONE envelope-encrypted JSON map (`ciphertext`, `wrapped_key`, `key_provider` `kms`/`local`, `key_id`) plus the stored path NAMES (`secret_fields`, so "is it set?" needs no decrypt); unique `(organization_id, block)`, plain FK to `organizations` (swept by `tenant_deletion`). Control-plane, beside the `Organization.settings` it was moved out of, so migration 0110 could copy-and-strip in one transaction. See `services/provider_credentials.py` and `erp-integration.md` § Where the credentials live
    - `AssistantUsage` — billing: per-org/month assistant token meter. The
      *only* usage meter that is control-plane; `ExtractionUsage` and
      `CardRebate` read like control-plane data but are tenant-local (see

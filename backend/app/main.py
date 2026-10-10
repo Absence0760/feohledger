@@ -48,6 +48,7 @@ from app.api import (
     invoices,
     notifications,
     organization,
+    organization_credentials,
     organization_sso,
     partner,
     payments,
@@ -518,6 +519,9 @@ app.include_router(organization.router, prefix="/api")
 app.include_router(chat_notifications.router, prefix="/api")
 # Hangs off /api/organization/sso — the one audited writer of settings.sso.
 app.include_router(organization_sso.router, prefix="/api")
+# Hangs off /api/organization/credentials — the one audited writer of the sealed
+# ERP / payment / card secrets (services/provider_credentials).
+app.include_router(organization_credentials.router, prefix="/api")
 app.include_router(partner.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")
 app.include_router(signup.router, prefix="/api")

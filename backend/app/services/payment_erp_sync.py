@@ -65,8 +65,10 @@ from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.payment import Payment
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.exception_service import create_exception
 from app.services.payment_settlement import settlement_coverage
+from app.services.provider_credentials import provider_config
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +176,18 @@ async def _sync_payments(run_id: uuid.UUID, org_id: uuid.UUID) -> PaymentSyncRes
         # `payment_scheduled` forever — under-counting the aging report, the
         # `/dashboard` pipeline, the vendor's payment history and the 1099 YTD
         # totals, while the payment row itself looked perfectly correct.
-        erp_config = (org.settings or {}).get("erp") or None
-        if erp_config is None:
+        # Sealed ERP credentials that cannot be opened (a KMS outage, a bad
+        # envelope) are an ERP problem, so they fail each LEG — exception row
+        # and all — exactly like an unsupported adapter. Never `erp_config =
+        # None`: that is "no ERP", which would skip the push and still advance
+        # every invoice to `paid`.
+        erp_error: Exception | None = None
+        try:
+            async with ctrl_factory() as ctrl_db:
+                erp_config = await provider_config(org, "erp", db=ctrl_db) or None
+        except CredentialCryptoError as exc:
+            erp_config, erp_error = None, exc
+        if erp_config is None and erp_error is None:
             logger.info(
                 "[payment-sync] no ERP configured for org %s — no ERP push; settled "
                 "payments still advance their invoices to paid",
@@ -200,7 +212,9 @@ async def _sync_payments(run_id: uuid.UUID, org_id: uuid.UUID) -> PaymentSyncRes
 
         try:
             async with tenant_factory() as db:
-                return await _sync_run_legs(db, run_id=run_id, org_id=org_id, erp_config=erp_config)
+                return await _sync_run_legs(
+                    db, run_id=run_id, org_id=org_id, erp_config=erp_config, erp_error=erp_error
+                )
         finally:
             await tenant_engine.dispose()
     finally:
@@ -208,7 +222,12 @@ async def _sync_payments(run_id: uuid.UUID, org_id: uuid.UUID) -> PaymentSyncRes
 
 
 async def _sync_run_legs(
-    db, *, run_id: uuid.UUID, org_id: uuid.UUID, erp_config: dict | None
+    db,
+    *,
+    run_id: uuid.UUID,
+    org_id: uuid.UUID,
+    erp_config: dict | None,
+    erp_error: Exception | None = None,
 ) -> PaymentSyncResult:
     """Run one leg per payment in the run, each independently committed."""
     counts = {_SYNCED: 0, _SKIPPED: 0, _HELD: 0, _FAILED: 0}
@@ -230,7 +249,12 @@ async def _sync_run_legs(
 
         for payment_id in payment_ids:
             outcome, moved = await _sync_one_leg(
-                db, payment_id=payment_id, run_id=run_id, org_id=org_id, erp_config=erp_config
+                db,
+                payment_id=payment_id,
+                run_id=run_id,
+                org_id=org_id,
+                erp_config=erp_config,
+                erp_error=erp_error,
             )
             counts[outcome] += 1
             transitioned += int(moved)
@@ -257,7 +281,13 @@ async def _sync_run_legs(
 
 
 async def _sync_one_leg(
-    db, *, payment_id: uuid.UUID, run_id: uuid.UUID, org_id: uuid.UUID, erp_config: dict | None
+    db,
+    *,
+    payment_id: uuid.UUID,
+    run_id: uuid.UUID,
+    org_id: uuid.UUID,
+    erp_config: dict | None,
+    erp_error: Exception | None = None,
 ) -> tuple[str, bool]:
     """Sync one payment, committing on its own.
 
@@ -318,6 +348,10 @@ async def _sync_one_leg(
         # `adapter = None`. Calling `get_erp_adapter({})` here instead would
         # fail closed and turn "this tenant has no ERP" into a permanent strand
         # plus an exception row for a situation that is not an error.
+        # The ERP credentials could not be opened for this pass: fail the leg
+        # through the same handler (rollback, `erp_reconciliation` row).
+        if erp_error is not None:
+            raise erp_error
         adapter = None
         if erp_config is not None:
             from app.services.erp_adapters import get_erp_adapter

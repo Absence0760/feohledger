@@ -6,14 +6,18 @@
  * which ERPs the form offers and which fields each needs. Nothing here
  * hardcodes a provider; adding one is a backend catalogue edit.
  *
- * Secrets are write-only: `GET /api/organization` returns each saved secret as
- * the catalogue's `secret_mask`, and a save that sends a secret blank (or still
- * masked) keeps the stored value. So the form never holds a real secret it did
- * not just have typed into it.
+ * Secrets are write-only and live apart from the configuration: they are sealed
+ * server-side (`provider_credentials`, decisions §266), set only through
+ * `PUT /api/organization/credentials/erp`, and never returned — the form learns
+ * which ones are stored by NAME (`GET /api/organization/credentials`). A save
+ * PATCHes the configuration (`buildErpPayload`, no secret in it) and then PUTs
+ * only what was typed or removed (`buildErpSecretUpdate`). So the form never
+ * holds a real secret it did not just have typed into it.
  *
  * Pure: no `$app`, no fetch, so vitest can reach it.
  */
 import type { MessageKey } from '#lib/i18n/messages.ts';
+import { credentialUpdate, type ProviderCredentialUpdate } from '#lib/types/providerCredentials.ts';
 
 export type ErpAuthKind = 'credentials' | 'oauth';
 
@@ -50,7 +54,6 @@ export interface ErpProvider {
 export interface ErpCatalog {
 	providers: ErpProvider[];
 	merge_dev_long_tail: { value: string; label: string }[];
-	secret_mask: string;
 }
 
 /** One OAuth ERP as `GET /api/organization/erp/oauth/status` reports it. */
@@ -78,7 +81,7 @@ export interface ErpOAuthStatus {
 	providers: ErpOAuthProviderStatus[];
 }
 
-/** `settings.erp` as `GET /api/organization` returns it (secrets masked). */
+/** `settings.erp` as `GET /api/organization` returns it: configuration only. */
 export type StoredErpConfig = Record<string, unknown> & {
 	type?: string;
 	integration_method?: string;
@@ -148,20 +151,19 @@ export function selectedProviderKey(erp: StoredErpConfig | undefined | null): st
 
 /**
  * The form's initial values for `provider` from what is stored. A secret
- * starts blank, never as the mask: blank means "keep", and the field shows
- * the saved-placeholder instead (see `secretIsSaved`).
+ * always starts blank: blank means "keep", and the field says whether one is
+ * stored instead (see `secretIsSaved`).
  */
 export function initialValues(
 	provider: ErpProvider,
-	stored: StoredErpConfig | undefined | null,
-	mask: string
+	stored: StoredErpConfig | undefined | null
 ): Record<string, string> {
 	const sameProvider = stored ? selectedProviderKey(stored) === provider.key : false;
 	const values: Record<string, string> = {};
 	for (const f of provider.fields) {
 		const raw = sameProvider ? stored?.[f.name] : undefined;
 		const value = typeof raw === 'string' ? raw : '';
-		values[f.name] = f.secret || value === mask ? '' : value;
+		values[f.name] = f.secret ? '' : value;
 		if (!f.secret && !values[f.name] && f.options?.length) values[f.name] = f.options[0];
 	}
 	return values;
@@ -185,36 +187,38 @@ export function destinationChanged(
 }
 
 /**
- * Is a secret already stored for this field (for the provider on file)? Not
- * once `values` changes a destination field: a stored secret is never carried
- * to a new host or account, so the form asks for it again.
+ * Is a secret stored for this field, for the provider on file? `storedNames`
+ * is the `erp` list from `GET /api/organization/credentials` (names only).
+ * Not for another ERP than the one on file (a save switching ERP drops its
+ * secrets), and not once `values` changes a destination field: the backend
+ * drops a stored secret rather than carry it to a new host or account
+ * (`catalog.secrets_to_drop`), so the form asks for it again.
  */
 export function secretIsSaved(
 	provider: ErpProvider,
 	field: ErpProviderField,
 	stored: StoredErpConfig | undefined | null,
-	mask: string,
+	storedNames: readonly string[],
 	values?: Record<string, string>
 ): boolean {
 	if (!field.secret || !stored || selectedProviderKey(stored) !== provider.key) return false;
 	if (values && destinationChanged(provider, values, stored)) return false;
-	return stored[field.name] === mask;
+	return storedNames.includes(field.name);
 }
 
 /** Keys a save never sends: the OAuth block's only writer is the callback. */
 const NEVER_SENT_KEYS: ReadonlySet<string> = new Set(['oauth']);
 
 /**
- * The `settings.erp` body a save (or a connection test) sends. Blank secrets
- * are sent blank, which the backend reads as "keep the stored value"; a secret
- * the admin chose to remove (`cleared`) is sent as `null`, which clears it.
- * The OAuth block is never sent: only the OAuth callback writes it.
+ * The `settings.erp` CONFIGURATION a save sends: no secret field at all —
+ * `PATCH /api/organization` refuses one, and they go to the credentials
+ * endpoint (`buildErpSecretUpdate`). The OAuth block is never sent: only the
+ * OAuth callback writes it.
  */
 export function buildErpPayload(
 	provider: ErpProvider,
 	values: Record<string, string>,
 	mergeErpType: string,
-	cleared: ReadonlySet<string> = new Set(),
 	stored?: StoredErpConfig | null
 ): Record<string, unknown> {
 	const body: Record<string, unknown> =
@@ -231,9 +235,47 @@ export function buildErpPayload(
 		}
 	}
 	for (const f of provider.fields) {
-		const value = (values[f.name] ?? '').trim();
-		// A value typed after Remove replaces rather than clears.
-		body[f.name] = f.secret && cleared.has(f.name) && !value ? null : value;
+		if (!f.secret) body[f.name] = (values[f.name] ?? '').trim();
+	}
+	return body;
+}
+
+/**
+ * The `PUT /api/organization/credentials/erp` body for `provider`'s secret
+ * fields, or `null` when the save changes none (no request is made). A typed
+ * value is set; a blank one keeps what is stored, unless its remove toggle is
+ * on (`clear[name]`); a typed value wins over a stale toggle.
+ */
+export function buildErpSecretUpdate(
+	provider: ErpProvider,
+	values: Record<string, string>,
+	clear: Readonly<Record<string, boolean>>
+): ProviderCredentialUpdate | null {
+	return credentialUpdate(
+		Object.fromEntries(
+			provider.fields
+				.filter((f) => f.secret)
+				.map((f) => [f.name, { value: values[f.name] ?? '', clear: clear[f.name] === true }])
+		)
+	);
+}
+
+/**
+ * The body of a connection TEST: the configuration plus each secret the admin
+ * has typed. A blank secret is left out, and the backend fills it from the
+ * sealed store only while the form names the saved ERP at the saved
+ * destination (`provider_credentials.config_for_connection_test`).
+ */
+export function buildErpTestPayload(
+	provider: ErpProvider,
+	values: Record<string, string>,
+	mergeErpType: string,
+	stored?: StoredErpConfig | null
+): Record<string, unknown> {
+	const body = buildErpPayload(provider, values, mergeErpType, stored);
+	for (const f of provider.fields) {
+		const typed = (values[f.name] ?? '').trim();
+		if (f.secret && typed) body[f.name] = typed;
 	}
 	return body;
 }
@@ -251,24 +293,24 @@ export function byoAppRequired(provider: ErpProvider, status: ErpOAuthStatus | n
 }
 
 /**
- * Required fields still empty. A required secret that is already saved counts
+ * Required fields still empty. A required secret that is already stored counts
  * as filled, since leaving it blank keeps it, unless the admin chose to remove
- * it (`cleared`). With `requireByoApp` the optional client id + secret pair
- * counts as required: there is no other app to connect through.
+ * it (`clear[name]`). With `requireByoApp` the optional client id + secret
+ * pair counts as required: there is no other app to connect through.
  */
 export function missingRequired(
 	provider: ErpProvider,
 	values: Record<string, string>,
 	stored: StoredErpConfig | undefined | null,
-	mask: string,
-	opts: { cleared?: ReadonlySet<string>; requireByoApp?: boolean } = {}
+	storedNames: readonly string[],
+	opts: { clear?: Readonly<Record<string, boolean>>; requireByoApp?: boolean } = {}
 ): ErpProviderField[] {
-	const cleared = opts.cleared ?? new Set<string>();
+	const clear = opts.clear ?? {};
 	return provider.fields.filter(
 		(f) =>
 			(f.required || (opts.requireByoApp === true && BYO_APP_FIELDS.includes(f.name))) &&
 			!(values[f.name] ?? '').trim() &&
-			!(secretIsSaved(provider, f, stored, mask, values) && !cleared.has(f.name))
+			!(secretIsSaved(provider, f, stored, storedNames, values) && clear[f.name] !== true)
 	);
 }
 
@@ -301,6 +343,8 @@ export const OAUTH_ERROR_KEYS = {
 	token_exchange_failed: 'org.erp.oauth.error.tokenExchangeFailed',
 	no_external_tenant: 'org.erp.oauth.error.noExternalTenant',
 	already_linked: 'org.erp.oauth.error.alreadyLinked',
+	credentials_unavailable: 'org.erp.oauth.error.credentialsUnavailable',
+	audit_unavailable: 'org.erp.oauth.error.auditUnavailable',
 } as const satisfies Record<string, MessageKey>;
 
 /** Bounded so a crafted URL can't put a paragraph into the status line. */

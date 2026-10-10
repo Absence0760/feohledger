@@ -27,23 +27,30 @@ value when the field is left blank. Leaving either readable here would make "no
 endpoint ever returns it" false and give the settings page a silent, unaudited
 second way to see it.
 
-**`settings.erp` is masked for admins too.** Its write path keeps a stored
-secret when a save sends it back blank or masked (`erp_adapters/catalog.
-merge_erp_update`), so the ERP form no longer needs the values back: every
-secret the catalogue names reads as `catalog.SECRET_MASK`, and the OAuth token
-block (`settings.erp.oauth`) reads as `{"connected": bool}`.
+**Provider credentials are not in the JSONB at all any more.** The secrets of
+the `erp`, `payments` and `cards` blocks live sealed in `provider_credentials`
+(`services/provider_credentials`), written only by the audited
+`PUT /api/organization/credentials/{block}` and reported by
+`GET /api/organization/credentials` as names-only "is set" flags. The settings
+page uses "leave blank to keep" for them, so nothing needs them back. Every
+secret-named key in those blocks is still stripped here for every role, admin
+included, as a second line: a value that reached the JSONB by some other route
+(a hand edit, a pre-0110 backup restored) must not reappear on this response.
+`settings.erp.oauth` — the OAuth consent metadata `services/erp_oauth` keeps
+beside its sealed tokens — reads as `{"connected": bool}` for the same reason:
+its `connection_id` is the capability the token refresher checks
+(`erp_adapters/catalog.public_erp_config`).
 
-Admins otherwise still get the settings **verbatim** — the other credential
-panels on `/organization` read saved values back into their form fields, so
-redacting them would blank a live config on the next save until each gains the
-same "leave blank to keep" contract.
+Admins otherwise still get the settings verbatim. `extraction.api_key` is the
+remaining credential an admin reads back; it is tracked separately.
 
 Pure: no DB, no request, no I/O.
 """
 
 from __future__ import annotations
 
-from app.services.erp_adapters.catalog import mask_erp_config
+from app.services.erp_adapters.catalog import public_erp_config
+from app.services.provider_credentials import strip_all_blocks
 
 # Top-level settings blocks a NON-ADMIN may read.
 #
@@ -110,6 +117,13 @@ def _without_always_redacted(settings: dict) -> dict:
     return out
 
 
+def _with_public_erp(settings: dict) -> dict:
+    """``settings`` with its ``erp`` block's OAuth metadata hidden (a new dict)."""
+    if isinstance(settings.get("erp"), dict):
+        return {**settings, "erp": public_erp_config(settings["erp"])}
+    return settings
+
+
 def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """Return the settings a caller of this role may see.
 
@@ -119,11 +133,7 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """
     raw = settings or {}
     if is_admin:
-        out = _without_always_redacted(raw)
-        if isinstance(out.get("erp"), dict):
-            # Copy before replacing the one key, so the live ORM dict is untouched.
-            out = {**out, "erp": mask_erp_config(out["erp"])}
-        return out
+        return _without_always_redacted(_with_public_erp(strip_all_blocks(raw)))
 
     projected: dict = {}
     for block, allowed_keys in NON_ADMIN_SETTINGS.items():
@@ -140,4 +150,4 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
         subset = {k: v for k, v in value.items() if k in allowed_keys}
         if subset:
             projected[block] = subset
-    return _without_always_redacted(projected)
+    return _without_always_redacted(_with_public_erp(strip_all_blocks(projected)))

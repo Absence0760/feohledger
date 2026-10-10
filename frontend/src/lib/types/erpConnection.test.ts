@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildErpPayload,
+	buildErpSecretUpdate,
+	buildErpTestPayload,
 	byoAppRequired,
 	groupProviders,
 	initialValues,
@@ -17,7 +19,8 @@ import {
 	type ErpProvider
 } from './erpConnection';
 
-const MASK = '********';
+/** `GET /api/organization/credentials` → `erp`: the stored secret NAMES. */
+const STORED_NAMES = ['consumer_secret'];
 
 const netsuite: ErpProvider = {
 	key: 'netsuite',
@@ -77,8 +80,7 @@ const merge: ErpProvider = {
 const storedNetsuite = {
 	type: 'netsuite',
 	integration_method: 'direct',
-	account_id: '123',
-	consumer_secret: MASK
+	account_id: '123'
 };
 
 describe('groupProviders', () => {
@@ -109,80 +111,126 @@ describe('selectedProviderKey', () => {
 });
 
 describe('initialValues / secretIsSaved', () => {
-	it('never puts the mask (or any secret) into an input', () => {
-		const values = initialValues(netsuite, storedNetsuite, MASK);
+	it('never puts a secret into an input; "saved" comes from the stored names', () => {
+		const values = initialValues(netsuite, storedNetsuite);
 		expect(values).toEqual({ account_id: '123', consumer_secret: '' });
-		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, MASK)).toBe(true);
-		expect(secretIsSaved(netsuite, netsuite.fields[0], storedNetsuite, MASK)).toBe(false);
+		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, STORED_NAMES)).toBe(true);
+		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, [])).toBe(false);
+		expect(secretIsSaved(netsuite, netsuite.fields[0], storedNetsuite, STORED_NAMES)).toBe(false);
 	});
 
 	it('stops treating a secret as saved once a destination field changes', () => {
-		const same = initialValues(netsuite, storedNetsuite, MASK);
+		const same = initialValues(netsuite, storedNetsuite);
 		const moved = { ...same, account_id: '999' };
 		expect(destinationChanged(netsuite, same, storedNetsuite)).toBe(false);
 		expect(destinationChanged(netsuite, moved, storedNetsuite)).toBe(true);
-		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, MASK, same)).toBe(true);
-		// The backend keeps no stored secret across a new destination, so the
-		// form must not say it does: the secret becomes required again.
-		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, MASK, moved)).toBe(false);
-		expect(missingRequired(netsuite, moved, storedNetsuite, MASK).map((f) => f.name)).toEqual([
-			'consumer_secret'
-		]);
+		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, STORED_NAMES, same)).toBe(
+			true
+		);
+		// The backend drops the stored secrets on a new destination, so the form
+		// must not say it keeps them: the secret becomes required again.
+		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, STORED_NAMES, moved)).toBe(
+			false
+		);
+		expect(
+			missingRequired(netsuite, moved, storedNetsuite, STORED_NAMES).map((f) => f.name)
+		).toEqual(['consumer_secret']);
 	});
 
 	it('reads blank and absent destinations as the same', () => {
-		const stored = { type: 'netsuite', integration_method: 'direct', consumer_secret: MASK };
+		const stored = { type: 'netsuite', integration_method: 'direct' };
 		const values = { account_id: '  ', consumer_secret: '' };
 		expect(destinationChanged(netsuite, values, stored)).toBe(false);
 	});
 
-	it('starts blank for a provider other than the one on file', () => {
-		expect(initialValues(syspro, storedNetsuite, MASK)).toEqual({
+	it('starts blank, with nothing saved, for a provider other than the one on file', () => {
+		expect(initialValues(syspro, storedNetsuite)).toEqual({
 			account_id: '',
 			consumer_secret: ''
 		});
-		expect(secretIsSaved(syspro, syspro.fields[1], storedNetsuite, MASK)).toBe(false);
+		expect(secretIsSaved(syspro, syspro.fields[1], storedNetsuite, STORED_NAMES)).toBe(false);
 	});
 
 	it('defaults a choice field to its first option', () => {
-		expect(initialValues(qbo, undefined, MASK).environment).toBe('production');
+		expect(initialValues(qbo, undefined).environment).toBe('production');
 	});
 });
 
 describe('buildErpPayload', () => {
-	it('sends a direct ERP with its key, blank secrets kept blank, values trimmed', () => {
+	it('sends a direct ERP with its key and trimmed values, and no secret field', () => {
 		expect(
-			buildErpPayload(netsuite, { account_id: ' 999 ', consumer_secret: '' }, 'ignored')
+			buildErpPayload(netsuite, { account_id: ' 999 ', consumer_secret: 'typed' }, 'ignored')
 		).toEqual({
 			type: 'netsuite',
 			integration_method: 'direct',
-			account_id: '999',
-			consumer_secret: ''
+			account_id: '999'
 		});
 	});
 
 	it('sends Merge.dev with the long-tail ERP as its type', () => {
 		expect(buildErpPayload(merge, { api_key: 'k', account_token: '' }, 'sap_s4hana')).toEqual({
 			type: 'sap_s4hana',
-			integration_method: 'merge_dev',
-			api_key: 'k',
-			account_token: ''
+			integration_method: 'merge_dev'
 		});
 	});
 
 	it('never sends an OAuth block', () => {
 		const body = buildErpPayload(qbo, { client_id: '', client_secret: '', environment: 'sandbox' }, '');
 		expect(body).not.toHaveProperty('oauth');
+		expect(body).not.toHaveProperty('client_secret');
+	});
+});
+
+describe('buildErpSecretUpdate', () => {
+	it('sets what was typed, clears what was removed, and leaves blanks alone', () => {
+		expect(
+			buildErpSecretUpdate(
+				merge,
+				{ api_key: ' new-key ', account_token: '' },
+				{ api_key: false, account_token: true }
+			)
+		).toEqual({ set: { api_key: 'new-key' }, clear: ['account_token'] });
+	});
+
+	it('is null when no secret changes, so no request is made', () => {
+		expect(
+			buildErpSecretUpdate(netsuite, { account_id: '9', consumer_secret: '' }, {})
+		).toBeNull();
+	});
+
+	it('lets a typed value win over a stale remove toggle, and never sends a non-secret', () => {
+		expect(
+			buildErpSecretUpdate(
+				netsuite,
+				{ account_id: '9', consumer_secret: 'typed' },
+				{ consumer_secret: true }
+			)
+		).toEqual({ set: { consumer_secret: 'typed' } });
+	});
+});
+
+describe('buildErpTestPayload', () => {
+	it('carries the typed secrets for the test, and leaves blank ones to the server', () => {
+		expect(
+			buildErpTestPayload(merge, { api_key: 'typed', account_token: '' }, 'sap_s4hana')
+		).toEqual({ type: 'sap_s4hana', integration_method: 'merge_dev', api_key: 'typed' });
 	});
 });
 
 describe('missingRequired', () => {
-	it('counts a saved secret as filled', () => {
-		expect(missingRequired(netsuite, { account_id: '123', consumer_secret: '' }, storedNetsuite, MASK)).toEqual([]);
+	it('counts a stored secret as filled', () => {
+		expect(
+			missingRequired(
+				netsuite,
+				{ account_id: '123', consumer_secret: '' },
+				storedNetsuite,
+				STORED_NAMES
+			)
+		).toEqual([]);
 	});
 
 	it('names required fields left empty', () => {
-		const missing = missingRequired(netsuite, { account_id: ' ', consumer_secret: '' }, undefined, MASK);
+		const missing = missingRequired(netsuite, { account_id: ' ', consumer_secret: '' }, undefined, []);
 		expect(missing.map((f) => f.name)).toEqual(['account_id', 'consumer_secret']);
 	});
 });
@@ -237,15 +285,7 @@ function status(overrides: Partial<ErpOAuthStatus> = {}): ErpOAuthStatus {
 
 const xero: ErpProvider = { ...qbo, key: 'xero', label: 'Xero', available: true };
 
-describe('buildErpPayload: removed secrets and unrendered settings', () => {
-	it('sends a removed secret as null, unless a new value was typed', () => {
-		const removed = new Set(['consumer_secret']);
-		const blank = { account_id: '1', consumer_secret: '' };
-		expect(buildErpPayload(netsuite, blank, '', removed).consumer_secret).toBeNull();
-		const typed = { account_id: '1', consumer_secret: 'new' };
-		expect(buildErpPayload(netsuite, typed, '', removed).consumer_secret).toBe('new');
-	});
-
+describe('buildErpPayload: unrendered settings', () => {
 	it('sends back a stored setting the form does not render, for the same ERP only', () => {
 		const stored = {
 			...storedNetsuite,
@@ -253,13 +293,13 @@ describe('buildErpPayload: removed secrets and unrendered settings', () => {
 			oauth: { connected: true }
 		};
 		const values = { account_id: '9', consumer_secret: '' };
-		const body = buildErpPayload(netsuite, values, '', new Set(), stored);
+		const body = buildErpPayload(netsuite, values, '', stored);
 		expect(body.transaction_code_values).toEqual([{ id: 1, value: 'Ops' }]);
 		// The form's own value wins over what is stored; the OAuth block is never sent.
 		expect(body.account_id).toBe('9');
 		expect(body).not.toHaveProperty('oauth');
 		// A different ERP starts clean.
-		const other = buildErpPayload(syspro, values, '', new Set(), stored);
+		const other = buildErpPayload(syspro, values, '', stored);
 		expect(other).not.toHaveProperty('transaction_code_values');
 	});
 });
@@ -281,16 +321,16 @@ describe('missingRequired: removed secrets and a required own app', () => {
 			netsuite,
 			{ account_id: '1', consumer_secret: '' },
 			storedNetsuite,
-			MASK,
-			{ cleared: new Set(['consumer_secret']) }
+			STORED_NAMES,
+			{ clear: { consumer_secret: true } }
 		);
 		expect(missing.map((f) => f.name)).toEqual(['consumer_secret']);
 	});
 
 	it('requires the client id and secret when no app is configured', () => {
 		const values = { client_id: '', client_secret: '', environment: 'production' };
-		expect(missingRequired(xero, values, undefined, MASK)).toEqual([]);
-		const missing = missingRequired(xero, values, undefined, MASK, { requireByoApp: true });
+		expect(missingRequired(xero, values, undefined, [])).toEqual([]);
+		const missing = missingRequired(xero, values, undefined, [], { requireByoApp: true });
 		expect(missing.map((f) => f.name)).toEqual(['client_id', 'client_secret']);
 	});
 });

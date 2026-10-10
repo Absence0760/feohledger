@@ -260,6 +260,9 @@ def _db():
     db.add = MagicMock()
     result = MagicMock()
     result.scalar_one_or_none = MagicMock(return_value=None)
+    # The locked re-read before an approval (`_locked_auto_approve_suppression`)
+    # finds no row, so these tests decide from the invoice double itself.
+    result.one_or_none = MagicMock(return_value=None)
     db.execute.return_value = result
     return db
 
@@ -410,6 +413,7 @@ async def test_suppress_auto_approve_lands_the_resubmission_at_review():
     assert args[2] is InvoiceStatus.ready_for_review
     assert kwargs["action_name"] == "invoice.extraction_completed"
     assert kwargs["details"]["auto_approved"] is False
+    assert kwargs["details"]["auto_approve_suppressed"] == "requested_by_caller"
 
 
 @pytest.mark.asyncio
@@ -435,3 +439,105 @@ async def test_without_the_flag_auto_approve_still_fires():
     args, kwargs = transition.await_args
     assert args[2] is InvoiceStatus.approved
     assert kwargs["action_name"] == "invoice.auto_approved"
+    assert kwargs["details"]["auto_approve_suppressed"] is None
+
+
+# ---------------------------------------------------------------------------
+# Who supplied the document — `auto_approve_suppression`
+# ---------------------------------------------------------------------------
+#
+# A clerk's own upload / extract is suppressed at dispatch, but the read that
+# approves can be someone else's: a manager re-extracting after a clerk swapped
+# the file in. `run_extraction` therefore decides from the row itself, in both
+# dispatch modes, whoever dispatched it.
+
+_MANAGER = uuid.uuid4()
+_CLERK = uuid.uuid4()
+
+
+@pytest.mark.parametrize(
+    ("uploaded_by", "actors", "actor", "requested", "expected"),
+    [
+        # System channels — no employee supplied the document.
+        (None, None, None, False, None),
+        (None, [], uuid.uuid4(), False, None),
+        # The reader is the uploader and nobody else shaped it: touchless.
+        (_MANAGER, None, _MANAGER, False, None),
+        (_MANAGER, [], str(_MANAGER), False, None),  # actor arrives as a string
+        # The follow-up: a clerk swapped the file on a manager's upload.
+        (_MANAGER, [str(_CLERK)], _MANAGER, False, "segregation_actors"),
+        # A recurring template's author re-reading their own generated invoice
+        # is still the author: the set is unconditional.
+        (_MANAGER, [str(_MANAGER)], _MANAGER, False, "segregation_actors"),
+        (None, [str(_MANAGER)], _MANAGER, False, "segregation_actors"),
+        # A clerk's own upload (swap included — the uploader is never restamped)
+        # read by a manager.
+        (_CLERK, None, _MANAGER, False, "uploaded_by_another_user"),
+        (_CLERK, [], None, False, "uploaded_by_another_user"),
+        # The caller's own request wins the recorded code.
+        (_CLERK, [str(_CLERK)], _MANAGER, True, "requested_by_caller"),
+        (None, None, None, True, "requested_by_caller"),
+    ],
+)
+def test_auto_approve_suppression(uploaded_by, actors, actor, requested, expected):
+    from types import SimpleNamespace
+
+    from app.services.extraction import auto_approve_suppression
+
+    invoice = SimpleNamespace(uploaded_by_id=uploaded_by, segregation_actor_ids=actors)
+    assert auto_approve_suppression(invoice, actor_id=actor, requested=requested) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_managers_read_of_a_document_a_clerk_swapped_in_lands_at_review():
+    """`docs/followups.md` — the manager's extraction, no flag, no second look."""
+    from app.models.invoice import InvoiceStatus
+    from app.services.extraction import run_extraction
+
+    invoice = _invoice(vendor_id=uuid.uuid4(), vendor_name="Bound Supply Co")
+    invoice.uploaded_by_id = _MANAGER
+    invoice.segregation_actor_ids = [str(_CLERK)]
+    instance = MagicMock()
+    instance.steps_config_snapshot = _AUTO_APPROVE_SNAPSHOT
+    transition = AsyncMock()
+
+    with (
+        _extraction_stack(vendor_name="Bound Supply Co", instance=instance),
+        patch("app.services.extraction.transition_invoice", transition),
+        patch("app.services.extraction.decide_auto_approve", return_value=True),
+        patch("app.services.extraction.resolve_gate_aggregate", AsyncMock(return_value=None)),
+    ):
+        await run_extraction(_db(), invoice, actor_id=_MANAGER)
+
+    args, kwargs = transition.await_args
+    assert args[2] is InvoiceStatus.ready_for_review
+    assert kwargs["action_name"] == "invoice.extraction_completed"
+    assert kwargs["details"]["auto_approved"] is False
+    assert kwargs["details"]["auto_approve_suppressed"] == "segregation_actors"
+    assert invoice.approved_by is None and invoice.approval_date is None
+
+
+@pytest.mark.asyncio
+async def test_no_suppression_is_recorded_when_the_gates_did_not_fire():
+    """`auto_approve_suppressed` means "a person was required where the policy
+    alone would have approved" — not "this invoice has a segregation set"."""
+    from app.models.invoice import InvoiceStatus
+    from app.services.extraction import run_extraction
+
+    invoice = _invoice(vendor_id=uuid.uuid4(), vendor_name="Bound Supply Co")
+    invoice.segregation_actor_ids = [str(_CLERK)]
+    instance = MagicMock()
+    instance.steps_config_snapshot = _AUTO_APPROVE_SNAPSHOT
+    transition = AsyncMock()
+
+    with (
+        _extraction_stack(vendor_name="Bound Supply Co", instance=instance),
+        patch("app.services.extraction.transition_invoice", transition),
+        patch("app.services.extraction.decide_auto_approve", return_value=False),
+        patch("app.services.extraction.resolve_gate_aggregate", AsyncMock(return_value=None)),
+    ):
+        await run_extraction(_db(), invoice, actor_id=_MANAGER)
+
+    args, kwargs = transition.await_args
+    assert args[2] is InvoiceStatus.ready_for_review
+    assert kwargs["details"]["auto_approve_suppressed"] is None

@@ -58,6 +58,7 @@ so a status this build does not know (NULL included) is refused too:
 | dispatch (`/execute`, `/resume`, `/compliance/release`) | a vendor rejected / deactivated / merged away after the run was built fails the payment `vendor_not_active:<status>` before the processor call (retry-safe) |
 | `/retry-failed` | skipped with `vendor_not_active` |
 | `POST /api/cards/generate` | no card is minted for the invoice |
+| a card **already minted** | cancelled by the write that made the vendor un-payable — see § Leaving `active` cancels the vendor's live cards |
 
 Verifying the vendor (`POST /api/vendors/{id}/verify`) is the sign-off that
 releases its invoices — the gate reads the vendor's current status, never the
@@ -65,6 +66,50 @@ releases its invoices — the gate reads the vendor's current status, never the
 with **no** vendor is not refused here: it cannot be screened either, and
 dispatch holds it at `pending_compliance` until AP links one
 ([payments.md](payments.md) § Sanctions / compliance hold resolution).
+
+### Leaving `active` cancels the vendor's live cards
+
+Every gate above stops the NEXT payment. A virtual card minted while the vendor
+was payable is bearer-spendable until it is closed, so each write that makes a
+vendor un-payable also reaches the cards already issued, through one helper —
+`services/vendor_card_revocation.revoke_vendor_cards`, run in the same
+transaction as the write. "Un-payable" is the card gates' own predicate:
+`status != "active"` **or** `payments_blocked`.
+
+| Door | Trigger on the audit rows |
+|---|---|
+| `PATCH /api/vendors/{id}` with a `status` field | `vendor.status_changed` |
+| `POST /api/vendors/{id}/reject`, `POST /api/vendors/bulk/status` (`rejected`) | `vendor.rejected` |
+| `POST /api/vendors/{id}/block` | `vendor.payment_blocked` |
+| a sanctions **match** from `screen_vendor_record` — `/screen`, `/bulk/screen`, the screen-on-create/edit/bank-change/tax/enrichment/ERP-sync paths, the re-screen sweep | `vendor.sanctions_match` |
+| `POST /api/enrichment/vendors/consolidation/merge` — the duplicates' cards are re-homed onto the canonical, so they are revoked when the canonical is itself un-payable | `vendor.merged` |
+| `POST /api/vendors/{id}/cancel-cards` — the retry | `vendor.cancel_cards_retry` |
+
+What happens per card, each with its own audit row on the card
+(`entity_type="virtual_card"`):
+
+- **Live and unbooked** (no payment behind it, or that payment is
+  `voided` / `failed` / `cancelled`) → cancelled provider-first:
+  `card.cancelled`, `disposition: closed`.
+- **Behind a live payment** (a run's card leg books the payment `completed`
+  and the invoice `payment_scheduled` at mint) → **left live**,
+  `card.cancel_deferred_to_void`, reported as `requires_payment_void`. Closing
+  it without the void would leave the books saying paid while the vendor can
+  never be paid; the void (`POST /api/payments/{id}/void`, `payment.void`)
+  closes the card and reopens the invoice in one step.
+- **Provider did not confirm** (refused, outage, cards switched off,
+  unregistered provider) → **left live**, `card.cancel_failed` with the outcome
+  tag, reported as `not_closed`. The vendor write still commits — refusing to
+  deactivate a vendor because a card processor is down would also keep it
+  payable by the next run.
+- Spent (`charged` / `completed`), `expired` and already-`cancelled` cards are
+  not touched.
+
+Every door returns the result: `VendorResponse.card_revocation` on the
+single-vendor writes, `card_revocations` (one entry per vendor that held a
+card) on `/bulk/status`, `/bulk/screen` and the merge. The web app turns any
+still-live card into a warning toast, and the vendor modal's **Cancel live
+cards** action is the retry. Reasoning: `docs/decisions.md` §264.
 
 
 ## Vendor Matching
@@ -356,7 +401,8 @@ that it changed plus a last-4 — never the number.
 | `PATCH` | `/api/vendors/{id}` | Update vendor fields |
 | `DELETE` | `/api/vendors/{id}` | Delete vendor |
 | `POST` | `/api/vendors/{id}/verify` | Verify an unverified vendor → active |
-| `POST` | `/api/vendors/{id}/reject` | Reject a vendor → rejected |
+| `POST` | `/api/vendors/{id}/reject` | Reject a vendor → rejected (cancels its live, unbooked cards — § Leaving `active` cancels the vendor's live cards) |
+| `POST` | `/api/vendors/{id}/cancel-cards` | Retry the card leg on an un-payable vendor (`vendor.manage` or `vendor.block`; 409 on a payable vendor) |
 | `POST` | `/api/vendors/sync-erp` | Pull vendors from connected ERP |
 
 ### The paginated lists issue a fixed number of queries

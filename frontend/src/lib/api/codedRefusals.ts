@@ -252,6 +252,7 @@ const fixed =
 const BUILDERS: Record<string, Builder> = {
 	// `services/approval_chain.py`
 	approval_segregation: fixed('refusal.approvalSegregation'),
+	approval_segregation_receiver: fixed('refusal.approvalSegregationReceiver'),
 	approval_level_reuse: fixed('refusal.approvalLevelReuse'),
 	approval_not_named_approver: fixed('refusal.approvalNotNamedApprover'),
 	// `services/review.py::_enforce_approval_thresholds`

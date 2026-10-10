@@ -9,14 +9,17 @@ import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers
  * /organization → ERP Integration (`organization/ErpConnectionPanel.svelte`).
  *
  * The panel renders from the backend catalogue (`GET
- * /api/organization/erp/providers`), and ERP secrets are write-only: a saved
- * secret reads back masked, its input starts blank with a visible "saved"
- * hint, and a blank secret on save keeps the stored value. What this pins is
- * what only the browser shows: choose an ERP → its fields render → save →
- * reload → the secret is never in the page or the response; Remove clears it;
- * a missing required field is marked and focused. The server rules behind it
- * (mask, keep-on-blank, null clears, the OAuth block, the audit row) are
- * pytest's (`backend/tests/test_erp_catalog.py`).
+ * /api/organization/erp/providers`), and ERP secrets are write-only: sealed
+ * server-side, never returned, each one a `ui/SecretField` that starts blank and
+ * says whether a value is stored (`GET /api/organization/credentials`, names
+ * only). A save PATCHes the configuration and PUTs only typed or removed
+ * secrets to `/api/organization/credentials/erp`. What this pins is what only
+ * the browser shows: choose an ERP → its fields render → save → reload → the
+ * secret is never in the page or any response; a new destination makes the
+ * fields ask again; the remove toggle clears one; a missing required field is
+ * marked and focused. The server rules behind it (sealing, the destination
+ * drop, the OAuth block, the audit rows) are pytest's
+ * (`backend/tests/test_erp_catalog.py`, `test_provider_credentials.py`).
  *
  * The OAuth tests stub `GET /oauth/status` (and the authorize / disconnect
  * calls) on their exact pathnames: whether the platform has a QuickBooks or
@@ -31,15 +34,54 @@ import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers
 
 const CONSUMER_SECRET = 'e2e-consumer-secret-never-rendered';
 const TOKEN_SECRET = 'e2e-token-secret-never-rendered';
-const SAVED_HINT = 'Saved. Type a new value to replace it.';
+const SAVED_HINT = 'A value is stored. It is never shown again; type a new one to replace it.';
+const NOT_SAVED_HINT = 'Nothing is stored yet.';
 const STATUS_PATH = '/api/organization/erp/oauth/status';
+const ERP_SECRETS = [
+	'api_key',
+	'account_token',
+	'client_secret',
+	'consumer_secret',
+	'token_secret',
+	'password',
+	'subscription_key',
+	'operator_password',
+	'company_password',
+	'webhook_signing_secret',
+	'webhook_secret'
+];
 
+/** Clear `settings.erp` and every sealed ERP secret. */
 async function resetErp(page: Page): Promise<void> {
+	const headers = { ...(await authedTenantHeaders(page)), 'Content-Type': 'application/json' };
 	const resp = await page.request.patch(`${API_BASE}/api/organization`, {
-		headers: await authedTenantHeaders(page),
+		headers,
 		data: { settings: { erp: null } }
 	});
 	expect(resp.status()).toBe(200);
+	const creds = await page.request.put(`${API_BASE}/api/organization/credentials/erp`, {
+		headers,
+		data: { clear: ERP_SECRETS }
+	});
+	expect(creds.status()).toBe(200);
+}
+
+/** Which ERP secrets the server holds — names only. */
+async function storedErpSecrets(page: Page): Promise<string[]> {
+	const resp = await page.request.get(`${API_BASE}/api/organization/credentials`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status()).toBe(200);
+	return ((await resp.json()) as { erp: string[] }).erp;
+}
+
+function credentialsPut(page: Page) {
+	return page.waitForResponse(
+		(r) =>
+			new URL(r.url()).pathname === '/api/organization/credentials/erp' &&
+			r.request().method() === 'PUT' &&
+			r.status() === 200
+	);
 }
 
 function panel(page: Page) {
@@ -83,7 +125,7 @@ async function stubStatus(page: Page, current: () => ErpOAuthStatus): Promise<vo
 }
 
 test.describe('/organization ERP connection', () => {
-	test('choose an ERP, save, and the secrets come back masked', async ({ page }) => {
+	test('choose an ERP, save, and the secrets are stored but never come back', async ({ page }) => {
 		await page.goto('/organization?section=erp');
 		const card = panel(page);
 		try {
@@ -105,10 +147,17 @@ test.describe('/organization ERP connection', () => {
 			await card.getByLabel('Token Secret', { exact: true }).fill(TOKEN_SECRET);
 
 			const first = saved(page);
+			const firstPut = credentialsPut(page);
 			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
-			const body = await (await first).text();
-			expect(body).not.toContain(CONSUMER_SECRET);
-			expect(body).not.toContain(TOKEN_SECRET);
+			const patch = await first;
+			// The configuration PATCH carries no secret; the PUT does, and answers names.
+			expect(JSON.stringify(patch.request().postDataJSON())).not.toContain(CONSUMER_SECRET);
+			for (const resp of [patch, await firstPut]) {
+				const body = await resp.text();
+				expect(body).not.toContain(CONSUMER_SECRET);
+				expect(body).not.toContain(TOKEN_SECRET);
+			}
+			expect((await storedErpSecrets(page)).sort()).toEqual(['consumer_secret', 'token_secret']);
 
 			// The typed secret is dropped from the form as soon as it is stored.
 			const secretInput = card.getByLabel('Consumer Secret', { exact: true });
@@ -122,7 +171,7 @@ test.describe('/organization ERP connection', () => {
 				const input = card.getByLabel(label, { exact: true });
 				await expect(input).toHaveValue('');
 				await expect(input).toHaveAttribute('type', 'password');
-				// "Saved" is said in visible text the input is described by, not
+				// "Stored" is said in visible text the input is described by, not
 				// only in a placeholder that vanishes on the first keystroke.
 				await expect(input).toHaveAccessibleDescription(SAVED_HINT);
 			}
@@ -130,12 +179,12 @@ test.describe('/organization ERP connection', () => {
 			expect(html).not.toContain(CONSUMER_SECRET);
 			expect(html).not.toContain(TOKEN_SECRET);
 
-			// A new Account ID is a new destination: the stored secrets are never
-			// sent to it, so the form asks for them again instead of saying "kept".
+			// A new Account ID is a new destination: the backend drops the stored
+			// secrets rather than send them there, so the form asks for them again.
 			await card.getByLabel('Account ID', { exact: true }).fill('7654321');
-			await expect(card.getByLabel('Consumer Secret', { exact: true })).not.toHaveAttribute(
+			await expect(card.getByLabel('Consumer Secret', { exact: true })).toHaveAttribute(
 				'data-secret-saved',
-				'true'
+				'false'
 			);
 			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
 			await expect(card.getByLabel('Consumer Secret', { exact: true })).toHaveAttribute(
@@ -144,28 +193,27 @@ test.describe('/organization ERP connection', () => {
 			);
 			await card.getByLabel('Account ID', { exact: true }).fill('1234567');
 
-			// Saving again with the secrets left blank keeps them stored.
+			// Saving again with the secrets left blank keeps them stored, and sends
+			// no credentials request at all.
 			await card.getByLabel('Token ID', { exact: true }).fill('tid-e2e-2');
 			const second = saved(page);
 			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
 			const erp = ((await (await second).json()) as { settings: { erp: Record<string, string> } })
 				.settings.erp;
 			expect(erp.token_id).toBe('tid-e2e-2');
-			expect(erp.consumer_secret).toBe('********');
-			expect(erp.token_secret).toBe('********');
+			expect(erp).not.toHaveProperty('consumer_secret');
+			expect((await storedErpSecrets(page)).sort()).toEqual(['consumer_secret', 'token_secret']);
 
-			// Removing a required secret makes it missing: the save is refused,
-			// the field is marked and focused (WCAG 3.3.1), and "Keep it" undoes it.
-			await card.getByRole('button', { name: 'Remove the saved Token Secret' }).click();
+			// Removing a required secret makes it missing: the save is refused and
+			// the field is marked and focused (WCAG 3.3.1); unticking undoes it.
 			const tokenSecret = card.getByLabel('Token Secret', { exact: true });
-			await expect(tokenSecret).toHaveAccessibleDescription(
-				'Will be removed when you save or connect.'
-			);
+			const remove = card.getByTestId('erp-secret-token_secret-clear');
+			await remove.check();
 			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
 			await expect(card.getByTestId('erp-status')).toHaveText('Fill in: Token Secret.');
 			await expect(tokenSecret).toHaveAttribute('aria-invalid', 'true');
 			await expect(tokenSecret).toBeFocused();
-			await card.getByRole('button', { name: 'Keep it' }).click();
+			await remove.uncheck();
 			await expect(tokenSecret).toHaveAccessibleDescription(SAVED_HINT);
 
 			await expectNoA11yViolations(page);
@@ -174,7 +222,7 @@ test.describe('/organization ERP connection', () => {
 		}
 	});
 
-	test('Remove clears an optional saved secret', async ({ page }) => {
+	test('the remove toggle clears an optional stored secret', async ({ page }) => {
 		await page.goto('/organization?section=erp');
 		const card = panel(page);
 		try {
@@ -184,24 +232,20 @@ test.describe('/organization ERP connection', () => {
 			await card.getByLabel('Operator password', { exact: true }).fill('op-pass');
 			await card.getByLabel('Company ID', { exact: true }).fill('EDU1');
 			await card.getByLabel('Company password (optional)', { exact: true }).fill('co-pass');
-			const first = saved(page);
+			const firstPut = credentialsPut(page);
 			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
-			await first;
+			await firstPut;
 
-			await card.getByRole('button', { name: 'Remove the saved Company password' }).click();
-			const second = saved(page);
+			await card.getByTestId('erp-secret-company_password-clear').check();
+			const secondPut = credentialsPut(page);
 			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
-			const resp = await second;
-			const sent = resp.request().postDataJSON() as { settings: { erp: Record<string, unknown> } };
-			expect(sent.settings.erp.company_password).toBeNull();
-			const erp = ((await resp.json()) as { settings: { erp: Record<string, string> } }).settings.erp;
-			expect(erp.company_password ?? '').toBe('');
+			const put = await secondPut;
+			expect(put.request().postDataJSON()).toEqual({ clear: ['company_password'] });
 			// The required secret was left blank, so it is kept.
-			expect(erp.operator_password).toBe('********');
-			await expect(card.getByLabel('Company password (optional)', { exact: true })).toHaveAttribute(
-				'data-secret-saved',
-				'false'
-			);
+			expect(((await put.json()) as { erp: string[] }).erp).toEqual(['operator_password']);
+			const company = card.getByLabel('Company password (optional)', { exact: true });
+			await expect(company).toHaveAttribute('data-secret-saved', 'false');
+			await expect(company).toHaveAccessibleDescription(NOT_SAVED_HINT);
 		} finally {
 			await resetErp(page);
 		}

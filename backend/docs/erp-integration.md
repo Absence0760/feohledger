@@ -276,7 +276,9 @@ different event.
 
 ## Organization ERP Configuration
 
-Stored in `Organization.settings` JSONB under the key `erp`:
+The block's CONFIGURATION is stored in `Organization.settings` JSONB under
+the key `erp`; its SECRETS are not (see § Where the credentials live, below).
+An illustrative shape, secrets included as the adapters receive them:
 
 ```json
 {
@@ -303,76 +305,81 @@ Stored in `Organization.settings` JSONB under the key `erp`:
 
 The ERP type determines which adapter is used.
 
-### Credentials at rest
+### Where the credentials live
 
-Every credential in `settings.erp` is stored encrypted, field by field, inside
-the JSONB: each catalogue field marked `secret` (`catalog.SECRET_KEYS`, which
-includes the inbound webhook key) and the OAuth block's `access_token` /
-`refresh_token`. A stored value reads `enc:v1:<key_id>:<base64>` — AES-256-GCM
-with a fresh nonce, and the field name (`erp.client_secret`,
-`erp.oauth.refresh_token`) bound as associated data, so a ciphertext moved to
-another field, or altered by one byte, fails to decrypt instead of yielding
-garbage (`app/utils/credential_crypto.py`). Ids, base URLs and the OAuth
-block's `connection_id` / `org_id` stay readable, so routing, masking, the plan
-gate and the realm lookup need no key.
+The secret fields of the block — every catalogue field marked `secret`
+(`erp_adapters/catalog.SECRET_KEYS`: `api_key` and `account_token` for Merge.dev
+and the Sage ZA API key, `client_secret` for Business Central, Intacct and any
+bring-your-own OAuth app, `consumer_secret` / `token_secret` for NetSuite TBA,
+`password` for Sage ZA, `operator_password` / `company_password` for SYSPRO,
+`subscription_key` for Blackbaud) plus `webhook_signing_secret` (inbound ERP
+webhooks, older spelling `webhook_secret`) — are **not** in
+`Organization.settings`, and neither are the OAuth access and refresh tokens. They are envelope-encrypted in the control-plane
+`provider_credentials` table, one sealed row per org and block
+(`services/provider_credentials.py`, catalogue `SECRET_FIELDS`;
+`services/credential_crypto.py` for the crypto):
 
-| Direction | The one place | Module |
-|---|---|---|
-| Settings save (`PATCH /organization`) | after `catalog.merge_erp_update` | `api/organization._encrypt_erp_or_refuse` |
-| OAuth connect | `erp_oauth.new_connection_block` | `services/erp_oauth` |
-| OAuth refresh | the compare-and-swap write | `services/erp_oauth._compare_and_swap` |
-| To an adapter | `get_erp_adapter` decrypts the top-level secrets | `erp_adapters/dispatcher` |
-| OAuth tokens / tenant app secret | `_stored_block`, `revoke`, `resolve_client_credentials`, `token_headers` | `services/erp_oauth` |
-| Inbound ERP webhook | the HMAC key | `api/erp_webhook` |
+- **Sealing.** Each write draws a fresh AES-256 data key, encrypts the block's
+  secrets with AES-256-GCM, and stores the data key wrapped by the app KMS key
+  (`FEOH_CREDENTIAL_KMS_KEY_ID`, AWS KMS `GenerateDataKey`/`Decrypt`). The
+  organization id and block are bound in as the KMS encryption context and the
+  GCM associated data, so a row copied to another tenant does not open. With
+  the variable unset — local dev and CI only; a deployed env refuses to boot —
+  the data key is wrapped by a key derived from `FEOH_SECRET_KEY` instead.
+- **Reading.** Every adapter, connection test and webhook verifier gets the
+  block through ONE accessor, `provider_credentials.provider_config(org,
+  "erp")`, which merges the decrypted secrets into the configuration exactly as
+  the adapters always received it. A secret-named key that is somehow still in
+  the JSONB is ignored. An unwrapped KMS data key is cached in-process for five
+  minutes, so a webhook burst is not a KMS call per event.
+- **Writing.** Only `PUT /api/organization/credentials/erp` (admin, audited
+  `organization.credentials_updated` with path NAMES, written before the save —
+  a 503 if it cannot be). `PATCH /api/organization` refuses a non-blank secret
+  in the block and names that endpoint; it drops blank ones, which is what the
+  settings form's "leave blank to keep" fields send.
+- **Never read back.** `GET /api/organization/credentials` reports which paths
+  are stored, by name. No endpoint returns a value, for any role.
+- **Connection test.** `POST /api/organization/test-erp` with a form body uses
+  the STORED secrets only while the body names the saved ERP at the saved
+  destination (`catalog.same_connection`: same `type` + routing, and the same
+  `catalog.DESTINATION_KEYS` — `base_url`, `tenant_id`, `account_id`,
+  `company_id`, `environment`); otherwise only the secrets typed into the body.
+  The body is completed from the saved block first (the OAuth metadata, keys the
+  form does not render), exactly as a save would. A test can therefore never
+  send a sealed credential to a host that has been typed but not saved. When
+  the store cannot be opened the test says so; it never runs without them.
+- **A new destination drops them.** A `PATCH` that names a different ERP, clears
+  the ERP, or changes a destination key of the same ERP removes the sealed
+  secrets that belonged to the old connection (`catalog.secrets_to_drop`; the
+  inbound webhook key survives a same-ERP destination change, since it is never
+  sent anywhere). It goes through the same writer, in the same transaction,
+  audited first as `organization.credentials_updated` with `reason:
+  erp_destination_changed`. Without it a stored SYSPRO password would follow
+  `base_url` to whatever host a save named. A block that selected no ERP yet
+  binds nothing, so secrets entered before the first configuration save stay
+  (decisions §271).
+- **OAuth tokens.** Sealed in the same row at the service-only paths
+  `oauth.access_token` / `oauth.refresh_token`
+  (`provider_credentials.SERVICE_SECRET_FIELDS`). They are never merged into an
+  adapter's config — an adapter asks `erp_oauth.get_access_token` — the PUT
+  endpoint refuses them, and only the consent callback, the refresher and the
+  disconnect write them (through `update_secrets`, under the org row lock).
+  `settings.erp.oauth` holds the connection metadata (provider, org,
+  `connection_id`, expiry, company id) and reads as `{"connected": bool}`.
+- **Fail closed.** A store that cannot be opened (KMS unreachable, a bad
+  envelope) is never "no ERP": an ERP send lands `failed`
+  (`erp_credentials_unavailable`, retryable), the ERP webhook answers a bodyless
+  503 so the ERP retries, the vendor / GL / PO syncs answer 503, an OAuth refresh
+  raises `ErpCredentialUnreadableError` (a failed push, never a reconnect mark),
+  and a payment-sync leg fails into `erp_reconciliation`.
+- **A configuration change is audited too** (`organization.provider_config_updated`,
+  key names only), because where a stored credential is sent — a base URL, an
+  environment — is decided by the configuration.
 
-The masked read (`catalog.mask_erp_config`) never decrypts. An adapter's config
-carries the OAuth block still encrypted: adapters never read tokens, they ask
-`erp_oauth.get_access_token`, which reads the stored row.
-
-**Keys.** `FEOH_CREDENTIAL_ENCRYPTION_KEYS` is a keyring (first entry encrypts,
-all decrypt), a sops secret in deployed envs, with a non-secret dev key
-committed in `.env.development` (`docs/environment.md`). **No keyring → fail
-closed everywhere:** a save carrying a secret answers 503 and stores nothing; a
-stored ciphertext cannot be read (`/test-erp` says so, a push fails with
-`ErpCredentialUnreadableError`, the webhook drops the event). A stored value
-that does not decrypt is never marked `needs_reconnect` — the grant may be fine;
-the keyring is not. Rotation: `docs/secrets-rotation.md` § ERP credential
-encryption keyring.
-
-**Legacy plaintext.** A value without the `enc:v1:` prefix is read as-is, and
-migration `0110_erp_credentials_encrypted` encrypts every one on the control
-plane (it refuses to run while plaintext exists and no keyring is set). A save
-or a refresh also re-writes the values it touches encrypted.
-
-### Secrets are write-only
-
-No response carries an ERP secret, admin included:
-
-- **Read.** `GET /api/organization` returns every key in
-  `erp_adapters/catalog.SECRET_KEYS` (each catalogue field marked `secret`, plus
-  `webhook_signing_secret` / `webhook_secret`) as `********` when set and `""`
-  when not, and replaces `erp.oauth` (the token block `services/erp_oauth`
-  writes) with `{"connected": bool}`. Non-admins still see only
-  `integration_method`.
-- **Write.** `PATCH /api/organization` runs `catalog.merge_erp_update`: a secret
-  sent blank, as `********`, or omitted keeps the stored value **while the ERP
-  selection (`type` + routing) and its destination are unchanged**. Switching
-  ERP never carries one ERP's secret into another's field of the same name, and
-  changing any of `catalog.DESTINATION_KEYS` (`base_url`, `tenant_id`,
-  `account_id`, `company_id`, `environment` — what an adapter builds its host or
-  target books from) is a new connection: every outbound secret must be typed
-  again, so a stored password can never be pointed at a host the save just
-  named. Only the inbound webhook HMAC key (`webhook_signing_secret`), which is
-  never sent anywhere, survives a destination change. An explicit `null` clears
-  a secret. `erp.oauth` is never taken from the body, so the OAuth callback stays
-  its only writer, and even `{"erp": null}` keeps it (only the OAuth disconnect
-  removes it). Every change writes `organization.erp_updated` (changed key
-  names, `type`, `integration_method`, never a value) before the save commits;
-  if that row can't be written the save is a `503` and nothing changes.
-- **Test.** `POST /api/organization/test-erp` with an unsaved form config fills
-  each masked or blank secret from the stored config the same way — and under
-  the same destination rule — so "Test connection" works on a form that shows
-  only masks but cannot send a stored secret to a new `base_url`.
+Migration `0110_provider_credentials` moved every pre-existing plaintext value
+into the table and deleted it from the JSONB. It used to be stated here that the
+credentials were "encrypted at rest via PostgreSQL column encryption"; they were
+plain JSONB under RDS storage encryption until that migration.
 
 ## Provider catalogue
 
@@ -384,7 +391,7 @@ the Organization → ERP form, served at `GET /api/organization/erp/providers`
 `options`) and `docs_url`; the endpoint adds `available` (adapter registered in
 this build). The response also carries `merge_dev_long_tail` (the ERPs offered
 inside the "Other ERP via Merge.dev" choice, Scale plan per `docs/decisions.md`
-§256) and `secret_mask`.
+§256).
 
 | Key | ERP | Regions | Auth |
 |---|---|---|---|
@@ -1000,11 +1007,10 @@ too, until a successful push replaces them.
 
 ## Security
 
-- ERP credentials are encrypted at rest, per field, inside `Organization.settings` JSONB (§ Credentials at rest)
+- ERP credentials are envelope-encrypted under the app KMS key in `provider_credentials`, write-only (§ Where the credentials live)
 - Webhook endpoints validate requests via signature/secret or IP whitelist
 - All ERP communication uses HTTPS
 - Credentials are never logged or included in audit trail details
-- Future: integrate with AWS Secrets Manager or HashiCorp Vault
 
 ## Testing
 
@@ -1122,8 +1128,11 @@ backend/app/api/erp_webhook.py        # POST /api/erp/webhook/{erp_type}
 1. Go to **Organization > ERP Integration**
 2. Pick your ERP from the dropdown. It leads with the ERPs popular in the
    United States and in South Africa
-3. Enter the fields the form shows for it. Saved secrets show as "saved, leave
-   blank to keep"; type a new value only to replace one
+3. Enter the fields the form shows for it. A secret field is always empty
+   when the page loads and says whether a value is stored; leave it blank to
+   keep the stored one, or tick "Remove the stored value" to delete it.
+   Changing where the ERP lives (address, account, tenant, company or
+   environment) removes the stored secrets, so type them again
 4. Save, then **Test connection**
 5. For an OAuth ERP (QuickBooks Online, Xero, Sage Business Cloud Accounting),
    optionally enter your own app's client ID and secret, save, then click
@@ -1585,12 +1594,12 @@ tenant; the environment is burned into the token.
 | `FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY` | **yes** | Platform subscription key. Empty and no tenant key → every post refuses `subscription_key_missing` before any call |
 | `settings.erp.ap_account_number` | no | AP liability account (`01-2000-00`) the invoice's Credit distribution posts to — **required** |
 | `settings.erp.currency` | no | ISO code of the FE NXT ledger — **required**; an invoice in another currency is refused |
-| `settings.erp.subscription_key` | **yes** (optional) | Tenant key overriding the platform one |
-| `settings.erp.client_id` / `client_secret` | secret: yes (optional) | Tenant-owned SKY application (read by `erp_oauth`) |
+| `subscription_key` | **yes**, sealed (optional) | Tenant key overriding the platform one |
+| `settings.erp.client_id` / sealed `client_secret` | secret: yes (optional) | Tenant-owned SKY application (read by `erp_oauth`) |
 | `settings.erp.project_id` | no (optional) | FE NXT project (`ui_project_id`) on every distribution split |
 | `settings.erp.transaction_code_values` | no (optional) | `[{"id", "value"}, …]` on every split, in FE NXT's code order |
 | `settings.erp.approval_status` | no (optional) | `Pending` / `Approved`; omitted otherwise (FE NXT's default applies) |
-| `settings.erp.oauth` | **yes** | Written only by `erp_oauth`; `external_tenant_id` = the token response's `environment_id` |
+| `settings.erp.oauth` + sealed tokens | **yes** (tokens) | Written only by `erp_oauth`; `external_tenant_id` = the token response's `environment_id` |
 
 | Operation | Call |
 |---|---|
@@ -1836,33 +1845,42 @@ and calls `await self.access_token()`.
 
 | Route | Auth | Contract |
 |---|---|---|
-| `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan | `200 {"authorize_url"}`; the page navigates the browser to it. `404` unknown provider, `409` no app configured, `402` plan. |
-| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}`, and 302s to `<tenant origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>`. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant`, `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`. |
-| `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth`, then revokes best-effort: `{"disconnected", "revoked"}`. |
+| `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan | `200 {"authorize_url"}`; the page navigates the browser to it. `404` unknown provider, `409` no app configured, `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
+| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>`. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant`, `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
+| `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
 | `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, connected_at, redirect_uri, providers: [{key, display_name, available, client_source}]}`. Never a token. |
 
-Connect and disconnect audit `organization.erp_connected` /
-`organization.erp_disconnected` (provider and client source, no tokens).
+Connect and disconnect write `organization.erp_connected` /
+`organization.erp_disconnected` (provider, client source, the sealed paths
+changed by name — never a token) BEFORE anything is saved, through
+`record_auth_audit_or_raise`; a row that cannot be written means nothing is
+linked or cleared. The revoke outcome, known only after the commit, follows as
+`organization.erp_token_revoked`.
 
 The callback's query (`code`, `state`, `realmId`) never reaches the uvicorn
 access log: `app/utils/access_log.py` strips the query of every path in
 `SENSITIVE_QUERY_PATHS` from `uvicorn.access` records, installed by
 `app/main.py` where app logging is configured (`tests/test_access_log_redaction.py`).
 
-**Which app.** The tenant's own (`settings.erp.client_id` / `client_secret`
-while `settings.erp.type` names the provider) wins over the platform's `FEOH_`
-app. With neither, the provider is unavailable. The consent's source is
+**Which app.** The tenant's own (`settings.erp.client_id` plus the sealed
+`client_secret`, while `settings.erp.type` names the provider) wins over the
+platform's `FEOH_` app. With neither, the provider is unavailable. The consent's source is
 recorded, and the refresher uses the same one.
 
-**Storage and refresh.** `settings.erp.oauth` holds the tokens plus `provider`,
-`org_id` and a random `connection_id`. It is `ALWAYS_REDACTED` from the
-settings response, refused on `PATCH /api/organization`, and carried across an
-`erp` save that keeps the same type. The refresher re-reads the stored block
-(never the config's copy) and requires the config's `provider` and
-`connection_id` to match it, so an admin-supplied `test-erp` config naming
-another org's id reaches nothing. It serialises refreshes per connection with
-a Redis lock and persists the rotated refresh token by compare-and-swap. A
-provider `invalid_grant` marks `needs_reconnect`. An outage raises
+**Storage and refresh.** `settings.erp.oauth` holds `provider`, `org_id`, a
+random `connection_id`, the expiry times and the company id; the access and
+refresh tokens are sealed in `provider_credentials` (§ Where the credentials
+live). The block reads as `{"connected": bool}` in the settings response, is
+never taken from `PATCH /api/organization`, and is carried across every `erp`
+save. The refresher re-reads the stored block and the sealed tokens (an
+adapter's config carries none) and requires the config's `provider` and
+`connection_id` to match, so an admin-supplied `test-erp` config naming another
+org's id reaches nothing. It serialises refreshes per connection with a Redis
+lock and persists the rotated tokens by compare-and-swap under the org row lock,
+through `provider_credentials.update_secrets` (no audit row: a rotation is the
+system keeping the grant alive). A
+provider `invalid_grant` marks `needs_reconnect` and writes
+`organization.erp_reconnect_required` (best-effort, after the commit). An outage raises
 `ErpTokenRefreshError` and leaves the connection alone.
 
 **Per-provider hooks on the spec.** The company id comes from

@@ -91,7 +91,8 @@ async def _run_local(
     from app.database import _make_tenant_url
     from app.models.invoice import Invoice
     from app.models.organization import Organization
-    from app.services.erp import send_to_erp_internal
+    from app.services.credential_crypto import CredentialCryptoError
+    from app.services.erp import fail_erp_send_without_credentials, send_to_erp_internal
 
     ctrl_engine = create_async_engine(settings.database_url)
     ctrl_factory = async_sessionmaker(ctrl_engine, expire_on_commit=False)
@@ -102,8 +103,13 @@ async def _run_local(
             org = result.scalar_one_or_none()
             if not org:
                 return
+            from app.services.provider_credentials import provider_config
 
-        erp_config = (org.settings or {}).get("erp")
+            credentials_ok = True
+            try:
+                erp_config = await provider_config(org, "erp", db=ctrl_db)
+            except CredentialCryptoError:
+                erp_config, credentials_ok = None, False
 
         tenant_url = _make_tenant_url(org.db_name)
         tenant_engine = create_async_engine(tenant_url)
@@ -115,6 +121,9 @@ async def _run_local(
                     result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
                     invoice = result.scalar_one_or_none()
                     if not invoice:
+                        return
+                    if not credentials_ok:
+                        await fail_erp_send_without_credentials(db, invoice, actor_id=actor_id)
                         return
 
                     await send_to_erp_internal(

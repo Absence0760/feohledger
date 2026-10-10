@@ -135,24 +135,6 @@ class _FakeRedis:
         return self._kv.pop(key, None)
 
 
-#: The suite's credential-encryption keyring: the same NON-secret dev key the
-#: committed `.env.development` carries (pytest does not load that file). A test
-#: of the empty-keyring refusal or of rotation monkeypatches its own.
-TEST_CREDENTIAL_KEYS = "dev1:ZGV2LW9ubHktY3JlZGVudGlhbC1rZXktbm90LXJlYWw="
-
-
-@pytest.fixture(autouse=True)
-def _autouse_credential_keyring(monkeypatch):
-    """Configure `FEOH_CREDENTIAL_ENCRYPTION_KEYS` for every test.
-
-    With no keyring the app refuses to store an ERP credential (fail closed,
-    `app/utils/credential_crypto.py`), so every test that saves one would 503.
-    """
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "credential_encryption_keys", TEST_CREDENTIAL_KEYS)
-
-
 @pytest.fixture(autouse=True)
 def _autouse_fake_redis(monkeypatch):
     """Stub Redis out of the rate limiter + webhook event dedup ledger
@@ -909,13 +891,22 @@ async def _ensure_test_tenants() -> dict:
         # when that file was run alone.) Baseline both back to pristine here so
         # per-test isolation doesn't depend on every author remembering a
         # `finally`.
-        from sqlalchemy import update
+        from sqlalchemy import delete, update
 
+        from app.models.provider_credential import ProviderCredential
+
+        org_ids = [t.org_id for t in tenants.values()]
         async with ctrl_mk() as s:
             await s.execute(
                 update(Organization)
-                .where(Organization.id.in_([t.org_id for t in tenants.values()]))
+                .where(Organization.id.in_(org_ids))
                 .values(settings={}, parent_org_id=None)
+            )
+            # The sealed ERP / payment / card secrets are the other half of
+            # those settings blocks (`services/provider_credentials`) — reset
+            # with them, or a key one test stored authenticates a later one.
+            await s.execute(
+                delete(ProviderCredential).where(ProviderCredential.organization_id.in_(org_ids))
             )
             await s.commit()
         return tenants
@@ -1153,6 +1144,21 @@ class RealDB:
                 raise ValueError(f"subscribe(): {plan_code!r} is not a catalog plan code")
             await s.commit()
 
+    async def store_provider_secrets(self, key: str, block: str, secrets: dict[str, str]) -> None:
+        """Seal ``secrets`` into tenant ``key``'s ``block`` credentials.
+
+        Provider secrets no longer live in ``Organization.settings``: a test that
+        needs an adapter or webhook to see one stores it here, through the same
+        writer the audited endpoint uses (``services/provider_credentials``). The
+        per-test reset deletes it again.
+        """
+        from app.services.provider_credentials import update_secrets, validate_update
+
+        to_set, to_clear = validate_update(block, secrets, [])
+        async with self.control_sessionmaker()() as s:
+            await update_secrets(s, self.tenants[key].org_id, block, to_set, to_clear)
+            await s.commit()
+
     def client(self, *, key: str, role: str | None = "admin"):
         import httpx
         from fastapi import Depends
@@ -1278,6 +1284,32 @@ def all_plan_features(monkeypatch, request):
 
     for target in _ENTITLEMENT_LOOKUPS:
         monkeypatch.setattr(target, _every_feature)
+
+
+@pytest.fixture
+def provider_store_from_settings(monkeypatch, request):
+    """For a DB-FREE test of a path that reads provider credentials: the fake
+    org's ``settings`` block stands in for the sealed store.
+
+    Every credential read goes through `provider_credentials.resolve_block`,
+    which queries `provider_credentials` on a control session. A mocked control
+    session cannot answer that query (it hands back whatever the test scripted
+    — usually the org itself), so a mock-DB test of a webhook or adapter path
+    declares its secrets the readable way, inline in the fake org's settings,
+    and opts in here (`pytestmark = pytest.mark.usefixtures(
+    "provider_store_from_settings")`). The store itself — sealing, the
+    accessor's merge, the plaintext-is-ignored rule — is covered against real
+    Postgres in `tests/test_provider_credentials.py`. A `realdb` test is left
+    alone: it seals what it needs with `realdb.store_provider_secrets`.
+    """
+    if "realdb" in request.fixturenames:
+        return
+    from app.services import provider_credentials
+
+    async def _from_settings(org_id, settings, block, *, db=None):  # noqa: ARG001
+        return (settings or {}).get(block)
+
+    monkeypatch.setattr(provider_credentials, "resolve_block", _from_settings)
 
 
 def pytest_configure(config) -> None:

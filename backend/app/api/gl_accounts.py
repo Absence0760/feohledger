@@ -22,6 +22,11 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.gl_account import GLAccountCreate, GLAccountUpdate
 from app.services.audit_dispatch import dispatch_audit
+from app.services.credential_crypto import CredentialCryptoError
+from app.services.provider_credentials import (
+    CREDENTIALS_UNAVAILABLE_DETAIL,
+    provider_config,
+)
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.search import ilike_contains
 
@@ -486,15 +491,18 @@ async def sync_gl_accounts_from_erp(
     in the tenant: a sync run under subsidiary B used to update subsidiary A's
     row rather than create B's, which is the opposite of the rule above.
     """
-    erp_config = (org.settings or {}).get("erp")
+    try:
+        erp_config = await provider_config(org, "erp", db=control_db)
+    except CredentialCryptoError:
+        # The sealed credentials could not be opened: OUR failure, and a sync
+        # never runs without them (a fall-back to `mock` would import fixtures).
+        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configured")
     # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
-    from app.services import erp_credentials
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
-    from app.utils.credential_crypto import CredentialCryptoError
 
     try:
         adapter = get_erp_adapter(erp_config)
@@ -506,10 +514,6 @@ async def sync_gl_accounts_from_erp(
             status_code=400,
             detail=f"'{exc.adapter_key}' is not a supported ERP adapter.",
         ) from exc
-    except CredentialCryptoError:
-        # A stored credential this server cannot decrypt: a configuration
-        # problem the admin or operator fixes, not a gateway failure.
-        raise HTTPException(status_code=409, detail=erp_credentials.UNREADABLE_DETAIL) from None
 
     try:
         erp_accounts = await adapter.list_gl_accounts()

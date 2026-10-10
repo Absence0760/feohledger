@@ -351,7 +351,7 @@ export const SETUP_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'tip',
-						text: 'Ask whoever administers your ERP for the credentials. Once saved, a secret is never shown again, to anyone. Its field says {ui:org.erp.secretSavedHint} Type a new value only to replace it, or click {ui:org.erp.secretRemove} to clear it when you next save.'
+						text: 'Ask whoever administers your ERP for the credentials. Once saved, a secret is stored encrypted and never shown again, to anyone. Its field says {ui:org.secret.configured} Leave it blank to keep it, or tick {ui:org.secret.clear} to clear it when you next save. Pointing the ERP somewhere else (a new address, account, tenant, company or environment), or choosing a different ERP, removes the stored secrets, so type them again.'
 					}
 				]
 			},

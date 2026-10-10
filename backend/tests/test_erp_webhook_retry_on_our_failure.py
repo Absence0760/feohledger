@@ -31,6 +31,9 @@ from fastapi import HTTPException
 
 from app.models.invoice import InvoiceStatus
 
+# The fake org's settings carry the webhook secrets; see the fixture.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 _SECRET = "erp-secret"
 
 

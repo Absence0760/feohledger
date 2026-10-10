@@ -6,8 +6,9 @@ connect flow (`services/erp_oauth.py`, `api/erp_oauth.py`) and the adapter
 `erp-integration.md` § Connecting an OAuth ERP. Where the build departs from
 this plan:
 
-- Tokens live in `settings.erp.oauth` (ALWAYS_REDACTED), not yet in a
-  KMS-encrypted tenant row. That follow-up still applies.
+- Tokens are sealed under the app KMS key in the control-plane
+  `provider_credentials` row for the `erp` block (decisions §266, §271);
+  `settings.erp.oauth` keeps only the connection metadata.
 - There is no `erp_connections` realm index table. A company already connected
   to another tenant is refused at connect time by a JSONB query; the Phase 3
   webhook still needs the index.
@@ -113,15 +114,15 @@ the adapter.
     lock). Two workers refreshing at once must not each persist a different
     token.
   - Cache access tokens (60 minutes) per realm in Redis.
-  - Never read back: every read of `settings.erp.oauth` is masked to
-    `{"connected": bool}` (`erp_adapters/catalog.mask_erp_config`), and a
-    settings save never takes it from the request. The only writers are the
-    callback, the refresher and disconnect.
-  - Better: hold them outside `Organization.settings` entirely, in a
-    tenant-table row encrypted with the app KMS key. ERP credentials are
-    plaintext JSONB today, encrypted only at the RDS storage layer (see the
-    follow-up). This flow is the natural moment to fix it for at least the
-    new credential.
+  - Sealed under the app KMS key in `provider_credentials`, beside the `erp`
+    block's other secrets, at the service-only paths `oauth.access_token` /
+    `oauth.refresh_token` (`provider_credentials.SERVICE_SECRET_FIELDS`;
+    `docs/decisions.md` §266, §271). Never read back: `settings.erp.oauth`
+    keeps only the connection metadata and reads as `{"connected": bool}`
+    (`erp_adapters/catalog.public_erp_config`), a settings save never takes it
+    from the request, and `PUT /api/organization/credentials/erp` refuses the
+    token paths. The only writers are the callback, the refresher and
+    disconnect, all through `provider_credentials.update_secrets`.
 - **Expiry visibility.** Record `x_refresh_token_expires_in`. Show
   "reconnect required" on the org ERP card and send an admin notification
   30 days before expiry. A dead token must surface as a notification, never

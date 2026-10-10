@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -350,6 +349,32 @@ class AppLocalizationsDe extends AppLocalizations {
   String get vendorRejected => 'Lieferant abgelehnt';
 
   @override
+  String vendorCardsNotClosed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count virtuelle Karten konnten beim Kartenanbieter nicht storniert werden und sind weiterhin aktiv. Erneut versuchen in der Web-App.',
+      one:
+          '$count virtuelle Karte konnte beim Kartenanbieter nicht storniert werden und ist weiterhin aktiv. Erneut versuchen in der Web-App.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorCardsRequireVoid(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count virtuelle Karten decken geplante Zahlungen und sind weiterhin aktiv – stornieren Sie diese Zahlungen, um die Karten zu sperren.',
+      one:
+          '$count virtuelle Karte deckt eine geplante Zahlung und ist weiterhin aktiv – stornieren Sie diese Zahlung, um die Karte zu sperren.',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get vendorActionFailed => 'Aktion fehlgeschlagen';
 
   @override
@@ -646,6 +671,10 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get codedRefusalApprovalSegregation =>
       'Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.';
+
+  @override
+  String get codedRefusalApprovalSegregationReceiver =>
+      'Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.';
 
   @override
   String get codedRefusalInvoiceStaleApproval =>

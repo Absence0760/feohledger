@@ -14,9 +14,9 @@ Every call carries two credentials:
 * ``Bb-Api-Subscription-Key: <key>`` — the SKY developer subscription key. It
   is tied to the developer account, not to a customer environment, so one
   platform key (``FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY``) serves every tenant; a
-  tenant that brings its own SKY application may set
-  ``settings.erp.subscription_key``. Neither set → the adapter refuses before
-  any call (fail closed, no fallback).
+  tenant that brings its own SKY application may store its own
+  ``subscription_key`` (sealed in ``provider_credentials``). Neither set → the
+  adapter refuses before any call (fail closed, no fallback).
 
 References (checked 2026-10):
 

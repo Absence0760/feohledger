@@ -351,13 +351,9 @@ async def test_slug_check_rate_limited_returns_429(realdb, monkeypatch):
     assert last_resp.status_code == 429
 
 
-def test_config_requires_captcha_in_deployed_env(monkeypatch):
+def test_config_requires_captcha_in_deployed_env():
     """A deployed environment must refuse to boot with captcha disabled —
     guards against a public, tenant-creating endpoint shipping fail-open."""
-    # A deployed env also needs a non-dev credential keyring (config guard).
-    monkeypatch.setenv(
-        "FEOH_CREDENTIAL_ENCRYPTION_KEYS", "k1:cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHA="
-    )
     import pytest
     from pydantic import ValidationError
 
@@ -374,12 +370,20 @@ def test_config_requires_captcha_in_deployed_env(monkeypatch):
 
     # A deployed env with no captcha secret must blow up at construction.
     with pytest.raises(ValidationError):
-        Settings(environment="production", hcaptcha_secret="", secret_key=strong_key)
+        Settings(
+            environment="production",
+            credential_kms_key_id="alias/test-app",
+            hcaptcha_secret="",
+            secret_key=strong_key,
+        )
 
     # ...and is satisfied once the captcha secret is provided.
     assert (
         Settings(
-            environment="production", hcaptcha_secret="0xabc", secret_key=strong_key
+            environment="production",
+            credential_kms_key_id="alias/test-app",
+            hcaptcha_secret="0xabc",
+            secret_key=strong_key,
         ).is_deployed
         is True
     )
@@ -655,15 +659,11 @@ def test_signup_is_open_by_default():
     assert Settings.model_fields["signup_enabled"].default is True
 
 
-def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret(monkeypatch):
+def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
     """The captcha boot check protects a public, tenant-creating endpoint; with
     signup closed there is none, so it must not make an operator hold a
     credential for a feature they turned off. While signup is open it still
     refuses to boot, exactly as before."""
-    # A deployed env also needs a non-dev credential keyring (config guard).
-    monkeypatch.setenv(
-        "FEOH_CREDENTIAL_ENCRYPTION_KEYS", "k1:cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHA="
-    )
     import pytest
     from pydantic import ValidationError
 
@@ -671,12 +671,20 @@ def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret(monkeypatch):
 
     strong_key = "x" * 32
     closed = Settings(
-        environment="production", hcaptcha_secret="", secret_key=strong_key, signup_enabled=False
+        environment="production",
+        credential_kms_key_id="alias/test-app",
+        hcaptcha_secret="",
+        secret_key=strong_key,
+        signup_enabled=False,
     )
     assert closed.is_deployed is True
     assert closed.signup_enabled is False
 
     with pytest.raises(ValidationError, match="FEOH_SIGNUP_ENABLED"):
         Settings(
-            environment="production", hcaptcha_secret="", secret_key=strong_key, signup_enabled=True
+            environment="production",
+            credential_kms_key_id="alias/test-app",
+            hcaptcha_secret="",
+            secret_key=strong_key,
+            signup_enabled=True,
         )

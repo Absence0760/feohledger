@@ -16,6 +16,7 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import {
@@ -102,6 +103,7 @@
 					: 'Already merged — nothing to do',
 				'success'
 			);
+			toastCardRevocations(res.card_revocations);
 			// Drop the merged cluster from the list so it can't be acted on twice.
 			clusters = clusters.filter((x) => x.cluster_id !== c.cluster_id);
 			onmerged();

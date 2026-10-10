@@ -2044,6 +2044,9 @@ async def reveal_card(
     token: str,
     tenant: Organization = Depends(get_tenant),
     db: AsyncSession = Depends(get_tenant_db),
+    # The same request-scoped control session `get_tenant` loaded `tenant` on
+    # (FastAPI caches the dependency) — used only to open the sealed BYOK keys.
+    ctrl_db: AsyncSession = Depends(get_control_db),
 ):
     """Vendor-facing single-use card reveal.
 
@@ -2135,7 +2138,17 @@ async def reveal_card(
             "warning": message,
         }
 
-    config = _resolve_card_config(tenant.settings or {}, app_settings)
+    # BYOK card keys are sealed; the one accessor merges them back in. Not being
+    # able to open them degrades exactly like a provider outage below — the
+    # token is already spent either way.
+    from app.services.credential_crypto import CredentialCryptoError
+    from app.services.provider_credentials import settings_with_secrets
+
+    try:
+        card_settings = await settings_with_secrets(tenant, "cards", db=ctrl_db)
+    except CredentialCryptoError:
+        return _fallback("Card details are temporarily unavailable. Please contact AP.")
+    config = _resolve_card_config(card_settings, app_settings)
     if config is None:
         # Cards were disabled after issuance — no live PAN retrieval possible.
         # The token is already spent (committed above): we never un-burn a

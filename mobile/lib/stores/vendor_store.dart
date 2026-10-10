@@ -36,6 +36,7 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
     _statusFilter = null;
     _searchQuery = null;
     _fromCache = false;
+    _lastRejected = null;
     debugResetSequence();
   }
 
@@ -100,7 +101,15 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
 
   Future<bool> verify(String id) => _act(() => VendorApi.verify(id));
 
-  Future<bool> reject(String id) => _act(() => VendorApi.reject(id));
+  /// The vendor the last successful [reject] returned — carries how many of
+  /// its virtual cards are still live, which the screen must surface.
+  Vendor? _lastRejected;
+  Vendor? get lastRejected => _lastRejected;
+
+  Future<bool> reject(String id) {
+    _lastRejected = null;
+    return _act(() async => _lastRejected = await VendorApi.reject(id));
+  }
 
   Future<bool> _act(Future<void> Function() action) async {
     try {
@@ -130,16 +139,16 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
   }
 
   Map<String, dynamic> _vendorToJson(Vendor v) => {
-        'id': v.id,
-        'name': v.name,
-        'code': v.code,
-        'email': v.email,
-        'phone': v.phone,
-        'status': v.status.value,
-        'source': v.source,
-        'payment_terms': v.paymentTerms,
-        'verified_by': v.verifiedBy,
-        'erp_vendor_id': v.erpVendorId,
-        'invoice_count': v.invoiceCount,
-      };
+    'id': v.id,
+    'name': v.name,
+    'code': v.code,
+    'email': v.email,
+    'phone': v.phone,
+    'status': v.status.value,
+    'source': v.source,
+    'payment_terms': v.paymentTerms,
+    'verified_by': v.verifiedBy,
+    'erp_vendor_id': v.erpVendorId,
+    'invoice_count': v.invoiceCount,
+  };
 }

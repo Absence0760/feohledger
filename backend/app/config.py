@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     # Auth / JWT
     secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 30
+
+    # Provider-credential envelope encryption (`services/credential_crypto`).
+    # The ERP / payment-rail / card-issuer secrets an admin enters are sealed
+    # under a per-value data key that this KMS key wraps — set it to the app key
+    # (`terraform output app_kms_key_alias`, e.g. `alias/feohledger-app-production`).
+    # Empty selects the LOCAL key provider (a key derived from FEOH_SECRET_KEY),
+    # which is what makes a dev laptop work with no AWS account; a deployed
+    # environment refuses to boot with it empty (see the validator below). Not a
+    # secret — a key id names a key, it does not grant use of it.
+    credential_kms_key_id: str = ""
     # Maximum concurrent sessions per user. When a user logs in and already
     # has this many active sessions, the oldest JTI is evicted onto the Redis
     # blocklist. Set to 0 to disable the cap. Default 5 — a reasonable mix of
@@ -274,8 +284,9 @@ class Settings(BaseSettings):
     # verbatim (fake-erp in local dev). The client id/secret pairs are the
     # PLATFORM app registered once with each provider and serving every
     # tenant; empty = the provider is unavailable and fails closed (no
-    # fallback). A tenant may bring its own app via `settings.erp.client_id` /
-    # `client_secret` instead (see `erp_adapters/oauth_base.py`).
+    # fallback). A tenant may bring its own app instead: `settings.erp.client_id`
+    # plus a `client_secret` sealed in `provider_credentials` (see
+    # `erp_adapters/oauth_base.py`).
     erp_xero_api_base: str = ""
     erp_xero_client_id: str = ""
     erp_xero_client_secret: str = ""
@@ -287,10 +298,10 @@ class Settings(BaseSettings):
     # https://accounting.sageone.co.za/api/2.0.0.
     erp_sage_za_api_base: str = ""
     # Blackbaud Financial Edge NXT (SKY API). The platform's registered SKY
-    # application (one app serves every tenant; a tenant may bring its own via
-    # settings.erp.client_id / client_secret) and the developer subscription
-    # key sent as `Bb-Api-Subscription-Key` on every call (a tenant may override
-    # it with settings.erp.subscription_key). All three are secrets with no
+    # application (one app serves every tenant; a tenant may bring its own:
+    # settings.erp.client_id + a sealed client_secret) and the developer
+    # subscription key sent as `Bb-Api-Subscription-Key` on every call (a tenant
+    # may override it with its own, sealed `subscription_key`). All three are secrets with no
     # fallback: empty in both places = the provider is unavailable and fails
     # closed.
     erp_blackbaud_client_id: str = ""
@@ -304,19 +315,8 @@ class Settings(BaseSettings):
     # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
     # `state` carried across the provider's consent redirect.
     erp_oauth_state_ttl_seconds: int = 600
-    # Encryption at rest for the credentials kept in `organizations.settings.erp`
-    # (every catalogue secret, plus the OAuth access + refresh tokens) —
-    # `app/utils/credential_crypto.py`, AES-256-GCM per field. A keyring:
-    # comma-separated `<key_id>:<base64 of 32 random bytes>`; the FIRST entry
-    # encrypts, every entry decrypts (rotation: prepend a new key, run
-    # `scripts/reencrypt_erp_credentials.py`, then drop the old one —
-    # docs/secrets-rotation.md). NO hardcoded fallback: empty refuses to store
-    # or read an encrypted credential, in every environment (fail closed, never
-    # plaintext). The committed .env.development sets a NON-secret dev key;
-    # deployed envs set the real one via sops. A malformed value refuses boot.
-    credential_encryption_keys: str = ""
     # QuickBooks Online platform app (one Intuit app serves every tenant; a
-    # tenant may bring its own via settings.erp.client_id/client_secret).
+    # tenant may bring its own: settings.erp.client_id + the sealed client_secret).
     # Secrets: sops in infra-secrets. Empty (the default) = no platform app —
     # QuickBooks is available only to a tenant that brings its own (fail closed).
     erp_qbo_client_id: str = ""
@@ -1030,29 +1030,6 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _validate_credential_encryption_keys(self) -> "Settings":
-        # A typo'd keyring must not boot into "every ERP save refused" (or, after
-        # a botched rotation, "every stored credential unreadable") discovered
-        # only when a customer saves. Empty is allowed here — it fails closed at
-        # use, where the error names the setting. Parsing lives in the utils
-        # module (no service-layer import; it imports only stdlib + cryptography).
-        from app.utils.credential_crypto import DEV_ONLY_KEY, parse_keyring
-
-        keyring = parse_keyring(self.credential_encryption_keys)
-        # Deployed, the keyring is required (a store-time failure would surface
-        # only when a customer saves an ERP), and must not hold the dev key
-        # committed in .env.development: a copied dev env file would encrypt
-        # every ERP credential under a publicly known key, silently.
-        if self.is_deployed and (
-            keyring is None or any(k == DEV_ONLY_KEY for k in keyring.keys.values())
-        ):
-            raise ValueError(
-                "FEOH_CREDENTIAL_ENCRYPTION_KEYS must be set from sops (no committed dev "
-                f"key) when FEOH_ENVIRONMENT is deployed ({self.environment!r})."
-            )
-        return self
-
-    @model_validator(mode="after")
     def _require_captcha_in_deployed_envs(self) -> "Settings":
         # Fail fast at boot rather than silently shipping signup with captcha
         # disabled — a 'fail open' captcha is an abuse hole on a public,
@@ -1084,6 +1061,20 @@ class Settings(BaseSettings):
                 "FEOH_SECRET_KEY must be set to a cryptographically random value of "
                 f"at least 32 chars when FEOH_ENVIRONMENT is deployed ({self.environment!r}); "
                 "refusing to boot with the default / weak JWT signing key."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_credential_kms_key_in_deployed_envs(self) -> "Settings":
+        # Without a KMS key id, tenant provider credentials would be sealed under
+        # a key derived from FEOH_SECRET_KEY — a dev convenience, not a control,
+        # and one that would tie every stored ERP / payment / card secret to the
+        # JWT key's rotation. Refuse to boot rather than fall back to it.
+        if self.is_deployed and not self.credential_kms_key_id.strip():
+            raise ValueError(
+                "FEOH_CREDENTIAL_KMS_KEY_ID must be set when FEOH_ENVIRONMENT is deployed "
+                f"({self.environment!r}); refusing to boot with tenant provider credentials "
+                "sealed under the local development key."
             )
         return self
 

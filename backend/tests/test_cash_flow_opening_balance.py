@@ -38,6 +38,7 @@ def _payments(**overrides) -> dict:
 
 async def test_explicit_wins_over_everything():
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings={
             **_payments(),
             "cashflow": {"opening_balance": "999.00"},
@@ -54,6 +55,7 @@ async def test_explicit_wins_over_everything():
 
 async def test_provider_balance_used_when_currency_matches():
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings={**_payments(), "cashflow": {"opening_balance": "999.00"}},
         reporting_currency="USD",
         explicit_opening=None,
@@ -68,6 +70,7 @@ async def test_provider_balance_used_when_currency_matches():
 
 async def test_falls_through_to_settings_when_no_provider_configured():
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings={"cashflow": {"opening_balance": "1500.25"}},
         reporting_currency="USD",
         explicit_opening=None,
@@ -79,7 +82,7 @@ async def test_falls_through_to_settings_when_no_provider_configured():
 
 async def test_falls_through_to_zero_when_nothing_configured():
     balance = await resolve_opening_balance(
-        org_settings=None, reporting_currency="USD", explicit_opening=None
+        org_id=None, org_settings=None, reporting_currency="USD", explicit_opening=None
     )
     assert balance.amount == Decimal("0")
     assert balance.source == "none"
@@ -90,6 +93,7 @@ async def test_use_provider_false_skips_the_bank_call():
     """The dashboard's `seed_balance=false` equivalent — no provider hit at all,
     and no `currency_mismatch` claim either (we never asked)."""
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings={**_payments(), "cashflow": {"opening_balance": "10.00"}},
         reporting_currency="USD",
         explicit_opening=None,
@@ -110,6 +114,7 @@ async def test_provider_balance_in_another_currency_is_refused():
     subtracted from it are USD, so the running balance would be a silent
     two-currency mixture."""
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings={
             **_payments(balance="9999.99", balance_currency="EUR"),
             "cashflow": {"opening_balance": "1500.25"},
@@ -127,6 +132,7 @@ async def test_provider_balance_in_another_currency_is_refused():
 
 async def test_currency_mismatch_falls_all_the_way_to_zero_and_still_reports_it():
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings=_payments(balance="9999.99", balance_currency="GBP"),
         reporting_currency="USD",
         explicit_opening=None,
@@ -140,6 +146,7 @@ async def test_currency_comparison_is_case_and_whitespace_insensitive():
     """`usd` from an adapter and `USD` from org settings are the same currency —
     a formatting difference must not look like a mismatch."""
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings=_payments(balance="777.00", balance_currency=" usd "),
         reporting_currency="usd",
         explicit_opening=None,
@@ -153,6 +160,7 @@ async def test_blank_provider_currency_fails_closed():
     """An adapter that reports no currency is not evidence of a match — refuse
     rather than assume it is the reporting currency."""
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings=_payments(balance="500.00", balance_currency=""),
         reporting_currency="USD",
         explicit_opening=None,
@@ -168,6 +176,7 @@ async def test_blank_provider_currency_fails_closed():
 
 async def test_malformed_persisted_balance_degrades_to_zero():
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings={"cashflow": {"opening_balance": "not-a-number"}},
         reporting_currency="USD",
         explicit_opening=None,
@@ -178,6 +187,7 @@ async def test_malformed_persisted_balance_degrades_to_zero():
 
 async def test_unavailable_provider_falls_through_without_claiming_a_mismatch():
     balance = await resolve_opening_balance(
+        org_id=None,
         org_settings={
             **_payments(balance_available=False),
             "cashflow": {"opening_balance": "88.00"},

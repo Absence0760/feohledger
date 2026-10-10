@@ -20,7 +20,10 @@ An ENTRY-ONLY caller holds `ap_clerk` and none of `INVOICE_MANAGE_ROLES`. They
 are held to the entry window (:func:`in_entry_window`) and the entry
 transitions, and nothing they do can end in an approval without a second
 person: their `/complete` skips the amount floor and their extraction runs with
-`suppress_auto_approve`.
+`suppress_auto_approve`. Nor can anyone else's extraction approve a document
+they chose: `services/extraction.auto_approve_suppression` refuses the
+unattended approval whenever the uploader is not the reader or the segregation
+set is non-empty.
 """
 
 from fastapi import HTTPException, status

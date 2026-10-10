@@ -280,7 +280,7 @@ receipt**.
 | `received_date` no later than the server's UTC date + 1 day | A user east of UTC is already on tomorrow; a future receipt would satisfy the 3-way leg for goods not yet here |
 | `gr_number` optional (the delivery-note number), unique per org case-folded; blank → `GR-<po_number>-<n>` | 409 `goods_receipt_number_taken` |
 | `Idempotency-Key` header: a replay of the **same** request (PO, date, lines) returns the same receipt with **200**; the key reused for anything else is a 409 `goods_receipt_idempotency_reused` — including the same key raced onto two POs, which the partial unique index `uq_goods_receipts_org_idempotency_key` catches inside a SAVEPOINT | A duplicate receipt doubles the received quantity and could lift a hold; a reused key answered with a receipt that says something else would be a lie |
-| `source = "manual"`, `recorded_by_user_id` stamped | The auto-close's segregation check above |
+| `source = "manual"`, `recorded_by_user_id` stamped | The auto-close's segregation check above, and approval's: the recorder of a live manual receipt on an invoice's PO cannot approve that invoice (403 `approval_segregation_receiver`, decisions §267) |
 | Audit `goods_receipt.created` — number, PO number, line count, total quantity, date; no free text | The procurement audit shape |
 | Every invoice citing the PO is re-matched **in the same transaction, not best-effort** | A receipt that landed without the holds it should raise (or lift) would be worse than no receipt; the QMS sync's rematch stays best-effort because it is a batch |
 

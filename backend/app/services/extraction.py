@@ -229,6 +229,103 @@ async def _pause_ai_reading(
         logger.warning("[extraction] AI usage notice check failed: %s", exc.__class__.__name__)
 
 
+#: Why an extraction pass that WOULD have auto-approved landed at review. The
+#: code rides the `invoice.extraction_completed` audit row's details as
+#: ``auto_approve_suppressed``, so a reviewer (and the touchless-rate reader)
+#: can tell "the gates didn't fire" from "the gates fired and a person was
+#: required anyway".
+AUTO_APPROVE_SUPPRESSED_BY_CALLER = "requested_by_caller"
+AUTO_APPROVE_SUPPRESSED_SEGREGATION_ACTORS = "segregation_actors"
+AUTO_APPROVE_SUPPRESSED_UPLOADED_BY_ANOTHER_USER = "uploaded_by_another_user"
+AUTO_APPROVE_SUPPRESSED_DOCUMENT_REPLACED = "document_replaced_during_read"
+
+
+async def _locked_auto_approve_suppression(
+    db: AsyncSession,
+    invoice_id: uuid.UUID,
+    *,
+    actor_id: uuid.UUID | None,
+    read_file_key: str | None,
+) -> str | None:
+    """:func:`auto_approve_suppression` over the row as it stands under
+    ``FOR UPDATE``, plus "the file was replaced after this pass read it".
+
+    Columns only, so the session's in-memory invoice — already carrying the
+    extracted fields — is not refreshed over. A row that has vanished keeps
+    the caller's earlier answer (it cannot be approved anyway).
+    """
+    row = (
+        await db.execute(
+            sa_select(Invoice.uploaded_by_id, Invoice.segregation_actor_ids, Invoice.file_key)
+            .where(Invoice.id == invoice_id)
+            .with_for_update()
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    reason = auto_approve_suppression(row, actor_id=actor_id)
+    if reason is None and row.file_key != read_file_key:
+        return AUTO_APPROVE_SUPPRESSED_DOCUMENT_REPLACED
+    return reason
+
+
+def auto_approve_suppression(
+    invoice: Invoice,
+    *,
+    actor_id: uuid.UUID | None,
+    requested: bool = False,
+) -> str | None:
+    """Why this extraction pass may not end in an unattended approval, or ``None``.
+
+    An auto-approve is the org's policy approving a document on behalf of
+    whoever had it read. That is only sound when the document came from no
+    employee at all (email intake, PEPPOL, the supplier portal — no uploader,
+    empty set) or from the very person asking for the read, and no other
+    employee has since shaped it. Otherwise someone chose the document who is
+    not the one accountable for reading it, and the policy approval would give
+    them an approval no human signed. Three checks, in order:
+
+    ``requested``
+        The dispatcher asked for it (`run_extraction`'s
+        ``suppress_auto_approve``): an entry-only caller, or a supplier's
+        resubmission of a rejected invoice. Kept first so its code is the one
+        recorded when several apply.
+    ``segregation_actor_ids`` non-empty
+        Someone segregation names beyond the uploader shaped this payable — an
+        entry-only clerk who edited, attached, replaced or removed the file, or
+        re-extracted it (``api/invoice_entry.stamp_entry_editor``); a recurring
+        template's author and material editors; an inter-company mirror's
+        source set. The set is the list of people who must not approve this
+        payable, and an approval at their colleague's click on a document they
+        chose is them approving it. Unconditional — the triggering actor being
+        in the set is the same case, not an exception.
+    ``uploaded_by_id`` set and not ``actor_id``
+        Another employee supplied the document. A clerk's own upload is
+        suppressed at dispatch, but a clerk who then REPLACES the file on their
+        own upload is not stamped (they are already the uploader), so without
+        this a manager's re-extract approved the clerk's swap with no second
+        look. Read without the uploader's role on purpose: the role can change
+        after the fact, and the extraction worker holds no control-plane
+        session. A manager re-reading another manager's upload lands at review
+        too — the conservative cost of not looking roles up, and a human
+        review rather than a refusal.
+
+    Approval on ``POST /invoices/{id}/complete`` is not routed through here:
+    there the caller acts on figures in front of them, and
+    ``approval_chain.violates_segregation`` already refuses the floor to a
+    caller who is implicated. Pure; reads with ``getattr`` so a partial test
+    double still answers.
+    """
+    if requested:
+        return AUTO_APPROVE_SUPPRESSED_BY_CALLER
+    if getattr(invoice, "segregation_actor_ids", None):
+        return AUTO_APPROVE_SUPPRESSED_SEGREGATION_ACTORS
+    uploader = getattr(invoice, "uploaded_by_id", None)
+    if uploader is not None and (actor_id is None or str(uploader) != str(actor_id)):
+        return AUTO_APPROVE_SUPPRESSED_UPLOADED_BY_ANOTHER_USER
+    return None
+
+
 def decide_auto_approve(
     ext_cfg: dict,
     approval_cfg: dict,
@@ -546,7 +643,10 @@ async def run_extraction(
         ``ready_for_review`` and a human decides again. Also set when an
         entry-only caller (an AP clerk, ``api/invoice_entry.py``) uploads or
         re-extracts: they chose the document and cannot approve, so an
-        unattended approval of it would have no second person in it.
+        unattended approval of it would have no second person in it. The flag
+        is not the only suppression: :func:`auto_approve_suppression` also
+        reads the row, so a manager's read of a document a clerk uploaded or
+        swapped in lands at review without any caller asking.
     """
     # Cache IDs before try block — after rollback, invoice attrs may be expired
     invoice_id = invoice.id
@@ -556,6 +656,14 @@ async def run_extraction(
     # fields land on the row (see `skip_vendor_match` above).
     preserved_vendor_id = invoice.vendor_id
     preserved_vendor_name = invoice.vendor_name
+    # Who supplied and shaped the document, read before anything below can
+    # expire the row (see `auto_approve_suppression`).
+    suppression_reason = auto_approve_suppression(
+        invoice, actor_id=actor_id, requested=suppress_auto_approve
+    )
+    # The document this pass downloads; compared under the lock before any
+    # approval (`_locked_auto_approve_suppression`).
+    read_file_key = invoice.file_key
     # The provider's token usage for this attempt, once the adapter has
     # answered. Held outside the `try` so the FAILURE meter row can carry it
     # too: a refused or unparseable read was still billed by the provider.
@@ -1000,15 +1108,33 @@ async def run_extraction(
             if auto_approved:
                 target_status = InvoiceStatus.approved
 
-        if suppress_auto_approve and auto_approved:
-            # A human already rejected this document, or an entry-only caller
-            # supplied it (see the docstring). Fall back to review rather than
+        # Recorded only when the gates fired: "suppressed" means a person was
+        # required where the policy alone would have approved.
+        recorded_suppression = None
+        if auto_approved and suppression_reason is None:
+            # The reason above was read when the worker started, unlocked, and
+            # the file download and the provider call sit between it and here.
+            # A clerk may replace the file on a `pending` invoice in that
+            # window (it is inside the entry window), so the answer that
+            # approves is re-read under the row lock, which the file routes
+            # also take: a swap either committed before this read (and is
+            # seen) or waits until this transaction has approved (and is then
+            # refused — the entry window closes on an approved invoice).
+            suppression_reason = await _locked_auto_approve_suppression(
+                db, invoice_id, actor_id=actor_id, read_file_key=read_file_key
+            )
+        if suppression_reason is not None and auto_approved:
+            # A human already rejected this document, an entry-only caller
+            # supplied it, or someone other than the reader chose or shaped it
+            # (`auto_approve_suppression`). Fall back to review rather than
             # approving it unattended.
             auto_approved = False
             target_status = InvoiceStatus.ready_for_review
+            recorded_suppression = suppression_reason
             logger.info(
-                "[extraction] auto-approve suppressed for invoice %s",
+                "[extraction] auto-approve suppressed for invoice %s (%s)",
                 invoice_id,
+                suppression_reason,
             )
 
         if auto_approved:
@@ -1027,6 +1153,7 @@ async def run_extraction(
                 "method": result.provider,
                 "confidence": result.overall_confidence,
                 "auto_approved": auto_approved,
+                "auto_approve_suppressed": recorded_suppression,
                 "vendor_action": vendor_action,
                 "vendor_id": str(vendor.id) if vendor else None,
                 "gl_suggested": result.suggested_gl_account.value,

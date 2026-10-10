@@ -50,7 +50,7 @@ env_value() {
 # uploads/backups silently need.
 REQUIRED_VARS=(APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
 	FEOH_SECRET_KEY FEOH_ENVIRONMENT FEOH_S3_BUCKET BACKUP_S3_BUCKET
-	FEOH_CREDENTIAL_ENCRYPTION_KEYS)
+	FEOH_CREDENTIAL_KMS_KEY_ID)
 
 # ── Database mode: the same decision deploy/lib.sh makes for every script ────
 # FEOH_DATABASE_URL set → an external database (RDS): it must parse under the
@@ -114,12 +114,6 @@ change-me-in-production)
 esac
 [ "${#SECRET_KEY_VALUE}" -ge 32 ] ||
 	die "FEOH_SECRET_KEY is ${#SECRET_KEY_VALUE} chars; the app refuses to boot below 32 (openssl rand -hex 32)."
-
-# The app also refuses to boot when the credential keyring holds the key
-# committed in backend/.env.development (config.py
-# _validate_credential_encryption_keys): mirror it here, by its public value.
-grep -E '^FEOH_CREDENTIAL_ENCRYPTION_KEYS=' .env.tmp | grep -q 'ZGV2LW9ubHktY3JlZGVudGlhbC1rZXktbm90LXJlYWw' &&
-	die "FEOH_CREDENTIAL_ENCRYPTION_KEYS holds the public dev key from backend/.env.development — generate one (deploy/prod.sops.yaml.example)."
 
 # Invoice extraction is the one adapter with no mock fallback in a deployed env
 # (services/extraction.py resolve_platform_provider): with neither var set,

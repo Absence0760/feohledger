@@ -10,19 +10,18 @@ An adapter on this flow subclasses :class:`OAuthErpAdapter`, declares its
 :class:`OAuthProviderSpec`, and calls ``await self.access_token()`` for a
 bearer token. It never reads, refreshes or stores tokens itself.
 
-Connection state lives in ``settings.erp.oauth``::
+Connection metadata lives in ``settings.erp.oauth``::
 
     {
         "provider": "<OAuthProviderSpec.key>",
-        "access_token": "...",
-        "refresh_token": "...",
         "expires_at": "<ISO-8601 UTC>",
         "external_tenant_id": "...",  # QBO realmId / Xero tenantId / Sage business id
         # plus org_id, connection_id, client_source, connected_at,
         # refresh_token_expires_at, needs_reconnect: see services/erp_oauth
     }
 
-Only ``services/erp_oauth`` writes that block. An adapter reads
+The tokens are sealed in ``provider_credentials`` and never reach an adapter's
+config. Only ``services/erp_oauth`` writes either half. An adapter reads
 ``external_tenant_id`` through :meth:`OAuthErpAdapter.external_tenant_id`.
 """
 

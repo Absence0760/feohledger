@@ -13,9 +13,10 @@ from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
-from app.services import erp_credentials
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.exception_service import create_exception
 from app.services.payment_settlement import settlement_coverage
+from app.services.provider_credentials import provider_config
 from app.services.webhook_security import (
     extract_signature_header,
     is_event_already_processed,
@@ -27,7 +28,6 @@ from app.services.workflow_engine import (
     get_invoice_for_update,
     transition_invoice,
 )
-from app.utils.credential_crypto import CredentialCryptoError
 
 logger = logging.getLogger(__name__)
 
@@ -170,22 +170,17 @@ async def erp_webhook(
         org = result.scalar_one_or_none()
         if not org:
             return
+        # The signing secret is sealed (`services/provider_credentials`). Not
+        # being able to open it is OUR failure, not a decision about this
+        # event, so the ERP is asked to retry rather than have it dropped.
+        try:
+            erp_config = await provider_config(org, "erp", db=ctrl_db) or {}
+        except CredentialCryptoError:
+            logger.error("ERP webhook: the tenant's ERP credentials could not be opened")
+            return _retry_please()
 
     # Verify HMAC against the tenant's configured signing secret.
-    erp_config = (org.settings or {}).get("erp") or {}
-    # Stored encrypted (`services/erp_credentials`). One that does not decrypt
-    # fails closed like a missing one: silent 204, an operator-facing log line.
-    try:
-        signing_secret = erp_credentials.decrypt_secret(
-            erp_config.get("webhook_signing_secret", ""), key="webhook_signing_secret"
-        )
-    except CredentialCryptoError:
-        logger.warning(
-            "ERP webhook dropped: stored webhook_signing_secret for tenant '%s' does not "
-            "decrypt (check FEOH_CREDENTIAL_ENCRYPTION_KEYS)",
-            tenant_slug,
-        )
-        return
+    signing_secret = erp_config.get("webhook_signing_secret", "")
     if not signing_secret:
         # Fail closed (verify_hmac_sha256 would 204 on an empty secret anyway),
         # but surface a PII-free config error so an operator learns the ERP

@@ -35,6 +35,9 @@ import pytest
 
 from app.models.invoice import InvoiceStatus
 
+# The fake org's settings carry the webhook secrets; see the fixture.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 
 def _sign(secret: str, body: bytes) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
