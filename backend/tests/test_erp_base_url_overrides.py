@@ -7,8 +7,9 @@ point them at the local fake ERP container (backend/docker-compose.yml
 - ``settings.erp_merge_api_base`` — Merge.dev API base (default = live).
 - ``settings.erp_netsuite_api_base`` — empty = derive per-account URL from
   ``account_id`` as usual; set = returned verbatim (rstrip "/").
-- ``settings.erp_d365_api_base`` — empty = admin-supplied config ``base_url``
-  with the SSRF guard; set = trusted operator override, guard skipped.
+- ``settings.erp_d365_api_base`` — empty = admin-supplied config ``base_url``,
+  allowed only as https on api.businesscentral.dynamics.com and then through
+  the SSRF guard; set = trusted operator override, both checks skipped.
 - ``settings.erp_d365_token_url`` — empty = login.microsoftonline.com built
   from ``tenant_id``; set = POST the token exchange there.
 
@@ -26,9 +27,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.config import settings
-from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
+from app.services.erp_adapters.dynamics_365_bc import (
+    BusinessCentralAdapter,
+    BusinessCentralConfigError,
+)
 from app.services.erp_adapters.merge_dev import MergeDevAdapter
-from app.services.erp_adapters.netsuite import NetSuiteAdapter
+from app.services.erp_adapters.netsuite import NetSuiteAdapter, NetSuiteConfigError
 from app.utils.url_safety import UnsafeUrlError
 
 FAKE_MERGE = "http://localhost:12112/merge/api/accounting/v1"
@@ -94,6 +98,7 @@ def test_merge_dev_override_applies_to_posts_too(monkeypatch):
         currency="USD",
         invoice_date=date(2026, 1, 1),
         correlation_id="corr-1",
+        vendor_erp_id="merge-vendor-1",
     )
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
@@ -114,6 +119,53 @@ def test_netsuite_base_url_derives_from_account_id_when_override_empty():
         adapter._base_url()
         == "https://123456-sb1.suitetalk.api.netsuite.com/services/rest/record/v1"
     )
+
+
+@pytest.mark.parametrize(
+    "account_id", ["evil.tld/x?", "evil.tld#", "a@evil.tld", "123 456", 'x" , oauth_x="', ""]
+)
+def test_netsuite_account_id_is_validated_before_it_reaches_the_hostname(account_id):
+    """`account_id` is admin-supplied and spliced into the API HOSTNAME: before
+    this check, `evil.tld/x?` sent every signed request (OAuth header included)
+    to evil.tld. Anything outside `[A-Za-z0-9_-]` is refused, and the error
+    names the key, never the value."""
+    adapter = NetSuiteAdapter({"account_id": account_id})
+    with pytest.raises(NetSuiteConfigError) as exc:
+        adapter._base_url()
+    assert str(exc.value) == "NetSuite config 'account_id' is invalid"
+
+
+def test_netsuite_post_invoice_refuses_a_bad_account_id_before_any_request():
+    from datetime import date
+    from decimal import Decimal
+
+    from app.services.erp_adapters.base import InvoicePayload
+
+    adapter = NetSuiteAdapter(
+        {
+            "account_id": "evil.tld/x?",
+            "consumer_key": "ck",
+            "consumer_secret": "cs",
+            "token_id": "tid",
+            "token_secret": "ts",
+        }
+    )
+    payload = InvoicePayload(
+        invoice_number="INV-1",
+        vendor_name="Acme",
+        amount=Decimal("100.00"),
+        currency="USD",
+        invoice_date=date(2026, 1, 1),
+        correlation_id="corr-1",
+        vendor_erp_id="25",
+        gl_account_erp_id="58",
+    )
+    with patch("httpx.AsyncClient") as cm:
+        result = _run(adapter.post_invoice(payload))
+    cm.assert_not_called()
+    assert result.success is False
+    assert result.retryable is False
+    assert result.message == "NetSuite config 'account_id' is invalid"
 
 
 def test_netsuite_base_url_returns_override_verbatim(monkeypatch):
@@ -220,15 +272,118 @@ def test_d365_api_url_uses_override_and_skips_ssrf_guard(monkeypatch):
     assert url == f"{FAKE_D365}/sandbox/api/v2.0/companies(c-1)/purchaseInvoices"
 
 
-def test_d365_api_url_admin_config_localhost_still_raises(monkeypatch):
-    """No override → the admin-supplied base_url stays behind the SSRF guard.
-    A tenant admin pointing base_url at an internal address is refused."""
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://127.0.0.1:12112/d365",  # internal
+        "http://169.254.169.254/latest",  # cloud metadata
+        "http://api.businesscentral.dynamics.com/v2.0",  # Microsoft's host, but plain http
+        "https://api.businesscentral.dynamics.com.evil.tld/v2.0",  # look-alike
+        "https://evil.tld/v2.0",  # public, so the SSRF guard alone would pass it
+        "https://user:pw@api.businesscentral.dynamics.com/v2.0",  # userinfo
+        "https://evil.tld@api.businesscentral.dynamics.com:8443/v2.0",  # odd port
+        "https://api.businesscentral.dynamics.com/v2.0?x=1",
+        "https://api.businesscentral.dynamics.com:bad/v2.0",
+    ],
+)
+def test_d365_admin_base_url_must_be_https_on_microsofts_api_host(monkeypatch, base_url):
+    """No override → the admin-supplied base_url is allowed only as https on
+    api.businesscentral.dynamics.com. The bearer token for the customer's whole
+    BC tenant rides on every request, so a public look-alike host — which the
+    SSRF guard would happily pass — is a credential leak. The error names the
+    key, never the value."""
+    monkeypatch.setattr(settings, "erp_d365_api_base", "")
+    adapter = BusinessCentralAdapter({"base_url": base_url, "company_id": "c-1"})
+    with pytest.raises(BusinessCentralConfigError) as exc:
+        _run(adapter._api_url("purchaseInvoices"))
+    assert "'base_url'" in str(exc.value)
+    assert "evil" not in str(exc.value) and "127.0.0.1" not in str(exc.value)
+
+
+def test_d365_blank_base_url_is_microsofts_default(monkeypatch):
+    """`base_url` is optional in the provider catalogue; blank used to KeyError."""
+    monkeypatch.setattr(settings, "erp_d365_api_base", "")
+    adapter = BusinessCentralAdapter({"environment": "production", "company_id": "c-1"})
+    with patch("app.utils.url_safety.assert_public_url_async", AsyncMock()):
+        url = _run(adapter._api_url("vendors"))
+    assert url == (
+        "https://api.businesscentral.dynamics.com/v2.0/production/api/v2.0/companies(c-1)/vendors"
+    )
+
+
+def test_d365_microsofts_host_still_passes_through_the_ssrf_guard(monkeypatch):
+    """The allowlist sits on top of the SSRF guard, not instead of it: if the
+    allowed host ever resolved inward, the request is still refused."""
     monkeypatch.setattr(settings, "erp_d365_api_base", "")
     adapter = BusinessCentralAdapter(
-        {"base_url": "http://127.0.0.1:12112/d365", "company_id": "c-1"}
+        {"base_url": "https://api.businesscentral.dynamics.com/v2.0", "company_id": "c-1"}
     )
-    with pytest.raises(UnsafeUrlError):
-        _run(adapter._api_url("purchaseInvoices"))
+    guard = AsyncMock(side_effect=UnsafeUrlError("internal"))
+    with patch("app.utils.url_safety.assert_public_url_async", guard):
+        with pytest.raises(UnsafeUrlError):
+            _run(adapter._api_url("vendors"))
+    guard.assert_awaited_once_with("https://api.businesscentral.dynamics.com/v2.0")
+
+
+def test_d365_post_invoice_refuses_a_bad_base_url_before_any_request(monkeypatch):
+    """The push fails at once (not retried — the config will not change on a
+    re-send), before the token exchange sends the client secret anywhere."""
+    from datetime import date
+    from decimal import Decimal
+
+    from app.services.erp_adapters.base import InvoicePayload
+
+    monkeypatch.setattr(settings, "erp_d365_api_base", "")
+    adapter = BusinessCentralAdapter(
+        {
+            "base_url": "https://evil.tld/v2.0",
+            "tenant_id": "t",
+            "client_id": "c",
+            "client_secret": "s",
+            "company_id": "c-1",
+        }
+    )
+    payload = InvoicePayload(
+        invoice_number="INV-1",
+        vendor_name="Acme",
+        amount=Decimal("100.00"),
+        currency="USD",
+        invoice_date=date(2026, 1, 1),
+        correlation_id="corr-1",
+        vendor_erp_id="V-1",
+        gl_account_erp_id="A-1",
+    )
+    with patch("httpx.AsyncClient") as cm:
+        result = _run(adapter.post_invoice(payload))
+    cm.assert_not_called()
+    assert result.success is False
+    assert result.retryable is False
+    assert "'base_url'" in result.message and "evil" not in result.message
+
+
+@pytest.mark.parametrize("method", ["list_gl_accounts", "list_pos", "list_vendors"])
+def test_d365_list_syncs_keep_the_ssrf_guard_on_admin_config(monkeypatch, method):
+    """The chart / PO / vendor syncs build their URL through `_api_url` too:
+    an admin `base_url` pointing inside the network is refused before any
+    request is sent to it (and the refusal is raised, not swallowed into an
+    empty "synced 0" result)."""
+    monkeypatch.setattr(settings, "erp_d365_api_base", "")
+    monkeypatch.setattr(settings, "erp_d365_token_url", FAKE_D365_TOKEN)
+    adapter = BusinessCentralAdapter(
+        {
+            "base_url": "http://169.254.169.254/latest",
+            "client_id": "c",
+            "client_secret": "s",
+            "company_id": "c-1",
+        }
+    )
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock()
+        with pytest.raises(BusinessCentralConfigError):
+            _run(getattr(adapter, method)())
+    client.get.assert_not_awaited()
 
 
 def test_d365_api_url_override_takes_precedence_over_admin_config(monkeypatch):

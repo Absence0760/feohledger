@@ -96,6 +96,34 @@ def test_admin_projection_is_equal_when_nothing_is_redacted():
     assert settings_for_response(plain, is_admin=True) == plain
 
 
+def test_the_erp_oauth_block_reads_as_connected_only():
+    """The OAuth consent metadata keeps its `connection_id` — the capability the
+    token refresher checks — so it reads as `{"connected": bool}`; a token copy
+    left in the JSONB (the tokens are sealed) never reappears either."""
+    stored = {
+        "erp": {
+            "type": "quickbooks_online",
+            "integration_method": "direct",
+            "oauth": {
+                "provider": "quickbooks_online",
+                "connection_id": "conn-capability",
+                "external_tenant_id": "realm-1",
+                "refresh_token": "stray-refresh-token",
+            },
+        }
+    }
+    projected = settings_for_response(stored, is_admin=True)
+    assert projected["erp"]["oauth"] == {"connected": True}
+    assert projected["erp"]["type"] == "quickbooks_online"
+    assert "conn-capability" not in str(projected)
+    assert "stray-refresh-token" not in str(projected)
+    # The live ORM dict is untouched.
+    assert stored["erp"]["oauth"]["connection_id"] == "conn-capability"
+    assert settings_for_response({"erp": {"oauth": {}}}, is_admin=True)["erp"]["oauth"] == {
+        "connected": False
+    }
+
+
 def test_admin_projection_strips_provider_secrets_in_multi_route_entries():
     """`payments.providers[]` entries carry their own keys; they are secrets too."""
     live = {

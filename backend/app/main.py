@@ -32,6 +32,7 @@ from app.api import (
     email_intake,
     enrichment,
     entities,
+    erp_oauth,
     erp_webhook,
     exception_agents,
     exceptions,
@@ -79,6 +80,8 @@ from app.api import (
 from app.api.v1 import router as public_v1_router
 from app.api.v1_openapi import router as public_v1_openapi_router
 from app.config import settings
+from app.services.erp_adapters import log_redaction as erp_log_redaction
+from app.utils import access_log
 
 # The stdlib root logger has no handler until something configures one —
 # uvicorn's default log config only wires up its OWN "uvicorn"/"uvicorn.access"
@@ -93,6 +96,12 @@ logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+# Credentials that travel in a query string never reach a log line: the access
+# log's ERP OAuth callback (?code=&state=&realmId=), and the ERP URLs httpx /
+# httpcore log. uvicorn has configured its loggers before importing this
+# module, so the filters attached here hold in dev and production alike.
+access_log.install()
+erp_log_redaction.install()
 
 
 @asynccontextmanager
@@ -472,6 +481,8 @@ app.include_router(scheduled_reports.router, prefix="/api")
 app.include_router(enrichment.router, prefix="/api")
 app.include_router(entities.router, prefix="/api")
 app.include_router(erp_webhook.router, prefix="/api")
+app.include_router(erp_oauth.router, prefix="/api")
+app.include_router(erp_oauth.public_router, prefix="/api")
 # Registered BEFORE exceptions.router so the literal /exceptions/agent-* collection
 # routes win over exceptions.py's parameterised /{exception_id}/... matcher.
 app.include_router(exception_agents.router, prefix="/api")

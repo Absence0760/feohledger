@@ -82,9 +82,13 @@ from app.schemas.vendor import (
 )
 from app.services.audit_access import build_field_diff, log_access
 from app.services.audit_dispatch import dispatch_audit
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_vendors_csv
 from app.services.email_adapters import EmailMessage, get_email_adapter
-from app.services.provider_credentials import provider_config
+from app.services.provider_credentials import (
+    CREDENTIALS_UNAVAILABLE_DETAIL,
+    provider_config,
+)
 from app.services.report_export import csv_safe_cell
 from app.services.sanctions_categories import (
     categories_from_raw_response,
@@ -1641,7 +1645,12 @@ async def sync_vendors_from_erp_endpoint(
     control_db: AsyncSession = Depends(get_control_db),
 ):
     """Pull vendors from the connected ERP and sync to local database."""
-    erp_config = await provider_config(org, "erp", db=control_db)
+    try:
+        erp_config = await provider_config(org, "erp", db=control_db)
+    except CredentialCryptoError:
+        # The sealed credentials could not be opened: OUR failure, and a sync
+        # never runs without them (a fall-back to `mock` would import fixtures).
+        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
     if not erp_config:
         raise HTTPException(
             status_code=400,
@@ -1651,10 +1660,6 @@ async def sync_vendors_from_erp_endpoint(
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     # Use ERP adapter to fetch vendors
-    import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
-    import app.services.erp_adapters.merge_dev  # noqa: F401
-    import app.services.erp_adapters.mock_adapter  # noqa: F401
-    import app.services.erp_adapters.netsuite  # noqa: F401
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
 
     try:

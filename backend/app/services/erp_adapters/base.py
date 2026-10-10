@@ -27,6 +27,10 @@ class LineItemPayload:
     tax: Decimal | None = None
     total: Decimal | None = None
     gl_account: str | None = None
+    #: The ERP's own id for ``gl_account`` (``gl_accounts.erp_account_id``),
+    #: resolved from the invoice entity's chart. None when the line has no
+    #: account or the account was never synced from this ERP.
+    gl_account_erp_id: str | None = None
 
 
 @dataclass
@@ -55,7 +59,20 @@ class InvoicePayload:
     bill_to_address: str | None = None
     remit_to_address: str | None = None
     vendor_address: str | None = None
+    #: The ERP's own vendor id (``vendors.erp_vendor_id``). Every real ERP posts
+    #: a bill against this, never a name. **A direct adapter refuses a payload
+    #: without it** (``ErpPostResult(success=False, message=...
+    #: "vendor_not_linked")``) and never falls back to a name lookup, which
+    #: picks the wrong "Acme" the first time two vendors share one.
+    vendor_erp_id: str | None = None
+    #: The ERP's own id for the header ``gl_account``; see ``LineItemPayload``.
+    gl_account_erp_id: str | None = None
     line_items: list[LineItemPayload] = field(default_factory=list)
+    #: The ERP background job an earlier attempt queued but could not confirm
+    #: (:attr:`ErpPostResult.pending_job_id`, persisted by ``services/erp``).
+    #: An adapter with asynchronous creates checks this job before queueing
+    #: another, so a retry while the first is still running cannot post twice.
+    pending_job_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +129,63 @@ def erp_failure_message(provider: str, status_code: int) -> str:
     return f"{provider} post failed: HTTP {status_code} ({erp_failure_reason(status_code)})"
 
 
+#: Stable reason code: the payload has no ``vendor_erp_id`` — the invoice's
+#: vendor was never linked to a record in this ERP (run the vendor sync, or the
+#: invoice has no resolved ``vendor_id`` at all). Every direct adapter refuses
+#: such a payload before it makes a single HTTP call, and never falls back to
+#: a name lookup.
+VENDOR_NOT_LINKED = "vendor_not_linked"
+
+#: Stable reason code: a line (or the header, for a header-only bill) is coded
+#: to a GL account that has no ``gl_account_erp_id`` in the invoice's chart, or
+#: — for an ERP whose bill line requires an account — is not coded at all.
+#: Refused rather than posted against the code's text or dropped, since either
+#: books the expense somewhere the approver never saw.
+ACCOUNT_NOT_LINKED = "account_not_linked"
+
+#: Stable reason code: an OAuth ERP with no usable connection (never connected,
+#: revoked, or past its refresh lifetime). Retrying cannot help.
+NOT_CONNECTED = "not_connected"
+
+#: Stable reason code: the bill's lines do not add up to the approved
+#: ``payload.amount`` (tax-inclusive, or tax-exclusive plus ``tax_amount``).
+#: The header amount is never recomputed from lines, so the bill is refused.
+AMOUNT_MISMATCH = "amount_mismatch"
+
+#: Stable reason code: a line has neither a ``total`` nor a ``quantity`` and
+#: ``unit_price`` to derive one from. Never filled from the header.
+LINE_AMOUNT_MISSING = "line_amount_missing"
+
+#: Stable reason code: the ERP computed the bill's total itself and it differs
+#: from the approved ``payload.amount`` (a default tax code added tax, say).
+POSTED_TOTAL_MISMATCH = "posted_total_mismatch"
+
+#: Stable reason code: the ERP created the bill but did not report the total it
+#: booked, so we cannot confirm it equals ``payload.amount``. Never success.
+POSTED_TOTAL_UNCONFIRMED = "posted_total_unconfirmed"
+
+
+def erp_refusal_message(provider: str, reason: str) -> str:
+    """Build the PII-free ``ErpPostResult.message`` for a payload an adapter
+    refused BEFORE calling the ERP.
+
+    The sibling of :func:`erp_failure_message` for the pre-flight case: no HTTP
+    status exists, so the message carries the provider literal and a stable
+    reason code (:data:`VENDOR_NOT_LINKED`, :data:`ACCOUNT_NOT_LINKED`, or an
+    adapter's own) and nothing from the payload — it is persisted on the same
+    append-only ``invoice.erp_failed`` audit row. ``provider`` and ``reason``
+    are fixed literals per call site, never user input.
+    """
+    return f"{provider} post refused: {reason}"
+
+
+def erp_refusal(provider: str, reason: str) -> ErpPostResult:
+    """The non-retryable :class:`ErpPostResult` for a payload refused pre-flight."""
+    return ErpPostResult(
+        success=False, message=erp_refusal_message(provider, reason), retryable=False
+    )
+
+
 @dataclass
 class ErpPostResult:
     """Outcome of an ``ErpAdapter.post_invoice`` call.
@@ -132,6 +206,15 @@ class ErpPostResult:
     erp_document_number: str | None = None
     message: str | None = None
     raw_response: dict | None = None
+    #: False when retrying cannot change the outcome — the adapter refused the
+    #: payload before calling the ERP (:func:`erp_refusal`). ``services/erp``
+    #: then fails the invoice at once instead of spending its backoff budget
+    #: re-sending the same refused bill.
+    retryable: bool = True
+    #: The id of an ERP background job this attempt queued but could not see
+    #: finish. ``services/erp`` persists it and hands it back as
+    #: :attr:`InvoicePayload.pending_job_id` on the next attempt; None clears it.
+    pending_job_id: str | None = None
 
 
 @dataclass

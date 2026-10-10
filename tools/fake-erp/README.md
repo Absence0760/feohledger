@@ -33,12 +33,23 @@ surfaces:
   cursor-paginated 2 + 1 via `next` / `?cursor=`), `GET /account-details`
   (test_connection).
 - **NetSuite**: `POST /vendorBill` → **204** with the new numeric id (`1001`,
-  `1002`, …) in the `Location` header, status `Open`;
-  `GET /vendorBill/{id}` → `{"status": {"refName": "Open"}}`;
-  `GET /vendor?limit=1` (test_connection).
+  `1002`, …) in the `Location` header, status `Open` (`Pending Approval` for
+  vendor `28`, which is under approval routing);
+  `GET /vendorBill/{id}` → the record with its `status` and `total` — the
+  lines plus any tax code's tax (account `123` / `6400` adds 10%, rounded to
+  the cent), written as an exact JSON number;
+  `GET /vendor?limit=1` (test_connection);
+  `POST /netsuite/services/rest/query/v1/suiteql` (requires
+  `Prefer: transient`; answers only `SELECT … FROM account`, paged by
+  `limit`/`offset`/`hasMore`) — the chart sync.
 - **D365**: `POST …/companies({id})/purchaseInvoices` → 201 `d365-inv-<n>`
-  status `Draft`; `POST …/purchaseInvoices({id})/Microsoft.NAV.post` → 204,
-  flips status to `Open`; `GET …/purchaseInvoices({id})`;
+  status `Draft`, with `totalAmountExcludingTax` / `totalTaxAmount` /
+  `totalAmountIncludingTax` computed from the lines (company `fake-vat-co`
+  adds 20% VAT on top, like a real BC VAT company; every other company is
+  untaxed); `POST …/purchaseInvoices({id})/Microsoft.NAV.post` → 204,
+  flips a `Draft` to `Open` and moves its etag (400 for anything already posted);
+  `GET …/purchaseInvoices({id})`; `DELETE …/purchaseInvoices({id})` (`If-Match`
+  must be the current etag or `*`, else 412; drafts only);
   `GET …/vendors?$top=1` (test_connection). OData base is `/d365`, i.e.
   `/d365/{environment}/api/v2.0/companies({company_id})/<resource>`.
 
@@ -63,6 +74,31 @@ Vendors (`GET /merge/api/accounting/v1/vendors`):
 3. "Fake Merge Services Co" — Net 60 (`payment_term` as a bare string, not an
    object — exercises that branch of `_merge_vendor_to_payload`), tax id
    `73-3456789`
+
+### References are enforced by id, as the real ERPs do
+
+A bill naming its vendor or account by anything but a known id is a **400**, so
+the e2e suite proves the adapters post the ids the syncs stored
+(`backend/docs/erp-integration.md` § ERP references):
+
+- **Merge** `POST /invoices`: `contact` must be a fixture vendor id
+  (`merge-vendor-701` …); a non-null line `account` must be a fixture account id
+  (`merge-acct-6100` …).
+- **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`,
+  `28`);
+  the `expense` sublist must be non-empty with each `account.id` an account id;
+  an `item` sublist is refused.
+- **D365** `POST …/purchaseInvoices`: `vendorId` (or `vendorNumber`) must name a
+  fixture vendor.
+
+NetSuite vendors (`GET /vendor`): `25` "Fake NetSuite Vendor A", `26` "Fake
+NetSuite Vendor B", `28` "Fake NetSuite Vendor Routed" (approval routing).
+NetSuite accounts (SuiteQL): `120` → `6100`, `121` → `6200`, `122` → `6300`,
+`123` → `6400` (10% tax code). Both behaviours are fixed fixtures, not a toggle,
+so parallel e2e workers cannot trip over each other. D365 vendor (`GET …/vendors`): id
+`5d115c9c-44e3-ea11-bb43-000d3a2feca1`, number `V0001`, "Fake BC Vendor A".
+Each provider's vendor names are distinct, so one e2e tenant syncing all three
+never links one provider's vendor id onto another's vendor row.
 
 ## Test hooks
 
@@ -112,3 +148,130 @@ FEOH_ERP_NETSUITE_API_BASE=http://localhost:12112/netsuite/services/rest/record/
 FEOH_ERP_D365_API_BASE=http://localhost:12112/d365
 FEOH_ERP_D365_TOKEN_URL=http://localhost:12112/d365/oauth2/token
 ```
+
+## Sage Intacct (`/intacct/ia/api/v1`)
+
+Backs `erp_adapters/sage_intacct.py` (`FEOH_ERP_INTACCT_API_BASE`).
+
+- `POST /oauth2/token` — `client_credentials` form with non-empty
+  `client_id` / `client_secret` and a `username` containing `@` → bearer
+  `fake-intacct-token`, required on every other call.
+- `POST /services/core/query` — `accounts-payable/vendor` (`V-ACME`,
+  `V-BETA`), `general-ledger/account` (`6100`, `6200`, `2000`),
+  `purchasing/document::Purchase Order` (`PO-INTACCT-401` 1250.00 pending,
+  `PO-INTACCT-402` 980.50 closed) and the created bills; `$eq` filters,
+  `start` / `size` paging with `ia::meta.next`.
+- `POST /objects/accounts-payable/bill` → 201 key `5001`, `5002`, …, state
+  `posted`; rejects an unknown vendor / GL account or a non-string `txnAmount`.
+  `GET` / `DELETE /objects/accounts-payable/bill/{key}` (a paid bill refuses
+  deletion).
+- `POST /intacct/ia/api/v1/__set-state` — test hook
+  `{"key", "state", "totalTxnAmountDue"}`.
+
+## SYSPRO 8 e.net REST (`/syspro/SYSPROWCFService/Rest`)
+
+Backs `erp_adapters/syspro.py` (`FEOH_ERP_SYSPRO_API_BASE=http://localhost:12112/syspro`).
+Every call is `GET` with query-string parameters; errors are HTTP 200 with a
+body starting `ERROR`, as SYSPRO's are.
+
+- `Logon?Operator=&OperatorPassword=&CompanyId=&CompanyPassword=` → a session
+  id (non-empty operator, password and company required); `Logoff?UserId=`.
+  `GET /syspro/SYSPROWCFService/Rest/__sessions` reports how many are still
+  open — the adapter should always leave it at 0.
+- `Query/Query?BusinessObject=COMFND` — tables `ApSupplier` (`0000001`,
+  `0000002`), `GenMaster` (`6100`, `6200` expense, `2000` liability),
+  `PorMasterHdr` / `PorMasterDetail` (`PO-SYS-501` 1250.00 open,
+  `PO-SYS-502` 980.50 complete) and the posted `ApInvoice` rows; `EQ`
+  expressions and `ReturnRows`.
+- `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier or
+  ledger code, a duplicate (supplier, invoice) and a distribution that does not
+  balance to `InvoiceAmount`.
+- `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
+  `{"supplier", "invoice", "balance"}` (`"0"` = paid).
+## Xero (`/xero/api.xro/2.0`)
+
+Backs `erp_adapters/xero.py`. Auth is shape-only: any non-empty
+`Authorization: Bearer …` plus a non-empty `Xero-Tenant-Id` (401 / 403
+otherwise). Point the backend at it with
+`FEOH_ERP_XERO_API_BASE=http://localhost:12112/xero/api.xro/2.0`.
+
+- `GET /Organisation` — `Fake Xero Org` (ZAR, ZA).
+- `GET /Contacts?where=IsSupplier==true` — `xero-contact-1` *Fake Xero
+  Supplier Co* (the customer `xero-contact-2` is filtered out).
+- `GET /Accounts` — `xero-acc-6100` / `6200` (default tax type `INPUT`) and
+  `xero-acc-6300` (no default tax type: a taxed bill is refused unless the org
+  sets `default_tax_type`).
+- `GET /PurchaseOrders` — `PO-XERO-401` (1250.00, AUTHORISED → open),
+  `PO-XERO-402` (980.50, BILLED → closed).
+- `GET /Invoices` with `InvoiceNumbers` / `ContactIDs` / `Statuses` filters
+  (the pre-create idempotency lookup); `PUT /Invoices` creates `xero-inv-<n>`
+  and replays the original response for a repeated `Idempotency-Key`;
+  `GET /Invoices/{id}`; `POST /Invoices/{id}` changes status (DELETED only
+  from DRAFT/SUBMITTED, VOIDED only from unpaid AUTHORISED).
+- Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
+  "amount_paid"?}`. `POST /__reset` clears this state too.
+
+## Sage Business Cloud Accounting (`/sage/v3.1`)
+
+Backs `erp_adapters/sage_accounting.py`. Auth is shape-only: any non-empty
+bearer plus a non-empty `X-Business`. Collections use Sage's
+`{"$items", "$next", ...}` envelope. Point the backend at it with
+`FEOH_ERP_SAGE_ACCOUNTING_API_BASE=http://localhost:12112/sage/v3.1`.
+
+- `GET /business_settings` (the connection test).
+- `GET /contacts?contact_type_id=VENDOR` — `sage-contact-1` *Fake Sage
+  Supplier Ltd* (the customer `sage-contact-2` is filtered out).
+- `GET /ledger_accounts`, `GET /ledger_accounts/{id}` — `sage-ledger-5000`,
+  `sage-ledger-7500` (default tax rate `GB_STANDARD`), `sage-ledger-7600` (no
+  default rate: a taxed invoice is refused unless the org sets
+  `default_tax_rate_id`).
+- `GET /purchase_invoices` with `contact_id` / `from_date` / `to_date` (the
+  pre-create idempotency lookup); `POST /purchase_invoices` creates
+  `sage-pi-<n>` as `UNPAID`, and 422s on an unknown contact or ledger, a taxed
+  line with no `tax_rate_id`, or net + tax that does not equal the total;
+  `GET /purchase_invoices/{id}`; `DELETE /purchase_invoices/{id}` deletes a
+  draft and voids an unpaid invoice (`void_reason` required).
+- Test hook `POST /sage/v3.1/__set-status {"id", "status",
+  "outstanding_amount"?}`. `POST /__reset` clears this state too.
+
+## Blackbaud Financial Edge NXT — SKY API (`/blackbaud`)
+
+Backs `erp_adapters/blackbaud_fe_nxt.py`
+(`FEOH_ERP_BLACKBAUD_API_BASE=http://localhost:12112/blackbaud`,
+`FEOH_ERP_BLACKBAUD_TOKEN_URL=http://localhost:12112/blackbaud/oauth2/token`).
+Every API route requires **both** `Authorization: Bearer fake-blackbaud-token`
+and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
+
+- `POST /oauth2/token` — `authorization_code` (with `code` + `redirect_uri`) or
+  `refresh_token` grant → the bearer above plus `environment_id`
+  `p-fake-env-1`, `legal_entity_id`, `refresh_token_expires_in`, the SKY token
+  response shape.
+- `GET /accountspayable/v1/vendors` (`136`, `137`), `/purchaseorders`
+  (`1001` 1250.00 open, `1002` 980.50 closed), `GET /generalledger/v1/accounts`
+  (`01-5000-00`, `01-5100-00`, `01-2000-00`) — `{"count", "value"}` with
+  `limit` / `offset`.
+- `GET /accountspayable/v1/invoices?search_text=` — matches invoice number or
+  description. `POST /accountspayable/v1/invoices/process` → `{"process_id"}`;
+  rejects an unknown vendor or account, a split set not totalling 100%, and
+  distributions whose Debits and Credits don't both equal `amount`. The job is
+  complete at once: `backgroundProcess/{id}/status` → 5,
+  `backgroundProcess/{id}/result` → `{"record_id"}`.
+  `GET /accountspayable/v1/invoices/{id}` returns `status` / `amount` / `balance`.
+- `POST /blackbaud/__set-status` — test hook `{"invoice_id", "status", "balance"}`.
+
+
+## Business Central + NetSuite syncs and void
+
+- **D365** `GET …/accounts` — `6100` / `6200` / `6300` Posting accounts (ids
+  `a6100000-…`), plus heading `6000` and blocked `6900` (the adapter skips
+  both). `GET …/purchaseOrders` (lines with `$expand=purchaseOrderLines`) —
+  `PO-FAKE-BC-401` 1500.25, blank `currencyCode`, blank date `0001-01-01`;
+  `PO-FAKE-BC-402` 820.00 EUR. Every collection honours
+  `Prefer: odata.maxpagesize` and returns `@odata.nextLink` (`$skiptoken`).
+  `DELETE …/purchaseInvoices({id})` needs `If-Match` and deletes only a `Draft`.
+  A purchaseInvoice `Account` line must carry a posting account's `accountId`.
+- **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, `28`,
+  and inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
+  (`PO-FAKE-NS-501` 2100.50 USD open, `PO-FAKE-NS-502` 640.00 GBP closed).
+  `DELETE /vendorBill/{id}` → 204 for a `pendingApproval` bill only
+  (`/__set-status` with `"pendingApproval"`).

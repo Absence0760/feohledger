@@ -225,13 +225,12 @@ tool, and item 3 below is how the two meet. Reasoning: [decisions.md](decisions.
 Each item ships as **its own PR**. Item 1 (goods-receipt entry) has shipped — see
 [roadmap_shipped.md](roadmap_shipped.md) § Priority 14.
 
-### 2. Direct ERP adapters — largest providers first
-**Status:** Partial — Merge.dev (unified API) is the default; direct adapters exist for Business Central and NetSuite
-**Open:** Direct adapters for the remaining large ERPs, one PR per ERP, largest first; and receipts pulled from the ERP alongside POs. *(c)* Tracked in [followups.md](followups.md).
+### 2. Direct ERP adapters
+**Status:** Partial. Direct adapters cover the top ERPs in the US and South Africa: QuickBooks Online, Xero, Sage Business Cloud Accounting (global v3.1 and the separate South Africa API), Sage Intacct, SYSPRO, NetSuite, Business Central and Blackbaud Financial Edge NXT. They are set up from a catalogue-driven panel (decisions §269–§272; shipped in [roadmap_shipped.md](roadmap_shipped.md) § Priority 14). Merge.dev stays the route for everything else.
+**Open:** a receipt pull on the adapter interface, and direct adapters for the large enterprise ERPs. *(c)* Tracked in [followups.md](followups.md).
 
-- [ ] Extend the `erp_adapters` interface with a goods-receipt pull, next to the PO sync, so an ERP that owns receiving feeds the 3-way match (Business Central + NetSuite first, since they already exist)
-- [ ] SAP S/4HANA (OData) · Oracle Fusion Cloud ERP · Microsoft Dynamics 365 Finance & Operations · Sage Intacct · Infor CloudSuite · Epicor Kinetic — each with a fake-erp route set (`pnpm erp:up`) and a `tests-e2e/erp/` spec, mock-by-default (guard rail 7)
-- [ ] SMB ledgers — QuickBooks Online, Xero — already decided as **direct** adapters on Growth (decisions §256, `backend/docs/quickbooks-online-adapter.md`, and the "Build a direct QuickBooks Online adapter" follow-up); the large-ERP order above has to be reconciled with §256, which routes the long tail (SAP, Sage Intacct, …) through Merge.dev on Scale — settle which large ERPs earn a direct adapter before starting
+- [ ] Extend the `erp_adapters` interface with a goods-receipt pull, next to the PO sync, so an ERP that owns receiving feeds the 3-way match (Business Central + NetSuite first)
+- [ ] SAP S/4HANA (OData) · Oracle Fusion Cloud ERP · Microsoft Dynamics 365 Finance & Operations · Infor CloudSuite · Epicor Kinetic — each with a fake-erp route set (`pnpm erp:up`) and a `tests-e2e/erp/` spec, mock-by-default (guard rail 7). Until one lands, these ride Merge.dev on Scale (decisions §256)
 
 ### 3. Commerce / inventory platform adapter (Shopify first)
 **Status:** Planned

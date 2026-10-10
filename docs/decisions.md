@@ -10417,6 +10417,11 @@ the pricing page must not advertise Merge-routed ERPs on Growth.
 not built, so a Growth tenant can save and push a Merge-routed config; the
 follow-up's trigger (the first paid Growth customer or the fourth Merge
 connection) is unchanged.
+
+*Update 2026-10-08:* §269 makes Sage Intacct, SYSPRO, Sage Business Cloud
+Accounting and Blackbaud direct adapters, so they come under `erp_integrations`
+on Growth like QuickBooks Online and Xero. Merge.dev on Scale remains the route
+only for ERPs without a direct adapter.
 ## 257. The single-VM database is RDS, reached over verify-full TLS set by PGSSLMODE (2026-10-07)
 
 The operator chose the single-VM deployment with Postgres on **RDS for
@@ -10949,3 +10954,190 @@ own-upload swap); keying on the uploader being entry-only (role drift, a
 control-plane read in the worker); refusing file changes while `pending`
 (closes the race too, but changes what clerks can do mid-extraction — the lock
 re-read closes the approval hole without that).
+
+## 269. Direct ERP adapters for the top ERPs in the US and South Africa, posting by the ERP's own ids (2026-10-08)
+
+**Context.** The user asked for direct sync with the five most-used ERPs in the
+US and in South Africa, plus Blackbaud. Roadmap Priority 14 item 2 had planned
+enterprise ERPs first (SAP, Oracle Fusion, …). §256 had put everything except
+QuickBooks Online and Xero behind Merge.dev on Scale. Separately, the two
+existing direct adapters posted bills by vendor name and GL code, which real
+ERPs reject (`known-issues.md`).
+
+**Decision.**
+
+- **The set:** QuickBooks Online, Xero, Sage Business Cloud Accounting, Sage
+  Intacct, SYSPRO, NetSuite, Business Central and Blackbaud Financial Edge NXT.
+  Together they are the US and South Africa top five, with overlap, plus the
+  nonprofit ERP the user named. All are direct, so §256 is **amended**: Sage
+  Intacct and SYSPRO now come under Growth's `erp_integrations`, like the other
+  direct adapters. Merge.dev stays the route, on Scale, for every ERP without a
+  direct adapter. The enterprise ERPs remain open roadmap work.
+- **Sage needs two adapters.** Sage's v3.1 API does not serve South African
+  businesses (its Swagger lists CA/DE/ES/FR/UK/IE/US only). SA runs on
+  `accounting.sageone.co.za/api/2.0.0`, which uses an API key plus a Sage login,
+  not OAuth. So `sage_accounting` (v3.1, OAuth) and `sage_accounting_za`
+  (credentials) are separate adapters. Sage 200 Evolution and desktop Pastel
+  run on the customer's own machines and have no cloud API; they are not
+  covered.
+- **Sage Intacct uses the REST API, not the XML gateway.** REST has been GA
+  since 2025, and its client-credentials grant keeps setup to pasted
+  credentials. The XML gateway needs a paid sender ID that every customer
+  company has to authorise, and its error XML echoes the submitted fields.
+- **A bill is posted against the ERP's own vendor and account ids, never a
+  name or code text.** These are `InvoicePayload.vendor_erp_id` /
+  `gl_account_erp_id`, resolved from the vendor and chart syncs. A missing id is
+  refused before any HTTP call with a stable reason
+  (`erp_adapters/base.erp_refusal`), and the refusal is **non-retryable**:
+  `send_to_erp_internal` fails the invoice on the first attempt. An OAuth ERP
+  with no usable connection is final the same way. A provider outage during a
+  token refresh still retries.
+- **A coded line is never moved.** Only an uncoded line takes the header's
+  account. A line coded to an account with no ERP id is refused, because
+  posting it on the header's account books the expense somewhere the approver
+  never saw.
+- **The booked total must equal the approved amount.** ERPs that compute a
+  bill's total themselves (Business Central, Xero, Sage, QuickBooks, NetSuite)
+  can add tax on top of the approved figure from default tax codes. The adapter reads
+  the booked total back. On a mismatch it deletes the draft where the API
+  allows, and returns a non-retryable `posted_total_mismatch`. A missing total
+  is treated as unconfirmed, never as success.
+
+**Rejected.**
+- *Name lookup as a fallback:* it picks the wrong "Acme" the first time two
+  vendors share a name.
+- *Routing Intacct and SYSPRO through Merge.dev:* Merge's $65 per linked
+  account (§256) is more than the Growth price, and SYSPRO is the South African
+  market's own ERP.
+- *One Sage adapter with a region switch:* the two APIs differ in auth, paths,
+  resources and money format.
+
+## 270. One OAuth connect flow for every consent-based ERP (2026-10-08)
+
+**Context.** QuickBooks Online, Xero, Sage Business Cloud Accounting and
+Blackbaud SKY have no client-credentials grant. The customer's admin consents in
+the provider's own UI, and we then hold a refresh token that the provider
+rotates on every use.
+
+**Decision.**
+
+- **One flow, `services/erp_oauth`, plus `OAuthErpAdapter`.** Adapters declare
+  an `OAuthProviderSpec` and call `access_token()`. They never read, refresh or
+  store a token themselves.
+- **One redirect URI** (`/api/erp/oauth/callback`) for every provider app. The
+  tenant travels in an HMAC-signed, single-use, short-TTL `state` (Redis
+  GETDEL) that binds org, user and provider. The callback re-checks that the
+  user is still an active admin, and the redirect home carries only a provider
+  key or a stable error code.
+- **Each provider supplies its company id its own way:** a callback parameter
+  (QuickBooks `realmId`), a token-response field (Blackbaud `environment_id`),
+  or one API call (Xero `GET /connections` filtered by the consent's
+  `authEventId`; Sage `GET /businesses`). With several candidates it resolves
+  to none, and the connect is refused (`no_external_tenant`). We never pick
+  one of a customer's ledgers for them.
+- **The stored grant records its provider, org and a random `connection_id`.**
+  That metadata lives in `settings.erp.oauth`; the access and refresh tokens
+  are sealed in `provider_credentials` beside the block's other secrets (§266,
+  §272) and never reach an adapter's config. The refresher re-reads both and
+  refuses any config whose provider or connection id differs. So a crafted `/test-erp`
+  body cannot borrow another tenant's token, and an ERP-type switch cannot hand
+  one ERP's grant to another. The block survives an ERP switch: dropping it
+  would leave a live grant unrevoked at the provider, and Disconnect is what
+  revokes it.
+- **Refresh uses a Redis lock per (org, provider) plus a compare-and-swap
+  write, not an org row lock across the call.** A row lock would be held across
+  a 15-second provider call and stall every settings writer for the tenant. The
+  compare-and-swap — a short org row lock, the one every credential writer takes
+  first, around reading the sealed refresh token and writing the rotation
+  through `provider_credentials.update_secrets` — keeps a newer rotation that
+  landed while the lock expired. A rotation writes no audit row (the system
+  keeping a grant alive); consent and disconnect are audited first, and a row
+  that cannot be written means nothing is linked or cleared (§239's rule).
+- **Platform app or the tenant's own.** A tenant may save its own client id
+  and (sealed) secret (the setup page's "use your own app"); otherwise the platform's
+  `FEOH_ERP_*_CLIENT_ID/_SECRET` apply. Neither fails closed. The refresher
+  uses the same source as the consent.
+
+**Rejected.**
+- *Per-provider callback routes and token code:* three copies of the riskiest
+  code in the integration.
+- *Revoking the grant on an ERP-type switch:* a mis-click in the dropdown
+  would disconnect the customer's books.
+
+## 271. ERP secrets: the catalogue names them, the sealed store holds them, a destination change drops them (2026-10-09)
+
+**Context.** The ERP setup form is driven by a per-provider catalogue
+(`erp_adapters/catalog.py`, `GET /api/organization/erp/providers`), which adds
+secrets §266's store did not know: a Sage (ZA) password, SYSPRO operator and
+company passwords, a Blackbaud subscription key, and the OAuth tokens (§270).
+§266 also kept a stored secret across any configuration save, and let a
+connection test use the stored secrets only when the form equalled the saved
+configuration exactly.
+
+**Decision.**
+
+- **Every catalogue field marked `secret` is a §266 sealed secret.**
+  `provider_credentials.SECRET_FIELDS["erp"]` lists them, and
+  `tests/test_erp_catalog.py` fails when the catalogue names one it does not.
+  The OAuth tokens are *service-only* paths (`oauth.access_token`,
+  `oauth.refresh_token`, `SERVICE_SECRET_FIELDS`): sealed in the same row,
+  stripped from the JSONB, never merged into an adapter's config, refused by
+  `PUT /api/organization/credentials/erp`, and written only by
+  `services/erp_oauth` through the same `update_secrets` writer. A settings
+  read shows the OAuth metadata as `{"connected": bool}`, because its
+  `connection_id` is the capability the refresher checks.
+- **A save that points the block at a different destination drops the sealed
+  secrets.** The destination keys are the base URL, tenant, account, company
+  and environment (`catalog.DESTINATION_KEYS`; a test fails on a host-naming
+  field left out). Same ERP at a new destination: every secret but the inbound
+  webhook key, which is never sent anywhere. A different ERP, or the ERP
+  cleared: every secret. `PATCH /api/organization` removes them through
+  `update_secrets` in the same transaction, audited first as
+  `organization.credentials_updated` with `reason: erp_destination_changed`.
+  Without this, a stolen admin session could set SYSPRO's `base_url` to its own
+  host and receive the stored operator password on the next push. A block that
+  selected no ERP yet binds nothing, so secrets entered before the first
+  configuration save stay.
+- **A connection test uses the stored secrets while the form names the saved
+  ERP at the saved destination** (`catalog.same_connection`) — the same
+  condition under which a save keeps them. For `erp` this replaces §266's
+  exact-equality rule, which made a test fail whenever the form had an unsaved
+  non-destination change (a Xero bill status) or omitted the OAuth metadata it
+  never renders.
+- The OAuth tokens survive an ERP switch and a destination change: they are
+  bound to their provider and `connection_id`, go only to that provider's own
+  hosts, and are removed by Disconnect, which revokes them first.
+
+**Rejected.** *Keeping secrets across every save* (§266's rule for the other
+blocks): one ERP's `client_secret` would become another's app credentials, and
+the stored secret would follow any new host. *Binding each secret to a
+destination fingerprint inside the envelope*: the same protection with a second
+comparison to keep in step with the catalogue, instead of a drop the audit
+trail records.
+
+## 272. Per-field ERP encryption inside the JSONB was built, then dropped for §266's sealed store (2026-10-09)
+
+**Context.** The ERP-connections branch (§269–§271) and §266 were built at the
+same time. The branch encrypted each ERP secret and OAuth token in place inside
+`settings.erp` (`enc:v1:<key-id>:<b64>`, AES-256-GCM, field name as associated
+data) under a keyring from sops, `FEOH_CREDENTIAL_ENCRYPTION_KEYS`, with its own
+migration 0110, a re-encrypt script and boot guards. §266 landed first.
+
+**Decision.** That mechanism is gone; ERP secrets and tokens live in §266's
+store (§271). Three reasons:
+
+- **One store.** Two encryption schemes for the same kind of value would mean
+  two rotation procedures, two failure modes and two places a reader can get
+  wrong; payment and card secrets were already in §266's.
+- **KMS instead of a keyring.** §266's data keys are wrapped by the app KMS
+  key, so every unwrap is a CloudTrail event naming the org, and no long-lived
+  symmetric key has to be distributed to every host through sops. Its
+  encryption context binds the org as well as the block, which the per-field
+  scheme did not.
+- **One audited writer.** In the JSONB, every settings save rewrote the
+  ciphertexts; §266 has exactly one writer, audit-first, which the OAuth
+  callback, the refresher, disconnect and the destination-change drop all call.
+
+**Rejected.** *Keeping both, the keyring for ERP and KMS for the rest*: see
+"one store". *Shipping the branch's migration as 0111 after 0110*: it would
+have encrypted values §266's migration had already moved out of the JSONB.

@@ -29,6 +29,7 @@ from app.schemas.organization import (
 )
 from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.billing.plan_catalog import FEATURE_SCIM
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.data_residency import (
     DEFAULT_REGION,
@@ -37,12 +38,16 @@ from app.services.data_residency import (
     get_region_placement,
     resolve_region,
 )
+from app.services.erp_adapters import catalog as erp_catalog
 from app.services.org_settings_view import settings_for_response
 from app.services.provider_credentials import (
     CREDENTIAL_BLOCKS,
+    CREDENTIALS_UNAVAILABLE_DETAIL,
     config_for_connection_test,
+    credential_status,
     extract_secrets,
     strip_secrets,
+    update_secrets,
 )
 from app.services.sso import generate_scim_token
 from app.tenant import get_tenant, lock_organization, normalize_custom_domain
@@ -252,6 +257,24 @@ def _validate_settings_patch(incoming: dict) -> None:
             )
 
 
+def _refuse_credentials_in_patch(block: str, cfg: object) -> None:
+    """422 when a PATCH carries a non-blank secret of a credential block.
+
+    Names the paths, never the values. Secrets have one sanctioned writer,
+    `PUT /api/organization/credentials/{block}` (`services/provider_credentials`).
+    """
+    secrets_sent = sorted(extract_secrets(block, cfg))
+    if secrets_sent:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{block} credentials ({', '.join(secrets_sent)}) are managed by "
+                f"PUT /api/organization/credentials/{block}, which stores them "
+                "encrypted and audits every change."
+            ),
+        )
+
+
 def _changed_key_names(before: object, after: object) -> list[str]:
     """Top-level key names whose value differs between two settings blocks."""
     b = before if isinstance(before, dict) else {}
@@ -273,6 +296,7 @@ async def update_organization(
     if body.name is not None:
         org.name = body.name
     credential_changes: dict[str, list[str]] = {}
+    erp_secrets_to_drop: frozenset[str] = frozenset()
 
     if body.settings is not None:
         _validate_settings_patch(body.settings)
@@ -281,8 +305,33 @@ async def update_organization(
         # the `erp` key this PATCH carries is checked: re-saving the company
         # profile on a downgraded tenant whose stored ERP is live must still
         # work, and clearing the key or choosing `mock` is never refused.
+        # `settings.erp` is CONFIGURATION only: its secrets are sealed in
+        # `provider_credentials` (refused here like every credential block's,
+        # below), and the OAuth metadata block is never taken from a PATCH —
+        # `services/erp_oauth` is its only writer. Resolve the block to what
+        # will actually be stored BEFORE the plan gate, so the gate judges the
+        # real config; and work out which sealed secrets the save leaves
+        # pointing at a different ERP or destination (`catalog.secrets_to_drop`)
+        # — those are removed in the same transaction, below.
+        erp_before = (org.settings or {}).get("erp")
         if "erp" in body.settings:
+            incoming_erp = body.settings.get("erp")
+            if incoming_erp is not None and not isinstance(incoming_erp, dict):
+                raise HTTPException(status_code=422, detail="erp must be an object.")
+            # Refuse a secret before the merge, which would otherwise drop it
+            # silently and report the save as a success.
+            _refuse_credentials_in_patch("erp", incoming_erp)
+            if isinstance(incoming_erp, dict):
+                body.settings["erp"] = erp_catalog.merge_erp_update(erp_before, incoming_erp)
+            else:
+                # Clearing the ERP still keeps the OAuth block: only the OAuth
+                # disconnect removes it (it revokes at the provider first).
+                kept = {}
+                if isinstance(erp_before, dict) and erp_catalog.OAUTH_KEY in erp_before:
+                    kept[erp_catalog.OAUTH_KEY] = erp_before[erp_catalog.OAUTH_KEY]
+                body.settings["erp"] = kept or None
             await ensure_live_erp_entitled(db, org.id, body.settings.get("erp"))
+            erp_secrets_to_drop = erp_catalog.secrets_to_drop(erp_before, body.settings["erp"])
 
         # The chat webhook URL has one sanctioned writer — the audited
         # `PUT /api/organization/chat-notifications/webhook`. This generic merge
@@ -378,16 +427,7 @@ async def update_organization(
         for block in CREDENTIAL_BLOCKS:
             if block not in incoming_settings:
                 continue
-            secrets_sent = sorted(extract_secrets(block, incoming_settings[block]))
-            if secrets_sent:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"{block} credentials ({', '.join(secrets_sent)}) are managed by "
-                        f"PUT /api/organization/credentials/{block}, which stores them "
-                        "encrypted and audits every change."
-                    ),
-                )
+            _refuse_credentials_in_patch(block, incoming_settings[block])
             incoming_settings[block] = strip_secrets(block, incoming_settings[block])
             changed = _changed_key_names((org.settings or {}).get(block), incoming_settings[block])
             if changed:
@@ -439,6 +479,51 @@ async def update_organization(
                 status_code=503,
                 detail="The change could not be recorded in the audit trail, so it was not saved.",
             ) from None
+    # A save that points the ERP block at a different ERP or destination drops
+    # the sealed secrets that belonged to the old one, through the same audited
+    # writer the credentials endpoint uses: audit row first, sealed-store write
+    # second, both in this transaction. Only names actually stored are touched,
+    # so a save that drops nothing never opens the store.
+    if erp_secrets_to_drop:
+        stored_names = set((await credential_status(db, org.id))["erp"])
+        to_clear = sorted(stored_names & erp_secrets_to_drop)
+        if to_clear:
+
+            async def _audit_drop(changed: list[str]) -> None:
+                try:
+                    await record_auth_audit_or_raise(
+                        organization_id=org.id,
+                        actor_id=user.id,
+                        action="organization.credentials_updated",
+                        entity_type="organization",
+                        entity_id=org.id,
+                        details={
+                            "block": "erp",
+                            "changed": changed,
+                            "cleared": changed,
+                            "reason": "erp_destination_changed",
+                        },
+                    )
+                except Exception:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "The change could not be recorded in the audit trail, "
+                            "so it was not saved."
+                        ),
+                    ) from None
+
+            try:
+                await update_secrets(db, org.id, "erp", {}, to_clear, before_write=_audit_drop)
+            except CredentialCryptoError:
+                await db.rollback()
+                raise HTTPException(
+                    status_code=503,
+                    detail="The credential store is unavailable, so nothing was saved.",
+                ) from None
+            except HTTPException:
+                await db.rollback()
+                raise
     await db.commit()
     # Admin-only endpoint, so the response is the admin projection.
     return _org_response(org, is_admin=True)
@@ -814,6 +899,28 @@ async def update_custom_domains(
     return CustomDomainsConfig(custom_domains=normalized)
 
 
+@router.get("/erp/providers")
+async def list_erp_providers(
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+):
+    """The ERP setup form's catalogue (`erp_adapters/catalog`).
+
+    `available` is whether the adapter is registered in this build; the form
+    shows an unavailable entry as not yet selectable rather than letting a save
+    land on `UnknownErpAdapterError`.
+    """
+    from app.services.erp_adapters import list_available_adapters
+
+    registered = set(list_available_adapters())
+    return {
+        "providers": [
+            {**entry, "available": entry["key"] in registered}
+            for entry in erp_catalog.all_providers()
+        ],
+        "merge_dev_long_tail": erp_catalog.MERGE_DEV_LONG_TAIL,
+    }
+
+
 @router.post("/test-erp")
 async def test_erp_connection(
     request: dict | None = None,
@@ -826,20 +933,20 @@ async def test_erp_connection(
     A live adapter needs ``FEATURE_ERP_INTEGRATIONS`` (decisions §258) — a test
     reaches the real ERP with the tenant's credentials. ``mock`` stays open.
     """
-    # Stored secrets join the test only when the form's configuration is the
-    # saved one (`provider_credentials.config_for_connection_test`).
-    erp_config = await config_for_connection_test(
-        org, "erp", request if request and request.get("type") else None, db=db
-    )
+    # Stored secrets join the test only while the form names the saved ERP at
+    # the saved destination (`provider_credentials.config_for_connection_test`).
+    try:
+        erp_config = await config_for_connection_test(
+            org, "erp", request if request and request.get("type") else None, db=db
+        )
+    except CredentialCryptoError:
+        # The sealed credentials could not be opened (KMS unreachable, a bad
+        # envelope). Say so; name no value, and never test without them.
+        return {"success": False, "message": CREDENTIALS_UNAVAILABLE_DETAIL}
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configuration provided")
     await ensure_live_erp_entitled(db, org.id, erp_config)
 
-    # Import adapters to trigger registration
-    import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
-    import app.services.erp_adapters.merge_dev  # noqa: F401
-    import app.services.erp_adapters.mock_adapter  # noqa: F401
-    import app.services.erp_adapters.netsuite  # noqa: F401
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
 
     try:

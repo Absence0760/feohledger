@@ -69,7 +69,7 @@ pins a Free refusal and a paid pass per gate. Two pieces remain, tracked in
 to gate, and Merge-routed ERPs are not yet split out as Scale-only `erp_merge`
 (§256) — `erp_integrations` admits them on Growth today.
 
-## The direct ERP adapters post bills without the ERP's vendor and account ids
+## ~~The direct ERP adapters post bills without the ERP's vendor and account ids~~ — FIXED 2026-10-08
 
 **Found 2026-10-07** while scoping the QuickBooks Online adapter
 (`backend/docs/quickbooks-online-adapter.md`, Phase 0).
@@ -95,8 +95,10 @@ these adapters against a real NetSuite or Business Central.
 **Blast radius.** No customer is on either direct adapter yet. The first one
 would see every push fail (HTTP 400 → `invalid_request`), or, on Business
 Central, a bill attached to the wrong vendor when a vendor number happens to
-equal another vendor's name. Merge.dev is not affected; its adapter resolves
-the vendor itself.
+equal another vendor's name. ~~Merge.dev is not affected; its adapter resolves
+the vendor itself.~~ *Corrected 2026-10-08:* Merge.dev was affected too. It
+sent no vendor (`contact`) at all, and it sent the GL code where Merge expects
+its own account id.
 
 **Fix.** Add `vendor_erp_id` to `InvoicePayload` and `gl_account_erp_id` to it
 and `LineItemPayload`. Resolve both in `_build_payload` (vendor from
@@ -105,6 +107,26 @@ refuse a payload with no vendor reference (`vendor_not_linked`) instead of
 falling back to a name. Then send `entity: {id}` / `account: {id}` (NetSuite)
 and `vendorId` (Business Central), and teach fake-erp to reject the old shapes
 so the e2e suite proves it.
+
+**Resolution (2026-10-08, branch `feat/erp-connections`, decisions §269).**
+Done as described, plus three things the diagnosis missed:
+
+- `services/erp._resolve_erp_refs` fills both ids in two queries, whatever the
+  line count. The account comes from the invoice's own chart (shared ∪ its
+  entity's, the entity's row winning) through `gl_chart.resolve_erp_account_ids`.
+- Every direct adapter refuses before any HTTP call through
+  `erp_adapters/base.erp_refusal` (`vendor_not_linked` / `account_not_linked`).
+  The refusal is **non-retryable**: `send_to_erp_internal` fails the invoice on
+  the first attempt rather than re-sending the same refused bill three times.
+- **A line coded to an account with no ERP id is refused, never moved onto the
+  header's account.** Only an uncoded line takes the header's account. Several
+  adapters first got this wrong in the other direction, booking the expense
+  somewhere the approver never saw.
+- Merge.dev now sends `contact` and line `account` as Merge ids. NetSuite gained
+  a SuiteQL chart sync and Business Central an `accounts` sync, because nothing
+  stored either ERP's account ids before.
+- fake-erp now 400s an unknown vendor or account id, so the ERP e2e suite fails
+  if the ids stop reaching the wire.
 
 ## ~~The assistant's payment-forecast tool skips the forecast's role gate~~ — FIXED 2026-10-06
 

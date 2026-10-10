@@ -1,8 +1,43 @@
 # QuickBooks Online direct adapter — scope
 
-**Status: scoped, not started (2026-10-07).** Tracked in `docs/followups.md`
-(c). This is the plan; `erp-integration.md` stays the description of what is
-built until code lands.
+**Status (2026-10-08): Phases 1 and 2 built; Phases 3–5 open.** The OAuth
+connect flow (`services/erp_oauth.py`, `api/erp_oauth.py`) and the adapter
+(`erp_adapters/quickbooks_online.py`) are described as built in
+`erp-integration.md` § Connecting an OAuth ERP. Where the build departs from
+this plan:
+
+- Tokens are sealed under the app KMS key in the control-plane
+  `provider_credentials` row for the `erp` block (decisions §266, §271);
+  `settings.erp.oauth` keeps only the connection metadata.
+- There is no `erp_connections` realm index table. A company already connected
+  to another tenant is refused at connect time by a JSONB query; the Phase 3
+  webhook still needs the index.
+- Access tokens are not cached in Redis: each call reads the stored block (one
+  primary-key select). Refreshes are serialised by a Redis lock plus a
+  compare-and-swap write.
+- Routes are `GET /api/organization/erp/oauth/{provider}/authorize` (JSON
+  `authorize_url`) and one shared `GET /api/erp/oauth/callback`, so every
+  OAuth ERP registers one redirect URI.
+- Open question 1 is answered conservatively: `void_invoice` deletes only a
+  bill with no payment applied (`Balance == TotalAmt`).
+- Open question 2 is answered by the shared line rules: the lines come from
+  `erp_adapters/bill_lines.py` (erp-integration.md § Bill lines: one rule set,
+  two views), so each line posts its tax-inclusive gross on its own account and
+  no tax code is sent. Tax-exclusive lines are grossed up by their stated tax
+  (per line, or all of it on a single line); several tax-exclusive lines with
+  header-only tax are refused `tax_not_itemised`; lines that sum to neither are
+  refused `amount_mismatch`. A coded line whose account has no QuickBooks id is
+  refused `account_not_linked`, never posted on the header's account.
+- QuickBooks still computes `TotalAmt` itself, and a company's default tax code
+  can add tax on top of those lines. So after the create, a `TotalAmt` other
+  than `amount` deletes the bill just created and fails non-retryable
+  `posted_total_mismatch`; a create with no `TotalAmt` fails non-retryable
+  `posted_total_unconfirmed` (`erp_adapters/posted_total.py`). The idempotent
+  re-find applies the same check before reporting an earlier bill as posted.
+- The `x_refresh_token_expires_in` expiry is recorded and shown on `/status`,
+  but nothing yet notifies an admin 30 days before it.
+
+The rest of this file is the original plan.
 
 ## Why direct, not through Merge.dev
 
@@ -79,11 +114,15 @@ the adapter.
     lock). Two workers refreshing at once must not each persist a different
     token.
   - Cache access tokens (60 minutes) per realm in Redis.
-  - Add `refresh_token` and `access_token` to the `erp` block's secret-field
-    list in `services/provider_credentials.py`, so they are sealed under the
-    app KMS key in `provider_credentials` like every other ERP secret
-    (`docs/decisions.md` §266) and never read back. The only writers are the
-    callback and the refresher, both through that service.
+  - Sealed under the app KMS key in `provider_credentials`, beside the `erp`
+    block's other secrets, at the service-only paths `oauth.access_token` /
+    `oauth.refresh_token` (`provider_credentials.SERVICE_SECRET_FIELDS`;
+    `docs/decisions.md` §266, §271). Never read back: `settings.erp.oauth`
+    keeps only the connection metadata and reads as `{"connected": bool}`
+    (`erp_adapters/catalog.public_erp_config`), a settings save never takes it
+    from the request, and `PUT /api/organization/credentials/erp` refuses the
+    token paths. The only writers are the callback, the refresher and
+    disconnect, all through `provider_credentials.update_secrets`.
 - **Expiry visibility.** Record `x_refresh_token_expires_in`. Show
   "reconnect required" on the org ERP card and send an admin notification
   30 days before expiry. A dead token must surface as a notification, never
@@ -118,7 +157,10 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
   pre-check with `query: select * from Bill where DocNumber = '…'` filtered to
   the vendor, and accept a hit only if its `PrivateNote` carries the
   correlation id. Every bill is written with
-  `PrivateNote: "FeohLedger <correlation_id>"`.
+  `PrivateNote: "FeohLedger <correlation_id>"`. A replay can name a bill an
+  earlier `posted_total_mismatch` deleted, so the created bill is read back;
+  Fault 610 / `status: Deleted` moves to the next `requestid`
+  (`<correlation_id>#r2`, …) — `erp-integration.md` § Connecting an OAuth ERP.
 - `VendorRef` ← `vendor_erp_id` (Phase 0). Lines are
   `AccountBasedExpenseLineDetail` with `AccountRef` ←
   `gl_account_erp_id`. Money goes through `dumps_exact_json` and never
@@ -127,7 +169,9 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
   from the lines, and our invariant is that the header `amount` is never
   recomputed from lines. If the lines (plus tax, as posted) don't sum to
   `amount`, refuse with `amount_mismatch` rather than post a different total
-  into the customer's books.
+  into the customer's books. (Built: the shared `bill_lines` helper, plus a
+  check of the `TotalAmt` QuickBooks reports back — see the status notes at
+  the top.)
 - **`DocNumber`: 21 characters** is the limit integrators report; verify it
   against Intuit's entity reference. Refuse when it is exceeded
   (`doc_number_too_long`), and never truncate. QuickBooks' own duplicate

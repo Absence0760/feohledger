@@ -11,10 +11,15 @@ import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
 	createApprovedInvoice,
 	deleteInvoice,
+	erpFailureFromAudit,
 	erpReferenceFromAudit,
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
 	setErpSettings,
+	syncAndListGlAccounts,
+	syncErpGlAccounts,
+	syncErpPurchaseOrders,
+	syncErpVendors,
 	testErpConnection
 } from './helpers';
 
@@ -34,9 +39,18 @@ import {
  *
  * Coverage:
  *   1. test_connection — token exchange + GET companies(fake-co)/vendors.
- *   2. Full send — an approved invoice posts as a purchaseInvoice through the
- *      async ERP dispatch (create 201 → Microsoft.NAV.post finalize) and
- *      lands `done` with a BC-shaped document id (d365-inv-N).
+ *   2. Chart sync — `accounts` paged by `Prefer: odata.maxpagesize`; the
+ *      three Posting accounts land on the chart (the heading and the blocked
+ *      account are skipped).
+ *   3. PO sync — `purchaseOrders?$expand=purchaseOrderLines`; a blank
+ *      `currencyCode` (local currency) stays null, a stated one is kept.
+ *   4. Full send — after the vendor and chart syncs store the BC ids, an
+ *      approved invoice posts as a purchaseInvoice through the async ERP
+ *      dispatch (create 201 → Microsoft.NAV.post finalize) and lands `done`
+ *      with a BC-shaped document id (d365-inv-N). The fake 400s a
+ *      `vendorId` naming no vendor and a line whose `accountId` is not a
+ *      posting account, as BC does, so `done` proves the adapter posted by
+ *      the synced ids rather than the name or the account No.
  */
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
@@ -88,10 +102,46 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 		expect(result.message).toContain('dynamics_365_bc');
 	});
 
+	test('chart sync imports the posting accounts', async ({ page }) => {
+		const accounts = await syncAndListGlAccounts(page);
+		for (const [code, name] of [
+			['6100', 'Fake BC Office Supplies'],
+			['6200', 'Fake BC Software'],
+			['6300', 'Fake BC Consulting']
+		]) {
+			const match = accounts.find((a) => a.code === code);
+			expect(match, `GL account ${code} synced`).toBeTruthy();
+			expect(match!.name).toBe(name);
+		}
+	});
+
+	test('PO sync imports purchase orders, leaving a local-currency total unlabelled', async ({
+		page
+	}) => {
+		const { adapter, pos } = await syncErpPurchaseOrders(page);
+		expect(adapter).toBe('dynamics_365_bc');
+		const local = pos.find((p) => p.po_number === 'PO-FAKE-BC-401');
+		const euro = pos.find((p) => p.po_number === 'PO-FAKE-BC-402');
+		expect(local, 'PO-FAKE-BC-401 synced').toBeTruthy();
+		expect(euro, 'PO-FAKE-BC-402 synced').toBeTruthy();
+		expect(Number(local!.total)).toBeCloseTo(1500.25, 2);
+		expect(local!.currency).toBeNull();
+		expect(Number(euro!.total)).toBeCloseTo(820, 2);
+		expect(euro!.currency).toBe('EUR');
+		expect(euro!.status).toBe('open');
+	});
+
 	test('full send: approved invoice posts as a purchaseInvoice and completes', async ({
 		page
 	}) => {
-		const inv = await createApprovedInvoice(page, { prefix: 'E2E-D365', amount: '3120.40' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365',
+			amount: '3120.40',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);
 			expect(terminal).toBe('done');
@@ -101,6 +151,31 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 			// the post, not the mock.
 			const erpRef = await erpReferenceFromAudit(page, inv.id);
 			expect(erpRef).toMatch(/^d365-inv-\d+$/);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a VAT company that would book more than was approved is refused, not posted', async ({
+		page
+	}) => {
+		// fake-erp's `fake-vat-co` adds 20% VAT on top of the lines, as a real
+		// BC VAT company does: 1,200 approved would become a 1,440 bill. The
+		// adapter reads the draft's total, deletes the draft and refuses.
+		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-co' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365-VAT',
+			amount: '1200.00',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Business Central post refused: posted_total_mismatch'
+			);
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}

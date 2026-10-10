@@ -11,6 +11,7 @@ DB-level round trip through the mock adapter; this file is adapter-only.
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import the adapter modules so their @register_adapter decorators
@@ -28,7 +29,8 @@ def _run(coro):
 def _make_mock_response(status_code: int, json_body: dict | None = None) -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
-    resp.content = b"{}" if json_body is not None else b""
+    # Real bytes: the BC / NetSuite syncs parse `content` with `loads_exact_json`.
+    resp.content = json.dumps(json_body).encode() if json_body is not None else b""
     resp.json = MagicMock(return_value=json_body or {})
     resp.headers = {"content-type": "application/json"}
     resp.raise_for_status = MagicMock()  # no-op by default; D365's _get_token calls it
@@ -226,58 +228,88 @@ def _netsuite_config() -> dict:
     }
 
 
-def test_netsuite_list_vendors_maps_response_into_vendor_payloads():
+def test_netsuite_list_vendors_maps_suiteql_rows_into_vendor_payloads():
+    """Vendors come from one SuiteQL query: the REST `/vendor` collection holds
+    only ids and links, so it could never have supplied a name. The id is what
+    a bill's `entity` is posted against; inactive vendors are skipped."""
     from app.services.erp_adapters.netsuite import NetSuiteAdapter
 
     adapter = NetSuiteAdapter(_netsuite_config())
     body = {
         "items": [
-            {"id": "25", "entityId": "Fake ERP Vendor A", "email": "a@vendor.test"},
-            {"id": "26", "entityId": "Fake ERP Vendor B"},
+            {
+                "id": "25",
+                "entityid": "ACME-01",
+                "companyname": "Acme Supplies Ltd",
+                "email": "a@vendor.test",
+                "phone": "555-0100",
+                "terms": "Net 30",
+                "isinactive": "F",
+            },
+            # An individual vendor: no company name, so the entity id names it.
+            {"id": "26", "entityid": "Jane Contractor", "companyname": None, "isinactive": "F"},
+            {"id": "27", "entityid": "Old Co", "companyname": "Old Co", "isinactive": "T"},
+            {"id": None, "entityid": "No id"},
         ],
         "hasMore": False,
     }
 
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        client.post = AsyncMock(return_value=_make_mock_response(200, body))
         vendors = _run(adapter.list_vendors())
 
-    assert [v.erp_vendor_id for v in vendors] == ["25", "26"]
-    assert vendors[0].name == "Fake ERP Vendor A"
+    assert [(v.erp_vendor_id, v.name, v.code) for v in vendors] == [
+        ("25", "Acme Supplies Ltd", "ACME-01"),
+        ("26", "Jane Contractor", "Jane Contractor"),
+    ]
     assert vendors[0].email == "a@vendor.test"
-    assert vendors[1].email is None
+    assert vendors[0].phone == "555-0100"
+    assert vendors[0].payment_terms == "Net 30"
+    assert vendors[1].email is None and vendors[1].payment_terms is None
+
+    url = client.post.await_args.args[0]
+    assert url.startswith(
+        "https://1234567.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit=100"
+    )
+    headers = client.post.await_args.kwargs["headers"]
+    assert headers["Prefer"] == "transient"
+    assert headers["Authorization"].startswith("OAuth ")
+    query = json.loads(client.post.await_args.kwargs["content"])["q"]
+    assert "FROM vendor" in query and "ORDER BY id" in query
 
 
-def test_netsuite_list_vendors_follows_has_more_pagination():
+def test_netsuite_list_vendors_follows_has_more_and_caps_at_1000_rows():
     from app.services.erp_adapters.netsuite import NetSuiteAdapter
 
     adapter = NetSuiteAdapter(_netsuite_config())
-    page1 = {"items": [{"id": "1", "entityId": "V1"}], "hasMore": True}
-    page2 = {"items": [{"id": "2", "entityId": "V2"}], "hasMore": False}
+
+    def page(n: int) -> MagicMock:
+        rows = [{"id": f"{n}-{i}", "entityid": f"V{n}-{i}"} for i in range(100)]
+        return _make_mock_response(200, {"items": rows, "hasMore": True})
 
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
-        client.get = AsyncMock(
-            side_effect=[_make_mock_response(200, page1), _make_mock_response(200, page2)]
-        )
+        client.post = AsyncMock(side_effect=[page(n) for n in range(12)])
         vendors = _run(adapter.list_vendors())
 
-    assert [v.erp_vendor_id for v in vendors] == ["1", "2"]
-    # Second page requested a later offset.
-    second_url = client.get.await_args_list[1].args[0]
-    assert "offset=100" in second_url
+    assert len(vendors) == 1000
+    assert client.post.await_count == 10
+    urls = [c.args[0] for c in client.post.await_args_list]
+    assert "offset=0" in urls[0] and "offset=100" in urls[1] and "offset=900" in urls[9]
 
 
-def test_netsuite_list_vendors_returns_empty_on_http_error():
+def test_netsuite_list_vendors_returns_what_it_read_on_http_error():
     from app.services.erp_adapters.netsuite import NetSuiteAdapter
 
     adapter = NetSuiteAdapter(_netsuite_config())
+    first = _make_mock_response(200, {"items": [{"id": "1", "entityid": "V1"}], "hasMore": True})
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_make_mock_response(401, {"detail": "no"}))
-        vendors = _run(adapter.list_vendors())
-    assert vendors == []
+        client.post = AsyncMock(return_value=_make_mock_response(401, {"detail": "no"}))
+        assert _run(adapter.list_vendors()) == []
+        client.post = AsyncMock(side_effect=[first, _make_mock_response(500, {})])
+        assert [v.erp_vendor_id for v in _run(adapter.list_vendors())] == ["1"]
 
 
 def test_netsuite_list_vendors_returns_empty_on_network_error():
@@ -288,7 +320,7 @@ def test_netsuite_list_vendors_returns_empty_on_network_error():
     adapter = NetSuiteAdapter(_netsuite_config())
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
-        client.get = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
+        client.post = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
         vendors = _run(adapter.list_vendors())
     assert vendors == []
 

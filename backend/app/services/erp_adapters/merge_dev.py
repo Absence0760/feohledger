@@ -7,6 +7,8 @@ import httpx
 
 from app.config import settings
 from app.services.erp_adapters.base import (
+    ACCOUNT_NOT_LINKED,
+    VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
     ErpPostResult,
@@ -16,6 +18,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_failure_message,
+    erp_refusal,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
@@ -122,9 +125,19 @@ class MergeDevAdapter(ErpAdapter):
         return headers
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
+        # Merge's Invoice references its vendor (`contact`) and each line's
+        # `account` by MERGE object id — the ids our vendor and chart syncs
+        # store. Without them the underlying ERP gets a bill with no vendor,
+        # or a GL code where an id belongs. Refuse before any HTTP call, as
+        # the direct adapters do; never fall back to the name or the code.
+        if not payload.vendor_erp_id:
+            return erp_refusal("Merge.dev", VENDOR_NOT_LINKED)
+        if any(li.gl_account and not li.gl_account_erp_id for li in payload.line_items):
+            return erp_refusal("Merge.dev", ACCOUNT_NOT_LINKED)
         body = {
             "model": {
                 "type": "ACCOUNTS_PAYABLE",
+                "contact": payload.vendor_erp_id,
                 "number": payload.invoice_number,
                 "issue_date": payload.invoice_date.isoformat() if payload.invoice_date else None,
                 "due_date": payload.due_date.isoformat() if payload.due_date else None,
@@ -146,7 +159,9 @@ class MergeDevAdapter(ErpAdapter):
                         "quantity": li.quantity if li.quantity else None,
                         "unit_price": li.unit_price if li.unit_price else None,
                         "total_line_amount": li.total if li.total else None,
-                        "account": li.gl_account,
+                        # An uncoded line posts no account (Merge allows it);
+                        # a coded one was refused above unless it has an id.
+                        "account": li.gl_account_erp_id,
                     }
                     for li in payload.line_items
                 ],

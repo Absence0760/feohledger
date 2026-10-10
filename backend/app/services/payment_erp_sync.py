@@ -194,21 +194,16 @@ async def _sync_payments(run_id: uuid.UUID, org_id: uuid.UUID) -> PaymentSyncRes
                 org_id,
             )
 
-        # Import adapters so the @register_adapter decorators populate the
-        # registry before any leg resolves one. Deliberately NOT resolving the
-        # adapter here as a pre-flight: an unsupported `settings.erp` type has
-        # to fail the LEG, so it travels the same path every other leg failure
-        # does and opens the de-duped `erp_reconciliation` exception this
-        # module exists to guarantee (see the header docstring). Aborting the
-        # whole run here instead would strand every payment at
-        # `payment_scheduled` with no exception row and no notification — and
-        # on the primary dispatch path the returned count is discarded by
-        # the fire-and-forget dispatch task, so it would be invisible, which is exactly the
-        # failure mode this module was rewritten to remove.
-        import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
-        import app.services.erp_adapters.merge_dev  # noqa: F401
-        import app.services.erp_adapters.mock_adapter  # noqa: F401
-        import app.services.erp_adapters.netsuite  # noqa: F401
+        # Deliberately NOT resolving the ERP adapter here as a pre-flight: an
+        # unsupported `settings.erp` type has to fail the LEG, so it travels the
+        # same path every other leg failure does and opens the de-duped
+        # `erp_reconciliation` exception this module exists to guarantee (see
+        # the header docstring). Aborting the whole run here instead would
+        # strand every payment at `payment_scheduled` with no exception row and
+        # no notification — and on the primary dispatch path the returned count
+        # is discarded by the fire-and-forget dispatch task, so it would be
+        # invisible, which is exactly the failure mode this module was
+        # rewritten to remove.
 
         # Open tenant DB
         tenant_url = _make_tenant_url(org.db_name)

@@ -48,14 +48,22 @@ CREDENTIAL_BLOCKS: tuple[str, ...] = ("erp", "payments", "cards")
 # own (an OAuth client id, a NetSuite consumer key / token id, an account id)
 # stay configuration so the settings page can still show them.
 SECRET_FIELDS: dict[str, frozenset[str]] = {
+    # Every field the ERP catalogue marks `secret` (`erp_adapters/catalog`)
+    # plus the inbound-webhook HMAC key; `tests/test_erp_catalog.py` fails when
+    # a catalogue secret is missing here.
     "erp": frozenset(
         {
-            "api_key",  # Merge.dev API key
+            "api_key",  # Merge.dev API key; Sage Accounting (ZA) API key
             "account_token",  # Merge.dev linked-account token
-            "client_secret",  # Business Central OAuth client secret
+            "client_secret",  # Business Central / Intacct / a bring-your-own OAuth app
             "consumer_secret",  # NetSuite TBA
             "token_secret",  # NetSuite TBA
+            "password",  # Sage Accounting (ZA) login
+            "subscription_key",  # Blackbaud SKY API subscription key
+            "operator_password",  # SYSPRO operator
+            "company_password",  # SYSPRO company
             "webhook_signing_secret",  # inbound ERP webhook HMAC key
+            "webhook_secret",  # its older spelling
         }
     ),
     "payments": frozenset(
@@ -74,12 +82,32 @@ SECRET_FIELDS: dict[str, frozenset[str]] = {
     ),
 }
 
+# Per block: secrets only a SERVICE flow writes — never the PUT endpoint, never
+# a PATCH. Sealed in the same row as the block's other secrets, but not merged
+# back into the adapter config by :func:`resolve_block`: the ERP OAuth tokens
+# are read by `services/erp_oauth` alone (an adapter asks it for an access
+# token), and written by its consent callback, its refresher and its
+# disconnect. Each path is ``<sub-block>.<key>``; a copy of one left in the
+# JSONB sub-block is stripped like any other secret.
+SERVICE_SECRET_FIELDS: dict[str, frozenset[str]] = {
+    "erp": frozenset({"oauth.access_token", "oauth.refresh_token"}),
+}
+
 # Blocks with a list of per-provider sub-configs, keyed by the entry's
 # `provider`, whose entries carry the same secret fields as the block.
 _PROVIDER_LISTS: dict[str, str] = {"payments": "providers"}
 
 _PROVIDER_NAME = re.compile(r"^[a-z0-9_]{1,50}$")
 _MAX_SECRET_LENGTH = 8192
+
+
+#: The client-facing sentence when a block's sealed credentials cannot be
+#: opened (`credential_crypto.CredentialCryptoError`: KMS unreachable, a bad
+#: envelope). Names no value; shared by every route that reaches a provider.
+CREDENTIALS_UNAVAILABLE_DETAIL = (
+    "The saved provider credentials could not be opened on this server (the credential "
+    "store is unavailable). Nothing was sent; try again shortly, or ask the operator."
+)
 
 
 class CredentialPathError(ValueError):
@@ -101,12 +129,18 @@ def _has_value(value: object) -> bool:
 # ── pure shape helpers ───────────────────────────────────────────────────────
 
 
-def validate_path(block: str, path: str) -> None:
-    """Raise :class:`CredentialPathError` unless ``path`` is a secret slot."""
+def validate_path(block: str, path: str, *, service: bool = False) -> None:
+    """Raise :class:`CredentialPathError` unless ``path`` is a secret slot.
+
+    ``service`` admits :data:`SERVICE_SECRET_FIELDS` too. The endpoint never
+    passes it, so a token path is refused there like any unknown path.
+    """
     fields = SECRET_FIELDS.get(block)
     if fields is None:
         raise CredentialPathError(f"{block} has no stored credentials.")
     if path in fields:
+        return
+    if service and path in SERVICE_SECRET_FIELDS.get(block, frozenset()):
         return
     list_key = _PROVIDER_LISTS.get(block)
     parts = path.split(".")
@@ -149,6 +183,10 @@ def strip_secrets(block: str, cfg: object) -> object:
         return cfg
     fields = SECRET_FIELDS[block]
     out = {k: v for k, v in cfg.items() if k not in fields}
+    for path in SERVICE_SECRET_FIELDS.get(block, frozenset()):
+        sub, key = path.split(".", 1)
+        if isinstance(out.get(sub), Mapping) and key in out[sub]:
+            out[sub] = {k: v for k, v in out[sub].items() if k != key}
     list_key = _PROVIDER_LISTS.get(block)
     if list_key and isinstance(out.get(list_key), list):
         out[list_key] = [
@@ -292,15 +330,29 @@ async def config_for_connection_test(
     No request body → the saved block, resolved. A request body (the form,
     possibly unsaved) → its configuration plus only the secrets it carries
     itself; the STORED secrets fill in only when the request's configuration
-    is the saved configuration. Otherwise a test would be a way to send a
-    sealed credential to a base URL the admin has typed but not saved — reading
-    it back by proxy, unaudited.
+    is the saved configuration (for `erp`: the same ERP at the same
+    destination, the catalogue's rule). Otherwise a test would be a way to send
+    a sealed credential to a base URL the admin has typed but not saved —
+    reading it back by proxy, unaudited.
     """
     if not request_cfg:
         return await provider_config(org, block, db=db)
     own = extract_secrets(block, request_cfg)
     public = strip_secrets(block, request_cfg)
-    if _comparable(block, request_cfg) == _comparable(block, (org.settings or {}).get(block)):
+    saved = (org.settings or {}).get(block)
+    if block == "erp":
+        # The ERP form sends only what it renders: complete it from the saved
+        # block exactly as a save would (OAuth metadata, unrendered keys), and
+        # let the stored secrets join while it names the same ERP at the same
+        # destination — the one condition under which a save keeps them
+        # (`erp_adapters/catalog.same_connection`).
+        from app.services.erp_adapters import catalog as erp_catalog
+
+        public = erp_catalog.merge_erp_update(saved, public)
+        same = erp_catalog.same_connection(saved, public)
+    else:
+        same = _comparable(block, request_cfg) == _comparable(block, saved)
+    if same:
         stored = await load_secrets(org.id, block, db=db)
         return inject_secrets(block, public, {**stored, **own})
     return inject_secrets(block, public, own)
@@ -333,7 +385,10 @@ async def credential_status(db: AsyncSession, org_id: uuid.UUID) -> dict[str, li
     status: dict[str, list[str]] = {block: [] for block in CREDENTIAL_BLOCKS}
     for row in rows:
         if row.block in status:
-            status[row.block] = sorted(row.secret_fields or [])
+            # Service-only paths (the ERP OAuth tokens) are no admin's to set or
+            # clear; the OAuth status route reports the connection instead.
+            hidden = SERVICE_SECRET_FIELDS.get(row.block, frozenset())
+            status[row.block] = sorted(p for p in (row.secret_fields or []) if p not in hidden)
     return status
 
 
@@ -383,14 +438,23 @@ async def update_secrets(
     """Apply a validated write and return the changed path NAMES.
 
     The caller has validated (:func:`validate_update`) and taken the org row
-    lock; it commits. ``before_write`` receives the changed names once they are
-    known and the new value is sealed, and before anything is persisted — the
-    endpoint writes its audit row there, so a change with no record is
+    lock; it commits. Every caller takes that lock first, so one holding it may
+    read the current values (:func:`load_secrets`) and decide on them — the ERP
+    token refresher's compare-and-swap does. The callers: the audited endpoint,
+    `PATCH /api/organization` dropping an ERP's secrets when the save points
+    them at a new destination, and `services/erp_oauth` (consent, refresh,
+    disconnect) — the only writer of :data:`SERVICE_SECRET_FIELDS`.
+
+    ``before_write`` receives the changed names once they are known and the new
+    value is sealed, and before anything is persisted — every person-driven
+    caller writes its audit row there, so a change with no record is
     impossible (it raises to abort), and a seal failure leaves no record of a
     change that never happened. It is not called when nothing would change. A
     block left with no secrets loses its row, so "is anything stored" is "is
     there a row".
     """
+    for path in [*to_set, *to_clear]:
+        validate_path(block, path, service=True)
     row = await _row(db, org_id, block, for_update=True)
     current = await _open_row(row) if row is not None else {}
     merged = dict(current)

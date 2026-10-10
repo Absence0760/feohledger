@@ -1010,4 +1010,15 @@ Per-tenant theming so resellers, banks, and ERP partners can offer the platform 
 
 Still open from this work, tracked in [followups.md](followups.md): the person who records a receipt can still approve the invoice it supports, and mobile has no receipt entry.
 
+### 2a. Direct ERP connections for the US and South Africa
+**Status:** Done (2026-10-08). Decisions §269–§272. See [erp-integration.md](../backend/docs/erp-integration.md).
+
+- [x] Bills post by the ERP's own vendor and account ids (`InvoicePayload.vendor_erp_id` / `gl_account_erp_id`). An unlinked vendor or account, including a coded line whose account has no id, is refused before any call and fails the push at once (no retry)
+- [x] OAuth authorization-code connect flow shared by every consent-based ERP (`services/erp_oauth`, `/api/organization/erp/oauth/*`): signed single-use state, rotating refresh tokens under a Redis lock with a compare-and-swap write, and a connection id binding the stored grant to its org and provider. Supports the platform app or the tenant's own
+- [x] New direct adapters: QuickBooks Online, Xero, Sage Business Cloud Accounting (v3.1), Sage Business Cloud Accounting South Africa (v2.0.0), Sage Intacct (REST), SYSPRO 8 (e.net REST), Blackbaud Financial Edge NXT (SKY API), each with fake-erp routes. Lines must sum to the approved amount, and the ERPs that compute a bill's total themselves (QuickBooks, Xero, both Sage APIs, Business Central, NetSuite) have it read back and refused on a mismatch
+- [x] Business Central and NetSuite completed: chart, vendor and PO syncs, and void of a draft / pending bill
+- [x] Setup panel: an ERP dropdown grouped by US / South Africa, fields rendered from the backend catalogue, a "Connect to X" button for OAuth ERPs, and write-only secrets: sealed in `provider_credentials` like every provider credential (never read back; dropped, audited, when a save points the ERP at a new destination or a different ERP)
+
+Still open, tracked in [followups.md](followups.md): sandbox verification per ERP, registering the platform OAuth apps, QuickBooks webhooks and BillPayment write-back, the receipt pull, and the enterprise ERPs.
+
 ---

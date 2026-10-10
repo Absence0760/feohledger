@@ -337,16 +337,21 @@ export const SETUP_GUIDES: Guide[] = [
 						type: 'steps',
 						items: [
 							'Open [[page:/organization]] and choose {ui:org.section.erp} in the section list.',
-							'Pick your {ui:org.erp.system}, for example Microsoft Dynamics 365 Business Central, Oracle NetSuite or SAP S/4HANA.',
-							'Choose the {ui:org.erp.method}. {ui:org.erp.methodMergeDev} works with every listed ERP. {ui:org.erp.methodDirect} is available for Business Central and NetSuite.',
-							'Enter the credentials your ERP or Merge.dev account gives you.',
-							'Click {ui:org.erp.save}, then {ui:org.common.testConnection} to check that the details work.'
+							'Pick your {ui:org.erp.system}. The list leads with the ERPs most used in the United States and South Africa, such as QuickBooks Online, Xero, Sage, Oracle NetSuite and Business Central. For any other ERP, choose {ui:org.erp.provider.mergeDev} and then pick it from the second list. That route needs the Scale plan.',
+							'Fill in the fields the form shows for that ERP. The form links to the ERP’s own setup guide for where to find each value.',
+							'Click {ui:org.erp.save}, then {ui:org.common.testConnection} to check that the details work.',
+							'For QuickBooks Online, Xero, Sage Business Cloud Accounting and Blackbaud Financial Edge NXT there is no password to type: click the connect button, which saves your choice, then approve access in the ERP. You come back to this section, which then shows the connection. If the connection later expires, the same button offers to reconnect.'
 						]
 					},
 					{
 						type: 'note',
 						tone: 'tip',
-						text: 'Ask whoever administers your ERP for the credentials. They are stored with your organization’s settings and are never shown to other roles.'
+						text: 'Those four connect through FeohLedger’s own app by default. If your administrator registered your organization’s own app with the ERP instead, open {ui:org.erp.oauth.byoSummary}, enter its client ID and secret, and register the {ui:org.erp.oauth.redirectUri} shown there in that app. The section opens by itself when this server has no app of its own for that ERP.'
+					},
+					{
+						type: 'note',
+						tone: 'tip',
+						text: 'Ask whoever administers your ERP for the credentials. Once saved, a secret is stored encrypted and never shown again, to anyone. Its field says {ui:org.secret.configured} Leave it blank to keep it, or tick {ui:org.secret.clear} to clear it when you next save. Pointing the ERP somewhere else (a new address, account, tenant, company or environment), or choosing a different ERP, removes the stored secrets, so type them again.'
 					}
 				]
 			},

@@ -301,3 +301,15 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 - `EntitySwitcher.svelte` — multi-entity (subsidiary) selector; hidden for
   single-entity tenants.
 
+### `organization/`
+
+- `ErpConnectionPanel.svelte` — the Organization → ERP panel, rendered entirely from the backend ERP
+  catalogue (`GET /api/organization/erp/providers`). Props: `stored` (`settings.erp` as
+  `GET /api/organization` serves it — configuration only), `readOnly`, `userLoaded`, `entitled` (the
+  `erp_integrations` plan feature) and `onsaved(org)`. Each secret is a `ui/SecretField`; which ones are
+  stored comes from `GET /api/organization/credentials` (names only), and a save PATCHes the
+  configuration then PUTs only typed or removed secrets to `/api/organization/credentials/erp`.
+  Renders the admin-only hint / `PlanUpgradeNotice` itself; one always-mounted `role="status"` region
+  (`erp-status`) carries test, validation and OAuth results. Pure helpers (grouping, the configuration
+  and secret payloads, destination changes, OAuth return params) live in
+  `#lib/types/erpConnection.ts` with a vitest.

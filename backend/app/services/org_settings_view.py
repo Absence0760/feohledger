@@ -36,6 +36,10 @@ page uses "leave blank to keep" for them, so nothing needs them back. Every
 secret-named key in those blocks is still stripped here for every role, admin
 included, as a second line: a value that reached the JSONB by some other route
 (a hand edit, a pre-0110 backup restored) must not reappear on this response.
+`settings.erp.oauth` — the OAuth consent metadata `services/erp_oauth` keeps
+beside its sealed tokens — reads as `{"connected": bool}` for the same reason:
+its `connection_id` is the capability the token refresher checks
+(`erp_adapters/catalog.public_erp_config`).
 
 Admins otherwise still get the settings verbatim. `extraction.api_key` is the
 remaining credential an admin reads back; it is tracked separately.
@@ -45,6 +49,7 @@ Pure: no DB, no request, no I/O.
 
 from __future__ import annotations
 
+from app.services.erp_adapters.catalog import public_erp_config
 from app.services.provider_credentials import strip_all_blocks
 
 # Top-level settings blocks a NON-ADMIN may read.
@@ -112,6 +117,13 @@ def _without_always_redacted(settings: dict) -> dict:
     return out
 
 
+def _with_public_erp(settings: dict) -> dict:
+    """``settings`` with its ``erp`` block's OAuth metadata hidden (a new dict)."""
+    if isinstance(settings.get("erp"), dict):
+        return {**settings, "erp": public_erp_config(settings["erp"])}
+    return settings
+
+
 def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """Return the settings a caller of this role may see.
 
@@ -121,7 +133,7 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """
     raw = settings or {}
     if is_admin:
-        return _without_always_redacted(strip_all_blocks(raw))
+        return _without_always_redacted(_with_public_erp(strip_all_blocks(raw)))
 
     projected: dict = {}
     for block, allowed_keys in NON_ADMIN_SETTINGS.items():
@@ -138,4 +150,4 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
         subset = {k: v for k, v in value.items() if k in allowed_keys}
         if subset:
             projected[block] = subset
-    return _without_always_redacted(strip_all_blocks(projected))
+    return _without_always_redacted(_with_public_erp(strip_all_blocks(projected)))

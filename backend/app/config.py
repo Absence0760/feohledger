@@ -272,6 +272,62 @@ class Settings(BaseSettings):
     # Dynamics 365 BC OAuth2 token URL. Empty = the real
     # login.microsoftonline.com URL built from the config's tenant_id.
     erp_d365_token_url: str = ""
+    # Sage Intacct REST base URL. Empty = the real https://api.intacct.com/ia/api/v1
+    # (token exchange at <base>/oauth2/token).
+    erp_intacct_api_base: str = ""
+    # SYSPRO e.net REST base URL. Empty = the admin-supplied config base_url,
+    # https-only and behind the SSRF guard (SYSPRO is customer-hosted).
+    erp_syspro_api_base: str = ""
+    # Xero + Sage Business Cloud Accounting (OAuth 2.0 authorization-code
+    # adapters, `erp_adapters/xero.py` / `sage_accounting.py`). The API bases
+    # follow the overrides above: empty = the live provider API; set = used
+    # verbatim (fake-erp in local dev). The client id/secret pairs are the
+    # PLATFORM app registered once with each provider and serving every
+    # tenant; empty = the provider is unavailable and fails closed (no
+    # fallback). A tenant may bring its own app instead: `settings.erp.client_id`
+    # plus a `client_secret` sealed in `provider_credentials` (see
+    # `erp_adapters/oauth_base.py`).
+    erp_xero_api_base: str = ""
+    erp_xero_client_id: str = ""
+    erp_xero_client_secret: str = ""
+    erp_sage_accounting_api_base: str = ""
+    erp_sage_accounting_client_id: str = ""
+    erp_sage_accounting_client_secret: str = ""
+    # Sage Business Cloud Accounting (South Africa) API base. Empty = the
+    # admin-config base_url (https-only, SSRF guard) or, absent that, the real
+    # https://accounting.sageone.co.za/api/2.0.0.
+    erp_sage_za_api_base: str = ""
+    # Blackbaud Financial Edge NXT (SKY API). The platform's registered SKY
+    # application (one app serves every tenant; a tenant may bring its own:
+    # settings.erp.client_id + a sealed client_secret) and the developer
+    # subscription key sent as `Bb-Api-Subscription-Key` on every call (a tenant
+    # may override it with its own, sealed `subscription_key`). All three are secrets with no
+    # fallback: empty in both places = the provider is unavailable and fails
+    # closed.
+    erp_blackbaud_client_id: str = ""
+    erp_blackbaud_client_secret: str = ""
+    erp_blackbaud_subscription_key: str = ""
+    # Operator overrides for fake-erp. Empty = the real
+    # https://api.sky.blackbaud.com and https://oauth2.sky.blackbaud.com/token.
+    erp_blackbaud_api_base: str = ""
+    erp_blackbaud_token_url: str = ""
+    # ERP OAuth authorization-code connections (QuickBooks Online, Xero, Sage
+    # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
+    # `state` carried across the provider's consent redirect.
+    erp_oauth_state_ttl_seconds: int = 600
+    # QuickBooks Online platform app (one Intuit app serves every tenant; a
+    # tenant may bring its own: settings.erp.client_id + the sealed client_secret).
+    # Secrets: sops in infra-secrets. Empty (the default) = no platform app —
+    # QuickBooks is available only to a tenant that brings its own (fail closed).
+    erp_qbo_client_id: str = ""
+    erp_qbo_client_secret: str = ""
+    # OPERATOR-controlled QuickBooks overrides, same shape as erp_d365_*: empty
+    # = the real Intuit endpoints (API base chosen by settings.erp.environment).
+    # Set to fake-erp in backend/.env.development for local dev + e2e.
+    erp_qbo_api_base: str = ""
+    erp_qbo_authorize_url: str = ""
+    erp_qbo_token_url: str = ""
+    erp_qbo_revoke_url: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS

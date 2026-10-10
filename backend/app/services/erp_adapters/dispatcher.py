@@ -39,6 +39,39 @@ def register_adapter(erp_type: str):
 
 MOCK_ADAPTER_KEY = "mock"
 
+#: Every built-in adapter module. Importing one runs its ``@register_adapter``
+#: decorator. **A new adapter adds its module here and nowhere else** — this
+#: replaced six hand-copied import blocks (the ERP push, payment sync-back,
+#: the vendor / PO / GL syncs and ``test-erp``), any one of which could miss a
+#: new adapter and answer ``UnknownErpAdapterError`` for an ERP the others
+#: accept.
+BUILTIN_ADAPTER_MODULES: tuple[str, ...] = (
+    "app.services.erp_adapters.dynamics_365_bc",
+    "app.services.erp_adapters.merge_dev",
+    "app.services.erp_adapters.mock_adapter",
+    "app.services.erp_adapters.netsuite",
+    "app.services.erp_adapters.sage_accounting_za",
+    "app.services.erp_adapters.sage_intacct",
+    "app.services.erp_adapters.syspro",
+    "app.services.erp_adapters.sage_accounting",
+    "app.services.erp_adapters.xero",
+    "app.services.erp_adapters.blackbaud_fe_nxt",
+    "app.services.erp_adapters.quickbooks_online",
+)
+
+
+def load_builtin_adapters() -> None:
+    """Import every built-in adapter module so the registry is complete.
+
+    Lazy (called from ``get_erp_adapter`` / ``list_available_adapters``, not
+    at import time) because each adapter module imports ``register_adapter``
+    from here.
+    """
+    import importlib
+
+    for module in BUILTIN_ADAPTER_MODULES:
+        importlib.import_module(module)
+
 
 def resolve_adapter_key(erp_config: dict) -> str:
     """The registry key ``get_erp_adapter`` would select for ``erp_config``.
@@ -96,7 +129,12 @@ def get_erp_adapter(erp_config: dict) -> ErpAdapter:
     against its registry for exactly this failure; here the name comes from
     per-org DB settings, so the refusal lives at the dispatcher. Same call as
     `payment_adapters.dispatcher`; see `decisions.md` §29.
+
+    The caller passes the block resolved through
+    ``provider_credentials.provider_config`` — configuration plus its sealed
+    secrets — so this function never opens a credential itself.
     """
+    load_builtin_adapters()
     adapter_key = resolve_adapter_key(erp_config)
     adapter_cls = _ADAPTER_REGISTRY.get(adapter_key)
     if adapter_cls is None:
@@ -107,4 +145,5 @@ def get_erp_adapter(erp_config: dict) -> ErpAdapter:
 
 def list_available_adapters() -> list[str]:
     """Return list of registered adapter type names."""
+    load_builtin_adapters()
     return sorted(_ADAPTER_REGISTRY.keys())

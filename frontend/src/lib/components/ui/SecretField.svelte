@@ -28,6 +28,14 @@
 		/** Placeholder when nothing is stored (format hint, e.g. `test_...`). */
 		placeholder?: string;
 		testId?: string;
+		/** Must be filled to save (only meaningful while nothing is stored). */
+		required?: boolean;
+		/** A save found it missing: `aria-invalid` (WCAG 3.3.1). */
+		invalid?: boolean;
+		/** Ids of further descriptions (a field's help text), after the hint. */
+		describedBy?: string;
+		/** Fired on every keystroke (e.g. to drop an `invalid` mark). */
+		oninput?: () => void;
 	};
 
 	let {
@@ -37,7 +45,11 @@
 		clear = $bindable(false),
 		configured,
 		placeholder = '',
-		testId
+		testId,
+		required = false,
+		invalid = false,
+		describedBy,
+		oninput
 	}: Props = $props();
 
 	const hintId = $derived(`${id}-hint`);
@@ -54,8 +66,12 @@
 			placeholder={configured ? m('org.secret.keepPlaceholder') : placeholder}
 			autocomplete="new-password"
 			spellcheck="false"
-			aria-describedby={hintId}
+			aria-describedby={describedBy ? `${hintId} ${describedBy}` : hintId}
+			aria-invalid={invalid ? 'true' : undefined}
+			required={required && !configured}
+			{oninput}
 			data-testid={testId}
+			data-secret-saved={String(configured)}
 		/>
 	</label>
 	<p class="secret-hint" id={hintId}>

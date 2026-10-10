@@ -23,7 +23,7 @@ APP = Path(__file__).resolve().parent.parent / "app"
 
 # Helpers that write `settings` on an org their CALLER loaded; the lock is the
 # caller's job, so each call site's enclosing function must take it instead.
-CALLER_LOCKS = {"write_groups", "_persist", "provision_intake_token"}
+CALLER_LOCKS = {"write_groups", "_persist", "provision_intake_token", "_link"}
 
 LOCK_MARKERS = ("lock_organization(", "with_for_update(")
 

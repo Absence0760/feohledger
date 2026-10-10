@@ -96,7 +96,7 @@ decimal comparison rather than binary drift.
 
 ### Control-Plane Tables
 
-- `organizations` — tenant registry (name, slug, db_name, settings, plan)
+- `organizations` — tenant registry (name, slug, db_name, settings, plan). `settings.erp.oauth` holds an ERP OAuth connection's metadata only; its tokens are sealed in `provider_credentials` with the block's other secrets (`erp-integration.md` § Where the credentials live).
 - `users` — all users across all tenants. Columns: `email`, `full_name`, `hashed_password` (nullable for SSO-only), `organization_id`, `is_active`, `must_change_password`, `sso_provider` + `sso_provider_id` (OIDC linkage), `mfa_secret` + `mfa_enabled` + `mfa_enrolled_at` (TOTP MFA)
 - `roles` — role definitions (admin, ap_manager, ap_clerk, cfo)
 - `user_roles` — many-to-many join table

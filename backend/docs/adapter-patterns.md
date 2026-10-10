@@ -58,19 +58,42 @@ class MyErpAdapter(ErpAdapter):
     async def test_connection(self) -> bool: ...
 ```
 
-Registered: `merge_dev`, `dynamics_365_bc`, `netsuite`, `mock`
+Registered (`dispatcher.BUILTIN_ADAPTER_MODULES` is the one list; every caller
+loads the registry from it, and `tests/test_erp_adapter_registry.py` fails when a
+module that registers an adapter is missing from it):
+
+| Key | ERP | Auth | Market |
+|---|---|---|---|
+| `mock` | local-first default | — | — |
+| `merge_dev` | Merge.dev unified API (long tail, Scale plan) | API key + account token | — |
+| `quickbooks_online` | QuickBooks Online | OAuth (`OAuthErpAdapter`) | US, ZA |
+| `xero` | Xero | OAuth | US, ZA |
+| `sage_accounting` | Sage Business Cloud Accounting (v3.1) | OAuth | US / global |
+| `sage_accounting_za` | Sage Business Cloud Accounting, South Africa (v2.0.0) | API key + Sage login | ZA |
+| `sage_intacct` | Sage Intacct (REST) | client credentials | US |
+| `syspro` | SYSPRO 8 (e.net REST, customer-hosted) | operator + company passwords | ZA |
+| `netsuite` | Oracle NetSuite | token-based auth | US, ZA |
+| `dynamics_365_bc` | Microsoft Dynamics 365 Business Central | client credentials | US, ZA |
+| `blackbaud_fe_nxt` | Blackbaud Financial Edge NXT (SKY API) | OAuth + subscription key | US |
+
+The setup form's fields, regions and secret flags come from
+`erp_adapters/catalog.py`, not from the frontend. An OAuth ERP subclasses
+`oauth_base.OAuthErpAdapter`, and its tokens come only from `services/erp_oauth`
+(decisions §270). A pre-flight refusal (`base.erp_refusal`) and a missing OAuth
+connection are final: the push is not retried (decisions §269).
 
 Config `integration_method: "merge_dev"|"direct"` selects whether to use Merge.dev unified API or direct adapter. Note `integration_method` **defaults to `merge_dev`**, so a config naming only a `type` routes through Merge.dev regardless of that type.
 
 An ERP type with no registered adapter raises `UnknownErpAdapterError` — it used to fall back to `mock`, whose `post_invoice` returns `success=True` with a fabricated `MOCK-…` document id, so `services/erp` walked the invoice `sending_to_erp → sent_to_erp → done` carrying an ERP reference that pointed at nothing, and `POST /api/organization/test-erp` answered "Connected successfully" (`mock.test_connection()` is `True`). The three sync endpoints now 400, and test-erp names the bad value. In `payment_erp_sync` the adapter is resolved **inside `_sync_one_leg`**, where it would be used, so an unsupported type fails that leg and opens the de-duped `erp_reconciliation` exception like any other leg failure — a pre-flight check before the tenant session could not open one, and its count is discarded on the fire-and-forget dispatch path, which would strand the run invisibly. See `../docs/decisions.md` §29.
 
-ERP send has retry logic: up to 3 attempts with exponential backoff (2s, 4s, 8s).
+ERP send has retry logic: up to 3 attempts with exponential backoff (2s, 4s, 8s), except for a refusal or a missing OAuth connection, which fail at once.
 
-The three real adapters' provider base URLs are env-overridable via the
-operator-trusted `FEOH_ERP_MERGE_API_BASE` / `FEOH_ERP_NETSUITE_API_BASE` /
-`FEOH_ERP_D365_API_BASE` / `FEOH_ERP_D365_TOKEN_URL` (process-level, so they bypass
-the admin-config SSRF guard; an admin-supplied `base_url` stays guarded).
-`backend/.env.development` points all four at the local fake ERP server — the
+Every real adapter's provider base URL is env-overridable through an
+operator-trusted `FEOH_ERP_*_API_BASE` (plus a `*_TOKEN_URL` where there is a
+token endpoint). These are process-level, so they bypass the admin-config SSRF
+guard; an admin-supplied `base_url` stays guarded. The full list is
+`docs/environment.md`. `backend/.env.development` points them at the local fake
+ERP server — the
 `fake-erp` compose service (opt-in `erp` profile, :12112, built from
 `tools/fake-erp/`, deterministic PO/GL fixtures, shape-checked auth only) — so
 `pnpm erp:up` → `pnpm test:erp` exercises `merge_dev`/`netsuite`/

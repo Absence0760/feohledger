@@ -39,7 +39,21 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-08 — the cards / receiving-SoD /
+**Last reconciled:** 2026-10-09 — enabling IAM database authentication on RDS
+(#542) opened one (c) entry (the app still signs in with the master password),
+taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
+(decisions §269–§272), merged onto the provider-credential store, opened
+eleven (c) entries, one (a) (sandbox verification) and one (b) (registering
+the platform OAuth apps) under their own heading, and rewrote two (c)
+entries: QuickBooks Online now tracks only phases 3–5, and the Priority 14
+adapter entry now tracks the receipt pull and the enterprise ERPs. The
+branch's "payment and card secrets still plaintext" entry is not carried,
+since §266 sealed them, and the "switching provider keeps the old sealed
+secret" entry is narrowed to payments and cards: §271 drops an ERP's sealed
+secrets on a new ERP or destination. Review of the merge added two more (c) entries (tenant deletion not revoking
+an OAuth grant; QuickBooks' realm id taken from the callback query). That takes
+the file from 82 → 97.
+Before that, 2026-10-08 — the cards / receiving-SoD /
 provider-credentials batch closed **five** (c) entries — a vendor leaving
 `active` keeping its live cards (decisions §264), `/cards/generate`'s unlocked
 checks (§265), ERP / payment / card credentials in plain JSONB (§266), the
@@ -125,7 +139,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**83 open: 68 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**98 open: 81 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1168,18 +1182,16 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 
 ### Surfaced by scoping the QuickBooks Online adapter (2026-10-07)
 
-- [ ] **(c) Build a direct QuickBooks Online adapter.** Merge.dev costs $65 per
-      linked account above a $650/month base (merge.dev/pricing, 2026-10-07),
-      more than the $49 Growth plan that includes ERP integrations, and QuickBooks
-      is the ERP most of the target segment runs. Intuit's API is free at these
-      volumes. **Durable fix:** the five phases in
-      `backend/docs/quickbooks-online-adapter.md`: shared ERP references in the
-      payload (also `known-issues.md`), an OAuth authorization-code connect flow
-      reusable for Xero, the adapter, CloudEvents webhooks plus a CDC
-      reconciliation sweep, and `post_payment` → BillPayment. Three product
-      calls in that doc's open questions come first. **Trigger:** the first pilot
-      customer on QuickBooks, or before Growth is sold with ERP integrations,
-      whichever comes first.
+- [ ] **(c) QuickBooks Online: webhooks, a reconciliation sweep and BillPayment
+      write-back.** Phases 0–2 of `backend/docs/quickbooks-online-adapter.md`
+      shipped with the US + South Africa ERP work (decisions §269–§270): ERP ids on
+      the payload, the shared OAuth connect flow, and the adapter. Still open:
+      Phase 3 (CloudEvents webhooks routed by an `erp_connections` realm index,
+      plus a CDC reconciliation sweep), Phase 4 (`post_payment` → BillPayment),
+      Phase 5 (an admin notice before the refresh token expires), and the
+      product call on bills whose tax is stated only on the header (refused
+      today as `amount_mismatch`). **Durable fix:** the phases as scoped in that
+      doc. **Trigger:** the first pilot customer on QuickBooks.
 - [ ] **(c) Merge-routed ERPs need a Scale-only `erp_merge` feature.**
       Decided in `docs/decisions.md` §256: Growth's `erp_integrations` covers the
       direct adapters, and Merge (`integration_method: merge_dev`) is Scale-only,
@@ -1284,22 +1296,115 @@ scope (§260) — do not fold them into any of these.
       backend change), quantities sent as strings, widget tests and ARB strings
       in every locale. **Trigger:** the first tenant receiving goods without a
       desk, or the next mobile procurement change.
-- [ ] **(c) Direct ERP adapters stop at Business Central and NetSuite, and no
-      adapter pulls receipts.** Everything else rides Merge.dev.
-      **Durable fix:** add a receipt pull to the `erp_adapters` interface, then
-      one direct adapter per PR, largest ERP first (SAP S/4HANA, Oracle Fusion,
-      Dynamics 365 F&O, Sage Intacct, Infor, Epicor), each with fake-erp routes
-      and an e2e spec; QuickBooks Online / Xero sized separately for the SMB
-      segment — QuickBooks Online and Xero are already their own entry above
-      (decisions §256), and §256 routes the long tail through Merge.dev on Scale,
-      so which large ERPs get a direct adapter is decided against it first.
-      **Trigger:** after PR 1 lands (receipts need somewhere to go).
+- [ ] **(c) No adapter pulls goods receipts, and the enterprise ERPs still
+      ride Merge.dev.** The US + South Africa set is now direct (QuickBooks
+      Online, Xero, Sage Accounting and its SA API, Sage Intacct, SYSPRO,
+      NetSuite, Business Central, Blackbaud; decisions §269). **Durable fix:**
+      add a receipt pull to the `erp_adapters` interface (Business Central and
+      NetSuite first), then one direct adapter per PR for SAP S/4HANA, Oracle
+      Fusion, Dynamics 365 F&O, Infor and Epicor, each with fake-erp routes and
+      an e2e spec. **Trigger:** the first customer on one of those ERPs who
+      won't use Merge.dev, or the first customer who receives goods in their
+      ERP rather than in FeohLedger.
 - [ ] **(c) Received merchandise never reaches the business's commerce /
       inventory platform.** **Durable fix:** SKU identity on PO + receipt lines
       (link to `catalog_items`), then a `commerce_adapters` family (`mock`
       default) that adjusts the mapped variant's quantity on each receipt,
       idempotent per receipt line — Shopify first. **Trigger:** after PR 1
       lands; independent of the ERP work.
+
+### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
+
+- [ ] **(c) The ERP OAuth callback is not bound to the browser that started it
+      (login-CSRF).** A rogue tenant admin can get a victim to approve consent
+      and link the victim's books to the attacker's tenant. **Durable fix:**
+      make `/authorize` a credentialed fetch (`credentials: 'include'`) to the
+      API public host, which sets an HttpOnly, Secure, `SameSite=Lax` nonce
+      cookie there; put the cookie's hash in the signed `state` and compare it
+      at the callback. A custom-domain origin cannot set a first-party cookie on
+      the API host, so custom-domain tenants start the connect from
+      `<slug>.<app domain>`. **Trigger:** before the platform QuickBooks, Xero,
+      Sage or Blackbaud OAuth apps are configured in production, or before the
+      first custom-domain tenant connects an OAuth ERP.
+- [ ] **(c) A VAT-registered Business Central company cannot post at all.** The
+      adapter reads back `totalAmountIncludingTax` and, when BC adds VAT on top
+      of the approved gross, deletes the draft and refuses
+      (`posted_total_mismatch`). That is safe, but such a company is blocked.
+      **Durable fix:** send net line amounts plus BC tax codes, so BC's computed
+      total equals the approved gross. **Trigger:** the first customer on a
+      VAT-registered BC company.
+- [ ] **(c) A Business Central user can edit a draft between our total check
+      and our post.** The adapter reads the draft's `totalAmountIncludingTax`
+      and then calls `Microsoft.NAV.post`; an edit in that window posts a total
+      nobody approved, and the success path does not read the posted invoice
+      back. **Durable fix:** after the post, read the posted invoice's total and
+      treat a mismatch as `posted_total_mismatch` (an accountant must reverse a
+      posted invoice in BC; we never delete one). **Trigger:** the first BC
+      customer whose staff edit purchase drafts.
+- [ ] **(c) Business Central approval workflows are not handled.** A post step
+      that fails after the draft is created is now a retryable failure, and a
+      retry finishes the draft. But a BC company with purchase-approval
+      workflows leaves the invoice "In Review", which the adapter refuses
+      (`existing_invoice_not_open`). **Durable fix:** decide whether we submit
+      for approval and poll, or post only to companies without workflows, and
+      document it. **Trigger:** the first BC customer with approval workflows.
+- [ ] **(c) Connecting picks no company when the consent covers several.** Xero
+      (several organisations authorised in one consent) and Sage v3.1 (a login
+      with several businesses) resolve to none, and the connect is refused
+      (`no_external_tenant`). **Durable fix:** a company picker after consent,
+      stored with the grant. **Trigger:** the first customer whose consent
+      covers more than one company.
+- [ ] **(c) The SSRF guard checks an admin-supplied ERP host once, then httpx
+      resolves it again.** DNS rebinding passes the check (`utils/url_safety`).
+      Business Central and Sage SA now also allowlist their API host, but SYSPRO
+      is customer-hosted. **Durable fix:** connect to the IP the guard
+      resolved (a pinned transport). **Trigger:** the first customer-hosted
+      SYSPRO connection in production.
+- [ ] **(c) A vendor holds one `erp_vendor_id`, whichever ERP set it.** A tenant
+      that switches ERP posts the old ERP's ids, and the new ERP rejects them,
+      and some syncs stored a name or code where the ERP gave no id. **Durable
+      fix:** key the id by ERP (a `vendor_erp_links` table, or `{erp_type: id}`)
+      and resolve by the active ERP. **Trigger:** the first tenant that
+      switches ERP.
+- [ ] **(c) ERP status polling and void are unwired, and three adapters read a
+      zero balance as paid.** `get_invoice_status` / `void_invoice` have no
+      callers under `app/`. When they are wired in, SYSPRO, Sage SA and
+      QuickBooks map balance 0 to `paid`, which also catches a credited or
+      zero-total bill. **Durable fix:** map paid only on a recorded payment
+      (or the ERP's own paid status), before wiring the poll. **Trigger:**
+      wiring the ERP status poll or void into any flow.
+- [ ] **(c) Business Central's vendor sync stores `paymentTermsId` (a GUID) as
+      the payment-terms text, and NetSuite's PO sync pulls no lines.**
+      **Durable fix:** resolve BC's `paymentTerms` code; pull NetSuite PO lines
+      through SuiteQL. **Trigger:** the first BC customer relying on synced
+      terms, or the PO sync starting to store lines.
+- [ ] **(c) The OAuth adapters have no Playwright spec.** The ERP e2e suite
+      covers Merge.dev, NetSuite and Business Central; the setup panel's spec
+      covers the connect UI with a mocked status. **Durable fix:** fake-erp
+      OAuth stubs for Xero, Sage and Blackbaud (QuickBooks has one), plus a
+      connect → push spec for each under `tests-e2e/erp/`. **Trigger:** the
+      next change to `services/erp_oauth`.
+- [ ] **(c) Deleting a tenant does not revoke its ERP OAuth grant.**
+      `services/tenant_deletion` deletes the sealed `provider_credentials` row,
+      but the refresh token stays valid at Intuit / Xero / Sage / Blackbaud
+      until it expires (up to five years for QuickBooks). **Durable fix:**
+      before the control-plane sweep, open the sealed tokens and call
+      `erp_oauth.revoke` best-effort, recording the outcome in the deletion
+      report. **Trigger:** the next change to `tenant_deletion`, or before the
+      first tenant with a live OAuth ERP is deleted.
+- [ ] **(c) QuickBooks' company id comes from the unsigned callback query.**
+      `realmId` is read from the redirect, so a tenant admin can consent to
+      their own company while naming another company's realm, which then
+      reads as `already_linked` for its real owner. Tokens are never shared —
+      it is a squatting / denial problem, not a leak. **Durable fix:** confirm
+      the realm with one API call under the new token (`GET
+      /v3/company/{realmId}/companyinfo/{realmId}`), as Xero and Sage already
+      resolve theirs. **Trigger:** with the OAuth login-CSRF binding above, or
+      before the platform Intuit app goes live.
+- [ ] **(c) SYSPRO's `void_invoice` docstring claims the same stance as
+      Business Central and NetSuite**, which now delete drafts while SYSPRO
+      deletes nothing. **Durable fix:** say SYSPRO never voids. **Trigger:**
+      the next edit to `syspro.py`.
 
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
@@ -1351,16 +1456,20 @@ scope (§260) — do not fold them into any of these.
       `PUT /api/organization/sso`, with a migration sealing existing values.
       **Trigger:** the next change to `api/organization_sso.py`, or before the
       first SSO customer in production.
-- [ ] **(c) Switching ERP or payment provider keeps the old provider's sealed
-      secret.** Changing `erp.type` or `payments.provider` leaves the previous
-      provider's stored key in place, and the next call sends it to the new
-      provider's host. The change is audited (`organization.provider_config_updated`)
-      but nothing clears it. **Durable fix:** when the provider identity of a
-      block changes, drop that block's sealed secrets in the same transaction
-      (or refuse the switch until new secrets are supplied), with a test.
-      **Trigger:** the next change to `provider_credentials` or the
-      organization settings writers — ideally before the QuickBooks connect
-      flow lands.
+- [ ] **(c) Switching payment or card provider keeps the old provider's sealed
+      secret.** Changing `payments.provider` (or `cards.provider`) leaves the
+      previous provider's stored key in place, and the next call sends it to
+      the new provider's host. The change is audited
+      (`organization.provider_config_updated`) but nothing clears it. The ERP
+      block no longer has this gap: a new ERP or a new destination drops its
+      sealed secrets in the same transaction (decisions §271,
+      `erp_adapters/catalog.secrets_to_drop`). **Durable fix:** the same shape
+      for `payments` / `cards` — a pure "what does this save drop" rule keyed on
+      the provider identity (and any base-URL / environment key), applied by
+      `PATCH /api/organization` through `provider_credentials.update_secrets`
+      with an audited `credentials_updated` row, plus a test. **Trigger:** the
+      next change to the payments or cards settings writers, or before the
+      first tenant with live payment-rail or card-issuer credentials.
 - [ ] **(c) A sealed value that can no longer be opened has no in-app
       recovery.** If the KMS key is disabled or (in dev) `FEOH_SECRET_KEY`
       changes, every save for that block returns 503, because the writer opens
@@ -1449,7 +1558,37 @@ as oversights.
 
 ---
 
+- [ ] **Verify the SYSPRO, Sage Intacct, Sage SA and Blackbaud adapters
+      against a live system.** Each was built from published docs and tested
+      against fake-erp only (decisions §269). Unverified:
+      **SYSPRO:** the APSTIN / COMFND schemas and the `ApInvoice` /
+      `PorMasterHdr` / `PorMasterDetail` column names.
+      **Intacct:** bill `state` values, the purchasing-document query name,
+      `txnTotal`, and whether REST can reverse a paid bill.
+      **Sage SA:** the `SupplierInvoice/Save` body, `DocumentNumber` and
+      `Reference` limits, OData filters, `CurrencyId` for home-currency
+      suppliers, account categories, and delete in a locked period.
+      **Blackbaud:** an empty `transaction_code_values`, the description
+      length, and job latency.
+      **Why blocked:** each needs a sandbox or developer-programme account.
+      **Durable fix:** run each adapter's post / status / sync / void against
+      its sandbox, then correct the adapter and fake-erp together.
+      **Trigger:** the first customer on each ERP, or sandbox access, whichever
+      comes first.
+
 ## (b) Operator steps on merged code
+
+- [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
+      Accounting and Blackbaud.** Until then those ERPs connect only when a
+      tenant brings its own app (decisions §270). Steps: register each app
+      with the redirect URI `FEOH_API_PUBLIC_URL/api/erp/oauth/callback`. For
+      Intuit, also pass the production app assessment and publish real
+      Disconnect / Reconnect pages; for Blackbaud, buy a SKY API subscription.
+      Then put `FEOH_ERP_QBO_*`, `FEOH_ERP_XERO_*`,
+      `FEOH_ERP_SAGE_ACCOUNTING_*` and `FEOH_ERP_BLACKBAUD_*` (client id,
+      secret, subscription key) in `infra-secrets/feohledger/prod.sops.yaml`.
+      **Trigger:** before selling ERP sync on Growth to customers on those
+      ERPs. The login-CSRF (c) entry above must land first.
 
 - [ ] **Create the five published contact aliases.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) `/legal/*` tells readers to
       write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on
