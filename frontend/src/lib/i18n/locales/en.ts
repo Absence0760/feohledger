@@ -1987,6 +1987,8 @@ export const en = {
 	'org.erp.oauth.redirectUriCopyFailed': 'Couldn\'t copy. Select the address and copy it instead.',
 	'org.commerce.field.access_token': "Access token",
 	'org.commerce.field.account_id': "Account ID",
+	'org.commerce.field.adjustment_account': "Adjustment account",
+	'org.commerce.help.adjustment_account': "Optional. The account code Cin7 posts the stock adjustment's journal to — use a clearing account so received stock is not counted twice beside the bill. Blank uses Cin7's default.",
 	'org.commerce.field.api_key': "API key",
 	'org.commerce.field.api_secret': "API secret",
 	'org.commerce.field.api_version': "API version",

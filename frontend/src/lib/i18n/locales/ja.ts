@@ -1803,6 +1803,8 @@ export const messages = {
 	'org.erp.oauth.redirectUriCopyFailed': 'コピーできませんでした。アドレスを選択して手動でコピーしてください。',
 	'org.commerce.field.access_token': "アクセストークン",
 	'org.commerce.field.account_id': "アカウントID",
+	'org.commerce.field.adjustment_account': "調整勘定",
+	'org.commerce.help.adjustment_account': "任意。Cin7 が在庫調整の仕訳を計上する勘定コードです。請求書と二重に計上されないよう、仮勘定を指定してください。空欄の場合は Cin7 の既定の勘定を使用します。",
 	'org.commerce.field.api_key': "APIキー",
 	'org.commerce.field.api_secret': "APIシークレット",
 	'org.commerce.field.api_version': "APIバージョン",

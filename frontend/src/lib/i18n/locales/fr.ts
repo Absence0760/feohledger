@@ -1838,6 +1838,8 @@ export const messages = {
 	'org.erp.oauth.redirectUriCopyFailed': 'Impossible de copier. Sélectionnez l\'adresse et copiez-la vous-même.',
 	'org.commerce.field.access_token': "Jeton d’accès",
 	'org.commerce.field.account_id': "ID de compte",
+	'org.commerce.field.adjustment_account': "Compte d’ajustement",
+	'org.commerce.help.adjustment_account': "Facultatif. Le compte sur lequel Cin7 passe l’écriture de l’ajustement de stock — utilisez un compte d’attente pour que le stock reçu ne soit pas compté deux fois avec la facture. Vide : le compte par défaut de Cin7.",
 	'org.commerce.field.api_key': "Clé API",
 	'org.commerce.field.api_secret': "Secret API",
 	'org.commerce.field.api_version': "Version de l’API",

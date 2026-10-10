@@ -1839,6 +1839,8 @@ export const messages = {
 	'org.erp.oauth.redirectUriCopyFailed': 'Não foi possível copiar. Selecione o endereço e copie-o manualmente.',
 	'org.commerce.field.access_token': "Token de acesso",
 	'org.commerce.field.account_id': "ID da conta",
+	'org.commerce.field.adjustment_account': "Conta de ajuste",
+	'org.commerce.help.adjustment_account': "Opcional. O código da conta em que o Cin7 lança o ajuste de estoque — use uma conta transitória para que o estoque recebido não seja contado duas vezes junto com a fatura. Em branco usa o padrão do Cin7.",
 	'org.commerce.field.api_key': "Chave de API",
 	'org.commerce.field.api_secret': "Segredo da API",
 	'org.commerce.field.api_version': "Versão da API",

@@ -1838,6 +1838,8 @@ export const messages = {
 	'org.erp.oauth.redirectUriCopyFailed': 'Kopieren fehlgeschlagen. Markieren und kopieren Sie die Adresse stattdessen.',
 	'org.commerce.field.access_token': "Zugriffstoken",
 	'org.commerce.field.account_id': "Konto-ID",
+	'org.commerce.field.adjustment_account': "Anpassungskonto",
+	'org.commerce.help.adjustment_account': "Optional. Das Konto, auf das Cin7 die Buchung der Bestandsanpassung bucht – verwenden Sie ein Verrechnungskonto, damit eingegangene Ware neben der Rechnung nicht doppelt erfasst wird. Leer verwendet die Cin7-Vorgabe.",
 	'org.commerce.field.api_key': "API-Schlüssel",
 	'org.commerce.field.api_secret': "API-Geheimnis",
 	'org.commerce.field.api_version': "API-Version",
