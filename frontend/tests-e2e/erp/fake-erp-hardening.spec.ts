@@ -189,4 +189,47 @@ test.describe('fake-erp request hardening', () => {
 		expect(resp.status()).toBe(200);
 		expect(await resp.json()).toEqual({ QueryResponse: {} });
 	});
+
+	test('QBO query keeps its normal shapes after the regex change', async ({ request }) => {
+		const authorize = await request.get(`${QBO}/oauth2/authorize`, {
+			params: {
+				redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+				state: 's',
+				client_id: QBO_CLIENT_ID
+			},
+			maxRedirects: 0
+		});
+		const code = new URL(authorize.headers()['location']).searchParams.get('code') ?? '';
+		const token = await request.post(`${QBO}/oauth2/token`, {
+			headers: {
+				Authorization: `Basic ${Buffer.from(`${QBO_CLIENT_ID}:fake-qbo-secret`).toString('base64')}`,
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			data: `grant_type=authorization_code&code=${code}`
+		});
+		const { access_token } = await token.json();
+		const run = (query: string) =>
+			request.get(`${QBO}/v3/company/fake-realm-1/query`, {
+				params: { query },
+				headers: { Authorization: `Bearer ${access_token}` }
+			});
+
+		// The entity name still ends at the first non-word character.
+		const vendors = await (await run('select * from Vendor')).json();
+		expect(Object.keys(vendors.QueryResponse)).toEqual(['Vendor']);
+		expect(vendors.QueryResponse.Vendor.length).toBeGreaterThan(0);
+
+		// A page past the single fixture page is empty, not an error.
+		const page2 = await run('select * from Vendor STARTPOSITION 1000 MAXRESULTS 10');
+		expect(await page2.json()).toEqual({ QueryResponse: {} });
+
+		// A DocNumber filter with an escaped quote matches no stored bill.
+		const bill = await run("select * from Bill where DocNumber = 'O\\'Brien-1'");
+		expect(bill.status()).toBe(200);
+		expect(await bill.json()).toEqual({ QueryResponse: {} });
+
+		// Not a select at all is still a parser error.
+		const bad = await run('delete from Vendor');
+		expect(bad.status()).toBe(400);
+	});
 });
