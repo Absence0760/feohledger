@@ -197,6 +197,7 @@ BLACKBAUD_OAUTH = register_oauth_provider(
         token_url=DEFAULT_TOKEN_URL,
         # Operator override (fake-erp), read on every call by services/erp_oauth.
         token_url_setting="erp_blackbaud_token_url",
+        authorize_url_setting="erp_blackbaud_authorize_url",
         # The SKY token response names the environment the admin approved.
         external_tenant_id_token_field="environment_id",
         # SKY applications have no per-request scopes: the API products an app
@@ -492,7 +493,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             return erp_refusal(PROVIDER, body)
 
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self.oauth_client(timeout=30) as client:
             if payload.pending_job_id:
                 # An earlier attempt queued a job we never saw finish. Its
                 # outcome decides; only a job that ended without creating the
@@ -602,7 +603,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.oauth_client(timeout=15) as client:
             resp = await client.get(
                 f"{self._base()}{AP}/invoices/{quote(erp_document_id, safe='')}",
                 headers=headers,
@@ -627,7 +628,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         """Best-effort like the other adapters: any failure degrades to []."""
         try:
             headers = await self._headers()
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with self.oauth_client(timeout=30) as client:
                 rows = (await self._pages(client, headers, f"{AP}/vendors")).rows
         except Exception:
             return []
@@ -656,7 +657,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         """
         try:
             headers = await self._headers()
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with self.oauth_client(timeout=30) as client:
                 rows = (await self._pages(client, headers, f"{GL}/accounts")).rows
         except Exception:
             return []
@@ -682,7 +683,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         """
         try:
             headers = await self._headers()
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with self.oauth_client(timeout=30) as client:
                 rows = (await self._pages(client, headers, f"{AP}/purchaseorders")).rows
         except Exception:
             return []
@@ -706,7 +707,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         try:
             self.external_tenant_id()  # consent completed and captured
             headers = await self._headers()
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with self.oauth_client(timeout=10) as client:
                 resp = await client.get(
                     f"{self._base()}{AP}/vendors", params={"limit": "1"}, headers=headers
                 )

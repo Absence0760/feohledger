@@ -24,6 +24,13 @@ import {
 
 export const FAKE_ERP_BASE = 'http://localhost:12112';
 
+/** The backend's ERP OAuth callback (backend/app/services/erp_oauth.py
+ *  CALLBACK_PATH) on the API this run targets. The fake registers it on the
+ *  dev API port and every worktree offset above it (tools/fake-erp/app.py
+ *  OAUTH_REDIRECT_URIS), so deriving it from API_BASE keeps a worktree on
+ *  :8001 asking for its own callback rather than the primary checkout's. */
+export const ERP_OAUTH_CALLBACK = `${API_BASE}/api/erp/oauth/callback`;
+
 /** Wipe the fake ERP's in-memory state (stored invoices + id counters) so
  *  document-id assertions aren't coupled to what previous runs created.
  *  Best-effort: when the fake isn't running the specs skip anyway via
@@ -221,7 +228,21 @@ export async function erpFailureFromAudit(page: Page, invoiceId: string): Promis
  *  review flow. */
 export async function createApprovedInvoice(
 	page: Page,
-	opts: { prefix: string; amount?: string; vendor?: string; glAccount?: string }
+	opts: {
+		prefix: string;
+		amount?: string;
+		vendor?: string;
+		glAccount?: string;
+		/** Exact invoice number, for an ERP that caps its length (QBO: 21). */
+		invoiceNumber?: string;
+		/** ISO 4217 code; defaults to USD. */
+		currency?: string;
+		/** The VAT / sales tax the invoice states, as an exact decimal string. */
+		taxAmount?: string;
+		/** ISO dates, for an ERP that refuses a bill without them (Xero). */
+		invoiceDate?: string;
+		dueDate?: string;
+	}
 ): Promise<Inv> {
 	const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 	const headers = await authedTenantHeaders(page);
@@ -229,11 +250,14 @@ export async function createApprovedInvoice(
 	const created = await page.request.post(`${API_BASE}/api/invoices`, {
 		headers,
 		data: {
-			invoice_number: `${opts.prefix}-${unique}`,
+			invoice_number: opts.invoiceNumber ?? `${opts.prefix}-${unique}`,
 			vendor: opts.vendor ?? 'Fake ERP Vendor A',
 			amount: opts.amount ?? '1234.56',
-			currency: 'USD',
+			currency: opts.currency ?? 'USD',
 			status: 'new',
+			...(opts.taxAmount ? { tax_amount: opts.taxAmount } : {}),
+			...(opts.invoiceDate ? { invoice_date: opts.invoiceDate } : {}),
+			...(opts.dueDate ? { due_date: opts.dueDate } : {}),
 			...(opts.glAccount ? { gl_account: opts.glAccount } : {})
 		}
 	});

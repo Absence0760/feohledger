@@ -836,6 +836,32 @@ def test_split_refuses_a_line_without_any_amount():
 
 
 # ---------------------------------------------------------------------------
+# FEOH_ERP_XERO_AUTHORIZE_URL / FEOH_ERP_XERO_TOKEN_URL
+# ---------------------------------------------------------------------------
+
+
+def test_oauth_endpoints_default_to_xero_and_honour_the_overrides(monkeypatch):
+    from app.services.erp_adapters.xero import XERO_OAUTH
+
+    monkeypatch.setattr(settings, "erp_xero_authorize_url", "")
+    monkeypatch.setattr(settings, "erp_xero_token_url", "")
+    assert (
+        erp_oauth.authorize_endpoint(XERO_OAUTH)
+        == "https://login.xero.com/identity/connect/authorize"
+    )
+    assert erp_oauth.token_endpoint(XERO_OAUTH) == "https://identity.xero.com/connect/token"
+
+    # The operator override is what lets the connect flow run against
+    # fake-erp locally (guard rail 7); each one moves only its own endpoint.
+    fake = "http://localhost:12112/xero/identity/connect"
+    monkeypatch.setattr(settings, "erp_xero_authorize_url", f"{fake}/authorize")
+    assert erp_oauth.authorize_endpoint(XERO_OAUTH) == f"{fake}/authorize"
+    assert erp_oauth.token_endpoint(XERO_OAUTH) == "https://identity.xero.com/connect/token"
+    monkeypatch.setattr(settings, "erp_xero_token_url", f"{fake}/token")
+    assert erp_oauth.token_endpoint(XERO_OAUTH) == f"{fake}/token"
+
+
+# ---------------------------------------------------------------------------
 # FEOH_ERP_XERO_API_BASE
 # ---------------------------------------------------------------------------
 

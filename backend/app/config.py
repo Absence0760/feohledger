@@ -290,9 +290,18 @@ class Settings(BaseSettings):
     erp_xero_api_base: str = ""
     erp_xero_client_id: str = ""
     erp_xero_client_secret: str = ""
+    # Xero OAuth endpoint overrides (operator-trusted, non-secret), read on
+    # every call. Empty → Xero's real identity endpoints. Dev points them at
+    # fake-erp so the connect flow runs with no Xero account (guard rail 7).
+    erp_xero_authorize_url: str = ""
+    erp_xero_token_url: str = ""
     erp_sage_accounting_api_base: str = ""
     erp_sage_accounting_client_id: str = ""
     erp_sage_accounting_client_secret: str = ""
+    # Sage OAuth endpoint overrides (operator-trusted, non-secret), read on
+    # every call. Empty → Sage's real endpoints. Dev points them at fake-erp.
+    erp_sage_accounting_authorize_url: str = ""
+    erp_sage_accounting_token_url: str = ""
     # Sage Business Cloud Accounting (South Africa) API base. Empty = the
     # admin-config base_url (https-only, SSRF guard) or, absent that, the real
     # https://accounting.sageone.co.za/api/2.0.0.
@@ -311,6 +320,9 @@ class Settings(BaseSettings):
     # https://api.sky.blackbaud.com and https://oauth2.sky.blackbaud.com/token.
     erp_blackbaud_api_base: str = ""
     erp_blackbaud_token_url: str = ""
+    # Authorize-endpoint override (operator-trusted, non-secret). Empty →
+    # Blackbaud's real one. Dev points it at fake-erp so the connect runs locally.
+    erp_blackbaud_authorize_url: str = ""
     # ERP OAuth authorization-code connections (QuickBooks Online, Xero, Sage
     # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
     # `state` carried across the provider's consent redirect.

@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-09 — enabling IAM database authentication on RDS
+**Last reconciled:** 2026-10-11 — PR #544 opened and closed two (c) entries in the
+same change (the OAuth-adapter e2e coverage gap, and only QuickBooks refreshing after
+a 401 — now shared as `oauth_base.RefreshOnUnauthorized`), so the file stays at 98. Before that, 2026-10-09 — enabling IAM database authentication on RDS
 (#542) opened one (c) entry (the app still signs in with the master password),
 taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
 (decisions §269–§272), merged onto the provider-credential store, opened

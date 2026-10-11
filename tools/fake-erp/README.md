@@ -108,6 +108,16 @@ never links one provider's vendor id onto another's vendor row.
   "status": "…"}` → force a stored invoice into a provider-native status
   (e.g. merge `PAID`, netsuite `paidInFull`, d365 `Paid`) to drive
   `get_invoice_status()` transitions.
+- OAuth token lifecycle, for any `FakeOAuthApp` (`xero`, `sage`, `blackbaud`):
+  `POST /__oauth/{key}/lifetime {"seconds"}` sets the `expires_in` of every token
+  issued from then on (under the backend's 120 s refresh margin, each use must
+  refresh first); `GET /__oauth/{key}/stats` → `{"refreshes"}` counts successful
+  refresh grants; `POST /__oauth/{key}/revoke-access` rejects every access token
+issued so far while the refresh token stays good (a 401 must refresh);
+`POST /__oauth/{key}/revoke` revokes the consent — every issued
+  token and the refresh token stop working, so the next refresh is
+  `invalid_grant`. Only `erp/blackbaud-fe-nxt.spec.ts` uses them, on the one
+  provider no other spec shares, so parallel workers cannot interfere.
 
 ## Dependencies
 
@@ -127,7 +137,7 @@ uv pip compile requirements.in --universal --python-version 3.14 --generate-hash
 
 ## Running
 
-Standalone (any venv with fastapi + uvicorn):
+Standalone (any venv with `pip install -r requirements.txt`):
 
 ```bash
 uvicorn app:app --port 12112   # from tools/fake-erp/
@@ -186,6 +196,8 @@ body starting `ERROR`, as SYSPRO's are.
 - `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier or
   ledger code, a duplicate (supplier, invoice) and a distribution that does not
   balance to `InvoiceAmount`.
+- The `XmlIn` / `XmlParameters` documents are parsed with `defusedxml`, so a
+  DTD or entity declaration is refused rather than expanded.
 - `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
   `{"supplier", "invoice", "balance"}` (`"0"` = paid).
 ## Xero (`/xero/api.xro/2.0`)
@@ -208,6 +220,13 @@ otherwise). Point the backend at it with
   and replays the original response for a repeated `Idempotency-Key`;
   `GET /Invoices/{id}`; `POST /Invoices/{id}` changes status (DELETED only
   from DRAFT/SUBMITTED, VOIDED only from unpaid AUTHORISED).
+- OAuth (the backend's real connect flow): `GET /xero/identity/connect/authorize`
+  302s to a **registered** `redirect_uri` with a `code` (client `fake-xero-client`,
+  `response_type=code`; anything else is a 400); `POST /xero/identity/connect/token`
+  takes `fake-xero-client:fake-xero-secret` by HTTP Basic, makes each code single-use
+  and bound to its `redirect_uri`, and rotates refresh tokens; `GET /xero/connections`
+  (bearer must be one it issued) lists the one organisation, tenant
+  `fake-xero-tenant-1`. Wired up by the committed `FEOH_ERP_XERO_*` dev values.
 - Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
   "amount_paid"?}`. `POST /__reset` clears this state too.
 
@@ -231,6 +250,13 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
   line with no `tax_rate_id`, or net + tax that does not equal the total;
   `GET /purchase_invoices/{id}`; `DELETE /purchase_invoices/{id}` deletes a
   draft and voids an unpaid invoice (`void_reason` required).
+- OAuth (the backend's real connect flow): `GET /sage/oauth2/auth/central` 302s to a
+  **registered** `redirect_uri` with a `code` (client `fake-sage-client`);
+  `POST /sage/oauth2/token` takes `client_id` / `client_secret` as **form fields**
+  (Sage's shape — HTTP Basic is refused), makes each code single-use and bound to
+  its `redirect_uri`, and rotates refresh tokens; `GET /sage/v3.1/businesses` (bearer
+  must be one it issued) lists the one business, `fake-sage-business`. Same
+  `FakeOAuthApp` as Xero's.
 - Test hook `POST /sage/v3.1/__set-status {"id", "status",
   "outstanding_amount"?}`. `POST /__reset` clears this state too.
 
@@ -239,13 +265,17 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
 Backs `erp_adapters/blackbaud_fe_nxt.py`
 (`FEOH_ERP_BLACKBAUD_API_BASE=http://localhost:12112/blackbaud`,
 `FEOH_ERP_BLACKBAUD_TOKEN_URL=http://localhost:12112/blackbaud/oauth2/token`).
-Every API route requires **both** `Authorization: Bearer fake-blackbaud-token`
-and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
+Every API route requires **both** a bearer the token endpoint issued and a
+non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
 
-- `POST /oauth2/token` — `authorization_code` (with `code` + `redirect_uri`) or
-  `refresh_token` grant → the bearer above plus `environment_id`
-  `p-fake-env-1`, `legal_entity_id`, `refresh_token_expires_in`, the SKY token
-  response shape.
+- OAuth (the backend's real connect flow, same `FakeOAuthApp` as Xero / Sage):
+  `GET /blackbaud/oauth2/authorization` 302s to a **registered** `redirect_uri`
+  with a `code` (client `fake-blackbaud-client`). `POST /oauth2/token` takes
+  `fake-blackbaud-client:fake-blackbaud-secret` by HTTP Basic, makes each code
+  single-use and bound to its `redirect_uri`, rotates refresh tokens, and answers
+  in the SKY shape: the bearer plus `environment_id` `p-fake-env-1`,
+  `legal_entity_id` and `refresh_token_expires_in` (the backend takes the
+  environment from the token response — there is no lookup call).
 - `GET /accountspayable/v1/vendors` (`136`, `137`), `/purchaseorders`
   (`1001` 1250.00 open, `1002` 980.50 closed), `GET /generalledger/v1/accounts`
   (`01-5000-00`, `01-5100-00`, `01-2000-00`) — `{"count", "value"}` with
@@ -275,3 +305,14 @@ and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   (`PO-FAKE-NS-501` 2100.50 USD open, `PO-FAKE-NS-502` 640.00 GBP closed).
   `DELETE /vendorBill/{id}` → 204 for a `pendingApproval` bill only
   (`/__set-status` with `"pendingApproval"`).
+
+## QuickBooks Online (`/qbo`)
+
+`GET /qbo/oauth2/authorize` 302s straight back to `redirect_uri` with a `code`
+and `realmId` — but only when `redirect_uri` exactly matches a registered URI,
+as Intuit requires; anything else is a 400 `invalid_request`, so the fake is
+never an open redirect. The registered set defaults to
+`http://{localhost,127.0.0.1}:{8000-8009}/api/erp/oauth/callback` (the
+backend's ERP OAuth callback on the dev API port and the worktree offsets);
+set `FAKE_ERP_OAUTH_REDIRECT_URIS` (comma-separated) to replace it. The same
+registered set guards the Xero authorize route.

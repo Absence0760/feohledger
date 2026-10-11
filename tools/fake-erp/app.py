@@ -8,24 +8,194 @@ real ERP adapters (backend/app/services/erp_adapters/):
     /d365/...                               Dynamics 365 Business Central OData
 
 State is in-memory only (module-level dicts), fully deterministic, and
-resettable via POST /__reset. No external deps beyond fastapi + uvicorn.
+resettable via POST /__reset. No external deps beyond fastapi + uvicorn, plus
+defusedxml for the request-supplied XML the SYSPRO routes parse.
 """
 
 from __future__ import annotations
 
 import copy
+import os
 import re
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 from typing import Any
 from urllib.parse import parse_qs
 
+from defusedxml import DefusedXmlException
+from defusedxml import ElementTree as SafeET
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 app = FastAPI(title="fake-erp", docs_url=None, redoc_url=None)
 
 D365_TOKEN = "fake-d365-token"
+
+# The redirect URIs "registered" on every fake OAuth app (QBO, Xero). A real
+# provider refuses an authorize request whose redirect_uri is not an exact
+# match for one of the app's registered URIs, and so does this fake: an
+# unregistered target would make it an open redirect. The default covers the
+# backend's ERP OAuth callback (backend/app/services/erp_oauth.py
+# CALLBACK_PATH) on the dev API port and the per-worktree offsets above it;
+# FAKE_ERP_OAUTH_REDIRECT_URIS (comma-separated) replaces the list.
+OAUTH_REDIRECT_URIS = tuple(
+    uri.strip()
+    for uri in os.environ.get(
+        "FAKE_ERP_OAUTH_REDIRECT_URIS",
+        ",".join(
+            f"http://{host}:{port}/api/erp/oauth/callback"
+            for host in ("localhost", "127.0.0.1")
+            for port in range(8000, 8010)
+        ),
+    ).split(",")
+    if uri.strip()
+)
+
+
+def _registered_redirect(redirect_uri: str) -> str | None:
+    """The registered URI equal to ``redirect_uri`` — redirect to THIS, never
+    to the caller's string — or None when it is not registered."""
+    return next((uri for uri in OAUTH_REDIRECT_URIS if uri == redirect_uri), None)
+
+
+#: Every FakeOAuthApp by key, for the /__oauth/{key}/... test hooks.
+FAKE_OAUTH_APPS: dict[str, Any] = {}
+
+
+class FakeOAuthApp:
+    """One provider's fake OAuth 2.0 authorization-code app.
+
+    ``authorize`` 302s straight back to a REGISTERED redirect_uri with a code
+    (no consent screen); ``token`` checks the client (HTTP Basic or form
+    fields, per provider), makes each code single-use and bound to the
+    redirect_uri it was issued for, and rotates refresh tokens (a spent one is
+    invalid_grant). ``issued`` says whether a bearer is one this app minted,
+    for the provider's tenant-lookup endpoint. State lives under STATE, so
+    POST /__reset clears it.
+    """
+
+    def __init__(self, key: str, client_id: str, client_secret: str) -> None:
+        self.key, self.client_id, self.client_secret = key, client_id, client_secret
+        FAKE_OAUTH_APPS[key] = self
+
+    def _state(self) -> dict[str, Any]:
+        return STATE.setdefault(
+            f"oauth_{self.key}",
+            {
+                "codes": {},
+                "refresh_token": None,
+                "counter": 0,
+                "issued": set(),
+                # Test hooks (/__oauth/{key}/...): the expires_in the next
+                # tokens carry, and how many refresh grants succeeded.
+                "lifetime": 1800,
+                "refreshes": 0,
+            },
+        )
+
+    def authorize(
+        self, redirect_uri: str, state: str, client_id: str, response_type: str
+    ) -> Response:
+        from urllib.parse import urlencode
+
+        from fastapi.responses import RedirectResponse
+
+        if client_id != self.client_id or response_type != "code":
+            raise ProviderError(400, {"error": "invalid_client"})
+        registered = _registered_redirect(redirect_uri)
+        if registered is None:
+            raise ProviderError(
+                400, {"error": "invalid_request", "error_description": "redirect_uri"}
+            )
+        st = self._state()
+        st["counter"] += 1
+        code = f"fake-{self.key}-code-{st['counter']}"
+        st["codes"][code] = registered
+        sep = "&" if "?" in registered else "?"
+        return RedirectResponse(
+            f"{registered}{sep}{urlencode({'code': code, 'state': state})}", status_code=302
+        )
+
+    async def token(self, request: Request, *, client_auth: str = "basic") -> dict:
+        import base64
+
+        raw = (await request.body()).decode("utf-8", errors="replace")
+        form = {k: v[0] for k, v in parse_qs(raw).items()}
+        if client_auth == "basic":
+            header = request.headers.get("authorization", "")
+            try:
+                decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
+            except Exception:  # noqa: BLE001
+                decoded = ""
+            cid, _, secret = decoded.partition(":")
+        else:
+            cid, secret = form.get("client_id", ""), form.get("client_secret", "")
+        if (cid, secret) != (self.client_id, self.client_secret):
+            raise ProviderError(401, {"error": "invalid_client"})
+        st = self._state()
+        if form.get("grant_type") == "authorization_code":
+            # Single use, and bound to the redirect_uri it was issued for.
+            if st["codes"].pop(form.get("code", ""), None) != form.get("redirect_uri"):
+                raise ProviderError(400, {"error": "invalid_grant"})
+        elif form.get("grant_type") == "refresh_token":
+            if not st["refresh_token"] or form.get("refresh_token") != st["refresh_token"]:
+                raise ProviderError(400, {"error": "invalid_grant"})
+            st["refreshes"] += 1
+        else:
+            raise ProviderError(400, {"error": "unsupported_grant_type"})
+        st["counter"] += 1
+        access = f"fake-{self.key}-access-{st['counter']}"
+        st["refresh_token"] = f"fake-{self.key}-refresh-{st['counter']}"
+        st["issued"].add(access)
+        return {
+            "access_token": access,
+            "refresh_token": st["refresh_token"],
+            "token_type": "Bearer",
+            "expires_in": st["lifetime"],
+        }
+
+    def issued(self, request: Request) -> bool:
+        token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        return token in self._state()["issued"]
+
+
+def _fake_oauth_app(key: str) -> FakeOAuthApp:
+    app_ = FAKE_OAUTH_APPS.get(key)
+    if app_ is None:
+        raise ProviderError(404, {"detail": "unknown fake OAuth app"})
+    return app_
+
+
+@app.post("/__oauth/{key}/lifetime")
+async def fake_oauth_lifetime(key: str, body: dict) -> dict:
+    """Test hook: the expires_in every token issued from now on carries. Under
+    the backend's 120 s refresh margin, so each use refreshes first."""
+    _fake_oauth_app(key)._state()["lifetime"] = int(body.get("seconds", 1800))
+    return {"status": "ok"}
+
+
+@app.get("/__oauth/{key}/stats")
+async def fake_oauth_stats(key: str) -> dict:
+    """Test hook: how many refresh grants succeeded (proves a refresh ran)."""
+    return {"refreshes": _fake_oauth_app(key)._state()["refreshes"]}
+
+
+@app.post("/__oauth/{key}/revoke-access")
+async def fake_oauth_revoke_access(key: str) -> dict:
+    """Test hook: the provider rejects every access token issued so far, before
+    its expiry, while the refresh token stays good — so a 401 must refresh."""
+    _fake_oauth_app(key)._state()["issued"].clear()
+    return {"status": "ok"}
+
+
+@app.post("/__oauth/{key}/revoke")
+async def fake_oauth_revoke(key: str) -> dict:
+    """Test hook: the provider revokes the consent — every issued token and the
+    refresh token stop working (a refresh is then invalid_grant)."""
+    st = _fake_oauth_app(key)._state()
+    st["refresh_token"] = None
+    st["issued"].clear()
+    return {"status": "ok"}
 
 # ---------------------------------------------------------------------------
 # In-memory state
@@ -1120,13 +1290,24 @@ def _syspro_rows_xml(table: str, rows: list[dict], columns: list[str]) -> str:
     return ET.tostring(root, encoding="unicode")
 
 
+def _syspro_parse(document: str) -> ET.Element | None:
+    """Parse request-supplied XML, or None when it is malformed or declares a
+    DTD / entities (defusedxml refuses those rather than expanding them)."""
+    try:
+        return SafeET.fromstring(document)
+    except (ET.ParseError, DefusedXmlException):
+        return None
+
+
 @syspro.get("/Query/Query")
 async def syspro_query(UserId: str = "", BusinessObject: str = "", XmlIn: str = "") -> Response:
     if UserId not in _syspro_state()["sessions"]:
         return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
     if BusinessObject != "COMFND":
         return _syspro_text("ERROR: Business object not supported by fake-erp")
-    query = ET.fromstring(XmlIn)
+    query = _syspro_parse(XmlIn)
+    if query is None:
+        return _syspro_text("ERROR: XmlIn is not a valid XML document")
     table = query.findtext("TableName", "")
     columns = [c.text or "" for c in query.findall("Columns/Column")]
     try:
@@ -1149,8 +1330,10 @@ async def syspro_post(
         return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
     if BusinessObject != "APSTIN":
         return _syspro_text("ERROR: Business object not supported by fake-erp")
-    ET.fromstring(XmlParameters)  # must be well-formed
-    posting = ET.fromstring(XmlIn).find("Item/Posting")
+    document = _syspro_parse(XmlIn)
+    if _syspro_parse(XmlParameters) is None or document is None:
+        return _syspro_text("ERROR: XmlParameters / XmlIn is not a valid XML document")
+    posting = document.find("Item/Posting")
     if posting is None:
         return _syspro_text("ERROR: Posting element missing")
     supplier = posting.findtext("Supplier", "")
@@ -1162,7 +1345,7 @@ async def syspro_post(
     amount = Decimal(posting.findtext("InvoiceAmount", "0"))
     known_gl = {g["GlCode"] for g in SYSPRO_GL}
     distributed = Decimal(0)
-    for line in ET.fromstring(XmlIn).findall("Item/Distribution/DistributionLine"):
+    for line in document.findall("Item/Distribution/DistributionLine"):
         if line.findtext("LedgerCode", "") not in known_gl:
             return _syspro_text("ERROR: Ledger code not on file")
         distributed += Decimal(line.findtext("DistributionValue", "0"))
@@ -1445,6 +1628,41 @@ async def xero_set_status(body: dict) -> dict:
     return {"status": "ok"}
 
 
+
+# Xero identity (FakeOAuthApp, client by HTTP Basic) + GET /connections, which
+# lists the one organisation this consent connected (the backend reads
+# tenantId from it). The accounting routes above stay shape-only on the bearer.
+XERO_TENANT_ID = "fake-xero-tenant-1"
+XERO_OAUTH = FakeOAuthApp("xero", "fake-xero-client", "fake-xero-secret")
+
+
+@app.get("/xero/identity/connect/authorize")
+async def xero_authorize(
+    redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
+) -> Response:
+    return XERO_OAUTH.authorize(redirect_uri, state, client_id, response_type)
+
+
+@app.post("/xero/identity/connect/token")
+async def xero_token(request: Request) -> dict:
+    return await XERO_OAUTH.token(request, client_auth="basic")
+
+
+@app.get("/xero/connections")
+async def xero_connections(request: Request) -> Response:
+    if not XERO_OAUTH.issued(request):
+        return JSONResponse({"Title": "Unauthorized"}, status_code=401)
+    return JSONResponse(
+        [
+            {
+                "id": "fake-xero-connection-1",
+                "tenantId": XERO_TENANT_ID,
+                "tenantType": "ORGANISATION",
+                "tenantName": "Fake Xero Org",
+            }
+        ]
+    )
+
 app.include_router(xero)
 
 
@@ -1668,6 +1886,32 @@ async def sage_set_status(body: dict) -> dict:
     if body.get("outstanding_amount") is not None:
         record["outstanding_amount"] = _XeroDecimal(str(body["outstanding_amount"]))
     return {"status": "ok"}
+
+
+
+# Sage identity (FakeOAuthApp, client as FORM fields — Sage's token endpoint
+# takes client_id / client_secret in the body) + GET /businesses, which the
+# backend reads the one business id from after the code exchange.
+SAGE_OAUTH = FakeOAuthApp("sage", "fake-sage-client", "fake-sage-secret")
+
+
+@app.get("/sage/oauth2/auth/central")
+async def sage_authorize(
+    redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
+) -> Response:
+    return SAGE_OAUTH.authorize(redirect_uri, state, client_id, response_type)
+
+
+@app.post("/sage/oauth2/token")
+async def sage_token(request: Request) -> dict:
+    return await SAGE_OAUTH.token(request, client_auth="body")
+
+
+@sage.get("/businesses")
+async def sage_businesses(request: Request) -> dict:
+    if not SAGE_OAUTH.issued(request):
+        raise _sage_error(401, "Unauthorised", "Invalid bearer token")
+    return {"$items": [{"id": SAGE_BUSINESS_ID, "displayed_as": "Fake Sage Business"}]}
 
 
 app.include_router(sage)
@@ -1900,7 +2144,7 @@ import json
 
 blackbaud = APIRouter(prefix="/blackbaud")
 
-BLACKBAUD_TOKEN = "fake-blackbaud-token"
+BLACKBAUD_OAUTH = FakeOAuthApp("blackbaud", "fake-blackbaud-client", "fake-blackbaud-secret")
 BLACKBAUD_ENVIRONMENT_ID = "p-fake-env-1"
 
 BLACKBAUD_VENDOR_FIXTURES: list[dict] = [
@@ -1938,7 +2182,7 @@ def _require_blackbaud_auth(request: Request) -> None:
         raise ProviderError(
             401, {"statusCode": 401, "message": "Access denied due to missing subscription key."}
         )
-    if request.headers.get("authorization", "") != f"Bearer {BLACKBAUD_TOKEN}":
+    if not BLACKBAUD_OAUTH.issued(request):
         raise ProviderError(401, {"statusCode": 401, "message": "Invalid access token."})
 
 
@@ -1957,20 +2201,21 @@ def _blackbaud_page(request: Request, rows: list[dict]) -> dict:
     return {"count": len(rows), "value": copy.deepcopy(rows[offset : offset + limit])}
 
 
+@app.get("/blackbaud/oauth2/authorization")
+async def blackbaud_authorize(
+    redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
+) -> Response:
+    return BLACKBAUD_OAUTH.authorize(redirect_uri, state, client_id, response_type)
+
+
 @blackbaud.post("/oauth2/token")
 async def blackbaud_token(request: Request) -> dict:
-    raw = (await request.body()).decode("utf-8", errors="replace")
-    form = {k: v[0] for k, v in parse_qs(raw).items()}
-    grant = form.get("grant_type")
-    authorization = grant == "authorization_code" and form.get("code") and form.get("redirect_uri")
-    refresh = grant == "refresh_token" and form.get("refresh_token")
-    if not (authorization or refresh):
-        raise ProviderError(400, {"error": "invalid_grant"})
+    """FakeOAuthApp's exchange (client by HTTP Basic), in the SKY response
+    shape: the environment the admin approved rides on the token response."""
+    issued = await BLACKBAUD_OAUTH.token(request, client_auth="basic")
     return {
-        "access_token": BLACKBAUD_TOKEN,
+        **issued,
         "token_type": "bearer",
-        "expires_in": 3600,
-        "refresh_token": "fake-blackbaud-refresh",
         "refresh_token_expires_in": 31536000,
         "environment_id": BLACKBAUD_ENVIRONMENT_ID,
         "environment_name": "Fake FE NXT Environment",
@@ -2433,6 +2678,7 @@ QBO_CLIENT_SECRET = "fake-qbo-secret"
 QBO_REALM = "fake-realm-1"
 
 
+
 def _qbo() -> dict[str, Any]:
     if "qbo" not in STATE:
         STATE["qbo"] = {
@@ -2491,13 +2737,17 @@ async def qbo_authorize(redirect_uri: str, state: str, client_id: str = "") -> R
 
     if client_id != QBO_CLIENT_ID:
         raise ProviderError(400, {"error": "invalid_client"})
+    # Redirect to the registered URI, never to the caller's string.
+    registered = _registered_redirect(redirect_uri)
+    if registered is None:
+        raise ProviderError(400, {"error": "invalid_request", "error_description": "redirect_uri"})
     st = _qbo()
     st["counter"] += 1
     code = f"fake-qbo-code-{st['counter']}"
     st["codes"].add(code)
-    sep = "&" if "?" in redirect_uri else "?"
+    sep = "&" if "?" in registered else "?"
     query = urlencode({"code": code, "state": state, "realmId": QBO_REALM})
-    return RedirectResponse(f"{redirect_uri}{sep}{query}", status_code=302)
+    return RedirectResponse(f"{registered}{sep}{query}", status_code=302)
 
 
 @qbo.post("/oauth2/token")
@@ -2587,7 +2837,9 @@ async def qbo_preferences(request: Request, realm: str) -> dict:
     }
 
 
-_QBO_SELECT = re.compile(r"select \* from (\w+)(.*)$", re.IGNORECASE)
+# The lookahead pins where the entity name ends and DOTALL lets the tail take
+# everything, so the match has one split and cannot backtrack quadratically.
+_QBO_SELECT = re.compile(r"select \* from (\w+)(?!\w)(.*)", re.IGNORECASE | re.DOTALL)
 _QBO_DOCNUMBER = re.compile(r"where DocNumber = '((?:[^'\\]|\\.)*)'", re.IGNORECASE)
 
 

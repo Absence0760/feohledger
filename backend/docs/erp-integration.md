@@ -234,7 +234,7 @@ After sending an invoice to the ERP, the system needs to know when the ERP has p
 | Method | How it works | When to use |
 |---|---|---|
 | **Webhook** | ERP calls our endpoint when status changes | Preferred — real-time, no polling cost |
-| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support |
+| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** (below) |
 
 **Webhook endpoint:** `POST /api/erp/webhook/{erp_type}`
 
@@ -269,10 +269,16 @@ integration that omits a per-delivery `event_id` instead hits
 path, which is the correct trade-off: no dedup at all beats false dedup on a
 different event.
 
-**Polling job:** Runs every 5 minutes for invoices in `sent_to_erp` status older than 1 minute:
-1. Calls `adapter.get_invoice_status(erp_document_id)`
-2. If status changed, transitions the invoice
-3. If stuck for > 30 minutes, marks as `failed` with timeout reason
+**Polling job — not built.** Every adapter implements
+`get_invoice_status(erp_document_id)` (and fake-erp's `__set-status` /
+`__set-balance` hooks can drive it), but **nothing under `app/` calls it**: there is
+no background sweep, so an ERP without a webhook never reports a status change
+back, and nothing times a stuck `sent_to_erp` invoice out. The webhook above is the
+only inbound path today. The intended design was a sweep every few minutes over
+`sent_to_erp` invoices that transitions on a changed status and fails one stuck
+past a timeout; before wiring it, three adapters' "balance 0 ⇒ paid" mapping has to
+change (it also matches a credited or zero-total bill). Tracked in
+`docs/followups.md` ("ERP status polling and void are unwired").
 
 ## Organization ERP Configuration
 
@@ -1348,7 +1354,9 @@ storage), and every call sends `Xero-Tenant-Id: <external_tenant_id>`, the
 organisation picked at consent. Base `https://api.xero.com/api.xro/2.0`,
 overridable with `FEOH_ERP_XERO_API_BASE` (fake-erp in dev). Platform app
 credentials: `FEOH_ERP_XERO_CLIENT_ID` / `_SECRET` (empty → unavailable, no
-fallback). Scopes are Xero's granular set (`accounting.invoices`,
+fallback); `FEOH_ERP_XERO_AUTHORIZE_URL` / `_TOKEN_URL` override the identity
+endpoints, which dev points at fake-erp so the connect flow runs locally
+(`frontend/tests-e2e/erp/xero.spec.ts`). Scopes are Xero's granular set (`accounting.invoices`,
 `accounting.contacts.read`, `accounting.settings.read`, `offline_access`),
 which apps created on or after 2026-03-02 must use.
 
@@ -1441,7 +1449,9 @@ token comes only from `self.access_token()`, and every call sends
 `https://www.sageone.com/oauth2/auth/central` with `filter=apiv3.1`, token at
 `https://oauth.accounting.sage.com/token`, scope `full_access`. Platform app
 credentials: `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `_SECRET` (empty →
-unavailable, no fallback).
+unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_URL`
+override the OAuth endpoints, which dev points at fake-erp so the connect flow
+runs locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
 
 **Region coverage: not South Africa.** Every v3.1 operation lists its
 availability as CA, DE, ES, FR, GB, IE and US. Sage Business Cloud Accounting
@@ -1662,8 +1672,10 @@ Request rules worth knowing:
   `invoice_date_missing`, `due_date_missing`, `amount_not_positive`,
   `duplicate_invoice_number`.
 
-Tests: `backend/tests/test_erp_blackbaud_adapter.py`. fake-erp surface:
-`/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_URL`).
+Tests: `backend/tests/test_erp_blackbaud_adapter.py`, and end to end through the
+real OAuth connect `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`. fake-erp
+surface: `/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_URL`,
+`FEOH_ERP_BLACKBAUD_AUTHORIZE_URL`).
 
 ## Business Central: chart, POs and void
 
@@ -1882,6 +1894,22 @@ system keeping the grant alive). A
 provider `invalid_grant` marks `needs_reconnect` and writes
 `organization.erp_reconnect_required` (best-effort, after the commit). An outage raises
 `ErpTokenRefreshError` and leaves the connection alone.
+
+**A 401 refreshes too, not only expiry.** A provider can reject a stored token
+before its recorded `expires_at` (the customer re-consented elsewhere, an admin
+revoked one session). Every OAuth adapter's API client comes from
+`OAuthErpAdapter.oauth_client`, whose `httpx` auth flow
+(`oauth_base.RefreshOnUnauthorized`) reads the rejected bearer, calls
+`get_access_token(..., rejected_token=...)` — which refreshes only if that token is
+still the stored one — and replays the request once; later requests in the same
+client carry the refreshed token directly. A failed refresh propagates like it does
+from `access_token()`: a revoked consent is the final `ErpNotConnectedError`
+(`needs_reconnect` is already set), an outage the retryable `ErpTokenRefreshError`
+— never flattened into a 401 the push loop would retry. QuickBooks keeps its
+own equivalent loop in `_request`. The only bare clients are the consent-time
+tenant lookups (no stored connection to refresh yet), pinned by
+`tests/test_erp_oauth.py::test_every_oauth_adapter_api_client_refreshes_on_401`;
+end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
 
 **Per-provider hooks on the spec.** The company id comes from
 `external_tenant_id_param` (a callback query parameter: QBO `realmId`), from

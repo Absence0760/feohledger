@@ -87,6 +87,8 @@ SAGE_ACCOUNTING_OAUTH = register_oauth_provider(
         extra_authorize_params={"filter": "apiv3.1"},
         # Sage's token endpoint takes client_id / client_secret as form fields.
         token_auth="body",
+        authorize_url_setting="erp_sage_accounting_authorize_url",
+        token_url_setting="erp_sage_accounting_token_url",
     )
 )
 
@@ -298,7 +300,7 @@ class SageAccountingAdapter(OAuthErpAdapter):
             return _refused(TAX_NOT_ITEMISED)
 
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self.oauth_client(timeout=30) as client:
             try:
                 existing = await self._find_existing(client, headers, payload)
             except _HttpFailure as failure:
@@ -400,7 +402,7 @@ class SageAccountingAdapter(OAuthErpAdapter):
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.oauth_client(timeout=15) as client:
             invoice = await self._get_invoice(client, headers, erp_document_id)
         if invoice is None:
             return ErpInvoiceStatus.unknown
@@ -413,7 +415,7 @@ class SageAccountingAdapter(OAuthErpAdapter):
         payment to be removed first), so that is False.
         """
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self.oauth_client(timeout=30) as client:
             invoice = await self._get_invoice(client, headers, erp_document_id)
             if invoice is None:
                 return False
@@ -439,7 +441,7 @@ class SageAccountingAdapter(OAuthErpAdapter):
     async def test_connection(self) -> bool:
         try:
             headers = await self._headers()
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with self.oauth_client(timeout=10) as client:
                 resp = await client.get(f"{_api_base()}/business_settings", headers=headers)
             return resp.status_code == 200
         except Exception:
@@ -452,7 +454,7 @@ class SageAccountingAdapter(OAuthErpAdapter):
         except Exception:
             return []
         out: list[dict] = []
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self.oauth_client(timeout=30) as client:
             for page in range(1, _PAGE_CAP + 1):
                 try:
                     resp = await client.get(
