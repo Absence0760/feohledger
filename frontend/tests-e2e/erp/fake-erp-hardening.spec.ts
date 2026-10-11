@@ -1,3 +1,5 @@
+import type { APIRequestContext } from '@playwright/test';
+
 import { expect, test } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import { FAKE_ERP_BASE } from './helpers';
@@ -13,6 +15,27 @@ import { FAKE_ERP_BASE } from './helpers';
 const SYSPRO = `${FAKE_ERP_BASE}/syspro/SYSPROWCFService/Rest`;
 const QBO = `${FAKE_ERP_BASE}/qbo`;
 const QBO_CLIENT_ID = 'fake-qbo-client';
+
+/** A live QBO bearer for `fake-realm-1`, through the real code → token flow. */
+async function qboBearer(request: APIRequestContext): Promise<string> {
+	const authorize = await request.get(`${QBO}/oauth2/authorize`, {
+		params: {
+			redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+			state: 's',
+			client_id: QBO_CLIENT_ID
+		},
+		maxRedirects: 0
+	});
+	const code = new URL(authorize.headers()['location']).searchParams.get('code') ?? '';
+	const token = await request.post(`${QBO}/oauth2/token`, {
+		headers: {
+			Authorization: `Basic ${Buffer.from(`${QBO_CLIENT_ID}:fake-qbo-secret`).toString('base64')}`,
+			'Content-Type': 'application/x-www-form-urlencoded'
+		},
+		data: `grant_type=authorization_code&code=${code}`
+	});
+	return `Bearer ${(await token.json()).access_token}`;
+}
 
 test.describe('fake-erp request hardening', () => {
 	// No app, no tenant, no sign-in: these talk to the container only.
@@ -384,5 +407,35 @@ test.describe('fake-erp request hardening', () => {
 		const other = await company('someone-elses-realm', bearer);
 		expect(other.status()).toBe(403);
 		expect((await other.json()).Fault.Error[0].code).toBe('3100');
+	});
+
+	test('QBO bill create is idempotent on requestid', async ({ request }) => {
+		const auth = { Authorization: await qboBearer(request) };
+		const url = `${QBO}/v3/company/fake-realm-1/bill`;
+		const requestid = `req-${Date.now()}`;
+		const body = {
+			VendorRef: { value: '56' },
+			DocNumber: requestid,
+			Line: [{ Amount: '40.10' }, { Amount: '2.15' }]
+		};
+
+		const first = await request.post(url, { params: { requestid }, headers: auth, data: body });
+		expect(first.status()).toBe(200);
+		const bill = (await first.json()).Bill;
+		expect(bill.TotalAmt).toBe(42.25);
+
+		// A retry with the same requestid returns the same bill, not a second one.
+		const retry = await request.post(url, { params: { requestid }, headers: auth, data: body });
+		expect((await retry.json()).Bill.Id).toBe(bill.Id);
+		const fresh = await request.post(url, {
+			params: { requestid: `${requestid}-b` },
+			headers: auth,
+			data: body
+		});
+		expect((await fresh.json()).Bill.Id).not.toBe(bill.Id);
+
+		const noVendor = await request.post(url, { headers: auth, data: { Line: [] } });
+		expect(noVendor.status()).toBe(400);
+		expect((await noVendor.json()).Fault.Error[0].code).toBe('2020');
 	});
 });
