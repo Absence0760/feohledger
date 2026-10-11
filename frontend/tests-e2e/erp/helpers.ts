@@ -228,6 +228,10 @@ export async function createApprovedInvoice(
 		glAccount?: string;
 		/** Exact invoice number, for an ERP that caps its length (QBO: 21). */
 		invoiceNumber?: string;
+		/** ISO 4217 code; defaults to USD. */
+		currency?: string;
+		/** The VAT / sales tax the invoice states, as an exact decimal string. */
+		taxAmount?: string;
 	}
 ): Promise<Inv> {
 	const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -239,8 +243,9 @@ export async function createApprovedInvoice(
 			invoice_number: opts.invoiceNumber ?? `${opts.prefix}-${unique}`,
 			vendor: opts.vendor ?? 'Fake ERP Vendor A',
 			amount: opts.amount ?? '1234.56',
-			currency: 'USD',
+			currency: opts.currency ?? 'USD',
 			status: 'new',
+			...(opts.taxAmount ? { tax_amount: opts.taxAmount } : {}),
 			...(opts.glAccount ? { gl_account: opts.glAccount } : {})
 		}
 	});
