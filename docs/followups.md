@@ -39,10 +39,10 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-10 — the ERP adapter e2e round on PR #544 opened one
-(c) entry (fake-erp has no OAuth authorize step for Blackbaud, so that adapter
-has no end-to-end coverage; Xero's and Sage Business Cloud's were added in the same PR), taking the file
-from 98 → 99. Before that, 2026-10-09 — enabling IAM database authentication on RDS
+**Last reconciled:** 2026-10-10 — PR #544 opened and closed one (c) entry in the
+same change (three OAuth ERP adapters had no local connect and no e2e; Xero, Sage
+Business Cloud and Blackbaud now connect through fake-erp's `FakeOAuthApp`), so the
+file stays at 98. Before that, 2026-10-09 — enabling IAM database authentication on RDS
 (#542) opened one (c) entry (the app still signs in with the master password),
 taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
 (decisions §269–§272), merged onto the provider-credential store, opened
@@ -142,7 +142,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**99 open: 82 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**98 open: 81 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1480,23 +1480,6 @@ scope (§260) — do not fold them into any of these.
       unreadable credentials" action on `/api/organization/credentials/{block}`,
       audited, that replaces the row without opening it. **Trigger:** the first
       key rotation or environment where it happens.
-
-### Surfaced by the ERP adapter e2e round (2026-10-10, PR #544)
-
-- [ ] **(c) Blackbaud's OAuth connect cannot run locally, so the adapter has no
-      end-to-end coverage.** `blackbaud_fe_nxt` is `auth: "oauth"` in
-      `erp_adapters/catalog.py`; fake-erp fakes its token endpoint (and dev
-      overrides `FEOH_ERP_BLACKBAUD_TOKEN_URL`), but there is no fake authorize
-      step and `BLACKBAUD_OAUTH` has no `authorize_url_setting`, so the connect
-      cannot start without a Blackbaud account. Every other OAuth ERP (QuickBooks
-      Online, Xero, Sage Business Cloud) now connects through fake-erp's
-      `FakeOAuthApp` and has an `erp/` Playwright spec. That is also a guard rail
-      7 gap. **Durable fix:** what PR #544 did for Xero and Sage — an
-      `authorize_url_setting` with a matching `FEOH_ERP_BLACKBAUD_AUTHORIZE_URL`,
-      fake-erp's authorize + token on `FakeOAuthApp`, the committed
-      `.env.development` pointed at it, and an `erp/blackbaud-fe-nxt.spec.ts`
-      (`erp/sage-accounting.spec.ts` is the template). **Trigger:** the next change
-      to the adapter, or its first production customer — whichever comes first.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
