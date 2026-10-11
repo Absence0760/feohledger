@@ -438,4 +438,50 @@ test.describe('fake-erp request hardening', () => {
 		expect(noVendor.status()).toBe(400);
 		expect((await noVendor.json()).Fault.Error[0].code).toBe('2020');
 	});
+
+	test('QBO bill lifecycle: find by quoted DocNumber, stale delete refused', async ({
+		request
+	}) => {
+		const auth = { Authorization: await qboBearer(request) };
+		const base = `${QBO}/v3/company/fake-realm-1`;
+		const docNumber = `O'Brien-${Date.now()}`;
+		const created = await request.post(`${base}/bill`, {
+			headers: auth,
+			data: { VendorRef: { value: '57' }, DocNumber: docNumber, Line: [{ Amount: '9.99' }] }
+		});
+		const bill = (await created.json()).Bill;
+
+		// The query escapes the quote; the fake unescapes it and finds the bill.
+		const escaped = docNumber.replace("'", "\\'");
+		const found = await request.get(`${base}/query`, {
+			params: { query: `select * from Bill where DocNumber = '${escaped}'` },
+			headers: auth
+		});
+		expect((await found.json()).QueryResponse.Bill.map((b: { Id: string }) => b.Id)).toEqual([
+			bill.Id
+		]);
+
+		// Marking it paid bumps the SyncToken, so the old token is stale.
+		await request.post(`${FAKE_ERP_BASE}/__qbo/set-balance`, { data: { id: bill.Id, balance: 0 } });
+		const paid = (await (await request.get(`${base}/bill/${bill.Id}`, { headers: auth })).json())
+			.Bill;
+		expect(paid.Balance).toBe(0);
+		expect(paid.SyncToken).toBe('1');
+
+		const stale = await request.post(`${base}/bill`, {
+			params: { operation: 'delete' },
+			headers: auth,
+			data: { Id: bill.Id, SyncToken: '0' }
+		});
+		expect((await stale.json()).Fault.Error[0].code).toBe('5010');
+
+		const deleted = await request.post(`${base}/bill`, {
+			params: { operation: 'delete' },
+			headers: auth,
+			data: { Id: bill.Id, SyncToken: '1' }
+		});
+		expect((await deleted.json()).Bill.status).toBe('Deleted');
+		const gone = await request.get(`${base}/bill/${bill.Id}`, { headers: auth });
+		expect((await gone.json()).Fault.Error[0].code).toBe('610');
+	});
 });
