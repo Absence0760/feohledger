@@ -451,8 +451,9 @@ test.describe('fake-erp request hardening', () => {
 		});
 		const bill = (await created.json()).Bill;
 
-		// The query escapes the quote; the fake unescapes it and finds the bill.
-		const escaped = docNumber.replace("'", "\\'");
+		// Escape every backslash and quote, as a QBO query string literal needs;
+		// the fake unescapes them and finds the bill.
+		const escaped = docNumber.replace(/[\\']/g, (c) => `\\${c}`);
 		const found = await request.get(`${base}/query`, {
 			params: { query: `select * from Bill where DocNumber = '${escaped}'` },
 			headers: auth
