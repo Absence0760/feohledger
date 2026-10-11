@@ -40,8 +40,8 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-10 — the ERP adapter e2e round on PR #544 opened one
-(c) entry (fake-erp has no OAuth endpoints for Xero / Sage Business Cloud /
-Blackbaud, so those three adapters have no end-to-end coverage), taking the file
+(c) entry (fake-erp has no OAuth endpoints for Sage Business Cloud / Blackbaud,
+so those two adapters have no end-to-end coverage; Xero's was added in the same PR), taking the file
 from 98 → 99. Before that, 2026-10-09 — enabling IAM database authentication on RDS
 (#542) opened one (c) entry (the app still signs in with the master password),
 taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
@@ -1483,23 +1483,24 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the ERP adapter e2e round (2026-10-10, PR #544)
 
-- [ ] **(c) Three OAuth ERP adapters cannot be connected locally, so they have no
-      end-to-end coverage.** `xero`, `sage_accounting` and `blackbaud_fe_nxt` are
+- [ ] **(c) Two OAuth ERP adapters cannot be connected locally, so they have no
+      end-to-end coverage.** `sage_accounting` and `blackbaud_fe_nxt` are
       `auth: "oauth"` in `erp_adapters/catalog.py`, but `tools/fake-erp` serves
-      only their REST APIs — there is no `/oauth2/authorize` + token exchange for
-      them, and `backend/.env.development` sets no `FEOH_ERP_*_AUTHORIZE_URL` /
-      `*_TOKEN_URL` pointing at the fake. Without a connect, the adapter has no
-      sealed token to call with, so the `erp/` Playwright suite covers QuickBooks
-      Online (which has a fake OAuth flow), SYSPRO, Sage Accounting (ZA),
-      NetSuite, Business Central and Merge.dev — but not these three. That is
-      also a guard rail 7 gap: a contributor cannot exercise their connect flow
-      with no cloud account. **Durable fix:** give each a fake authorize / token /
-      revoke surface modelled on fake-erp's `/qbo` one (registered-redirect
-      allowlist included), point the committed `.env.development` at it, and add
+      only their REST APIs — there is no fake authorize + token exchange for them,
+      and their `OAuthProviderSpec`s carry no `*_url_setting` override hooks.
+      Without a connect, the adapter has no sealed token to call with, so the
+      `erp/` Playwright suite covers QuickBooks Online and Xero (both connect
+      through a fake OAuth flow), SYSPRO, Sage Accounting (ZA), NetSuite, Business
+      Central and Merge.dev — but not these two. That is also a guard rail 7 gap: a
+      contributor cannot exercise their connect flow with no cloud account.
+      **Durable fix:** what PR #544 did for Xero — add `authorize_url_setting` /
+      `token_url_setting` to the provider's spec with matching `FEOH_ERP_*`
+      settings, give fake-erp an authorize / token surface behind
+      `OAUTH_REDIRECT_URIS`, point the committed `.env.development` at it, and add
       an `erp/<provider>.spec.ts` that connects through the real OAuth chain and
-      reads the posted bill back from the fake, as `erp/quickbooks-online.spec.ts`
-      does. **Trigger:** the next change to any of those three adapters, or their
-      first production customer — whichever comes first.
+      reads the posted bill back from the fake (`erp/xero.spec.ts` is the
+      template). **Trigger:** the next change to either adapter, or its first
+      production customer — whichever comes first.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

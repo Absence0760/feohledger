@@ -232,6 +232,9 @@ export async function createApprovedInvoice(
 		currency?: string;
 		/** The VAT / sales tax the invoice states, as an exact decimal string. */
 		taxAmount?: string;
+		/** ISO dates, for an ERP that refuses a bill without them (Xero). */
+		invoiceDate?: string;
+		dueDate?: string;
 	}
 ): Promise<Inv> {
 	const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -246,6 +249,8 @@ export async function createApprovedInvoice(
 			currency: opts.currency ?? 'USD',
 			status: 'new',
 			...(opts.taxAmount ? { tax_amount: opts.taxAmount } : {}),
+			...(opts.invoiceDate ? { invoice_date: opts.invoiceDate } : {}),
+			...(opts.dueDate ? { due_date: opts.dueDate } : {}),
 			...(opts.glAccount ? { gl_account: opts.glAccount } : {})
 		}
 	});
