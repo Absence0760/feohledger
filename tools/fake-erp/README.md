@@ -210,6 +210,13 @@ otherwise). Point the backend at it with
   and replays the original response for a repeated `Idempotency-Key`;
   `GET /Invoices/{id}`; `POST /Invoices/{id}` changes status (DELETED only
   from DRAFT/SUBMITTED, VOIDED only from unpaid AUTHORISED).
+- OAuth (the backend's real connect flow): `GET /xero/identity/connect/authorize`
+  302s to a **registered** `redirect_uri` with a `code` (client `fake-xero-client`,
+  `response_type=code`; anything else is a 400); `POST /xero/identity/connect/token`
+  takes `fake-xero-client:fake-xero-secret` by HTTP Basic, makes each code single-use
+  and bound to its `redirect_uri`, and rotates refresh tokens; `GET /xero/connections`
+  (bearer must be one it issued) lists the one organisation, tenant
+  `fake-xero-tenant-1`. Wired up by the committed `FEOH_ERP_XERO_*` dev values.
 - Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
   "amount_paid"?}`. `POST /__reset` clears this state too.
 
@@ -286,4 +293,5 @@ as Intuit requires; anything else is a 400 `invalid_request`, so the fake is
 never an open redirect. The registered set defaults to
 `http://{localhost,127.0.0.1}:{8000-8009}/api/erp/oauth/callback` (the
 backend's ERP OAuth callback on the dev API port and the worktree offsets);
-set `FAKE_ERP_QBO_REDIRECT_URIS` (comma-separated) to replace it.
+set `FAKE_ERP_OAUTH_REDIRECT_URIS` (comma-separated) to replace it. The same
+registered set guards the Xero authorize route.

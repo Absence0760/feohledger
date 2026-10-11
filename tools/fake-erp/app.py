@@ -31,6 +31,32 @@ app = FastAPI(title="fake-erp", docs_url=None, redoc_url=None)
 
 D365_TOKEN = "fake-d365-token"
 
+# The redirect URIs "registered" on every fake OAuth app (QBO, Xero). A real
+# provider refuses an authorize request whose redirect_uri is not an exact
+# match for one of the app's registered URIs, and so does this fake: an
+# unregistered target would make it an open redirect. The default covers the
+# backend's ERP OAuth callback (backend/app/services/erp_oauth.py
+# CALLBACK_PATH) on the dev API port and the per-worktree offsets above it;
+# FAKE_ERP_OAUTH_REDIRECT_URIS (comma-separated) replaces the list.
+OAUTH_REDIRECT_URIS = tuple(
+    uri.strip()
+    for uri in os.environ.get(
+        "FAKE_ERP_OAUTH_REDIRECT_URIS",
+        ",".join(
+            f"http://{host}:{port}/api/erp/oauth/callback"
+            for host in ("localhost", "127.0.0.1")
+            for port in range(8000, 8010)
+        ),
+    ).split(",")
+    if uri.strip()
+)
+
+
+def _registered_redirect(redirect_uri: str) -> str | None:
+    """The registered URI equal to ``redirect_uri`` — redirect to THIS, never
+    to the caller's string — or None when it is not registered."""
+    return next((uri for uri in OAUTH_REDIRECT_URIS if uri == redirect_uri), None)
+
 # ---------------------------------------------------------------------------
 # In-memory state
 # ---------------------------------------------------------------------------
@@ -1462,6 +1488,104 @@ async def xero_set_status(body: dict) -> dict:
     return {"status": "ok"}
 
 
+
+# Xero identity (OAuth 2.0 authorization code) + GET /connections. Lets the
+# backend's real connect flow run locally: /identity/connect/authorize 302s
+# straight back to a registered redirect_uri with a code, /identity/connect/
+# token takes the client by HTTP Basic, makes codes single-use and rotates
+# refresh tokens, and /connections lists the one organisation this consent
+# connected (the backend reads tenantId from it). The accounting routes above
+# stay shape-only on the bearer.
+XERO_CLIENT_ID = "fake-xero-client"
+XERO_CLIENT_SECRET = "fake-xero-secret"
+XERO_TENANT_ID = "fake-xero-tenant-1"
+
+
+def _xero_oauth() -> dict[str, Any]:
+    return STATE.setdefault(
+        "xero_oauth", {"codes": {}, "refresh_token": None, "counter": 0, "issued": set()}
+    )
+
+
+@app.get("/xero/identity/connect/authorize")
+async def xero_authorize(
+    redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
+) -> Response:
+    from urllib.parse import urlencode
+
+    from fastapi.responses import RedirectResponse
+
+    if client_id != XERO_CLIENT_ID or response_type != "code":
+        raise ProviderError(400, {"error": "invalid_client"})
+    registered = _registered_redirect(redirect_uri)
+    if registered is None:
+        raise ProviderError(400, {"error": "invalid_request", "error_description": "redirect_uri"})
+    st = _xero_oauth()
+    st["counter"] += 1
+    code = f"fake-xero-code-{st['counter']}"
+    st["codes"][code] = registered
+    sep = "&" if "?" in registered else "?"
+    return RedirectResponse(
+        f"{registered}{sep}{urlencode({'code': code, 'state': state})}", status_code=302
+    )
+
+
+def _xero_issue() -> dict:
+    st = _xero_oauth()
+    st["counter"] += 1
+    access = f"fake-xero-access-{st['counter']}"
+    st["refresh_token"] = f"fake-xero-refresh-{st['counter']}"
+    st["issued"].add(access)
+    return {
+        "access_token": access,
+        "refresh_token": st["refresh_token"],
+        "token_type": "Bearer",
+        "expires_in": 1800,
+    }
+
+
+@app.post("/xero/identity/connect/token")
+async def xero_token(request: Request) -> dict:
+    import base64
+
+    header = request.headers.get("authorization", "")
+    try:
+        cid, _, secret = base64.b64decode(header.removeprefix("Basic ")).decode().partition(":")
+    except Exception:  # noqa: BLE001
+        cid = secret = ""
+    if (cid, secret) != (XERO_CLIENT_ID, XERO_CLIENT_SECRET):
+        raise ProviderError(401, {"error": "invalid_client"})
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    form = {k: v[0] for k, v in parse_qs(raw).items()}
+    st = _xero_oauth()
+    if form.get("grant_type") == "authorization_code":
+        # Single use, and bound to the redirect_uri it was issued for.
+        if st["codes"].pop(form.get("code", ""), None) != form.get("redirect_uri"):
+            raise ProviderError(400, {"error": "invalid_grant"})
+        return _xero_issue()
+    if form.get("grant_type") == "refresh_token":
+        if not st["refresh_token"] or form.get("refresh_token") != st["refresh_token"]:
+            raise ProviderError(400, {"error": "invalid_grant"})
+        return _xero_issue()
+    raise ProviderError(400, {"error": "unsupported_grant_type"})
+
+
+@app.get("/xero/connections")
+async def xero_connections(request: Request) -> Response:
+    token = request.headers.get("authorization", "").removeprefix("Bearer ")
+    if token not in _xero_oauth()["issued"]:
+        return JSONResponse({"Title": "Unauthorized"}, status_code=401)
+    return JSONResponse(
+        [
+            {
+                "id": "fake-xero-connection-1",
+                "tenantId": XERO_TENANT_ID,
+                "tenantType": "ORGANISATION",
+                "tenantName": "Fake Xero Org",
+            }
+        ]
+    )
+
 app.include_router(xero)
 
 
@@ -2449,25 +2573,6 @@ QBO_CLIENT_ID = "fake-qbo-client"
 QBO_CLIENT_SECRET = "fake-qbo-secret"
 QBO_REALM = "fake-realm-1"
 
-# The redirect URIs "registered" on the fake QBO app. Intuit refuses an
-# authorize request whose redirect_uri is not an exact match for one of the
-# app's registered URIs, and so does this fake: an unregistered target would
-# make it an open redirect. The default covers the backend's ERP OAuth
-# callback (backend/app/services/erp_oauth.py CALLBACK_PATH) on the dev API
-# port and the per-worktree offsets above it; FAKE_ERP_QBO_REDIRECT_URIS
-# (comma-separated) replaces the list for any other origin.
-QBO_REDIRECT_URIS = tuple(
-    uri.strip()
-    for uri in os.environ.get(
-        "FAKE_ERP_QBO_REDIRECT_URIS",
-        ",".join(
-            f"http://{host}:{port}/api/erp/oauth/callback"
-            for host in ("localhost", "127.0.0.1")
-            for port in range(8000, 8010)
-        ),
-    ).split(",")
-    if uri.strip()
-)
 
 
 def _qbo() -> dict[str, Any]:
@@ -2529,7 +2634,7 @@ async def qbo_authorize(redirect_uri: str, state: str, client_id: str = "") -> R
     if client_id != QBO_CLIENT_ID:
         raise ProviderError(400, {"error": "invalid_client"})
     # Redirect to the registered URI, never to the caller's string.
-    registered = next((uri for uri in QBO_REDIRECT_URIS if uri == redirect_uri), None)
+    registered = _registered_redirect(redirect_uri)
     if registered is None:
         raise ProviderError(400, {"error": "invalid_request", "error_description": "redirect_uri"})
     st = _qbo()

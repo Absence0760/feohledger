@@ -97,6 +97,8 @@ XERO_OAUTH = register_oauth_provider(
         ),
         client_id_setting="erp_xero_client_id",
         client_secret_setting="erp_xero_client_secret",
+        authorize_url_setting="erp_xero_authorize_url",
+        token_url_setting="erp_xero_token_url",
     )
 )
 

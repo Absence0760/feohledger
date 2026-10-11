@@ -290,6 +290,11 @@ class Settings(BaseSettings):
     erp_xero_api_base: str = ""
     erp_xero_client_id: str = ""
     erp_xero_client_secret: str = ""
+    # Xero OAuth endpoint overrides (operator-trusted, non-secret), read on
+    # every call. Empty → Xero's real identity endpoints. Dev points them at
+    # fake-erp so the connect flow runs with no Xero account (guard rail 7).
+    erp_xero_authorize_url: str = ""
+    erp_xero_token_url: str = ""
     erp_sage_accounting_api_base: str = ""
     erp_sage_accounting_client_id: str = ""
     erp_sage_accounting_client_secret: str = ""

@@ -1348,7 +1348,9 @@ storage), and every call sends `Xero-Tenant-Id: <external_tenant_id>`, the
 organisation picked at consent. Base `https://api.xero.com/api.xro/2.0`,
 overridable with `FEOH_ERP_XERO_API_BASE` (fake-erp in dev). Platform app
 credentials: `FEOH_ERP_XERO_CLIENT_ID` / `_SECRET` (empty → unavailable, no
-fallback). Scopes are Xero's granular set (`accounting.invoices`,
+fallback); `FEOH_ERP_XERO_AUTHORIZE_URL` / `_TOKEN_URL` override the identity
+endpoints, which dev points at fake-erp so the connect flow runs locally
+(`frontend/tests-e2e/erp/xero.spec.ts`). Scopes are Xero's granular set (`accounting.invoices`,
 `accounting.contacts.read`, `accounting.settings.read`, `offline_access`),
 which apps created on or after 2026-03-02 must use.
 
