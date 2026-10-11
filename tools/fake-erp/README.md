@@ -240,6 +240,13 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
   line with no `tax_rate_id`, or net + tax that does not equal the total;
   `GET /purchase_invoices/{id}`; `DELETE /purchase_invoices/{id}` deletes a
   draft and voids an unpaid invoice (`void_reason` required).
+- OAuth (the backend's real connect flow): `GET /sage/oauth2/auth/central` 302s to a
+  **registered** `redirect_uri` with a `code` (client `fake-sage-client`);
+  `POST /sage/oauth2/token` takes `client_id` / `client_secret` as **form fields**
+  (Sage's shape — HTTP Basic is refused), makes each code single-use and bound to
+  its `redirect_uri`, and rotates refresh tokens; `GET /sage/v3.1/businesses` (bearer
+  must be one it issued) lists the one business, `fake-sage-business`. Same
+  `FakeOAuthApp` as Xero's.
 - Test hook `POST /sage/v3.1/__set-status {"id", "status",
   "outstanding_amount"?}`. `POST /__reset` clears this state too.
 

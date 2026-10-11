@@ -547,6 +547,24 @@ def test_list_gl_accounts_maps_type_and_skips_out_of_chart(token):
     ]
 
 
+def test_oauth_endpoints_default_to_sage_and_honour_the_overrides(monkeypatch):
+    from app.services.erp_adapters.sage_accounting import SAGE_ACCOUNTING_OAUTH as spec
+
+    monkeypatch.setattr(settings, "erp_sage_accounting_authorize_url", "")
+    monkeypatch.setattr(settings, "erp_sage_accounting_token_url", "")
+    assert erp_oauth.authorize_endpoint(spec) == "https://www.sageone.com/oauth2/auth/central"
+    assert erp_oauth.token_endpoint(spec) == "https://oauth.accounting.sage.com/token"
+
+    # The operator override is what lets the connect flow run against
+    # fake-erp locally (guard rail 7); each one moves only its own endpoint.
+    fake = "http://localhost:12112/sage/oauth2"
+    monkeypatch.setattr(settings, "erp_sage_accounting_authorize_url", f"{fake}/auth/central")
+    assert erp_oauth.authorize_endpoint(spec) == f"{fake}/auth/central"
+    assert erp_oauth.token_endpoint(spec) == "https://oauth.accounting.sage.com/token"
+    monkeypatch.setattr(settings, "erp_sage_accounting_token_url", f"{fake}/token")
+    assert erp_oauth.token_endpoint(spec) == f"{fake}/token"
+
+
 def test_api_base_defaults_to_live_sage_and_honours_the_override(token, monkeypatch):
     from app.services.erp_adapters import sage_accounting
 

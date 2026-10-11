@@ -57,6 +57,92 @@ def _registered_redirect(redirect_uri: str) -> str | None:
     to the caller's string — or None when it is not registered."""
     return next((uri for uri in OAUTH_REDIRECT_URIS if uri == redirect_uri), None)
 
+
+class FakeOAuthApp:
+    """One provider's fake OAuth 2.0 authorization-code app.
+
+    ``authorize`` 302s straight back to a REGISTERED redirect_uri with a code
+    (no consent screen); ``token`` checks the client (HTTP Basic or form
+    fields, per provider), makes each code single-use and bound to the
+    redirect_uri it was issued for, and rotates refresh tokens (a spent one is
+    invalid_grant). ``issued`` says whether a bearer is one this app minted,
+    for the provider's tenant-lookup endpoint. State lives under STATE, so
+    POST /__reset clears it.
+    """
+
+    def __init__(self, key: str, client_id: str, client_secret: str) -> None:
+        self.key, self.client_id, self.client_secret = key, client_id, client_secret
+
+    def _state(self) -> dict[str, Any]:
+        return STATE.setdefault(
+            f"oauth_{self.key}",
+            {"codes": {}, "refresh_token": None, "counter": 0, "issued": set()},
+        )
+
+    def authorize(
+        self, redirect_uri: str, state: str, client_id: str, response_type: str
+    ) -> Response:
+        from urllib.parse import urlencode
+
+        from fastapi.responses import RedirectResponse
+
+        if client_id != self.client_id or response_type != "code":
+            raise ProviderError(400, {"error": "invalid_client"})
+        registered = _registered_redirect(redirect_uri)
+        if registered is None:
+            raise ProviderError(
+                400, {"error": "invalid_request", "error_description": "redirect_uri"}
+            )
+        st = self._state()
+        st["counter"] += 1
+        code = f"fake-{self.key}-code-{st['counter']}"
+        st["codes"][code] = registered
+        sep = "&" if "?" in registered else "?"
+        return RedirectResponse(
+            f"{registered}{sep}{urlencode({'code': code, 'state': state})}", status_code=302
+        )
+
+    async def token(self, request: Request, *, client_auth: str = "basic") -> dict:
+        import base64
+
+        raw = (await request.body()).decode("utf-8", errors="replace")
+        form = {k: v[0] for k, v in parse_qs(raw).items()}
+        if client_auth == "basic":
+            header = request.headers.get("authorization", "")
+            try:
+                decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
+            except Exception:  # noqa: BLE001
+                decoded = ""
+            cid, _, secret = decoded.partition(":")
+        else:
+            cid, secret = form.get("client_id", ""), form.get("client_secret", "")
+        if (cid, secret) != (self.client_id, self.client_secret):
+            raise ProviderError(401, {"error": "invalid_client"})
+        st = self._state()
+        if form.get("grant_type") == "authorization_code":
+            # Single use, and bound to the redirect_uri it was issued for.
+            if st["codes"].pop(form.get("code", ""), None) != form.get("redirect_uri"):
+                raise ProviderError(400, {"error": "invalid_grant"})
+        elif form.get("grant_type") == "refresh_token":
+            if not st["refresh_token"] or form.get("refresh_token") != st["refresh_token"]:
+                raise ProviderError(400, {"error": "invalid_grant"})
+        else:
+            raise ProviderError(400, {"error": "unsupported_grant_type"})
+        st["counter"] += 1
+        access = f"fake-{self.key}-access-{st['counter']}"
+        st["refresh_token"] = f"fake-{self.key}-refresh-{st['counter']}"
+        st["issued"].add(access)
+        return {
+            "access_token": access,
+            "refresh_token": st["refresh_token"],
+            "token_type": "Bearer",
+            "expires_in": 1800,
+        }
+
+    def issued(self, request: Request) -> bool:
+        token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        return token in self._state()["issued"]
+
 # ---------------------------------------------------------------------------
 # In-memory state
 # ---------------------------------------------------------------------------
@@ -1489,91 +1575,28 @@ async def xero_set_status(body: dict) -> dict:
 
 
 
-# Xero identity (OAuth 2.0 authorization code) + GET /connections. Lets the
-# backend's real connect flow run locally: /identity/connect/authorize 302s
-# straight back to a registered redirect_uri with a code, /identity/connect/
-# token takes the client by HTTP Basic, makes codes single-use and rotates
-# refresh tokens, and /connections lists the one organisation this consent
-# connected (the backend reads tenantId from it). The accounting routes above
-# stay shape-only on the bearer.
-XERO_CLIENT_ID = "fake-xero-client"
-XERO_CLIENT_SECRET = "fake-xero-secret"
+# Xero identity (FakeOAuthApp, client by HTTP Basic) + GET /connections, which
+# lists the one organisation this consent connected (the backend reads
+# tenantId from it). The accounting routes above stay shape-only on the bearer.
 XERO_TENANT_ID = "fake-xero-tenant-1"
-
-
-def _xero_oauth() -> dict[str, Any]:
-    return STATE.setdefault(
-        "xero_oauth", {"codes": {}, "refresh_token": None, "counter": 0, "issued": set()}
-    )
+XERO_OAUTH = FakeOAuthApp("xero", "fake-xero-client", "fake-xero-secret")
 
 
 @app.get("/xero/identity/connect/authorize")
 async def xero_authorize(
     redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
 ) -> Response:
-    from urllib.parse import urlencode
-
-    from fastapi.responses import RedirectResponse
-
-    if client_id != XERO_CLIENT_ID or response_type != "code":
-        raise ProviderError(400, {"error": "invalid_client"})
-    registered = _registered_redirect(redirect_uri)
-    if registered is None:
-        raise ProviderError(400, {"error": "invalid_request", "error_description": "redirect_uri"})
-    st = _xero_oauth()
-    st["counter"] += 1
-    code = f"fake-xero-code-{st['counter']}"
-    st["codes"][code] = registered
-    sep = "&" if "?" in registered else "?"
-    return RedirectResponse(
-        f"{registered}{sep}{urlencode({'code': code, 'state': state})}", status_code=302
-    )
-
-
-def _xero_issue() -> dict:
-    st = _xero_oauth()
-    st["counter"] += 1
-    access = f"fake-xero-access-{st['counter']}"
-    st["refresh_token"] = f"fake-xero-refresh-{st['counter']}"
-    st["issued"].add(access)
-    return {
-        "access_token": access,
-        "refresh_token": st["refresh_token"],
-        "token_type": "Bearer",
-        "expires_in": 1800,
-    }
+    return XERO_OAUTH.authorize(redirect_uri, state, client_id, response_type)
 
 
 @app.post("/xero/identity/connect/token")
 async def xero_token(request: Request) -> dict:
-    import base64
-
-    header = request.headers.get("authorization", "")
-    try:
-        cid, _, secret = base64.b64decode(header.removeprefix("Basic ")).decode().partition(":")
-    except Exception:  # noqa: BLE001
-        cid = secret = ""
-    if (cid, secret) != (XERO_CLIENT_ID, XERO_CLIENT_SECRET):
-        raise ProviderError(401, {"error": "invalid_client"})
-    raw = (await request.body()).decode("utf-8", errors="replace")
-    form = {k: v[0] for k, v in parse_qs(raw).items()}
-    st = _xero_oauth()
-    if form.get("grant_type") == "authorization_code":
-        # Single use, and bound to the redirect_uri it was issued for.
-        if st["codes"].pop(form.get("code", ""), None) != form.get("redirect_uri"):
-            raise ProviderError(400, {"error": "invalid_grant"})
-        return _xero_issue()
-    if form.get("grant_type") == "refresh_token":
-        if not st["refresh_token"] or form.get("refresh_token") != st["refresh_token"]:
-            raise ProviderError(400, {"error": "invalid_grant"})
-        return _xero_issue()
-    raise ProviderError(400, {"error": "unsupported_grant_type"})
+    return await XERO_OAUTH.token(request, client_auth="basic")
 
 
 @app.get("/xero/connections")
 async def xero_connections(request: Request) -> Response:
-    token = request.headers.get("authorization", "").removeprefix("Bearer ")
-    if token not in _xero_oauth()["issued"]:
+    if not XERO_OAUTH.issued(request):
         return JSONResponse({"Title": "Unauthorized"}, status_code=401)
     return JSONResponse(
         [
@@ -1809,6 +1832,32 @@ async def sage_set_status(body: dict) -> dict:
     if body.get("outstanding_amount") is not None:
         record["outstanding_amount"] = _XeroDecimal(str(body["outstanding_amount"]))
     return {"status": "ok"}
+
+
+
+# Sage identity (FakeOAuthApp, client as FORM fields — Sage's token endpoint
+# takes client_id / client_secret in the body) + GET /businesses, which the
+# backend reads the one business id from after the code exchange.
+SAGE_OAUTH = FakeOAuthApp("sage", "fake-sage-client", "fake-sage-secret")
+
+
+@app.get("/sage/oauth2/auth/central")
+async def sage_authorize(
+    redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
+) -> Response:
+    return SAGE_OAUTH.authorize(redirect_uri, state, client_id, response_type)
+
+
+@app.post("/sage/oauth2/token")
+async def sage_token(request: Request) -> dict:
+    return await SAGE_OAUTH.token(request, client_auth="body")
+
+
+@sage.get("/businesses")
+async def sage_businesses(request: Request) -> dict:
+    if not SAGE_OAUTH.issued(request):
+        raise _sage_error(401, "Unauthorised", "Invalid bearer token")
+    return {"$items": [{"id": SAGE_BUSINESS_ID, "displayed_as": "Fake Sage Business"}]}
 
 
 app.include_router(sage)

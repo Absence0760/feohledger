@@ -1443,7 +1443,9 @@ token comes only from `self.access_token()`, and every call sends
 `https://www.sageone.com/oauth2/auth/central` with `filter=apiv3.1`, token at
 `https://oauth.accounting.sage.com/token`, scope `full_access`. Platform app
 credentials: `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `_SECRET` (empty →
-unavailable, no fallback).
+unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_URL`
+override the OAuth endpoints, which dev points at fake-erp so the connect flow
+runs locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
 
 **Region coverage: not South Africa.** Every v3.1 operation lists its
 availability as CA, DE, ES, FR, GB, IE and US. Sage Business Cloud Accounting

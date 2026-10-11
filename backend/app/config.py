@@ -298,6 +298,10 @@ class Settings(BaseSettings):
     erp_sage_accounting_api_base: str = ""
     erp_sage_accounting_client_id: str = ""
     erp_sage_accounting_client_secret: str = ""
+    # Sage OAuth endpoint overrides (operator-trusted, non-secret), read on
+    # every call. Empty → Sage's real endpoints. Dev points them at fake-erp.
+    erp_sage_accounting_authorize_url: str = ""
+    erp_sage_accounting_token_url: str = ""
     # Sage Business Cloud Accounting (South Africa) API base. Empty = the
     # admin-config base_url (https-only, SSRF guard) or, absent that, the real
     # https://accounting.sageone.co.za/api/2.0.0.

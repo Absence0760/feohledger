@@ -87,6 +87,8 @@ SAGE_ACCOUNTING_OAUTH = register_oauth_provider(
         extra_authorize_params={"filter": "apiv3.1"},
         # Sage's token endpoint takes client_id / client_secret as form fields.
         token_auth="body",
+        authorize_url_setting="erp_sage_accounting_authorize_url",
+        token_url_setting="erp_sage_accounting_token_url",
     )
 )
 
