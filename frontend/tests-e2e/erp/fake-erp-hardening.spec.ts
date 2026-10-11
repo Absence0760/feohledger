@@ -99,6 +99,25 @@ test.describe('fake-erp request hardening', () => {
 		await request.get(`${SYSPRO}/Logoff`, { params: { UserId: userId } });
 	});
 
+	test('SYSPRO refuses an external-entity (XXE) document', async ({ request }) => {
+		const logon = await request.get(`${SYSPRO}/Logon`, {
+			params: { Operator: 'op', OperatorPassword: 'pw', CompanyId: 'C', CompanyPassword: 'cpw' }
+		});
+		const userId = (await logon.text()).trim();
+		const xxe =
+			'<?xml version="1.0"?><!DOCTYPE q [<!ENTITY f SYSTEM "file:///etc/passwd">]>' +
+			'<Query><TableName>&f;</TableName></Query>';
+
+		const resp = await request.get(`${SYSPRO}/Query/Query`, {
+			params: { UserId: userId, BusinessObject: 'COMFND', XmlIn: xxe }
+		});
+		const body = await resp.text();
+		expect(body).toBe('ERROR: XmlIn is not a valid XML document');
+		expect(body).not.toContain('root:');
+
+		await request.get(`${SYSPRO}/Logoff`, { params: { UserId: userId } });
+	});
+
 	test('QBO query parses a multi-line query without regex backtracking', async ({ request }) => {
 		const token = await request.post(`${QBO}/oauth2/token`, {
 			headers: {
