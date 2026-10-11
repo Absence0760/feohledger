@@ -232,4 +232,48 @@ test.describe('fake-erp request hardening', () => {
 		const bad = await run('delete from Vendor');
 		expect(bad.status()).toBe(400);
 	});
+
+	test('QBO auth codes are single-use and refresh tokens rotate', async ({ request }) => {
+		const basic = `Basic ${Buffer.from(`${QBO_CLIENT_ID}:fake-qbo-secret`).toString('base64')}`;
+		const token = (data: string, authorization = basic) =>
+			request.post(`${QBO}/oauth2/token`, {
+				headers: {
+					Authorization: authorization,
+					'Content-Type': 'application/x-www-form-urlencoded'
+				},
+				data
+			});
+		const authorize = await request.get(`${QBO}/oauth2/authorize`, {
+			params: {
+				redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+				state: 's',
+				client_id: QBO_CLIENT_ID
+			},
+			maxRedirects: 0
+		});
+		const code = new URL(authorize.headers()['location']).searchParams.get('code') ?? '';
+
+		// A wrong client secret never gets a token, even with a live code.
+		const wrong = `Basic ${Buffer.from(`${QBO_CLIENT_ID}:nope`).toString('base64')}`;
+		expect((await token(`grant_type=authorization_code&code=${code}`, wrong)).status()).toBe(401);
+
+		const first = await token(`grant_type=authorization_code&code=${code}`);
+		expect(first.status()).toBe(200);
+		const issued = await first.json();
+
+		// The same code a second time is spent.
+		const replay = await token(`grant_type=authorization_code&code=${code}`);
+		expect(replay.status()).toBe(400);
+		expect(await replay.json()).toEqual({ error: 'invalid_grant' });
+
+		// A refresh rotates: the new refresh token works, the old one is dead.
+		const rotated = await token(`grant_type=refresh_token&refresh_token=${issued.refresh_token}`);
+		expect(rotated.status()).toBe(200);
+		const next = await rotated.json();
+		expect(next.refresh_token).not.toBe(issued.refresh_token);
+		const stale = await token(`grant_type=refresh_token&refresh_token=${issued.refresh_token}`);
+		expect(stale.status()).toBe(400);
+
+		expect((await token('grant_type=password')).status()).toBe(400);
+	});
 });
