@@ -1203,3 +1203,97 @@ async def test_refresh_token_lifetime_is_recorded_under_either_name():
         body = {"access_token": "a", "refresh_token": "r", name: 31536000}
         expires = datetime.fromisoformat(erp_oauth._token_fields(body)["refresh_token_expires_at"])
         assert expires > datetime.now(UTC) + timedelta(days=360)
+
+
+# ---------------------------------------------------------------------------
+# RefreshOnUnauthorized — the shared 401 → refresh → replay-once flow
+# ---------------------------------------------------------------------------
+
+
+def _unauthorized_harness(monkeypatch, *, refreshed: str | Exception):
+    """A client over a transport that accepts only ``new-token``, with
+    ``get_access_token`` scripted to return (or raise) ``refreshed``."""
+    seen: list[str] = []
+    refresh_calls: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bearer = request.headers.get("Authorization", "")
+        seen.append(bearer)
+        assert request.content == b'{"amount": "10.00"}'  # the body is replayed intact
+        return httpx.Response(200 if bearer == "Bearer new-token" else 401)
+
+    async def fake_get_access_token(spec, config, *, rejected_token=None):
+        refresh_calls.append(rejected_token)
+        if isinstance(refreshed, Exception):
+            raise refreshed
+        return refreshed
+
+    monkeypatch.setattr(erp_oauth, "get_access_token", fake_get_access_token)
+    adapter = types.SimpleNamespace(oauth_provider=QBO_OAUTH, config={"type": "x"})
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        auth=erp_oauth_base.RefreshOnUnauthorized(adapter),
+    )
+    return client, seen, refresh_calls
+
+
+async def _post(client: httpx.AsyncClient, token: str) -> httpx.Response:
+    async with client:
+        return await client.post(
+            "https://erp.test/bill",
+            content=b'{"amount": "10.00"}',
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+
+async def test_a_401_refreshes_the_rejected_token_and_replays_once(monkeypatch):
+    client, seen, refresh_calls = _unauthorized_harness(monkeypatch, refreshed="new-token")
+    resp = await _post(client, "old-token")
+    assert resp.status_code == 200
+    assert seen == ["Bearer old-token", "Bearer new-token"]
+    # Refresh only if the REJECTED token is still the stored one.
+    assert refresh_calls == ["old-token"]
+
+
+async def test_a_success_never_refreshes(monkeypatch):
+    client, seen, refresh_calls = _unauthorized_harness(monkeypatch, refreshed="unused")
+    assert (await _post(client, "new-token")).status_code == 200
+    assert seen == ["Bearer new-token"] and refresh_calls == []
+
+
+async def test_a_second_401_is_returned_not_retried_again(monkeypatch):
+    client, seen, _ = _unauthorized_harness(monkeypatch, refreshed="still-bad")
+    assert (await _post(client, "old-token")).status_code == 401
+    assert seen == ["Bearer old-token", "Bearer still-bad"]
+
+
+async def test_an_unchanged_token_is_not_replayed(monkeypatch):
+    # The refresh came back with the same token: replaying would only 401 again.
+    client, seen, _ = _unauthorized_harness(monkeypatch, refreshed="old-token")
+    assert (await _post(client, "old-token")).status_code == 401
+    assert seen == ["Bearer old-token"]
+
+
+async def test_a_failed_refresh_returns_the_original_401(monkeypatch):
+    # Consent revoked: erp_oauth has marked needs_reconnect; the adapter sees
+    # the provider's 401 exactly as before, so its own failure path runs.
+    client, seen, _ = _unauthorized_harness(
+        monkeypatch, refreshed=erp_oauth.ErpNotConnectedError("x")
+    )
+    assert (await _post(client, "old-token")).status_code == 401
+    assert seen == ["Bearer old-token"]
+
+
+def test_every_oauth_adapter_api_client_refreshes_on_401():
+    """Each OAuth adapter's API calls go through ``oauth_client``; only the
+    consent-time tenant lookup (no stored connection to refresh yet) and QBO's
+    own retry loop build a bare client."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(erp_oauth_base.__file__).parent
+    allowed_bare = {"xero.py": 1, "sage_accounting.py": 1, "blackbaud_fe_nxt.py": 0}
+    for name, bare in allowed_bare.items():
+        src = (root / name).read_text()
+        assert len(re.findall(r"httpx\.AsyncClient\(", src)) == bare, name
+        assert "self.oauth_client(" in src, name

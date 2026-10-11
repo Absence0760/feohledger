@@ -319,7 +319,7 @@ class XeroAdapter(OAuthErpAdapter):
             status = "AUTHORISED"
 
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self.oauth_client(timeout=30) as client:
             lookup, existing = await self._find_existing_bill(client, headers, payload)
             if lookup.status_code != 200:
                 # Fail closed: without the lookup we cannot rule out a duplicate.
@@ -452,7 +452,7 @@ class XeroAdapter(OAuthErpAdapter):
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.oauth_client(timeout=15) as client:
             bill = await self._get_bill(client, headers, erp_document_id)
         if bill is None:
             return ErpInvoiceStatus.unknown
@@ -483,7 +483,7 @@ class XeroAdapter(OAuthErpAdapter):
         ``NOT_VOIDED``; one already DELETED / VOIDED is ``ALREADY_GONE``.
         """
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self.oauth_client(timeout=30) as client:
             bill = await self._get_bill(client, headers, erp_document_id)
             if bill is None:
                 return VoidOutcome.NOT_VOIDED
@@ -520,7 +520,7 @@ class XeroAdapter(OAuthErpAdapter):
     async def test_connection(self) -> bool:
         try:
             headers = await self._headers()
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with self.oauth_client(timeout=10) as client:
                 resp = await client.get(f"{_api_base()}/Organisation", headers=headers)
             return resp.status_code == 200 and bool(_json(resp).get("Organisations"))
         except Exception:
@@ -533,7 +533,7 @@ class XeroAdapter(OAuthErpAdapter):
         except Exception:
             return []
         out: list[dict] = []
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self.oauth_client(timeout=30) as client:
             for page in range(1, _PAGE_CAP + 1):
                 try:
                     resp = await client.get(
@@ -556,7 +556,7 @@ class XeroAdapter(OAuthErpAdapter):
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         try:
             headers = await self._headers()
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with self.oauth_client(timeout=30) as client:
                 resp = await client.get(f"{_api_base()}/Accounts", headers=headers)
         except Exception:
             return []

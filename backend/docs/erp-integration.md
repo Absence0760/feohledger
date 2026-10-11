@@ -1889,6 +1889,19 @@ provider `invalid_grant` marks `needs_reconnect` and writes
 `organization.erp_reconnect_required` (best-effort, after the commit). An outage raises
 `ErpTokenRefreshError` and leaves the connection alone.
 
+**A 401 refreshes too, not only expiry.** A provider can reject a stored token
+before its recorded `expires_at` (the customer re-consented elsewhere, an admin
+revoked one session). Every OAuth adapter's API client comes from
+`OAuthErpAdapter.oauth_client`, whose `httpx` auth flow
+(`oauth_base.RefreshOnUnauthorized`) reads the rejected bearer, calls
+`get_access_token(..., rejected_token=...)` — which refreshes only if that token is
+still the stored one — and replays the request once. A failed refresh returns the
+original 401, so each adapter's own failure path is unchanged. QuickBooks keeps its
+own equivalent loop in `_request`. The only bare clients are the consent-time
+tenant lookups (no stored connection to refresh yet), pinned by
+`tests/test_erp_oauth.py::test_every_oauth_adapter_api_client_refreshes_on_401`;
+end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
+
 **Per-provider hooks on the spec.** The company id comes from
 `external_tenant_id_param` (a callback query parameter: QBO `realmId`), from
 `external_tenant_id_token_field` (a token-response field: Blackbaud

@@ -27,9 +27,11 @@ config. Only ``services/erp_oauth`` writes either half. An adapter reads
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from typing import ClassVar
+
+import httpx
 
 from app.services.erp_adapters.base import ErpAdapter
 
@@ -86,10 +88,57 @@ class OAuthProviderSpec:
     revoke_url_setting: str | None = None
 
 
+class RefreshOnUnauthorized(httpx.Auth):
+    """Replay a request once with a refreshed token when the provider answers 401.
+
+    A provider can reject a stored access token before its recorded expiry (the
+    customer re-consented elsewhere, an admin revoked a session). Refreshing only
+    inside the expiry margin then fails every call until the old token would
+    have expired. This flow reads the bearer the request carried, asks
+    ``erp_oauth`` to refresh only if that token is still the stored one (a
+    concurrent caller may already have), and retries once with the new one.
+
+    When the refresh itself fails — consent revoked (``erp_oauth`` has then
+    marked the connection ``needs_reconnect``) or the provider unreachable — the
+    original 401 is returned, so each adapter's own failure handling is
+    unchanged.
+    """
+
+    def __init__(self, adapter: OAuthErpAdapter) -> None:
+        self._adapter = adapter
+
+    async def async_auth_flow(
+        self, request: httpx.Request
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        response = yield request
+        if response.status_code != 401:
+            return
+        rejected = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not rejected:
+            return
+        from app.services import erp_oauth
+
+        try:
+            token = await erp_oauth.get_access_token(
+                self._adapter.oauth_provider, self._adapter.config, rejected_token=rejected
+            )
+        except erp_oauth.ErpNotConnectedError:
+            return
+        if token == rejected:
+            return
+        request.headers["Authorization"] = f"Bearer {token}"
+        yield request
+
+
 class OAuthErpAdapter(ErpAdapter):
     """An ERP adapter whose credentials come from a consented OAuth connection."""
 
     oauth_provider: ClassVar[OAuthProviderSpec]
+
+    def oauth_client(self, *, timeout: float) -> httpx.AsyncClient:
+        """An HTTP client for this connection's API calls: a 401 refreshes the
+        token and replays the request once (:class:`RefreshOnUnauthorized`)."""
+        return httpx.AsyncClient(timeout=timeout, auth=RefreshOnUnauthorized(self))
 
     async def access_token(self) -> str:
         """A bearer token valid for at least the next request.
