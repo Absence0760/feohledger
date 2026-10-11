@@ -308,4 +308,45 @@ test.describe('fake-erp request hardening', () => {
 		});
 		expect(await after.text()).toBe(expired);
 	});
+
+	test('SYSPRO refuses unbalanced, unknown and duplicate postings', async ({ request }) => {
+		const logon = await request.get(`${SYSPRO}/Logon`, {
+			params: { Operator: 'op', OperatorPassword: 'pw', CompanyId: 'C', CompanyPassword: 'cpw' }
+		});
+		const userId = (await logon.text()).trim();
+		const invoice = `REFUSE-${Date.now()}`;
+		const doc = (supplier: string, amount: string, ledger: string, value: string) =>
+			`<PostApInvoice><Item><Posting><Supplier>${supplier}</Supplier>` +
+			`<Invoice>${invoice}</Invoice><InvoiceAmount>${amount}</InvoiceAmount></Posting>` +
+			`<Distribution><DistributionLine><LedgerCode>${ledger}</LedgerCode>` +
+			`<DistributionValue>${value}</DistributionValue></DistributionLine>` +
+			'</Distribution></Item></PostApInvoice>';
+		const post = async (xmlIn: string) =>
+			(
+				await request.get(`${SYSPRO}/Transaction/Post`, {
+					params: { UserId: userId, BusinessObject: 'APSTIN', XmlParameters: '<p/>', XmlIn: xmlIn }
+				})
+			).text();
+
+		expect(await post(doc('9999999', '10.00', '6100', '10.00'))).toBe(
+			"ERROR: Supplier '9999999' not on file"
+		);
+		expect(await post(doc('0000001', '10.00', '0000', '10.00'))).toBe(
+			'ERROR: Ledger code not on file'
+		);
+		// Exact decimals: one cent short does not balance.
+		expect(await post(doc('0000001', '10.00', '6100', '9.99'))).toBe(
+			'ERROR: Distribution does not balance to the invoice amount'
+		);
+		expect(await post('<PostApInvoice><Item/></PostApInvoice>')).toBe(
+			'ERROR: Posting element missing'
+		);
+
+		expect(await post(doc('0000001', '10.00', '6100', '10.00'))).not.toMatch(/^ERROR/);
+		expect(await post(doc('0000001', '10.00', '6100', '10.00'))).toBe(
+			`ERROR: Invoice '${invoice}' already on file`
+		);
+
+		await request.get(`${SYSPRO}/Logoff`, { params: { UserId: userId } });
+	});
 });
