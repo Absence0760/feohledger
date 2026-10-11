@@ -273,6 +273,24 @@ test.describe('/erp blackbaud_fe_nxt adapter against fake-erp', () => {
 		expect(after.needs_reconnect).toBeFalsy();
 	});
 
+	test('a token rejected before its expiry is refreshed and the call replayed', async ({
+		page,
+		request
+	}) => {
+		const hook = `${FAKE_ERP_BASE}/__oauth/blackbaud`;
+		const refreshes = async () => (await (await request.get(`${hook}/stats`)).json()).refreshes;
+		// The stored token has ~30 min left, so no proactive refresh is due —
+		// but the provider stops accepting it now. Before the shared 401 retry
+		// (oauth_base.RefreshOnUnauthorized) every call failed until expiry.
+		const before = await refreshes();
+		await request.post(`${hook}/revoke-access`);
+
+		const result = await testErpConnection(page);
+		expect(result.success, result.message).toBe(true);
+		expect(await refreshes()).toBe(before + 1);
+		expect((await oauthStatus(page)).connected).toBe(true);
+	});
+
 	test('disconnect clears the connection', async ({ page }) => {
 		const headers = await authedTenantHeaders(page);
 		const resp = await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, {

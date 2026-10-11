@@ -180,6 +180,14 @@ async def fake_oauth_stats(key: str) -> dict:
     return {"refreshes": _fake_oauth_app(key)._state()["refreshes"]}
 
 
+@app.post("/__oauth/{key}/revoke-access")
+async def fake_oauth_revoke_access(key: str) -> dict:
+    """Test hook: the provider rejects every access token issued so far, before
+    its expiry, while the refresh token stays good — so a 401 must refresh."""
+    _fake_oauth_app(key)._state()["issued"].clear()
+    return {"status": "ok"}
+
+
 @app.post("/__oauth/{key}/revoke")
 async def fake_oauth_revoke(key: str) -> dict:
     """Test hook: the provider revokes the consent — every issued token and the
