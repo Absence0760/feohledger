@@ -221,7 +221,14 @@ export async function erpFailureFromAudit(page: Page, invoiceId: string): Promis
  *  review flow. */
 export async function createApprovedInvoice(
 	page: Page,
-	opts: { prefix: string; amount?: string; vendor?: string; glAccount?: string }
+	opts: {
+		prefix: string;
+		amount?: string;
+		vendor?: string;
+		glAccount?: string;
+		/** Exact invoice number, for an ERP that caps its length (QBO: 21). */
+		invoiceNumber?: string;
+	}
 ): Promise<Inv> {
 	const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 	const headers = await authedTenantHeaders(page);
@@ -229,7 +236,7 @@ export async function createApprovedInvoice(
 	const created = await page.request.post(`${API_BASE}/api/invoices`, {
 		headers,
 		data: {
-			invoice_number: `${opts.prefix}-${unique}`,
+			invoice_number: opts.invoiceNumber ?? `${opts.prefix}-${unique}`,
 			vendor: opts.vendor ?? 'Fake ERP Vendor A',
 			amount: opts.amount ?? '1234.56',
 			currency: 'USD',
