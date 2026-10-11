@@ -39,10 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-10 — PR #544 opened and closed one (c) entry in the
-same change (three OAuth ERP adapters had no local connect and no e2e; Xero, Sage
-Business Cloud and Blackbaud now connect through fake-erp's `FakeOAuthApp`), so the
-file stays at 98. Before that, 2026-10-09 — enabling IAM database authentication on RDS
+**Last reconciled:** 2026-10-10 — PR #544's token-lifecycle e2e opened one (c) entry
+(only the QuickBooks adapter refreshes after a 401), taking the file from 98 → 99;
+earlier in the same PR it opened and closed the OAuth-adapter coverage entry. Before that, 2026-10-09 — enabling IAM database authentication on RDS
 (#542) opened one (c) entry (the app still signs in with the master password),
 taking the file from 97 → 98. Before that, 2026-10-09 — the US + South Africa ERP connections
 (decisions §269–§272), merged onto the provider-credential store, opened
@@ -142,7 +141,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**98 open: 81 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**99 open: 82 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1480,6 +1479,24 @@ scope (§260) — do not fold them into any of these.
       unreadable credentials" action on `/api/organization/credentials/{block}`,
       audited, that replaces the row without opening it. **Trigger:** the first
       key rotation or environment where it happens.
+
+### Surfaced by the ERP token-lifecycle e2e (2026-10-10, PR #544)
+
+- [ ] **(c) Only the QuickBooks adapter recovers from a 401 by refreshing.** When
+      the provider rejects a stored access token before its recorded expiry (the
+      customer re-consented elsewhere, an admin revoked one session, the provider
+      rotated keys), `quickbooks_online` calls `erp_oauth.get_access_token(...,
+      rejected_token=token)` and retries once. `xero`, `sage_accounting` and
+      `blackbaud_fe_nxt` do not: every send and sync fails `HTTP 401` until the
+      stored `expires_at` falls inside the refresh margin (up to 30–60 min), and
+      only then does the proactive refresh run. A revoked *consent* is still
+      handled correctly (the refresh is `invalid_grant` → `needs_reconnect`,
+      pinned by `erp/blackbaud-fe-nxt.spec.ts`). **Durable fix:** move the
+      401-retry into `OAuthErpAdapter` (one `_authorized_request` helper the four
+      adapters share, retrying once with `rejected_token`), then extend the
+      Blackbaud token-lifecycle e2e with a revoke-access-only hook. **Trigger:** a
+      customer report of an ERP send failing 401 while connected, or the next
+      change to `oauth_base.py`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

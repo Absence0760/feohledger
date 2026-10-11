@@ -108,6 +108,14 @@ never links one provider's vendor id onto another's vendor row.
   "status": "…"}` → force a stored invoice into a provider-native status
   (e.g. merge `PAID`, netsuite `paidInFull`, d365 `Paid`) to drive
   `get_invoice_status()` transitions.
+- OAuth token lifecycle, for any `FakeOAuthApp` (`xero`, `sage`, `blackbaud`):
+  `POST /__oauth/{key}/lifetime {"seconds"}` sets the `expires_in` of every token
+  issued from then on (under the backend's 120 s refresh margin, each use must
+  refresh first); `GET /__oauth/{key}/stats` → `{"refreshes"}` counts successful
+  refresh grants; `POST /__oauth/{key}/revoke` revokes the consent — every issued
+  token and the refresh token stop working, so the next refresh is
+  `invalid_grant`. Only `erp/blackbaud-fe-nxt.spec.ts` uses them, on the one
+  provider no other spec shares, so parallel workers cannot interfere.
 
 ## Dependencies
 

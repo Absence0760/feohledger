@@ -48,7 +48,11 @@ import {
  *   3. Fail closed — an unlinked vendor is refused before anything is posted,
  *      and so is any send while the org has not stated the FE NXT ledger's
  *      currency (the API reports none) or the invoice is in another one.
- *   4. Disconnect — clears the connection.
+ *   4. Token lifecycle — a stored token inside the refresh margin is refreshed
+ *      and the rotated refresh token persisted; a consent revoked at the
+ *      provider turns the connection to `needs_reconnect`, and reconnecting
+ *      clears it.
+ *   5. Disconnect — clears the connection.
  */
 
 const PROVIDER = 'blackbaud_fe_nxt';
@@ -227,6 +231,46 @@ test.describe('/erp blackbaud_fe_nxt adapter against fake-erp', () => {
 		// Stated, and the invoice is in another one: never booked as if it matched.
 		await setLedgerConfig(page, 'USD');
 		expect(await send('EUR')).toBe('Blackbaud FE NXT post refused: currency_mismatch');
+	});
+
+	test('an expiring token is refreshed; a revoked consent asks for reconnect', async ({
+		page,
+		request
+	}) => {
+		const hook = `${FAKE_ERP_BASE}/__oauth/blackbaud`;
+		const refreshes = async () => (await (await request.get(`${hook}/stats`)).json()).refreshes;
+		try {
+			// Tokens that expire inside the backend's 120 s refresh margin: every
+			// use must refresh first. Reconnect so the STORED token is one of them.
+			await request.post(`${hook}/lifetime`, { data: { seconds: 60 } });
+			await connectBlackbaud(page);
+			const before = await refreshes();
+
+			const ok = await testErpConnection(page);
+			expect(ok.success, ok.message).toBe(true);
+			expect(await refreshes()).toBeGreaterThan(before);
+			// The rotated refresh token was persisted: a second refresh works too.
+			const mid = await refreshes();
+			expect((await testErpConnection(page)).success).toBe(true);
+			expect(await refreshes()).toBeGreaterThan(mid);
+
+			// The customer revokes the app at Blackbaud: the refresh is refused,
+			// and the connection reads "reconnect required" — never retried
+			// forever, never silently mock.
+			await request.post(`${hook}/revoke`);
+			expect((await testErpConnection(page)).success).toBe(false);
+			const status = await oauthStatus(page);
+			expect(status.needs_reconnect).toBe(true);
+			expect(status.connected).toBe(false);
+		} finally {
+			await request.post(`${hook}/lifetime`, { data: { seconds: 1800 } });
+		}
+
+		// Reconnecting through the consent flow clears it.
+		await connectBlackbaud(page);
+		const after = await oauthStatus(page);
+		expect(after.connected).toBe(true);
+		expect(after.needs_reconnect).toBeFalsy();
 	});
 
 	test('disconnect clears the connection', async ({ page }) => {

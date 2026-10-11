@@ -58,6 +58,10 @@ def _registered_redirect(redirect_uri: str) -> str | None:
     return next((uri for uri in OAUTH_REDIRECT_URIS if uri == redirect_uri), None)
 
 
+#: Every FakeOAuthApp by key, for the /__oauth/{key}/... test hooks.
+FAKE_OAUTH_APPS: dict[str, Any] = {}
+
+
 class FakeOAuthApp:
     """One provider's fake OAuth 2.0 authorization-code app.
 
@@ -72,11 +76,21 @@ class FakeOAuthApp:
 
     def __init__(self, key: str, client_id: str, client_secret: str) -> None:
         self.key, self.client_id, self.client_secret = key, client_id, client_secret
+        FAKE_OAUTH_APPS[key] = self
 
     def _state(self) -> dict[str, Any]:
         return STATE.setdefault(
             f"oauth_{self.key}",
-            {"codes": {}, "refresh_token": None, "counter": 0, "issued": set()},
+            {
+                "codes": {},
+                "refresh_token": None,
+                "counter": 0,
+                "issued": set(),
+                # Test hooks (/__oauth/{key}/...): the expires_in the next
+                # tokens carry, and how many refresh grants succeeded.
+                "lifetime": 1800,
+                "refreshes": 0,
+            },
         )
 
     def authorize(
@@ -126,6 +140,7 @@ class FakeOAuthApp:
         elif form.get("grant_type") == "refresh_token":
             if not st["refresh_token"] or form.get("refresh_token") != st["refresh_token"]:
                 raise ProviderError(400, {"error": "invalid_grant"})
+            st["refreshes"] += 1
         else:
             raise ProviderError(400, {"error": "unsupported_grant_type"})
         st["counter"] += 1
@@ -136,12 +151,43 @@ class FakeOAuthApp:
             "access_token": access,
             "refresh_token": st["refresh_token"],
             "token_type": "Bearer",
-            "expires_in": 1800,
+            "expires_in": st["lifetime"],
         }
 
     def issued(self, request: Request) -> bool:
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         return token in self._state()["issued"]
+
+
+def _fake_oauth_app(key: str) -> FakeOAuthApp:
+    app_ = FAKE_OAUTH_APPS.get(key)
+    if app_ is None:
+        raise ProviderError(404, {"detail": "unknown fake OAuth app"})
+    return app_
+
+
+@app.post("/__oauth/{key}/lifetime")
+async def fake_oauth_lifetime(key: str, body: dict) -> dict:
+    """Test hook: the expires_in every token issued from now on carries. Under
+    the backend's 120 s refresh margin, so each use refreshes first."""
+    _fake_oauth_app(key)._state()["lifetime"] = int(body.get("seconds", 1800))
+    return {"status": "ok"}
+
+
+@app.get("/__oauth/{key}/stats")
+async def fake_oauth_stats(key: str) -> dict:
+    """Test hook: how many refresh grants succeeded (proves a refresh ran)."""
+    return {"refreshes": _fake_oauth_app(key)._state()["refreshes"]}
+
+
+@app.post("/__oauth/{key}/revoke")
+async def fake_oauth_revoke(key: str) -> dict:
+    """Test hook: the provider revokes the consent — every issued token and the
+    refresh token stop working (a refresh is then invalid_grant)."""
+    st = _fake_oauth_app(key)._state()
+    st["refresh_token"] = None
+    st["issued"].clear()
+    return {"status": "ok"}
 
 # ---------------------------------------------------------------------------
 # In-memory state
@@ -2162,7 +2208,6 @@ async def blackbaud_token(request: Request) -> dict:
     return {
         **issued,
         "token_type": "bearer",
-        "expires_in": 3600,
         "refresh_token_expires_in": 31536000,
         "environment_id": BLACKBAUD_ENVIRONMENT_ID,
         "environment_name": "Fake FE NXT Environment",
