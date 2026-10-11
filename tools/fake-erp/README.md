@@ -127,7 +127,7 @@ uv pip compile requirements.in --universal --python-version 3.14 --generate-hash
 
 ## Running
 
-Standalone (any venv with fastapi + uvicorn):
+Standalone (any venv with `pip install -r requirements.txt`):
 
 ```bash
 uvicorn app:app --port 12112   # from tools/fake-erp/
@@ -186,6 +186,8 @@ body starting `ERROR`, as SYSPRO's are.
 - `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier or
   ledger code, a duplicate (supplier, invoice) and a distribution that does not
   balance to `InvoiceAmount`.
+- The `XmlIn` / `XmlParameters` documents are parsed with `defusedxml`, so a
+  DTD or entity declaration is refused rather than expanded.
 - `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
   `{"supplier", "invoice", "balance"}` (`"0"` = paid).
 ## Xero (`/xero/api.xro/2.0`)
@@ -275,3 +277,13 @@ and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   (`PO-FAKE-NS-501` 2100.50 USD open, `PO-FAKE-NS-502` 640.00 GBP closed).
   `DELETE /vendorBill/{id}` → 204 for a `pendingApproval` bill only
   (`/__set-status` with `"pendingApproval"`).
+
+## QuickBooks Online (`/qbo`)
+
+`GET /qbo/oauth2/authorize` 302s straight back to `redirect_uri` with a `code`
+and `realmId` — but only when `redirect_uri` exactly matches a registered URI,
+as Intuit requires; anything else is a 400 `invalid_request`, so the fake is
+never an open redirect. The registered set defaults to
+`http://{localhost,127.0.0.1}:{8000-8009}/api/erp/oauth/callback` (the
+backend's ERP OAuth callback on the dev API port and the worktree offsets);
+set `FAKE_ERP_QBO_REDIRECT_URIS` (comma-separated) to replace it.

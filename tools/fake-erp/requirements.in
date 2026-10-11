@@ -14,3 +14,6 @@
 # every dependency it grows is one more thing to pin and scan.
 fastapi>=0.142.2,<1
 uvicorn>=0.54.0,<1
+# Request-supplied XML (the SYSPRO routes) is parsed through defusedxml, not
+# the stdlib parser, so a DTD / entity-expansion payload is refused.
+defusedxml>=0.7.1,<1

@@ -8,18 +8,22 @@ real ERP adapters (backend/app/services/erp_adapters/):
     /d365/...                               Dynamics 365 Business Central OData
 
 State is in-memory only (module-level dicts), fully deterministic, and
-resettable via POST /__reset. No external deps beyond fastapi + uvicorn.
+resettable via POST /__reset. No external deps beyond fastapi + uvicorn, plus
+defusedxml for the request-supplied XML the SYSPRO routes parse.
 """
 
 from __future__ import annotations
 
 import copy
+import os
 import re
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 from typing import Any
 from urllib.parse import parse_qs
 
+from defusedxml import DefusedXmlException
+from defusedxml import ElementTree as SafeET
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
@@ -1120,13 +1124,24 @@ def _syspro_rows_xml(table: str, rows: list[dict], columns: list[str]) -> str:
     return ET.tostring(root, encoding="unicode")
 
 
+def _syspro_parse(document: str) -> ET.Element | None:
+    """Parse request-supplied XML, or None when it is malformed or declares a
+    DTD / entities (defusedxml refuses those rather than expanding them)."""
+    try:
+        return SafeET.fromstring(document)
+    except (ET.ParseError, DefusedXmlException):
+        return None
+
+
 @syspro.get("/Query/Query")
 async def syspro_query(UserId: str = "", BusinessObject: str = "", XmlIn: str = "") -> Response:
     if UserId not in _syspro_state()["sessions"]:
         return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
     if BusinessObject != "COMFND":
         return _syspro_text("ERROR: Business object not supported by fake-erp")
-    query = ET.fromstring(XmlIn)
+    query = _syspro_parse(XmlIn)
+    if query is None:
+        return _syspro_text("ERROR: XmlIn is not a valid XML document")
     table = query.findtext("TableName", "")
     columns = [c.text or "" for c in query.findall("Columns/Column")]
     try:
@@ -1149,8 +1164,10 @@ async def syspro_post(
         return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
     if BusinessObject != "APSTIN":
         return _syspro_text("ERROR: Business object not supported by fake-erp")
-    ET.fromstring(XmlParameters)  # must be well-formed
-    posting = ET.fromstring(XmlIn).find("Item/Posting")
+    document = _syspro_parse(XmlIn)
+    if _syspro_parse(XmlParameters) is None or document is None:
+        return _syspro_text("ERROR: XmlParameters / XmlIn is not a valid XML document")
+    posting = document.find("Item/Posting")
     if posting is None:
         return _syspro_text("ERROR: Posting element missing")
     supplier = posting.findtext("Supplier", "")
@@ -1162,7 +1179,7 @@ async def syspro_post(
     amount = Decimal(posting.findtext("InvoiceAmount", "0"))
     known_gl = {g["GlCode"] for g in SYSPRO_GL}
     distributed = Decimal(0)
-    for line in ET.fromstring(XmlIn).findall("Item/Distribution/DistributionLine"):
+    for line in document.findall("Item/Distribution/DistributionLine"):
         if line.findtext("LedgerCode", "") not in known_gl:
             return _syspro_text("ERROR: Ledger code not on file")
         distributed += Decimal(line.findtext("DistributionValue", "0"))
@@ -2432,6 +2449,26 @@ QBO_CLIENT_ID = "fake-qbo-client"
 QBO_CLIENT_SECRET = "fake-qbo-secret"
 QBO_REALM = "fake-realm-1"
 
+# The redirect URIs "registered" on the fake QBO app. Intuit refuses an
+# authorize request whose redirect_uri is not an exact match for one of the
+# app's registered URIs, and so does this fake: an unregistered target would
+# make it an open redirect. The default covers the backend's ERP OAuth
+# callback (backend/app/services/erp_oauth.py CALLBACK_PATH) on the dev API
+# port and the per-worktree offsets above it; FAKE_ERP_QBO_REDIRECT_URIS
+# (comma-separated) replaces the list for any other origin.
+QBO_REDIRECT_URIS = tuple(
+    uri.strip()
+    for uri in os.environ.get(
+        "FAKE_ERP_QBO_REDIRECT_URIS",
+        ",".join(
+            f"http://{host}:{port}/api/erp/oauth/callback"
+            for host in ("localhost", "127.0.0.1")
+            for port in range(8000, 8010)
+        ),
+    ).split(",")
+    if uri.strip()
+)
+
 
 def _qbo() -> dict[str, Any]:
     if "qbo" not in STATE:
@@ -2491,13 +2528,17 @@ async def qbo_authorize(redirect_uri: str, state: str, client_id: str = "") -> R
 
     if client_id != QBO_CLIENT_ID:
         raise ProviderError(400, {"error": "invalid_client"})
+    # Redirect to the registered URI, never to the caller's string.
+    registered = next((uri for uri in QBO_REDIRECT_URIS if uri == redirect_uri), None)
+    if registered is None:
+        raise ProviderError(400, {"error": "invalid_request", "error_description": "redirect_uri"})
     st = _qbo()
     st["counter"] += 1
     code = f"fake-qbo-code-{st['counter']}"
     st["codes"].add(code)
-    sep = "&" if "?" in redirect_uri else "?"
+    sep = "&" if "?" in registered else "?"
     query = urlencode({"code": code, "state": state, "realmId": QBO_REALM})
-    return RedirectResponse(f"{redirect_uri}{sep}{query}", status_code=302)
+    return RedirectResponse(f"{registered}{sep}{query}", status_code=302)
 
 
 @qbo.post("/oauth2/token")
@@ -2587,7 +2628,9 @@ async def qbo_preferences(request: Request, realm: str) -> dict:
     }
 
 
-_QBO_SELECT = re.compile(r"select \* from (\w+)(.*)$", re.IGNORECASE)
+# The lookahead pins where the entity name ends and DOTALL lets the tail take
+# everything, so the match has one split and cannot backtrack quadratically.
+_QBO_SELECT = re.compile(r"select \* from (\w+)(?!\w)(.*)", re.IGNORECASE | re.DOTALL)
 _QBO_DOCNUMBER = re.compile(r"where DocNumber = '((?:[^'\\]|\\.)*)'", re.IGNORECASE)
 
 
