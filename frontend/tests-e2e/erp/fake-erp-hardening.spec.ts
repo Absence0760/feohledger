@@ -276,4 +276,36 @@ test.describe('fake-erp request hardening', () => {
 
 		expect((await token('grant_type=password')).status()).toBe(400);
 	});
+
+	test('SYSPRO checks the session and business object before parsing', async ({ request }) => {
+		const bomb =
+			'<?xml version="1.0"?><!DOCTYPE q [<!ENTITY a "aaaa">]><Query><TableName>&a;</TableName></Query>';
+		const expired = 'ERROR: The supplied UserID is invalid, or your session has expired';
+
+		// No session: refused on the session check, whatever the document.
+		for (const path of ['Query/Query', 'Transaction/Post']) {
+			const resp = await request.get(`${SYSPRO}/${path}`, {
+				params: { UserId: 'not-a-session', BusinessObject: 'COMFND', XmlIn: bomb }
+			});
+			expect(await resp.text(), path).toBe(expired);
+		}
+
+		const logon = await request.get(`${SYSPRO}/Logon`, {
+			params: { Operator: 'op', OperatorPassword: 'pw', CompanyId: 'C', CompanyPassword: 'cpw' }
+		});
+		const userId = (await logon.text()).trim();
+
+		// Wrong business object for the route: refused before the XML is read.
+		const query = await request.get(`${SYSPRO}/Query/Query`, {
+			params: { UserId: userId, BusinessObject: 'APSTIN', XmlIn: bomb }
+		});
+		expect(await query.text()).toBe('ERROR: Business object not supported by fake-erp');
+
+		// A logged-off session is dead.
+		await request.get(`${SYSPRO}/Logoff`, { params: { UserId: userId } });
+		const after = await request.get(`${SYSPRO}/Query/Query`, {
+			params: { UserId: userId, BusinessObject: 'COMFND', XmlIn: '<Query/>' }
+		});
+		expect(await after.text()).toBe(expired);
+	});
 });
