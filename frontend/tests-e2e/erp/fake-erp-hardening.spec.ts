@@ -45,6 +45,37 @@ test.describe('fake-erp request hardening', () => {
 		});
 	});
 
+	test('QBO redirect_uri must match a registered URI exactly', async ({ request }) => {
+		const authorize = (redirect_uri: string, client_id = QBO_CLIENT_ID) =>
+			request.get(`${QBO}/oauth2/authorize`, {
+				params: { redirect_uri, state: 'x', client_id },
+				maxRedirects: 0
+			});
+
+		// The loopback IP and a worktree-offset port are both registered.
+		const ip = await authorize('http://127.0.0.1:8003/api/erp/oauth/callback');
+		expect(ip.status()).toBe(302);
+		expect(ip.headers()['location']).toMatch(/^http:\/\/127\.0\.0\.1:8003\/api\/erp\/oauth\/callback\?/);
+
+		// Near misses are not prefix-matched: another port, another path, a
+		// suffix smuggled after the registered URI, another scheme.
+		for (const uri of [
+			'http://localhost:8010/api/erp/oauth/callback',
+			'http://localhost:8000/api/erp/oauth/callback/../../evil',
+			'http://localhost:8000/api/erp/oauth/callback@evil.example',
+			'https://localhost:8000/api/erp/oauth/callback'
+		]) {
+			const resp = await authorize(uri);
+			expect(resp.status(), uri).toBe(400);
+			expect(resp.headers()['location'], uri).toBeUndefined();
+		}
+
+		// The client check runs first: an unknown client never redirects.
+		const client = await authorize('http://localhost:8000/api/erp/oauth/callback', 'other');
+		expect(client.status()).toBe(400);
+		expect(await client.json()).toEqual({ error: 'invalid_client' });
+	});
+
 	test('SYSPRO refuses a DTD / entity payload instead of expanding it', async ({ request }) => {
 		const logon = await request.get(`${SYSPRO}/Logon`, {
 			params: { Operator: 'op', OperatorPassword: 'pw', CompanyId: 'C', CompanyPassword: 'cpw' }
