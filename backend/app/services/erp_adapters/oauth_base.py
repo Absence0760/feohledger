@@ -98,34 +98,43 @@ class RefreshOnUnauthorized(httpx.Auth):
     ``erp_oauth`` to refresh only if that token is still the stored one (a
     concurrent caller may already have), and retries once with the new one.
 
-    When the refresh itself fails — consent revoked (``erp_oauth`` has then
-    marked the connection ``needs_reconnect``) or the provider unreachable — the
-    original 401 is returned, so each adapter's own failure handling is
-    unchanged.
+    When the refresh itself fails, its exception propagates exactly as it would
+    from ``access_token()``: a revoked consent (``erp_oauth`` has then marked the
+    connection ``needs_reconnect``) is ``ErpNotConnectedError``, which
+    ``services/erp._is_final`` treats as final, and a provider outage is the
+    retryable ``ErpTokenRefreshError``. Swallowing either into the provider's 401
+    would misclassify "not connected" as a retryable HTTP failure and hide the
+    cause. A 401 means the provider did not process the request, so raising here
+    cannot orphan a write.
+
+    An adapter builds its headers once per client block, so after a refresh the
+    remaining requests in that block still carry the rejected bearer. The flow
+    remembers each replacement and swaps it in before sending, instead of
+    spending a 401 and a token lookup on every one of them.
     """
 
     def __init__(self, adapter: OAuthErpAdapter) -> None:
         self._adapter = adapter
+        self._replaced: dict[str, str] = {}
 
     async def async_auth_flow(
         self, request: httpx.Request
     ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        sent = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if sent in self._replaced:
+            sent = self._replaced[sent]
+            request.headers["Authorization"] = f"Bearer {sent}"
         response = yield request
-        if response.status_code != 401:
-            return
-        rejected = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        if not rejected:
+        if response.status_code != 401 or not sent:
             return
         from app.services import erp_oauth
 
-        try:
-            token = await erp_oauth.get_access_token(
-                self._adapter.oauth_provider, self._adapter.config, rejected_token=rejected
-            )
-        except erp_oauth.ErpNotConnectedError:
+        token = await erp_oauth.get_access_token(
+            self._adapter.oauth_provider, self._adapter.config, rejected_token=sent
+        )
+        if token == sent:
             return
-        if token == rejected:
-            return
+        self._replaced[sent] = token
         request.headers["Authorization"] = f"Bearer {token}"
         yield request
 

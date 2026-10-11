@@ -1274,14 +1274,34 @@ async def test_an_unchanged_token_is_not_replayed(monkeypatch):
     assert seen == ["Bearer old-token"]
 
 
-async def test_a_failed_refresh_returns_the_original_401(monkeypatch):
-    # Consent revoked: erp_oauth has marked needs_reconnect; the adapter sees
-    # the provider's 401 exactly as before, so its own failure path runs.
-    client, seen, _ = _unauthorized_harness(
-        monkeypatch, refreshed=erp_oauth.ErpNotConnectedError("x")
-    )
-    assert (await _post(client, "old-token")).status_code == 401
+@pytest.mark.parametrize(
+    "error",
+    [erp_oauth.ErpNotConnectedError("x"), erp_oauth.ErpTokenRefreshError("x", "outage")],
+)
+async def test_a_failed_refresh_propagates_not_a_bare_401(monkeypatch, error):
+    # Consent revoked (final: needs_reconnect) or provider unreachable
+    # (retryable) — the push loop classifies on the exception
+    # (services/erp._is_final), so it must not be flattened into a 401.
+    client, seen, _ = _unauthorized_harness(monkeypatch, refreshed=error)
+    with pytest.raises(type(error)):
+        await _post(client, "old-token")
     assert seen == ["Bearer old-token"]
+
+
+async def test_later_requests_carry_the_refreshed_token_without_another_401(monkeypatch):
+    # An adapter reuses one headers dict per client block: after the first
+    # refresh, the next request must go out with the NEW bearer directly.
+    client, seen, refresh_calls = _unauthorized_harness(monkeypatch, refreshed="new-token")
+    async with client:
+        for _ in range(2):
+            resp = await client.post(
+                "https://erp.test/bill",
+                content=b'{"amount": "10.00"}',
+                headers={"Authorization": "Bearer old-token"},
+            )
+            assert resp.status_code == 200
+    assert seen == ["Bearer old-token", "Bearer new-token", "Bearer new-token"]
+    assert refresh_calls == ["old-token"]
 
 
 def test_every_oauth_adapter_api_client_refreshes_on_401():

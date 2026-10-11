@@ -1901,8 +1901,11 @@ revoked one session). Every OAuth adapter's API client comes from
 `OAuthErpAdapter.oauth_client`, whose `httpx` auth flow
 (`oauth_base.RefreshOnUnauthorized`) reads the rejected bearer, calls
 `get_access_token(..., rejected_token=...)` — which refreshes only if that token is
-still the stored one — and replays the request once. A failed refresh returns the
-original 401, so each adapter's own failure path is unchanged. QuickBooks keeps its
+still the stored one — and replays the request once; later requests in the same
+client carry the refreshed token directly. A failed refresh propagates like it does
+from `access_token()`: a revoked consent is the final `ErpNotConnectedError`
+(`needs_reconnect` is already set), an outage the retryable `ErpTokenRefreshError`
+— never flattened into a 401 the push loop would retry. QuickBooks keeps its
 own equivalent loop in `_request`. The only bare clients are the consent-time
 tenant lookups (no stored connection to refresh yet), pinned by
 `tests/test_erp_oauth.py::test_every_oauth_adapter_api_client_refreshes_on_401`;
