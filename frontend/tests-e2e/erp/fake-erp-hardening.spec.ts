@@ -1,8 +1,8 @@
 import type { APIRequestContext } from '@playwright/test';
 
-import { expect, test } from '../fixtures/helpers';
+import { escapeRegExp, expect, test } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
-import { FAKE_ERP_BASE } from './helpers';
+import { ERP_OAUTH_CALLBACK, FAKE_ERP_BASE } from './helpers';
 
 /**
  * The fake ERP's own request handling — what CodeQL flagged in
@@ -20,7 +20,7 @@ const QBO_CLIENT_ID = 'fake-qbo-client';
 async function qboBearer(request: APIRequestContext): Promise<string> {
 	const authorize = await request.get(`${QBO}/oauth2/authorize`, {
 		params: {
-			redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+			redirect_uri: ERP_OAUTH_CALLBACK,
 			state: 's',
 			client_id: QBO_CLIENT_ID
 		},
@@ -46,14 +46,13 @@ test.describe('fake-erp request hardening', () => {
 	});
 
 	test('QBO authorize redirects only to a registered redirect_uri', async ({ request }) => {
-		const registered = 'http://localhost:8000/api/erp/oauth/callback';
 		const ok = await request.get(`${QBO}/oauth2/authorize`, {
-			params: { redirect_uri: registered, state: 's1', client_id: QBO_CLIENT_ID },
+			params: { redirect_uri: ERP_OAUTH_CALLBACK, state: 's1', client_id: QBO_CLIENT_ID },
 			maxRedirects: 0
 		});
 		expect(ok.status()).toBe(302);
 		expect(ok.headers()['location']).toMatch(
-			/^http:\/\/localhost:8000\/api\/erp\/oauth\/callback\?code=fake-qbo-code-\d+&state=s1&realmId=/
+			new RegExp(`^${escapeRegExp(ERP_OAUTH_CALLBACK)}\\?code=fake-qbo-code-\\d+&state=s1&realmId=`)
 		);
 
 		const hostile = await request.get(`${QBO}/oauth2/authorize`, {
@@ -84,9 +83,9 @@ test.describe('fake-erp request hardening', () => {
 		// suffix smuggled after the registered URI, another scheme.
 		for (const uri of [
 			'http://localhost:8010/api/erp/oauth/callback',
-			'http://localhost:8000/api/erp/oauth/callback/../../evil',
-			'http://localhost:8000/api/erp/oauth/callback@evil.example',
-			'https://localhost:8000/api/erp/oauth/callback'
+			`${ERP_OAUTH_CALLBACK}/../../evil`,
+			`${ERP_OAUTH_CALLBACK}@evil.example`,
+			ERP_OAUTH_CALLBACK.replace(/^http:/, 'https:')
 		]) {
 			const resp = await authorize(uri);
 			expect(resp.status(), uri).toBe(400);
@@ -94,7 +93,7 @@ test.describe('fake-erp request hardening', () => {
 		}
 
 		// The client check runs first: an unknown client never redirects.
-		const client = await authorize('http://localhost:8000/api/erp/oauth/callback', 'other');
+		const client = await authorize(ERP_OAUTH_CALLBACK, 'other');
 		expect(client.status()).toBe(400);
 		expect(await client.json()).toEqual({ error: 'invalid_client' });
 	});
@@ -187,7 +186,7 @@ test.describe('fake-erp request hardening', () => {
 			data: await (async () => {
 				const authorize = await request.get(`${QBO}/oauth2/authorize`, {
 					params: {
-						redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+						redirect_uri: ERP_OAUTH_CALLBACK,
 						state: 's',
 						client_id: QBO_CLIENT_ID
 					},
@@ -216,7 +215,7 @@ test.describe('fake-erp request hardening', () => {
 	test('QBO query keeps its normal shapes after the regex change', async ({ request }) => {
 		const authorize = await request.get(`${QBO}/oauth2/authorize`, {
 			params: {
-				redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+				redirect_uri: ERP_OAUTH_CALLBACK,
 				state: 's',
 				client_id: QBO_CLIENT_ID
 			},
@@ -268,7 +267,7 @@ test.describe('fake-erp request hardening', () => {
 			});
 		const authorize = await request.get(`${QBO}/oauth2/authorize`, {
 			params: {
-				redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+				redirect_uri: ERP_OAUTH_CALLBACK,
 				state: 's',
 				client_id: QBO_CLIENT_ID
 			},
@@ -386,7 +385,7 @@ test.describe('fake-erp request hardening', () => {
 
 		const authorize = await request.get(`${QBO}/oauth2/authorize`, {
 			params: {
-				redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+				redirect_uri: ERP_OAUTH_CALLBACK,
 				state: 's',
 				client_id: QBO_CLIENT_ID
 			},

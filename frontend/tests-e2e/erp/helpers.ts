@@ -24,6 +24,13 @@ import {
 
 export const FAKE_ERP_BASE = 'http://localhost:12112';
 
+/** The backend's ERP OAuth callback (backend/app/services/erp_oauth.py
+ *  CALLBACK_PATH) on the API this run targets. The fake registers it on the
+ *  dev API port and every worktree offset above it (tools/fake-erp/app.py
+ *  OAUTH_REDIRECT_URIS), so deriving it from API_BASE keeps a worktree on
+ *  :8001 asking for its own callback rather than the primary checkout's. */
+export const ERP_OAUTH_CALLBACK = `${API_BASE}/api/erp/oauth/callback`;
+
 /** Wipe the fake ERP's in-memory state (stored invoices + id counters) so
  *  document-id assertions aren't coupled to what previous runs created.
  *  Best-effort: when the fake isn't running the specs skip anyway via

@@ -11,6 +11,7 @@ import {
 } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
+	ERP_OAUTH_CALLBACK,
 	FAKE_ERP_BASE,
 	createApprovedInvoice,
 	deleteInvoice,
@@ -105,7 +106,7 @@ async function oauthStatus(page: Page) {
 
 /** An invoice straight from the fake, with a bearer the fake issued to us. */
 async function blackbaudInvoice(request: APIRequestContext, id: string) {
-	const callback = 'http://localhost:8000/api/erp/oauth/callback';
+	const callback = ERP_OAUTH_CALLBACK;
 	const authorize = await request.get(`${BB}/oauth2/authorization`, {
 		params: {
 			redirect_uri: callback,

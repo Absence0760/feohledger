@@ -11,6 +11,7 @@ import {
 } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
+	ERP_OAUTH_CALLBACK,
 	FAKE_ERP_BASE,
 	createApprovedInvoice,
 	deleteInvoice,
@@ -91,7 +92,7 @@ async function billFromFake(page: Page, id: string) {
 	const qbo = `${FAKE_ERP_BASE}/qbo`;
 	const authorize = await page.request.get(`${qbo}/oauth2/authorize`, {
 		params: {
-			redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+			redirect_uri: ERP_OAUTH_CALLBACK,
 			state: 'spec',
 			client_id: 'fake-qbo-client'
 		},
