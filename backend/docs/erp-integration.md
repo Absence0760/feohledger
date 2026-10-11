@@ -234,7 +234,7 @@ After sending an invoice to the ERP, the system needs to know when the ERP has p
 | Method | How it works | When to use |
 |---|---|---|
 | **Webhook** | ERP calls our endpoint when status changes | Preferred — real-time, no polling cost |
-| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support |
+| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** (below) |
 
 **Webhook endpoint:** `POST /api/erp/webhook/{erp_type}`
 
@@ -269,10 +269,16 @@ integration that omits a per-delivery `event_id` instead hits
 path, which is the correct trade-off: no dedup at all beats false dedup on a
 different event.
 
-**Polling job:** Runs every 5 minutes for invoices in `sent_to_erp` status older than 1 minute:
-1. Calls `adapter.get_invoice_status(erp_document_id)`
-2. If status changed, transitions the invoice
-3. If stuck for > 30 minutes, marks as `failed` with timeout reason
+**Polling job — not built.** Every adapter implements
+`get_invoice_status(erp_document_id)` (and fake-erp's `__set-status` /
+`__set-balance` hooks can drive it), but **nothing under `app/` calls it**: there is
+no background sweep, so an ERP without a webhook never reports a status change
+back, and nothing times a stuck `sent_to_erp` invoice out. The webhook above is the
+only inbound path today. The intended design was a sweep every few minutes over
+`sent_to_erp` invoices that transitions on a changed status and fails one stuck
+past a timeout; before wiring it, three adapters' "balance 0 ⇒ paid" mapping has to
+change (it also matches a credited or zero-total bill). Tracked in
+`docs/followups.md` ("ERP status polling and void are unwired").
 
 ## Organization ERP Configuration
 
