@@ -96,7 +96,7 @@ tests-e2e/
 ├── payments/                        queue, runs, void/cancel, CFO approval, execute
 ├── workflows/                       lifecycle, step config, approval matrix, etc.
 ├── exceptions/                      queue, assign, filter, resolve
-├── erp/                             merge-dev / netsuite / dynamics / quickbooks-online / xero / sage-accounting / blackbaud-fe-nxt / sage-intacct / syspro / sage-accounting-za adapter e2e + fake-erp request hardening (gated — needs fake-erp)
+├── erp/                             merge-dev / netsuite / dynamics / quickbooks-online / xero / sage-accounting / blackbaud-fe-nxt / sage-intacct / syspro / sage-accounting-za adapter e2e + inbound ERP webhook + fake-erp request hardening (gated — needs fake-erp)
 ├── credit-memos/                    list, pagination, the invoice pickers
 ├── organization/                    settings, fraud rules, GL accounts sync
 ├── purchase-orders/                 list, sync
@@ -480,7 +480,7 @@ container is up.
 |---|---|---|
 | `sso/login.spec.ts` | Keycloak + acme SSO seeded | `pnpm idp:up && pnpm idp:seed` |
 | `email/signup-email.spec.ts` | Mailpit + backend on `FEOH_EMAIL_PROVIDER=smtp` | `pnpm mail:up`, restart backend with smtp |
-| `erp/` (merge-dev / netsuite / dynamics / quickbooks-online / xero / sage-accounting / blackbaud-fe-nxt / sage-intacct / syspro / sage-accounting-za + fake-erp-hardening specs) | fake-erp on :12112 + backend on the committed `.env.development` `FEOH_ERP_*` base URLs | `pnpm erp:up`, then `pnpm test:erp` |
+| `erp/` (merge-dev / netsuite / dynamics / quickbooks-online / xero / sage-accounting / blackbaud-fe-nxt / sage-intacct / syspro / sage-accounting-za + erp-webhook + fake-erp-hardening specs) | fake-erp on :12112 + backend on the committed `.env.development` `FEOH_ERP_*` base URLs | `pnpm erp:up`, then `pnpm test:erp` |
 | `scim/provisioning.spec.ts` | (none — CI-safe contract test) | always runs |
 
 Backend-only service flows are pytest integration tests, also gated:
