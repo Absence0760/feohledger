@@ -349,4 +349,40 @@ test.describe('fake-erp request hardening', () => {
 
 		await request.get(`${SYSPRO}/Logoff`, { params: { UserId: userId } });
 	});
+
+	test('QBO API refuses a missing token and the wrong realm', async ({ request }) => {
+		const company = (realm: string, authorization?: string) =>
+			request.get(`${QBO}/v3/company/${realm}/companyinfo/${realm}`, {
+				headers: authorization ? { Authorization: authorization } : {}
+			});
+
+		const none = await company('fake-realm-1');
+		expect(none.status()).toBe(401);
+		expect((await none.json()).Fault.Error[0].code).toBe('3200');
+		expect((await company('fake-realm-1', 'Bearer made-up')).status()).toBe(401);
+
+		const authorize = await request.get(`${QBO}/oauth2/authorize`, {
+			params: {
+				redirect_uri: 'http://localhost:8000/api/erp/oauth/callback',
+				state: 's',
+				client_id: QBO_CLIENT_ID
+			},
+			maxRedirects: 0
+		});
+		const code = new URL(authorize.headers()['location']).searchParams.get('code') ?? '';
+		const token = await request.post(`${QBO}/oauth2/token`, {
+			headers: {
+				Authorization: `Basic ${Buffer.from(`${QBO_CLIENT_ID}:fake-qbo-secret`).toString('base64')}`,
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			data: `grant_type=authorization_code&code=${code}`
+		});
+		const bearer = `Bearer ${(await token.json()).access_token}`;
+
+		expect((await company('fake-realm-1', bearer)).status()).toBe(200);
+		// A valid token for one company does not open another.
+		const other = await company('someone-elses-realm', bearer);
+		expect(other.status()).toBe(403);
+		expect((await other.json()).Fault.Error[0].code).toBe('3100');
+	});
 });
