@@ -118,6 +118,43 @@ test.describe('fake-erp request hardening', () => {
 		await request.get(`${SYSPRO}/Logoff`, { params: { UserId: userId } });
 	});
 
+	test('SYSPRO still posts and queries well-formed documents', async ({ request }) => {
+		const logon = await request.get(`${SYSPRO}/Logon`, {
+			params: { Operator: 'op', OperatorPassword: 'pw', CompanyId: 'C', CompanyPassword: 'cpw' }
+		});
+		const userId = (await logon.text()).trim();
+		const invoice = `HARD-${Date.now()}`;
+		const xmlIn =
+			'<PostApInvoice><Item><Posting><Supplier>0000001</Supplier>' +
+			`<Invoice>${invoice}</Invoice><InvoiceAmount>100.25</InvoiceAmount></Posting>` +
+			'<Distribution><DistributionLine><LedgerCode>6100</LedgerCode>' +
+			'<DistributionValue>100.25</DistributionValue></DistributionLine>' +
+			'</Distribution></Item></PostApInvoice>';
+
+		const post = await request.get(`${SYSPRO}/Transaction/Post`, {
+			params: { UserId: userId, BusinessObject: 'APSTIN', XmlParameters: '<p/>', XmlIn: xmlIn }
+		});
+		const posted = await post.text();
+		expect(posted).not.toMatch(/^ERROR/);
+		expect(posted).toContain(`<Invoice>${invoice}</Invoice>`);
+
+		const query = await request.get(`${SYSPRO}/Query/Query`, {
+			params: {
+				UserId: userId,
+				BusinessObject: 'COMFND',
+				XmlIn:
+					'<Query><TableName>ApInvoice</TableName><Columns><Column>Invoice</Column>' +
+					'<Column>OrigInvValue</Column></Columns><Where><Expression>' +
+					`<Column>Invoice</Column><Value>${invoice}</Value></Expression></Where></Query>`
+			}
+		});
+		const rows = await query.text();
+		expect(rows).toContain(`<Invoice>${invoice}</Invoice><OrigInvValue>100.25</OrigInvValue>`);
+		expect(rows).toContain('<RowsReturned>1</RowsReturned>');
+
+		await request.get(`${SYSPRO}/Logoff`, { params: { UserId: userId } });
+	});
+
 	test('QBO query parses a multi-line query without regex backtracking', async ({ request }) => {
 		const token = await request.post(`${QBO}/oauth2/token`, {
 			headers: {
