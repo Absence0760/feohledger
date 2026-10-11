@@ -2090,7 +2090,7 @@ import json
 
 blackbaud = APIRouter(prefix="/blackbaud")
 
-BLACKBAUD_TOKEN = "fake-blackbaud-token"
+BLACKBAUD_OAUTH = FakeOAuthApp("blackbaud", "fake-blackbaud-client", "fake-blackbaud-secret")
 BLACKBAUD_ENVIRONMENT_ID = "p-fake-env-1"
 
 BLACKBAUD_VENDOR_FIXTURES: list[dict] = [
@@ -2128,7 +2128,7 @@ def _require_blackbaud_auth(request: Request) -> None:
         raise ProviderError(
             401, {"statusCode": 401, "message": "Access denied due to missing subscription key."}
         )
-    if request.headers.get("authorization", "") != f"Bearer {BLACKBAUD_TOKEN}":
+    if not BLACKBAUD_OAUTH.issued(request):
         raise ProviderError(401, {"statusCode": 401, "message": "Invalid access token."})
 
 
@@ -2147,20 +2147,22 @@ def _blackbaud_page(request: Request, rows: list[dict]) -> dict:
     return {"count": len(rows), "value": copy.deepcopy(rows[offset : offset + limit])}
 
 
+@app.get("/blackbaud/oauth2/authorization")
+async def blackbaud_authorize(
+    redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
+) -> Response:
+    return BLACKBAUD_OAUTH.authorize(redirect_uri, state, client_id, response_type)
+
+
 @blackbaud.post("/oauth2/token")
 async def blackbaud_token(request: Request) -> dict:
-    raw = (await request.body()).decode("utf-8", errors="replace")
-    form = {k: v[0] for k, v in parse_qs(raw).items()}
-    grant = form.get("grant_type")
-    authorization = grant == "authorization_code" and form.get("code") and form.get("redirect_uri")
-    refresh = grant == "refresh_token" and form.get("refresh_token")
-    if not (authorization or refresh):
-        raise ProviderError(400, {"error": "invalid_grant"})
+    """FakeOAuthApp's exchange (client by HTTP Basic), in the SKY response
+    shape: the environment the admin approved rides on the token response."""
+    issued = await BLACKBAUD_OAUTH.token(request, client_auth="basic")
     return {
-        "access_token": BLACKBAUD_TOKEN,
+        **issued,
         "token_type": "bearer",
         "expires_in": 3600,
-        "refresh_token": "fake-blackbaud-refresh",
         "refresh_token_expires_in": 31536000,
         "environment_id": BLACKBAUD_ENVIRONMENT_ID,
         "environment_name": "Fake FE NXT Environment",

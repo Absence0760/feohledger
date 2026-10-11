@@ -723,3 +723,20 @@ def test_oauth_spec_reads_the_environment_and_a_call_time_token_override():
         )
     )
     assert tenant == "p-env-1"
+
+
+def test_oauth_endpoints_default_to_blackbaud_and_honour_the_overrides(monkeypatch):
+    from app.services import erp_oauth as oauth
+    from app.services.erp_adapters.blackbaud_fe_nxt import BLACKBAUD_OAUTH as spec
+
+    monkeypatch.setattr(settings, "erp_blackbaud_authorize_url", "")
+    monkeypatch.setattr(settings, "erp_blackbaud_token_url", "")
+    assert oauth.authorize_endpoint(spec) == "https://app.blackbaud.com/oauth/authorize"
+    assert oauth.token_endpoint(spec) == "https://oauth2.sky.blackbaud.com/token"
+
+    # The operator override is what lets the connect flow run against
+    # fake-erp locally (guard rail 7); each one moves only its own endpoint.
+    fake = "http://localhost:12112/blackbaud/oauth2"
+    monkeypatch.setattr(settings, "erp_blackbaud_authorize_url", f"{fake}/authorization")
+    assert oauth.authorize_endpoint(spec) == f"{fake}/authorization"
+    assert oauth.token_endpoint(spec) == "https://oauth2.sky.blackbaud.com/token"

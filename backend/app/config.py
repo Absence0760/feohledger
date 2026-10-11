@@ -320,6 +320,9 @@ class Settings(BaseSettings):
     # https://api.sky.blackbaud.com and https://oauth2.sky.blackbaud.com/token.
     erp_blackbaud_api_base: str = ""
     erp_blackbaud_token_url: str = ""
+    # Authorize-endpoint override (operator-trusted, non-secret). Empty →
+    # Blackbaud's real one. Dev points it at fake-erp so the connect runs locally.
+    erp_blackbaud_authorize_url: str = ""
     # ERP OAuth authorization-code connections (QuickBooks Online, Xero, Sage
     # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
     # `state` carried across the provider's consent redirect.

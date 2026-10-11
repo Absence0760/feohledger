@@ -1666,8 +1666,10 @@ Request rules worth knowing:
   `invoice_date_missing`, `due_date_missing`, `amount_not_positive`,
   `duplicate_invoice_number`.
 
-Tests: `backend/tests/test_erp_blackbaud_adapter.py`. fake-erp surface:
-`/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_URL`).
+Tests: `backend/tests/test_erp_blackbaud_adapter.py`, and end to end through the
+real OAuth connect `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`. fake-erp
+surface: `/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_URL`,
+`FEOH_ERP_BLACKBAUD_AUTHORIZE_URL`).
 
 ## Business Central: chart, POs and void
 

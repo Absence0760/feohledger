@@ -197,6 +197,7 @@ BLACKBAUD_OAUTH = register_oauth_provider(
         token_url=DEFAULT_TOKEN_URL,
         # Operator override (fake-erp), read on every call by services/erp_oauth.
         token_url_setting="erp_blackbaud_token_url",
+        authorize_url_setting="erp_blackbaud_authorize_url",
         # The SKY token response names the environment the admin approved.
         external_tenant_id_token_field="environment_id",
         # SKY applications have no per-request scopes: the API products an app

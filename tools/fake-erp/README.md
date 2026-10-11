@@ -255,13 +255,17 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
 Backs `erp_adapters/blackbaud_fe_nxt.py`
 (`FEOH_ERP_BLACKBAUD_API_BASE=http://localhost:12112/blackbaud`,
 `FEOH_ERP_BLACKBAUD_TOKEN_URL=http://localhost:12112/blackbaud/oauth2/token`).
-Every API route requires **both** `Authorization: Bearer fake-blackbaud-token`
-and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
+Every API route requires **both** a bearer the token endpoint issued and a
+non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
 
-- `POST /oauth2/token` — `authorization_code` (with `code` + `redirect_uri`) or
-  `refresh_token` grant → the bearer above plus `environment_id`
-  `p-fake-env-1`, `legal_entity_id`, `refresh_token_expires_in`, the SKY token
-  response shape.
+- OAuth (the backend's real connect flow, same `FakeOAuthApp` as Xero / Sage):
+  `GET /blackbaud/oauth2/authorization` 302s to a **registered** `redirect_uri`
+  with a `code` (client `fake-blackbaud-client`). `POST /oauth2/token` takes
+  `fake-blackbaud-client:fake-blackbaud-secret` by HTTP Basic, makes each code
+  single-use and bound to its `redirect_uri`, rotates refresh tokens, and answers
+  in the SKY shape: the bearer plus `environment_id` `p-fake-env-1`,
+  `legal_entity_id` and `refresh_token_expires_in` (the backend takes the
+  environment from the token response — there is no lookup call).
 - `GET /accountspayable/v1/vendors` (`136`, `137`), `/purchaseorders`
   (`1001` 1250.00 open, `1002` 980.50 closed), `GET /generalledger/v1/accounts`
   (`01-5000-00`, `01-5100-00`, `01-2000-00`) — `{"count", "value"}` with
