@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-12 — the commerce inventory sync (decisions §273)
+**Last reconciled:** 2026-10-12 — evaluating Baidu's Unlimited OCR opened
+one (c) entry, a scanned-invoice benchmark before any self-hosted OCR
+adapter, taking the file from 102 → 103. Before that, the commerce inventory sync (decisions §273)
 landed with its five providers (WooCommerce, Shopify, Square, Lightspeed
 X-Series, Cin7 Core): the Priority 14 commerce entry closes, and five (c)
 entries open — the OAuth-consent connection, WooCommerce's read → write race,
@@ -146,7 +148,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**102 open: 85 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**103 open: 86 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1536,6 +1538,32 @@ scope (§260) — do not fold them into any of these.
       unreadable credentials" action on `/api/organization/credentials/{block}`,
       audited, that replaces the row without opening it. **Trigger:** the first
       key rotation or environment where it happens.
+
+### Surfaced by evaluating Baidu's Unlimited OCR (2026-10-11)
+
+- [ ] **(c) No self-hosted extraction path is benchmarked for scanned invoices.**
+      The only local option for a scan with no text layer is a general vision
+      model through the `ollama` adapter, and nothing measures how it compares
+      with `claude_vision` / `aws_textract`. Baidu's Unlimited OCR (MIT, 3B
+      params / ~0.5B active, arXiv 2606.23050, June 2026) is a candidate OCR
+      stage: it returns text and layout, not fields, so it would run in front of
+      the existing Ollama text-mode prompt rather than replace an adapter. It is
+      **not** worth building an adapter on spec: digital PDFs already skip OCR
+      (PyMuPDF text mode), invoices are 1–3 pages so its long-document strength
+      mostly goes unused, a two-step read has no honest per-field confidence for
+      the 0.95 auto-approve gate, it likely needs a GPU plus vLLM / Transformers
+      rather than Ollama (a new local service under guard rail 7), and its
+      provenance needs a CISO / Security Analyst call before it touches
+      customer data. **Durable fix:** a bounded benchmark first — ~30 scanned
+      or photographed invoices plus a few multi-page vendor statements
+      (`statement_extraction.py`), comparing Unlimited OCR → Ollama text model
+      against `ollama` vision, `claude_vision` and `aws_textract` on per-field
+      accuracy and latency — and only if it clearly beats the current local
+      path on scans, an OCR pre-stage for the `ollama` adapter with a
+      confidence story, a Compose profile and `pnpm` script, and
+      `docs/sub-processors.md` unchanged (self-hosted). **Trigger:** a customer
+      or prospect asks for on-prem / no-third-party extraction of scanned
+      invoices, or the next change to the `ollama` adapter's image mode.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
