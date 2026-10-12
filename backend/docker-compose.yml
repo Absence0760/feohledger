@@ -240,7 +240,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.35.1@sha256:292ee7945dfc3d5840a181f3ab86fedb1e66703e02c8af98b50f4da56b7e278c
+    image: ollama/ollama:0.40.2@sha256:b86366bb528bbf7f1424435d165028497a5b69bf6ddb4fa5a87102e2b79f44fb
     profiles: ["ai"]
     ports:
       - "11435:11434"
