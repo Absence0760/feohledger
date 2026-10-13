@@ -363,6 +363,20 @@ async def update_organization(
                     "change."
                 ),
             )
+        # The commerce connection has its own audited writers: the configuration
+        # through `PUT /api/commerce/settings` (and `/locations`), which drops the
+        # sealed secrets when the platform or its destination changes, and the
+        # secrets through `PUT /api/organization/credentials/commerce` (decisions
+        # §273). This shallow merge would do neither, so the key is refused whole.
+        if "commerce" in body.settings:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "commerce is managed by /api/commerce/settings and "
+                    "/api/commerce/locations; its credentials by "
+                    "/api/organization/credentials/commerce."
+                ),
+            )
         # `billing` is the platform's own billing of THIS tenant, not a tenant
         # preference, and every value in it now drives a charge: the provider
         # overage is reported to, the spending cap, and the per-period

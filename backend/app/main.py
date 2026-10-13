@@ -24,6 +24,7 @@ from app.api import (
     cash_flow,
     catalogs,
     chat_notifications,
+    commerce,
     contracts,
     credit_memos,
     dashboard,
@@ -217,6 +218,7 @@ async def lifespan(app: FastAPI):
     from app.services.billing.ai_overage import run_ai_overage_reconcile_loop
     from app.services.billing.dunning_sweep import run_dunning_loop
     from app.services.cash_flow_alerts import run_shortfall_alerts_loop
+    from app.services.commerce_sync import run_commerce_sync_loop
     from app.services.contract_renewal import run_renewal_loop
     from app.services.discount_auto_trigger import run_discount_optimization_loop
     from app.services.extraction_reaper import run_reaper_loop
@@ -326,6 +328,12 @@ async def lifespan(app: FastAPI):
     # usage notices — never charges anything itself (see billing/ai_overage).
     if settings.billing_ai_overage_sweep_enabled:
         ai_overage_task = start_sweep(run_ai_overage_reconcile_loop(), name="billing-ai-overage")
+    # Commerce inventory push retries (decisions §273). Disabled by default; a
+    # receipt's own push runs post-commit, this is its backstop. Adjusts shelf
+    # stock on the business's commerce platform — never moves money.
+    commerce_task: asyncio.Task | None = None
+    if settings.commerce_sync_enabled:
+        commerce_task = start_sweep(run_commerce_sync_loop(), name="commerce-sync")
 
     try:
         yield
@@ -346,6 +354,7 @@ async def lifespan(app: FastAPI):
             scheduled_reports_task,
             shortfall_alerts_task,
             ai_overage_task,
+            commerce_task,
         ):
             if task is not None:
                 task.cancel()
@@ -494,6 +503,7 @@ app.include_router(expense_policies.router, prefix="/api")
 app.include_router(expense_preapprovals.router, prefix="/api")
 app.include_router(gl_accounts.router, prefix="/api")
 app.include_router(goods_receipts.router, prefix="/api")
+app.include_router(commerce.router, prefix="/api")
 app.include_router(inspections.router, prefix="/api")
 app.include_router(invoices.router, prefix="/api")
 app.include_router(email_actions.public_router, prefix="/api")

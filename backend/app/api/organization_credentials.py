@@ -1,6 +1,6 @@
 """Tenant provider credentials — their one sanctioned, audited writer.
 
-Mounted at `/api/organization/credentials`. The secrets of the `erp`,
+Mounted at `/api/organization/credentials`. The secrets of the `erp`, `commerce`,
 `payments` and `cards` settings blocks (API keys, OAuth client secrets, account
 tokens, webhook signing secrets — the catalogue is
 `services/provider_credentials.SECRET_FIELDS`) are stored sealed in
@@ -49,6 +49,7 @@ class ProviderCredentialStatus(BaseModel):
     erp: list[str]
     payments: list[str]
     cards: list[str]
+    commerce: list[str] = []
 
 
 class UpdateProviderCredentialsRequest(BaseModel):

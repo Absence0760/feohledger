@@ -44,6 +44,7 @@
 	import { formatList } from '#lib/utils/list.ts';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import ErpConnectionPanel from '#lib/components/organization/ErpConnectionPanel.svelte';
+	import CommerceConnectionPanel from '#lib/components/organization/CommerceConnectionPanel.svelte';
 	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
 	import {
 		FEATURE_ERP_INTEGRATIONS,
@@ -305,6 +306,7 @@
 			labelKey: 'org.rail.group.integrations',
 			items: [
 				{ slug: 'erp', labelKey: 'org.section.erp' },
+				{ slug: 'commerce', labelKey: 'org.section.commerce' },
 				{ slug: 'extraction', labelKey: 'org.section.extraction' },
 				{ slug: 'email-intake', labelKey: 'org.section.emailIntake' },
 				{ slug: 'chat', labelKey: 'org.section.chat' },
@@ -2373,6 +2375,10 @@
 							if (org) org = { ...org, settings: data.settings as unknown as OrgSettings };
 						}}
 					/>
+				{/if}
+
+				{#if section === 'commerce'}
+					<CommerceConnectionPanel {readOnly} {userLoaded} />
 				{/if}
 
 				{#if section === 'payments'}

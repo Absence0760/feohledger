@@ -57,6 +57,9 @@ def _line_dict(li) -> dict:
         "id": str(li.id),
         "po_line_item_id": str(li.po_line_item_id) if li.po_line_item_id else None,
         "description": li.description,
+        # Copied from the PO line (migration 0111); null on a free-text line.
+        "sku": li.sku,
+        "catalog_item_id": str(li.catalog_item_id) if li.catalog_item_id else None,
         # `is not None`, not truthiness: a line that received NOTHING (`0`) is a
         # recorded short-shipment, and `null` would read as "not recorded".
         "quantity_received": (
@@ -219,6 +222,7 @@ async def record_goods_receipt(
         ],
         idempotency_key=(idempotency_key or "").strip() or None,
         org_settings=org.settings or {},
+        tenant_db_name=org.db_name,
     )
     if not created:
         response.status_code = 200
@@ -244,5 +248,6 @@ async def cancel_receipt(
         entity_id=entity_id,
         gr_id=gr_id,
         org_settings=org.settings or {},
+        tenant_db_name=org.db_name,
     )
     return await _detail(db, receipt)

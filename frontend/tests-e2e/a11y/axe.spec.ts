@@ -58,6 +58,7 @@ const ORG_PANELS: [slug: string, heading: string][] = [
 	['branding', 'Branding'],
 	['custom-domains', 'Custom Domains'],
 	['erp', 'ERP Integration'],
+	['commerce', 'Commerce & inventory'],
 	['extraction', 'AI Extraction'],
 	['email-intake', 'Email Intake'],
 	['chat', 'Chat Notifications'],

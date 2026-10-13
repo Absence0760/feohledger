@@ -57,7 +57,14 @@ export function uniq(prefix: string): string {
 	return `${prefix}-${Date.now().toString(36)}-${_seq}-${Math.floor(Math.random() * 1e6)}`;
 }
 
-export type PoLine = { description: string; quantity: number; unitPrice: number; total: number };
+export type PoLine = {
+	description: string;
+	quantity: number;
+	unitPrice: number;
+	total: number;
+	/** The line's SKU snapshot (`po_line_items.sku`, migration 0111). */
+	sku?: string;
+};
 
 /** Insert a PurchaseOrder (+ optional line items). Returns its id + number. */
 export function createPo(opts: {
@@ -80,8 +87,8 @@ export function createPo(opts: {
 	const poId = sql(`select id from purchase_orders where po_number = '${poNumber}';`);
 	for (const l of opts.lines ?? []) {
 		sql(
-			`insert into po_line_items (id, po_id, description, quantity, unit_price, total, created_at, updated_at)
-			 values (gen_random_uuid(), '${poId}', '${l.description}', ${l.quantity}, ${l.unitPrice}, ${l.total}, now(), now());`
+			`insert into po_line_items (id, po_id, description, quantity, unit_price, total, sku, created_at, updated_at)
+			 values (gen_random_uuid(), '${poId}', '${l.description}', ${l.quantity}, ${l.unitPrice}, ${l.total}, ${l.sku ? `'${l.sku}'` : 'NULL'}, now(), now());`
 		);
 	}
 	return { poId, poNumber };
@@ -254,6 +261,7 @@ export function cleanup(ids: {
 		deleteInvoicesWhere(`id = '${id}'`);
 	}
 	for (const id of ids.grIds ?? []) {
+		sql(`delete from commerce_inventory_syncs where goods_receipt_id = '${id}';`);
 		sql(`delete from quality_inspections where gr_id = '${id}';`);
 		sql(`delete from gr_line_items where gr_id = '${id}';`);
 		sql(`delete from goods_receipts where id = '${id}';`);

@@ -6,6 +6,7 @@ from app.models.bank_reconciliation import BankStatement, BankTransaction
 from app.models.base import Base
 from app.models.billing import Plan, Subscription
 from app.models.cash_plan import CashPlan
+from app.models.commerce import CommerceInventorySync, CommerceSkuMapping
 from app.models.contract import Contract, ContractLineItem, ContractStatus, ContractType
 from app.models.credit_memo import CreditMemo
 from app.models.data_subject_request import DataSubjectRequest
@@ -104,6 +105,8 @@ __all__ = [
     "CardRebate",
     "CardRevealToken",
     "CashPlan",
+    "CommerceInventorySync",
+    "CommerceSkuMapping",
     "Catalog",
     "CatalogItem",
     "CatalogType",

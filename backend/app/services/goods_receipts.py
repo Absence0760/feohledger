@@ -33,6 +33,7 @@ from app.models.procurement import (
     POLineItem,
     PurchaseOrder,
 )
+from app.services import commerce_sync
 from app.services.audit_dispatch import dispatch_audit
 from app.services.po_matching import CANCELLED_GR_STATUSES, format_quantity
 from app.tenant import apply_entity_scope
@@ -264,6 +265,7 @@ async def create_goods_receipt(
     lines: list[ReceiptLineInput],
     idempotency_key: str | None,
     org_settings: dict | None,
+    tenant_db_name: str | None = None,
 ) -> tuple[GoodsReceipt, bool]:
     """Record a delivery against ``po_id``. Returns ``(receipt, created)``;
     ``created`` is False when ``idempotency_key`` replays an earlier submit."""
@@ -336,6 +338,11 @@ async def create_goods_receipt(
                 po_line_item_id=po_line.id if po_line is not None else None,
                 description=po_line.description if po_line is not None else line.description,
                 quantity_received=line.quantity_received,
+                # What arrived is what was ordered: the PO line's item identity,
+                # never the client's (migration 0111). The commerce sync pushes
+                # by this SKU.
+                catalog_item_id=po_line.catalog_item_id if po_line is not None else None,
+                sku=po_line.sku if po_line is not None else None,
             )
         )
     await db.flush()
@@ -362,6 +369,15 @@ async def create_goods_receipt(
     )
 
     await _rematch(db, org_id, po.po_number, org_settings)
+    # The commerce push is PLANNED here, in this transaction, and RUN after it
+    # commits (decisions §273): one sync row per line commits with the receipt.
+    await commerce_sync.plan_receipt(
+        db,
+        org_id=org_id,
+        org_settings=org_settings,
+        receipt=receipt,
+        tenant_db_name=tenant_db_name,
+    )
     return receipt, True
 
 
@@ -373,6 +389,7 @@ async def cancel_goods_receipt(
     entity_id: uuid.UUID | None,
     gr_id: uuid.UUID,
     org_settings: dict | None,
+    tenant_db_name: str | None = None,
 ) -> GoodsReceipt:
     """Cancel a hand-entered receipt. The matcher stops counting it, so the
     invoices on its PO are re-matched — which can raise a hold, never lift one."""
@@ -438,6 +455,14 @@ async def cancel_goods_receipt(
 
     if po_number:
         await _rematch(db, org_id, po_number, org_settings)
+    # Take back off the shelf what this receipt put on it (decisions §273).
+    await commerce_sync.plan_reversal(
+        db,
+        org_id=org_id,
+        org_settings=org_settings,
+        receipt=receipt,
+        tenant_db_name=tenant_db_name,
+    )
     return receipt
 
 

@@ -18,6 +18,9 @@ export interface GoodsReceiptLine {
 	id: string;
 	po_line_item_id: string | null;
 	description: string | null;
+	/** Copied from the PO line (migration 0111); null on a free-text line. */
+	sku: string | null;
+	catalog_item_id: string | null;
 	quantity_received: number | null;
 }
 
@@ -60,6 +63,9 @@ export interface ReceivablePO {
 export interface ReceivablePOLine {
 	id: string;
 	description: string | null;
+	/** The SKU snapshot (migration 0111); null when the line names none. */
+	sku: string | null;
+	catalog_item_id: string | null;
 	quantity: number | null;
 	quantity_received: number;
 }

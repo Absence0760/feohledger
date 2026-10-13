@@ -465,9 +465,11 @@ gate fails if a model is added without being classified.
    - `InvoiceExtractionResult` — invoice_id, method, confidence, raw_result (JSONB)
    - `Vendor` — name, code, tax_id, status (active/unverified/inactive/rejected), source (manual/erp_sync/ai_extracted)
    - `PurchaseOrder` — po_number, vendor_id, total, currency (nullable, no default — migration 0099), status
-   - `POLineItem` — po_id, description, quantity, unit_price, total
+   - `POLineItem` — po_id, description, quantity, unit_price, total, catalog_item_id + sku (item identity, migration 0111 — `sku` is a snapshot, never re-joined; decisions §273)
    - `GoodsReceipt` — gr_number, po_id, received_date, status, source, recorded_by_user_id, idempotency_key
-   - `GRLineItem` — gr_id, po_line_item_id (migration 0109), description, quantity_received
+   - `GRLineItem` — gr_id, po_line_item_id (migration 0109), description, quantity_received, catalog_item_id + sku (copied from the PO line, migration 0111)
+   - `CommerceInventorySync` — one row per received line per direction (`receive` / `reverse`), unique on `(gr_line_item_id, direction)`: provider, sku, signed `quantity_delta`, status (pending / in_flight / synced / skipped / failed / cancelled), coded `reason`, provider ids + reference, `idempotency_key`, attempts (migration 0111). See `commerce-integration.md`
+   - `CommerceSkuMapping` — an admin's SKU → provider item id override, unique per `(organization_id, provider, sku)` (migration 0111)
    - `QualityInspection` — inspection_number, po_id, gr_id, result (pass/fail/partial), accepted_quantity, rejected_quantity, deviation_notes — the 4-way match leg (see `docs/po-matching.md`)
    - `GLAccount` — code, name, account_type, parent_code, erp_account_id
    - `PaymentRun` — status, total_amount, initiated_by, executed_at

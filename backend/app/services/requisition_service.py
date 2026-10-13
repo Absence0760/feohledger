@@ -237,6 +237,10 @@ def convert_requisition_to_po(
                 quantity=li.quantity,
                 unit_price=li.unit_price,
                 total=li.total,
+                # What was requested is what is ordered (migration 0111): the
+                # catalog item and the item code the line was raised with.
+                catalog_item_id=li.catalog_item_id,
+                sku=(li.item_code or "").strip() or None,
             )
         )
     return po

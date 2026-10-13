@@ -249,6 +249,10 @@ always `backend/app/config.py`.
 | `FEOH_EXTRACTION_MODE` | `local` | `local` or `lambda` |
 | `FEOH_ERP_MODE` | `local` | `local` or `lambda` |
 | `FEOH_ERP_MERGE_API_BASE` | `https://api.merge.dev/api/accounting/v1` | Merge.dev API base — operator-controlled (bypasses the admin-config SSRF guard); `.env.development` points it at fake-erp (`http://localhost:12112/merge/api/accounting/v1`) |
+| `FEOH_COMMERCE_API_BASE_OVERRIDE` | (empty) | Points EVERY commerce adapter at one fake, each provider at `<override>/<provider key>` (decisions §273). Operator-only and trusted (skips the SSRF guard on tenant shop/store URLs), so a **deployed environment refuses to boot with it set**. `.env.development` sets `http://localhost:12113` (fake-commerce, `pnpm commerce:up`). Empty = each provider's real API |
+| `FEOH_COMMERCE_SYNC_ENABLED` | `false` | The commerce push retry sweep (`services/commerce_sync`, sweep `commerce-sync`). Off by default: a receipt's push runs post-commit on its own, and an admin can retry by hand. Flip on in deployed envs once a tenant connects a platform. Adjusts shelf stock only — never moves money |
+| `FEOH_COMMERCE_SYNC_INTERVAL_SECONDS` | `300` | Its tick |
+| `FEOH_COMMERCE_SYNC_MAX_ATTEMPTS` | `8` | Attempts before the sweep stops retrying a retryable failure (backoff 1, 2, 4 … min, capped at 6 h); a manual retry still works |
 | `FEOH_ERP_NETSUITE_API_BASE` | (empty) | NetSuite REST base override — empty derives the per-account URL from `account_id`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_API_BASE` | (empty) | Dynamics 365 BC OData base override — empty → admin-config `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty) | D365 OAuth token URL override — empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value targets fake-erp |

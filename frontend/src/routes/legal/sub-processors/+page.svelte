@@ -718,6 +718,25 @@
 			does not gain ours.
 		</li>
 		<li>
+			<strong>Commerce platforms</strong> — Shopify, Square (Block), Lightspeed
+			Retail (X-Series), Cin7 Core (Cin7). When you connect your shop or account,
+			each goods receipt adds the received quantity of each item, by SKU, to the
+			stock at the location you chose (and a cancelled receipt takes it back off).
+			Alongside the SKU and quantity go the platform's item and location
+			identifiers, a timestamp or a note naming {OPERATOR.serviceName}, and an
+			opaque reference of ours. Cin7 Core also receives the item's unit cost, which
+			is Cin7's own average cost read back from your Cin7 account, and, if you set
+			one, the account code its stock adjustment posts to. No invoice, price,
+			supplier, bank, tax or user data from {OPERATOR.serviceName} is sent.
+		</li>
+		<li>
+			<strong>Your own WooCommerce store</strong> — when you connect it, each goods
+			receipt sends product identifiers, SKUs and stock quantities to the
+			WooCommerce site you run on your own WordPress hosting. Nothing personal
+			is sent, and the site and its host are yours, so neither is a
+			sub-processor of ours.
+		</li>
+		<li>
 			<strong>Supplier catalogue punch-out</strong> — a supplier's own catalogue
 			system, which receives the buyer's session identity and the cart contents
 			during a punch-out.
@@ -876,6 +895,22 @@
 				<tr>
 					<th scope="row">7 October 2026</th>
 					<td>The databases move from the EC2 instance's own disk to Amazon RDS, in the same region. RDS is added to § 2; the EC2 row no longer holds the databases.</td>
+				</tr>
+				<tr>
+					<th scope="row">9 October 2026</th>
+					<td>Your own WooCommerce store is added to § 4 as a system you control: a goods receipt can push stock quantities to it. It is not a sub-processor.</td>
+				</tr>
+				<tr>
+					<th scope="row">9 October 2026</th>
+					<td>Square (Block) is added to § 4 as a commerce platform you can connect: a goods receipt adds the received quantity to your own Square account's stock.</td>
+				</tr>
+				<tr>
+					<th scope="row">10 October 2026</th>
+					<td>Lightspeed Retail (X-Series) is added to § 4 as a commerce platform connection: your own store, receiving received-stock quantities against its own product identifiers.</td>
+				</tr>
+				<tr>
+					<th scope="row">10 October 2026</th>
+					<td>Cin7 Core (Cin7) is added to § 4 as a commerce platform connection: a goods receipt becomes a stock adjustment in your own Cin7 account, valued at Cin7's own average cost.</td>
 				</tr>
 			</tbody>
 		</table>
