@@ -547,7 +547,7 @@ Worktree notes:
   ```bash
   git branch --no-merged main                    # audit: anything still off main?
   git fetch origin
-  git rebase origin/main                         # in the worktree: build on the published main only
+  git rebase origin/main                         # in the worktree, before the first push only: build on the published main
   git push -u origin <worktree-branch>
   gh pr create --base main --title "<type>(<scope>): <subject>"
   ```
@@ -555,11 +555,14 @@ Worktree notes:
   commits; rooting on `origin/main` keeps them out of the PR, as
   `/fix-issues` does (`git checkout -B <branch> origin/main`). PRs are
   squash-merged once green; merging is the operator's call. Protection does not
-  require the branch to be up to date with `main` (`strict: false`); when one
-  does need updating, rebase it onto `origin/main` and `git push
-  --force-with-lease` rather than merging `main` in, so the PR branch stays
-  linear and rebase-merge stays available (the same rule `/fix-issues` follows
-  for `single-pr`). Claude prompts to keep or remove the
+  require the branch to be up to date with `main` (`strict: false`); when a
+  pushed branch does need updating (a conflict, or CI needs a newer `main`),
+  `git fetch origin && git merge origin/main` in the worktree and push
+  normally. Never rebase a branch that is already pushed: re-publishing it
+  needs a force-push, which `.claude/settings.json` denies (`git push --force`,
+  `-f`, and `--force*`, so `--force-with-lease` too). The merge commit never
+  reaches `main`, because the squash merge turns the whole PR into one linear
+  commit. Rebasing is fine only before the first push. Claude prompts to keep or remove the
   worktree on exit (auto-removes it if you left no changes) — but removal does
   **not** push or open a PR; do that first.
 - This is backed by a safety net: the `SessionStart` hook

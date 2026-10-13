@@ -99,7 +99,7 @@ listed above really is absent from \`main\`.
 green \`CI gate\` (squash-merged, linear history), never a local \`git merge\`.
 A branch listed here whose PR is still open is expected, not stranded. For one
 with no PR yet (\`gh pr list --head <branch> --state all\`), from its worktree:
-  git fetch origin && git rebase origin/main   # build on the published main only
+  git fetch origin && git rebase origin/main   # only if never pushed; else \`git merge origin/main\` (force-push is denied)
   git push -u origin <branch>
   gh pr create --base main --title "<type>(<scope>): <subject>"
 Surface this to the user and offer to open the missing PR before the work is forgotten.
