@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:feohledger_mobile/services/camera_capture.dart';
 
 void main() {
-  // FilePicker.pickFiles touches a platform channel; the binding must exist
+  // FilePicker.pickFile touches a platform channel; the binding must exist
   // before the swallowed MissingPluginException can be observed.
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -26,7 +26,7 @@ void main() {
 
   test('pickDocument returns null (no picker platform impl in tests) without '
       'throwing', () async {
-    // FilePicker.pickFiles has no test-host implementation; the service
+    // FilePicker.pickFile has no test-host implementation; the service
     // swallows the MissingPluginException and returns null rather than throwing.
     expect(await CameraCapture.pickDocument(), isNull);
   });

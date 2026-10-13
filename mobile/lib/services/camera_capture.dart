@@ -51,12 +51,13 @@ class CameraCapture {
   /// treats both identically.
   static Future<File?> pickDocument() async {
     try {
-      final result = await FilePicker.pickFiles(
+      // Single-select and never buffered: we upload by path. (`pickFiles`
+      // defaults to multi-select from file_picker 12.)
+      final picked = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: documentExtensions,
-        withData: false, // we upload by path; avoid buffering the whole file
       );
-      final path = result?.files.single.path;
+      final path = picked?.path;
       if (path == null) return null;
       return File(path);
     } catch (e) {
