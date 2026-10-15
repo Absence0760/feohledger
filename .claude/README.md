@@ -71,6 +71,7 @@ in [`personas/README.md`](personas/README.md).
 | [`commands/coverage-hunt.md`](commands/coverage-hunt.md) | Proactively backfill tests for behaviour that works but isn't tested — area-scoped, no bug required. The build-side counterpart to the diff-scoped `test-gap-checker`. |
 | [`commands/fix-ci.md`](commands/fix-ci.md) | Fix a failing GitHub Actions CI job (backend / frontend / mobile / e2e). Root-causes, reproduces locally with the same command CI used, fixes at source, lands coverage. No retry/timeout/skip band-aids. |
 | [`commands/flake-doctor.md`](commands/flake-doctor.md) | Triage and source-fix a flaky/failing Playwright e2e spec via the `flake-doctor` agent. Never masks a flake with sleeps, retries, or inflated timeouts. |
+| [`commands/draft.md`](commands/draft.md) | Ad hoc testing session in one draft PR. `/draft [topic]` opens a worktree, branch and draft PR off `origin/main`; each issue the operator sends is triaged in the main session and fixed by a background subagent (root cause, tests + docs, one path-scoped commit); `/draft resume <pr>` picks it up again; `/draft ready` runs the gate and `/check`, sets a conventional title, marks it ready and drives it to green. Never merges. |
 | [`commands/endpoint-inventory.md`](commands/endpoint-inventory.md) | Generator (read-only): writes `reviews/endpoint-inventory.md` — a canonical table of every FastAPI route (method / path / auth / tenant-scope / params / response) read from `backend/app/main.py` + `app/api/`. Feeds integrators and `/audit/auth`. |
 
 ## Hooks
