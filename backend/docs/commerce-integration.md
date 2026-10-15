@@ -94,7 +94,7 @@ The message of an error is stored on the sync row and shown to an admin:
 | `GET /api/commerce/providers` | admin |
 | `GET/PUT/DELETE /api/commerce/settings` | admin; configuration only — the read adds `secrets_set` (sealed secret NAMES); `PUT` refuses a non-blank secret (`commerce_secret_in_settings`) and drops the sealed secrets on a platform or destination change; `DELETE` clears both halves |
 | `PUT /api/organization/credentials/commerce` | admin; `{set, clear}` — the only writer of commerce secrets (`api/organization_credentials.py`), audited `organization.credentials_updated` |
-| `POST /api/commerce/test` | admin; the posted form plus the secrets it carries — stored ones join only for the saved platform at the saved destination (`config_for_connection_test`); returns `{success, code, message, locations}` |
+| `POST /api/commerce/test` | admin; the posted form plus the secrets it carries — stored ones join only for the saved platform at the saved destination (`config_for_connection_test`); returns `{success, code, message, locations}`; a refusal carries only the stable `code` (the panel localizes it) — the adapter's own text goes to the log, never the response |
 | `GET /api/commerce/oauth/{provider}/authorize` | admin; the Connect hook — 501 `commerce_oauth_not_available` in this build |
 | `GET/PUT /api/commerce/locations` | admin; `{location_id, entity_locations}` |
 | `GET/PUT /api/commerce/sku-mappings`, `DELETE …/{id}` | admin |

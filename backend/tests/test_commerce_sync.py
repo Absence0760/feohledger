@@ -37,6 +37,7 @@ from app.models.procurement import POLineItem, PurchaseOrder
 from app.models.workflow import AuditLog
 from app.services import commerce_sync
 from app.services.commerce_adapters import mock_adapter
+from app.services.commerce_adapters.base import CommerceAuthError
 from app.services.post_commit import drain_post_commit
 from app.utils.dates import utc_today
 
@@ -480,6 +481,24 @@ async def test_a_save_is_audited_and_test_reports_locations(realdb):
         "organization.commerce_locations_updated",
         "organization.commerce_disconnected",
     } <= actions
+
+
+async def test_a_refused_test_returns_the_code_without_the_adapters_text(realdb, monkeypatch):
+    async def _refuse(self):
+        raise CommerceAuthError("token tok-secret rejected at https://shop.example/?k=v")
+
+    monkeypatch.setattr(mock_adapter.MockCommerceAdapter, "test_connection", _refuse)
+    await _connect(realdb, location=None)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/commerce/test")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "success": False,
+        "code": "auth_failed",
+        "message": "",
+        "locations": [],
+    }
+    assert "tok-secret" not in resp.text
 
 
 async def test_the_syncs_read_is_scoped_to_the_tenant(realdb):

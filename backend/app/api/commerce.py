@@ -308,7 +308,11 @@ async def test_connection(
         await adapter.test_connection()
         locations = await adapter.list_locations()
     except CommerceError as exc:
-        return {"success": False, "code": exc.code, "message": str(exc), "locations": []}
+        # The code is the answer — the panel localizes it. The adapter's text
+        # stays in the log: echoing it would trust every provider module to keep
+        # its message clean, which nothing enforces.
+        logger.info("commerce test_connection refused: %s", exc.code)
+        return {"success": False, "code": exc.code, "message": "", "locations": []}
     except Exception as exc:  # noqa: BLE001 — class name only; no provider text
         logger.warning("commerce test_connection raised %s", type(exc).__name__)
         return {"success": False, "code": "unexpected", "message": "", "locations": []}
