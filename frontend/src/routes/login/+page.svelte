@@ -8,6 +8,7 @@
 	import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { SSO_PROVIDER_LABELS } from '#lib/types/ssoSettings.ts';
+	import type { Component } from 'svelte';
 
 	interface SSOConfigPublic {
 		enabled: boolean;
@@ -26,6 +27,21 @@
 	// When the tenant requires SSO, hide the password form entirely. Only ever
 	// true alongside an enabled config, so a broken IdP can't lock everyone out.
 	let ssoOnly = $state(false);
+
+	// Local-dev one-click demo sign-in. Loaded through a dynamic import behind
+	// `import.meta.env.DEV` — a literal Vite substitutes at build time — so a
+	// production build drops the branch AND the chunk: the seed accounts never
+	// reach the shipped bundle. (`dev` from `$app/env` is not folded across the
+	// module boundary, and a static import kept the component in the build.)
+	let DevDemoLogin = $state<Component<{
+		onpick: (email: string, password: string) => void;
+		disabled?: boolean;
+	}> | null>(null);
+	if (import.meta.env.DEV) {
+		void import('#lib/components/auth/DevDemoLogin.svelte').then((mod) => {
+			DevDemoLogin = mod.default;
+		});
+	}
 
 	// Shared with the `/organization` SSO panel's picker, so an admin can only
 	// pick a provider this page knows how to label.
@@ -85,10 +101,22 @@
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
+		await signIn(email, password);
+	}
+
+	// Dev-only one-click sign-in: fills the form too, so a failure (seed not
+	// run, backend down) leaves the attempted account visible beside the error.
+	function signInAsDemo(demoEmail: string, demoPassword: string) {
+		email = demoEmail;
+		password = demoPassword;
+		void signIn(demoEmail, demoPassword);
+	}
+
+	async function signIn(loginEmail: string, loginPassword: string) {
 		error = '';
 		loading = true;
 		try {
-			const result = await auth.login(email, password);
+			const result = await auth.login(loginEmail, loginPassword);
 			if (result.kind === 'mfa') {
 				// Stash the challenge in sessionStorage so the verify page can
 				// pick it up. sessionStorage clears on tab close — won't outlive
@@ -152,6 +180,10 @@
 			</button>
 		{/if}
 	</form>
+
+	{#if DevDemoLogin && !ssoOnly}
+		<DevDemoLogin onpick={signInAsDemo} disabled={loading} />
+	{/if}
 
 	{#snippet panel()}
 		<p class="panel-line">{m('auth.login.panelBody')}</p>

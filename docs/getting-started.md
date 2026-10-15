@@ -63,6 +63,13 @@ Access the app via a tenant subdomain:
 
 All demo accounts use password `demo`.
 
+Under `pnpm dev` the login page also shows a **Demo accounts (dev only)** panel
+listing the current tenant's seeded users, and one click signs in as that user,
+so you never have to type these. It is loaded behind `import.meta.env.DEV`, so
+production builds don't contain it, and `devDemoLogin.test.ts` guards that.
+The list lives in `frontend/src/lib/components/auth/DevDemoLogin.svelte`; keep
+it in step with `backend/scripts/seed.py` when seeded users change.
+
 **Acme Corp** (http://acme.localhost:7777):
 
 | Email                      | Name            | Role       |
