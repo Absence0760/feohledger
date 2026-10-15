@@ -79,7 +79,7 @@ services:
   # (feohledger-app) and two test users (demo@acme.com, newhire@acme.com),
   # both password `demo`.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.0@sha256:27b3230fbabb8c9ff3c66c864cf09dcd8a41aca82e5100679d109ef0eeb05741
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244
     profiles: ["idp"]
     command: ["start-dev", "--import-realm"]
     environment:
@@ -134,7 +134,7 @@ services:
       retries: 10
 
   authentik-server:
-    image: ghcr.io/goauthentik/server:2026.8.3@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849
+    image: ghcr.io/goauthentik/server:2026.8.4@sha256:e7226ae116dac5aa0a5643803e735b010038f492c401e08e16b3bf1ac54c090c
     profiles: ["idp"]
     command: server
     environment:
@@ -171,7 +171,7 @@ services:
       start_period: 60s
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:2026.8.3@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849
+    image: ghcr.io/goauthentik/server:2026.8.4@sha256:e7226ae116dac5aa0a5643803e735b010038f492c401e08e16b3bf1ac54c090c
     profiles: ["idp"]
     command: worker
     environment:
@@ -240,7 +240,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.40.2@sha256:b86366bb528bbf7f1424435d165028497a5b69bf6ddb4fa5a87102e2b79f44fb
+    image: ollama/ollama:0.40.3@sha256:adca95a12c2b386a8f9a995e7fa0600e187e3323b5e5522f5a6c3b1ec73eff99
     profiles: ["ai"]
     ports:
       - "11435:11434"
@@ -315,7 +315,7 @@ services:
   # instead of the real internet — view rendered HTML at http://localhost:8025.
   # Opt-in under the `mail` profile (`pnpm mail:up`). Captures only; never relays.
   mailpit:
-    image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    image: axllent/mailpit:v1.31.5@sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea
     profiles: ["mail"]
     ports:
       - "1025:1025"   # SMTP — FEOH_SMTP_PORT

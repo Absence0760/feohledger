@@ -2,7 +2,7 @@
 # Scorecard's PinnedDependencies treats an unpinned image as a supply-chain
 # pivot point, and a fixture whose Python drifts under it stops being
 # deterministic. Dependabot's docker ecosystem bumps tag + digest together.
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 
 WORKDIR /srv
 
