@@ -302,7 +302,7 @@ anchored to the tenant root rather than matching any page below it, and that
 `escapeRegExp` escapes backslashes, so one tenant's pattern can never be
 satisfied by another tenant's origin.
 
-Two things stay shared and are NOT covered by these variables:
+Three things stay shared and are NOT covered by these variables:
 
 - **The databases.** Every session still shares one Postgres, so pin a distinct
   tenant with `E2E_TENANT_OFFSET` (above) and give the second backend its own

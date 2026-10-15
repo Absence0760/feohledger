@@ -2,13 +2,17 @@
 # SessionStart hook: surface work that lives off `main`.
 #
 # With per-session git worktrees (`claude --worktree <name>`), each session
-# commits on its own branch. Git won't let a worktree check out `main`, so that
-# work only reaches `main` via an explicit merge from the primary checkout. If a
-# worktree branch is forgotten, its commits sit stranded off `main`.
+# commits on its own branch, and branch protection on `main` (PR required, the
+# `CI gate` check green, linear history, enforced on admins) means that work
+# reaches `main` only through a pull request — a local `git merge` into `main`
+# cannot be pushed. If a worktree branch is forgotten before its PR is opened,
+# its commits sit stranded off `main`.
 #
 # This hook lists every local branch holding work not yet on `main` and prints a
 # warning to stdout — which Claude Code injects as session context, so the next
-# turn can surface it and offer to merge. Silent when everything is on `main`.
+# turn can surface it and offer to open the missing PR. A branch whose PR is
+# still open is listed too; that is expected. Silent when everything is on
+# `main`.
 # Fail-open: any error exits 0 with no output, never wedging startup.
 #
 # ## Why `git branch --no-merged` is not enough
@@ -91,9 +95,13 @@ ${report}
 Branches already squash-merged into \`main\` are filtered out, so everything
 listed above really is absent from \`main\`.
 
-To land it on main, from the PRIMARY checkout (the one with \`main\`):
-  git merge <branch>        # fast-forwards if main hasn't moved; else a merge commit
-  # or, for linear history: cd into the worktree, \`git rebase main\`, then \`git merge --ff-only <branch>\`
-Surface this to the user and offer to consolidate it before it's forgotten.
+\`main\` is branch-protected: work reaches it only through a pull request with a
+green \`CI gate\` (squash-merged, linear history), never a local \`git merge\`.
+A branch listed here whose PR is still open is expected, not stranded. For one
+with no PR yet (\`gh pr list --head <branch> --state all\`), from its worktree:
+  git fetch origin && git rebase origin/main   # only if never pushed; else \`git merge origin/main\` (force-push is denied)
+  git push -u origin <branch>
+  gh pr create --base main --title "<type>(<scope>): <subject>"
+Surface this to the user and offer to open the missing PR before the work is forgotten.
 EOF
 exit 0

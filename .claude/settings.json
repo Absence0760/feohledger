@@ -80,7 +80,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-$PWD}/.claude/hooks/unmerged-worktree-check.sh\"",
             "timeout": 10,
-            "description": "Warns at session start if any branch holds commits not on main (e.g. a forgotten worktree branch), so worktree work always gets consolidated back to main. See .claude/hooks/unmerged-worktree-check.sh."
+            "description": "Warns at session start if any branch holds commits not on main (e.g. a forgotten worktree branch), so worktree work always gets a PR to main. See .claude/hooks/unmerged-worktree-check.sh."
           }
         ]
       }

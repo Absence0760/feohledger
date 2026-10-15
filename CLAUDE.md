@@ -447,20 +447,25 @@ below or in `## Project invariants` — this is the index.)
 12. **Docs-as-code.** A behaviour, command, env var, port, or convention change
     updates its docs in the same turn — deferred docs are drift. See [Every
     change must update docs and tests](#every-change-must-update-docs-and-tests).
-13. **One worktree per concurrent session; merge it back to `main`.** When more
-    than one Claude (or person) works this repo at once, each session runs in its
-    own git worktree (`claude --worktree <name>`) — never two sessions in the
+13. **One worktree per concurrent session; land it on `main` through a PR.** When
+    more than one Claude (or person) works this repo at once, each session runs in
+    its own git worktree (`claude --worktree <name>`) — never two sessions in the
     shared checkout. The scope-guard is path-granular, not hunk-granular, so two
     sessions editing the *same file* in one checkout silently capture each
     other's edits (a path-scoped commit grabs whatever is in the one shared tree);
-    a worktree is the only real fix. Then **consolidate**: a worktree commits on
-    its own branch and only reaches `main` via an explicit `git merge` from the
-    primary checkout — retiring a worktree does NOT merge it. Before ending such
-    work, run `git branch --no-merged main` and merge anything still off `main`.
-    The `SessionStart` hook `.claude/hooks/unmerged-worktree-check.sh` is the
-    backstop: it warns at every session start about branches holding commits not
-    on `main` — when it fires, surface it and offer to consolidate. See [Running
-    concurrent sessions — use a worktree](#running-concurrent-sessions--use-a-worktree).
+    a worktree is the only real fix. A worktree commits on its own branch, and
+    that branch reaches `main` **only through a pull request**: branch protection
+    on `main` requires a PR, a green `CI gate` check, linear history and resolved
+    conversations, enforced on admins too, so a local `git merge` into `main`
+    cannot be pushed. Root the branch on `origin/main`, push it, open the PR
+    (`gh pr create`), and let it be squash-merged once green — merging is the
+    operator's call. Retiring a worktree does NOT open or merge anything, so
+    before ending such work run `git branch --no-merged main` and make sure each
+    branch listed has an open PR. The `SessionStart` hook
+    `.claude/hooks/unmerged-worktree-check.sh` is the backstop: it warns at every
+    session start about branches holding work not on `main` — when it fires,
+    surface it and offer to open the missing PR. See [Running concurrent
+    sessions — use a worktree](#running-concurrent-sessions--use-a-worktree).
 
 ## Every change must update docs and tests
 
@@ -530,23 +535,41 @@ Worktree notes:
   ```
   `frontend/tests-e2e/fixtures/env.ts` resolves both and derives every other
   origin from them; nothing else may read a port. Full detail, including what
-  those variables do **not** reach, is `frontend/tests-e2e/README.md` § Ports.
-- **All work must end up on `main`.** A worktree commits on its own branch, and
-  git won't let a worktree check out `main`, so that work only reaches `main`
-  via an explicit merge from the **primary checkout**. Before retiring a
-  worktree, consolidate it:
+  those variables do **not** reach, is [`frontend/tests-e2e/README.md` § Running
+  from a worktree → Ports](frontend/tests-e2e/README.md#ports-e2e_web_origin--public_api_url).
+- **All work must end up on `main`, and only a PR gets it there.** Branch
+  protection on `main` requires a pull request with the `CI gate` check green,
+  linear history and every conversation resolved; it is enforced on admins, and
+  force-pushes and deletions are refused (`gh api
+  repos/Absence0760/feohledger/branches/main/protection`; also
+  `docs/soc2-readiness.md`). A local `git merge` into `main` therefore cannot
+  be pushed. Before retiring a worktree, land its branch:
   ```bash
-  git branch --no-merged main          # audit: anything still off main?
-  git merge <worktree-branch>          # from the primary checkout (on main)
+  git branch --no-merged main                    # audit: anything still off main?
+  git fetch origin
+  git rebase origin/main                         # in the worktree, before the first push only: build on the published main
+  git push -u origin <worktree-branch>
+  gh pr create --base main --title "<type>(<scope>): <subject>"
   ```
-  Use `git merge --ff-only` when main hasn't moved (linear); otherwise rebase
-  the worktree branch onto `main` first to keep history linear. Claude prompts
-  to keep or remove the worktree on exit (auto-removes it if you left no
-  changes) — but removal does **not** merge; consolidate first.
+  The worktree starts from local `HEAD` (above), which can hold unpublished
+  commits; rooting on `origin/main` keeps them out of the PR, as
+  `/fix-issues` does (`git checkout -B <branch> origin/main`). PRs are
+  squash-merged once green; merging is the operator's call. Protection does not
+  require the branch to be up to date with `main` (`strict: false`); when a
+  pushed branch does need updating (a conflict, or CI needs a newer `main`),
+  `git fetch origin && git merge origin/main` in the worktree and push
+  normally. Never rebase a branch that is already pushed: re-publishing it
+  needs a force-push, which `.claude/settings.json` denies (`git push --force`,
+  `-f`, and `--force*`, so `--force-with-lease` too). The merge commit never
+  reaches `main`, because the squash merge turns the whole PR into one linear
+  commit. Rebasing is fine only before the first push. Claude prompts to keep or remove the
+  worktree on exit (auto-removes it if you left no changes) — but removal does
+  **not** push or open a PR; do that first.
 - This is backed by a safety net: the `SessionStart` hook
   `.claude/hooks/unmerged-worktree-check.sh` warns at the start of every session
   if any branch holds work not on `main`, so stranded worktree work surfaces
-  and gets merged instead of forgotten. **It filters branches that were
+  and gets a PR instead of being forgotten. A branch whose PR is still open is
+  listed too — that is expected, not stranded work. **It filters branches that were
   squash-merged.** `git branch --no-merged` is ancestry-based and this repo
   squashes every PR, so a merged branch's tip never becomes an ancestor of
   `main` and stays "unmerged" forever — the hook once reported 99 stranded
