@@ -97,6 +97,7 @@ tests-e2e/
 ├── workflows/                       lifecycle, step config, approval matrix, etc.
 ├── exceptions/                      queue, assign, filter, resolve
 ├── erp/                             merge-dev / netsuite / dynamics / quickbooks-online / xero / sage-accounting / blackbaud-fe-nxt / sage-intacct / syspro / sage-accounting-za adapter e2e + inbound ERP webhook + fake-erp request hardening (gated — needs fake-erp)
+├── commerce/                        receipt → commerce platform push: mock.spec.ts (no extra service) + one spec per provider (gated — needs fake-commerce, `pnpm commerce:up`)
 ├── credit-memos/                    list, pagination, the invoice pickers
 ├── organization/                    settings, fraud rules, GL accounts sync
 ├── purchase-orders/                 list, sync

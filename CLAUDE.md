@@ -57,7 +57,9 @@ pnpm stripe:up                # Stripe API mock (stripe-mock :12111, opt-in `pay
 pnpm mail:up                  # Mailpit SMTP sink + web inbox (:1025/:8025, opt-in `mail` profile) for the smtp email adapter
 pnpm erp:up                   # fake ERP server (fake-erp :12112, opt-in `erp` profile) for merge_dev/netsuite/dynamics_365_bc adapter e2e (erp:down / erp:logs too)
 pnpm test:erp                 # ERP adapter e2e (tests-e2e/erp/) — real HTTP against fake-erp; skips if it's down
-pnpm services:up              # everything at once: core + IdPs + LocalStack + Ollama + stripe-mock + Mailpit + fake-erp (services:down / services:logs / services:reset too)
+pnpm commerce:up              # fake commerce platforms (fake-commerce :12113, opt-in `commerce` profile) for the commerce adapters (commerce:down / commerce:logs too)
+pnpm test:commerce            # commerce e2e (tests-e2e/commerce/) — mock path always; provider specs skip if fake-commerce is down
+pnpm services:up              # everything at once: core + IdPs + LocalStack + Ollama + stripe-mock + Mailpit + fake-erp + fake-commerce (services:down / services:logs / services:reset too)
 pnpm seed                     # python scripts/seed.py
 pnpm dev                      # backend (:8000) + frontend (:7777) together, one Ctrl-C stops both
 pnpm dev:all                  # db:up (core only), then pnpm dev (whole web stack from cold)
@@ -199,6 +201,7 @@ before changing any router; the summaries below are only an index.
 | `/privacy`, `/retention-policy` | GDPR/CCPA DSAR + erasure; SOX per-record-class retention config |
 | `/dashboard` | KPI aggregates (pipeline, aging, spend, trends) |
 | `/billing` | Platform billing & metering — the AP platform's OWN customer billing (control-plane) |
+| `/commerce` | Commerce platform connection (admin), location + SKU mapping, per-receipt inventory push status + retry |
 | `/erp`, `/email-intake`, `/peppol` | Inbound webhooks — ERP status, email-to-invoice, PEPPOL AS4 receive |
 | `/approvals/slack`, `/approvals/teams` | Interactive approval from a chat message — public, HMAC + single-use action token |
 | `/organization/email-intake`, `/signup` | Per-tenant intake address; self-service tenant signup |
@@ -229,7 +232,7 @@ the whole app runs with no cloud account (guard rail 7). Families:
 `financing_adapters` · `qms_adapters` · `sanctions_adapters` ·
 `email_adapters` · `chat_notification_adapters` · `email_intake_adapters` ·
 `embedding_adapters` · `peppol_adapters` · `billing_adapters` ·
-`enrichment_adapters`
+`enrichment_adapters` · `commerce_adapters`
 
 **Read `backend/CLAUDE.md` § Adapter patterns before adding or changing one** —
 it lists every provider per family, which are real vs fail-closed skeletons, and
@@ -260,7 +263,7 @@ The void-payment path (`POST /api/payments/{id}/void`) takes `payment_scheduled`
 ### Data models
 
 **Control plane**: Organization, User, Role, UserRole, AssistantUsage, ApiKey, ApiKeyUsage, Plan, Subscription, WebhookSubscription, WebhookDelivery, WebAuthnCredential
-**Tenant-scoped**: Entity, Invoice, InvoiceLineItem, InvoiceExtractionResult, Vendor, VendorChangeRequest, PurchaseOrder, POLineItem, GoodsReceipt, GRLineItem, QualityInspection, GLAccount, PaymentRun, PaymentSchedule, Payment, VirtualCard, CardRebate, ExtractionUsage, WorkflowDefinition, WorkflowInstance, WorkflowStep, AuditLog, Exception, AgentDecision, Notification, Contract, ContractLineItem, SupplierChatThread, SupplierChatMessage, ExpenseReport, Expense, ExpensePolicy, CorporateCardTransaction, ExpensePreapproval, DiscountOffer, RecurringInvoiceTemplate, VendorStatementReconciliation, VendorStatementReconLine, WorkflowExperiment, CashPlan
+**Tenant-scoped**: Entity, Invoice, InvoiceLineItem, InvoiceExtractionResult, Vendor, VendorChangeRequest, PurchaseOrder, POLineItem, GoodsReceipt, GRLineItem, QualityInspection, GLAccount, PaymentRun, PaymentSchedule, Payment, VirtualCard, CardRebate, ExtractionUsage, WorkflowDefinition, WorkflowInstance, WorkflowStep, AuditLog, Exception, AgentDecision, Notification, Contract, ContractLineItem, SupplierChatThread, SupplierChatMessage, ExpenseReport, Expense, ExpensePolicy, CorporateCardTransaction, ExpensePreapproval, DiscountOffer, RecurringInvoiceTemplate, VendorStatementReconciliation, VendorStatementReconLine, WorkflowExperiment, CashPlan, CommerceInventorySync, CommerceSkuMapping
 
 **Multi-entity**: business tables (Invoice, Vendor, PurchaseOrder, GoodsReceipt, Payment, PaymentRun, CreditMemo, Exception, GLAccount, WorkflowDefinition, VirtualCard) carry a nullable `entity_id` FK (`EntityMixin`) to the tenant-local `Entity` (subsidiary). Every tenant has one `is_default` Entity; rows backfill to it (GLAccount stays NULL = shared chart). Phase 2 + 2b scope reads/writes (incl. the dashboard + CFO analytics) by the `X-Entity-ID` header (`app/tenant.py` → `get_entity_id` / `get_write_entity_id` / `apply_entity_scope`) with a sidebar entity switcher. Phase 3 wires the entity-level chart of accounts (shared NULL ∪ entity) into the AI extraction GL catalog + bulk-recode validation and selects the entity's own `WorkflowDefinition` (shared fallback; one default per `(org, entity)` via `uq_workflow_definitions_one_default`, migration 0050). Phase 4 adds inter-company invoice routing (`counterparty_entity_id` / `intercompany_mirror_id`, migration 0051) + cross-entity consolidated reporting (`GET /analytics/by-entity`). Multi-entity is **complete** (Phases 1–4). See `docs/multi-entity.md`.
 
@@ -316,6 +319,7 @@ Prefer reading docs over guessing. Update them when behavior changes.
 | Structured e-invoicing (in + outbound) | `backend/docs/e-invoicing.md` |
 | Conversational assistant | `backend/docs/conversational-assistant.md` |
 | ERP integration | `backend/docs/erp-integration.md` |
+| Commerce / inventory sync (push received stock to Shopify etc.; add-a-provider checklist) | `backend/docs/commerce-integration.md` |
 | Workflow design | `backend/docs/workflow-design.md` |
 | Payments | `backend/docs/payments.md` |
 | Virtual cards | `backend/docs/virtual-cards.md` |

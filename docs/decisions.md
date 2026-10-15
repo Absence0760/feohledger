@@ -11141,3 +11141,85 @@ store (§271). Three reasons:
 **Rejected.** *Keeping both, the keyring for ERP and KMS for the rest*: see
 "one store". *Shipping the branch's migration as 0111 after 0110*: it would
 have encrypted values §266's migration had already moved out of the JSONB.
+
+## 273. A goods receipt pushes received stock to the business's commerce platform (migration 0111, 2026-10-10)
+
+**Context.** §260 keeps stock, valuation and selling out of the product and
+brings in a commerce sync instead: the AP side records what was received, the
+business's own platform (Shopify, Lightspeed, Square, Cin7, WooCommerce) records
+what is on the shelf. Nothing could say WHAT a receipt line was — lines carried
+free text only — and five provider adapters were to be built at once, in
+parallel, on top of this foundation.
+
+**Decision.**
+
+- **Item identity is a snapshot on the line.** `po_line_items` gains a nullable
+  `catalog_item_id` and a `sku` string; receipt lines copy both from the PO line,
+  never from the client. The SKU is a snapshot, not a join: a catalog edit must
+  not rewrite what an issued PO named, and ERP and contract POs carry item codes
+  with no catalog row behind them.
+- **The push is planned in the receipt's transaction and run after it commits.**
+  One `commerce_inventory_syncs` row per line and direction (`receive` /
+  `reverse`), unique on `(gr_line_item_id, direction)`, commits or rolls back
+  with the receipt. The provider call happens post-commit
+  (`services/post_commit`) with no transaction open: claim by compare-and-swap,
+  resolve the sealed credentials, call, record only if still claimed. A receipt
+  never fails because the platform is down; its row says so.
+- **Not an error, a skip:** a line with no SKU, nothing received, an SKU the
+  platform does not know, or no mapped location is `skipped` with a coded
+  reason. The last two are retryable by hand once an admin maps them.
+- **Cancel takes back exactly what landed.** A synced (or in-flight) receive
+  gets a reverse row at the same item and location; anything that never landed
+  becomes `cancelled` so no retry can push it afterwards.
+- **Idempotent twice.** Our unique row per line and direction, and the row's
+  `feoh:<line>:<direction>` key at the provider — every adapter must apply a
+  repeated key at most once (the contract helper proves it).
+- **Retry:** manual (`POST /api/commerce/syncs/{id}/retry`, the receipt-entry
+  roles — it re-sends what the receipt already authorised under the same key)
+  and a sweep, off by default per the env conventions, with backoff and an
+  attempt cap; it also reclaims claims a dead process left `in_flight`.
+- **Fail closed on a moved target.** A row planned for one provider and pushed
+  while another is configured fails `provider_changed`; a fraction on a
+  whole-unit platform fails `fractional_quantity` rather than being rounded into
+  the shelf count.
+- **Commerce secrets live in the sealed store (§266, §271).** `commerce` is a
+  fourth `provider_credentials` block: every field a provider spec marks secret
+  is listed in `SECRET_FIELDS["commerce"]` (a guard test fails otherwise),
+  sealed under the app KMS key, written only through `PUT
+  /api/organization/credentials/commerce` and never read back. `settings.commerce`
+  is configuration, written by `/api/commerce/*` (admin, audited); a save there
+  refuses a secret, and one that names another platform or changes a
+  destination field drops the sealed secrets through the store's writer — the
+  ERP rule of §271, mirrored in `commerce_adapters/catalog` rather than shared
+  code, since the two catalogues differ in identity (ERP type + routing method)
+  and OAuth handling. The connection test joins the stored secrets only for the
+  saved platform at the saved destination (`config_for_connection_test`).
+  `PATCH /api/organization` refuses the key. Location mapping is per org with a
+  per-entity override; SKU → item resolves through the platform's own lookup
+  with an admin override table.
+- **A provider is one module.** Each adapter declares its catalogue entry
+  (`CommerceProviderSpec`) beside itself and the registry discovers modules with
+  `pkgutil`; fake-commerce mounts `providers/<key>.py` the same way, and one
+  operator override (`FEOH_COMMERCE_API_BASE_OVERRIDE`, refused in a deployed
+  environment) points every adapter at it. A provider's shared edits are its
+  secret names in `SECRET_FIELDS["commerce"]` and its sub-processor register rows.
+- **Open on every plan**, like the receipts it hangs off; the `mock` platform is
+  the local default.
+
+**Rejected.**
+
+- *Pushing inside the receipt transaction:* a provider's latency would hold the
+  PO row lock, the reason `post_commit` exists.
+- *Best-effort pushes with no record:* a lost push leaves the shelf count wrong
+  with nothing to retry from.
+- *Per-field encryption inside `settings.commerce`* (the branch's first cut,
+  modelled on the ERP design §272 later dropped): one store, one KMS key and one
+  audited writer for every provider secret is §266's whole point.
+- *A hand-kept adapter import list and a central catalogue* (the ERP family's
+  shape): five concurrent provider branches would all edit the same lines.
+- *Per-provider `FEOH_*_API_BASE` overrides:* one override per provider is a
+  shared config edit per provider; `<override>/<key>` needs none.
+- *Building the OAuth consent flow now:* every planned platform has a key-based
+  connection, and `services/erp_oauth` is bound to `settings.erp`. The catalogue
+  carries `auth: "oauth"` and the panel a Connect hook; generalising the flow is
+  tracked in `followups.md`.

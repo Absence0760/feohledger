@@ -24,7 +24,8 @@ export const SERVICES = {
 	mailpit: 'http://localhost:8025/api/v1/info',
 	localstack: 'http://localhost:4566/_localstack/health',
 	stripeMock: 'http://localhost:12111/v1',
-	fakeErp: 'http://localhost:12112/health'
+	fakeErp: 'http://localhost:12112/health',
+	fakeCommerce: 'http://localhost:12113/health'
 } as const;
 
 /** Hint shown when a service is down, keyed by probe URL. */
@@ -35,7 +36,9 @@ const HINTS: Record<string, string> = {
 	[SERVICES.localstack]: 'LocalStack not running — `pnpm aws:up`',
 	[SERVICES.stripeMock]: 'stripe-mock not running — `pnpm stripe:up`',
 	[SERVICES.fakeErp]:
-		'fake-erp not running — `pnpm erp:up` (backend must have started with the .env.development FEOH_ERP_*_API_BASE overrides)'
+		'fake-erp not running — `pnpm erp:up` (backend must have started with the .env.development FEOH_ERP_*_API_BASE overrides)',
+	[SERVICES.fakeCommerce]:
+		'fake-commerce not running — `pnpm commerce:up` (backend must have started with the .env.development FEOH_COMMERCE_API_BASE_OVERRIDE)'
 };
 
 const _cache = new Map<string, boolean>();

@@ -800,6 +800,9 @@ async def create_po_from_contract(
                 quantity=li.quantity,
                 unit_price=li.unit_price,
                 total=li.total,
+                # The contract line's item code is the SKU snapshot (migration
+                # 0111); a contract line has no catalog item behind it.
+                sku=(li.item_code or "").strip() or None,
             )
         )
     db.add(po)

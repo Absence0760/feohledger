@@ -18,6 +18,7 @@ Deep-dive docs live in `backend/docs/`:
 | Conversational AP assistant | `docs/conversational-assistant.md` |
 | AI Cash-Flow Copilot (Phases 1–2 — read-only cash tools + proposed plans + `/api/cash-flow` façade) | `../docs/cash-flow-copilot.md` (repo-root `docs/`) |
 | ERP adapters (Merge.dev + direct) | `docs/erp-integration.md` |
+| Commerce / inventory platform adapters (receipt → shelf stock push) | `docs/commerce-integration.md` |
 | QuickBooks Online adapter (phases 3–5 open: webhooks, BillPayment) | `docs/quickbooks-online-adapter.md` |
 | Workflow state machine | `docs/workflow-design.md` |
 | Workflow snapshot semantics | `docs/workflow-snapshots.md` |
@@ -626,7 +627,7 @@ Step types: `extraction` → `approval` → `erp_export` → `done`
 
 ## Key background services
 
-Fifteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
+Sixteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
 its own `FEOH_*_ENABLED` gate. **What each one does, plus the shared loop runner,
 health registry and locking rules: `backend/docs/background-sweeps.md`.**
 
@@ -673,6 +674,7 @@ Families under `backend/app/services/`:
 | Chat notifications | `chat_notification_adapters/` |
 | Embeddings | `embedding_adapters/` |
 | QMS / quality inspections | `qms_adapters/` |
+| Commerce / inventory platforms | `commerce_adapters/` (discovered by `pkgutil` — a new provider is one module; see `docs/commerce-integration.md` § How to add a provider) |
 
 Three rules hold across every family:
 
@@ -911,8 +913,8 @@ Stored in `Organization.settings`:
 }
 ```
 
-**Provider secrets are not in this JSONB.** The secret keys of `erp`, `payments`
-and `cards` (API keys, OAuth client secrets, account tokens and the three
+**Provider secrets are not in this JSONB.** The secret keys of `erp`, `payments`,
+`cards` and `commerce` (API keys, OAuth client secrets, account tokens and the three
 `webhook_*_secret` HMAC keys — catalogue `services/provider_credentials.SECRET_FIELDS`)
 are envelope-encrypted under the app KMS key in the control-plane
 `provider_credentials` table. Read them ONLY through

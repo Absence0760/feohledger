@@ -123,17 +123,18 @@ def test_dev_lock_satisfies_requirements_dev_in() -> None:
     )
 
 
-def test_fake_erp_lock_satisfies_its_requirements_in() -> None:
-    """Same guard for the fixture image, whose pair Dependabot does manage.
+@pytest.mark.parametrize("fixture", ["fake-erp", "fake-commerce"])
+def test_fake_fixture_lock_satisfies_its_requirements_in(fixture: str) -> None:
+    """Same guard for the fixture images, whose pairs Dependabot does manage.
 
     Dependabot regenerates `requirements.txt` itself here, so this mostly
     catches a hand-edited `requirements.in` that never got recompiled.
     """
-    fake_erp = REPO_ROOT / "tools" / "fake-erp"
+    root = REPO_ROOT / "tools" / fixture
     _assert_satisfied(
-        _requirements_in(fake_erp / "requirements.in"),
-        _locked_versions(fake_erp / "requirements.txt"),
-        "tools/fake-erp/requirements.txt",
+        _requirements_in(root / "requirements.in"),
+        _locked_versions(root / "requirements.txt"),
+        f"tools/{fixture}/requirements.txt",
     )
 
 
@@ -143,6 +144,7 @@ def test_fake_erp_lock_satisfies_its_requirements_in() -> None:
         BACKEND / "requirements.lock",
         BACKEND / "requirements-dev.lock",
         REPO_ROOT / "tools" / "fake-erp" / "requirements.txt",
+        REPO_ROOT / "tools" / "fake-commerce" / "requirements.txt",
     ],
     ids=lambda p: str(p.relative_to(REPO_ROOT)),
 )

@@ -39,7 +39,14 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-11 — PR #544 opened and closed two (c) entries in the
+**Last reconciled:** 2026-10-12 — evaluating Baidu's Unlimited OCR opened
+one (c) entry, a scanned-invoice benchmark before any self-hosted OCR
+adapter, taking the file from 102 → 103. Before that, the commerce inventory sync (decisions §273)
+landed with its five providers (WooCommerce, Shopify, Square, Lightspeed
+X-Series, Cin7 Core): the Priority 14 commerce entry closes, and five (c)
+entries open — the OAuth-consent connection, WooCommerce's read → write race,
+Lightspeed R-Series, the Cin7 Core push's limits and Cin7 Omni — taking the
+file from 98 → 102. Before that, 2026-10-11 — PR #544 opened and closed two (c) entries in the
 same change (the OAuth-adapter e2e coverage gap, and only QuickBooks refreshing after
 a 401 — now shared as `oauth_base.RefreshOnUnauthorized`), so the file stays at 98. Before that, 2026-10-09 — enabling IAM database authentication on RDS
 (#542) opened one (c) entry (the app still signs in with the master password),
@@ -141,7 +148,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**98 open: 81 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**103 open: 86 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1308,12 +1315,64 @@ scope (§260) — do not fold them into any of these.
       an e2e spec. **Trigger:** the first customer on one of those ERPs who
       won't use Merge.dev, or the first customer who receives goods in their
       ERP rather than in FeohLedger.
-- [ ] **(c) Received merchandise never reaches the business's commerce /
-      inventory platform.** **Durable fix:** SKU identity on PO + receipt lines
-      (link to `catalog_items`), then a `commerce_adapters` family (`mock`
-      default) that adjusts the mapped variant's quantity on each receipt,
-      idempotent per receipt line — Shopify first. **Trigger:** after PR 1
-      lands; independent of the ERP work.
+- [ ] **(c) The Cin7 Core push is read-then-set, its retry check pages the
+      whole adjustment list, and it refuses batch / bin stock.** Cin7 Core v2
+      has no delta write outside its purchase flow. The adapter reads on-hand
+      and posts a completed stock adjustment to `on_hand + delta`, so a sale
+      that Cin7 records between the read and the write is overwritten.
+      `/stockadjustmentList` cannot search by reference, so every retry
+      (`attempt > 1`) pages the list, and refuses past 25,000 adjustments. A
+      batch- or serial-tracked product, or stock kept in bins, is refused
+      because the receipt names neither (`backend/docs/commerce-integration.md`
+      § Cin7 Core). **Durable fix:** move to a delta write and a reference
+      search as soon as Cin7 Core's API offers either. Until then, carry the
+      batch / bin on the PO line (an optional `commerce_batch` / bin per
+      line), add it to the adjustment, and sum availability per batch.
+      **Trigger:** a Cin7 tenant reporting a drifted on-hand count, the scan
+      cap being hit, or the first Cin7 tenant that receives batch-tracked or
+      binned stock.
+- [ ] **(c) Cin7 Omni has no adapter.** The `cin7` provider targets Cin7 Core.
+      Omni is the older, separate product, with its own API at `api.cin7.com`
+      (basic auth, `Adjustments` with a `where` filter). **Durable fix:** a
+      separate `cin7_omni` module, following § How to add a provider. Omni
+      can filter adjustments by reference, so its retry check would not need
+      the full-list scan. **Trigger:** the first customer still on Cin7 Omni.
+- [ ] **(c) A WooCommerce stock push can overwrite a concurrent storefront
+      sale.** The REST API has no relative stock change and no compare-and-set,
+      so the adapter reads `stock_quantity`, adds the receipt's delta and writes
+      the absolute result; a sale landing between the read and the write is
+      lost from the shelf count (`backend/docs/commerce-integration.md`
+      § WooCommerce, the decision note). **Durable fix:** a small companion
+      WordPress plugin exposing a REST route that calls
+      `wc_update_product_stock($product, $n, 'increase'|'decrease')` — an
+      atomic SQL increment — with the `_feoh_inventory_syncs` idempotency check
+      beside it; the adapter uses that route when the plugin answers and keeps
+      today's read → write path otherwise. **Trigger:** the first WooCommerce
+      merchant who reports a shelf count drifting after receipts, or one whose
+      order volume makes a sale inside a two-request window routine.
+- [ ] **(c) Lightspeed Retail R-Series cannot be connected.** The `lightspeed`
+      adapter targets X-Series (the former Vend), Lightspeed's current global
+      retail POS. R-Series (the former Lightspeed Retail / "Onsite" line, still
+      sold mainly in North America) is a different API on a different host
+      (`api.lightspeedapp.com/API/V3/Account/{accountID}`), with integer ids,
+      its own inventory model and **OAuth-only** access — there is no personal
+      token to paste. **Durable fix:** once commerce OAuth exists (the entry
+      below), a separate `lightspeed_r` module whose push writes a received
+      purchase order (or an inventory count with a reason) rather than
+      overwriting `ItemShop.qoh`, with its own fake-commerce module and contract
+      test. **Trigger:** the first customer on R-Series, or commerce OAuth
+      landing.
+- [ ] **(c) A commerce platform that connects only by OAuth consent cannot be
+      connected.** The catalogue's `auth: "oauth"` renders a Connect button
+      wired to `GET /api/commerce/oauth/{provider}/authorize`, which answers 501
+      `commerce_oauth_not_available`: `services/erp_oauth` (state, callback,
+      refresh lock, compare-and-swap) reads and writes `settings.erp` only.
+      None of the five planned platforms needs it — each has a key-based
+      connection. **Durable fix:** parameterise `erp_oauth` by settings block
+      (`erp` / `commerce`) and register commerce `OAuthProviderSpec`s, keeping
+      one callback route. **Trigger:** the first commerce provider shipped
+      OAuth-only, or a public Shopify / Square app listing (which requires
+      OAuth install).
 
 ### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 
@@ -1479,6 +1538,32 @@ scope (§260) — do not fold them into any of these.
       unreadable credentials" action on `/api/organization/credentials/{block}`,
       audited, that replaces the row without opening it. **Trigger:** the first
       key rotation or environment where it happens.
+
+### Surfaced by evaluating Baidu's Unlimited OCR (2026-10-11)
+
+- [ ] **(c) No self-hosted extraction path is benchmarked for scanned invoices.**
+      The only local option for a scan with no text layer is a general vision
+      model through the `ollama` adapter, and nothing measures how it compares
+      with `claude_vision` / `aws_textract`. Baidu's Unlimited OCR (MIT, 3B
+      params / ~0.5B active, arXiv 2606.23050, June 2026) is a candidate OCR
+      stage: it returns text and layout, not fields, so it would run in front of
+      the existing Ollama text-mode prompt rather than replace an adapter. It is
+      **not** worth building an adapter on spec: digital PDFs already skip OCR
+      (PyMuPDF text mode), invoices are 1–3 pages so its long-document strength
+      mostly goes unused, a two-step read has no honest per-field confidence for
+      the 0.95 auto-approve gate, it likely needs a GPU plus vLLM / Transformers
+      rather than Ollama (a new local service under guard rail 7), and its
+      provenance needs a CISO / Security Analyst call before it touches
+      customer data. **Durable fix:** a bounded benchmark first — ~30 scanned
+      or photographed invoices plus a few multi-page vendor statements
+      (`statement_extraction.py`), comparing Unlimited OCR → Ollama text model
+      against `ollama` vision, `claude_vision` and `aws_textract` on per-field
+      accuracy and latency — and only if it clearly beats the current local
+      path on scans, an OCR pre-stage for the `ollama` adapter with a
+      confidence story, a Compose profile and `pnpm` script, and
+      `docs/sub-processors.md` unchanged (self-hosted). **Trigger:** a customer
+      or prospect asks for on-prem / no-third-party extraction of scanned
+      invoices, or the next change to the `ollama` adapter's image mode.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

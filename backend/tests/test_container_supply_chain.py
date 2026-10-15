@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILES = [
     REPO_ROOT / "backend" / "Dockerfile",
     REPO_ROOT / "tools" / "fake-erp" / "Dockerfile",
+    REPO_ROOT / "tools" / "fake-commerce" / "Dockerfile",
 ]
 
 # `FROM <image>@sha256:<64 hex>` — with or without a `:tag` in between, and

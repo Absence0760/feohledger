@@ -7,6 +7,7 @@
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
@@ -31,6 +32,9 @@
 	interface POLineItem {
 		id: string;
 		description: string | null;
+		/** The SKU snapshot (migration 0111); null when the line names none. */
+		sku: string | null;
+		catalog_item_id: string | null;
 		quantity: number | null;
 		unit_price: number | null;
 		total: number | null;
@@ -414,7 +418,7 @@
 				<tbody>
 					{#each detail.line_items as li (li.id)}
 						<tr>
-							<td>{li.description ?? '—'}</td>
+							<td><LineDescription description={li.description} sku={li.sku} /></td>
 							<td class="right mono">{li.quantity ?? '—'}</td>
 							<td class="right mono">{formatMoney(li.unit_price, { currency: detail.currency })}</td>
 							<td class="right mono">{formatMoney(li.total, { currency: detail.currency })}</td>

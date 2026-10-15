@@ -273,6 +273,48 @@ class MyAdapter:
 
 Registered: `mock` (deterministic synthetic firmographics, no network/credential — the local-first default), `dun_bradstreet` + `clearbit` (httpx skeletons — live key via per-org settings; **fail closed** `EnrichmentNotConfigured` without it, no hardcoded fallback). `get_enrichment_adapter(config)` resolves `Organization.settings.enrichment.provider` → `FEOH_VENDOR_ENRICHMENT_PROVIDER` → `mock` (an absent/empty provider is the local-first default), and raises `UnknownEnrichmentProviderError` for a NAMED provider it has no adapter for — the enrich route turns that into a 422. It used to fall back to `mock`, which fabricates a complete plausible identity (legal name / address / DUNS / employee count) with `matched=True`, so a typo presented invented firmographics as a D&B lookup one click from being applied onto a real supplier (`../docs/decisions.md` §29 / §36). External vendor firmographics (legal name / registered address / industry+SIC/NAICS / employee count / revenue / website / DUNS / founding year) for `POST /api/enrichment/vendors/{id}/enrich`. **Advisory / suggestion-only** — returns the firmographics + a per-field suggestion diff but NEVER writes back onto the `Vendor` row. Raw `tax_id` is an input match-key only — never echoed (only `***<last4>` via `mask_tax_id`), never logged. See `docs/data-enrichment.md` § External enrichment.
 
+### Commerce / inventory adapters (`services/commerce_adapters/`)
+
+```python
+SPEC = CommerceProviderSpec(key="my_platform", label="My Platform", auth="credentials",
+                            fields=(field("shop_domain"), field("access_token", secret=True)),
+                            docs_url="https://…", destination_keys=frozenset({"shop_domain"}))
+
+@register_commerce_adapter("my_platform", SPEC)
+class MyAdapter(CommerceAdapter):
+    async def test_connection(self) -> None: ...
+    async def list_locations(self) -> list[CommerceLocation]: ...
+    async def resolve_sku(self, sku: str) -> CommerceItemRef: ...
+    async def adjust_available(self, adjustment: InventoryAdjustment) -> InventoryAdjustmentResult: ...
+```
+
+Registered: `mock` (in-process, the local-first default); `shopify` (real —
+Admin GraphQL `inventoryAdjustQuantities`, `@idempotent`, whole units);
+`woocommerce` (real — REST `/wp-json/wc/v3` on the merchant's own https
+`store_url`, consumer key + secret over Basic, one synthetic `store` location,
+read → write adjust with the idempotency key in product meta); `square` (real —
+Square REST API v2, access token + sandbox/production environment, fractional
+quantities, native idempotency key plus a `reference_id` lookup before any
+re-send — the `InventoryAdjustment.attempt` field says which push it is);
+`lightspeed` (Lightspeed Retail X-Series — real; receipts land as stock orders);
+`cin7` (real — Cin7 Core API v2, a completed stock adjustment set to on-hand +
+delta because Cin7 takes the new value, fractional quantities; on a retry,
+`attempt > 1`, it looks for our key in an adjustment's `Reference` before
+writing). The registry imports
+every module in the package (`pkgutil`), so **a new provider is one new module**
+— no import list and no shared catalogue: the spec passed to the decorator IS
+its catalogue entry. Selected by `Organization.settings.commerce.provider`; an
+absent block means "not connected" (no sync planned), and a named provider with
+no adapter raises `UnknownCommerceAdapterError` (never `mock`). Secrets are
+sealed in `provider_credentials` (block `commerce`): every spec secret must be
+in `provider_credentials.SECRET_FIELDS["commerce"]`, adapters receive the
+resolved block (`get_commerce_adapter(resolved)`), and a save naming another
+platform or destination drops them (`catalog.secrets_to_drop`, the ERP rule of
+decisions §271). `FEOH_COMMERCE_API_BASE_OVERRIDE` points every
+adapter at fake-commerce (`<override>/<key>`); a deployed environment refuses to
+boot with it. Pushes run post-commit from `services/commerce_sync`. Full
+reference and the add-a-provider checklist: `docs/commerce-integration.md`.
+
 ### Audit-shipping adapters (`services/audit_shipping/`)
 
 ```python

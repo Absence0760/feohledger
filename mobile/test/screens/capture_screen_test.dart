@@ -62,7 +62,7 @@ void main() {
       '(picker is a no-op platform channel in tests)', (tester) async {
     await tester.pumpWidget(_localized());
 
-    // FilePicker.pickFiles has no test platform implementation; the service
+    // FilePicker.pickFile has no test platform implementation; the service
     // swallows the MissingPluginException and returns null, so the empty state
     // stays put and no exception escapes.
     await tester.tap(find.widgetWithText(OutlinedButton, 'Choose file'));

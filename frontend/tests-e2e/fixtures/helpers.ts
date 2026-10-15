@@ -767,6 +767,8 @@ export function deleteVendorsWhere(predicate: string, slug?: string): void {
 
 	// Procurement, leaves first. An inspection can hang off either the PO or
 	// the goods receipt, so both parents are covered before either is deleted.
+	// A receipt's commerce push rows (migration 0111) hang off its lines.
+	tenantPsql(`DELETE FROM commerce_inventory_syncs WHERE goods_receipt_id IN (${grs})`, slug);
 	tenantPsql(`DELETE FROM gr_line_items WHERE gr_id IN (${grs})`, slug);
 	tenantPsql(`DELETE FROM quality_inspections WHERE po_id IN (${pos}) OR gr_id IN (${grs})`, slug);
 	tenantPsql(`DELETE FROM goods_receipts WHERE po_id IN (${pos})`, slug);
@@ -806,6 +808,11 @@ export function deleteVendorsWhere(predicate: string, slug?: string): void {
 	tenantPsql(`DELETE FROM purchase_orders WHERE vendor_id IN (${ids})`, slug);
 
 	// A catalog item can belong to the vendor directly or through its catalog.
+	// Another vendor's PO / receipt line may name it (migration 0111): that
+	// line keeps its SKU snapshot and loses only the link.
+	const vendorItems = `SELECT id FROM catalog_items WHERE catalog_id IN (${catalogs}) OR vendor_id IN (${ids})`;
+	tenantPsql(`UPDATE po_line_items SET catalog_item_id = NULL WHERE catalog_item_id IN (${vendorItems})`, slug);
+	tenantPsql(`UPDATE gr_line_items SET catalog_item_id = NULL WHERE catalog_item_id IN (${vendorItems})`, slug);
 	tenantPsql(
 		`DELETE FROM catalog_items WHERE catalog_id IN (${catalogs}) OR vendor_id IN (${ids})`,
 		slug

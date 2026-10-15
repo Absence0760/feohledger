@@ -1175,6 +1175,9 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
                     quantity=Decimal("10"),
                     unit_price=Decimal("85.00"),
                     total=Decimal("850.00"),
+                    # Stocked goods carry a SKU (migration 0111), so a receipt
+                    # against them has something to push to a commerce platform.
+                    sku="OFF-PAPER-A4",
                 ),
                 POLineItem(
                     po_id=po1.id,
@@ -1182,6 +1185,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
                     quantity=Decimal("50"),
                     unit_price=Decimal("8.00"),
                     total=Decimal("400.00"),
+                    sku="OFF-PENS-BLK",
                 ),
                 POLineItem(
                     po_id=po2.id,
@@ -1210,6 +1214,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
                     quantity=Decimal("5"),
                     unit_price=Decimal("2400.00"),
                     total=Decimal("12000.00"),
+                    sku="IT-LAPTOP-X",
                 ),
                 POLineItem(
                     po_id=po5.id,

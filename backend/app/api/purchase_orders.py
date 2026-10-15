@@ -52,6 +52,9 @@ def _line_item_dict(li: POLineItem) -> dict:
         "quantity": float(li.quantity) if li.quantity else None,
         "unit_price": json_money(li.unit_price) if li.unit_price else None,
         "total": json_money(li.total) if li.total else None,
+        # Item identity (migration 0111): the SKU snapshot and the catalog item.
+        "sku": li.sku,
+        "catalog_item_id": str(li.catalog_item_id) if li.catalog_item_id else None,
     }
 
 
@@ -477,6 +480,7 @@ async def sync_pos_from_erp(
                     quantity=line.quantity,
                     unit_price=line.unit_price,
                     total=line.total,
+                    sku=(line.item_code or "").strip()[:100] or None,
                 )
             )
 

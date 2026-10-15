@@ -424,6 +424,24 @@ Advisory only: results are suggestions and never overwrite the `Vendor` row.
 
 ---
 
+## 19.1 Commerce / inventory platforms (`services/commerce_adapters/`)
+
+Pushes received quantities from goods receipts to the business's own commerce
+platform (decisions §273). Each real provider adds its row here and on the
+published page when it lands (`backend/docs/commerce-integration.md` § How to
+add a provider).
+
+| Adapter | Processor | Service | Data categories | Processing location | Active when configured | DPA / sub-processing status |
+|---------|-----------|---------|-----------------|---------------------|------------------------|------------------------------|
+| `mock` | — (in-process) | Deterministic local stock book | none leaves process | Local | **Default — local dev and tests** | n/a |
+| `shopify` | **Shopify** (Admin GraphQL API) | Adds received stock to the customer's own shop | INV (SKU, received quantity, location id, an opaque receipt-line reference) — no vendor, bank, tax or user data | Shopify's hosting (Canada / US, global CDN) | Configured only (direct) | The customer's own shop under their Shopify agreement; listed in § 22 as a customer-controlled counterparty |
+| `woocommerce` | **(customer's own WordPress store)** | Stock push to the merchant's self-hosted WooCommerce REST API (`<store_url>/wp-json/wc/v3`) | Product / variation ids, SKUs, absolute stock quantities, and our receipt-line idempotency keys in product meta. No personal data, no supplier, invoice or banking fields | Wherever the merchant hosts WordPress | Configured only (per-org `store_url` + consumer key/secret; https + public host enforced) | Not a sub-processor of ours: the merchant chooses and contracts their own host, and Automattic receives nothing through this path — see § 22 |
+| `square` | **Block** (Square) | Received-stock push into the customer's own Square account (`connect.squareup.com`, or `connect.squareupsandbox.com` for a sandbox connection) | Business data only, no personal data: the SKU as a catalog search query; the Square variation id, location id, received quantity and a timestamp; our opaque line reference (`feoh:<line id>:<direction>`) as the idempotency key and `reference_id`. No invoice, price, vendor or user data | Square's hosting region for the customer's account (US-based) | Configured only (direct; per-org access token, fails closed) | The customer's own account under their Square agreement; listed in § 22 as a customer-controlled counterparty |
+| `lightspeed` | **Lightspeed** (Retail X-Series, formerly Vend) | Stock-order push on goods receipt / cancellation | No personal data: Lightspeed's own product and outlet ids, the received quantity, a note naming FeohLedger, and an opaque reference built from our receipt-line id; the SKU searched for | Lightspeed's hosting region for the store (`<prefix>.retail.lightspeed.app`) | Configured only (direct, customer's own store) | Covered by customer's own Lightspeed agreement — published page lists it under § 4 (your own systems), like the direct ERPs |
+| `cin7` | **Cin7** (Cin7 Core, formerly DEAR Inventory; External API v2) | Stock-adjustment push on goods receipt / cancellation | No personal data: Cin7's own product and location ids, the new on-hand quantity, Cin7's own average cost for the item (read back from Cin7), an opaque reference built from our receipt-line id, a fixed comment, and an optional account code; the SKU searched for | Cin7's hosting (`inventory.dearsystems.com`) | Configured only (direct, customer's own Cin7 account) | Covered by customer's own Cin7 agreement — published page lists it under § 4 (your own systems), with the other commerce platforms |
+
+---
+
 ## 20. Infrastructure — Amazon Web Services (AWS)
 
 AWS is the **infrastructure sub-processor** for any deployed environment. Unlike
@@ -510,6 +528,8 @@ to them, not appointing someone to process it on our behalf. These belong in the
 |---|---|---|---|
 | **The customer's identity provider** — Okta, Microsoft Entra ID, Authentik, Keycloak, or any other OIDC / SAML 2.0 IdP | `/api/auth/sso`, `/api/auth/saml`, `/scim/v2` | Inbound: an authentication assertion plus the user attributes the customer chooses to release (name, email, groups). Outbound SCIM: nothing — SCIM is the IdP pushing to us | **The customer's own controller relationship.** We hold their users' identities; their IdP does not gain ours. Not a sub-processor of ours |
 | **Direct ERP connections** — NetSuite (Oracle), Dynamics 365 Business Central (Microsoft) | § 2 | Invoices posted into the customer's own ERP tenant | Customer's own agreement with Oracle / Microsoft. Listed in § 2 for the data description, not as our sub-processor |
+| **Commerce platforms** — Shopify, Square (Block), Lightspeed Retail (X-Series), Cin7 Core (Cin7) | § 19.1 | SKU, received quantity and location, added to the customer's own shop's stock | Customer's own agreement with the platform. Listed in § 19.1 for the data description, not as our sub-processor |
+| **Self-hosted commerce platform** — WooCommerce on the customer's own WordPress | § 19.1 | Product ids, SKUs and stock quantities pushed from goods receipts, to the customer's own store | Customer's own site and hosting agreement. Listed in § 19.1 for the data description, not as our sub-processor |
 | **Supplier catalogue punch-out** | § 15 | Buyer session identity + cart contents, to the supplier's own catalogue system | Customer ↔ supplier |
 | **Outbound Developer-API webhooks** | `/api/webhooks` | Event payloads, to a URL the tenant nominates | Customer-directed transfer (see § Maintenance) |
 | **Scheduled report delivery** | `/api/analytics/scheduled-reports` | Report contents, to recipient addresses the tenant nominates | Customer-directed transfer |

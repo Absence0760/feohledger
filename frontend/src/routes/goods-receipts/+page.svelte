@@ -31,6 +31,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
@@ -47,6 +48,7 @@
 	import { isInspectionResult, listInspections, syncInspections } from '#lib/api/inspections.ts';
 	import RecordInspectionModal from './RecordInspectionModal.svelte';
 	import RecordReceiptModal from './RecordReceiptModal.svelte';
+	import CommerceSyncSection from './CommerceSyncSection.svelte';
 	import { cancelGoodsReceipt, type GoodsReceiptDetail } from '#lib/api/goodsReceipts.ts';
 	import {
 		GR_SOURCE_MANUAL,
@@ -84,6 +86,9 @@
 		id: string;
 		po_line_item_id: string | null;
 		description: string | null;
+		/** Copied from the PO line (migration 0111); null on a free-text line. */
+		sku: string | null;
+		catalog_item_id: string | null;
 		quantity_received: number | null;
 	}
 
@@ -771,7 +776,7 @@
 				<tbody>
 					{#each detail.line_items as li (li.id)}
 						<tr>
-							<td>{li.description ?? '—'}</td>
+							<td><LineDescription description={li.description} sku={li.sku} /></td>
 							<td class="right mono">{li.quantity_received ?? '—'}</td>
 						</tr>
 					{:else}
@@ -779,6 +784,14 @@
 					{/each}
 				</tbody>
 			</table>
+
+			<!-- What this receipt pushed to the business's commerce platform
+			     (decisions §273); renders nothing when no platform was connected. -->
+			<CommerceSyncSection
+				receiptId={detail.id}
+				version={detail.status}
+				canRetry={canRecordReceipt}
+			/>
 
 			<!-- The 4-way quality leg for THIS delivery. `po_matching` reads the
 			     most recent of these rows (by `created_at`), so the list is

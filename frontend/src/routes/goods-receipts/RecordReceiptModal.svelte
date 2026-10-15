@@ -17,6 +17,7 @@
 	 * lost response replays the same receipt instead of booking it twice.
 	 */
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import QuantityInput from '#lib/components/ui/QuantityInput.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
@@ -299,7 +300,7 @@
 						<tbody>
 							{#each po.line_items as li (li.id)}
 								<tr>
-									<td>{li.description ?? '—'}</td>
+									<td><LineDescription description={li.description} sku={li.sku} /></td>
 									<td class="right mono">{li.quantity ?? '—'}</td>
 									<td class="right mono">{li.quantity_received}</td>
 									<td class="right mono">{li.quantity === null ? '—' : remainingQuantity(li)}</td>

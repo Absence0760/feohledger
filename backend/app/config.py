@@ -341,6 +341,23 @@ class Settings(BaseSettings):
     erp_qbo_token_url: str = ""
     erp_qbo_revoke_url: str = ""
 
+    # Commerce / inventory sync (decisions §273, `services/commerce_sync.py`).
+    # OPERATOR-only override that points EVERY commerce adapter at one fake
+    # (tools/fake-commerce, host port 12113), each provider under its own key:
+    # `<override>/<provider key>`. Trusted, so it skips the SSRF guard that
+    # protects tenant-supplied shop / store URLs — which is why a deployed
+    # environment refuses to boot with it set. Empty = each provider's real API.
+    commerce_api_base_override: str = ""
+    # The retry sweep for receipt-line pushes that failed retryably or never
+    # ran (a process that died between commit and push). Off by default: a
+    # receipt's push runs post-commit on its own, and the manual retry endpoint
+    # covers the rest locally. Never moves money.
+    commerce_sync_enabled: bool = False
+    commerce_sync_interval_seconds: int = 300
+    # Attempts before a retryable failure stops being retried by the sweep (an
+    # admin can still retry it by hand).
+    commerce_sync_max_attempts: int = 8
+
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS
     sqs_audit_queue_url: str = ""  # required when audit_mode = "lambda"
@@ -1038,6 +1055,19 @@ class Settings(BaseSettings):
                 f"FEOH_EXTRACTION_PROVIDER={name!r} is not a registered extraction "
                 f"adapter (one of: {', '.join(sorted(_EXTRACTION_PROVIDERS))}); leave it "
                 "empty to derive the provider from FEOH_ANTHROPIC_API_KEY."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _refuse_commerce_override_in_deployed_envs(self) -> "Settings":
+        # The override sends every tenant's commerce credentials to one host,
+        # unchecked by the SSRF guard. It exists for fake-commerce on a laptop
+        # and in CI; a deployed env carrying it (a copied .env.development) would
+        # ship real Shopify / Square tokens to whatever it names.
+        if self.is_deployed and self.commerce_api_base_override.strip():
+            raise ValueError(
+                "FEOH_COMMERCE_API_BASE_OVERRIDE is a local-dev / CI setting and must be "
+                f"empty when FEOH_ENVIRONMENT is deployed ({self.environment!r})."
             )
         return self
 

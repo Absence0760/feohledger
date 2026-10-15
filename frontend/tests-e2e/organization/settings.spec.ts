@@ -76,6 +76,7 @@ const PANELS = [
 	['branding', 'Branding'],
 	['custom-domains', 'Custom Domains'],
 	['erp', 'ERP Integration'],
+	['commerce', 'Commerce & inventory'],
 	['extraction', 'AI Extraction'],
 	['email-intake', 'Email Intake'],
 	['chat', 'Chat Notifications'],
@@ -102,6 +103,7 @@ const PANELS = [
 const ADMIN_ONLY_PANELS = [
 	['extraction', 'AI Extraction', 'extraction-admin-only'],
 	['erp', 'ERP Integration', 'erp-admin-only'],
+	['commerce', 'Commerce & inventory', 'commerce-admin-only'],
 	['payments', 'Payments (ACH / Wire / RTP)', 'payments-admin-only'],
 	['cards', 'Virtual Cards', 'cards-admin-only'],
 	['security', 'Security', 'security-admin-only'],

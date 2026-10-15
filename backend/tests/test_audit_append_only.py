@@ -372,6 +372,9 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
     ("app.api.workflow", "retry_erp"): (
         "audits via services/erp.retry_erp → workflow_engine.transition_invoice"
     ),
+    ("app.api.commerce", "retry_sync"): (
+        "audits via services/commerce_sync.request_retry (commerce_inventory.retry_requested)"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -459,7 +462,15 @@ def _identifiers_in(src: str) -> set[str]:
 # asserting "a SUCCESSFUL enrollment is unaudited on both surfaces" after both
 # surfaces started auditing it: the same "one thing silently vouches for
 # another" shape as the module-wide unit this file's per-handler unit replaced.
-_AUDIT_WRITERS = ("dispatch_audit", "dispatch_auth_audit", "queue_auth_audit")
+# `record_auth_audit_or_raise` is the write-first variant (the row is written
+# synchronously and the change refused if it can't be) — missing it read the
+# commerce location-mapping save, audited through `_write_block`, as unaudited.
+_AUDIT_WRITERS = (
+    "dispatch_audit",
+    "dispatch_auth_audit",
+    "queue_auth_audit",
+    "record_auth_audit_or_raise",
+)
 
 
 def _writes_audit_row(src: str) -> bool:

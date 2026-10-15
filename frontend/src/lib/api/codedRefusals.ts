@@ -406,7 +406,14 @@ const BUILDERS: Record<string, Builder> = {
 	goods_receipt_already_cancelled: (p, t) => {
 		const grNumber = str(p, 'grNumber');
 		return grNumber === null ? null : t('refusal.goodsReceiptAlreadyCancelled', { grNumber });
-	}
+	},
+	// The commerce connection and receipt sync (`api/commerce.py`, decisions §273).
+	commerce_not_configured: fixed('refusal.commerceNotConfigured'),
+	commerce_oauth_not_available: fixed('refusal.commerceOauthNotAvailable'),
+	commerce_sync_not_retryable: fixed('refusal.commerceSyncNotRetryable'),
+	commerce_sync_not_found: fixed('refusal.commerceSyncNotFound'),
+	commerce_unknown_entity: fixed('refusal.commerceUnknownEntity'),
+	commerce_unknown_provider: fixed('refusal.commerceUnknownProvider')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

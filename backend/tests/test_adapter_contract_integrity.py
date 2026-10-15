@@ -60,6 +60,7 @@ FAMILY_REGISTRIES: dict[str, str] = {
     "chat_notification_adapters": (
         "app.services.chat_notification_adapters.dispatcher._ADAPTER_REGISTRY"
     ),
+    "commerce_adapters": "app.services.commerce_adapters.registry._REGISTRY",
     "email_adapters": "app.services.email_adapters.dispatcher._ADAPTER_REGISTRY",
     # Parser FUNCTIONS, not classes — the scan handles both.
     "email_intake_adapters": "app.services.email_intake_adapters._REGISTRY",
