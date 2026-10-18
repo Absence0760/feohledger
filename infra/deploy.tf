@@ -1,5 +1,5 @@
 # Release deploys to the app VM (.github/workflows/vm-deploy.yml,
-# docs/decisions.md §274).
+# docs/decisions.md §275).
 #
 # A published release runs `deploy/deploy.sh --ref <commit>` on the VM through
 # SSM Run Command — no SSH, no inbound port, no key. The GitHub deploy role may

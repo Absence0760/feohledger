@@ -225,7 +225,7 @@ Publishing a GitHub release deploys it: `.github/workflows/vm-deploy.yml`
 assumes `feohledger-deploy`, waits for the `production` environment's required
 reviewer, and sends SSM Run Command to the VM, which runs
 `deploy/deploy.sh --ref <the release's commit>` (`../deploy/README.md`
-§ Deploys, `../docs/decisions.md` §274). `deploy.tf` holds the two AWS pieces:
+§ Deploys, `../docs/decisions.md` §275). `deploy.tf` holds the two AWS pieces:
 
 - **`aws_ssm_document.deploy`** (`feohledger-vm-deploy`, output
   `vm_deploy_document_name`) — runs exactly

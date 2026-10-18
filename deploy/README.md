@@ -81,7 +81,7 @@ of a public repo is public. Each automated deploy's full log is a file under
 `/var/log/feoh-deploy/` on the VM (kept 90 days). No SSH is involved: the deploy role can
 run only the `feohledger-vm-deploy` command document, on only this instance,
 and the document accepts nothing but a commit sha (`infra/deploy.tf`,
-`docs/decisions.md` §274). Prereleases do not deploy. Redeploy or roll back by
+`docs/decisions.md` §275). Prereleases do not deploy. Redeploy or roll back by
 running the workflow by hand from `main` or from an older release tag (one that
 already contains `vm-deploy.yml`; for anything older, `./deploy.sh --ref <sha>`
 by hand).
