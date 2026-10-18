@@ -94,7 +94,7 @@ if [ "$DO_BACKEND" = 1 ]; then
 	"${COMPOSE[@]}" up -d "${DB_SERVICES[@]}" redis
 	echo "==> running migrations (control plane + every tenant DB)"
 	# init_control_plane.py builds an EMPTY control plane first (tables, system
-	# roles, stamp head) and is a no-op on an initialised one — Alembic's chain
+	# roles, Alembic version row — one transaction) and is a no-op on an initialised one — Alembic's chain
 	# has no step that creates it (app/services/control_plane_bootstrap.py).
 	"${COMPOSE[@]}" run --rm api sh -c \
 		"python scripts/init_control_plane.py && alembic upgrade head && python scripts/migrate_all_tenants.py"

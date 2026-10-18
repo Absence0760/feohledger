@@ -144,6 +144,7 @@ async def test_deploy_command_initialises_an_empty_control_plane(scratch_control
     result = _run(DEPLOY_MIGRATE, name)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Empty control-plane database" in result.stdout
+    assert "Control plane initialised at" in result.stdout
     assert "No tenants found in control plane." in result.stdout
 
     tables = await _tables(dsn)
@@ -241,6 +242,30 @@ async def test_a_failed_tenant_migration_fails_the_run(monkeypatch):
 
     assert await mat.main() == 1
     assert attempted == ["feoh_ok", "feoh_broken"]
+
+
+async def test_initialise_is_all_or_nothing(scratch_control_db, monkeypatch):
+    """A failure after the tables are built must leave NO tables behind —
+    otherwise the next run calls the database PRESENT with no roles and no
+    version row (review of #570)."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    import app.services.control_plane_bootstrap as cpb
+
+    name, dsn = scratch_control_db
+
+    async def boom(_conn):
+        raise RuntimeError("role seed failed")
+
+    monkeypatch.setattr(cpb, "_seed_system_roles", boom)
+    engine = create_async_engine(_make_tenant_url(name))
+    try:
+        with pytest.raises(RuntimeError):
+            await cpb.initialise(engine, "0111_commerce_inventory_sync")
+        assert await cpb.inspect(engine) is ControlPlaneState.FRESH
+    finally:
+        await engine.dispose()
+    assert await _tables(dsn) == set()
 
 
 def test_the_deployed_url_is_untouched_by_these_tests():

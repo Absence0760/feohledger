@@ -11244,7 +11244,9 @@ rolled new code over a tenant whose migration had failed.
 - **`scripts/init_control_plane.py` runs before `alembic upgrade head`** in
   `deploy/deploy.sh` (and the dormant ECS pipeline and the DR runbook). On an
   empty database it builds the `CONTROL_TABLES` with `create_all`, seeds the four
-  system roles, and runs `alembic stamp head`; on an initialised one it does
+  system roles, and writes Alembic's version row at head — all in one
+  transaction, so an interruption leaves nothing half-built for the next run
+  to mistake for an initialised control plane; on an initialised one it does
   nothing. This is the same shape a new tenant already uses (`database.md`
   § Index parity), and it is sound for the same reason: the ORM is the head
   schema, which `test_migration_model_index_parity.py` enforces.

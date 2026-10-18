@@ -4,7 +4,7 @@ Run before `alembic upgrade head` on every deploy (`deploy/deploy.sh`):
 
 - an initialised control plane (`organizations` exists) — no-op, exit 0;
 - an EMPTY database — create the control-plane tables, seed the system roles,
-  stamp Alembic at head, exit 0;
+  record Alembic at head — all in one transaction — exit 0;
 - a database Alembic stamped while it was empty — refuse, exit 2, with the
   recovery steps. Why, and why this cannot be an Alembic revision:
   `app/services/control_plane_bootstrap.py`.
@@ -14,7 +14,6 @@ Never creates an organization, a user or any demo data — that is
 """
 
 import asyncio
-import subprocess
 import sys
 from pathlib import Path
 
@@ -24,15 +23,24 @@ from pathlib import Path
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(1, str(Path(__file__).resolve().parent.parent))
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 from app.database import control_engine
-from app.services.control_plane_bootstrap import (
-    ControlPlaneState,
-    create_control_tables,
-    inspect,
-    seed_system_roles,
-)
+from app.services.control_plane_bootstrap import ControlPlaneState, initialise, inspect
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def head_revision() -> str:
+    """The chain's single head, read from the same `alembic.ini` `alembic
+    upgrade head` uses. More than one head is refused rather than guessed."""
+    script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
+    heads = script.get_heads()
+    if len(heads) != 1:
+        raise SystemExit(f"init_control_plane: expected one Alembic head, found {heads}")
+    return heads[0]
+
 
 STAMPED_EMPTY_HELP = """\
 init_control_plane: the control-plane database has an alembic_version table but no
@@ -47,6 +55,7 @@ Nothing was changed."""
 
 
 async def main() -> int:
+    head = head_revision()
     try:
         state = await inspect(control_engine)
         if state is ControlPlaneState.PRESENT:
@@ -56,16 +65,13 @@ async def main() -> int:
             print(STAMPED_EMPTY_HELP, file=sys.stderr)
             return 2
         print("Empty control-plane database: creating tables and system roles...")
-        await create_control_tables(control_engine)
-        await seed_system_roles(control_engine)
+        # The ORM is the head schema, so it is recorded as such in the same
+        # transaction; `alembic upgrade head` right after is then a no-op
+        # instead of replaying every revision's tenant branch here.
+        await initialise(control_engine, head)
     finally:
         await control_engine.dispose()
-
-    # The ORM is the head schema, so record it as such; `alembic upgrade head`
-    # right after is then a no-op instead of replaying every revision's
-    # tenant-database branch against the control plane.
-    subprocess.run([sys.executable, "-m", "alembic", "stamp", "head"], cwd=BACKEND_DIR, check=True)
-    print("Control plane initialised and stamped at head.")
+    print(f"Control plane initialised at {head}.")
     return 0
 
 

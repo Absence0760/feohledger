@@ -11,7 +11,7 @@ is how the first production deploy found this (issue #566).
 
 So a fresh install is built the same way a fresh tenant is (`database.md`
 § Index parity between the two provisioning paths): ``create_all`` of the
-`CONTROL_TABLES`, then ``alembic stamp head``, because the ORM already IS the
+`CONTROL_TABLES`, then Alembic recorded at head, because the ORM already IS the
 head schema (`test_migration_model_index_parity.py` holds that). The four
 system roles are seeded with it — `provision_tenant` grants a new tenant's
 admin the `admin` role only if that row exists, and skips silently when it
@@ -28,7 +28,7 @@ import uuid
 
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO
 from app.models import Base
@@ -85,32 +85,65 @@ async def inspect(engine: AsyncEngine) -> ControlPlaneState:
     return classify(has_organizations=row[0], has_alembic_version=row[1])
 
 
+def _control_tables() -> list:
+    # Tenant tables are filtered out: `invoice_embeddings` alone needs pgvector,
+    # which the control database does not have.
+    return [table for name, table in Base.metadata.tables.items() if name in CONTROL_TABLES]
+
+
 async def create_control_tables(engine: AsyncEngine) -> None:
     """``create_all`` of the control-plane tables only. Additive and idempotent
-    (``checkfirst``) — it never alters or drops an existing table. Tenant tables
-    are filtered out: `invoice_embeddings` alone needs pgvector, which the
-    control database does not have."""
-    tables = [table for name, table in Base.metadata.tables.items() if name in CONTROL_TABLES]
+    (``checkfirst``) — it never alters or drops an existing table."""
+    tables = _control_tables()
     async with engine.begin() as conn:
         await conn.run_sync(
             lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables, checkfirst=True)
         )
 
 
-async def seed_system_roles(engine: AsyncEngine) -> None:
+async def _seed_system_roles(conn: AsyncConnection) -> None:
     """Insert any missing system role. Never touches a row that exists — the
     `uq_roles_system_name` partial index is the conflict target."""
+    await conn.execute(
+        pg_insert(Role)
+        .values(
+            [
+                {"id": uuid.uuid4(), "name": name, "description": description}
+                for name, description in SYSTEM_ROLE_DESCRIPTIONS.items()
+            ]
+        )
+        .on_conflict_do_nothing(
+            index_elements=[Role.name],
+            index_where=Role.organization_id.is_(None),
+        )
+    )
+
+
+async def initialise(engine: AsyncEngine, head_revision: str) -> None:
+    """Build an empty control plane in ONE transaction: the tables, the system
+    roles, and Alembic's version row at ``head_revision``.
+
+    Postgres DDL is transactional, so this either all lands or none of it does.
+    Three separate commits would leave a window — tables committed, roles or the
+    stamp not — in which the next run sees `organizations`, calls the database
+    PRESENT, and either provisions admins with no role or lets
+    `alembic upgrade head` replay the whole chain onto it. The version table is
+    written here with Alembic's own shape rather than by `alembic stamp` in a
+    subprocess for the same reason.
+    """
+    tables = _control_tables()
     async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables, checkfirst=True)
+        )
+        await _seed_system_roles(conn)
         await conn.execute(
-            pg_insert(Role)
-            .values(
-                [
-                    {"id": uuid.uuid4(), "name": name, "description": description}
-                    for name, description in SYSTEM_ROLE_DESCRIPTIONS.items()
-                ]
+            text(
+                "CREATE TABLE alembic_version ("
+                "version_num VARCHAR(32) NOT NULL, "
+                "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
             )
-            .on_conflict_do_nothing(
-                index_elements=[Role.name],
-                index_where=Role.organization_id.is_(None),
-            )
+        )
+        await conn.execute(
+            text("INSERT INTO alembic_version (version_num) VALUES (:v)"), {"v": head_revision}
         )
