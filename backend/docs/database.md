@@ -327,7 +327,7 @@ A database here is built **two ways**, and only one of them runs Alembic:
 | Path | Built by | Applies to |
 |------|----------|-----------|
 | Alembic | `alembic upgrade head` / `scripts/migrate_all_tenants.py` | every EXISTING tenant + the control plane |
-| `create_all` | `Base.metadata.create_all` in `services/tenant_provisioning._create_tenant_tables` | every NEW tenant, the control plane on a fresh install, and the pytest `realdb` harness |
+| `create_all` | `Base.metadata.create_all` in `services/tenant_provisioning._create_tenant_tables` (tenants) and `services/control_plane_bootstrap.create_control_tables` (control plane) | every NEW tenant, the control plane on a fresh install (`scripts/init_control_plane.py`, which then stamps Alembic at head — the chain has no revision that creates the control plane), and the pytest `realdb` harness |
 
 `create_all` builds **exactly what the ORM declares**. So an index written into a
 migration and never declared on its model reaches migrated databases and

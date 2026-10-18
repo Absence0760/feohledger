@@ -79,6 +79,10 @@ from app.services.billing.plan_catalog import (
     ensure_plan_catalog,
     ensure_subscription,
 )
+from app.services.control_plane_bootstrap import SYSTEM_ROLE_DESCRIPTIONS
+from app.services.control_plane_bootstrap import (
+    create_control_tables as bootstrap_control_tables,
+)
 from app.services.tenant_provisioning import (
     CONTROL_TABLES,
     _parse_maintenance_dsn,
@@ -86,16 +90,10 @@ from app.services.tenant_provisioning import (
 )
 from app.utils.passwords import pwd_context
 
-# Canonical role set seeded into every control plane, keyed by the same
-# ROLE_* constants `app.api.deps` composes into ALL_ROLES. Building the Role
-# rows from this map means the seeded roles and the `require_roles` allow-list
-# cannot drift — `tests/test_rbac.py` asserts the two sets are identical.
-ROLE_DEFINITIONS: dict[str, str] = {
-    ROLE_ADMIN: "Full access to all features and user management",
-    ROLE_AP_MANAGER: "Review and approve invoices",
-    ROLE_AP_CLERK: "Enter and code invoices; prepare requisitions, intake and expenses",
-    ROLE_CFO: "Approve high-value invoices and view reports",
-}
+# Canonical role set, owned by `control_plane_bootstrap` — a production control
+# plane is seeded from the same map (`scripts/init_control_plane.py`), and
+# `tests/test_rbac.py` asserts it equals ALL_ROLES.
+ROLE_DEFINITIONS: dict[str, str] = SYSTEM_ROLE_DESCRIPTIONS
 
 # Fixed UUIDs for reproducibility
 ACME_ORG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -199,15 +197,7 @@ async def create_control_tables():
     tenant-scoped tables (like invoice_embeddings, which needs pgvector)
     in the control DB.
     """
-    control_tables = [
-        table for name, table in Base.metadata.tables.items() if name in CONTROL_TABLES
-    ]
-    async with control_engine.begin() as conn:
-        await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(
-                sync_conn, tables=control_tables, checkfirst=True
-            )
-        )
+    await bootstrap_control_tables(control_engine)
     print("  Control-plane tables ready")
 
 

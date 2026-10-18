@@ -11223,3 +11223,44 @@ parallel, on top of this foundation.
   connection, and `services/erp_oauth` is bound to `settings.erp`. The catalogue
   carries `auth: "oauth"` and the panel a Connect hook; generalising the flow is
   tracked in `followups.md`.
+
+## 274. A fresh control plane is built by `create_all` + stamp, not by Alembic (2026-10-18)
+
+**Context.** The first production deploy (#566) ran `alembic upgrade head`
+against the new, empty RDS database and then failed in
+`migrate_all_tenants.py` on `relation "organizations" does not exist`. The
+Alembic chain starts at `0001_signup`, written after the control-plane schema
+had always been built by `create_all` (`scripts/seed.py` locally, the pytest
+harness in CI), so no revision creates `organizations`, `users` or `roles`.
+Against an empty database every revision's `users`-probe answered "tenant",
+the tenant-side branches ran, and head was stamped over nothing. Nothing had
+caught it because no environment ever started from an empty control plane and
+then ran only Alembic. A second defect hid behind it: `migrate_all_tenants.py`
+printed `FAILED` for a tenant and still exited 0, so `deploy.sh` would have
+rolled new code over a tenant whose migration had failed.
+
+**Decision.**
+
+- **`scripts/init_control_plane.py` runs before `alembic upgrade head`** in
+  `deploy/deploy.sh` (and the dormant ECS pipeline and the DR runbook). On an
+  empty database it builds the `CONTROL_TABLES` with `create_all`, seeds the four
+  system roles, and runs `alembic stamp head`; on an initialised one it does
+  nothing. This is the same shape a new tenant already uses (`database.md`
+  § Index parity), and it is sound for the same reason: the ORM is the head
+  schema, which `test_migration_model_index_parity.py` enforces.
+- **System roles are part of the baseline.** `provision_tenant` grants the
+  first admin the `admin` role only if the row exists and skips silently if not,
+  so a control plane without them would provision admins who can do nothing.
+  The role map moved from `seed.py` to `services/control_plane_bootstrap.py`;
+  the seed imports it, so the two cannot drift.
+- **A database Alembic stamped while empty is refused, not repaired** (exit 2,
+  with the two recovery commands). What the tenant-side branches left in it is
+  not a known state, and it cannot hold data — recreating it is cheaper and
+  certain.
+- **`migrate_all_tenants.py` exits non-zero when any tenant fails**, after still
+  attempting every tenant.
+
+**Rejected.** A `0000` "create the control plane" revision: the chain is applied
+to every tenant too, and a revision that creates control tables must then probe
+which kind of database it is in — the same probe that misfired here. Running
+`seed.py` in production: it creates demo organizations and users.

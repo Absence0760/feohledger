@@ -946,7 +946,8 @@ Severity: `error`, `warning`, `info`. Auto-detected by `invoice_warnings.py`. `e
 | `scripts/create_tenant.py` | CLI wrapper around `services.tenant_provisioning.provision_tenant` — provisions a single tenant (org + admin user + DB + tables) |
 | `scripts/delete_tenant.py` | CLI wrapper around `services.tenant_deletion.delete_tenant` — deletes one tenant completely (object-storage prefix, tenant DB, control-plane rows), in that order. `--dry-run` inventories; otherwise it needs `--confirm <slug>` or `--yes`. Driven by `deploy/remove-tenant.sh`, which adds the Caddy and backup legs. The deletion `/legal/dpa` § 13 promises. |
 | `scripts/sso_break_glass.py` | CLI wrapper around `services.sso_break_glass.lift_sso_only` — clears `settings.sso.sso_only` (and nothing else) for one SSO-only tenant whose IdP has stopped working, after writing an `organization.sso_only_lifted` audit row; refuses to change anything if the row cannot be written. `--slug`, optional `--reason` (ticket ref, no PII). Procedure: `../docs/founder-runbooks/sso-break-glass.md` |
-| `scripts/migrate_all_tenants.py` | Runs `alembic upgrade head` on every tenant DB |
+| `scripts/init_control_plane.py` | Builds an EMPTY control-plane database — `CONTROL_TABLES` via `create_all`, the four system roles, `alembic stamp head` — and is a no-op on an initialised one. Alembic's chain has no step that creates the control plane, so `deploy/deploy.sh` runs this before `alembic upgrade head`; it refuses (exit 2) a database Alembic stamped while empty. `services/control_plane_bootstrap.py` |
+| `scripts/migrate_all_tenants.py` | Runs `alembic upgrade head` on every tenant DB; exits non-zero if any tenant failed (every tenant is still attempted) |
 
 ## Self-service tenant signup
 
