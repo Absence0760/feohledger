@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # Deploy / update the minimal single-VM stack (docs/minimal-deployment.md).
-# Run ON the VM from anywhere: preflight → pull main → decrypt secrets →
-# build frontend (compose.prod.yml's one-shot `frontend-build` service, a
+# Run ON the VM from anywhere: preflight → pull main (or check out a release's
+# commit, --ref) → hand over to the deploy.sh just checked out → decrypt
+# secrets → build frontend (compose.prod.yml's one-shot `frontend-build` service, a
 # node:24 container — no Node/pnpm needed on the VM) →
 # build backend → run migrations BEFORE the new code serves traffic (control
 # plane + every tenant DB — same ordering contract as the future ECS
 # pipeline) → roll containers and wait for the API healthcheck.
 #
-# Usage: deploy.sh [--no-pull] [--backend-only|--frontend-only]
+# Usage: deploy.sh [--no-pull | --ref <sha>] [--backend-only|--frontend-only]
+#
+# --ref <sha> deploys exactly that commit, which must be on origin/main — what a
+# published release runs over SSM (.github/workflows/vm-deploy.yml,
+# infra/deploy.tf). Without it, main's tip.
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO_ROOT=$(cd .. && pwd)
@@ -20,26 +25,57 @@ die() {
 	exit 1
 }
 
-DO_PULL=1 DO_BACKEND=1 DO_FRONTEND=1
-for arg in "$@"; do
-	case "$arg" in
+USAGE="usage: deploy.sh [--no-pull | --ref <sha>] [--backend-only|--frontend-only]"
+DO_PULL=1 DO_BACKEND=1 DO_FRONTEND=1 REF=""
+SCOPE=() # the build-scope flags, handed on unchanged when the script re-runs itself
+while [ $# -gt 0 ]; do
+	case "$1" in
 	--no-pull) DO_PULL=0 ;;
-	--backend-only) DO_FRONTEND=0 ;;
-	--frontend-only) DO_BACKEND=0 ;;
-	*) die "usage: deploy.sh [--no-pull] [--backend-only|--frontend-only]" ;;
+	--ref)
+		[ $# -ge 2 ] || die "$USAGE"
+		REF=$2
+		shift
+		;;
+	--ref=*) REF=${1#--ref=} ;;
+	--backend-only)
+		DO_FRONTEND=0
+		SCOPE+=("$1")
+		;;
+	--frontend-only)
+		DO_BACKEND=0
+		SCOPE+=("$1")
+		;;
+	*) die "$USAGE" ;;
 	esac
+	shift
 done
+[ "$DO_PULL" = 1 ] || [ -z "$REF" ] ||
+	die "--ref and --no-pull contradict each other: --ref checks a commit out. $USAGE"
 
 # ── Preflight — fail with a clear message before doing any work ──────────────
-for cmd in docker sops git; do
+for cmd in docker sops git flock; do
 	command -v "$cmd" >/dev/null || die "'$cmd' not installed — run deploy/bootstrap-vm.sh first."
 done
 docker compose version >/dev/null 2>&1 || die "docker compose plugin missing — run deploy/bootstrap-vm.sh first."
 docker info >/dev/null 2>&1 || die "cannot talk to the docker daemon — is it running, and are you in the docker group? (log out/in after bootstrap-vm.sh)"
 [ -f prod.sops.yaml ] || die "prod.sops.yaml missing — copy infra-secrets/feohledger/prod.sops.yaml here (template: deploy/prod.sops.yaml.example; see deploy/README.md)."
 
+# One deploy at a time on this VM: a release deploy over SSM and a manual run
+# from a Session Manager shell would otherwise build and migrate over each
+# other. The lock is held by the open descriptor, so it survives the re-exec
+# below; the variable tells the re-run script it already holds it.
+if [ -z "${FEOH_DEPLOY_LOCK_HELD:-}" ]; then
+	exec 9>.deploy.lock
+	flock -n 9 || die "another deploy is already running on this VM (deploy/.deploy.lock)."
+	export FEOH_DEPLOY_LOCK_HELD=1
+fi
+
 if [ "$DO_PULL" = 1 ]; then
-	git -C "$REPO_ROOT" pull --ff-only
+	feoh_sync_source "$REPO_ROOT" "$REF" || die "could not bring the checkout to the commit to deploy."
+	# Bash is still running the deploy.sh that was on disk before the checkout.
+	# Hand over to the one just checked out, so a release that changes the
+	# deploy steps is deployed BY those steps rather than its predecessor's.
+	exec ./deploy.sh --no-pull ${SCOPE[@]+"${SCOPE[@]}"}
 fi
 
 # Secrets: decrypt prod.sops.yaml to .env and check it before it replaces the

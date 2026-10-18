@@ -8,3 +8,5 @@
 prod.sops.yaml
 # Per-VM tenant host list — seeded from tenants.caddy.example.
 tenants.caddy
+# deploy.sh's one-deploy-at-a-time lock (flock).
+.deploy.lock
