@@ -238,6 +238,15 @@ def test_postgres_has_no_required_variable_guard() -> None:
     assert ":?" not in str(_services()["postgres"]["environment"]["POSTGRES_PASSWORD"])
 
 
+def test_every_postgres_password_reference_has_a_default() -> None:
+    """RDS mode leaves POSTGRES_PASSWORD unset, and compose v2 expands a nested
+    reference even inside an unused `:-` default — a bare one warns "variable is
+    not set" on every compose call there."""
+    refs = re.findall(r"\$\{POSTGRES_PASSWORD([^}]*)\}", PROD_COMPOSE.read_text())
+    assert refs, "compose.prod.yml no longer references POSTGRES_PASSWORD"
+    assert all(r == ":-" for r in refs), refs
+
+
 def test_the_local_postgres_is_healthy_only_once_it_serves_tcp() -> None:
     """The entrypoint's temporary initdb server answers on the socket only."""
     test = " ".join(_services()["postgres"]["healthcheck"]["test"])

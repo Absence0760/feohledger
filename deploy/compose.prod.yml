@@ -105,7 +105,10 @@ services:
       # RDS deployment sets FEOH_DATABASE_URL (which also switches the stack to
       # external-database mode, see the header), ElastiCache would set the
       # other. No compose edit either way.
-      FEOH_DATABASE_URL: ${FEOH_DATABASE_URL:-postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/feohledger}
+      # The nested `:-` keeps RDS mode, where POSTGRES_PASSWORD is unset, from
+      # warning on every compose call (compose v2 expands it even when unused);
+      # decrypt-env.sh is what refuses it empty in container mode.
+      FEOH_DATABASE_URL: ${FEOH_DATABASE_URL:-postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-}@postgres:5432/feohledger}
       FEOH_REDIS_URL: ${FEOH_REDIS_URL:-redis://redis:6379}
       # Database TLS, read by asyncpg for every connection the app opens —
       # engines, tenant engines, the raw CREATE/DROP DATABASE connection — as
