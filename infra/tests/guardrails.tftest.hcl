@@ -5,7 +5,8 @@
 # validation-record wiring, the platform domain's registration settings and
 # apex-only guard, the access-log sink's delivery prerequisites, and the platform
 # domain's mail records (SES identity, DKIM, MAIL FROM, Migadu, DMARC) with their
-# input guards.
+# input guards, and the release-deploy grant (deploy.tf): one document, one
+# instance, one sha-shaped parameter.
 
 mock_provider "aws" {
   # A mocked policy document renders a random string, which the KMS key and
@@ -105,6 +106,24 @@ override_resource {
       next_signing_key_length = "RSA_2048_BIT"
       tokens                  = ["tokenone", "tokentwo", "tokenthree"]
     }
+  }
+}
+
+# The deploy role's SendCommand grant is compared against these ARNs exactly,
+# so give them known values at plan time.
+override_resource {
+  target          = aws_instance.app
+  override_during = plan
+  values = {
+    arn = "arn:aws:ec2:us-east-1:000000000000:instance/i-0123456789abcdef0"
+  }
+}
+
+override_resource {
+  target          = aws_ssm_document.deploy
+  override_during = plan
+  values = {
+    arn = "arn:aws:ssm:us-east-1:000000000000:document/feohledger-vm-deploy"
   }
 }
 
@@ -560,4 +579,58 @@ run "alarms_need_a_subscriber" {
   }
 
   expect_failures = [var.alert_emails]
+}
+
+# ── Release deploys (deploy.tf) ──────────────────────────────────────────────
+
+run "deploy_role_runs_only_the_deploy_document_on_only_the_app_vm" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.deploy_vm.statement : tolist(s.resources)
+      if contains(s.actions, "ssm:SendCommand")
+    ])) == toset([aws_instance.app.arn, aws_ssm_document.deploy.arn])
+    error_message = "ssm:SendCommand must name exactly the app VM and the deploy document — any other document (AWS-RunShellScript) is arbitrary root shell on the VM."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.deploy_vm.statement :
+      !contains(tolist(s.resources), "*") || toset(s.actions) == toset(["ssm:GetCommandInvocation"])
+    ])
+    error_message = "Only the read-only ssm:GetCommandInvocation, which has no resource type, may be granted on \"*\"."
+  }
+
+  assert {
+    condition     = aws_iam_role_policy.deploy_vm.role == "feohledger-deploy"
+    error_message = "The grant attaches to the baseline-owned deploy role by name; the role itself is not defined here."
+  }
+}
+
+run "deploy_document_takes_only_a_commit_sha" {
+  command = plan
+
+  assert {
+    condition     = keys(jsondecode(aws_ssm_document.deploy.content).parameters) == ["Ref"]
+    error_message = "The deploy document must take exactly one parameter, the commit to deploy — a free-form parameter would make the deploy role a remote shell."
+  }
+
+  assert {
+    condition     = jsondecode(aws_ssm_document.deploy.content).parameters.Ref.allowedPattern == "^[0-9a-f]{40}$"
+    error_message = "Ref must be refused by SSM unless it is a full 40-character sha, before any shell sees it."
+  }
+
+  assert {
+    condition = anytrue([
+      for line in one(jsondecode(aws_ssm_document.deploy.content).mainSteps).inputs.runCommand :
+      startswith(line, "sudo -iu ec2-user /home/ec2-user/feohledger/deploy/deploy.sh --ref '{{ Ref }}' ")
+    ])
+    error_message = "The document must run deploy.sh as ec2-user (the checkout owner, in the docker group) with the release's ref."
+  }
+
+  assert {
+    condition     = element(one(jsondecode(aws_ssm_document.deploy.content).mainSteps).inputs.runCommand, -1) == "exit $rc"
+    error_message = "The document must exit with deploy.sh's status, or a failed deploy reports success."
+  }
 }

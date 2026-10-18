@@ -21,6 +21,7 @@ infra/
 ├── compute.tf                   # app VM (EC2 Graviton, Session Manager, IMDSv2) + instance role + Elastic IP + apex/api/* DNS
 ├── database.tf                  # RDS Postgres 16: private, encrypted, TLS-only, point-in-time restore, write-only password
 ├── monitoring.tf                # SNS alerts topic + VM recovery/reboot and DB CPU/memory/storage alarms
+├── deploy.tf                    # release deploys: the SSM command document that runs deploy.sh --ref, + the deploy role's grant to run it
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
 ├── terraform.tfvars.example     # committed template
@@ -45,15 +46,26 @@ Every resource in this module follows the SOC 2 baseline:
 
 ### The deploy role is not owned here
 
-`feohledger-deploy` — the role `.github/workflows/aws-deploy.yml` assumes through
-OIDC, whose ARN is the `AWS_DEPLOY_ROLE_ARN` environment secret — is **not in
-this module and must not be added to it.** It is minted by the estate account
+`feohledger-deploy` — the role `.github/workflows/vm-deploy.yml` (and the
+disarmed `aws-deploy.yml`) assume through OIDC, whose ARN is the
+`AWS_DEPLOY_ROLE_ARN` environment secret — is **not in this module and must not
+be added to it.** It is minted by the estate account
 bootstrap (`~/github/templates/infra/modules/project-baseline`, driven by
 `~/github/templates/scripts/new-project-account.sh`), its inputs live in
 `Absence0760/infra-secrets` → `feohledger/bootstrap.tfvars`, and its state is in
 the mgmt account's bucket. Change the trust policy there, never here — the
 module is shared by every project account, so fixing it locally would fix this
 account and leave the next one broken.
+
+What the role may **do** is the project's, by the module's own design: it mints
+the role with a trust policy and no permissions ("Project repo attaches its own
+policies"). This module attaches one inline policy to it, by name —
+`vm-deploy`, in `deploy.tf` (§ Release deploys). It references the role through
+a `data "aws_iam_role"` lookup, so the role, its trust policy and its lifetime
+stay the baseline's. If the baseline ever starts managing the role's inline
+policies exclusively (`aws_iam_role_policies_exclusive`), it would strip this
+one on its next apply — move the grant there at that point rather than letting
+the two fight.
 
 **The gotcha that makes this worth its own section (issue #449):** the trust
 policy pins `token.actions.githubusercontent.com:sub` with `StringEquals`, and
@@ -206,6 +218,54 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 5. Then the VM side: `../deploy/README.md` (bootstrap, the sops env with `FEOH_DATABASE_URL` pointing at the `db_address` output, first deploy).
 
 **Rotating the database password**: put the new value in `terraform.sops.yaml`, bump `db_master_password_version` in `prod.tfvars`, apply as in step 3, then update the password inside `FEOH_DATABASE_URL` in `prod.sops.yaml` and redeploy. Between the apply and the redeploy the app cannot connect, so do both in one sitting.
+
+## Release deploys
+
+Publishing a GitHub release deploys it: `.github/workflows/vm-deploy.yml`
+assumes `feohledger-deploy`, waits for the `production` environment's required
+reviewer, and sends SSM Run Command to the VM, which runs
+`deploy/deploy.sh --ref <the release's commit>` (`../deploy/README.md`
+§ Deploys, `../docs/decisions.md` §274). `deploy.tf` holds the two AWS pieces:
+
+- **`aws_ssm_document.deploy`** (`feohledger-vm-deploy`, output
+  `vm_deploy_document_name`) — runs exactly
+  `sudo -iu ec2-user /home/ec2-user/feohledger/deploy/deploy.sh --ref '<Ref>'`,
+  logs each run to its own file under `/var/log/feoh-deploy/` (kept 90 days)
+  and prints that log's tail. Its one
+  parameter, `Ref`, has `allowedPattern` `^[0-9a-f]{40}$`, so SSM refuses
+  anything but a full commit sha before a shell exists.
+- **`aws_iam_role_policy.deploy_vm`** on the deploy role — `ssm:SendCommand` on
+  the app instance's ARN **and** that document's ARN (SendCommand is authorized
+  against both, so `AWS-RunShellScript` and every other document stay out of
+  reach, as does every other instance), plus `ssm:GetCommandInvocation` on
+  `*` to poll the result: SSM defines no resource type for it, it is read-only,
+  and the only command output in this account is deploy logs.
+  `ssm:ListCommandInvocations` is deliberately not granted — the workflow knows
+  its own command id.
+
+**One-time operator steps**, in order:
+
+1. **Plan and apply** as in § Workload stack step 3 (the database password has
+   to be passed again — it is an ephemeral variable). The plan should add
+   exactly `aws_ssm_document.deploy` and `aws_iam_role_policy.deploy_vm`.
+2. **Update the VM's own `deploy.sh` once by hand**, so it understands `--ref`:
+   `aws ssm start-session --target <app_instance_id> --profile feohledger`, then
+   `sudo -iu ec2-user /home/ec2-user/feohledger/deploy/deploy.sh`. Until this
+   runs, the VM's checkout predates `--ref` and an automated deploy fails at
+   argument parsing (harmlessly — nothing is touched).
+3. **Give the workflow the instance id**, as a `production` environment secret
+   (secret, not variable: this repo's workflow logs are public, and secrets are
+   masked in them):
+   `gh secret set VM_INSTANCE_ID --env production --repo Absence0760/feohledger --body "$(AWS_PROFILE=feohledger terraform -chdir=infra output -raw app_instance_id)"`
+4. **Prove the OIDC handshake** (issue #449): run **AWS OIDC preflight**
+   (`gh workflow run aws-oidc-preflight.yml --repo Absence0760/feohledger`) and
+   approve it. If it fails, the trust policy's subject is wrong — fix it in the
+   baseline module (§ The deploy role is not owned here), not here.
+5. **Arm the workflow**:
+   `gh variable set VM_DEPLOY_ENABLED --repo Absence0760/feohledger --body true`.
+   Until then a release skips the deploy job rather than failing it.
+6. **Publish a release** (or run `Deploy to the VM` by hand from `main`) and
+   approve it; the run's log ends with the tail of `deploy.sh`'s output.
 
 ## Secrets
 
