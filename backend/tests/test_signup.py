@@ -482,7 +482,7 @@ async def test_signup_complete_provisions_and_marks_consumed(realdb, monkeypatch
     kwargs = provision.await_args.kwargs
     assert kwargs["slug"] == slug
     assert kwargs["admin_email"] == email
-    # No password is generated, so there is none to force-change (decisions §282).
+    # No password is generated, so there is none to force-change (decisions §283).
     assert kwargs["admin_password"] is None
     assert kwargs["must_change_password"] is False
 

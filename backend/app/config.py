@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     password_reset_ttl_minutes: int = 30
     # Lifetime of the set-password link a self-service signup admin is sent
     # instead of a temporary password (`api/signup.py`, `docs/decisions.md`
-    # §282). Same token as the reset link above, longer life: the reset link is
+    # §283). Same token as the reset link above, longer life: the reset link is
     # minted for someone at the keyboard who asked for it, while this one is
     # minted the moment a workspace exists and must survive a closed tab and a
     # weekend. Seventy-two hours covers Friday evening to Monday morning, is

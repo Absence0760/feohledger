@@ -60,7 +60,7 @@ async def issue_reset_token(user_id: uuid.UUID, *, ttl_seconds: int | None = Non
     ``ttl_seconds`` defaults to the forgot-password lifetime
     (``FEOH_PASSWORD_RESET_TTL_MINUTES``). The one other caller is signup's
     set-password link (``FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS``,
-    ``docs/decisions.md`` §282): the same token, store and single-use redemption
+    ``docs/decisions.md`` §283): the same token, store and single-use redemption
     through ``POST /api/auth/reset-password``, only a longer life, because
     nobody asked for it a minute ago and is waiting at the keyboard."""
     token = secrets.token_urlsafe(32)

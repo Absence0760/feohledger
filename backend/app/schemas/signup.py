@@ -32,7 +32,7 @@ class SignupCompleteResponse(BaseModel):
     # email carries). Returned to the browser that just proved it can read the
     # admin's mailbox by opening the verification link — the email goes to
     # that same inbox, so this discloses nothing the email does not
-    # (decisions §282). None when the token
+    # (decisions §283). None when the token
     # could not be stored; the admin then uses Forgot password.
     set_password_url: str | None = None
 

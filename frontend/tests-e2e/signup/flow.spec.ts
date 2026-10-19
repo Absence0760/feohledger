@@ -13,7 +13,7 @@ import { SERVICES, skipUnlessReachable } from '../fixtures/services';
  *     runs anywhere; we drive it with bogus tokens.
  *  3. The full happy path landing → signup → verification email → /verify →
  *     "Set your password" (the same single-use link the welcome email carries;
- *     no password is ever emailed, decisions §282) → sign in with the email
+ *     no password is ever emailed, decisions §283) → sign in with the email
  *     prefilled → dashboard. Gated on Mailpit (the real outbound sink); ALSO needs the
  *     backend on the `smtp` adapter pointed at Mailpit:
  *        pnpm mail:up && FEOH_EMAIL_PROVIDER=smtp FEOH_SMTP_PORT=1025 pnpm dev:backend

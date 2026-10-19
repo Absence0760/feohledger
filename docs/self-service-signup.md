@@ -1,6 +1,6 @@
 # Self-service tenant signup
 
-End-to-end flow for anonymous visitors to provision their own workspace. Landing page → signup form → verification email → workspace created → **set your password** (one single-use link, shown on the verify page and in the welcome email) → sign in. No password is ever generated or emailed (`docs/decisions.md` §282).
+End-to-end flow for anonymous visitors to provision their own workspace. Landing page → signup form → verification email → workspace created → **set your password** (one single-use link, shown on the verify page and in the welcome email) → sign in. No password is ever generated or emailed (`docs/decisions.md` §283).
 
 ## Turning signup off — `FEOH_SIGNUP_ENABLED`
 
@@ -115,7 +115,7 @@ Adding a provider: copy `app/services/email_adapters/console_adapter.py`, implem
 | `FEOH_AWS_SES_REGION` | `us-east-1` | Only used by the SES adapter |
 | `FEOH_PUBLIC_URL` | `http://localhost:7777` | Frontend URL — used to build verification links |
 | `FEOH_TENANT_URL_TEMPLATE` | `http://{slug}.localhost:7777` | `{slug}` is substituted in the welcome email and the set-password link; blank → `/signup/complete` answers 503 before provisioning |
-| `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS` | `72` | Lifetime of the signup admin's single-use set-password link (minimum 1). Longer than the 30-minute forgot-password link because nobody is waiting at the keyboard for it — see `docs/decisions.md` §282 |
+| `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS` | `72` | Lifetime of the signup admin's single-use set-password link (minimum 1). Longer than the 30-minute forgot-password link because nobody is waiting at the keyboard for it — see `docs/decisions.md` §283 |
 | `FEOH_ENVIRONMENT` | `development` | Deployment discriminator. Any value outside `development`/`dev`/`local`/`test`/`ci` is "deployed" and turns on the production safety guards (e.g. captcha must be configured). |
 | `FEOH_SIGNUP_ENABLED` | `true` | Master switch for `/api/signup/*`. `false` → every signup route 404s, `/signup` says signup is closed, and the hCaptcha secret is no longer required. See § Turning signup off. |
 | `FEOH_HCAPTCHA_SECRET` | *(empty)* | Empty skips verification — OK for local dev; a deployed env with signup on refuses to boot when empty. |

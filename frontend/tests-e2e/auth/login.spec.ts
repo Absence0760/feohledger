@@ -40,7 +40,7 @@ test.describe('/login', () => {
 
 	test('?email= prefills the email field, and only with a plausible address', async ({ page }) => {
 		// The signup welcome email's sign-in link and the reset page's "go to
-		// sign in" both carry the account's address (decisions §282).
+		// sign in" both carry the account's address (decisions §283).
 		await page.goto('/login?email=' + encodeURIComponent('first+ap@acme.example'));
 		const field = page.locator('input[type="email"]');
 		await expect(field).toHaveValue('first+ap@acme.example');

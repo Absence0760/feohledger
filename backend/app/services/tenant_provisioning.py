@@ -452,7 +452,7 @@ async def _provision_into(
             email=normalize_email(admin_email),
             full_name=admin_name,
             # None = no password yet: the self-service signup admin chooses their
-            # own through a set-password link (`api/signup.py`, decisions §282),
+            # own through a set-password link (`api/signup.py`, decisions §283),
             # and until then `/auth/login` refuses the account like an SSO-only one.
             hashed_password=(
                 await hash_password(admin_password) if admin_password is not None else None

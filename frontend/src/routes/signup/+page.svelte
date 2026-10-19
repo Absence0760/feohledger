@@ -208,7 +208,7 @@
 
 <!-- What pressing the button starts. Worth saying before the press: the flow
      crosses an inbox twice, and a user who does not expect the second email
-     (the set-password link, decisions §282) is a support ticket. Not shown on a closed
+     (the set-password link, decisions §283) is a support ticket. Not shown on a closed
      deployment, where there is no button to press. -->
 {#snippet nextSteps()}
 	<h3 class="next-heading">{m('auth.signup.nextHeading')}</h3>

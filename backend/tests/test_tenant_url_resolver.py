@@ -438,7 +438,7 @@ _VANITY = {"brand": {"tenant_url_template": "https://ap.acmecorp.example"}}
 
 
 def test_password_reset_url_shapes(monkeypatch):
-    """The one builder for both reset-token links (decisions §282)."""
+    """The one builder for both reset-token links (decisions §283)."""
     monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.app.example.com")
     assert (
         password_reset_url("acme", None, "a/b+c")

@@ -8,7 +8,7 @@
 
 	// Two links land here, both redeeming the same single-use reset token:
 	// forgot-password's, and the set-password link a self-service signup admin
-	// gets instead of a temporary password (`mode=set`, decisions §282). The
+	// gets instead of a temporary password (`mode=set`, decisions §283). The
 	// mode changes copy only.
 	let token = $state('');
 	let setMode = $state(false);

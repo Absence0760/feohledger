@@ -104,7 +104,7 @@ def password_reset_url(
     """The tenant-hosted reset page for ``token``, or ``None`` with no base URL.
 
     One builder for both links that redeem a reset token: the forgot-password
-    email and signup's set-password link (``docs/decisions.md`` §282).
+    email and signup's set-password link (``docs/decisions.md`` §283).
     ``set_password`` adds ``mode=set``, which changes only the page's copy
     ("Set your password" rather than "Set a new password") — the token, the
     endpoint and the single-use redemption are identical.

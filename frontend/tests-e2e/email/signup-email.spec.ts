@@ -103,7 +103,7 @@ test.describe('Outbound email via Mailpit (signup)', () => {
 		expect(body.set_password_url).toMatch(/\/login\/reset-password\?token=[^&]+&mode=set$/);
 
 		// 5. The welcome email lands too, carrying that same set-password link and
-		//    no password (decisions §282).
+		//    no password (decisions §283).
 		let welcome: MailpitMessage | null = null;
 		await expect
 			.poll(async () => {

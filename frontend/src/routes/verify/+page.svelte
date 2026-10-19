@@ -12,7 +12,7 @@
 		slug: string;
 		tenant_url: string;
 		admin_email: string;
-		// Single-use link to choose the admin's first password (decisions §282).
+		// Single-use link to choose the admin's first password (decisions §283).
 		// Null when the server could not build one; Forgot password is the way in.
 		set_password_url: string | null;
 	}

@@ -351,7 +351,7 @@ async def signup_complete(
         )
 
     # 3. Provision the tenant. The admin gets NO password: they choose their
-    #    own through the set-password link minted below (decisions §282), so
+    #    own through the set-password link minted below (decisions §283), so
     #    there is no credential to email and nothing to force-change.
     try:
         provisioned = await provision_tenant(

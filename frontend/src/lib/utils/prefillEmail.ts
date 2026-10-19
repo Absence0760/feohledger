@@ -3,7 +3,7 @@
  *
  * Server-built links carry it — the signup welcome email's sign-in link and
  * the reset page's "go to sign in" (`backend/app/utils/tenant_urls.sign_in_url`,
- * `docs/decisions.md` §282). The value only ever becomes the email field's
+ * `docs/decisions.md` §283). The value only ever becomes the email field's
  * text: Svelte binds it as a value, never markup, and nothing else on the page
  * reads it. Anything that is not plausibly a single address is dropped rather
  * than shown, so a crafted link cannot put a sentence in the field.
