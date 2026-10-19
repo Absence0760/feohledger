@@ -221,13 +221,22 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             raise QboRequestError(resp.status_code)
         return _json(resp).get("QueryResponse") or {}
 
-    async def _query_all(self, entity: str) -> list[dict]:
+    async def _query_all(self, entity: str, *, include_inactive: bool = False) -> list[dict]:
+        """Every row of ``entity``, paged.
+
+        ``include_inactive``: a plain ``select`` returns only ACTIVE accounts and
+        vendors, so an account the company made inactive simply vanished from
+        the pull — and a row still linked to it looked like a link to a deleted
+        account. ``where Active IN (true, false)`` is QuickBooks' documented way
+        to read both.
+        """
+        where = " where Active IN (true, false)" if include_inactive else ""
         rows: list[dict] = []
         start = 1
         for _ in range(_MAX_PAGES):
             page = (
                 await self._query(
-                    f"select * from {entity} STARTPOSITION {start} MAXRESULTS {_PAGE_SIZE}"
+                    f"select * from {entity}{where} STARTPOSITION {start} MAXRESULTS {_PAGE_SIZE}"
                 )
             ).get(entity) or []
             rows.extend(r for r in page if isinstance(r, dict))
@@ -499,7 +508,8 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         return resp.status_code == 200
 
     async def list_vendors(self) -> list[VendorPayload]:
-        return [_vendor_payload(v) for v in await self._query_all("Vendor") if v.get("Id")]
+        rows = await self._query_all("Vendor", include_inactive=True)
+        return [_vendor_payload(v) for v in rows if v.get("Id")]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """The chart, keyed by what is UNIQUE in QuickBooks (:func:`_account_code`).
@@ -510,7 +520,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         ``Name`` this adapter keyed sub-accounts by before §284, which is how
         the sync recognises a row that collapsed two accounts into one.
         """
-        rows = [a for a in await self._query_all("Account") if a.get("Id")]
+        rows = [a for a in await self._query_all("Account", include_inactive=True) if a.get("Id")]
         code_by_id = {str(a["Id"]): _account_code(a) for a in rows}
         out = []
         for a in rows:
@@ -523,6 +533,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                     erp_account_id=str(a["Id"]),
                     parent_code=code_by_id.get(str((a.get("ParentRef") or {}).get("value"))),
                     legacy_codes=_legacy_account_codes(a),
+                    active=_is_active(a),
                 )
             )
         return out
@@ -531,20 +542,14 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         """Purchase orders exist on QuickBooks Plus/Advanced only; on Simple
         Start the query returns none, and an empty list is the right answer.
 
-        A PO line's account is resolved by its ``AccountRef`` id to the same
-        code the chart sync stores — never taken from the ref's ``name``, which
-        two sub-accounts can share. One extra chart read, only when a line
-        references an account.
+        PO lines carry no GL account: ``po_line_items`` has no column for one
+        and nothing in matching or invoice-from-PO reads it, so resolving each
+        line's ``AccountRef`` would spend a chart read per sync on data that is
+        discarded. ``gl_account`` stays None — and is never taken from the
+        ref's ``name``, which two sub-accounts can share. Persist it by id,
+        through the chart sync's code, when a consumer needs it.
         """
-        raw_pos = await self._query_all("PurchaseOrder")
-        code_by_id: dict[str, str] = {}
-        if any(_po_account_ids(p) for p in raw_pos):
-            code_by_id = {
-                str(a["Id"]): _account_code(a)
-                for a in await self._query_all("Account")
-                if a.get("Id")
-            }
-        return [_po_payload(p, code_by_id) for p in raw_pos]
+        return [_po_payload(p) for p in await self._query_all("PurchaseOrder")]
 
 
 def _private_note(correlation_id: str) -> str:
@@ -586,6 +591,14 @@ def _account_code(raw: dict) -> str:
     return path[: GL_CODE_MAX_LENGTH - len(tail)] + tail
 
 
+def _is_active(raw: dict) -> bool:
+    """QuickBooks' ``Active`` flag; a record that omits it is active."""
+    value = raw.get("Active", True)
+    if isinstance(value, str):
+        return value.strip().lower() != "false"
+    return value is not False
+
+
 def _account_display_name(raw: dict) -> str:
     """The path, so a numbered chart's same-named sub-accounts read apart too."""
     return str(raw.get("FullyQualifiedName") or raw.get("Name") or _account_code(raw))
@@ -600,16 +613,6 @@ def _legacy_account_codes(raw: dict) -> tuple[str, ...]:
     ambiguity check."""
     keys = (str(raw.get("AcctNum") or "").strip(), str(raw.get("Name") or "").strip())
     return tuple(dict.fromkeys(k for k in keys if k))
-
-
-def _po_account_ids(raw: dict) -> list[str]:
-    ids = []
-    for line in raw.get("Line") or []:
-        if isinstance(line, dict):
-            ref = (line.get("AccountBasedExpenseLineDetail") or {}).get("AccountRef") or {}
-            if ref.get("value"):
-                ids.append(str(ref["value"]))
-    return ids
 
 
 def _vendor_payload(raw: dict) -> VendorPayload:
@@ -627,6 +630,11 @@ def _vendor_payload(raw: dict) -> VendorPayload:
         # for the vendor. Our ``code`` is our own vendor identifier, so the sync
         # leaves it alone (None never overwrites a local value).
         code=None,
+        # ...but the mapping before §284 DID write it there, and CSV import
+        # resolves vendors by code: the sync clears it from the vendors that
+        # mapping created (``vendor_sync``).
+        legacy_code=str(raw.get("AcctNum") or "").strip() or None,
+        active=_is_active(raw),
         email=(raw.get("PrimaryEmailAddr") or {}).get("Address"),
         phone=(raw.get("PrimaryPhone") or {}).get("FreeFormNumber"),
         address=address or None,
@@ -637,7 +645,7 @@ def _vendor_payload(raw: dict) -> VendorPayload:
     )
 
 
-def _po_payload(raw: dict, code_by_id: dict[str, str] | None = None) -> PoPayload:
+def _po_payload(raw: dict) -> PoPayload:
     lines: list[PoLinePayload] = []
     for line in raw.get("Line") or []:
         if not isinstance(line, dict):
@@ -652,11 +660,8 @@ def _po_payload(raw: dict, code_by_id: dict[str, str] | None = None) -> PoPayloa
                 quantity=_dec(detail.get("Qty")),
                 unit_price=_dec(detail.get("UnitPrice")),
                 total=_dec(line.get("Amount")),
-                # By id, to the chart's code; an account the chart read did not
-                # return stays None rather than falling back to the ref's name.
-                gl_account=(code_by_id or {}).get(
-                    str((account_detail.get("AccountRef") or {}).get("value"))
-                ),
+                # Never the AccountRef name (see list_pos): PO lines carry no GL.
+                gl_account=None,
             )
         )
     status = str(raw.get("POStatus") or "Open").lower()

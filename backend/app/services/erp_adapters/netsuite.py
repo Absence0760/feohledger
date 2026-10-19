@@ -12,7 +12,6 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
-from app.models.gl_account import GL_CODE_MAX_LENGTH
 from app.services.erp_adapters.base import (
     POSTED_TOTAL_MISMATCH,
     POSTED_TOTAL_UNCONFIRMED,
@@ -424,7 +423,9 @@ class NetSuiteAdapter(ErpAdapter):
         """Pull vendors through SuiteQL (``_VENDOR_QUERY``).
 
         The ``id`` is what ``post_invoice`` posts a bill's ``entity`` against.
-        Inactive vendors are skipped: NetSuite will not take a bill for one.
+        Inactive vendors are emitted ``active=False``: NetSuite will not take a
+        bill for one, so the sync never creates a payee for it, but its id
+        still exists.
         """
         out: list[VendorPayload] = []
         for raw in await self._suiteql(_VENDOR_QUERY):
@@ -493,12 +494,13 @@ def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload | None:
 
     The name is ``companyname``, falling back to ``entityid`` (an individual
     vendor has no company name); ``entityid`` is also the vendor's code. An
-    inactive vendor (``isinactive`` "T") or a row with no id is skipped.
-    Anything absent maps to None — ``sync_vendors_from_erp`` never nulls out an
-    existing local value for a missing field.
+    inactive vendor (``isinactive`` "T") is emitted with ``active=False`` (the
+    sync never creates a payee for one, and its id still exists); a row with no
+    id is skipped. Anything absent maps to None — ``sync_vendors_from_erp``
+    never nulls out an existing local value for a missing field.
     """
     vendor_id = raw.get("id")
-    if vendor_id is None or str(raw.get("isinactive", "F")).upper() == "T":
+    if vendor_id is None:
         return None
     entity_id = raw.get("entityid") or None
     name = raw.get("companyname") or entity_id or str(vendor_id)
@@ -509,6 +511,7 @@ def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload | None:
         email=raw.get("email") or None,
         phone=raw.get("phone") or None,
         payment_terms=raw.get("terms") or None,
+        active=str(raw.get("isinactive", "F")).upper() != "T",
     )
 
 
@@ -617,25 +620,29 @@ _NETSUITE_ACCOUNT_TYPES: dict[str, str] = {
 def _netsuite_account_to_payload(raw: dict) -> GLAccountPayload | None:
     """Map a SuiteQL ``account`` row to a GLAccountPayload.
 
-    SuiteQL returns lower-case column names. Inactive accounts (``isinactive``
-    "T") are skipped: nothing should be newly coded to them. An account with no
-    number (the "Use Account Numbers" preference off) is keyed by its name,
-    since the code is what an AP clerk picks; its internal id is what the bill
-    is posted against either way.
+    SuiteQL returns lower-case column names. An account with no number (the
+    "Use Account Numbers" preference off) is keyed by its name, since the code
+    is what an AP clerk picks; its internal id is what the bill is posted
+    against either way.
+
+    Emitted, not dropped: an inactive account (``isinactive`` "T") as
+    ``active=False``, and a code longer than ``gl_accounts.code`` as it is.
+    The sync then marks the first inactive in our chart and refuses the second
+    ``code_too_long`` — never truncated, which would let two long names share
+    a code — and either way still knows the account's id exists, so a row
+    linked to it is not mistaken for a link to a deleted account.
     """
     account_id = raw.get("id")
-    if account_id is None or str(raw.get("isinactive", "F")).upper() == "T":
+    if account_id is None:
         return None
     name = raw.get("fullname") or ""
     code = str(raw.get("acctnumber") or name)
-    # `gl_accounts.code` is GL_CODE_MAX_LENGTH characters. Truncating would let
-    # two long names collapse into one code — the sync would then write the
-    # second account's id onto the first — so an over-long name is skipped.
-    if not code or len(code) > GL_CODE_MAX_LENGTH:
+    if not code:
         return None
     return GLAccountPayload(
         code=code,
-        name=str(name or code),
+        name=str(name or code)[:255],
         account_type=_NETSUITE_ACCOUNT_TYPES.get(str(raw.get("accttype") or "")),
         erp_account_id=str(account_id),
+        active=str(raw.get("isinactive", "F")).upper() != "T",
     )
