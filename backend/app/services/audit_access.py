@@ -55,6 +55,10 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _is_blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def build_field_diff(
     before: dict[str, Any],
     after: dict[str, Any],
@@ -64,12 +68,17 @@ def build_field_diff(
 
     Only fields whose value actually changed are included, so an approval that
     corrected one field doesn't bloat the audit row with eight unchanged ones.
+    NULL and a blank string count as the same value.
     Money values are serialised as string-Decimal (never float).
     """
     diff: dict[str, dict[str, Any]] = {}
     for field in fields:
         old = before.get(field)
         new = after.get(field)
+        if _is_blank(old) and _is_blank(new):
+            # NULL and "" are the same absence of a value. Recording one
+            # becoming the other wrote an edit nobody made onto the trail.
+            continue
         if old != new:
             diff[field] = {"old": _jsonable(old), "new": _jsonable(new)}
     return diff

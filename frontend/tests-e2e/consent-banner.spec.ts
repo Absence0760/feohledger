@@ -78,7 +78,16 @@ test.describe('consent banner', () => {
 		// viewport tall. Until the banner reserved its own height there was
 		// nothing to scroll, so the focused button stayed behind it (WCAG 2.4.11).
 		await page.setViewportSize({ width: 1280, height: 720 });
-		await page.goto('/login/reset-password?token=not-a-real-token');
+		// The page reads its token before rendering the form (decisions §283), and
+		// a bogus one gets the expired-link state with no fields at all. What is
+		// under test is the layout of the form, so the non-consuming check is
+		// stubbed as a live token, on its exact pathname — a real one would need
+		// a minted token and would redeem a seeded credential.
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) => route.fulfill({ json: { email: 'someone@acme.example' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
 		await expect(banner(page)).toBeVisible();
 		// The room it reserves, measured from the rendered banner.
 		await expect(page.locator('html')).toHaveCSS('scroll-padding-bottom', /^[1-9]\d*(\.\d+)?px$/);

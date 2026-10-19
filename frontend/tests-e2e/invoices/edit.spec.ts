@@ -1,7 +1,9 @@
 import {
 	API_BASE,
 	authedTenantHeaders,
+	deleteInvoicesWhere,
 	expect,
+	tenantPsql,
 	test
 } from '../fixtures/helpers';
 
@@ -126,5 +128,83 @@ test.describe('/invoices modal edit + save', () => {
 		// Cancel is in the footer, distinct from the close-X (aria-label="Close").
 		await modal.getByRole('button', { name: /^Cancel$/ }).click();
 		await expect(modal).toBeHidden();
+	});
+});
+
+/**
+ * Two defects from a live test (2026-10-19), on one untouched open + Save:
+ *
+ * - The amount input read `77.1` for an invoice of 77.10 USD: money crosses
+ *   the wire as a JSON number, which has no trailing zeros. The modal now
+ *   starts from `moneyInputText` — the currency's precision — and the save
+ *   sends that exact text back.
+ * - The save wrote an `invoice.edited` row recording `po_number` and
+ *   `description` as `null -> ""`: edits nobody made, on the SOX trail.
+ */
+const ROUND_TRIP_PREFIX = 'E2E-AMOUNT-PRECISION-';
+
+test.describe('/invoices modal amount precision + no-op save', () => {
+	test.afterEach(() => {
+		deleteInvoicesWhere(`invoice_number LIKE '${ROUND_TRIP_PREFIX}%'`);
+	});
+
+	test('shows 77.10 as 77.10 and an untouched save audits no edit', async ({ page }) => {
+		const number = `${ROUND_TRIP_PREFIX}${Date.now()}`;
+		// po_number / description stay NULL, as on an invoice nobody coded. The
+		// vendor is already LINKED, as on the live invoice: a save that finds no
+		// link resolves one, and that is a real, audited change (`vendor_id`).
+		tenantPsql(
+			`INSERT INTO invoices (id, correlation_id, organization_id, invoice_number, vendor_name,
+			   vendor_id, amount, currency, status, created_at, updated_at)
+			 SELECT gen_random_uuid(), gen_random_uuid(), i.organization_id, '${number}',
+			   v.name, v.id, 77.10, 'USD', 'new', now(), now()
+			 FROM vendors v, (SELECT organization_id FROM invoices LIMIT 1) i
+			 WHERE v.status = 'active' LIMIT 1`
+		);
+
+		await page.goto('/invoices');
+		const listed = page.waitForResponse(
+			(r) =>
+				r.url().includes('/api/invoices?') &&
+				r.url().includes(`search=${encodeURIComponent(number)}`) &&
+				r.request().method() === 'GET'
+		);
+		await page.getByPlaceholder('Search invoices...').fill(number);
+		await listed;
+		await page
+			.locator('table tbody tr', { hasText: number })
+			.first()
+			.getByRole('button', { name: 'Edit' })
+			.click();
+
+		const modal = page.getByRole('dialog');
+		const amountInput = modal.locator('input[type="number"]').first();
+		await expect(amountInput).toHaveValue('77.10');
+
+		const saved = page.waitForResponse(
+			(r) =>
+				r.url().includes('/api/invoices/') &&
+				!r.url().includes('/api/invoices?') &&
+				r.request().method() === 'PATCH'
+		);
+		await modal.getByRole('button', { name: /^Save$/ }).click();
+		const resp = await saved;
+		expect(resp.status()).toBe(200);
+		const body = resp.request().postDataJSON() as Record<string, unknown>;
+		expect(body.amount).toBe('77.10');
+		expect(body.po_number).toBeNull();
+		expect(body.description).toBeNull();
+
+		expect(
+			tenantPsql(`SELECT amount FROM invoices WHERE invoice_number = '${number}'`).trim()
+		).toBe('77.10');
+		// The changes themselves, not a count, so a failure names the field.
+		expect(
+			tenantPsql(
+				`SELECT coalesce(string_agg(a.details->>'changes', '; '), '')
+				 FROM audit_log a JOIN invoices i ON a.correlation_id = i.correlation_id
+				 WHERE i.invoice_number = '${number}' AND a.action = 'invoice.edited'`
+			).trim()
+		).toBe('');
 	});
 });

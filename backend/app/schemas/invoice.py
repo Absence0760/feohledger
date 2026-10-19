@@ -2,11 +2,42 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
+
+#: The nullable free-text columns `PATCH /api/invoices/{id}` can write. A blank
+#: one is stored as NULL: an empty form input arrives as `""`, and storing it
+#: verbatim turned a save that changed nothing into an `invoice.edited` row
+#: recording `null -> ""` on the SOX trail (the modal's Send to ERP saves the
+#: form first). `vendor` and `invoice_number` are NOT NULL columns and
+#: `currency` has a default, so they are not in this list.
+OPTIONAL_TEXT_FIELDS = (
+    "payment_terms",
+    "po_number",
+    "remit_to_address",
+    "bill_to_address",
+    "vendor_address",
+    "vendor_tax_id",
+    "ship_to_address",
+    "payment_method",
+    "reference_number",
+    "description",
+    "notes",
+    "gl_account",
+    "cost_center",
+    "department",
+    "project",
+)
+
+
+def _blank_to_none(value):
+    """A whitespace-only / empty string means "no value": NULL, not `""`."""
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
 
 
 def _is_masked_tax_id(value) -> bool:
@@ -130,6 +161,13 @@ class InvoiceUpdate(BaseModel):
     # entirely (the pre-existing default) is unchanged — no check runs,
     # matching every caller that predates this field.
     expected_updated_at: datetime | None = None
+
+    @field_validator(*OPTIONAL_TEXT_FIELDS, mode="before")
+    @classmethod
+    def _blank_optional_text_is_null(cls, value):
+        # The field stays SET (an explicit clear still clears), only as NULL —
+        # so a stored NULL saved back blank is no change, and no audit row.
+        return _blank_to_none(value)
 
     @model_validator(mode="after")
     def _guard_masked_tax_id(self):
