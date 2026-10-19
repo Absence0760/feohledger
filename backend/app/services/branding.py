@@ -418,22 +418,21 @@ def _email_mark_img(brand: BrandContext, public_url: str | None) -> str:
 
 
 def brand_email_html_header(brand: BrandContext, *, public_url: str | None) -> str:
-    """A small branded HTML header line for transactional emails.
+    """The brand header that sits above the card in every HTML email.
 
     The mark ``brand.mark`` picks — the tenant logo, or the platform mark served
     from ``public_url`` — followed by the product name in the tenant accent
     color. A tenant that renamed the product without a logo gets the name alone.
-    PII-free. Callers prepend this to the body HTML. Returns plain markup (no
-    <html>/<body> wrapper) so it composes with the per-template HTML fragments.
+    PII-free. Returns a fragment (no <html>/<body>);
+    ``email_adapters.layout.render_email`` places it in the document.
     """
     name = _escape_html(brand.product_name)
     accent = brand.accent_color  # already a validated hex literal or platform default
     img = _email_mark_img(brand, public_url)
     label = f'{img}<span style="vertical-align:middle">{name}</span>' if img else name
     return (
-        f'<div style="border-bottom:2px solid {accent};padding-bottom:8px;'
-        f'margin-bottom:16px;font-weight:600;font-size:16px;color:{accent}">'
-        f"{label}</div>"
+        f'<div style="font-weight:700;font-size:18px;line-height:{EMAIL_MARK_PX}px;'
+        f'letter-spacing:-0.01em;color:{accent}">{label}</div>'
     )
 
 
@@ -454,8 +453,8 @@ def brand_email_footer_html(brand: BrandContext) -> str:
         return ""
     url = _escape_html(brand.support_url)
     return (
-        f'<p style="color:#94a3b8;font-size:12px;margin-top:24px">'
-        f'Need help? <a href="{url}">{url}</a></p>'
+        f'<div>Need help? <a href="{url}" style="color:inherit;'
+        f'text-decoration:underline">{url}</a></div>'
     )
 
 

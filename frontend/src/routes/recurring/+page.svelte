@@ -464,7 +464,10 @@
 								<RowAction
 									disabled={busyId === template.id}
 									onclick={() => generateNow(template)}
-									ariaLabel={m('recurring.row.generateNowAria', { name: template.name })}
+									ariaLabel={m('recurring.row.generateNowAria', {
+										action: m('recurring.row.generateNow'),
+										name: template.name
+									})}
 								>
 									{m('recurring.row.generateNow')}
 								</RowAction>

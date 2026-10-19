@@ -110,7 +110,9 @@ FEOH_WEBAUTHN_ORIGINS: "https://feohledger.com,https://*.feohledger.com"
 FEOH_DEPLOYED_REGION: "us"
 
 # ── Email (SES sandbox only sends to verified recipients — request
-#    production access, or keep provider=console until it clears) ──
+#    production access before opening signup). Required, and never "console":
+#    that adapter logs every temporary password, reset link and sign-in code,
+#    so the app refuses to boot with it here and decrypt-env.sh refuses it. ──
 FEOH_EMAIL_PROVIDER: "ses"
 FEOH_EMAIL_FROM: "no-reply@example.com"
 FEOH_AWS_SES_REGION: "us-east-1"

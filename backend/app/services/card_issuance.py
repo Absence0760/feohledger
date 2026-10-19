@@ -750,17 +750,32 @@ async def notify_vendor_of_card(
         "This link will expire in 7 days and can only be used once. "
         "If you didn't expect this email, please reply to let us know.\n"
     )
-    body_html = (
-        f"<p>Hi {vendor.name},</p>"
-        f"<p><strong>{org_name}</strong> has issued a virtual card to pay invoice "
-        f"<code>{invoice.invoice_number or invoice.id}</code> for "
-        f"<strong>{invoice.currency or 'USD'} {(card.amount_limit):,.2f}</strong>.</p>"
-        f'<p><a href="{link}">View your one-time card details</a></p>'
-        f"<p style='color:#888;font-size:12px'>This link expires in 7 days "
-        "and can only be used once.</p>"
+    from app.services.branding import get_brand_context
+    from app.services.email_adapters import EmailMessage, get_email_adapter
+    from app.services.email_adapters.layout import (
+        email_button,
+        email_credentials,
+        email_note,
+        email_paragraph,
     )
 
-    from app.services.email_adapters import EmailMessage, get_email_adapter
+    # The layout blocks escape their input: the vendor and org names are free
+    # text a tenant typed, and must not become markup.
+    body_html = (
+        email_paragraph(f"Hi {vendor.name},")
+        + email_paragraph(f"{org_name} has issued a virtual card to pay this invoice.")
+        + email_credentials(
+            [
+                ("Invoice", str(invoice.invoice_number or invoice.id)),
+                ("Amount", f"{invoice.currency or 'USD'} {(card.amount_limit):,.2f}"),
+            ]
+        )
+        + email_button(link, "View your one-time card details", get_brand_context(None))
+        + email_note(
+            "This link expires in 7 days and can only be used once. "
+            "If you didn't expect this email, please reply to let us know."
+        )
+    )
 
     try:
         adapter = get_email_adapter()

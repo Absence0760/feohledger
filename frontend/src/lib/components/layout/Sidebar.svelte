@@ -198,7 +198,9 @@
 			class="profile-btn"
 			class:collapsed
 			title={collapsed ? m('shell.profile') : ''}
-			aria-label={m('shell.profileMenu')}
+			aria-label={collapsed
+				? m('shell.profileMenu')
+				: m('shell.profileMenuNamed', { name: auth.user?.full_name ?? m('shell.profile') })}
 			aria-haspopup="menu"
 			aria-expanded={showProfile}
 			onclick={() => (showProfile = !showProfile)}

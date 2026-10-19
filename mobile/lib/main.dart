@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -131,7 +133,11 @@ class _AuthGateState extends State<AuthGate> {
   void _onAuthChanged() {
     final loggedIn = AuthStore.instance.loggedIn;
     final signedOut = _wasLoggedIn && !loggedIn;
+    final signedIn = !_wasLoggedIn && loggedIn;
     _wasLoggedIn = loggedIn;
+    // Push init ran before any session existed, so its device registration
+    // could not authenticate; send it now that one does.
+    if (signedIn) unawaited(PushService.instance.registerWithBackend());
     if (!signedOut) return;
     // The gate itself is the FIRST route, so a session that ends while the user
     // is inside a pushed route (invoice detail, admin, a modal) would leave the

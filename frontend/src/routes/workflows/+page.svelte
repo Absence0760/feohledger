@@ -304,14 +304,17 @@
 						{/if}
 					</td>
 					<td>
-						<RowLink href="/workflows/{wf.id}" ariaLabel={m('workflows.list.editAria', { name: wf.name })}>
-							<span class="wf-name">
+						<!-- The badge sits beside the link, not inside it: inside, its text
+						     would be visible link text missing from the link's aria-label,
+						     which is a WCAG 2.5.3 Label in Name failure. -->
+						<span class="wf-name">
+							<RowLink href="/workflows/{wf.id}" ariaLabel={m('workflows.list.editAria', { name: wf.name })}>
 								{wf.name}
-								{#if wf.is_default}
-									<Badge tone="accent" variant="default-badge">{m('workflows.list.defaultBadge')}</Badge>
-								{/if}
-							</span>
-						</RowLink>
+							</RowLink>
+							{#if wf.is_default}
+								<Badge tone="accent" variant="default-badge">{m('workflows.list.defaultBadge')}</Badge>
+							{/if}
+						</span>
 						{#if wf.description}
 							<div class="wf-desc">{wf.description}</div>
 						{/if}

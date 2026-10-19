@@ -48,7 +48,12 @@ test.describe('/invoices pagination', () => {
 		);
 		await loadMore.click();
 		await next;
-		expect(await page.locator('table tbody tr').count()).toBeGreaterThan(firstPageRows);
+		// The page-2 response landing is not the rows rendering: Svelte appends
+		// them on the next tick, so a one-shot `count()` here raced the DOM and
+		// read the first page back. Poll the rendered row count instead.
+		await expect
+			.poll(() => page.locator('table tbody tr').count())
+			.toBeGreaterThan(firstPageRows);
 	});
 
 	test('API default page size is 20', async ({ page }) => {

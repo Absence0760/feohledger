@@ -155,7 +155,7 @@ async function openQueue(page: import('@playwright/test').Page) {
 // invoice, so a screen reader hears which one it would price (WCAG 2.5.3 is why
 // the visible label is a prefix of it).
 const compareAction = (page: import('@playwright/test').Page) =>
-	page.getByRole('button', { name: `Compare payment routes for invoice ${QUEUE_INVOICE_NUMBER}` });
+	page.getByRole('button', { name: `Compare routes for invoice ${QUEUE_INVOICE_NUMBER}` });
 
 test.describe('/payments — corridor quote comparison (advisory)', () => {
 	test('a permitted role gets the ranking, and it leads with the advisory notice', async ({

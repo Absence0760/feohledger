@@ -605,7 +605,7 @@ rebuilding the stack:
 | Wildcard TLS certificate | Tenant count makes per-host certs noisy (Let's Encrypt ~50 certs/week limit) | DNS already wildcards; swap the Caddy image for an xcaddy build with the Route 53 DNS plugin and replace `tenants.caddy` with one `*.feohledger.com` site block. |
 | Real provider adapters (payments, cards, AI extraction, ERP, sanctions…) | Going live with real money / real data | Per-org `Organization.settings.*` flips + sops keys — zero infrastructure. |
 | Background sweeps (payment reconciler, audit shipping, renewals, dunning…) | First real payments / compliance needs | `FEOH_*_ENABLED=true` in the sops env, redeploy. |
-| SES production access | Emailing unverified recipients (self-service signup) | AWS console request; until it clears, `FEOH_EMAIL_PROVIDER=console` + CLI-provisioned tenants. |
+| SES production access | Emailing unverified recipients (self-service signup) | AWS console request; until it clears, keep `FEOH_EMAIL_PROVIDER=ses` (the sandbox still delivers to verified addresses), signup closed, and tenants CLI-provisioned. Never `console` in a deployment: it logs every temporary password, reset link and sign-in code, and the app refuses to boot with it. |
 | Multi-instance / ECS / ALB | >1 instance needed | The full `production-deployment.md` build-out; the compose file retires. Nothing here changes shape — the same image, env contract, DB schema, and S3 layout move onto ECS. |
 
 ## Implementation status

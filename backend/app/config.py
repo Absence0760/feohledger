@@ -1089,6 +1089,24 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _refuse_console_email_in_deployed_envs(self) -> "Settings":
+        # The console adapter writes each email's full text to the log, which is
+        # what makes it useful on a laptop: the welcome email's temporary
+        # password, a reset link, a sign-in code are all read from there. In a
+        # deployed env the same log line hands every one of those to anyone who
+        # can read the logs, and the email never reaches its recipient. SES in
+        # its sandbox still delivers to verified addresses, so no deployed stage
+        # needs `console`.
+        if self.is_deployed and self.email_provider.strip().lower() == "console":
+            raise ValueError(
+                "FEOH_EMAIL_PROVIDER is 'console' (the default) in a deployed environment "
+                f"({self.environment!r}); it would log every temporary password, reset "
+                "link and sign-in code instead of sending them. Set FEOH_EMAIL_PROVIDER=ses "
+                "(or smtp)."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_real_secret_key_in_deployed_envs(self) -> "Settings":
         # The JWT signing key is the root of the whole auth system. The default
         # `change-me-in-production` is in the public repo, so a deployed instance

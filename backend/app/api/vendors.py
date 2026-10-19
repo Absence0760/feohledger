@@ -1901,6 +1901,8 @@ async def invite_vendor_portal_user(
                     f"  Password: {temp_password}\n\n"
                     "You'll be asked to change your password on first sign-in.\n"
                 ),
+                links=(portal_url,) if portal_url else (),
+                preheader="Your supplier-portal sign-in details are inside.",
             )
         )
     except Exception as exc:  # noqa: BLE001
@@ -2046,6 +2048,8 @@ async def reset_vendor_portal_user_password(
                     f"  Password: {temp_password}\n\n"
                     "You'll be asked to change your password on first sign-in.\n"
                 ),
+                links=(portal_url,) if portal_url else (),
+                preheader="Your new supplier-portal sign-in details are inside.",
             )
         )
     except Exception as exc:  # noqa: BLE001

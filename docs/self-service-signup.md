@@ -37,11 +37,20 @@ keeps the default (`true`) and **must** set `FEOH_HCAPTCHA_SECRET` and
 whose tenants are provisioned by hand sets `FEOH_SIGNUP_ENABLED=false` and may
 leave both hCaptcha values empty.
 
+The two hCaptcha values must come from the **same hCaptcha account**: the
+sitekey from the site's entry under *Sites*, the secret from *Settings →
+Secrets → Account-level Secret* (not the API key, which `/siteverify`
+rejects). A pair from two accounts fails every signup with
+`sitekey-secret-mismatch` in the API log, while the widget itself renders and
+solves normally. The site's hostname is the apex (`feohledger.com`), where
+`/signup` lives; hCaptcha rejects a wildcard. Quote both values in the sops
+file: a secret starting `0x` is otherwise read by YAML as a number.
+
 ## User journey
 
 1. Visitor lands on the apex domain (no subdomain) and clicks **Create your workspace**.
-2. `/signup` form: company name, desired slug, admin name, admin email, hCaptcha.
-3. Form submits `POST /api/signup/start`. Backend validates, records an `EmailVerification` row, and emails a verification link (`PUBLIC_URL/verify?token=...`).
+2. `/signup` form: company name, desired slug, admin name, admin email, hCaptcha (rendered in its dark theme, since the app is dark-only).
+3. Form submits `POST /api/signup/start`. Backend validates (including refusing an admin name that holds a web or email address: the name greets the reader of an email sent to whatever address the visitor typed, and mail clients auto-link a bare URL even in inert text), records an `EmailVerification` row, and emails a verification link (`PUBLIC_URL/verify?token=...`).
 4. User clicks the link. `/verify?token=...` calls `POST /api/signup/complete`. Backend re-checks availability, provisions the tenant (DB + org + admin user), generates a 16-char temp password, sends the welcome email with tenant URL + credentials.
 5. User receives the welcome email, clicks the tenant URL, signs in with the temp password.
 6. Login response sets `must_change_password=true` on the `/auth/me` user object. The frontend layout redirects to `/change-password`.
@@ -98,7 +107,7 @@ Adding a provider: copy `app/services/email_adapters/console_adapter.py`, implem
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `FEOH_EMAIL_PROVIDER` | `console` | `console` or `ses` |
+| `FEOH_EMAIL_PROVIDER` | `console` | `console`, `ses` or `smtp`. A deployed env refuses to boot on `console`, which logs each email's full text (temporary passwords included) instead of sending it. |
 | `FEOH_EMAIL_FROM` | `no-reply@localhost` | Verified SES sender in prod |
 | `FEOH_AWS_SES_REGION` | `us-east-1` | Only used by the SES adapter |
 | `FEOH_PUBLIC_URL` | `http://localhost:7777` | Frontend URL — used to build verification links |

@@ -14,7 +14,6 @@
 	import AdapterRail from '#lib/components/marketing/AdapterRail.svelte';
 	import Atmosphere from '#lib/components/marketing/Atmosphere.svelte';
 	import HeroPipeline from '#lib/components/marketing/HeroPipeline.svelte';
-	import MotionToggle from '#lib/components/marketing/MotionToggle.svelte';
 	import { LEGAL_PAGES } from '#lib/legal/pages.ts';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import { countUp, reveal } from '#lib/actions/reveal.ts';
@@ -91,11 +90,6 @@
 		{ value: '1–2%', label: 'typical rebate on card payments' },
 	];
 
-	// Set by the in-page pause control (WCAG 2.2.2). `app.css` turns the
-	// attribute into `animation-play-state: paused` for this whole subtree, so
-	// the hero loop, the aurora and the adapter rail stop together.
-	let motionPaused = $state(false);
-
 	// Whether the page has scrolled past the hero's top edge, which is the only
 	// thing the sticky header changes about itself. Kept as a boolean rather
 	// than a scroll offset so the class flips once instead of on every frame.
@@ -104,7 +98,7 @@
 
 <svelte:window onscroll={() => (scrolled = window.scrollY > 12)} />
 
-<div class="landing" data-motion={motionPaused ? 'paused' : 'running'}>
+<div class="landing">
 	<Atmosphere fixed />
 
 	<header class="nav" class:scrolled>
@@ -116,7 +110,6 @@
 			<a href="#features">Features</a>
 			<a href="#how">How it works</a>
 			<a href="#pricing">Pricing</a>
-			<MotionToggle bind:paused={motionPaused} />
 			<a href="/signup" class="nav-cta">
 				<!-- Two labels, one shown per breakpoint. `display: none` on the
 				     hidden one takes it out of the accessibility tree too, so the
@@ -424,8 +417,8 @@
 	   to `.nav-links a` (0,1,1) above and rendered --text-muted on --accent-strong
 	   — about 1.5:1. The previous version papered over the same tie with
 	   `color: #fff !important`; matching the specificity is the fix, and it keeps
-	   `!important` free for the reduced-motion and motion-toggle overrides that
-	   genuinely need it. */
+	   `!important` free for the reduced-motion overrides that genuinely need
+	   it. */
 	.nav-links .nav-cta {
 		display: inline-flex;
 		align-items: center;
@@ -461,10 +454,11 @@
 		.cta-long { display: none; }
 		.cta-short { display: inline; }
 	}
-	/* WCAG 1.4.10 Reflow, at the criterion's own 320px. The mark, the motion
-	   toggle and the short CTA are 13px wider than that viewport with the
-	   wordmark beside them, and `.landing` clips horizontal overflow — so the
-	   button's edge was cut off rather than scrollable. The wordmark goes, and
+	/* WCAG 1.4.10 Reflow, at the criterion's own 320px. With the wordmark
+	   beside them, the mark and the short CTA (measured when a motion toggle
+	   also sat in this row) ran past that viewport, and `.landing` clips
+	   horizontal overflow — so the button's edge was cut off rather than
+	   scrollable. The wordmark goes, and
 	   the mark alone carries the brand; its TEXT stays in the accessibility tree
 	   (clipped, not `display: none`), because the mark image is decorative and
 	   that text is the home link's only accessible name. */
@@ -534,9 +528,11 @@
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
-		/* A slow pass of the gradient across the words. It ends where it starts,
-		   so the resting frame under reduced motion is the intended one. */
-		animation: sheen 9s ease-in-out infinite;
+		/* One pass of the gradient across the words and back, then rest. It
+		   ends where it starts, so the resting frame — and the only frame under
+		   reduced motion — is the intended one. 4s: nothing on this page moves
+		   past five seconds (decisions §279). */
+		animation: sheen 4s ease-in-out 1 forwards;
 	}
 	@keyframes sheen {
 		0%, 100% { background-position: 0% 50%; }

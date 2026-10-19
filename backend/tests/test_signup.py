@@ -26,6 +26,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 
@@ -372,6 +373,7 @@ def test_config_requires_captcha_in_deployed_env():
     with pytest.raises(ValidationError):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="",
             secret_key=strong_key,
@@ -381,6 +383,7 @@ def test_config_requires_captcha_in_deployed_env():
     assert (
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="0xabc",
             secret_key=strong_key,
@@ -466,6 +469,134 @@ async def test_signup_complete_provisions_and_marks_consumed(realdb, monkeypatch
             await s.execute(select(EmailVerification).where(EmailVerification.token == token))
         ).scalar_one()
         assert row.consumed_at is not None
+
+
+class _CaptureAdapter:
+    """Stands in for the email adapter and keeps every message it is handed."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    async def send(self, message) -> None:
+        self.sent.append(message)
+
+
+def _rendered_html(message) -> str:
+    """The HTML part exactly as the SMTP/SES adapters would send it."""
+    from app.services.email_adapters.smtp_adapter import SmtpAdapter
+
+    mime = SmtpAdapter({"from_address": "no-reply@platform.test"})._build(message)
+    return mime.get_body(preferencelist=("html",)).get_content()
+
+
+async def test_verification_email_is_html_with_a_confirm_button(
+    realdb, monkeypatch, cleanup_signup
+):
+    from app.api import signup as signup_mod
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    capture = _CaptureAdapter()
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
+
+    body = _start_body(slug, email) | {"admin_name": "<b>Eve<i> & co"}
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post("/api/signup/start", json=body)
+    assert resp.status_code == 200
+
+    (msg,) = capture.sent
+    link = next(ln for ln in msg.body_text.splitlines() if "/verify?token=" in ln)
+    html = _rendered_html(msg)
+    assert f'href="{link.strip()}"' in html
+    assert ">Confirm and create workspace</a>" in html
+    assert "expires in 24 hours" in html
+    # The requester's own input is escaped, in the HTML and nowhere rewritten in text.
+    assert "<b>Eve" not in html
+    assert "&lt;b&gt;Eve&lt;i&gt; &amp; co" in html
+    assert "<b>Eve<i> & co" in msg.body_text
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "your account is locked, sign in at https://evil.example/login",
+        "Sign in at www.evil.example",
+        "Reset at evil.example now",
+        "mail help@evil.example",
+        "Jared evil.example/login",
+    ],
+)
+async def test_a_link_like_admin_name_is_refused_before_any_email(
+    realdb, monkeypatch, cleanup_signup, name
+):
+    """The name is free text sent to any address, and mail clients auto-link a
+    bare URL even when our HTML keeps it inert, so a phishing link typed into it
+    is refused at the door and no email goes out."""
+    from app.api import signup as signup_mod
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    capture = _CaptureAdapter()
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(
+            "/api/signup/start", json=_start_body(slug, email) | {"admin_name": name}
+        )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Your name can't contain a web or email address."
+    assert capture.sent == []
+
+
+@pytest.mark.parametrize("name", ["J. Smith", "J.R.R. Tolkien", "Zoë O'Brien-Núñez", "Dr. Ada"])
+def test_ordinary_names_pass_the_link_check(name):
+    from app.api.signup import _validate_admin_name
+
+    _validate_admin_name(name)  # raises on refusal
+
+
+async def test_welcome_email_sets_the_credentials_apart(realdb, monkeypatch, cleanup_signup):
+    from app.api import signup as signup_mod
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    token = await _seed_verification(realdb, slug=slug, email=email)
+    provision = AsyncMock()
+    monkeypatch.setattr(signup_mod, "provision_tenant", provision)
+    capture = _CaptureAdapter()
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post("/api/signup/complete", json={"token": token})
+    assert resp.status_code == 200
+    tenant_url = resp.json()["tenant_url"]
+    temp_password = provision.await_args.kwargs["admin_password"]
+
+    (msg,) = capture.sent
+    html = _rendered_html(msg)
+    assert f'href="{tenant_url}"' in html
+    assert ">Open your workspace</a>" in html
+    # The credentials sit in their own panel, the password in monospace.
+    panel = html[html.index('class="feoh-panel"') :]
+    panel = panel[: panel.index("</table>")]
+    assert email in panel
+    assert temp_password in panel
+    assert "monospace" in panel
+    # Both parts tell them to keep the email until they have their own password.
+    keep = "Keep this email until you've signed in and chosen your own password."
+    assert keep in msg.body_text
+    assert keep.replace("'", "&#x27;") in html
+    # The inbox preview never carries the credentials.
+    assert temp_password not in (msg.preheader or "")
 
 
 async def test_signup_complete_unknown_token_returns_uniform_410(realdb):
@@ -672,6 +803,7 @@ def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
     strong_key = "x" * 32
     closed = Settings(
         environment="production",
+        email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="",
         secret_key=strong_key,
@@ -683,6 +815,7 @@ def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
     with pytest.raises(ValidationError, match="FEOH_SIGNUP_ENABLED"):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="",
             secret_key=strong_key,

@@ -337,6 +337,8 @@ async def _send_email_otp(user: User, code: str) -> None:
             "If you didn't try to sign in, ignore this email and consider "
             "rotating your password."
         ),
+        # Fixed copy: the inbox preview must never show the code.
+        preheader="Use the code in this email to finish signing in.",
     )
     adapter = get_email_adapter()
     await adapter.send(msg)
@@ -639,6 +641,8 @@ async def _send_password_reset_email(user: User, reset_url: str) -> None:
             "If you didn't request this, you can safely ignore this email — "
             "your password will not be changed.\n"
         ),
+        links=(reset_url,),
+        preheader="Use the link in this email to choose a new password.",
     )
     try:
         await get_email_adapter().send(msg)

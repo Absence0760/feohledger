@@ -2287,6 +2287,7 @@
 							<td class="right">
 								<RowAction
 									ariaLabel={m('payments.quotes.openAria', {
+										action: m('payments.quotes.open'),
 										invoice: item.invoice_number
 									})}
 									onclick={() => openQuotes(item)}

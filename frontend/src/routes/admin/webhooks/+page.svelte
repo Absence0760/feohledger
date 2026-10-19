@@ -543,7 +543,10 @@
 							</td>
 							<td class="actions">
 								<RowAction
-									ariaLabel={m('admin.webhooks.rotateAria', { name: sub.name })}
+									ariaLabel={m('admin.webhooks.rotateAria', {
+										action: m('admin.webhooks.row.rotate'),
+										name: sub.name
+									})}
 									onclick={(e) => {
 										e.stopPropagation();
 										openRotate(sub);

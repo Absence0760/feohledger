@@ -24,14 +24,12 @@
 	 * `dense` tightens the grid and brings the aurora forward, for the narrow
 	 * panel beside an auth card where the full-page spread reads as empty.
 	 *
-	 * `still` holds the aurora at its resting frame. The auth pages take it,
-	 * and not for performance: WCAG 2.2.2 asks for a control over content that
-	 * moves automatically for more than five seconds, and the honest answers are
-	 * either a visible pause control or no continuous motion. A pause button on a
-	 * sign-in form is clutter nobody wants, so those pages get their life from
-	 * entrance and focus transitions — which are short and user-initiated, and so
-	 * outside 2.2.2 — while the marketing page, which earns its ambient motion,
-	 * carries the control (`MotionToggle`).
+	 * `still` holds the aurora at its resting frame. The auth pages take it: a
+	 * sign-in form gets its life from entrance and focus transitions, and a
+	 * backdrop shifting behind the fields is distraction there, however short.
+	 * Without `still` the aurora drifts ONCE, for at most five seconds, and
+	 * rests — WCAG 2.2.2 applies only to motion that runs longer than that, so
+	 * the marketing page needs no pause control (decisions §279).
 	 *
 	 * `fixed` pins the layers to the viewport instead of the parent. The
 	 * marketing page takes it: sized to a 5,700 px document, the percentage-
@@ -76,17 +74,18 @@
 	}
 
 	/* ---------------------------------------------------------------
-	   Aurora. Three blurred blobs drifting on long, mutually prime
-	   periods (23s / 31s / 41s) so the composite never visibly repeats
-	   — equal periods read as a loop within about two cycles, which is
-	   the thing that makes a gradient backdrop look cheap.
+	   Aurora. Three blurred blobs, each drifting once into place on a
+	   different duration (4.2s / 4.6s / 5s) so they settle one after
+	   another rather than as a block. They used to loop forever on
+	   23s / 31s / 41s periods; nothing on this page may move for more
+	   than five seconds (decisions §279).
 
-	   Every keyframe ENDS where the layer should rest. `app.css`
-	   collapses animation-duration to 0.001ms under
-	   `prefers-reduced-motion`, so the final frame is what a
-	   reduced-motion visitor actually sees — an animation that ended
-	   off-screen or at zero opacity would render as a missing layer
-	   rather than a still one.
+	   Every keyframe ENDS where the layer should rest, and `forwards`
+	   holds it there. `app.css` collapses animation-duration to
+	   0.001ms under `prefers-reduced-motion`, so the final frame is
+	   what a reduced-motion visitor sees from the start — an animation
+	   that ended off-screen or at zero opacity would render as a
+	   missing layer rather than a still one.
 	   --------------------------------------------------------------- */
 	.aurora {
 		position: absolute;
@@ -99,7 +98,7 @@
 		width: 62%;
 		height: 68%;
 		background: radial-gradient(circle, rgba(99, 140, 255, 0.30), transparent 70%);
-		animation: drift-a 23s ease-in-out infinite alternate;
+		animation: drift-a 4.2s ease-in-out 1 forwards;
 	}
 	.aurora-b {
 		top: 18%;
@@ -107,7 +106,7 @@
 		width: 55%;
 		height: 60%;
 		background: radial-gradient(circle, rgba(140, 106, 255, 0.24), transparent 70%);
-		animation: drift-b 31s ease-in-out infinite alternate;
+		animation: drift-b 4.6s ease-in-out 1 forwards;
 	}
 	/* The one warm note: the brand's gilt, kept faint and low so it reads as a
 	   reflection off the tally rather than as a second accent competing with
@@ -118,7 +117,7 @@
 		width: 48%;
 		height: 46%;
 		background: radial-gradient(circle, rgba(231, 185, 94, 0.13), transparent 72%);
-		animation: drift-c 41s ease-in-out infinite alternate;
+		animation: drift-c 5s ease-in-out 1 forwards;
 	}
 	.dense .aurora-a {
 		width: 100%;

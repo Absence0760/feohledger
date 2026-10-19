@@ -11533,3 +11533,110 @@ separately*: both serve the same build from the same distribution, so a
 staggered cutover tests nothing the `*.cloudfront.net` check and the post-cutover
 smoke run don't. Instead it leaves a window in which the marketing host and the
 tenant hosts serve different builds.
+
+## 279. The landing page loses its pause button: every animation ends within five seconds (2026-10-19)
+
+**Context.** §180 met WCAG 2.2.2 Pause, Stop, Hide on the marketing page with
+an in-page **Pause animation** button (`MotionToggle`), because the hero
+sequence, the aurora drift, the headline sheen and the adapter marquee all
+looped forever. The operator decided the page should carry no such control.
+
+**Decision.** Keep the motion, end it. 2.2.2 applies only to motion that starts
+automatically *and* lasts more than five seconds, so every animation on the
+public pages now runs a finite number of times with
+`delay + duration × count ≤ 5s` and `forwards` fill, resting on a final frame
+that shows everything (§180 rule 1 still holds). The hero lift, sweep, ping,
+rail and stage dots each run once and have finished by 4.8s; the aurora blobs
+drift once over 4.2 / 4.6 / 5s; the sheen makes one 4s pass. The adapter
+marquee — a 46s scroll — cannot fit, so it became a static wrapped row, which
+also drops the duplicate `aria-hidden` list the seamless loop needed. The
+`data-motion` attribute, its `app.css` pause rule and the component are gone.
+Reduced motion is unchanged: durations and delays still collapse to nothing.
+
+**Rejected.**
+- *Keep the button and shorten nothing.* Conformant, but it is the control the
+  operator asked to remove.
+- *Rely on `prefers-reduced-motion`.* An OS setting a visitor may not know
+  about does not discharge 2.2.2 — the same reason §180 gave.
+- *A marquee that scrolls once in five seconds.* Eighteen names crossing the
+  viewport in five seconds is unreadable motion, not a list.
+
+**Guards.** `frontend/src/lib/a11y/marketingMotion.test.ts` reads each
+marketing component's stylesheet and fails on `infinite` or a literal timing
+past the budget; `frontend/tests-e2e/marketing/landing.spec.ts` reads
+`getComputedTiming()` for every animation the page actually runs, which
+catches the per-element `calc()` delays the static scan cannot resolve. This
+supersedes rule 4 of §180; `frontend/docs/ui-patterns.md` § Motion carries the
+working form.
+
+## 280. Every email goes out in one HTML layout, derived from the plaintext when a sender writes none (2026-10-19)
+
+**Context.** Only four of the fourteen send sites wrote HTML, and those four
+were bare `<p>` fragments under a one-line brand header; the rest — signup
+verification, the welcome email carrying the temporary password, invites,
+password resets, sign-in codes — went out as plain text. The first real signup
+in production showed it: an email a new customer reads first looked like a
+log line. Three of the four HTML bodies also interpolated vendor and org names
+straight into markup.
+
+**Decided.** `services/email_adapters/layout.py` owns one email-client-safe
+document — tables and inline styles, a 600px card, the brand header above, a
+muted support footer below, a hidden preheader, `color-scheme` meta plus a
+`prefers-color-scheme: dark` override — and `EmailAdapter._branded_html`
+applies it to every message, so it is never `None` any more. A message with no
+`body_html` gets one derived from `body_text` by shape (a URL-only line is the
+button, indented `Label: value` lines a panel, long blocks monospace, the rest
+paragraphs). Hand-written bodies are assembled from the same escaping blocks,
+and the signup verification and welcome emails now have them: a confirm button
+with the expiry and a paste-this-link fallback, and a workspace button over a
+set-off credentials panel with a "keep this email" line (added to both parts).
+The plaintext part is never rewritten.
+
+**Only a URL the sender built becomes a link.** No text is ever scanned for
+URLs. A name, a company name or a rejection reason is free text, and the
+signup greeting goes to any address typed into the form: "your account is
+locked, sign in at https://evil.example/login" entered as a name would
+otherwise be a live link inside a genuine email from us. A hand-written body
+passes its own URLs to `email_button` / `email_fallback_link`; a derived body
+links only the URLs the sender lists in `EmailMessage.links`, and only when one
+stands alone on its line or as a panel value. Every other URL renders as inert
+text, the password cell included. Both blocks raise on anything but an absolute
+http(s) URL, so no future caller can put `javascript:` behind a button. An
+origin allowlist (public URL plus the tenant template) was rejected: white-label
+tenants serve their portal from their own domains, which no static list knows,
+and an origin check still admits any path on a trusted host. Some mail clients
+autolink a bare URL in text by themselves. The layout cannot stop that, and the
+plaintext part has always carried the same text.
+
+**The inbox preview is never derived.** The first sentence is exactly where a
+sign-in code or a credential sits, so a preheader is fixed copy the sender opts
+into. The sign-in-code, password-reset, invite and portal-reset senders set one
+that names no code, link or credential; the rest send none, and the client
+previews the body as it always did. Filtering the derived line for digits or
+URLs was rejected: a temporary password is alphanumeric and a name can hold
+anything, so a denylist cannot know what a credential looks like, while an
+opt-in has nothing to miss.
+
+**Why derive instead of hand-writing all fourteen.** Ten senders get the
+layout without editing them, and the fifteenth gets it by default; hand-writing
+each would leave the next new sender plain again. Their texts already have the
+shapes the derivation reads, because the plaintext was written for a human.
+
+**Rejected.**
+- *A template engine (Jinja) for email.* A dependency and a second escaping
+  model for a handful of shapes Python strings already cover.
+- *Converting the text with a Markdown renderer.* Plaintext URLs and indented
+  key/value lines are not Markdown, and a renderer passes raw HTML through —
+  the injection this change closes.
+- *A dark-first card.* Gmail and Outlook force a light canvas whatever the
+  document asks for, so the card is light with a dark override where honoured.
+
+**Guards.** `backend/tests/test_email_layout.py` pins the derivation rules,
+escaping, that a hostile URL in free text and an undeclared URL never become a
+link, the http(s)-only href rule, that no preheader is derived and the
+sign-in-code and reset emails preview without their code or link, the document
+shell, that SES and SMTP attach the HTML part to a text-only message, and fails
+on a `body_html = f"<…"` send site; `backend/tests/test_signup.py` checks both
+signup emails as the adapter would send them, including a phishing URL typed as
+the admin name. `backend/docs/notifications.md` § The HTML layout carries the
+working form.
