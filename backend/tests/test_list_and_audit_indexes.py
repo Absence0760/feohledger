@@ -296,11 +296,6 @@ async def test_migration_statements_apply_are_idempotent_and_reverse(realdb):
 # the shape the named caller issues, not an approximation of it.
 _PLAN_CASES = [
     pytest.param(
-        "ix_audit_log_shipped_at_null",
-        "SELECT id FROM audit_log WHERE shipped_at IS NULL ORDER BY created_at ASC LIMIT 500",
-        id="audit_log_shipper._ship_tenant",
-    ),
-    pytest.param(
         "ix_audit_log_created_at",
         "SELECT id FROM audit_log WHERE created_at >= now() - interval '7 days' "
         "AND created_at < now() ORDER BY created_at",
@@ -363,6 +358,46 @@ async def test_index_serves_its_query(realdb, index_name, sql):
         plan = "\n".join((await session.execute(text(f"EXPLAIN {sql}"))).scalars().all())
     assert index_name in plan, f"plan did not use {index_name}:\n{plan}"
     assert "Sort" not in plan, f"{index_name} did not supply the order:\n{plan}"
+
+
+# The shipper's query needs its own case for the same reason the signature
+# sweep below does: two `audit_log` indexes can produce `ORDER BY created_at`
+# for it — the partial one with `shipped_at IS NULL` implied by its predicate,
+# the plain one as an ordered scan with the null test as a per-row Filter — so
+# the knobs above cannot separate them. Which one wins is decided by the
+# trail's statistics, not by the index's shape. When `audit_log` has been
+# analyzed while every row is unshipped (any earlier test in the shard that
+# writes audit rows, then autovacuum), the two scans visit exactly the same
+# tuples and cost exactly the same, and the tie goes to whichever index the
+# planner enumerates first — the plain one. That is the CI failure this case
+# was split out to stop: shard composition decided the assertion. On a real
+# trail the shipped majority makes the partial index the only sensible plan
+# (0.040 ms caught up at 1.2 M rows, the migration's measurement). Dropping the
+# plain timestamp indexes inside a transaction that rolls back asks the
+# deterministic question instead: can the partial index serve the shipper's
+# query, ordered, with its predicate doing the filtering?
+_SHIPPER_SQL = "SELECT id FROM audit_log WHERE shipped_at IS NULL ORDER BY created_at ASC LIMIT 500"
+
+
+async def test_shipper_tail_is_served_by_the_partial_index(realdb):
+    """`audit_log_shipper._ship_tenant` — every tenant, every 60 s — reads the
+    unshipped tail oldest-first; the partial index carries both the predicate
+    and the order."""
+    async with realdb.sessionmaker(TENANT)() as session:
+        try:
+            for knob in ("enable_seqscan", "enable_bitmapscan", "enable_sort"):
+                await session.execute(text(f"SET LOCAL {knob} = off"))
+            await session.execute(text("DROP INDEX ix_audit_log_created_at"))
+            await session.execute(text("DROP INDEX ix_audit_log_action_created_at"))
+            rows = await session.execute(text(f"EXPLAIN {_SHIPPER_SQL}"))
+            plan = "\n".join(rows.scalars().all())
+        finally:
+            # Undoes both DROPs: nothing here is committed.
+            await session.rollback()
+    assert "ix_audit_log_shipped_at_null" in plan, plan
+    assert "Sort" not in plan, plan
+    # The predicate is the index's own, so Postgres never re-checks it per row.
+    assert "Filter" not in plan, f"`shipped_at IS NULL` is re-checked per row:\n{plan}"
 
 
 # The signature sweep needs its own case, because both `audit_log` timestamp
