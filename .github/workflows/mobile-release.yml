@@ -1,18 +1,24 @@
 name: Mobile Release
 
-# Builds the Flutter mobile artifacts (Android APK, iOS .app) on a published
-# release. Both jobs reference the `production` GitHub Environment, so the
-# release's required reviewer must approve before either build runs — keeping
-# every release-triggered action behind the same production gate as the
-# AWS deploy (see aws-deploy.yml).
+# Builds the Flutter mobile artifacts (Android APK, iOS .app) on a `mobile-v*`
+# tag, or by hand from the Actions tab. Both jobs reference the `production`
+# GitHub Environment, so its required reviewer approves before either build runs.
+#
+# Deliberately NOT on `release: published`: a web release deploys the VM
+# (vm-deploy.yml), and the mobile app ships on its own cadence through the app
+# stores. Triggering here on every web release queued a second approval for
+# artifacts nobody ships — the APK is not release-signed and the iOS build is
+# `--no-codesign`, so neither can go to a store yet (store accounts, signing and
+# listings are operator work, docs/production-deployment.md § Mobile).
 #
 # The web frontend is NOT built here — it deploys to S3 + CloudFront via
 # aws-deploy.yml. (The old GitHub Pages deploy that lived in this file has
 # been retired now that AWS is the production frontend.)
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["mobile-v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -48,7 +54,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
         with:
-          name: android-apk-${{ github.event.release.tag_name }}
+          name: android-apk-${{ github.ref_name }}
           path: mobile/build/app/outputs/flutter-apk/app-release.apk
 
   mobile-ios:

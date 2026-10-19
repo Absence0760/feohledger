@@ -196,7 +196,11 @@ Every job in both is gated by the `production` GitHub Environment:
 | `backend` | ECS / Fargate | `docker build backend` → push to ECR (commit-SHA tag) → register a new task-definition revision with that image → **run DB migrations** (one-off Fargate task) → `update-service` → wait for stable |
 | `lambdas` | Lambda (extraction / ERP / audit) | `needs: backend` → point every function in `LAMBDA_FUNCTIONS` at the **same** image the backend job just pushed (`update-function-code --image-uri`) → wait for update |
 
-`.github/workflows/mobile-release.yml` builds the mobile artifacts:
+`.github/workflows/mobile-release.yml` builds the mobile artifacts on a `mobile-v*`
+tag (`git tag mobile-v1.0.0 && git push origin mobile-v1.0.0`) or a manual run —
+**not** on a web release, which deploys the VM through `vm-deploy.yml`. Neither
+artifact can go to a store yet: the APK is not release-signed and the iOS build
+is unsigned; store accounts, signing keys and listings are operator work.
 
 | Job | Target | Steps |
 |---|---|---|
@@ -310,5 +314,5 @@ a release won't turn it red before the infrastructure exists. To go live:
 
 Until step 5, the AWS jobs (`backend`, `lambdas`, `frontend`) skip via the
 kill switch — `backend`/`frontend` on their `if:` guard, `lambdas` because it
-`needs: backend`. (The `mobile-release.yml` jobs have no such guard — they
-build on every release and are gated only by the `production` reviewer.)
+`needs: backend`. (`mobile-release.yml` does not run on a release at all — it
+builds on a `mobile-v*` tag or by hand, gated by the `production` reviewer.)
