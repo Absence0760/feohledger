@@ -16,7 +16,8 @@ import { expect, NO_TENANT_BASE, test } from '../fixtures/helpers';
  *    assertions rather than visibility ones.
  *  - a visitor with `prefers-reduced-motion` must get a page with no hidden
  *    state in it at all, not a page that depends on an observer to un-hide it.
- *  - WCAG 2.2.2 requires the looping animation to be stoppable in-page.
+ *  - WCAG 2.2.2: with no pause control on the page, every animation must
+ *    finish on its own inside five seconds.
  *  - the count-up must settle on the substantiated figures written in the
  *    markup (`Landing.svelte` § stats), never a rounding of them.
  */
@@ -93,47 +94,59 @@ test.describe('landing — scroll reveal', () => {
 	});
 });
 
-test.describe('landing — motion control (WCAG 2.2.2)', () => {
-	test('the in-page toggle pauses every animation beneath the page root', async ({ page }) => {
+test.describe('landing — motion ends on its own (WCAG 2.2.2)', () => {
+	// The page has no pause control: it meets 2.2.2 by never moving for more
+	// than five seconds (decisions §278). This reads what the browser is
+	// actually running — every CSS animation and transition, including the
+	// per-element `calc()` delays the static guard
+	// (`src/lib/a11y/marketingMotion.test.ts`) cannot resolve — and checks each
+	// one's active end time against the budget.
+	test('every animation on the page is finite and finishes within five seconds', async ({
+		page
+	}) => {
 		await gotoLanding(page);
-
-		const toggle = page.getByRole('button', { name: 'Pause animation' });
-		await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-
-		const card = page.locator('.hero-visual .card');
-		await expect.poll(() => card.evaluate((el) => getComputedStyle(el).animationPlayState)).toBe(
-			'running'
-		);
-
-		await toggle.click();
-
-		// The button now offers the inverse action, and says it is pressed.
-		const play = page.getByRole('button', { name: 'Play animation' });
-		await expect(play).toHaveAttribute('aria-pressed', 'true');
-		await expect(page.locator('.landing')).toHaveAttribute('data-motion', 'paused');
-		// The hero card, the adapter rail and the backdrop aurora are three
-		// different components; the rule has to reach all of them.
-		for (const selector of ['.hero-visual .card', '.rail .track', '.atmosphere .aurora-a']) {
-			await expect
-				.poll(
-					() =>
-						page
-							.locator(selector)
-							.first()
-							.evaluate((el) => getComputedStyle(el).animationPlayState),
-					{ message: selector }
-				)
-				.toBe('paused');
+		// Bring each section in, so the scroll reveals are running too.
+		for (const name of SECTION_HEADINGS) {
+			await page.getByRole('heading', { level: 2, name }).scrollIntoViewIfNeeded();
 		}
 
-		await play.click();
-		await expect(page.getByRole('button', { name: 'Pause animation' })).toHaveAttribute(
-			'aria-pressed',
-			'false'
+		const running = await page.evaluate(() =>
+			document.getAnimations().map((a) => {
+				const timing = a.effect!.getComputedTiming();
+				const target = (a.effect as KeyframeEffect).target as Element | null;
+				return {
+					name:
+						(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id,
+					target: target ? `${target.tagName.toLowerCase()}.${target.className}` : '?',
+					endMs: Number(timing.endTime),
+					iterations: Number(timing.iterations)
+				};
+			})
 		);
-		await expect.poll(() => card.evaluate((el) => getComputedStyle(el).animationPlayState)).toBe(
-			'running'
-		);
+
+		// Not vacuous: the hero, the aurora and the headline sheen all animate.
+		const names = running.map((a) => a.name).join(' ');
+		for (const expected of ['card-lift', 'drift-a', 'sheen', 'stop-live']) {
+			expect(names, expected).toContain(expected);
+		}
+		expect(running.filter((a) => !Number.isFinite(a.iterations) || a.endMs > 5000)).toEqual([]);
+	});
+
+	test('the adapter row is static: every name shown once, nothing scrolling', async ({ page }) => {
+		await gotoLanding(page);
+		const list = page.locator('.rail .set');
+		await expect(list).toHaveCount(1);
+		await expect(list.getByText('NetSuite', { exact: true })).toHaveCount(1);
+		expect(
+			await list.evaluate((el) => el.getAnimations({ subtree: true }).length),
+			'the adapter row runs no animation'
+		).toBe(0);
+	});
+
+	test('there is no pause control left to find', async ({ page }) => {
+		await gotoLanding(page);
+		await expect(page.getByRole('button', { name: /pause animation|play animation/i })).toHaveCount(0);
+		await expect(page.locator('[data-motion]')).toHaveCount(0);
 	});
 });
 

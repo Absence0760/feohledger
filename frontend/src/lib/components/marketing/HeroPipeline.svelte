@@ -8,8 +8,10 @@
 	/**
 	 * The hero's moving part: one invoice walking the pipeline the product
 	 * exists to automate — captured, extracted field by field, matched against
-	 * its PO, approved, paid. The card assembles once in under four seconds and
-	 * holds; the extraction sweep and the stage rail keep cycling over it.
+	 * its PO, approved, paid. The card assembles once in about four seconds, the
+	 * extraction sweep and the stage rail run once over it, and then everything
+	 * holds on the finished card. **Nothing here runs past five seconds** — that
+	 * is how the page meets WCAG 2.2.2 with no pause control (decisions §278).
 	 *
 	 * **It is a drawing, not a screenshot.** A screenshot of the real app would
 	 * be a maintenance liability (it goes stale on the next restyle and nobody
@@ -20,10 +22,11 @@
 	 *
 	 * **Every animation ends where the element should rest.** `app.css` collapses
 	 * `animation-duration` to 0.001ms under `prefers-reduced-motion`, which means
-	 * the final keyframe is the *entire* experience for that visitor — so the
-	 * end state of each loop is the finished card, fully populated and marked
-	 * paid, rather than the blank frame the loop starts from. A visitor who asked
-	 * for less motion gets the completed story, not an empty card.
+	 * the final keyframe is the *entire* experience for that visitor — and, with
+	 * `forwards` fill, it is what every visitor is left looking at once the
+	 * five seconds are up. So the end state of each animation is the finished
+	 * card, fully populated and marked paid, rather than the blank frame it
+	 * starts from.
 	 *
 	 * Whole thing is `aria-hidden`: it re-states the surrounding copy in pictures
 	 * and its animated field values would otherwise be announced mid-transition
@@ -93,17 +96,15 @@
 		display: flex;
 		flex-direction: column;
 		gap: 22px;
-		/* Two clocks, deliberately.
-		   --build is the ONE-SHOT assembly of the card: fields, meters, the
-		   match label, the stamp. It runs once and holds, because the finished
-		   card is the frame worth looking at — the first cut ran it on the same
-		   16s clock as everything else, and a visitor glancing for the usual
-		   three seconds saw an empty band where the stamp was still ten seconds
-		   away.
-		   --loop is the AMBIENT cycle that keeps going over the finished card:
-		   the sweep, the rail and the lift. */
+		/* --build is the assembly of the card: fields, meters, the match label,
+		   the stamp. The finished card is the frame worth looking at, so it lands
+		   early — an earlier cut ran it on a 16s loop, and a visitor glancing for
+		   the usual three seconds saw an empty band where the stamp was still ten
+		   seconds away. The lift, the sweep, the rail and the stage dots used to
+		   cycle forever over the result; each now runs once and every animation
+		   in this file has finished by 5s (delay + duration), which the
+		   landing spec measures. */
 		--build: 3.6s;
-		--loop: 16s;
 	}
 
 	/* ------------------------------ the card ------------------------------ */
@@ -118,7 +119,7 @@
 			0 32px 70px -28px rgba(0, 0, 0, 0.85),
 			inset 0 1px 0 rgba(255, 255, 255, 0.05);
 		backdrop-filter: blur(12px);
-		animation: card-lift var(--loop) ease-in-out infinite;
+		animation: card-lift 4s ease-in-out 1 forwards;
 	}
 	@keyframes card-lift {
 		0%, 100% { transform: translate3d(0, 0, 0); }
@@ -187,13 +188,15 @@
 			rgba(99, 140, 255, 0.55) 92%,
 			transparent
 		);
-		animation: sweep var(--loop) cubic-bezier(0.5, 0, 0.5, 1) infinite;
+		/* One pass, alongside the fields landing; ends below the last field at
+		   zero alpha, so the resting card has no bar across it. */
+		animation: sweep 2.4s cubic-bezier(0.5, 0, 0.5, 1) 0.25s 1 both;
 	}
 	@keyframes sweep {
 		0% { transform: translate3d(0, -60px, 0); opacity: 0; }
-		8% { opacity: 1; }
-		34% { transform: translate3d(0, 230px, 0); opacity: 1; }
-		40%, 100% { transform: translate3d(0, 230px, 0); opacity: 0; }
+		20% { opacity: 1; }
+		85% { transform: translate3d(0, 230px, 0); opacity: 1; }
+		100% { transform: translate3d(0, 230px, 0); opacity: 0; }
 	}
 
 	.field {
@@ -275,7 +278,8 @@
 		border-radius: 50%;
 		background: var(--success);
 		box-shadow: 0 0 0 0 rgba(31, 168, 106, 0.55);
-		animation: ping 2.4s ease-out infinite;
+		/* One ring as the stamp lands (3.6s + 1.2s = 4.8s), ending ringless. */
+		animation: ping 1.2s ease-out var(--build) 1 forwards;
 	}
 	@keyframes stamp-in {
 		from { opacity: 0; transform: scale(0.88); }
@@ -311,7 +315,7 @@
 		width: 100%;
 		background: linear-gradient(90deg, var(--accent), #a37dff, #e7b95e);
 		transform-origin: left center;
-		animation: rail var(--loop) cubic-bezier(0.65, 0, 0.35, 1) infinite;
+		animation: rail 4.4s cubic-bezier(0.65, 0, 0.35, 1) 1 forwards;
 	}
 	@keyframes rail {
 		0% { transform: scaleX(0); }
@@ -341,8 +345,11 @@
 		background: rgba(24, 26, 35, 0.92);
 		color: var(--text-muted);
 		font-size: 17px;
-		animation: stop-live var(--loop) ease-in-out infinite;
-		animation-delay: calc(var(--i) * var(--loop) * 0.24);
+		/* Lit in turn, 0.8s apart: the last stop ends at 3 × 0.8 + 1.6 = 4s.
+		   `forwards` keeps each one lit, so the rest frame is the whole
+		   pipeline done; before its turn a stop shows its base (unlit) style,
+		   which is also the first keyframe. */
+		animation: stop-live 1.6s ease-in-out calc(var(--i) * 0.8s) 1 forwards;
 	}
 	/* Colour and scale together, so the active stop reads at a glance and the
 	   last frame leaves every stop lit — the finished pipeline. */

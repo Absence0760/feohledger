@@ -1082,27 +1082,6 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 
 /* ===================================================================
-   Motion toggle (WCAG 2.2.2 Pause, Stop, Hide)
-   -------------------------------------------------------------------
-   The marketing surfaces run looping decorative animation — a hero
-   sequence and an auto-scrolling adapter rail — which SC 2.2.2 requires
-   a user be able to stop, independently of any OS-level preference.
-   Their shell carries `data-motion="paused"` when the visitor asks for
-   that, and this halts every animation beneath it in one rule rather
-   than each component remembering to honour the flag.
-
-   `animation-play-state` freezes an animation WHERE IT IS, which is
-   the honest reading of "pause": a stopped hero holds the frame the
-   reader was looking at instead of jumping to the end of the loop.
-   =================================================================== */
-[data-motion='paused'],
-[data-motion='paused'] *,
-[data-motion='paused'] *::before,
-[data-motion='paused'] *::after {
-	animation-play-state: paused !important;
-}
-
-/* ===================================================================
    Reduced motion (WCAG 2.3.3 Animation from Interactions)
    -------------------------------------------------------------------
    Honour the OS "reduce motion" preference globally: near-instant

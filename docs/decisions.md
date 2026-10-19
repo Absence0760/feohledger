@@ -11458,3 +11458,38 @@ Caddy image, error text and empty 404 alike.
   the same failure with no path change.
 - *An absolute symlink*: it would name the host path, which does not exist inside
   the container.
+
+## 278. The landing page loses its pause button: every animation ends within five seconds (2026-10-19)
+
+**Context.** §180 met WCAG 2.2.2 Pause, Stop, Hide on the marketing page with
+an in-page **Pause animation** button (`MotionToggle`), because the hero
+sequence, the aurora drift, the headline sheen and the adapter marquee all
+looped forever. The operator decided the page should carry no such control.
+
+**Decision.** Keep the motion, end it. 2.2.2 applies only to motion that starts
+automatically *and* lasts more than five seconds, so every animation on the
+public pages now runs a finite number of times with
+`delay + duration × count ≤ 5s` and `forwards` fill, resting on a final frame
+that shows everything (§180 rule 1 still holds). The hero lift, sweep, ping,
+rail and stage dots each run once and have finished by 4.8s; the aurora blobs
+drift once over 4.2 / 4.6 / 5s; the sheen makes one 4s pass. The adapter
+marquee — a 46s scroll — cannot fit, so it became a static wrapped row, which
+also drops the duplicate `aria-hidden` list the seamless loop needed. The
+`data-motion` attribute, its `app.css` pause rule and the component are gone.
+Reduced motion is unchanged: durations and delays still collapse to nothing.
+
+**Rejected.**
+- *Keep the button and shorten nothing.* Conformant, but it is the control the
+  operator asked to remove.
+- *Rely on `prefers-reduced-motion`.* An OS setting a visitor may not know
+  about does not discharge 2.2.2 — the same reason §180 gave.
+- *A marquee that scrolls once in five seconds.* Eighteen names crossing the
+  viewport in five seconds is unreadable motion, not a list.
+
+**Guards.** `frontend/src/lib/a11y/marketingMotion.test.ts` reads each
+marketing component's stylesheet and fails on `infinite` or a literal timing
+past the budget; `frontend/tests-e2e/marketing/landing.spec.ts` reads
+`getComputedTiming()` for every animation the page actually runs, which
+catches the per-element `calc()` delays the static scan cannot resolve. This
+supersedes rule 4 of §180; `frontend/docs/ui-patterns.md` § Motion carries the
+working form.

@@ -374,7 +374,7 @@ component the second time you would duplicate one.**
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `InvoicePicker` (both over `ui/SearchPicker`) `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
-- marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail` `MotionToggle`
+- marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail`
 - auth: `AuthShell` (every pre-auth employee page) `AuthCard`
 
 Two invariants the library enforces, worth knowing before you call anything:
@@ -425,7 +425,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 - **User-facing strings go through `m()`** — never a hardcoded literal. See `### Internationalization`.
 - **Accessibility is WCAG 2.2 AA and it is tested.** Focus management, keyboard reachability, target size, and reflow at 320 px are guarded by `frontend/tests-e2e/a11y/` (axe-core). `reflow.spec.ts` enumerates `src/routes` off disk, so a NEW route is measured at 320px the day it lands and there is no list to add it to — and for a route that shows one panel at a time behind `?section=` it reads the slugs off disk too, from the page's own `SECTION_GROUPS`, since visiting the bare path would measure only the default panel. Never loosen those specs — fix the markup.
 - **Colour comes from the tokens in `app.css`**, never a literal hex in a component. Contrast ratios are computed and asserted; a new token pair must pass 1.4.3.
-- **Motion ends on its resting frame, hides nothing by stylesheet, and stops on request.** Continuous animation lives under a `data-motion` root with `MotionToggle` (WCAG 2.2.2); reduced motion collapses durations *and* delays. The five rules are `docs/ui-patterns.md` § Motion.
+- **Motion ends on its resting frame, hides nothing by stylesheet, and stops on its own within 5 s.** No `infinite`, and `delay + duration × count ≤ 5s` — that is how the public pages meet WCAG 2.2.2 without a pause control (decisions §278; guards `src/lib/a11y/marketingMotion.test.ts` + `tests-e2e/marketing/landing.spec.ts`); reduced motion collapses durations *and* delays. The five rules are `docs/ui-patterns.md` § Motion.
 - **A chrome or decorative `<img>` is not draggable.** Pair `draggable="false"` on the element with `-webkit-user-drag: none; user-select: none;` in CSS (never `pointer-events: none`, which also swallows hit-testing) — see `AuthShell.svelte`'s `.panel-art`. `src/lib/a11y/imageDragging.test.ts` guards every `<img>` in the tree against an explicit, commented allowlist (a user's own document, e.g. `InvoiceModal`, stays draggable on purpose).
 - **Class names follow the documented convention** rather than utility soup; the conventions section is the reference.
 ## Conventions

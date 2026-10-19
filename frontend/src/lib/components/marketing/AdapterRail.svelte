@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * The scrolling rail of shipped adapters.
+	 * The row of shipped adapters.
 	 *
 	 * **It names adapters, not customers.** Every entry is a provider this repo
 	 * has a registered adapter for — the families listed in `backend/CLAUDE.md`
@@ -18,14 +18,12 @@
 	 * trademark, and using one implies an endorsement none of these have given.
 	 * It also keeps the rail weightless — no images, no licence questions.
 	 *
-	 * The list is rendered twice and the track translates by exactly -50%, so
-	 * the second copy is under the cursor at the moment the first wraps and the
-	 * loop has no seam. The duplicate is `aria-hidden` so a screen reader is
-	 * not read the same names twice.
-	 *
-	 * Motion: the rail pauses on hover and on keyboard focus within, and the
-	 * page's `MotionToggle` stops it outright (WCAG 2.2.2) through the
-	 * `data-motion` rule in `app.css`.
+	 * Static, deliberately: a wrapped, centred row rather than the marquee it
+	 * used to be. A 46-second scroll cannot fit inside the five seconds of
+	 * motion this page allows itself (WCAG 2.2.2 with no pause control,
+	 * decisions §278), and a row the reader can scan beats one they have to
+	 * wait for — every name is visible at once, nothing is masked at the edges,
+	 * and the list is rendered once instead of twice.
 	 */
 	const adapters = [
 		'NetSuite',
@@ -51,20 +49,11 @@
 
 <div class="rail">
 	<p class="rail-head">Ships with adapters for</p>
-	<div class="viewport">
-		<div class="track">
-			<ul class="set">
-				{#each adapters as adapter}
-					<li>{adapter}</li>
-				{/each}
-			</ul>
-			<ul class="set" aria-hidden="true">
-				{#each adapters as adapter}
-					<li>{adapter}</li>
-				{/each}
-			</ul>
-		</div>
-	</div>
+	<ul class="set">
+		{#each adapters as adapter}
+			<li>{adapter}</li>
+		{/each}
+	</ul>
 </div>
 
 <style>
@@ -83,35 +72,14 @@
 		color: var(--text-muted);
 	}
 
-	.viewport {
-		overflow: hidden;
-		/* Fade both ends into the page so names enter and leave rather than
-		   being clipped at a hard edge. */
-		mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent);
-	}
-
-	.track {
-		display: flex;
-		width: max-content;
-		animation: marquee 46s linear infinite;
-	}
-	/* Both are genuine user-initiated states, so pausing here is a courtesy on
-	   top of the page-level control rather than a substitute for it. */
-	.viewport:hover .track,
-	.viewport:focus-within .track {
-		animation-play-state: paused;
-	}
-	@keyframes marquee {
-		from { transform: translate3d(0, 0, 0); }
-		to { transform: translate3d(-50%, 0, 0); }
-	}
-
 	.set {
 		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
 		align-items: center;
-		gap: 14px;
+		gap: 10px 12px;
 		margin: 0;
-		padding: 0 7px;
+		padding: 0;
 		list-style: none;
 	}
 	.set li {
