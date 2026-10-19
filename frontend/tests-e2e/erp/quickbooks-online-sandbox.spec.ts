@@ -116,22 +116,27 @@ const COMPANY_CODES = [
 	...COMPANY.accounts.flatMap((a) => [a.FullyQualifiedName, a.Name, a.AcctNum ?? a.Name]),
 	...COMPANY.legacy_chart.map((r) => r.code)
 ];
-const ACCOUNT_IDS = COMPANY.accounts.map((a) => a.Id);
 const VENDOR_IDS = COMPANY.vendors.map((v) => v.Id);
 
 /**
- * Leave the worker tenant's chart and vendors holding nothing of this company.
+ * Leave the worker tenant's chart and vendors holding nothing of this company,
+ * and its chart no ERP link at all.
  *
  * Its rows are deleted (nothing references a GL row by key, invoices hold the
- * code as a string). Any other row still linked to one of its ids is unlinked:
- * other ERP specs share this tenant and their fake companies reuse small ids
- * ("7", "56"), so a stale link would be matched by id and turn into code drift.
- * Vendors are only unlinked — every vendor spec re-links by name on its sync.
+ * code as a string). Every other GL link is cleared too: the other ERP specs
+ * share this tenant, and a sync trusts a link only in the company that issued
+ * it (§284), so this company's sync would unlink theirs (NetSuite's
+ * 6100–6400, …) and report them beside the live answer. The recorded state
+ * held no other company's links, and this is that state; those specs re-link
+ * by code on their own sync. Vendors are only unlinked from this company's ids
+ * — every vendor spec re-links by name on its sync.
  */
 function clearCompanyFromTenant(): void {
 	tenantPsql(`DELETE FROM gl_accounts WHERE code IN (${sqlList(COMPANY_CODES)})`);
 	tenantPsql(
-		`UPDATE gl_accounts SET erp_account_id = NULL WHERE erp_account_id IN (${sqlList(ACCOUNT_IDS)})`
+		'UPDATE gl_accounts SET erp_account_id = NULL, erp_link_realm = NULL, ' +
+			'erp_link_candidates = NULL, erp_link_confirmed_at = NULL, erp_link_confirmed_by = NULL ' +
+			'WHERE erp_account_id IS NOT NULL OR erp_link_candidates IS NOT NULL'
 	);
 	tenantPsql(
 		`UPDATE vendors SET erp_vendor_id = NULL WHERE erp_vendor_id IN (${sqlList(VENDOR_IDS)})`
@@ -190,10 +195,18 @@ async function syncChart(page: Page): Promise<ChartSummary & { message: string }
 	return resp.json();
 }
 
-type GlRow = { code: string; name: string; erp_account_id: string | null; parent_code: string | null };
+type GlRow = {
+	code: string;
+	name: string;
+	erp_account_id: string | null;
+	parent_code: string | null;
+	is_active: boolean;
+};
+/** The whole chart, retired rows included (the list defaults to active only). */
 async function chart(page: Page): Promise<Map<string, GlRow>> {
 	const resp = await page.request.get(`${API_BASE}/api/gl-accounts`, {
-		headers: await authedTenantHeaders(page)
+		headers: await authedTenantHeaders(page),
+		params: { active_only: 'false' }
 	});
 	expect(resp.status()).toBe(200);
 	return new Map(((await resp.json()) as GlRow[]).map((r) => [r.code, r]));
@@ -332,6 +345,8 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 		// Numbered accounts keep code and link; the number is reported as drift.
 		expect(after.get('Advertising')?.erp_account_id).toBe('7');
 		expect(after.get('Office Expenses')?.erp_account_id).toBe('15');
+		// Inactive in QuickBooks: retired here, its link kept for the record.
+		expect(after.get('Bank Charges')).toMatchObject({ is_active: false, erp_account_id: '8' });
 		expect(result.code_drift).toContainEqual({ code: 'Advertising', erp_code: '6010' });
 		expect(after.has('6010')).toBe(false);
 
