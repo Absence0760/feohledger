@@ -5,7 +5,8 @@ import { expectNoA11yViolations } from '../a11y/axe-helper';
 
 /**
  * Plan-gated settings show an upgrade prompt instead of a control the server
- * would refuse with a 402 (docs/decisions.md §253 the tiers, §258 the gates).
+ * would refuse with a 402 (docs/decisions.md §253 the tiers, §258 the gates,
+ * §281 Free's direct ERP and the Scale-only Merge.dev route).
  *
  * Every e2e worker tenant is seeded on `scale`, which grants every feature, so
  * the real `/api/auth/me` drives the "entitled" side. The FREE and GROWTH sides
@@ -17,6 +18,7 @@ import { expectNoA11yViolations } from '../a11y/axe-helper';
  * shows.
  */
 
+const FREE = ['erp_integrations'];
 const GROWTH = ['erp_integrations', 'public_api', 'sso'];
 
 async function stubEntitlements(page: Page, entitlements: string[]): Promise<void> {
@@ -46,7 +48,7 @@ test.describe('plan-gated settings', () => {
 	});
 
 	test('on Free, each gated setting names its tier and links to billing', async ({ page }) => {
-		await stubEntitlements(page, []);
+		await stubEntitlements(page, FREE);
 
 		await page.goto('/admin/entities');
 		const entities = page.getByTestId('entities-plan-upgrade');
@@ -69,14 +71,45 @@ test.describe('plan-gated settings', () => {
 			page.getByTestId('webhooks-plan-upgrade').getByText('Available on Growth')
 		).toBeVisible();
 
+		// Free carries the direct ERPs, so the ERP form is open — but Merge.dev
+		// is a Scale connection.
 		await page.goto('/organization?section=erp');
-		await expect(page.getByTestId('erp-plan-upgrade')).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Test Connection' })).toHaveCount(0);
+		const erp = page.getByTestId('erp-panel');
+		await expect(erp.getByTestId('erp-provider-select')).toBeVisible();
+		await expect(page.getByTestId('erp-plan-upgrade')).toHaveCount(0);
+		await erp.getByTestId('erp-provider-select').selectOption('netsuite');
+		await expect(erp.getByRole('button', { name: 'Test Connection' })).toBeVisible();
+		await expect(erp.getByTestId('erp-merge-plan-upgrade')).toHaveCount(0);
+		await erp.getByTestId('erp-provider-select').selectOption('merge_dev');
+		const merge = erp.getByTestId('erp-merge-plan-upgrade');
+		await expect(merge.getByText('Available on Scale')).toBeVisible();
+		await expect(erp.getByTestId('erp-merge-type')).toHaveCount(0);
+		await expect(erp.getByRole('button', { name: 'Save ERP Settings' })).toHaveCount(0);
+		await expectNoA11yViolations(page);
 
 		await page.goto('/organization?section=sso');
 		await expect(page.getByTestId('sso-plan-upgrade')).toBeVisible();
 		// The worker's SSO is off, and turning it ON is what the plan gates.
 		await expect(page.getByTestId('sso-enabled-toggle')).toBeDisabled();
+	});
+
+	test('a negotiated plan without the direct ERPs names Free as the tier', async ({ page }) => {
+		// No catalog plan leaves `erp_integrations` out since §281; an
+		// operator-configured contract can, and its prompt must not send the
+		// admin to a paid tier for something Free already has.
+		await stubEntitlements(page, []);
+		await page.goto('/organization?section=erp');
+		const notice = page.getByTestId('erp-plan-upgrade');
+		await expect(notice.getByText('Available on Free')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Test Connection' })).toHaveCount(0);
+	});
+
+	test('on Growth, Merge.dev is still a Scale connection', async ({ page }) => {
+		await stubEntitlements(page, GROWTH);
+		await page.goto('/organization?section=erp');
+		const erp = page.getByTestId('erp-panel');
+		await erp.getByTestId('erp-provider-select').selectOption('merge_dev');
+		await expect(erp.getByTestId('erp-merge-plan-upgrade').getByText('Available on Scale')).toBeVisible();
 	});
 
 	test('on Growth, SSO is open but "require SSO" is a Scale feature', async ({ page }) => {

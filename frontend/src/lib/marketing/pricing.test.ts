@@ -83,6 +83,19 @@ describe('the pricing grid matches the generated catalogue', () => {
 		});
 	});
 
+	it('the first card lists the core, then what the first tier itself grants', () => {
+		// Free carries the direct ERP adapters (decisions §281); a grant on the
+		// first tier must reach its card, which has no "Everything in X" lead.
+		expect(tiers[0].listedFeatures).toEqual([...CORE_FEATURE_KEYS, ...tiers[0].addedFeatures]);
+		expect(tiers[0].listedFeatures).toContain(FEATURE_LABEL_KEYS.erp_integrations);
+		for (const tier of tiers.slice(1)) expect(tier.listedFeatures).toEqual(tier.addedFeatures);
+	});
+
+	it('sells Merge.dev on the top tier only (decisions §256)', () => {
+		const withMerge = tiers.filter((t) => t.addedFeatures.includes(FEATURE_LABEL_KEYS.erp_merge));
+		expect(withMerge.map((t) => t.code)).toEqual([PLANS[PLANS.length - 1].code]);
+	});
+
 	it('the featured card and the Enterprise base name catalogue plans', () => {
 		expect(PLANS.map((p) => p.code)).toContain(FEATURED_PLAN_CODE);
 		expect(topPlanName()).toBe(PLANS[PLANS.length - 1].name);

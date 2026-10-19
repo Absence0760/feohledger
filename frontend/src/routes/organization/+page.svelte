@@ -48,6 +48,7 @@
 	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
 	import {
 		FEATURE_ERP_INTEGRATIONS,
+		FEATURE_ERP_MERGE,
 		FEATURE_SSO,
 		FEATURE_SSO_ENFORCEMENT
 	} from '#lib/types/planFeatures.ts';
@@ -268,6 +269,7 @@
 	const ssoEntitled = $derived(auth.hasFeature(FEATURE_SSO));
 	const ssoEnforcementEntitled = $derived(auth.hasFeature(FEATURE_SSO_ENFORCEMENT));
 	const erpEntitled = $derived(auth.hasFeature(FEATURE_ERP_INTEGRATIONS));
+	const erpMergeEntitled = $derived(auth.hasFeature(FEATURE_ERP_MERGE));
 
 	// ── Section navigation ────────────────────────────────────────────────
 	// Fifteen panels' worth of unrelated concerns — company identity, DNS, chat
@@ -2371,6 +2373,7 @@
 						{readOnly}
 						{userLoaded}
 						entitled={erpEntitled}
+						mergeEntitled={erpMergeEntitled}
 						onsaved={(data) => {
 							if (org) org = { ...org, settings: data.settings as unknown as OrgSettings };
 						}}
