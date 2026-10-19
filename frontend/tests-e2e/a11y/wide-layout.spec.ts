@@ -30,7 +30,9 @@ import {
  *     actually overflows, so it is measured here directly);
  *   - a ROW ACTION stays inside its cell, and — whenever its table does not
  *     scroll — inside the table's visible region;
- *   - a KPI CARD stays inside its row, and its figure inside the card.
+ *   - a KPI CARD stays inside its row, and its figure inside the card;
+ *   - nothing paints past a `.card` / `.chart-card` edge outside a scroll
+ *     region (the dashboard's Top Vendors figure did, and scrolled the page).
  *
  * The page list is `NAV` itself (`#lib/nav.ts`, the module the sidebar renders
  * from), so a page added to the sidebar is measured the day it exists. An
@@ -226,6 +228,46 @@ function measureLayout({ allowScroll }: { allowScroll: boolean }): Finding[] {
 		}
 		const spill = card.scrollWidth - card.clientWidth;
 		if (spill > TOL) out.push({ what: `KPI card content overflows the card: ${label(card)}`, px: spill });
+	}
+
+	// Content painting past a CARD's edge (`.card`, `.chart-card`). Neither
+	// clips, so a figure wider than its slot draws over the card border — and
+	// on the rightmost card it scrolls the whole page, which is how the
+	// dashboard's Top Vendors amount first showed up (#575). Only leaves with
+	// no clipping or scrolling ancestor between them and the card are
+	// measured: anything inside a scroll region is that region's business,
+	// and the table checks above own it.
+	for (const card of document.querySelectorAll('.card, .chart-card')) {
+		if (!shown(card)) continue;
+		const cardRight = card.getBoundingClientRect().right;
+		for (const leaf of card.querySelectorAll('*')) {
+			if (leaf.children.length > 0 || !shown(leaf)) continue;
+			let clipped = false;
+			for (let p = leaf.parentElement; p && p !== card; p = p.parentElement) {
+				if (getComputedStyle(p).overflowX !== 'visible') {
+					clipped = true;
+					break;
+				}
+			}
+			if (clipped) continue;
+			// The TEXT's extent, not just the element's box: a fixed-width span
+			// keeps its box inside the card while its glyphs overflow it, which is
+			// exactly the Top Vendors defect. How far the glyphs reach depends on
+			// the font, so measuring the box alone passed locally and only the
+			// wider CI font pushed it into a document scroll.
+			// A leaf that clips itself (an ellipsized name) paints only its box.
+			let right = leaf.getBoundingClientRect().right;
+			if (getComputedStyle(leaf).overflowX === 'visible') {
+				const range = document.createRange();
+				range.selectNodeContents(leaf);
+				right = Math.max(right, range.getBoundingClientRect().right);
+			}
+			const past = Math.round(right - cardRight);
+			if (past > TOL) {
+				out.push({ what: `content past its card's edge: ${label(leaf)}`, px: past });
+				break; // one finding per card names the defect
+			}
+		}
 	}
 
 	return out;
