@@ -238,7 +238,7 @@ frontend), give them separate environments (`production-backend`,
 
 ### Database migrations
 
-The `backend` job runs `python scripts/init_control_plane.py && alembic upgrade head && python scripts/migrate_all_tenants.py`
+The `backend` job runs `sh scripts/deploy_migrate.sh` (`init_control_plane.py`, `alembic upgrade head`, `migrate_all_tenants.py` — the file `deploy/deploy.sh` and CI's day-one job run too)
 as a one-off Fargate task on the freshly-registered task definition **before**
 rolling the service, so new code never serves against an un-migrated schema and
 the revision fans out to **every tenant DB** (not just the control plane). A

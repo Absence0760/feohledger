@@ -24,6 +24,19 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=12, max_length=128)
 
 
+class ResetPasswordCheckRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=256)
+
+
+class ResetPasswordCheckResponse(BaseModel):
+    """What the reset page shows before a password is chosen. The address is
+    the account the token's holder is about to set a password for — it fills
+    the hidden username field a password manager files the new password under,
+    and the sign-in link the page offers afterwards."""
+
+    email: str
+
+
 class ResetPasswordResponse(BaseModel):
     detail: str = "Password has been reset. You can now log in with your new password."
 

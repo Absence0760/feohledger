@@ -19,12 +19,15 @@ from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.api.deps import ROLE_ADMIN
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
 from app.models import Base
+from app.models.billing import Subscription
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
 from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscription
+from app.services.schema_version import head_revision, record_head
 from app.utils.emails import normalize_email
 from app.utils.passwords import hash_password
 from app.utils.slug import validate_slug_format
@@ -91,6 +94,12 @@ CONTROL_TABLES: frozenset[str] = frozenset(
         "provider_credentials",
     }
 )
+
+
+class ControlPlaneNotInitialised(RuntimeError):
+    """The control plane lacks its baseline (the system roles), so a tenant
+    provisioned into it would be unusable. The role check runs before the
+    tenant database is created, so a broken control plane costs nothing."""
 
 
 @dataclass
@@ -212,12 +221,27 @@ PROVISIONED_STEPS_CONFIG: dict = {
 
 
 async def _create_tenant_tables(db_name: str, organization_id: uuid.UUID | None = None) -> None:
+    # Resolved before any DDL: a chain with two heads fails here, with nothing
+    # created, rather than after the tables exist with no version recorded.
+    head = head_revision()
     tenant_url = _make_tenant_url(db_name)
     engine = create_async_engine(tenant_url)
     tenant_tables = [
         table for name, table in Base.metadata.tables.items() if name not in CONTROL_TABLES
     ]
     async with engine.begin() as conn:
+        # Only a database with nothing in it yet becomes the head schema below.
+        # One that already holds tables (a half-built tenant an older release
+        # left behind) gets only the tables it lacks — `checkfirst` never adds
+        # a column — so it is NOT at head, and must be left for Alembic.
+        fresh = not (
+            await conn.execute(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public')"
+                )
+            )
+        ).scalar()
         # pgvector extension is required by the RAG embeddings table
         # (app.models.invoice_embedding). CREATE EXTENSION must run before
         # create_all, because the Vector column type resolves at DDL time.
@@ -227,6 +251,13 @@ async def _create_tenant_tables(db_name: str, organization_id: uuid.UUID | None 
                 sync_conn, tables=tenant_tables, checkfirst=True
             )
         )
+        # A fresh tenant IS the head schema, so record it as such in this same
+        # transaction. Without the row the next deploy's migrate_all_tenants.py
+        # replays the whole chain onto it from base, which is not a no-op
+        # (`services/schema_version.py`, #575). A tenant Alembic already tracks
+        # keeps its row; a pre-existing unstamped one stays unstamped, as above.
+        if fresh:
+            await record_head(conn, head)
         # SOX: install the DB-level append-only guard on audit_log. Migration
         # 0022 does the same across existing tenants; this keeps tenants created
         # outside Alembic (fresh provisioning + the test harness) consistent.
@@ -298,21 +329,61 @@ async def organization_slug_exists(slug: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
+async def _system_admin_role(session) -> Role | None:
+    # The SYSTEM role (organization_id NULL) — an org's custom role may share
+    # the name, and must never be the one granted.
+    return (
+        await session.execute(
+            select(Role).where(Role.name == ROLE_ADMIN, Role.organization_id.is_(None))
+        )
+    ).scalar_one_or_none()
+
+
+_NO_ADMIN_ROLE = (
+    f"the control plane has no system {ROLE_ADMIN!r} role, so the new tenant's admin "
+    "would hold no role. Run scripts/init_control_plane.py (deploy.sh does), which "
+    "seeds the system roles."
+)
+
+
+async def _require_system_admin_role() -> None:
+    """Refuse up front, before a tenant database exists to clean up."""
+    async with control_session_factory() as session:
+        if await _system_admin_role(session) is None:
+            raise ControlPlaneNotInitialised(_NO_ADMIN_ROLE)
+
+
+async def _delete_control_rows(org_id: uuid.UUID) -> None:
+    """Undo `_provision_into`'s committed control-plane rows for one org."""
+    async with control_session_factory() as session:
+        user_ids = select(User.id).where(User.organization_id == org_id)
+        await session.execute(UserRole.__table__.delete().where(UserRole.user_id.in_(user_ids)))
+        await session.execute(User.__table__.delete().where(User.organization_id == org_id))
+        await session.execute(
+            Subscription.__table__.delete().where(Subscription.organization_id == org_id)
+        )
+        await session.execute(Organization.__table__.delete().where(Organization.id == org_id))
+        await session.commit()
+
+
 async def provision_tenant(
     *,
     company_name: str,
     slug: str,
     admin_email: str,
     admin_name: str,
-    admin_password: str,
+    admin_password: str | None,
     plan: str = "free",
     must_change_password: bool = True,
 ) -> ProvisioningResult:
     """End-to-end: DB + org + admin user + tenant tables.
 
-    On success, the admin can log in immediately at the tenant subdomain
-    and will be forced to change their password on first login (unless
-    must_change_password is disabled for internal tenants).
+    With an ``admin_password`` the admin can log in immediately at the tenant
+    subdomain and, with ``must_change_password`` (the default), is forced to
+    change it on first login — the partner and CLI provisioning paths. With
+    ``None`` the admin has no password at all until they redeem a set-password
+    link; self-service signup does that, and passes
+    ``must_change_password=False`` since the password is their own choice.
 
     Raises ``SlugError`` before any database work when ``slug`` fails
     ``utils.slug.validate_slug_format``. The API callers validate first to
@@ -324,6 +395,7 @@ async def provision_tenant(
     """
     validate_slug_format(slug)
     db_name = f"{settings.tenant_db_prefix}{slug}"
+    await _require_system_admin_role()
 
     created_db = await _create_postgres_database(db_name)
     org_id = uuid.uuid4()
@@ -362,7 +434,7 @@ async def _provision_into(
     slug: str,
     admin_email: str,
     admin_name: str,
-    admin_password: str,
+    admin_password: str | None,
     plan: str,
     must_change_password: bool,
 ) -> ProvisioningResult:
@@ -379,25 +451,32 @@ async def _provision_into(
             # Normalized like every other `users.email` write (`utils/emails`).
             email=normalize_email(admin_email),
             full_name=admin_name,
-            hashed_password=await hash_password(admin_password),
+            # None = no password yet: the self-service signup admin chooses their
+            # own through a set-password link (`api/signup.py`, decisions §283),
+            # and until then `/auth/login` refuses the account like an SSO-only one.
+            hashed_password=(
+                await hash_password(admin_password) if admin_password is not None else None
+            ),
             is_active=True,
             organization_id=org_id,
             must_change_password=must_change_password,
         )
 
-        # Grant the admin role if it exists (created by seed.py). In a fresh
-        # DB without seeds, skip silently — RBAC roles can be provisioned
-        # later by an admin endpoint.
-        admin_role = (
-            await session.execute(select(Role).where(Role.name == "admin"))
-        ).scalar_one_or_none()
+        # The SYSTEM admin role (organization_id NULL — an org's custom role
+        # may share the name). It is part of the control-plane baseline
+        # (`control_plane_bootstrap`, run by every deploy), so a missing one is
+        # a broken control plane, and refused: provisioning used to skip the
+        # grant silently, creating an admin who could do nothing and no way for
+        # anyone to notice but that admin (#566).
+        admin_role = await _system_admin_role(session)
+        if admin_role is None:  # removed since provision_tenant checked
+            raise ControlPlaneNotInitialised(_NO_ADMIN_ROLE)
 
         session.add(org)
         session.add(user)
         await session.flush()
 
-        if admin_role is not None:
-            session.add(UserRole(user_id=user_id, role_id=admin_role.id))
+        session.add(UserRole(user_id=user_id, role_id=admin_role.id))
 
         # Baseline billing so this org isn't permanently locked out of every
         # entitlement-gated feature (issue #180) and can actually use
@@ -409,12 +488,30 @@ async def _provision_into(
         # "pro" that were never a real billing tier), not a `Plan.code`;
         # upgrading to a paid, entitled tier is what change-plan is for.
         await ensure_plan_catalog(session)
-        await ensure_subscription(session, organization_id=org_id, plan_code="free")
+        if await ensure_subscription(session, organization_id=org_id, plan_code="free") is None:
+            # ensure_plan_catalog creates `free` when it is missing, so this is
+            # unreachable unless that write silently failed — and an org with no
+            # subscription can never change plan (issue #180). Refused, like a
+            # missing role, rather than provisioning a tenant stuck on nothing.
+            raise ControlPlaneNotInitialised(
+                "the plan catalogue has no 'free' plan to subscribe the new tenant to."
+            )
 
         await session.commit()
         logger.info("Provisioned org %s (%s) + admin user %s", slug, org_id, admin_email)
 
-    await _create_tenant_tables(db_name, organization_id=org_id)
+    try:
+        await _create_tenant_tables(db_name, organization_id=org_id)
+    except Exception:
+        # The control-plane rows are already committed. Left behind, they name
+        # a database the caller is about to drop: the slug is burned, a retry
+        # trips the unique slug, and `create_tenant.py --skip-existing` (so
+        # add-tenant.sh) reports the dead tenant as "already exists" (#575).
+        try:
+            await _delete_control_rows(org_id)
+        except Exception:  # noqa: BLE001 — the original error is the one to raise
+            logger.exception("Failed to remove control-plane rows after a failed provision")
+        raise
 
     return ProvisioningResult(
         organization_id=org_id,

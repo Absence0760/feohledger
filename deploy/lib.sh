@@ -100,6 +100,41 @@ feoh_pg_run() {
 		pgtools "$@"
 }
 
+# ── Provisioning a tenant ────────────────────────────────────────────────────
+#
+# feoh_tenant_argv <slug> <name> <admin-email> [<admin-password>] builds the
+# command that provisions a tenant inside the api container, without running
+# it. add-tenant.sh execs it into the running api; CI's day-one job
+# (scripts/day-one/stack.sh) execs the same array into its api container, so
+# the rehearsal provisions exactly as production does (#575). It sets:
+#
+#   FEOH_TENANT_ARGV      the scripts/create_tenant.py command line
+#   FEOH_TENANT_PASSWORD  the admin's password: the one given, or a generated
+#                         temporary one
+#   FEOH_TENANT_FORCED    1 when the password was generated, which also forces
+#                         a change at first login; 0 otherwise
+#
+# --skip-existing makes add-tenant.sh re-runnable: a run that provisioned the
+# tenant but died before the Caddy step skips provisioning cleanly instead of
+# tripping the deliberate duplicate-slug error.
+feoh_tenant_argv() {
+	local slug=$1 name=$2 email=$3 password=${4:-}
+	FEOH_TENANT_FORCED=0
+	if [ -z "$password" ]; then
+		# Prefix guarantees the app's complexity rules (12+ chars, upper/lower/digit).
+		password="Aa1-$(openssl rand -hex 12)" || return 1
+		FEOH_TENANT_FORCED=1
+	fi
+	FEOH_TENANT_PASSWORD=$password
+	FEOH_TENANT_ARGV=(python scripts/create_tenant.py
+		--name "$name" --slug "$slug"
+		--admin-email "$email" --admin-password "$password"
+		--skip-existing)
+	if [ "$FEOH_TENANT_FORCED" = 1 ]; then
+		FEOH_TENANT_ARGV+=(--force-password-change)
+	fi
+}
+
 # ── Source: which commit the deploy builds ───────────────────────────────────
 #
 # feoh_sync_source <repo-root> [<sha>] brings the checkout to the commit to

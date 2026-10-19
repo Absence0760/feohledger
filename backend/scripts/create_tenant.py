@@ -28,6 +28,7 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 from app.database import control_engine
 from app.services.tenant_provisioning import organization_slug_exists, provision_tenant
 from app.utils.slug import SlugError
+from app.utils.tenant_urls import tenant_base_url
 
 
 async def main():
@@ -88,7 +89,9 @@ async def main():
 
     print(f"\nTenant '{args.slug}' is ready!")
     print(f"  Database:    {result.db_name}")
-    print(f"  Login at:    http://{args.slug}.localhost:7777")
+    # The tenant's own URL, from FEOH_TENANT_URL_TEMPLATE — this used to print
+    # the local-dev host on every server, production included (#575).
+    print(f"  Login at:    {tenant_base_url(args.slug) or '(FEOH_TENANT_URL_TEMPLATE is not set)'}")
     print(f"  Login email: {args.admin_email}")
     print("  Password:    (the one you supplied via --admin-password)")
 

@@ -38,6 +38,9 @@ def register_adapter(erp_type: str):
 
 
 MOCK_ADAPTER_KEY = "mock"
+#: The Merge.dev unified-API adapter. The plan gate keys on it: a config that
+#: resolves here needs ``FEATURE_ERP_MERGE`` (decisions §256, §281).
+MERGE_DEV_ADAPTER_KEY = "merge_dev"
 
 #: Every built-in adapter module. Importing one runs its ``@register_adapter``
 #: decorator. **A new adapter adds its module here and nowhere else** — this
@@ -81,15 +84,15 @@ def resolve_adapter_key(erp_config: dict) -> str:
     blank. The one statement of the rule, shared by the dispatcher and the
     plan gate below so the two can never disagree about which ERP is in play.
     """
-    if erp_config.get("integration_method", "merge_dev") == "merge_dev":
-        return "merge_dev"
+    if erp_config.get("integration_method", MERGE_DEV_ADAPTER_KEY) == MERGE_DEV_ADAPTER_KEY:
+        return MERGE_DEV_ADAPTER_KEY
     return erp_config.get("type") or MOCK_ADAPTER_KEY
 
 
 def erp_config_is_live(erp_config: object) -> bool:
     """Does ``erp_config`` select a real ERP (anything but the ``mock`` adapter)?
 
-    The ``FEATURE_ERP_INTEGRATIONS`` gate keys on this (decisions §258): the
+    The ERP plan gate keys on this (decisions §258): the
     mock ERP is the local-first default (guard rail 7) and stays open on every
     plan. An absent or empty config selects nothing — callers already answer
     "no ERP configured" for it — so it is not live either.

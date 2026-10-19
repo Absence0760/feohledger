@@ -397,7 +397,8 @@ the Organization → ERP form, served at `GET /api/organization/erp/providers`
 `options`) and `docs_url`; the endpoint adds `available` (adapter registered in
 this build). The response also carries `merge_dev_long_tail` (the ERPs offered
 inside the "Other ERP via Merge.dev" choice, Scale plan per `docs/decisions.md`
-§256).
+§256 — the `erp_merge` feature; every direct adapter is on every plan, Free
+included, under `erp_integrations`, §281).
 
 | Key | ERP | Regions | Auth |
 |---|---|---|---|
@@ -1131,6 +1132,10 @@ backend/app/api/erp_webhook.py        # POST /api/erp/webhook/{erp_type}
 
 ### Direct ERP (QuickBooks Online, Xero, Sage, NetSuite, Business Central, SYSPRO)
 
+Every plan, Free included (`erp_integrations`, `docs/decisions.md` §281). A
+workspace holds one `settings.erp`, so Free is one direct ERP that imports
+(vendors, GL accounts, purchase orders) and pushes approved invoices.
+
 1. Go to **Organization > ERP Integration**
 2. Pick your ERP from the dropdown. It leads with the ERPs popular in the
    United States and in South Africa
@@ -1146,6 +1151,13 @@ backend/app/api/erp_webhook.py        # POST /api/erp/webhook/{erp_type}
    section with a connected status, and can **Disconnect** there
 
 ### Other ERP via Merge.dev (Scale plan)
+
+Needs the `erp_merge` feature, which only Scale grants (`docs/decisions.md`
+§256). On Free and Growth the panel shows a Scale upgrade notice in place of the
+Merge form, and the server refuses a Merge config, test, sync or push with
+`402 plan_feature_required` naming `erp_merge`. A config with no
+`integration_method` routes through Merge (the dispatcher's default) and is
+gated as one.
 
 1. Create a [Merge.dev](https://merge.dev) account and get your API key
 2. Have your customer connect their ERP via Merge Link, which creates an
@@ -1163,9 +1175,10 @@ connected to one integration (merge.dev/pricing, read 2026-10-07):
   linked accounts.
 - **Professional / Enterprise**: contract-based.
 
-$65 a linked account is more than the $49 Growth plan, which includes ERP
-integrations. That is why QuickBooks Online is scoped as a direct adapter
-(`quickbooks-online-adapter.md`) with Merge kept for the long tail.
+$65 a linked account is more than the $49 Growth plan, and Free pays nothing.
+That is why the common ERPs are direct adapters (`quickbooks-online-adapter.md`,
+decisions §269), open on every plan, with Merge kept for the long tail on
+Scale (§256, §281).
 
 ## Implementation Status
 

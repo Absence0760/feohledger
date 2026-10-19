@@ -51,6 +51,17 @@
 		font: inherit;
 		color: inherit;
 		text-align: left;
+		/* Never wider than its cell. A `<button>` is an atomic box, so a
+		   clipping cell's `text-overflow: ellipsis` never reached the text
+		   inside it: an ERP-length invoice number was cut off mid-character and
+		   whatever followed it in the cell (the warning icon) was pushed out of
+		   sight (#575). Bounded, the link clips its own text with an ellipsis;
+		   in a cell that wraps, `white-space` is inherited and nothing changes. */
+		display: inline-block;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		vertical-align: bottom;
 		cursor: pointer;
 		text-decoration: none;
 		border-radius: 3px;

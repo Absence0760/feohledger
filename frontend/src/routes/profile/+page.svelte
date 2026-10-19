@@ -677,6 +677,19 @@
 								changePassword();
 							}}
 						>
+							<!-- The username password managers file the new password under
+							     (same pattern as `routes/change-password`). Hidden, read-only,
+							     out of the tab order and the accessibility tree. -->
+							<input
+								type="email"
+								name="username"
+								autocomplete="username"
+								value={auth.user?.email ?? ''}
+								readonly
+								hidden
+								tabindex="-1"
+								aria-hidden="true"
+							/>
 							<label>
 								<span>{m('profile.password.current')}</span>
 								<input

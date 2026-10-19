@@ -169,8 +169,13 @@ async def test_portal_password_change_revokes_other_sessions_but_not_the_callers
     for jti in others:
         assert f"token:blocked:{jti}" in portal_redis.strings
     assert f"token:blocked:{mine_jti}" not in portal_redis.strings
-    assert [a["action"] for a in audits] == ["portal.session.revoked"]
-    assert audits[0]["details"] == {
+    # The change's own row first, then the forced-logout side effect.
+    assert [a["action"] for a in audits] == ["portal.password.changed", "portal.session.revoked"]
+    assert audits[0]["details"] == {"via": "change_password", "forced": True}
+    assert audits[0]["actor_id"] == vu.id and audits[0]["entity_id"] == vu.id
+    assert "BrandNewPass123" not in repr(audits) and "OldPassword123" not in repr(audits)
+    assert vu.email not in repr(audits), "a supplier contact's address is third-party PII"
+    assert audits[1]["details"] == {
         "scope": "others",
         "revoked": 2,
         "reason": "password_changed",
@@ -178,11 +183,43 @@ async def test_portal_password_change_revokes_other_sessions_but_not_the_callers
 
 
 @pytest.mark.asyncio
-async def test_portal_password_change_rejects_a_wrong_current_password(portal_redis):
-    """Negative control — a failed change must revoke nothing."""
+async def test_portal_voluntary_password_change_is_audited_not_forced(portal_redis, monkeypatch):
+    from app.api.portal_auth import portal_change_password
+    from app.schemas.portal import PortalChangePasswordRequest
+
+    audits: list[dict] = []
+
+    async def _capture(**kwargs):
+        audits.append(kwargs)
+
+    monkeypatch.setattr("app.api.portal_auth.dispatch_auth_audit", _capture)
+
+    vu = _vendor_user(must_change_password=False)
+    await portal_change_password(
+        body=PortalChangePasswordRequest(
+            current_password="OldPassword123", new_password="BrandNewPass123"
+        ),
+        vu=vu,
+        db=_vendor_db(),
+        authorization=None,
+    )
+    changed = [a for a in audits if a["action"] == "portal.password.changed"]
+    assert [a["details"] for a in changed] == [{"via": "change_password", "forced": False}]
+
+
+@pytest.mark.asyncio
+async def test_portal_password_change_rejects_a_wrong_current_password(portal_redis, monkeypatch):
+    """Negative control — a failed change must revoke nothing and audit no change."""
     from app.api.portal_auth import portal_change_password
     from app.schemas.portal import PortalChangePasswordRequest
     from app.services.session_management import register_session
+
+    audits: list[dict] = []
+
+    async def _capture(**kwargs):
+        audits.append(kwargs)
+
+    monkeypatch.setattr("app.api.portal_auth.dispatch_auth_audit", _capture)
 
     vu = _vendor_user()
     other = str(uuid.uuid4())
@@ -199,3 +236,4 @@ async def test_portal_password_change_rejects_a_wrong_current_password(portal_re
         )
     assert exc.value.status_code == 400
     assert f"token:blocked:{other}" not in portal_redis.strings
+    assert audits == []

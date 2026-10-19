@@ -630,6 +630,55 @@ async def test_admin_role_crud_audits(realdb):
     assert rows[2].details["name"] == role_name
 
 
+@pytest.mark.asyncio
+async def test_role_update_names_only_the_fields_that_differ(realdb):
+    """The role editor resends description + permissions on every save; the
+    trail names a field only when its value changed (#575), and a save that
+    changes nothing writes no row at all. Permission ORDER is not a change."""
+    role_name = f"Custom Diff {uuid.uuid4().hex[:8]}"
+    perms = ["invoice.approve", "vendor.manage"]
+    async with realdb.client(key="a", role="admin") as c:
+        created = await c.post(
+            "/api/admin/roles",
+            json={"name": role_name, "description": "same", "permissions": perms},
+        )
+        assert created.status_code == 201, created.text
+        role_id = created.json()["id"]
+        try:
+            # Full-form save, nothing changed (permissions re-sent reordered).
+            noop = await c.patch(
+                f"/api/admin/roles/{role_id}",
+                json={"description": "same", "permissions": list(reversed(perms))},
+            )
+            assert noop.status_code == 200, noop.text
+            # Full-form save, only the grants changed.
+            grants = await c.patch(
+                f"/api/admin/roles/{role_id}",
+                json={"description": "same", "permissions": ["invoice.approve"]},
+            )
+            assert grants.status_code == 200, grants.text
+        finally:
+            await c.delete(f"/api/admin/roles/{role_id}")
+
+    async with realdb.sessionmaker("a")() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog)
+                    .where(
+                        AuditLog.entity_id == uuid.UUID(role_id),
+                        AuditLog.action == "role.updated",
+                    )
+                    .order_by(AuditLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r.details["changed_fields"] for r in rows] == [["permissions"]]
+    assert rows[0].details["permissions"] == ["invoice.approve"]
+
+
 # --------------------------------------------------------------------------
 # Standalone force-logout — `POST /api/admin/users/{id}/revoke-sessions`.
 # Forced logout already rides along with a role change / password reset /

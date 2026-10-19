@@ -499,6 +499,24 @@ Idempotent (`CREATE OR REPLACE` / `DROP ... IF EXISTS`), guarded by
 `_has_table("audit_log")`. Covered by `tests/test_audit_immutable.py`,
 including an assertion that the shipper's stamp still succeeds.
 
+## A row names what changed — not what the request carried
+
+The coverage guard below proves a mutation writes *a* row; it cannot prove the
+row is *true*. Every update handler that records a field list (`fields`,
+`changed_fields`, `fields_changed`) names a field only when its stored value
+actually differed, and writes no row at all for a save that changed nothing.
+Edit forms resend every field on every save, so a list built from the request
+body (`sorted(payload.keys())`) claims changes that never happened — #566's
+`user.updated` named `email` and `password` on a rename, and #575 found the
+same shape on `role.updated`, `scheduled_report.updated`,
+`vendor.tax_fields_updated` (a TIN "change" on a classification fix),
+`vendor.contact_updated_by_vendor`, `vendor_user.notification_prefs_updated`
+and `workflow_experiment.updated`, plus the inverse — a change applied and
+never named — on `contract.updated` (a vendor re-point), `intake.updated` and
+`expense.updated` (a GL recode or report move). Compare before you append;
+`services/audit_access.build_field_diff` does it for the before/after shape.
+Each of those handlers has a full-form-resend test beside its other tests.
+
 ## The audit-coverage guard (`tests/test_audit_append_only.py`)
 
 The triggers above make the trail **tamper-proof**. They say nothing about

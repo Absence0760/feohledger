@@ -134,8 +134,8 @@ export const en = {
 	'marketing.pricing.included': '{count} {n, plural, one {AI-read invoice} other {AI-read invoices}} a month',
 	'marketing.pricing.pastLimit.pause': 'Past that, AI reading pauses. Everything else keeps working.',
 	'marketing.pricing.pastLimit.overage': 'Then {price} per extra AI-read invoice.',
-	'marketing.pricing.tagline.free': 'For trying it out and light invoice volume.',
-	'marketing.pricing.tagline.growth': 'For teams connecting their ERP and identity provider.',
+	'marketing.pricing.tagline.free': 'For light invoice volume, connected to your accounting system.',
+	'marketing.pricing.tagline.growth': 'For more invoice volume, the public API and single sign-on.',
 	'marketing.pricing.tagline.scale': 'For finance teams running several entities.',
 	'marketing.pricing.tagline.enterprise': 'For negotiated volume and contract terms.',
 	'marketing.pricing.coreHeading': 'Core accounts payable:',
@@ -145,7 +145,8 @@ export const en = {
 	'marketing.pricing.core.payments': 'Payment runs and a full audit trail',
 	'marketing.pricing.buildsOn': 'Everything in {plan}, plus:',
 	'marketing.pricing.feature.publicApi': 'Public API and webhooks',
-	'marketing.pricing.feature.erpIntegrations': 'ERP integrations (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.erpIntegrations': 'Direct ERP integration (QuickBooks Online, Xero, NetSuite, Dynamics 365 and more)',
+	'marketing.pricing.feature.erpMerge': 'Any other ERP through Merge.dev',
 	'marketing.pricing.feature.sso': 'Single sign-on (SAML and OIDC)',
 	'marketing.pricing.feature.scim': 'SCIM user provisioning',
 	'marketing.pricing.feature.ssoEnforcement': 'Require single sign-on for every user',
@@ -1920,7 +1921,6 @@ export const en = {
 	'org.erp.comingSoonHint': 'The direct connection to {erp} isn\'t available yet. Choose another ERP, or connect it through Merge.dev.',
 	'org.erp.mergeErp': 'Your ERP',
 	'org.erp.mergeHint': 'Merge.dev connects ERPs we don\'t integrate with directly. Your API key is in the Merge.dev dashboard; the account token is created when you connect your ERP through Merge Link.',
-	'org.erp.mergePlan': 'Connecting through Merge.dev is part of the Scale plan.',
 	'org.erp.docsLink': '{erp} setup guide (opens in a new tab)',
 	'org.erp.optionalLabel': '{label} (optional)',
 	'org.erp.missingRequired': 'Fill in: {fields}.',
@@ -4026,6 +4026,9 @@ export const en = {
 	'auth.login.or': 'or',
 	'auth.login.signInWith': 'Sign in with {provider}',
 	'auth.login.forgotPassword': 'Forgot password?',
+	'auth.login.devAccounts.heading': 'Dev accounts',
+	'auth.login.devAccounts.hint': 'Local development only. Pick a seeded account to fill the form.',
+	'auth.login.devAccounts.fill': 'Fill the form as {email}, {role}',
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Reset your password',
@@ -4052,6 +4055,16 @@ export const en = {
 	'auth.resetPassword.invalidToken':
 		'This reset link is invalid or has expired. Please request a new one.',
 	'auth.resetPassword.goToLogin': 'Go to sign in',
+	'auth.resetPassword.retry': 'Try again',
+	'auth.resetPassword.checkFailed':
+		"We couldn't check this link just now. Please try again.",
+	'auth.resetPassword.checking': 'Checking your link…',
+	'auth.resetPassword.setExpiredHint':
+		'Set-password links work once and expire. Request a new one with Forgot password — it works for your new account too.',
+	'auth.resetPassword.setSuccess': 'Your password is set. You can now sign in.',
+	'auth.resetPassword.setSubmit': 'Set password',
+	'auth.resetPassword.setSubtitle': 'Choose a password for your new account.',
+	'auth.resetPassword.setHeading': 'Set your password',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Two-factor verification',
@@ -4120,8 +4133,9 @@ export const en = {
 	'auth.signup.step1Body': 'Pick the address your team will sign in at.',
 	'auth.signup.step2Title': 'Confirm your email',
 	'auth.signup.step2Body': 'We send a link to prove the address is yours.',
-	'auth.signup.step3Title': 'Sign in and set a password',
-	'auth.signup.step3Body': 'Your welcome email carries a temporary one to start with.',
+	'auth.signup.step3Title': 'Set your password and sign in',
+	'auth.signup.step3Body':
+		'Choose it straight from the confirmation page, or from the link in your welcome email.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Change password — FeohLedger',
@@ -4148,15 +4162,18 @@ export const en = {
 	'auth.verify.failed': 'Verification failed.',
 	'auth.verify.pendingHeading': 'Creating your workspace…',
 	'auth.verify.pendingSub':
-		"This usually takes a few seconds — we're provisioning your database and sending your credentials.",
+		"This usually takes a few seconds — we're provisioning your database and sending your welcome email.",
 	'auth.verify.successHeading': 'Your workspace is ready',
-	'auth.verify.successSubPre': 'We emailed your sign-in link and a temporary password to ',
-	'auth.verify.successSubPost':
-		". Use that password to sign in for the first time — you'll set your own right after.",
-	'auth.verify.step1': 'Open the welcome email and copy the temporary password.',
-	'auth.verify.step2': 'Sign in at your workspace below.',
-	'auth.verify.step3': "Choose a new password — then you're in.",
-	'auth.verify.continueTo': 'Continue to {slug} →',
+	'auth.verify.successSubPre': 'We also emailed a link to set your password to ',
+	'auth.verify.successSubPost': ", in case you'd rather do it later.",
+	'auth.verify.step1': 'Choose your password — the button below takes you straight there.',
+	'auth.verify.step2': 'Sign in to your workspace with your email and that password.',
+	'auth.verify.step3': "Invite your team and connect your tools — you're in.",
+	'auth.verify.noLink':
+		"Use Forgot password on your workspace's sign-in page to choose your password.",
+	'auth.verify.linkNote':
+		'The link works once. If it has expired, use Forgot password on the sign-in page.',
+	'auth.verify.setPassword': 'Set your password',
 	'auth.verify.errorHeading': 'Something went wrong',
 	'auth.verify.startOver': 'Start over',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
@@ -6323,11 +6340,13 @@ export const en = {
 	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
 	'planFeature.publicApi': "Public API and webhooks",
 	'planFeature.erpIntegrations': "ERP integrations",
+	'planFeature.erpMerge': "Connecting an ERP through Merge.dev",
 	'planFeature.sso': "Single sign-on (OIDC / SAML)",
 	'planFeature.scim': "SCIM user provisioning",
 	'planFeature.ssoEnforcement': "Requiring single sign-on",
 	'planFeature.multiEntity': "Multiple entities",
 	'planFeature.auditSiemExport': "Audit-log SIEM export",
+	'planTier.free': "Free",
 	'planTier.growth': "Growth",
 	'planTier.scale': "Scale",
 	'planUpgrade.title': "Available on {plan}",

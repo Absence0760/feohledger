@@ -205,6 +205,47 @@ async def test_update_open_intake(realdb):
         assert row.estimated_amount == Decimal("2400.00")
 
 
+async def test_update_audit_names_exactly_the_fields_that_changed(realdb):
+    """`intake.updated` used to name `vendor_id` whenever the body carried it —
+    a full-form save claimed a vendor change that never happened — and dropped
+    it whenever another field changed in the same save (#575)."""
+    from app.models.vendor import Vendor
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        vendor = Vendor(organization_id=realdb.info("a").org_id, name="Figma Inc")
+        s.add(vendor)
+        await s.commit()
+        vendor_id = str(vendor.id)
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        body = _payload()
+        iid = (await c.post("/api/intake", json=body)).json()["id"]
+        form = {k: body[k] for k in ("title", "estimated_amount", "currency", "vendor_name")}
+        steps = [
+            {**form, "vendor_id": vendor_id, "title": "Figma Org plan"},  # link + rename
+            {**form, "vendor_id": vendor_id, "title": "Figma Org plan"},  # resent, no change
+        ]
+        for step in steps:
+            resp = await c.patch(f"/api/intake/{iid}", json=step)
+            assert resp.status_code == 200, resp.text
+
+    async with mk() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "intake.updated",
+                        AuditLog.entity_id == uuid.UUID(iid),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [sorted(r.details["fields"]) for r in rows] == [["title", "vendor_id"]]
+
+
 async def test_update_blocked_after_review(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         iid = (await c.post("/api/intake", json=_payload())).json()["id"]

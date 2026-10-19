@@ -65,6 +65,11 @@
 		"commerce:down": "cd backend && docker compose stop fake-commerce",
 		"commerce:logs": "cd backend && docker compose logs -f fake-commerce",
 
+		"//-- day-one --": "The day-one rehearsal (#575): an EMPTY Postgres taken through the deploy's own migration step (backend/scripts/deploy_migrate.sh) and add-tenant's provisioning (deploy/lib.sh), then the production API image booted production-shaped (MFA on, signup off, smtp to Mailpit, KMS on LocalStack). Its own compose project on alternate ports (DAY_ONE_*), so it runs beside db:up; the API defaults to :8000 and the web origin to :7777 (DAY_ONE_API_PORT / DAY_ONE_WEB_PORT). day-one:up = scripts/day-one/stack.sh all; test:day-one is the Playwright journey against it. Needs docker, jq and openssl. Docs: frontend/tests-e2e/README.md § The day-one suite.",
+		"day-one:up": "bash scripts/day-one/stack.sh all",
+		"day-one:down": "bash scripts/day-one/stack.sh down",
+		"day-one:logs": "bash scripts/day-one/stack.sh logs",
+
 		"//-- services --": "Everything at once — core (Postgres/Redis/MinIO) + all opt-in profiles (idp/aws/ai/payments/mail/erp/commerce). services:reset also drops volumes.",
 		"services:up": "cd backend && docker compose --profile idp --profile aws --profile ai --profile payments --profile mail --profile erp --profile commerce up -d",
 		"services:down": "cd backend && docker compose --profile idp --profile aws --profile ai --profile payments --profile mail --profile erp --profile commerce down",
@@ -78,8 +83,10 @@
 		"migrate:tenants": "cd backend && python scripts/migrate_all_tenants.py",
 		"migrate:all": "pnpm run migrate && pnpm run migrate:tenants",
 
-		"//-- build --": "Production builds. Frontend is adapter-static (S3 + CloudFront) — no SSR.",
+		"//-- build --": "Production builds. Frontend is adapter-static (S3 + CloudFront) — no SSR. check:build:dev-accounts runs AFTER build:frontend and fails if the login page's dev-only seeded-account panel (frontend/src/lib/dev/) reached frontend/build; it runs in CI's Frontend job right after Build, and test:build:dev-accounts covers the guard itself.",
 		"build:frontend": "cd frontend && pnpm build",
+		"check:build:dev-accounts": "node scripts/check_dev_accounts_stripped.mjs",
+		"test:build:dev-accounts": "node --test scripts/check_dev_accounts_stripped.test.mjs",
 
 		"//-- gen --": "Derived, committed source. The message catalogues need the backend venv; gen:icons re-renders every web + mobile icon from assets/logo-render/gen_svg.py and needs Inkscape + ImageMagick 7 (docs/decisions.md §173). gen:marketing re-renders the landing page's tally ornament in Blender (Cycles on the GPU) and rewrites its grain overlay, into frontend/static/marketing/; needs blender + ImageMagick 7, no guard, not run in CI (docs/decisions.md §180). gen:illustrations rewrites the empty-state art module frontend/src/lib/components/ui/emptyStateArt.generated.ts from assets/illustrations/gen_empty_states.py (stdlib python3; --preview renders a contact sheet with Inkscape + ImageMagick); check:illustrations is its drift guard in CI's Brand assets job (docs/decisions.md §181). gen:einvoice-messages rewrites frontend/src/lib/api/einvoiceRuleMessages.generated.ts from the backend's e-invoice rule set; gen:warning-messages rewrites frontend/src/lib/api/invoiceWarningMessages.generated.ts AND mobile/lib/l10n/invoice_warning_messages.generated.dart from app/services/invoice_warning_catalog.py (the Dart arms take their argument order from mobile/lib/l10n/app_en.arb). gen:pricing rewrites frontend/src/lib/marketing/plans.generated.ts — every price, AI-read allowance, overage rate and feature the public pricing page shows — from backend/app/services/billing/plan_catalog.py (docs/decisions.md §253, issue #426). check:einvoice-messages / check:warning-messages / check:pricing are their drift guards and all three run in CI's Backend lint job; check:icons is gen:icons' guard (stdlib python3 only) and runs in CI's Brand assets job. check:subprocessors is not a generator guard — it compares the adapter registries against both sub-processor registers (docs/sub-processors.md and the published /legal/sub-processors page) and FAILS on a mismatch; it runs in CI's Frontend job, which is simply where Node already is — it reads backend source, the internal register and the published page, so it belongs to no one workspace. check:followups is the arithmetic guard on docs/followups.md's headline count, which had drifted from the file it describes three times; it runs in the same Frontend job, for the same reason. gen:test-durations <run-id> rebuilds backend/.test_durations from the eight per-shard duration artifacts one ci.yml run uploads (needs gh; refuses a run missing a shard) — the CI-measured baseline that check:test-durations guards.",
 		"gen:einvoice-messages": "cd backend && python scripts/gen_einvoice_rule_messages.py",
@@ -110,13 +117,14 @@
 		"check:illustrations": "python3 assets/illustrations/gen_empty_states.py --check",
 		"check:test-durations": "cd backend && python scripts/check_test_durations.py",
 
-		"//-- test --": "Test suites per surface: pytest (backend — venv + core services required), Playwright e2e (frontend), flutter test (mobile). test:scim/test:saml need the local IdPs up + seeded (idp:up then scim:seed/saml:seed); test:erp needs fake-erp up (erp:up); test:commerce runs the commerce/ suite (its mock-path spec needs nothing extra; provider specs need commerce:up). test:scripts validates this file's script targets; test:compliance covers the compliance-drift detector (scripts/check_compliance_drift.mjs), which the compliance-drift CI workflow runs against a PR diff; test:subprocessors covers the register guard behind check:subprocessors; test:icons proves check:icons fails on a broken icon set (stdlib python3, CI's Brand assets job); test:illustrations does the same for check:illustrations; test:followups covers the count guard behind check:followups.",
+		"//-- test --": "Test suites per surface: pytest (backend — venv + core services required), Playwright e2e (frontend), flutter test (mobile). test:scim/test:saml need the local IdPs up + seeded (idp:up then scim:seed/saml:seed); test:erp needs fake-erp up (erp:up); test:commerce runs the commerce/ suite (its mock-path spec needs nothing extra; provider specs need commerce:up). test:day-one runs the day-one journey (tests-e2e/day-one/, its own Playwright config) and needs day-one:up first; with the same E2E_WEB_ORIGIN / PUBLIC_API_URL as the stack's DAY_ONE_WEB_PORT / DAY_ONE_API_PORT. test:scripts validates this file's script targets; test:compliance covers the compliance-drift detector (scripts/check_compliance_drift.mjs), which the compliance-drift CI workflow runs against a PR diff; test:subprocessors covers the register guard behind check:subprocessors; test:icons proves check:icons fails on a broken icon set (stdlib python3, CI's Brand assets job); test:illustrations does the same for check:illustrations; test:followups covers the count guard behind check:followups.",
 		"test:backend": "cd backend && pytest",
 		"test:frontend": "cd frontend && pnpm test:e2e",
 		"test:scim": "cd frontend && pnpm exec playwright test --config=tests-e2e/playwright.config.ts scim/",
 		"test:saml": "cd frontend && pnpm exec playwright test --config=tests-e2e/playwright.config.ts saml/",
 		"test:erp": "cd frontend && pnpm exec playwright test --config=tests-e2e/playwright.config.ts erp/",
 		"test:commerce": "cd frontend && pnpm exec playwright test --config=tests-e2e/playwright.config.ts commerce/",
+		"test:day-one": "cd frontend && pnpm exec playwright test --config=tests-e2e/day-one/playwright.config.ts",
 		"test:mobile": "cd mobile && flutter test",
 		"test:scripts": "node scripts/check_root_scripts.mjs",
 		"test:compliance": "node --test scripts/check_compliance_drift.test.mjs",

@@ -805,6 +805,7 @@
 
 	.vendor-bar-bg {
 		flex: 1;
+		min-width: 0;
 		height: 16px;
 		background: var(--bg);
 		border-radius: 3px;
@@ -822,7 +823,12 @@
 		font-size: 0.78rem;
 		font-weight: 500;
 		color: var(--text-muted);
-		width: 70px;
+		/* At least the old fixed 70px so short figures still line up, but never
+		   narrower than the figure itself: a fixed width let a thirteen-digit
+		   total ("$9,877,530,865,309") run past the card and scroll the whole
+		   page sideways (#575). The bar beside it (`flex: 1`) gives way instead. */
+		min-width: 70px;
+		white-space: nowrap;
 		text-align: right;
 		flex-shrink: 0;
 	}

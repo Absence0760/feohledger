@@ -49,16 +49,26 @@ describe('plan features', () => {
 		const byKey = Object.fromEntries(
 			Object.entries(backendFeatures()).map(([name, key]) => [key, name])
 		);
+		const free = grantedBy('free');
 		const growth = grantedBy('growth');
 		const scale = grantedBy('scale');
-		expect(grantedBy('free')).toEqual(new Set());
+		const grants = (tier: Set<string> | 'all', constant: string) =>
+			tier === 'all' || tier.has(constant);
 		for (const feature of PLAN_FEATURES) {
 			const constant = byKey[feature];
-			const onGrowth = growth === 'all' || growth.has(constant);
-			const onScale = scale === 'all' || scale.has(constant);
-			expect(onScale, `${feature} is not granted by scale`).toBe(true);
-			expect(FEATURE_MIN_TIER[feature]).toBe(onGrowth ? 'growth' : 'scale');
+			expect(grants(scale, constant), `${feature} is not granted by scale`).toBe(true);
+			const cheapest = grants(free, constant)
+				? 'free'
+				: grants(growth, constant)
+					? 'growth'
+					: 'scale';
+			expect(FEATURE_MIN_TIER[feature]).toBe(cheapest);
 		}
+	});
+
+	it('keeps Merge.dev off Free and Growth (decisions §256, §281)', () => {
+		expect(FEATURE_MIN_TIER.erp_integrations).toBe('free');
+		expect(FEATURE_MIN_TIER.erp_merge).toBe('scale');
 	});
 
 	it('labels every feature and tier from the catalogue', () => {

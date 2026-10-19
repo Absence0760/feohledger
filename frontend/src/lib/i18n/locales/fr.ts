@@ -113,8 +113,8 @@ export const messages = {
 	'marketing.pricing.included': '{count} {n, plural, one {facture lue} other {factures lues}} par l’IA par mois',
 	'marketing.pricing.pastLimit.pause': 'Au-delà, la lecture par l’IA est suspendue. Tout le reste continue de fonctionner.',
 	'marketing.pricing.pastLimit.overage': 'Puis {price} par facture supplémentaire lue par l’IA.',
-	'marketing.pricing.tagline.free': 'Pour essayer et pour un faible volume de factures.',
-	'marketing.pricing.tagline.growth': 'Pour les équipes qui connectent leur ERP et leur fournisseur d’identité.',
+	'marketing.pricing.tagline.free': 'Pour un faible volume de factures, relié à votre comptabilité.',
+	'marketing.pricing.tagline.growth': 'Pour plus de volume de factures, l’API publique et l’authentification unique.',
 	'marketing.pricing.tagline.scale': 'Pour les équipes financières qui gèrent plusieurs entités.',
 	'marketing.pricing.tagline.enterprise': 'Pour un volume et des conditions contractuelles négociés.',
 	'marketing.pricing.coreHeading': 'L’essentiel de la comptabilité fournisseurs :',
@@ -124,7 +124,8 @@ export const messages = {
 	'marketing.pricing.core.payments': 'Lots de paiement et piste d’audit complète',
 	'marketing.pricing.buildsOn': 'Tout ce que contient {plan}, plus :',
 	'marketing.pricing.feature.publicApi': 'API publique et webhooks',
-	'marketing.pricing.feature.erpIntegrations': 'Intégrations ERP (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.erpIntegrations': 'Intégration ERP directe (QuickBooks Online, Xero, NetSuite, Dynamics 365 et plus)',
+	'marketing.pricing.feature.erpMerge': 'Tout autre ERP via Merge.dev',
 	'marketing.pricing.feature.sso': 'Authentification unique (SAML et OIDC)',
 	'marketing.pricing.feature.scim': 'Provisionnement des utilisateurs par SCIM',
 	'marketing.pricing.feature.ssoEnforcement': 'Imposer l’authentification unique à tous les utilisateurs',
@@ -1771,7 +1772,6 @@ export const messages = {
 	'org.erp.comingSoonHint': 'La connexion directe à {erp} n\'est pas encore disponible. Choisissez un autre ERP ou connectez-le via Merge.dev.',
 	'org.erp.mergeErp': 'Votre ERP',
 	'org.erp.mergeHint': 'Merge.dev connecte les ERP que nous n\'intégrons pas directement. Votre clé API se trouve dans le tableau de bord Merge.dev ; le jeton de compte est créé lorsque vous connectez votre ERP via Merge Link.',
-	'org.erp.mergePlan': 'La connexion via Merge.dev fait partie de l\'offre Scale.',
 	'org.erp.docsLink': 'Guide de configuration de {erp} (s\'ouvre dans un nouvel onglet)',
 	'org.erp.optionalLabel': '{label} (facultatif)',
 	'org.erp.missingRequired': 'À renseigner : {fields}.',
@@ -3802,6 +3802,9 @@ export const messages = {
 	'auth.login.or': 'ou',
 	'auth.login.signInWith': 'Se connecter avec {provider}',
 	'auth.login.forgotPassword': 'Mot de passe oublié ?',
+	'auth.login.devAccounts.heading': 'Comptes de développement',
+	'auth.login.devAccounts.hint': 'Développement local uniquement. Choisissez un compte de démonstration pour remplir le formulaire.',
+	'auth.login.devAccounts.fill': 'Remplir le formulaire avec {email}, {role}',
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Réinitialiser votre mot de passe',
@@ -3829,6 +3832,17 @@ export const messages = {
 	'auth.resetPassword.invalidToken':
 		'Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.',
 	'auth.resetPassword.goToLogin': 'Aller à la connexion',
+	'auth.resetPassword.retry': 'Réessayer',
+	'auth.resetPassword.checkFailed':
+		"Nous n'avons pas pu vérifier ce lien pour le moment. Veuillez réessayer.",
+	'auth.resetPassword.checking': 'Vérification de votre lien…',
+	'auth.resetPassword.setExpiredHint':
+		"Les liens de définition du mot de passe ne fonctionnent qu'une fois et expirent. Demandez-en un nouveau avec « Mot de passe oublié ? » — cela fonctionne aussi pour votre nouveau compte.",
+	'auth.resetPassword.setSuccess':
+		'Votre mot de passe est défini. Vous pouvez maintenant vous connecter.',
+	'auth.resetPassword.setSubmit': 'Définir le mot de passe',
+	'auth.resetPassword.setSubtitle': 'Choisissez un mot de passe pour votre nouveau compte.',
+	'auth.resetPassword.setHeading': 'Définir votre mot de passe',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Vérification à deux facteurs',
@@ -3897,8 +3911,9 @@ export const messages = {
 	'auth.signup.step1Body': 'Choisissez l\'adresse à laquelle votre équipe se connectera.',
 	'auth.signup.step2Title': 'Confirmez votre e-mail',
 	'auth.signup.step2Body': 'Nous envoyons un lien pour vérifier que l\'adresse vous appartient.',
-	'auth.signup.step3Title': 'Connectez-vous et définissez un mot de passe',
-	'auth.signup.step3Body': 'Votre e-mail de bienvenue contient un mot de passe temporaire pour commencer.',
+	'auth.signup.step3Title': 'Définissez votre mot de passe et connectez-vous',
+	'auth.signup.step3Body':
+		'Choisissez-le directement sur la page de confirmation, ou depuis le lien de votre e-mail de bienvenue.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Changer le mot de passe — FeohLedger',
@@ -3925,15 +3940,21 @@ export const messages = {
 	'auth.verify.failed': 'Échec de la vérification.',
 	'auth.verify.pendingHeading': 'Création de votre espace de travail…',
 	'auth.verify.pendingSub':
-		'Cela prend généralement quelques secondes — nous provisionnons votre base de données et envoyons vos identifiants.',
+		'Cela prend généralement quelques secondes — nous préparons votre base de données et envoyons votre e-mail de bienvenue.',
 	'auth.verify.successHeading': 'Votre espace de travail est prêt',
-	'auth.verify.successSubPre': 'Nous avons envoyé votre lien de connexion et un mot de passe temporaire à ',
-	'auth.verify.successSubPost':
-		'. Utilisez ce mot de passe pour vous connecter la première fois — vous définirez le vôtre juste après.',
-	'auth.verify.step1': 'Ouvrez l\'e-mail de bienvenue et copiez le mot de passe temporaire.',
-	'auth.verify.step2': 'Connectez-vous à votre espace de travail ci-dessous.',
-	'auth.verify.step3': 'Choisissez un nouveau mot de passe — et vous y êtes.',
-	'auth.verify.continueTo': 'Continuer vers {slug} →',
+	'auth.verify.successSubPre':
+		'Nous avons aussi envoyé un lien pour définir votre mot de passe à ',
+	'auth.verify.successSubPost': ', si vous préférez le faire plus tard.',
+	'auth.verify.step1':
+		'Choisissez votre mot de passe — le bouton ci-dessous vous y mène directement.',
+	'auth.verify.step2':
+		'Connectez-vous à votre espace de travail avec votre e-mail et ce mot de passe.',
+	'auth.verify.step3': 'Invitez votre équipe et connectez vos outils — et vous y êtes.',
+	'auth.verify.noLink':
+		'Utilisez « Mot de passe oublié ? » sur la page de connexion de votre espace de travail pour choisir votre mot de passe.',
+	'auth.verify.linkNote':
+		"Le lien ne fonctionne qu'une fois. S'il a expiré, utilisez « Mot de passe oublié ? » sur la page de connexion.",
+	'auth.verify.setPassword': 'Définir votre mot de passe',
 	'auth.verify.errorHeading': 'Une erreur s\'est produite',
 	'auth.verify.startOver': 'Recommencer',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
@@ -6093,11 +6114,13 @@ export const messages = {
 	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
 	'planFeature.publicApi': "API publique et webhooks",
 	'planFeature.erpIntegrations': "Intégrations ERP",
+	'planFeature.erpMerge': "Connexion d’un ERP via Merge.dev",
 	'planFeature.sso': "Authentification unique (OIDC / SAML)",
 	'planFeature.scim': "Provisionnement des utilisateurs par SCIM",
 	'planFeature.ssoEnforcement': "Imposer l'authentification unique",
 	'planFeature.multiEntity': "Plusieurs entités",
 	'planFeature.auditSiemExport': "Export du journal d'audit vers un SIEM",
+	'planTier.free': "Free",
 	'planTier.growth': "Growth",
 	'planTier.scale': "Scale",
 	'planUpgrade.title': "Disponible avec {plan}",

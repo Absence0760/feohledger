@@ -3,7 +3,9 @@
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { emailFromQuery } from '#lib/utils/prefillEmail.ts';
 	import { api } from '#lib/api.ts';
 	import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -44,6 +46,9 @@
 	}
 
 	onMount(async () => {
+		// A sign-in link we built (the signup welcome email, the reset page's
+		// "go to sign in") names the account; the field is still editable.
+		email = emailFromQuery(page.url.searchParams);
 		// A tenant is configured for at most one protocol; query both and render
 		// whichever is enabled. Both are non-fatal — password login still works.
 		// On the platform apex (marketing / signup host) there is neither a slug
@@ -123,7 +128,7 @@
 		{#if !ssoOnly}
 			<label>
 				<span>{m('auth.login.email')}</span>
-				<input type="email" bind:value={email} required autocomplete="email" />
+				<input type="email" bind:value={email} required autocomplete="username" />
 			</label>
 			<label>
 				<span>{m('auth.login.password')}</span>
@@ -152,6 +157,22 @@
 			</button>
 		{/if}
 	</form>
+
+	<!-- Local development only: `import.meta.env.DEV` is a compile-time
+	     constant, so `pnpm build` drops this branch AND the dynamic import with
+	     it — no seeded address reaches the deployed bundle
+	     (`scripts/check_dev_accounts_stripped.mjs` checks the build). -->
+	{#if import.meta.env.DEV && !ssoOnly}
+		{#await import('#lib/dev/DevAccountsPanel.svelte') then { default: DevAccountsPanel }}
+			<DevAccountsPanel
+				slug={getTenantSlug()}
+				onpick={(account) => {
+					email = account.email;
+					password = account.password;
+				}}
+			/>
+		{/await}
+	{/if}
 
 	{#snippet panel()}
 		<p class="panel-line">{m('auth.login.panelBody')}</p>

@@ -1035,3 +1035,40 @@ async def test_an_unstorable_settlement_holds_the_invoice(realdb):
         "an amount-free rail must still fail OPEN — conflating it with a "
         "garbage report would strand every invoice such a rail settles"
     )
+
+
+async def _lapse_subscription(realdb, key: str) -> None:
+    """Cancel the org's live subscription in place (the dunning sweep's write)."""
+    from app.models.billing import Subscription
+
+    async with realdb.control_sessionmaker()() as s:
+        sub = (
+            await s.execute(
+                select(Subscription).where(Subscription.organization_id == realdb.info(key).org_id)
+            )
+        ).scalar_one()
+        sub.status = "canceled"
+        await s.commit()
+
+
+@pytest.mark.parametrize("plan", ["free", "canceled_scale"])
+async def test_sync_back_still_pays_on_a_plan_without_merge(realdb, plan):
+    """The in-flight exemption (decisions §258, §281): a stored Merge.dev
+    config on a plan without `erp_merge` — Free, or a lapsed Scale — must not
+    strand a payment already made. The sync-back is not plan-gated, so the
+    invoice still reaches `paid`."""
+    if plan == "free":
+        await realdb.subscribe("a", "free")
+    else:
+        await realdb.subscribe("a", "scale")
+        await _lapse_subscription(realdb, "a")
+    await _set_org_erp(realdb, "a", {"type": "sage_intacct", "integration_method": "merge_dev"})
+    run_id, invoice_id = await _seed_run(realdb, "a")
+
+    result = await _sync_payments(run_id, realdb.info("a").org_id)
+
+    assert result.transitioned == 1
+    assert result.failed == 0
+    async with realdb.sessionmaker("a")() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+    assert inv.status == InvoiceStatus.paid

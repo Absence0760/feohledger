@@ -74,7 +74,10 @@ const HOST_ARG = ' --host 127.0.0.1';
  */
 export default defineConfig({
 	testDir: '.',
-	testIgnore: ['**/node_modules/**', '**/.auth/**', '**/fixtures/**'],
+	// `day-one/` is its own suite with its own config (`day-one/playwright.config.ts`):
+	// it runs against an unseeded stack that `scripts/day-one/stack.sh` builds,
+	// in CI's day-one job, never in these shards.
+	testIgnore: ['**/node_modules/**', '**/.auth/**', '**/fixtures/**', '**/day-one/**'],
 
 	// Runs once in the main process before any test/worker starts. Verifies
 	// every tenant's seeded "Default Workflow" is still is_active with its

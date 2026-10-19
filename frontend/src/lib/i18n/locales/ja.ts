@@ -116,8 +116,8 @@ export const messages = {
 	'marketing.pricing.included': '{n, plural, other {AI 読み取り請求書}} 月 {count} 件',
 	'marketing.pricing.pastLimit.pause': '上限を超えると AI による読み取りが一時停止します。その他の機能はすべて引き続き利用できます。',
 	'marketing.pricing.pastLimit.overage': '以降は AI 読み取り請求書ごとに {price}。',
-	'marketing.pricing.tagline.free': 'お試しや少量の請求書処理に。',
-	'marketing.pricing.tagline.growth': 'ERP や ID プロバイダーと連携するチームに。',
+	'marketing.pricing.tagline.free': '少量の請求書処理と会計システムとの連携に。',
+	'marketing.pricing.tagline.growth': 'より多くの請求書、公開 API、シングルサインオンに。',
 	'marketing.pricing.tagline.scale': '複数の法人を運営する財務チームに。',
 	'marketing.pricing.tagline.enterprise': '取扱量と契約条件を個別に交渉したい場合に。',
 	'marketing.pricing.coreHeading': '買掛金管理の基本機能:',
@@ -127,7 +127,8 @@ export const messages = {
 	'marketing.pricing.core.payments': '支払いバッチと完全な監査証跡',
 	'marketing.pricing.buildsOn': '{plan} のすべての機能に加えて:',
 	'marketing.pricing.feature.publicApi': '公開 API と Webhook',
-	'marketing.pricing.feature.erpIntegrations': 'ERP 連携 (NetSuite、Dynamics 365、Merge.dev)',
+	'marketing.pricing.feature.erpIntegrations': 'ERP との直接連携 (QuickBooks Online、Xero、NetSuite、Dynamics 365 など)',
+	'marketing.pricing.feature.erpMerge': 'その他の ERP は Merge.dev 経由で',
 	'marketing.pricing.feature.sso': 'シングルサインオン (SAML と OIDC)',
 	'marketing.pricing.feature.scim': 'SCIM によるユーザープロビジョニング',
 	'marketing.pricing.feature.ssoEnforcement': 'すべてのユーザーにシングルサインオンを必須化',
@@ -1736,7 +1737,6 @@ export const messages = {
 	'org.erp.comingSoonHint': '{erp} への直接接続はまだ利用できません。別の ERP を選ぶか、Merge.dev 経由で接続してください。',
 	'org.erp.mergeErp': 'ご利用の ERP',
 	'org.erp.mergeHint': 'Merge.dev は、直接連携していない ERP を接続します。API キーは Merge.dev のダッシュボードにあります。アカウントトークンは Merge Link で ERP を接続すると作成されます。',
-	'org.erp.mergePlan': 'Merge.dev 経由の接続は Scale プランに含まれます。',
 	'org.erp.docsLink': '{erp} の設定ガイド（新しいタブで開きます）',
 	'org.erp.optionalLabel': '{label}（任意）',
 	'org.erp.missingRequired': '入力してください: {fields}。',
@@ -3759,6 +3759,9 @@ export const messages = {
 	'auth.login.or': 'または',
 	'auth.login.signInWith': '{provider}でサインイン',
 	'auth.login.forgotPassword': 'パスワードをお忘れですか？',
+	'auth.login.devAccounts.heading': '開発用アカウント',
+	'auth.login.devAccounts.hint': 'ローカル開発専用です。シード済みのアカウントを選ぶとフォームに入力されます。',
+	'auth.login.devAccounts.fill': '{email}（{role}）でフォームに入力',
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'パスワードをリセット',
@@ -3785,6 +3788,16 @@ export const messages = {
 	'auth.resetPassword.invalidToken':
 		'このリセットリンクは無効か期限切れです。もう一度リクエストしてください。',
 	'auth.resetPassword.goToLogin': 'サインインへ',
+	'auth.resetPassword.retry': '再試行',
+	'auth.resetPassword.checkFailed':
+		'現在このリンクを確認できませんでした。もう一度お試しください。',
+	'auth.resetPassword.checking': 'リンクを確認しています…',
+	'auth.resetPassword.setExpiredHint':
+		'パスワード設定リンクは 1 回のみ使用でき、有効期限があります。「パスワードをお忘れですか？」から新しいリンクをリクエストしてください — 新しいアカウントでも利用できます。',
+	'auth.resetPassword.setSuccess': 'パスワードが設定されました。サインインできます。',
+	'auth.resetPassword.setSubmit': 'パスワードを設定',
+	'auth.resetPassword.setSubtitle': '新しいアカウントのパスワードを選択してください。',
+	'auth.resetPassword.setHeading': 'パスワードを設定',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': '二要素認証',
@@ -3853,8 +3866,9 @@ export const messages = {
 	'auth.signup.step1Body': 'チームがサインインするアドレスを選びます。',
 	'auth.signup.step2Title': 'メールアドレスを確認',
 	'auth.signup.step2Body': 'アドレスがご本人のものか確認するリンクをお送りします。',
-	'auth.signup.step3Title': 'サインインしてパスワードを設定',
-	'auth.signup.step3Body': 'ウェルカムメールに記載された仮パスワードで始められます。',
+	'auth.signup.step3Title': 'パスワードを設定してサインイン',
+	'auth.signup.step3Body':
+		'確認ページから直接、またはウェルカムメールのリンクから設定できます。',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'パスワード変更 — FeohLedger',
@@ -3880,16 +3894,16 @@ export const messages = {
 	'auth.verify.noToken': 'URLに確認トークンがありません。',
 	'auth.verify.failed': '確認に失敗しました。',
 	'auth.verify.pendingHeading': 'ワークスペースを作成しています…',
-	'auth.verify.pendingSub':
-		'通常は数秒かかります。データベースをプロビジョニングし、認証情報を送信しています。',
+	'auth.verify.pendingSub': '通常は数秒で完了します — データベースを準備し、ようこそメールを送信しています。',
 	'auth.verify.successHeading': 'ワークスペースの準備ができました',
-	'auth.verify.successSubPre': 'サインインリンクと一時パスワードを ',
-	'auth.verify.successSubPost':
-		' に送信しました。そのパスワードで初回サインインし、その直後にご自身のパスワードを設定してください。',
-	'auth.verify.step1': 'ようこそメールを開いて一時パスワードをコピーしてください。',
-	'auth.verify.step2': '下のワークスペースでサインインしてください。',
-	'auth.verify.step3': '新しいパスワードを選択すれば完了です。',
-	'auth.verify.continueTo': '{slug} へ進む →',
+	'auth.verify.successSubPre': '後で設定したい場合に備えて、パスワード設定用のリンクを ',
+	'auth.verify.successSubPost': ' にもメールで送信しました。',
+	'auth.verify.step1': 'パスワードを設定してください — 下のボタンから直接移動できます。',
+	'auth.verify.step2': 'メールアドレスとそのパスワードでワークスペースにサインインしてください。',
+	'auth.verify.step3': 'チームを招待してツールを接続すれば準備完了です。',
+	'auth.verify.noLink': 'パスワードを設定するには、ワークスペースのサインインページで「パスワードをお忘れですか？」をご利用ください。',
+	'auth.verify.linkNote': 'リンクは 1 回のみ使用できます。期限が切れた場合は、サインインページの「パスワードをお忘れですか？」をご利用ください。',
+	'auth.verify.setPassword': 'パスワードを設定',
 	'auth.verify.errorHeading': '問題が発生しました',
 	'auth.verify.startOver': '最初からやり直す',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
@@ -6028,11 +6042,13 @@ export const messages = {
 	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
 	'planFeature.publicApi': "公開 API と Webhook",
 	'planFeature.erpIntegrations': "ERP 連携",
+	'planFeature.erpMerge': "Merge.dev 経由の ERP 連携",
 	'planFeature.sso': "シングルサインオン（OIDC / SAML）",
 	'planFeature.scim': "SCIM によるユーザープロビジョニング",
 	'planFeature.ssoEnforcement': "シングルサインオンの必須化",
 	'planFeature.multiEntity': "複数の事業体",
 	'planFeature.auditSiemExport': "監査ログの SIEM へのエクスポート",
+	'planTier.free': "Free",
 	'planTier.growth': "Growth",
 	'planTier.scale': "Scale",
 	'planUpgrade.title': "{plan} プランで利用可能",

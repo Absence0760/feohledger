@@ -386,7 +386,9 @@ Action names:
 | Admin force-logout of another user | `user.sessions_revoked` — PII-free, records only the revoked count |
 | Admin reset of another user's password (`POST /api/admin/users/{id}/reset-password`) | `user.password_reset` — PII-free, records `{changed_fields: ["password"], must_change_password: true, sessions_revoked: <count>}` (`null` when the forced logout failed — the reset still returns its temp, with `sessions_revoked: false` on the response); never the temp |
 | Admin edit of a user (`PATCH /api/admin/users/{id}`) | `user.updated` — `changed_fields` names only fields whose value actually changed (the Edit form resends every field; a resent unchanged value is neither applied nor named — #566). No values except `role_names` / `is_active` when those changed |
-| Self-service password change (`POST /auth/change-password`, incl. the forced first-login change; `PATCH /auth/me` with `password`) | `auth.password.changed` — PII-free, records `{via: "change_password" \| "profile", forced: <bool>}`; `forced` is true when it replaced an admin- or signup-issued temp. Written before the `auth.session.revoked` row the same change's forced logout writes, which is a side effect and not the event |
+| Self-service password change (`POST /auth/change-password`, incl. the forced first-login change; `PATCH /auth/me` with `password`) | `auth.password.changed` — PII-free, records `{via: "change_password" \| "profile", forced: <bool>}`; `forced` is true when it replaced an admin-issued temp (signup issues none — decisions §283). Written before the `auth.session.revoked` row the same change's forced logout writes, which is a side effect and not the event |
+| Supplier-portal password change (`POST /portal/auth/change-password`, incl. the forced first sign-in change) | `portal.password.changed` — the portal twin of `auth.password.changed`: PII-free, records `{via: "change_password", forced: <bool>}` (`forced` = it replaced the temp the AP team issued), identifies the account by `actor_id`/`entity_id`, never by address. Written before the `portal.session.revoked` side-effect row |
+| Forgot-password link requested / redeemed (`POST /auth/forgot-password`, `POST /auth/reset-password`) | `auth.password_reset.requested` (`actor_id` null — the requester is unauthenticated) · `auth.password_reset.completed` (`actor_id` = the account) — both PII-free, recording only `{ip}`; never the token or the new password. `requested` is written only for an existing, active account with a tenant to route to |
 | MFA challenge issued during login | `auth.mfa.challenge_issued` |
 | Successful MFA verify | `auth.mfa.verify.success` |
 | Failed MFA verify | `auth.mfa.verify.failure` |
@@ -904,6 +906,22 @@ or created by SCIM (`api/scim.py`), in any org, SSO-only or not. `PATCH
 /api/auth/me` refuses such an account's "current password" with the same
 "Current password is incorrect" a wrong password gets, so the profile page's
 Change-password form used to be a control that account could never submit.
+
+The **self-service signup admin** starts the same way (`provision_tenant(...,
+admin_password=None)`), with no temporary password and `must_change_password`
+false: they choose their first password through a single-use **set-password
+link**, which is a forgot-password reset token with a longer life
+(`FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS`, default 72) redeemed by the ordinary
+`/login/reset-password` page and `POST /api/auth/reset-password`. Until then no
+password signs in to the account, so it never reaches `/profile` in that state.
+The reset page reads its token first with `POST /api/auth/reset-password/check`,
+which never consumes it — a mail scanner prefetching the link, or a reload,
+leaves the token usable; only submitting a password spends it — and fills a
+hidden `autocomplete="username"` field with the address the check returns, so a
+password manager saves the new password under the account. An expired or used
+link sends the admin to forgot-password, which needs only an active user and
+so works for an account that has never had a password. Reasoning:
+[decisions.md](decisions.md) §283.
 
 `GET /api/auth/me` carries `has_password` (`User.hashed_password is not None`)
 alongside `password_sign_in_closed`. It describes only the caller's own
@@ -2375,6 +2393,7 @@ behavioural suites cover (`test_slack_approvals`, `test_webhook_security`,
 | `POST /auth/mfa/verify`, `POST /auth/mfa/challenge/email`, `POST /auth/mfa/passkey/authenticate[/verify]` | The login-issued MFA challenge token (`typ=mfa_challenge`) — password already proven, access token not yet issued. The passkey verify additionally checks the assertion against the single-use login-purpose challenge slot. |
 | `POST /portal/auth/mfa/challenge[/email]` | The portal's own `typ=vendor_mfa_challenge` token — distinct from the employee one so neither crosses the AP/vendor boundary. |
 | `POST /auth/reset-password` | The single-use emailed reset token IS the credential; `consume_reset_token` GETDELs it atomically, so a replay 400s exactly like an expiry. |
+| `POST /auth/reset-password/check` | The same token, read without consuming it (`peek_reset_token`): the same opaque 400 for any token the reset would refuse, otherwise the account email the link already resets. Its own per-IP budget (20/min), so loading the page never spends the submit's. |
 | `POST /auth/sso/callback` | Server-minted single-use `state`, then the IdP's signed, nonce-bound ID token. |
 | `POST /auth/saml/acs`, `POST /auth/saml/exchange` | Server-minted single-use RelayState + python3-saml's signed-assertion verification; the exchange leg consumes a one-time handoff code. |
 | `POST /signup/complete` | The emailed `EmailVerification` token, taken `FOR UPDATE` and consumed so two calls can't double-provision a tenant. |
