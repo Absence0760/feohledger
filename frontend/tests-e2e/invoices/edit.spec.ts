@@ -150,13 +150,16 @@ test.describe('/invoices modal amount precision + no-op save', () => {
 
 	test('shows 77.10 as 77.10 and an untouched save audits no edit', async ({ page }) => {
 		const number = `${ROUND_TRIP_PREFIX}${Date.now()}`;
-		// po_number / description stay NULL, as on an invoice nobody coded.
+		// po_number / description stay NULL, as on an invoice nobody coded. The
+		// vendor is already LINKED, as on the live invoice: a save that finds no
+		// link resolves one, and that is a real, audited change (`vendor_id`).
 		tenantPsql(
 			`INSERT INTO invoices (id, correlation_id, organization_id, invoice_number, vendor_name,
-			   amount, currency, status, created_at, updated_at)
-			 SELECT gen_random_uuid(), gen_random_uuid(), organization_id, '${number}',
-			   'Precision Vendor', 77.10, 'USD', 'new', now(), now()
-			 FROM invoices LIMIT 1`
+			   vendor_id, amount, currency, status, created_at, updated_at)
+			 SELECT gen_random_uuid(), gen_random_uuid(), i.organization_id, '${number}',
+			   v.name, v.id, 77.10, 'USD', 'new', now(), now()
+			 FROM vendors v, (SELECT organization_id FROM invoices LIMIT 1) i
+			 WHERE v.status = 'active' LIMIT 1`
 		);
 
 		await page.goto('/invoices');
@@ -195,11 +198,13 @@ test.describe('/invoices modal amount precision + no-op save', () => {
 		expect(
 			tenantPsql(`SELECT amount FROM invoices WHERE invoice_number = '${number}'`).trim()
 		).toBe('77.10');
+		// The changes themselves, not a count, so a failure names the field.
 		expect(
 			tenantPsql(
-				`SELECT count(*) FROM audit_log a JOIN invoices i ON a.correlation_id = i.correlation_id
+				`SELECT coalesce(string_agg(a.details->>'changes', '; '), '')
+				 FROM audit_log a JOIN invoices i ON a.correlation_id = i.correlation_id
 				 WHERE i.invoice_number = '${number}' AND a.action = 'invoice.edited'`
 			).trim()
-		).toBe('0');
+		).toBe('');
 	});
 });
