@@ -529,10 +529,20 @@ registration for a platform replaces whatever was stored — FCM tokens rotate
 overwritten rather than accumulated.
 
 Mobile calls this from `PushService` (`mobile/lib/services/push_service.dart`)
-both on initial token acquisition and on every `onTokenRefresh` fire; the call
-is best-effort (a failure — e.g. not yet authenticated at cold-start, since
-push init runs before session restore — is logged and swallowed, never blocks
-push setup). See `mobile/CLAUDE.md`.
+whenever FCM's `onRegistered` stream fires and again on every sign-in
+(`registerWithBackend`, called by the auth gate). The sign-in call is the one
+that matters: push init runs before session restore, so the first attempt
+always fails unauthenticated, and `onRegistered` fires only when the identifier
+changes. Every call is best-effort — a failure is logged and swallowed, never
+blocks push setup. See `mobile/CLAUDE.md`.
+
+**What the stored `token` is**: since firebase_messaging 17 the mobile app
+registers through `register()` / `onRegistered`, which yield the app
+instance's **Firebase Installation ID (FID)**, not the legacy FCM registration
+token the deprecated `getToken()` returned. A future push-sending adapter must
+target the FID with FCM's FID-based direct send, not the v1 `message.token`
+field. Rows written by an older app build still hold a legacy token until that
+device signs in on a newer build and overwrites it.
 
 ## Where a tenant's links point
 
