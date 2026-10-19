@@ -202,9 +202,14 @@ async def update_vendor_w9_fields(
 
     data = body.model_dump(exclude_unset=True)
     tax_id_changed = "tax_id" in data and rekey_tax_id(vendor, data["tax_id"])
+    # Named in the audit row only when the stored value actually differs: the
+    # W-9 form resends every field, and recording presence made the trail
+    # claim a TIN change on a save that only fixed the business name (#575).
+    changed = ["tax_id"] if tax_id_changed else []
     for key, value in data.items():
-        if key != "tax_id":
+        if key != "tax_id" and getattr(vendor, key) != value:
             setattr(vendor, key, value)
+            changed.append(key)
     if tax_id_changed:
         await screen_best_effort(
             db,
@@ -216,16 +221,18 @@ async def update_vendor_w9_fields(
         )
     # PII-free: the FIELD NAMES that changed, never their values — `tax_id` is
     # one of them, and a TIN must never reach the audit trail (invariant #7).
-    await dispatch_audit(
-        db,
-        correlation_id=uuid.uuid4(),
-        organization_id=org_id,
-        actor_id=user.id,
-        action="vendor.tax_fields_updated",
-        entity_type="vendor",
-        entity_id=vendor.id,
-        details={"changed_fields": sorted(data.keys())},
-    )
+    # A save that changed nothing writes no row.
+    if changed:
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=org_id,
+            actor_id=user.id,
+            action="vendor.tax_fields_updated",
+            entity_type="vendor",
+            entity_id=vendor.id,
+            details={"changed_fields": sorted(changed)},
+        )
     await db.commit()
     await db.refresh(vendor)
     return _vendor_tax_response(vendor)

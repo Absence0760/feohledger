@@ -256,6 +256,36 @@ async def test_every_mutation_audits_the_count_never_the_addresses(realdb):
     assert updated.details["fields_changed"] == ["period_days"]
 
 
+async def test_full_form_save_names_only_the_fields_that_differ(realdb):
+    """The edit form resends every field; the trail must name only what changed
+    (#575), and a save that changes nothing writes no `updated` row at all."""
+    async with realdb.client(key="a", role="admin") as c:
+        created = await c.post(_BASE, json=_payload())
+        schedule_id = created.json()["id"]
+        try:
+            same = await c.patch(f"{_BASE}/{schedule_id}", json=_payload())
+            assert same.status_code == 200, same.text
+            renamed = await c.patch(f"{_BASE}/{schedule_id}", json=_payload(name="Renamed"))
+            assert renamed.status_code == 200, renamed.text
+        finally:
+            await c.delete(f"{_BASE}/{schedule_id}")
+
+    async with realdb.sessionmaker("a")() as db:
+        rows = list(
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_id == uuid.UUID(schedule_id),
+                        AuditLog.action == "scheduled_report.updated",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r.details["fields_changed"] for r in rows] == [["name"]]
+
+
 # --------------------------------------------------------------------------- #
 # Re-enabling a 5-strike-disabled schedule
 # --------------------------------------------------------------------------- #

@@ -1079,7 +1079,12 @@ async def update_expense(
     payload = body.model_dump(exclude_unset=True)
 
     # gl_account_id / report_id need UUID coercion; handle them explicitly.
+    # Neither joins `changed` (that set gates the report-owner / lock checks
+    # below, which deliberately leave GL coding open), so the audit row names
+    # them through `moved` instead — a GL recode alone used to write no row at
+    # all, and a report move beside a field edit dropped `report_id` (#575).
     affected_reports: set[uuid.UUID] = set()
+    moved: list[str] = []
     if "gl_account_id" in payload:
         raw = payload.pop("gl_account_id")
         gl_uuid: uuid.UUID | None = None
@@ -1090,6 +1095,7 @@ async def update_expense(
                 raise HTTPException(status_code=400, detail="Invalid gl_account_id")
         if expense.gl_account_id != gl_uuid:
             expense.gl_account_id = gl_uuid
+            moved.append("gl_account_id")
     if "report_id" in payload:
         raw = payload.pop("report_id")
         new_report: uuid.UUID | None = None
@@ -1123,6 +1129,7 @@ async def update_expense(
                 _require_report_owner(target, user)
                 affected_reports.add(new_report)
             expense.report_id = new_report
+            moved.append("report_id")
 
     changed: list[str] = []
     for field in _EXPENSE_UPDATABLE_FIELDS:
@@ -1178,7 +1185,8 @@ async def update_expense(
     # Amount / category / receipt may have changed — recompute violations.
     await _refresh_policy_violations(db, expense, org)
 
-    if changed or affected_reports:
+    audited = changed + moved
+    if audited:
         await dispatch_audit(
             db,
             correlation_id=uuid.uuid4(),
@@ -1187,7 +1195,7 @@ async def update_expense(
             action="expense.updated",
             entity_type="expense",
             entity_id=expense.id,
-            details={"fields": changed or ["report_id"]},
+            details={"fields": audited},
         )
     await db.commit()
     fresh = await _get_expense_or_404(db, expense.id)

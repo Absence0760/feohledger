@@ -270,19 +270,23 @@ async def update_experiment(
             status_code=422,
             detail=f"primary_metric must be one of {sorted(PRIMARY_METRICS)}.",
         )
-    for field, value in data.items():
-        setattr(exp, field, value)
+    # Applied and named only when the value differs from the stored one — a
+    # field merely present in the body is not a change (#575).
+    changed = sorted(f for f, v in data.items() if getattr(exp, f) != v)
+    for field in changed:
+        setattr(exp, field, data[field])
     await db.flush()
-    await dispatch_audit(
-        db,
-        correlation_id=uuid.uuid4(),
-        organization_id=user.organization_id,
-        actor_id=user.id,
-        action="workflow_experiment.updated",
-        entity_type="workflow_experiment",
-        entity_id=exp.id,
-        details={"fields": sorted(data.keys())},
-    )
+    if changed:
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=user.organization_id,
+            actor_id=user.id,
+            action="workflow_experiment.updated",
+            entity_type="workflow_experiment",
+            entity_id=exp.id,
+            details={"fields": changed},
+        )
     await db.commit()
     await db.refresh(exp)
     names = await _definition_names(db, {exp.workflow_definition_id})

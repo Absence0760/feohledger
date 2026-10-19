@@ -306,6 +306,44 @@ async def test_update_contract(realdb):
         assert len(actions) >= 1
 
 
+async def test_update_contract_audit_names_exactly_the_fields_that_changed(realdb):
+    """A vendor re-point is audited (it used to be applied and never named, so a
+    vendor-only edit wrote no row), a resent unchanged vendor is not, and a
+    full-form save that changes nothing writes no row (#575)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    other_vendor = await _add_vendor(mk, org_id, name="Initech Supply")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        contract_id = (await _create_contract(c, vendor_id)).json()["id"]
+        same = await c.patch(
+            f"/api/contracts/{contract_id}",
+            json={"vendor_id": vendor_id, "title": "Master Services Agreement"},
+        )
+        assert same.status_code == 200, same.text
+        moved = await c.patch(
+            f"/api/contracts/{contract_id}",
+            json={"vendor_id": other_vendor, "title": "Master Services Agreement"},
+        )
+        assert moved.status_code == 200, moved.text
+
+    async with mk() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "contract.updated",
+                        AuditLog.entity_id == uuid.UUID(contract_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r.details["fields"] for r in rows] == [["vendor_id"]]
+
+
 # ---------------------------------------------------------------------------
 # lifecycle
 # ---------------------------------------------------------------------------

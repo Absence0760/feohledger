@@ -378,24 +378,28 @@ async def update_intake(
 
     payload = body.model_dump(exclude_unset=True)
 
-    # vendor_id needs UUID coercion; handle it explicitly. Capture presence
-    # before the pop so the audit condition below doesn't have to re-dump body.
-    vendor_id_provided = "vendor_id" in payload
-    if vendor_id_provided:
+    # vendor_id needs UUID coercion; handle it explicitly. It is named in the
+    # audit row only when it actually moves — recording mere presence claimed a
+    # vendor change on every full-form save, and dropped `vendor_id` from the
+    # row whenever another field changed in the same save (#575).
+    changed: list[str] = []
+    if "vendor_id" in payload:
         # Re-pointing the vendor is validated exactly like setting it on create
         # — against the INTAKE's own entity, not the caller's selector, so a
         # PATCH can't smuggle in a sibling subsidiary's supplier.
-        intake.vendor_id = await _resolve_vendor_id(
+        new_vendor = await _resolve_vendor_id(
             db, payload.pop("vendor_id"), org_id=org_id, entity_id=intake.entity_id
         )
+        if intake.vendor_id != new_vendor:
+            intake.vendor_id = new_vendor
+            changed.append("vendor_id")
 
-    changed: list[str] = []
     for field in _INTAKE_UPDATABLE_FIELDS:
         if field in payload and getattr(intake, field) != payload[field]:
             setattr(intake, field, payload[field])
             changed.append(field)
 
-    if changed or vendor_id_provided:
+    if changed:
         await dispatch_audit(
             db,
             correlation_id=uuid.uuid4(),
@@ -404,7 +408,7 @@ async def update_intake(
             action="intake.updated",
             entity_type="intake_request",
             entity_id=intake.id,
-            details={"fields": changed or ["vendor_id"]},
+            details={"fields": changed},
         )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
