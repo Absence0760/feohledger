@@ -26,6 +26,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 
@@ -499,7 +500,7 @@ async def test_verification_email_is_html_with_a_confirm_button(
     capture = _CaptureAdapter()
     monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
 
-    body = _start_body(slug, email) | {"admin_name": "<b>Eve</b> & co"}
+    body = _start_body(slug, email) | {"admin_name": "<b>Eve<i> & co"}
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post("/api/signup/start", json=body)
     assert resp.status_code == 200
@@ -512,17 +513,26 @@ async def test_verification_email_is_html_with_a_confirm_button(
     assert "expires in 24 hours" in html
     # The requester's own input is escaped, in the HTML and nowhere rewritten in text.
     assert "<b>Eve" not in html
-    assert "&lt;b&gt;Eve&lt;/b&gt; &amp; co" in html
-    assert "<b>Eve</b> & co" in msg.body_text
+    assert "&lt;b&gt;Eve&lt;i&gt; &amp; co" in html
+    assert "<b>Eve<i> & co" in msg.body_text
 
 
-async def test_a_url_in_the_admin_name_is_never_a_link_in_the_verification_email(
-    realdb, monkeypatch, cleanup_signup
+@pytest.mark.parametrize(
+    "name",
+    [
+        "your account is locked, sign in at https://evil.example/login",
+        "Sign in at www.evil.example",
+        "Reset at evil.example now",
+        "mail help@evil.example",
+        "Jared evil.example/login",
+    ],
+)
+async def test_a_link_like_admin_name_is_refused_before_any_email(
+    realdb, monkeypatch, cleanup_signup, name
 ):
-    """The name is free text sent to any address: a phishing link typed into it
-    must stay inert. Only the verify link the server built is clickable."""
-    import re
-
+    """The name is free text sent to any address, and mail clients auto-link a
+    bare URL even when our HTML keeps it inert, so a phishing link typed into it
+    is refused at the door and no email goes out."""
     from app.api import signup as signup_mod
 
     slugs, emails = cleanup_signup
@@ -533,18 +543,20 @@ async def test_a_url_in_the_admin_name_is_never_a_link_in_the_verification_email
     capture = _CaptureAdapter()
     monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
 
-    name = "your account is locked, sign in at https://evil.example/login"
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
             "/api/signup/start", json=_start_body(slug, email) | {"admin_name": name}
         )
-    assert resp.status_code == 200
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Your name can't contain a web or email address."
+    assert capture.sent == []
 
-    (msg,) = capture.sent
-    html = _rendered_html(msg)
-    hrefs = set(re.findall(r'href="([^"]*)"', html))
-    assert hrefs and all("/verify?token=" in h for h in hrefs)
-    assert "https://evil.example/login" in html  # shown, as text
+
+@pytest.mark.parametrize("name", ["J. Smith", "J.R.R. Tolkien", "Zoë O'Brien-Núñez", "Dr. Ada"])
+def test_ordinary_names_pass_the_link_check(name):
+    from app.api.signup import _validate_admin_name
+
+    _validate_admin_name(name)  # raises on refusal
 
 
 async def test_welcome_email_sets_the_credentials_apart(realdb, monkeypatch, cleanup_signup):

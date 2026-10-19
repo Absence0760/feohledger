@@ -50,7 +50,7 @@ file: a secret starting `0x` is otherwise read by YAML as a number.
 
 1. Visitor lands on the apex domain (no subdomain) and clicks **Create your workspace**.
 2. `/signup` form: company name, desired slug, admin name, admin email, hCaptcha (rendered in its dark theme, since the app is dark-only).
-3. Form submits `POST /api/signup/start`. Backend validates, records an `EmailVerification` row, and emails a verification link (`PUBLIC_URL/verify?token=...`).
+3. Form submits `POST /api/signup/start`. Backend validates (including refusing an admin name that holds a web or email address: the name greets the reader of an email sent to whatever address the visitor typed, and mail clients auto-link a bare URL even in inert text), records an `EmailVerification` row, and emails a verification link (`PUBLIC_URL/verify?token=...`).
 4. User clicks the link. `/verify?token=...` calls `POST /api/signup/complete`. Backend re-checks availability, provisions the tenant (DB + org + admin user), generates a 16-char temp password, sends the welcome email with tenant URL + credentials.
 5. User receives the welcome email, clicks the tenant URL, signs in with the temp password.
 6. Login response sets `must_change_password=true` on the `/auth/me` user object. The frontend layout redirects to `/change-password`.

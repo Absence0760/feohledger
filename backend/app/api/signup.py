@@ -32,6 +32,7 @@ The split protects against:
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -125,6 +126,23 @@ def _validate_email_shape(email: str) -> None:
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
 
 
+# What a mail client would turn into a link on its own: a scheme, `www.`, an
+# address, a path, or a `word.tld` domain. The admin name is free text from an
+# unauthenticated visitor, emailed to whatever address they typed, and greets
+# the reader of a genuine FeohLedger email; the layout keeps it inert, but
+# Gmail and Outlook auto-link bare URLs in the text regardless. A person's name
+# needs none of these. A dotted initial ("J. Smith", "J.R.R. Tolkien") does
+# not match: the part after the dot must be two or more letters with no space.
+_LINK_LIKE_NAME = re.compile(r"://|www\.|[@/\\]|\w\.[a-z]{2,}", re.IGNORECASE)
+
+
+def _validate_admin_name(name: str) -> None:
+    if _LINK_LIKE_NAME.search(name):
+        raise HTTPException(
+            status_code=422, detail="Your name can't contain a web or email address."
+        )
+
+
 @router.get("/slug-check", response_model=SlugCheckResponse)
 async def slug_check(
     slug: str,
@@ -165,6 +183,7 @@ async def signup_start(
 
     # 2. Input validation.
     _validate_email_shape(body.admin_email)
+    _validate_admin_name(body.admin_name)
     try:
         validate_slug_format(body.slug)
     except SlugError as exc:
