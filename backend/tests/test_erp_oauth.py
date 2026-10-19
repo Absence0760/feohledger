@@ -391,21 +391,25 @@ async def test_authorize_is_open_on_free(realdb, platform_app):
     assert resp.status_code == 200, resp.text
 
 
-async def test_authorize_is_plan_gated(realdb, platform_app):
-    """No catalog plan leaves the direct ERPs out since §281, so the refusal is
-    a negotiated plan's that does."""
+NEGOTIATED_PREFIX = "oauth_gate_test_"
+
+
+async def _negotiated_empty_plan(realdb, key: str = "a") -> None:
+    """Bind the org to a non-catalog plan granting nothing. No catalog plan
+    leaves the direct ERPs out since §281, so this is the only refusal left.
+    Remove with ``realdb.purge_plans(NEGOTIATED_PREFIX, org_ids=[...])``."""
     from decimal import Decimal
 
     from sqlalchemy import delete
 
     from app.models.billing import Plan, Subscription
 
-    org_id = realdb.info("a").org_id
+    org_id = realdb.info(key).org_id
     async with realdb.control_sessionmaker()() as s:
         await s.execute(delete(Subscription).where(Subscription.organization_id == org_id))
         plan = Plan(
             id=uuid.uuid4(),
-            code=f"oauth_gate_test_{uuid.uuid4().hex[:8]}",
+            code=f"{NEGOTIATED_PREFIX}{uuid.uuid4().hex[:8]}",
             name="Negotiated",
             monthly_price=Decimal("0.00"),
             currency="USD",
@@ -418,13 +422,47 @@ async def test_authorize_is_plan_gated(realdb, platform_app):
             Subscription(id=uuid.uuid4(), organization_id=org_id, plan_id=plan.id, status="active")
         )
         await s.commit()
+
+
+async def test_authorize_is_plan_gated(realdb, platform_app):
+    await _negotiated_empty_plan(realdb)
     try:
         async with realdb.client(key="a", role="admin") as c:
             resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
         assert resp.status_code == 402
         assert resp.json()["detail"]["params"] == {"feature": "erp_integrations"}
     finally:
-        await realdb.purge_plans("oauth_gate_test_", org_ids=[org_id])
+        await realdb.purge_plans(NEGOTIATED_PREFIX, org_ids=[realdb.info("a").org_id])
+
+
+@pytest.mark.plan("free")
+async def test_callback_completes_on_free(realdb, platform_app, provider):
+    """§281: a Free workspace connects QuickBooks end to end."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    assert resp.status_code == 302
+    assert resp.headers["location"].endswith(f"erp_connected={PROVIDER}")
+    assert (await _org_settings(realdb))["erp"]["oauth"]["external_tenant_id"] == REALM
+
+
+@pytest.mark.plan("free")
+async def test_callback_after_the_plan_lost_the_erp_is_plan_required(
+    realdb, platform_app, provider
+):
+    """The plan is re-checked at the callback: a connect started on Free and
+    finished on a plan without the direct ERPs is refused before the code is
+    exchanged, and nothing is linked."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    await _negotiated_empty_plan(realdb)
+    try:
+        resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+        assert resp.headers["location"].endswith("erp_error=plan_required")
+        assert provider.calls == []
+        assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    finally:
+        await realdb.purge_plans(NEGOTIATED_PREFIX, org_ids=[realdb.info("a").org_id])
 
 
 @pytest.mark.plan("scale")

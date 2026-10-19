@@ -939,3 +939,391 @@ async def test_no_webhook_is_queued_for_a_plan_without_the_feature(realdb, monke
             )
             await s.execute(delete(WebhookSubscription).where(WebhookSubscription.id == sub_id))
             await s.commit()
+
+
+# ---------------------------------------------------------------------------
+# §281 breadth: the routing rule, every ERP route, the in-flight exemptions,
+# and a lapsed plan across the other gates
+# ---------------------------------------------------------------------------
+
+SYNC_PATHS = (
+    "/api/vendors/sync-erp",
+    "/api/gl-accounts/sync-erp",
+    "/api/purchase-orders/sync-erp",
+)
+
+
+@pytest.mark.parametrize(
+    "config,adapter_key,features",
+    [
+        # No `integration_method`: the dispatcher's default sends it to Merge.
+        ({"type": "xero"}, "merge_dev", [FEATURE_ERP_INTEGRATIONS, FEATURE_ERP_MERGE]),
+        (
+            {"integration_method": "merge_dev"},
+            "merge_dev",
+            [FEATURE_ERP_INTEGRATIONS, FEATURE_ERP_MERGE],
+        ),
+        (LIVE_ERP, "netsuite", [FEATURE_ERP_INTEGRATIONS]),
+        (
+            {"type": "netsuite", "integration_method": "direct"},
+            "netsuite",
+            [FEATURE_ERP_INTEGRATIONS],
+        ),
+        (MOCK_ERP, "mock", []),
+        ({}, None, []),
+        (None, None, []),
+    ],
+)
+def test_the_gate_reads_the_route_the_dispatcher_takes(monkeypatch, config, adapter_key, features):
+    """The gate and `get_erp_adapter` share `resolve_adapter_key`; this pins
+    both ends of that agreement for the configs the plan rule turns on."""
+    import asyncio
+
+    from app.api import deps
+    from app.services.erp_adapters.dispatcher import (
+        _ADAPTER_REGISTRY,
+        load_builtin_adapters,
+        resolve_adapter_key,
+    )
+
+    checked: list[str] = []
+
+    async def _record(_db, _org_id, feature):
+        checked.append(feature)
+
+    monkeypatch.setattr(deps, "ensure_entitlement", _record)
+    asyncio.run(deps.ensure_live_erp_entitled(None, None, config))
+    assert checked == features
+
+    if adapter_key is not None:
+        load_builtin_adapters()
+        assert resolve_adapter_key(config) == adapter_key
+        assert adapter_key in _ADAPTER_REGISTRY
+
+
+@pytest.mark.asyncio
+async def test_get_entitlements_hands_back_a_copy(realdb):
+    """Mutating the no-plan answer must not rewrite what every later
+    plan-less org is granted."""
+    from app.services.billing.entitlements import get_entitlements
+
+    async with realdb.control_sessionmaker()() as s:
+        first = await get_entitlements(s, realdb.info("a").org_id)
+        first["public_api"] = True
+        first.pop(FEATURE_ERP_INTEGRATIONS)
+        second = await get_entitlements(s, realdb.info("a").org_id)
+    assert NO_PLAN_ENTITLEMENTS == {FEATURE_ERP_INTEGRATIONS: True}
+    assert second == {FEATURE_ERP_INTEGRATIONS: True}
+
+
+@pytest.mark.asyncio
+async def test_growth_does_not_carry_merge(realdb):
+    from app.services.billing.entitlements import get_entitlements
+
+    await realdb.subscribe("a", "growth")
+    async with realdb.control_sessionmaker()() as s:
+        ents = await get_entitlements(s, realdb.info("a").org_id)
+    assert ents.get(FEATURE_ERP_INTEGRATIONS) is True
+    assert FEATURE_ERP_MERGE not in ents
+
+
+async def _lapse(realdb, key: str = "a") -> None:
+    """Cancel the org's live subscription in place — the dunning sweep's write,
+    which `get_active_subscription`'s status filter reads, a different path
+    from an org that never had one."""
+    from app.models.billing import Subscription
+
+    async with realdb.control_sessionmaker()() as s:
+        sub = (
+            await s.execute(
+                select(Subscription).where(Subscription.organization_id == realdb.info(key).org_id)
+            )
+        ).scalar_one()
+        sub.status = "canceled"
+        await s.commit()
+
+
+async def _arrange(realdb, plan: str) -> None:
+    if plan == "canceled_scale":
+        await realdb.subscribe("a", "scale")
+        await _lapse(realdb)
+    else:
+        await realdb.subscribe("a", plan)
+
+
+def _mock_adapter_for_any_config(monkeypatch) -> None:
+    """Let a route that passed the gate reach an adapter without a network:
+    the gate is this file's subject, not NetSuite."""
+    from app.services import erp_adapters
+    from app.services.erp_adapters.mock_adapter import MockAdapter
+
+    monkeypatch.setattr(erp_adapters, "get_erp_adapter", lambda config: MockAdapter(config))
+
+
+async def _failed_invoice(realdb, prefix: str) -> uuid.UUID:
+    """An invoice whose ERP push failed after approval — what retry-erp takes."""
+    from decimal import Decimal
+
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    invoice_id = uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            Invoice(
+                id=invoice_id,
+                correlation_id=uuid.uuid4(),
+                organization_id=realdb.info("a").org_id,
+                vendor_name="Retry Supplies",
+                invoice_number=f"{prefix}-{invoice_id.hex[:6]}",
+                amount=Decimal("100.00"),
+                currency="USD",
+                status=InvoiceStatus.failed,
+                approved_by="an approver",
+            )
+        )
+        await s.commit()
+    return invoice_id
+
+
+def _record_dispatch(monkeypatch) -> list[uuid.UUID]:
+    from app.api import workflow as workflow_api
+
+    dispatched: list[uuid.UUID] = []
+
+    async def _record(invoice_id, *_args, **_kwargs):
+        dispatched.append(invoice_id)
+
+    monkeypatch.setattr(workflow_api, "dispatch_erp", _record)
+    return dispatched
+
+
+@pytest.mark.asyncio
+async def test_free_retries_a_failed_push_to_a_direct_erp(realdb, monkeypatch):
+    from app.models.invoice import InvoiceStatus
+
+    dispatched = _record_dispatch(monkeypatch)
+    await realdb.subscribe("a", "free")
+    await _write_settings(realdb, erp=dict(LIVE_ERP))
+    invoice_id = await _failed_invoice(realdb, "RT")
+    async with realdb.client(key="a") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/retry-erp")
+    assert resp.status_code == 202, resp.text
+    assert dispatched == [invoice_id]
+    assert await _invoice_status(realdb, invoice_id) == InvoiceStatus.sending_to_erp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plan", ["free", "growth", "canceled_scale"])
+async def test_retrying_a_merge_push_needs_scale(realdb, monkeypatch, plan):
+    from app.models.invoice import InvoiceStatus
+
+    dispatched = _record_dispatch(monkeypatch)
+    await _arrange(realdb, plan)
+    await _write_settings(realdb, erp=dict(MERGE_ERP))
+    invoice_id = await _failed_invoice(realdb, "RM")
+    async with realdb.client(key="a") as c:
+        _assert_plan_refusal(
+            await c.post(f"/api/invoices/{invoice_id}/retry-erp"), FEATURE_ERP_MERGE
+        )
+    assert dispatched == []
+    assert await _invoice_status(realdb, invoice_id) == InvoiceStatus.failed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "erp,expected",
+    [(LIVE_ERP, "sending_to_erp"), (MERGE_ERP, "approved")],
+    ids=["direct-dispatches", "merge-stays-approved"],
+)
+async def test_completing_an_approved_invoice_on_free(realdb, monkeypatch, erp, expected):
+    """The completion leg (`POST /complete` on an approved invoice with the ERP
+    step on): a direct ERP is pushed on Free; a Merge one is refused BEFORE the
+    transition, so the invoice stays `approved` and payable."""
+    from app.models.invoice import InvoiceStatus
+
+    from app.api import workflow as workflow_api
+
+    async def _erp_step_on(*_args, **_kwargs):
+        return True
+
+    # The harness tenant's workflow keeps the ERP step off; this leg is the
+    # one that runs when a tenant has it on.
+    monkeypatch.setattr(workflow_api, "is_step_enabled", _erp_step_on)
+    dispatched = _record_dispatch(monkeypatch)
+    await realdb.subscribe("a", "free")
+    await _write_settings(realdb, erp=dict(erp))
+    invoice_id = await _approved_invoice(realdb, "CP")
+    async with realdb.client(key="a") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+    if expected == "approved":
+        _assert_plan_refusal(resp, FEATURE_ERP_MERGE)
+        assert dispatched == []
+    else:
+        assert resp.status_code == 200, resp.text
+        assert dispatched == [invoice_id]
+    assert await _invoice_status(realdb, invoice_id) == InvoiceStatus(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", SYNC_PATHS)
+async def test_free_syncs_from_a_direct_erp(realdb, monkeypatch, path):
+    _mock_adapter_for_any_config(monkeypatch)
+    await realdb.subscribe("a", "free")
+    await _write_settings(realdb, erp=dict(LIVE_ERP))
+    async with realdb.client(key="a") as c:
+        resp = await c.post(path)
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", SYNC_PATHS)
+@pytest.mark.parametrize("plan", ["free", "growth"])
+async def test_syncing_from_merge_needs_scale(realdb, monkeypatch, path, plan):
+    _mock_adapter_for_any_config(monkeypatch)
+    await realdb.subscribe("a", plan)
+    await _write_settings(realdb, erp=dict(MERGE_ERP))
+    async with realdb.client(key="a") as c:
+        _assert_plan_refusal(await c.post(path), FEATURE_ERP_MERGE)
+
+
+@pytest.mark.asyncio
+async def test_free_tests_a_direct_erp_connection(realdb, monkeypatch):
+    _mock_adapter_for_any_config(monkeypatch)
+    await realdb.subscribe("a", "free")
+    async with realdb.client(key="a") as c:
+        resp = await c.post("/api/organization/test-erp", json=LIVE_ERP)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+
+
+class _DedupRedis:
+    """SET NX / get / delete — all the ERP webhook's dedup claim needs."""
+
+    def __init__(self):
+        self._store: dict[str, str] = {}
+
+    async def set(self, key, value, *, nx=False, ex=None):
+        if nx and key in self._store:
+            return None
+        self._store[key] = value
+        return True
+
+    async def get(self, key):
+        return self._store.get(key)
+
+    async def delete(self, key):
+        self._store.pop(key, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plan", ["free", "canceled_scale"])
+async def test_the_erp_webhook_is_accepted_for_a_stored_merge_config(realdb, monkeypatch, plan):
+    """The in-flight exemption (§258, §281): a push already sent before the
+    plan stopped covering Merge still has its status reported back. The
+    webhook is not plan-gated, so `sent_to_erp → posted_in_erp` applies."""
+    import hashlib
+    import hmac
+    import json
+
+    from app.api import erp_webhook
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    secret = f"whsec-{uuid.uuid4().hex}"
+    fake = _DedupRedis()
+
+    async def _get_redis():
+        return fake
+
+    monkeypatch.setattr("app.services.webhook_security.get_redis", _get_redis)
+    monkeypatch.setattr(erp_webhook, "control_session_factory", realdb.control_sessionmaker())
+
+    await _arrange(realdb, plan)
+    await _write_settings(realdb, erp=dict(MERGE_ERP))
+    await realdb.store_provider_secrets("a", "erp", {"webhook_signing_secret": secret})
+
+    invoice_id = await _approved_invoice(realdb, "WH")
+    async with realdb.sessionmaker("a")() as s:
+        invoice = await s.get(Invoice, invoice_id)
+        invoice.status = InvoiceStatus.sent_to_erp
+        correlation_id = str(invoice.correlation_id)
+        await s.commit()
+
+    body = json.dumps(
+        {
+            "tenant_slug": realdb.info("a").slug,
+            "correlation_id": correlation_id,
+            "event_id": f"evt-{uuid.uuid4().hex}",
+            "status": "posted",
+        }
+    ).encode()
+    signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(
+            "/api/erp/webhook/merge_dev",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Webhook-Signature": signature},
+        )
+    assert resp.status_code == 204, resp.text
+    assert await _invoice_status(realdb, invoice_id) == InvoiceStatus.posted_in_erp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "gate",
+    ["api_key", "webhook", "sso", "scim_token", "scim_provisioning", "second_entity"],
+)
+async def test_a_lapsed_scale_plan_is_refused_every_paid_gate(realdb, monkeypatch, gate):
+    """A canceled subscription reaches `get_active_subscription`'s status
+    filter — not the no-row path — and must read as Free there too: every
+    paid feature refused. `audit_siem_export` gates nothing yet (§258)."""
+    await realdb.subscribe("a", "scale")
+    await _lapse(realdb)
+
+    if gate == "scim_provisioning":
+        from app.api.scim import create_user
+        from app.schemas.scim import SCIMUserCreate
+
+        org = await _org(realdb)
+        async with realdb.control_sessionmaker()() as s:
+            with pytest.raises(HTTPException) as exc:
+                await create_user(
+                    SCIMUserCreate(userName=f"lapsed-{uuid.uuid4().hex[:6]}@example.test"),
+                    _REQUEST,
+                    org,
+                    s,
+                )
+        assert exc.value.status_code == 402
+        return
+
+    if gate == "webhook":
+
+        async def _public(*_a, **_k):
+            return None
+
+        monkeypatch.setattr("app.api.webhooks.ensure_public_webhook_target", _public)
+
+    requests = {
+        "api_key": ("post", "/api/api-keys", {"name": "k"}, FEATURE_PUBLIC_API),
+        "webhook": (
+            "post",
+            "/api/webhooks",
+            {
+                "name": "lapsed",
+                "target_url": "https://hooks.example.test/in",
+                "event_types": ["invoice.approved"],
+            },
+            FEATURE_PUBLIC_API,
+        ),
+        "sso": ("put", SSO_URL, {**OIDC_READY, "sso_only": False}, FEATURE_SSO),
+        "scim_token": ("post", "/api/organization/sso/scim-token", None, FEATURE_SCIM),
+        "second_entity": (
+            "post",
+            "/api/entities",
+            {"name": "Lapsed Inc", "slug": "lapsed-inc", "currency": "USD"},
+            FEATURE_MULTI_ENTITY,
+        ),
+    }
+    method, path, body, feature = requests[gate]
+    async with realdb.client(key="a") as c:
+        resp = await c.request(method.upper(), path, json=body)
+    _assert_plan_refusal(resp, feature)
