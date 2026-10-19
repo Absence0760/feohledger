@@ -49,7 +49,7 @@ The app was designed local-first, and that carries straight into a cheap deploy:
 ## What this deliberately does NOT give you
 
 Single AZ, single instance, no autoscaling, a single-AZ database instance (no
-standby), manual deploys, restore as the failover story. Acceptable for a
+standby), deploys that build on the serving VM, restore as the failover story. Acceptable for a
 pilot; see [What's left out](#whats-left-out--and-how-to-add-it-later) for
 when each piece graduates.
 
@@ -119,9 +119,17 @@ Resizing is a change to `app_instance_type` in the tfvars (a stop → change-typ
    to the gitignored `deploy/.env` on every deploy — the compose file reads it
    via `env_file` + interpolation. The contract is
    `deploy/prod.sops.yaml.example` (`docs/decisions.md` §171).
-5. **Manual deploys.** SSH in: `git pull`, rebuild, migrate, restart (script
-   below). `aws-deploy.yml` stays disarmed (`AWS_DEPLOY_ENABLED` unset) until
-   the ECS build-out exists.
+5. **Release-triggered deploys over SSM.** Publishing a GitHub release runs
+   `.github/workflows/vm-deploy.yml`: after the `production` environment's
+   required reviewer approves, it sends SSM Run Command to the VM, which runs
+   `deploy/deploy.sh --ref <the release's commit>` (pull that exact commit,
+   rebuild, migrate, roll — step 4 below) and reports the result back. No SSH:
+   the GitHub deploy role may run only the `feohledger-vm-deploy` command
+   document, only on this instance, and the document's one parameter must be a
+   commit sha (`infra/deploy.tf`, `docs/decisions.md` §275). A manual
+   `./deploy.sh` from a Session Manager shell still works and deploys main's
+   tip. `aws-deploy.yml` stays disarmed (`AWS_DEPLOY_ENABLED` unset) until the
+   ECS build-out exists.
 6. **The database is RDS from day one.** Postgres is the one component whose
    loss is data loss, and RDS turns its recovery from "last night's dump" into
    automated backups with point-in-time restore, on a database that outlives
@@ -314,8 +322,29 @@ pnpm store cached in a volume) and the backend image, runs
 the new API serves traffic (same ordering contract as the future ECS
 pipeline), then rolls the containers with `up -d --wait` — the deploy fails
 loudly if the API healthcheck never passes, and a failed build or migration
-leaves the previous containers serving. Flags: `--no-pull`, `--backend-only`,
-`--frontend-only`.
+leaves the previous containers serving. Flags: `--no-pull`, `--ref <sha>`,
+`--backend-only`, `--frontend-only`. Only one deploy runs at a time (a `flock`
+on `deploy/.deploy.lock`), and after the checkout the script re-runs the
+`deploy.sh` it just checked out, so a release that changes the deploy steps is
+deployed by them.
+
+**Every deploy after the first is a published release.** Tag a commit on
+`main`, publish the GitHub release, and approve the `Deploy to the VM` run when
+the `production` environment asks. The workflow runs
+`deploy.sh --ref <the tag's commit>` over SSM — that commit, not whatever
+`main` has become while the run waited for approval — and fails the run if the
+deploy fails, printing the tail of the log with tenant database names redacted
+(the run log is public; the whole log stays on the VM under
+`/var/log/feoh-deploy/`, one file per run, kept 90 days). `deploy.sh` refuses a
+commit that is not on `origin/main`, so a release tagged on a branch fails
+rather than ships. Prereleases do not deploy. To redeploy, or roll back, run the
+workflow by hand (`workflow_dispatch`) from `main` — or from an older release
+tag, for a rollback (only a tag that already contains `vm-deploy.yml`; for an
+older commit, use `./deploy.sh --ref <sha>` from a Session Manager shell). The
+migrations are forward-only, so rolling back past one is a database decision,
+not just a code one. GitHub keeps one pending run per concurrency group, so
+releases published in quick succession while one waits for approval collapse to
+the newest. One-time setup: `infra/README.md` § Release deploys.
 
 Tenants are one command each: `deploy/add-tenant.sh <slug> --name "Company"
 --admin-email admin@company.com` provisions the tenant (the same

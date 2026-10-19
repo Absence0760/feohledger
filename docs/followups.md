@@ -558,14 +558,17 @@ honestly be folded into the slice that surfaced it.
 
 ### Surfaced by wiring the FeohLedger AWS account (2026-09-14)
 
-- [ ] **(c) The GitHub deploy role exists but can do nothing.** The estate
+- [ ] **(c) The GitHub deploy role can deploy the VM, but not the ECS pipeline.** The estate
       account bootstrap created `feohledger-deploy` in the FeohLedger account,
       trusted only from this repo's `production` environment, and attached no
       policy — on purpose. *Corrected 2026-10-07:* `infra/` now defines a
       single-VM workload (`compute.tf`'s EC2 instance + `database.tf`'s RDS,
       `docs/minimal-deployment.md`), while `aws-deploy.yml` still targets
       ECS/Fargate — so the first call is which deploy target the pipeline
-      serves, and the policy is scoped to that. As written, `aws-deploy.yml` needs ECR push, ECS
+      serves, and the policy is scoped to that. *Updated 2026-10-18:* the VM half
+      is done — `infra/deploy.tf` grants the role SSM Run Command of one
+      document on the app VM, and `vm-deploy.yml` deploys on a release
+      (`docs/decisions.md` §275). What remains is the ECS half. As written, `aws-deploy.yml` needs ECR push, ECS
       register/update + `run-task`/`describe-tasks`, `iam:PassRole` on the task
       and execution roles, `lambda:UpdateFunctionCode`, S3 sync and CloudFront
       invalidation (`docs/production-deployment.md` § Credentials), and every

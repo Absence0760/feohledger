@@ -1,0 +1,163 @@
+name: Deploy to the VM
+
+# Production deploy for the single-VM stack (docs/minimal-deployment.md,
+# docs/decisions.md §254 and §275): a published release runs
+# `deploy/deploy.sh --ref <the release's commit>` on the app VM through SSM Run
+# Command, waits for it, and fails if the deploy fails.
+#
+# - No SSH. The VM has no port 22 and no key pair; SSM is the only way in, and
+#   every command is an IAM-authorized, CloudTrail-logged event.
+# - The role can run ONE thing. `infra/deploy.tf` grants the deploy role
+#   `ssm:SendCommand` on the app VM and the `feohledger-vm-deploy` command
+#   document only — not AWS-RunShellScript — and that document's single
+#   parameter must be a 40-character sha. Holding the role is not a shell.
+# - A human approves every run: the job is in the `production` environment,
+#   whose required reviewer gates it before any AWS call is made.
+# - What deploys is the release's commit, not whatever main is by the time the
+#   reviewer approves. deploy.sh refuses a commit that is not on origin/main, so
+#   a release tagged on a branch fails instead of shipping unreviewed code.
+#
+# `aws-deploy.yml` is the separate, disarmed pipeline for the ECS/CloudFront
+# build-out (docs/production-deployment.md); this one is for the stack that
+# exists.
+#
+# Armed by the repository variable VM_DEPLOY_ENABLED=true, once the operator
+# steps in infra/README.md § Release deploys are done — until then a release
+# skips this job instead of failing it.
+
+on:
+  release:
+    types: [published]
+  # A redeploy (run it from `main`: main's tip) or a rollback (run it from an
+  # older release tag: that tag's commit — only tags that already contain this
+  # workflow can be run from). A commit that is not on origin/main is refused
+  # on the VM.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One production deploy at a time. Never cancel one in flight: it may be
+  # half-way through a migration. (deploy.sh also takes a lock on the VM, which
+  # covers a manual run from a Session Manager shell.)
+  group: vm-deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy release to the app VM
+    runs-on: ubuntu-latest
+    # Repository variable, not environment-scoped, so it is readable before the
+    # environment gate. Prereleases are not production releases.
+    if: >-
+      vars.VM_DEPLOY_ENABLED == 'true'
+      && !(github.event_name == 'release' && github.event.release.prerelease)
+    # deploy.sh builds the frontend and backend on a t4g.medium (~30 min at
+    # worst). Worst case on the SSM side is 5 min to deliver + 45 min to run
+    # (the document's timeout) = 50; the poll gives up at 55, and the job at 60
+    # leaves room to collect the output.
+    timeout-minutes: 60
+
+    # MUST match the deploy role's trust policy (`:environment:production`),
+    # and carries the required reviewer.
+    environment: production
+
+    permissions:
+      id-token: write # OIDC: assume the deploy role, no long-lived keys
+      contents: read
+
+    env:
+      # The command document infra/deploy.tf creates (output
+      # vm_deploy_document_name). Not secret: it is the project name.
+      DEPLOY_DOCUMENT: feohledger-vm-deploy
+      # On a release, the commit its tag points at; on a manual run, the tip of
+      # the branch it was started from.
+      DEPLOY_SHA: ${{ github.sha }}
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Run deploy.sh on the VM
+        id: send
+        env:
+          # An environment secret, not a variable: this repo is public and so are
+          # its workflow logs, and a secret is masked in them.
+          INSTANCE_ID: ${{ secrets.VM_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "::error::The production environment has no VM_INSTANCE_ID secret (infra/README.md § Release deploys)."
+            exit 1
+          fi
+          echo "Deploying ${DEPLOY_SHA}"
+          # --timeout-seconds bounds DELIVERY: an offline agent fails in five
+          # minutes instead of the default hour. Execution is bounded by the
+          # document's own timeout (45 min).
+          command_id=$(aws ssm send-command \
+            --document-name "$DEPLOY_DOCUMENT" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "Ref=${DEPLOY_SHA}" \
+            --timeout-seconds 300 \
+            --comment "GitHub run ${GITHUB_RUN_ID}" \
+            --query Command.CommandId --output text)
+          echo "command_id=${command_id}" >> "$GITHUB_OUTPUT"
+          echo "SSM command ${command_id}"
+
+      - name: Wait for the deploy
+        env:
+          INSTANCE_ID: ${{ secrets.VM_INSTANCE_ID }}
+          COMMAND_ID: ${{ steps.send.outputs.command_id }}
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 55 * 60 ))
+          status=Pending
+          while :; do
+            # Right after SendCommand the invocation may not exist yet
+            # (InvocationDoesNotExist) — that is "pending". Any other error
+            # (a missing permission, say) fails now rather than at the deadline.
+            if ! status=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>"$RUNNER_TEMP/poll.err"); then
+              grep -q InvocationDoesNotExist "$RUNNER_TEMP/poll.err" || { cat "$RUNNER_TEMP/poll.err" >&2; exit 1; }
+              status=Pending
+            fi
+            case "$status" in
+              Pending | InProgress | Delayed | Cancelling) ;;
+              *) break ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Still ${status} after 55 minutes. The command may still be running on the VM; its log is under /var/log/feoh-deploy/ (aws ssm start-session)."
+              exit 1
+            fi
+            sleep 20
+          done
+
+          # The document returns only the tail of the deploy log; the whole log
+          # stays on the VM under /var/log/feoh-deploy/. This run log is PUBLIC
+          # (public repo), so tenant database names — which carry customer
+          # slugs, printed once per tenant by the migration step — are redacted
+          # before printing. And the output is never interpreted as workflow
+          # commands: a `::` line in it is printed, not obeyed.
+          output() {
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+              --query "$1" --output text | grep -v '^None$' || true
+          }
+          stop=$(openssl rand -hex 16)
+          echo "::group::deploy.sh output (tail, tenant names redacted)"
+          echo "::stop-commands::${stop}"
+          { output StandardOutputContent; output StandardErrorContent; } |
+            sed -E 's/feoh_[A-Za-z0-9_]+/feoh_<tenant>/g'
+          echo "::${stop}::"
+          echo "::endgroup::"
+
+          if [ "$status" != Success ]; then
+            echo "::error::Deploy ${status}. A failed build or migration leaves the previous containers serving (deploy/README.md § Deploys)."
+            exit 1
+          fi
+          echo "Deployed ${DEPLOY_SHA}."

@@ -11267,6 +11267,61 @@ to every tenant too, and a revision that creates control tables must then probe
 which kind of database it is in — the same probe that misfired here. Running
 `seed.py` in production: it creates demo organizations and users.
 
+## 275. A published release deploys the VM over SSM, through one scoped document (2026-10-18)
+
+The single-VM stack (§254) deploys on a **published GitHub release**:
+`.github/workflows/vm-deploy.yml` assumes the OIDC deploy role in the
+`production` environment, and sends SSM Run Command to the app VM, which runs
+`deploy/deploy.sh --ref <the release's commit>`, waits for it and fails the run
+if the deploy fails. Mechanics: `deploy/README.md` § Deploys and
+`infra/README.md` § Release deploys.
+
+- **Release-triggered, behind a human.** A release is already the repo's unit
+  of "this ships" (`mobile-release.yml` and the disarmed `aws-deploy.yml` hang
+  off the same event), and the `production` environment's required reviewer
+  gates the job before any AWS call. Prereleases do not deploy. A
+  `workflow_dispatch` covers a redeploy or a rollback.
+- **SSM, not SSH.** The VM has no port 22 and no key pair (§254); Run Command
+  needs neither, and every command is an IAM-authorized, CloudTrail-logged
+  event. Opening SSH to GitHub's runner ranges, or keeping a deploy key in
+  Actions secrets, were the alternatives — both add a standing credential to an
+  internet-facing machine.
+- **The role can run one thing.** `infra/deploy.tf` grants `ssm:SendCommand` on
+  the app instance and on a custom `feohledger-vm-deploy` document only. SSM
+  authorizes SendCommand against both, so `AWS-RunShellScript` — root shell on
+  the VM for whoever holds the role — is out of reach. The document's single
+  parameter is the commit, constrained by `allowedPattern` to a 40-hex sha, so
+  SSM refuses anything else before a shell exists. `ssm:GetCommandInvocation`
+  has no resource type and is granted on `*` (read-only);
+  `ListCommandInvocations` is not granted at all. The grant is an inline policy
+  attached by role name: the baseline module mints the role with a trust policy
+  and no permissions and says the project attaches its own, so the trust policy
+  stays the baseline's.
+- **The release's commit, not main's tip.** `deploy.sh` used to deploy whatever
+  `git pull` brought, and between publishing a release and a reviewer approving
+  it `main` can move — the deploy would ship commits nobody released. `--ref`
+  checks out exactly the tagged commit, refuses one that is not on
+  `origin/main` (a release tagged on a branch fails rather than ships
+  unreviewed code), and leaves the checkout on `main` so a rollback does not
+  strand the next pull. Refusing every release whose tag is not main's tip was
+  the simpler option, rejected because it fails any release where `main` moved
+  during the approval wait — the normal case on a busy day.
+- **Two fixes the automation surfaced.** `deploy.sh` re-runs the copy of itself
+  it just checked out (bash otherwise finishes the deploy with the previous
+  release's steps), and takes a `flock`, so a release and a manual run from a
+  Session Manager shell cannot build and migrate over each other.
+- **The run log is public, so the output is redacted.** The workflow prints the
+  tail of the deploy log (SSM returns at most 24,000 characters, so the document
+  tails a per-run log file kept on the VM), with tenant database names —
+  customer slugs — replaced, and with workflow commands stopped around it.
+
+Rejected: arming `aws-deploy.yml` (it targets the ECS build-out, which does not
+exist); a self-hosted runner on the VM (a long-lived GitHub credential on the
+production box, and any workflow change runs there); polling `main` from a cron
+on the VM (deploys unreviewed commits, and no result reaches anyone). The
+workflow exercises the same OIDC handshake as `aws-oidc-preflight.yml`, so the
+preflight remains the first thing to run (issue #449).
+
 ## 276. An admin resets a password to a forced-change temp, never to a value they type (#566, 2026-10-18)
 
 **Context.** `PATCH /api/admin/users/{id}` took a `password` and stored the

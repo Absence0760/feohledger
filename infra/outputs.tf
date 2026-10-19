@@ -62,3 +62,8 @@ output "alerts_topic_arn" {
   description = "SNS topic every infrastructure alarm notifies."
   value       = aws_sns_topic.alerts.arn
 }
+
+output "vm_deploy_document_name" {
+  description = "SSM command document the release workflow runs on the app VM (deploy.tf). .github/workflows/vm-deploy.yml names it directly; the two must agree."
+  value       = aws_ssm_document.deploy.name
+}

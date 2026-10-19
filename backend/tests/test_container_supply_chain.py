@@ -371,6 +371,30 @@ def test_workflows_restate_no_image_ref() -> None:
     )
 
 
+_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*(?P<ref>\S+)(?P<rest>.*)$")
+_PINNED_ACTION = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
+
+
+def test_workflow_actions_are_pinned_by_full_sha() -> None:
+    """Every third-party action is `owner/repo@<40-hex sha> # <tag>`.
+
+    A tag can be moved to other code after review; a sha cannot. The trailing
+    tag comment is what Dependabot's `github-actions` ecosystem reads to bump
+    the pin, and what a reviewer reads to know which release it is. Local
+    actions (`./…`) are part of this repo and exempt.
+    """
+    assert WORKFLOWS, "no .github/workflows found — every workflow guard would pass vacuously"
+    bad = [
+        f"{workflow.name}: {match['ref']}"
+        for workflow in WORKFLOWS
+        for line in workflow.read_text().splitlines()
+        if (match := _USES.match(line))
+        and not match["ref"].startswith("./")
+        and not (_PINNED_ACTION.match(match["ref"]) and re.match(r"\s+#\s*\S", match["rest"]))
+    ]
+    assert not bad, f"actions not pinned to a full sha with a `# <tag>` comment: {bad}"
+
+
 def test_workflow_containers_run_the_compose_files_refs() -> None:
     """Every `services:` / `container:` image is an output of the compose reader.
 

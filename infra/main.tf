@@ -11,6 +11,8 @@
 #   - compute.tf  : the app VM, its instance role, Elastic IP and DNS records
 #   - database.tf : RDS Postgres 16
 #   - monitoring.tf : alarms
+#   - deploy.tf   : release deploys — the SSM document that runs deploy.sh on
+#                   the VM, and the deploy role's grant to run only that
 #
 # The scale-up architecture (ECS, ALB, CloudFront) is
 # docs/production-deployment.md and is not built.

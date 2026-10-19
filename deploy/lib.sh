@@ -2,7 +2,8 @@
 # The variables this file sets are its outputs, read by the sourcing script.
 # shellcheck disable=SC2034
 # Shared by every deploy script (sourced, never run): the ONE place the
-# database mode is decided, and the compose invocation that follows from it.
+# database mode is decided, and the compose invocation that follows from it —
+# plus feoh_sync_source, deploy.sh's choice of which commit to build (bottom).
 #
 #   external — the sops env sets FEOH_DATABASE_URL (the documented path:
 #              Amazon RDS). The `postgres` service never starts; pg client
@@ -97,4 +98,47 @@ feoh_pg_run() {
 		-e PGUSER="$FEOH_PGUSER" \
 		-e PGPASSWORD \
 		pgtools "$@"
+}
+
+# ── Source: which commit the deploy builds ───────────────────────────────────
+#
+# feoh_sync_source <repo-root> [<sha>] brings the checkout to the commit to
+# deploy, and always leaves it on the `main` branch:
+#
+#   no sha — fast-forward main to origin/main (a manual `./deploy.sh`).
+#   sha    — exactly that commit (a release: .github/workflows/vm-deploy.yml
+#            passes the commit the release tag points at, through deploy.sh
+#            --ref). It must be a full sha and on origin/main — a release tag
+#            on a branch is refused, not deployed. `main` is moved to it, so an
+#            older sha is a rollback, and because that commit is an ancestor of
+#            origin/main the next plain pull still fast-forwards. A modified
+#            tracked file is refused: the deploy would no longer be the commit
+#            it names.
+feoh_sync_source() {
+	local root=$1 ref=${2:-}
+	if [ -z "$ref" ]; then
+		git -C "$root" pull --ff-only
+		return
+	fi
+	if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+		echo "--ref takes a full 40-character commit sha, got '${ref}'." >&2
+		return 1
+	fi
+	if ! git -C "$root" diff --quiet HEAD --; then
+		echo "the checkout has modified tracked files; a --ref deploy would not be the commit it names. Commit or discard them first (git -C ${root} status)." >&2
+		return 1
+	fi
+	git -C "$root" fetch --quiet origin main || return 1
+	if ! git -C "$root" cat-file -e "${ref}^{commit}" 2>/dev/null; then
+		echo "commit ${ref} is not in origin — was the release made from another repository?" >&2
+		return 1
+	fi
+	if ! git -C "$root" merge-base --is-ancestor "$ref" origin/main; then
+		echo "commit ${ref} is not on origin/main; only commits on main are deployed. Tag a commit on main and publish the release again." >&2
+		return 1
+	fi
+	# Explicit returns throughout: callers run this as `feoh_sync_source … || die`,
+	# where errexit does not apply inside the function.
+	git -C "$root" checkout --quiet -B main "$ref" || return 1
+	echo "==> source: main at ${ref}"
 }

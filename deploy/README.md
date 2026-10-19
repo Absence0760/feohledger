@@ -14,7 +14,7 @@ The whole flow is four commands on a fresh VM:
 ```
 ./bootstrap-vm.sh                     # once: docker, compose, sops, swap, cron, IMDS fix
 # copy infra-secrets' feohledger/prod.sops.yaml in as deploy/prod.sops.yaml, log out/in (docker group), then:
-./deploy.sh                           # every deploy: build, migrate, roll, verify
+./deploy.sh                           # first deploy: build, migrate, roll, verify (later ones: publish a release, § Deploys)
 ./add-tenant.sh acme --name "Acme" --admin-email admin@acme.com
 ```
 
@@ -24,9 +24,9 @@ The whole flow is four commands on a fresh VM:
 | `compose.prod.yml` | Redis (AOF) + API + Caddy, plus Postgres (pgvector) under the `localdb` profile for container mode only. No DB host ports; S3 is real AWS. API healthcheck lets deploys verify themselves. Container logs capped (json-file, 10 MB × 5 per service) so they can't fill the 30 GB disk. `FEOH_DATABASE_URL` (set → RDS) and `FEOH_REDIS_URL` are override seams; `PGSSLMODE` is passed to the api (default `prefer`). The one-shot `pgtools` service (same Postgres image, RDS CA bundle mounted, `tools` profile) carries the pg client tools for RDS. Also the one-shot `frontend-build` service (Node image + pnpm-store cache) behind a `build` profile, so `up` never starts it — `deploy.sh` runs it. Every image is `repo:tag@sha256:…`, bumped by Dependabot (`backend/docs/docker.md` § Image pinning). |
 | `Caddyfile` | TLS + static SPA + `api.feohledger.com` reverse proxy. Domains via env. |
 | `tenants.caddy.example` | Template for the per-VM tenant host list (`tenants.caddy`, gitignored). `add-tenant.sh` maintains it — manual edits rarely needed. |
-| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). |
+| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). Also `feoh_sync_source`, `deploy.sh`'s checkout step: main's tip, or with `--ref` exactly one commit that must be on `origin/main`, always leaving the checkout on `main`. |
 | `compose.sh` / `psql.sh` | Ad-hoc `docker compose` / `psql` with the database mode applied — use these instead of a bare `docker compose -f compose.prod.yml …`, which in container mode would start the stack without its database. |
-| `deploy.sh` | Preflight → pull → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → Caddy reload. Flags: `--no-pull`, `--backend-only`, `--frontend-only`. |
+| `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → Caddy reload. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
 | `add-tenant.sh` | Tenant DB + org + admin user (same `provision_tenant` path as signup) + Caddy host block + reload, in one shot. Generates a temp password (first-login change forced) unless `--admin-password` given. |
 | `remove-tenant.sh` | The inverse of `add-tenant.sh`, and the deletion `/legal/dpa` § 13 promises within 60 days of termination: removes the Caddy host block and reloads (stop serving first), runs `scripts/delete_tenant.py` in the api container (documents → tenant DB → control-plane rows), then deletes every version of that tenant's nightly dumps from the backup bucket. `--dry-run` prints the inventory and changes nothing; otherwise it makes you type the slug back. Prints the written confirmation to send the customer, including the two residues it does NOT reach. |
 | `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. On RDS these are the long-retention, provider-independent copy beside RDS's automated backups + PITR (globals with `--no-role-passwords`); in container mode they are the whole DR story. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. |
@@ -70,10 +70,40 @@ The whole flow is four commands on a fresh VM:
 
 ## Deploys
 
-`./deploy.sh` — it preflights its own prerequisites and required env keys,
-runs migrations before the new API serves traffic, and fails loudly (via the
-compose healthcheck) if the API doesn't come up. If the build or migration
-step fails, the previously-running containers keep serving.
+**Publish a GitHub release.** That is the whole deploy: tag a commit on `main`,
+publish the release, and approve the `Deploy to the VM` run
+(`.github/workflows/vm-deploy.yml`) when the `production` environment asks for
+a reviewer. The workflow sends SSM Run Command to this VM, which runs
+`./deploy.sh --ref <the release's commit>` as `ec2-user`, waits for it (up to
+45 minutes), prints the tail of its output, and fails the run if the deploy
+failed. That output is redacted of tenant database names, because the run log
+of a public repo is public. Each automated deploy's full log is a file under
+`/var/log/feoh-deploy/` on the VM (kept 90 days). No SSH is involved: the deploy role can
+run only the `feohledger-vm-deploy` command document, on only this instance,
+and the document accepts nothing but a commit sha (`infra/deploy.tf`,
+`docs/decisions.md` §275). Prereleases do not deploy. Redeploy or roll back by
+running the workflow by hand from `main` or from an older release tag (one that
+already contains `vm-deploy.yml`; for anything older, `./deploy.sh --ref <sha>`
+by hand).
+One-time setup (apply, the instance-id secret, the OIDC preflight, arming the
+workflow): `../infra/README.md` § Release deploys.
+
+`./deploy.sh` by hand, from a Session Manager shell, still works: it deploys
+main's tip, and `--ref <sha>` deploys one commit. Either way it preflights its
+own prerequisites and required env keys, runs migrations before the new API
+serves traffic, and fails loudly (via the compose healthcheck) if the API
+doesn't come up. If the build or migration step fails, the previously-running
+containers keep serving. Only one deploy runs at a time — a second one, manual
+or released, refuses to start while the first holds `.deploy.lock`.
+
+`--ref` refuses a commit that is not on `origin/main` (a release tagged on a
+branch fails rather than ships unreviewed code) and a checkout with modified
+tracked files (the deploy would no longer be the commit it names). It resets
+the VM's local `main` to that commit — a commit made on the VM and never pushed
+is dropped from the branch, so never commit on the box — and leaves the checkout
+on `main`, so after a rollback the next plain
+`./deploy.sh` fast-forwards as usual. Migrations are forward-only: rolling the
+code back past one leaves the newer schema in place.
 
 **A VM first deployed before the frontend build moved into compose**
 (`docs/decisions.md` §203) still holds the old pnpm cache volume,
