@@ -58,7 +58,8 @@ never float, anywhere.
 ### Default plan catalog + baseline Subscription (`services/billing/plan_catalog.py`)
 
 Every org needs a live `Subscription` for two reasons: `get_entitlements`
-fail-closes to `{}` without one (so the public API is unreachable — see
+reads an org without one as Free (so nothing past Free's direct ERP is
+reachable — see
 [Entitlement gating](#entitlement-gating-servicesbillingentitlementspy--apidepspy)
 below), and `change_plan` 404s with `no_live_subscription` when there's no
 starting row to move FROM (so an org could never even upgrade). Before this,
@@ -96,10 +97,20 @@ new-child-tenant provisioning path — all three route through
 `provision_tenant`) binds every new org to the real **`free`** plan regardless
 of the cosmetic `Organization.plan` display string those callers pass (that
 field predates this billing model and has long carried values like `"pro"`
-that were never a real `Plan.code`). `free` grants no entitlements by design —
-every feature in [Entitlement gating](#entitlement-gating-servicesbillingentitlementspy--apidepspy)
-is a paid-tier feature; an org reaches one via `POST /api/billing/change-plan`
-to `growth` or `scale`.
+that were never a real `Plan.code`). `free` grants one feature,
+`erp_integrations` — the direct ERP adapters, which cost nothing per
+connection (decisions §281). Every other feature in
+[Entitlement gating](#entitlement-gating-servicesbillingentitlementspy--apidepspy)
+is a paid-tier feature, Merge.dev (`erp_merge`) among them; an org reaches one
+via `POST /api/billing/change-plan` to `growth` or `scale`.
+
+Migration **`0112_free_plan_erp`** brings an already-provisioned control plane
+onto §281: it merges `erp_integrations` into the existing `free` row and
+`erp_merge` into `scale` (`entitlements || {...}`, so an operator's other edits
+to a row's grants survive), and leaves `growth` alone. `ensure_plan_catalog`
+never rewrites an existing row, so without it an older control plane would keep
+Free at `{}`. `0107_plan_catalog_v2` did the same job for §253, by rewriting the
+whole column.
 
 #### The public pricing page is generated from this catalog
 
@@ -125,7 +136,7 @@ all on the same plan — the codes are named on `ACME_PLAN_CODE` /
 | Seeded tenant | Plan | Why |
 |---|---|---|
 | `acme` | `scale` | The tenant `docs/getting-started.md` logs into, and the one the local IdPs are wired to (`pnpm idp:seed` / `saml:seed` / `scim:seed`). `scale` grants every feature, so SSO enforcement, SCIM, multiple entities, live ERPs and the public API (`GET /api/v1/...` with a key minted straight after `pnpm seed` — see [public-api.md § Trying it locally](public-api.md#trying-it-locally)) all work on a fresh clone. Anything less would make part of the product 402 locally, which guard rail 7 (local-first) forbids. |
-| `techflow` | `free` | Keeps the **refusal** side of every gate — and the upgrade prompt — exercisable too. A seed where every tenant were entitled would make the 402 unreachable in exactly the way the 200 used to be. |
+| `techflow` | `free` | Keeps the **refusal** side of every gate — and the upgrade prompt — exercisable too. Free carries the direct ERP adapters (decisions §281), so techflow's ERP refusal is the Merge.dev one (`erp_merge`). A seed where every tenant were entitled would make the 402 unreachable in exactly the way the 200 used to be. |
 | `e2e1..e2eN` | `scale` | The Playwright suite drives SSO settings, entity creation, ERP adapters, API keys and webhooks on its worker's tenant, and each is plan-gated (decisions §258). All workers share the one plan, so they stay interchangeable — which shard drew which tenant is unobservable — and `frontend/tests-e2e/billing/billing.spec.ts` still parks whatever live subscription its worker's org holds, runs against its own fixture plans, then restores the parked row by id. The FREE / GROWTH side of each gate is covered in e2e by stubbing `/api/auth/me`'s `entitlements` (`tests-e2e/billing/plan-gates.spec.ts`), never by moving a worker's subscription, which would outlive a crashed test. |
 
 `ensure_subscription` deliberately no-ops once an org holds a live
@@ -560,7 +571,7 @@ period end is overdue by default) is flagged `canceled` with an append-only
 
 **Money-path boundary:** the sweep ONLY changes a `Subscription` status — it
 never charges, refunds, or creates any payment-side row. (A canceled subscription
-grants nothing via `get_entitlements`; that down-grade is a read consequence, not
+reads as Free via `get_entitlements` (decisions §281); that down-grade is a read consequence, not
 a money op.) **Control-plane only** — `Subscription` lives in the control DB, so
 one query, no per-tenant fan-out. **Idempotent** — only `past_due` rows are
 touched, each is re-read `FOR UPDATE` and re-checked inside its own leg, and
@@ -792,8 +803,14 @@ leaves it absent so provisioning genuinely commits.
 ## Entitlement gating (`services/billing/entitlements.py` + `api/deps.py`)
 
 `get_entitlements(db, org_id)` returns the `entitlements` JSON of the plan behind
-the org's **live** subscription, or `{}` when there is none (fail-closed — a
-feature is granted only when a plan explicitly includes it).
+the org's **live** subscription. An org with none — provisioned before the
+baseline subscription existed, or canceled by the dunning sweep — reads as the
+catalog's `free` plan (`entitlements.NO_PLAN_ENTITLEMENTS`), exactly as the
+AI-read meter reads it (`ai_invoice_meter.allowance_for_plan`). It is still
+fail-closed: a feature is granted only when a plan explicitly includes it, and
+Free grants only the direct ERP (decisions §281). While Free was `{}`, "no plan"
+and "Free" were the same thing; reading them alike keeps it so, and keeps a
+lapsed paid tenant from landing below Free.
 
 Features are the `plan_catalog.FEATURE_*` constants (decisions §253) — **a gate
 always names the constant, never a string literal**, so a typo cannot fail a
@@ -819,7 +836,8 @@ RFC 7644 error body, not ours.
 | Feature (tier) | Gated | Stays open on every plan |
 |---|---|---|
 | `public_api` (Growth) | every `/api/v1` route; `POST /api/api-keys`; `POST /api/webhooks`, `PATCH /api/webhooks/{id}` (unless it switches the subscription off), `POST /api/webhooks/{id}/rotate-secret`, `POST /api/webhooks/deliveries/{id}/redeliver`; `webhooks.dispatch._emit` queues nothing for an org without it | listing and revoking keys, key usage, listing / deleting subscriptions and deliveries, switching a subscription off |
-| `erp_integrations` (Growth) | for a **live** adapter only (`erp_adapters.dispatcher.erp_config_is_live`): a `PATCH /api/organization` carrying `settings.erp`, `POST /api/organization/test-erp`, `POST /api/{vendors,gl-accounts,purchase-orders}/sync-erp`, `POST /api/invoices/{id}/send-to-erp` / `retry-erp`, and the ERP leg of `POST /api/invoices/{id}/complete` (refused before the transition, so the invoice stays `approved`) | the `mock` ERP (guard rail 7); an org with no ERP configured (the route's own "not configured" answer); saving other settings while a stored ERP is live; the ERP webhook and `payment_erp_sync` sync-back of a payment already in flight |
+| `erp_integrations` (Free, Growth, Scale — decisions §281) | for a **live** adapter only (`erp_adapters.dispatcher.erp_config_is_live`): a `PATCH /api/organization` carrying `settings.erp`, `POST /api/organization/test-erp`, `POST /api/{vendors,gl-accounts,purchase-orders}/sync-erp`, `POST /api/invoices/{id}/send-to-erp` / `retry-erp`, and the ERP leg of `POST /api/invoices/{id}/complete` (refused before the transition, so the invoice stays `approved`) | the `mock` ERP (guard rail 7); an org with no ERP configured (the route's own "not configured" answer); saving other settings while a stored ERP is live; the ERP webhook and `payment_erp_sync` sync-back of a payment already in flight |
+| `erp_merge` (Scale — decisions §256, §281) | the same routes, when the config resolves to Merge.dev (`dispatcher.resolve_adapter_key(...) == MERGE_DEV_ADAPTER_KEY`) — which includes a config naming only a `type`, since `integration_method` defaults to `merge_dev`. Checked by the same `ensure_live_erp_entitled`, after `erp_integrations`, so a refusal names `erp_merge` | everything `erp_integrations` leaves open; every direct adapter |
 | `sso` (Growth) | `PUT /api/organization/sso` saving `enabled: true`; **sign-in** — `services/sso_plan.plan_scoped_settings` reads the stored block as switched off, so `/auth/{sso,saml}/config` report no SSO and authorize / callback / login / ACS / metadata answer as for an unconfigured tenant | saving with `enabled: false` (switching SSO off, staging IdP fields); password sign-in |
 | `sso_enforcement` (Scale) | `PUT /api/organization/sso` saving `sso_only: true`; sign-in reads `sso_only` as off without it, so the password reopens | saving `sso_only: false` |
 | `scim` (Scale) | `POST /api/organization/sso/scim-token`; a `PUT /api/organization/sso` that changes a non-empty group → role map; SCIM create user, PUT / PATCH user (anything but deactivation), create / replace / patch group — a SCIM-shaped 402 | SCIM reads, `DELETE /Users/{id}`, a PATCH that only sets `active` false, a PUT with `active: false` (applied as the deactivation alone), `DELETE /Groups/{id}` |
@@ -836,8 +854,10 @@ tenant nobody can enter.
 grants, never the raw JSON — and the SPA reads it (`auth.hasFeature`) to render
 `ui/PlanUpgradeNotice.svelte` ("Available on Growth / Scale — upgrade", linking
 to `/billing`) in place of a control that would 402: the SSO panel's enable and
-"require SSO" toggles, the ERP section, `/admin/entities`' create, `/admin/api-keys`'
-mint and `/admin/webhooks`' create. Advisory only; the server enforces every
+"require SSO" toggles, the Merge.dev choice in the ERP section (and the whole
+ERP section on a negotiated plan without `erp_integrations`, whose notice names
+Free), `/admin/entities`' create, `/admin/api-keys`' mint and `/admin/webhooks`'
+create. Advisory only; the server enforces every
 gate. `frontend/src/lib/types/planFeatures.ts` is the client copy of the
 catalog, drift-guarded against `plan_catalog.py` by its test.
 
@@ -1127,7 +1147,7 @@ LIVE row.
 `backend/tests/test_seed_billing_baseline.py` — which plan `scripts/seed.py`
 lands each tenant on: the cross-module claim that `ACME_PLAN_CODE` and
 `E2E_PLAN_CODE` name a catalog plan actually granting every feature (and that
-`TECHFLOW_PLAN_CODE` grants none), plus the real-Postgres behaviour of
+`TECHFLOW_PLAN_CODE` grants only what Free does), plus the real-Postgres behaviour of
 `ensure_demo_billing_baseline` — a fresh control plane entitles the demo tenant
 and not the other, a control plane already stranded on `free` or `growth` is
 repaired by repointing the SAME live row (never a second, which

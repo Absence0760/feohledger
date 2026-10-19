@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-19 — the first production deploy (#566) opened one
+**Last reconciled:** 2026-10-19 — giving Free the direct ERP adapters
+(decisions §281) built the Scale-only `erp_merge` gate, closing its (c) entry and
+taking the file from 106 → 105. Before that, 2026-10-19 — the first production deploy (#566) opened one
 (c) entry, the day-one test gap tracked in #575, taking the file from 103 → 104. Before that, 2026-10-12 — evaluating Baidu's Unlimited OCR opened
 one (c) entry, a scanned-invoice benchmark before any self-hosted OCR
 adapter, taking the file from 102 → 103. Before that, the commerce inventory sync (decisions §273)
@@ -149,7 +151,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**106 open: 88 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**105 open: 87 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1233,18 +1235,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       product call on bills whose tax is stated only on the header (refused
       today as `amount_mismatch`). **Durable fix:** the phases as scoped in that
       doc. **Trigger:** the first pilot customer on QuickBooks.
-- [ ] **(c) Merge-routed ERPs need a Scale-only `erp_merge` feature.**
-      Decided in `docs/decisions.md` §256: Growth's `erp_integrations` covers the
-      direct adapters, and Merge (`integration_method: merge_dev`) is Scale-only,
-      because Merge's $65 per connection exceeds Growth's $49. **Durable fix:**
-      add `FEATURE_ERP_MERGE` to `plan_catalog` (Scale), a migration rewriting
-      the catalog rows' `entitlements` (as `0107` did), a gate on saving a
-      `merge_dev` config and on the Merge push, and regenerate the pricing page
-      (`pnpm gen:pricing`). It extends `api/deps.ensure_live_erp_entitled`
-      (decisions §258), which already shares `resolve_adapter_key` with the
-      dispatcher, so the gate itself is one more check. **Trigger:**
-      before the first paid Growth customer, or the fourth Merge connection
-      (the first three are free), whichever comes first.
 
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
@@ -1740,8 +1730,8 @@ as oversights.
       Then put `FEOH_ERP_QBO_*`, `FEOH_ERP_XERO_*`,
       `FEOH_ERP_SAGE_ACCOUNTING_*` and `FEOH_ERP_BLACKBAUD_*` (client id,
       secret, subscription key) in `infra-secrets/feohledger/prod.sops.yaml`.
-      **Trigger:** before selling ERP sync on Growth to customers on those
-      ERPs. The login-CSRF (c) entry above must land first.
+      **Trigger:** before selling ERP sync (on any plan, Free included since
+      decisions §281) to customers on those ERPs. The login-CSRF (c) entry above must land first.
 
 - [ ] **Create the five published contact aliases.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) `/legal/*` tells readers to
       write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on

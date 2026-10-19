@@ -10265,6 +10265,11 @@ reverse — an outage the customer did not choose); SSO as Scale-only (an SSO ta
 on a feature that costs little to serve); counting re-reads and failed
 extractions (charging for our own retries).
 
+*Update 2026-10-19:* §281 moves `erp_integrations` onto Free, so the Features
+row now reads Free "core AP + direct ERP integrations", Growth "+ public API +
+webhooks, SSO", and Scale adds "ERPs through Merge.dev" (`erp_merge`). Prices
+and allowances are unchanged.
+
 ## 254. The pilot runs on one VM with the database on RDS (2026-10-07)
 
 The workload stack is the single VM of `docs/minimal-deployment.md` — Docker
@@ -10422,6 +10427,10 @@ connection) is unchanged.
 Accounting and Blackbaud direct adapters, so they come under `erp_integrations`
 on Growth like QuickBooks Online and Xero. Merge.dev on Scale remains the route
 only for ERPs without a direct adapter.
+
+*Update 2026-10-19:* §281 puts `erp_integrations` on Free as well, and builds
+`erp_merge` (Scale only) with migration `0112_free_plan_erp`. Merge is now
+refused on Free and Growth, which closes the follow-up above.
 ## 257. The single-VM database is RDS, reached over verify-full TLS set by PGSSLMODE (2026-10-07)
 
 The operator chose the single-VM deployment with Postgres on **RDS for
@@ -10533,6 +10542,13 @@ a worker's subscription.
 `audit_siem_export` gates nothing yet: there is no tenant-configurable SIEM
 destination, only the operator's platform shipper. Tracked in
 `docs/followups.md`; the SOX auditor export stays ungated regardless.
+
+*Update 2026-10-19:* §281 gives Free `erp_integrations`. The ERP refusal a Free
+tenant meets is now `erp_merge` (Merge.dev, Scale). The `erp_integrations`
+refusal is reachable only on a negotiated plan that leaves it out. An org with
+no live subscription reads as Free (`entitlements.NO_PLAN_ENTITLEMENTS`), so the
+harness's subscription-less orgs still read exactly like `free`. The downgrade
+rules above apply unchanged to `erp_merge`.
 
 ## 259. A month's AI-read overage is priced on the terms it was used under (2026-10-07)
 
@@ -11533,3 +11549,88 @@ separately*: both serve the same build from the same distribution, so a
 staggered cutover tests nothing the `*.cloudfront.net` check and the post-cutover
 smoke run don't. Instead it leaves a window in which the marketing host and the
 tenant hosts serve different builds.
+
+## 281. Free gets the direct ERP integrations; Merge.dev stays on Scale (migration 0112, 2026-10-19)
+
+§253 sold "ERP integrations" from Growth up, and §256 split Merge.dev out for
+Scale. The operator moved the line on 2026-10-19: **`erp_integrations`, the
+direct adapters, is now on every catalog plan, Free included.** A workspace
+holds one `settings.erp`, so on Free that means one direct ERP that imports
+(vendors, GL accounts, purchase orders) and pushes approved invoices. That is
+the whole direct-ERP feature, not a trimmed version of it.
+
+**Why.**
+
+- **A direct adapter costs nothing per connection.** QuickBooks Online, Xero,
+  NetSuite, Business Central, Sage and the rest (§269) call the ERP's own API
+  with the tenant's own grant. No third party bills us per linked account, so
+  the gate was protecting no cost.
+- **It is the test a small business runs before paying.** A business on
+  QuickBooks or Xero wants to see an invoice go from capture to approved to *in
+  its books*. With the ERP behind Growth, Free could only show the first half,
+  and the half it hid is the part that answers "will this fit my accounting".
+- **The upgrade lever becomes volume.** Free pauses AI reading at 100 AI-read
+  invoices a month (§253, §255). A business that is using the product past that
+  point is the one that should pay, and it pays because it is getting more out
+  of the product, not to unlock a connection. That fits §253's usage-based model
+  better than a feature lock did.
+- **Growth keeps its own reasons to buy it:** 500 AI reads with $0.10 overage
+  instead of a pause, the public API and outbound webhooks, and SSO.
+
+**Merge.dev stays Scale-only, and is now enforced.** Every Merge connection past
+the first three costs at least $65 a month (§256), and Free pays nothing. §256's
+`erp_merge` feature had never been built, so giving Free `erp_integrations`
+would also have opened Merge to it. This change builds it: `FEATURE_ERP_MERGE`
+in `plan_catalog`, granted by Scale alone, and one more check in
+`api/deps.ensure_live_erp_entitled`. After `erp_integrations`, a config that
+resolves to Merge (`dispatcher.resolve_adapter_key`, the dispatcher's own rule)
+needs `erp_merge` too. That covers save, connection test, the three syncs, send,
+retry and the completion leg, with §258's downgrade rules unchanged. A config
+that names only a `type` is gated as Merge, because the dispatcher defaults
+`integration_method` to `merge_dev` and would route it there. The panel swaps
+the Merge form for a Scale `PlanUpgradeNotice`. The direct ERPs in the same
+select stay open.
+
+**Growth loses the Merge route it could reach until now.** §256 had already
+decided that, and nothing grandfathers it. A Growth tenant that saved a Merge
+config before this meets §258's downgrade rules. New pushes, retries, syncs and
+re-saves of that config are refused. The background legs are left alone so
+money is never stranded mid-path: an invoice already dispatched (the queued or
+lambda `send_invoice_to_erp`), the ERP webhook, and the `payment_erp_sync`
+sync-back still run. Those legs can keep making Merge calls for a stored config,
+the same exemption `erp_integrations` already had. The tenant's way forward is
+its own: move to a direct adapter (never refused), or to Scale.
+
+**No live plan now reads as Free.** `get_entitlements` used to return `{}` for
+an org without a live subscription. That was the same as Free while Free was
+`{}`. Left alone, it would now put a tenant the dunning sweep canceled *below*
+Free (no ERP at all), while the AI-read meter already reads "no plan" as Free
+(`ai_invoice_meter.allowance_for_plan`). It now returns the catalog's Free
+grants (`entitlements.NO_PLAN_ENTITLEMENTS`, taken from the code catalog like
+the meter's allowance). That is still fail-closed, since it grants only what
+every new workspace is given.
+
+**Migration `0112_free_plan_erp`** reaches control planes provisioned before
+this. `ensure_plan_catalog` never touches an existing row. Unlike `0107`, which
+rewrote the whole column, it merges one key per row: `erp_integrations` into
+`free` and `erp_merge` into `scale`. An operator's other edits to a plan's grants
+survive. Growth is untouched. It is control-plane only (gated on `plans`) and
+idempotent, and the downgrade removes the two keys.
+
+**Rejected:**
+
+- **A Growth trial at signup.** It shows the ERP for 14 days and then takes it
+  away just as the books start to depend on it. A downgrade that stops pushes to
+  a ledger the customer already uses is the worst moment to hit a gate. A trial
+  would also need trial machinery that nothing grants yet (`trial_days` is
+  stored and unused).
+- **Import-only ERP on Free** (vendors, GL accounts and POs in, no invoice push).
+  It splits one feature at the point that matters to the customer: the push is
+  the "in my books" step the free plan exists to demonstrate. It would also mean
+  a second gate inside the ERP routes, splitting the sync legs from the push legs,
+  to protect a cost that is zero.
+
+*Supersedes:* §253's Features row (Free is no longer "core AP" only), §256's
+"`erp_integrations` (Growth and Scale)" and "`erp_merge` doesn't exist yet",
+and §258's "the `realdb` harness's orgs hold no subscription — which reads
+exactly like `free`", which stays true only because no plan now reads as Free.

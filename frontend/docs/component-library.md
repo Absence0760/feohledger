@@ -307,7 +307,9 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 - `ErpConnectionPanel.svelte` — the Organization → ERP panel, rendered entirely from the backend ERP
   catalogue (`GET /api/organization/erp/providers`). Props: `stored` (`settings.erp` as
   `GET /api/organization` serves it — configuration only), `readOnly`, `userLoaded`, `entitled` (the
-  `erp_integrations` plan feature) and `onsaved(org)`. Each secret is a `ui/SecretField`; which ones are
+  `erp_integrations` plan feature — every catalog plan, decisions §281), `mergeEntitled` (`erp_merge`,
+  Scale only: without it, choosing Merge.dev shows a `PlanUpgradeNotice` in place of the Merge form)
+  and `onsaved(org)`. Each secret is a `ui/SecretField`; which ones are
   stored comes from `GET /api/organization/credentials` (names only), and a save PATCHes the
   configuration then PUTs only typed or removed secrets to `/api/organization/credentials/erp`.
   Renders the admin-only hint / `PlanUpgradeNotice` itself; one always-mounted `role="status"` region
