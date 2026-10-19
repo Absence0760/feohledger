@@ -30,11 +30,12 @@ depending on which deployment shape you are running.
   login endpoints, with the tenant resolved from the request `Host`
   through that same resolver, plus the opt-in
   `settings.brand.sso_callback_base_url` this runbook's Step 7 sets.
-- **Does not ship**: any DNS or certificate automation. `infra/` today
-  is **KMS + S3 buckets only** (`infra/main.tf`, `kms.tf`, `s3.tf`) —
-  there is no Terraform for CloudFront, ALB, or ACM. Everything in the
-  AWS branch of Step 3 is console/CLI work you do by hand the first
-  time.
+- **Does not ship**: any DNS or certificate automation *for a customer's
+  domain*. `infra/` does define the platform's own ACM certificate
+  (`acm.tf`) and the SPA's CloudFront distribution (`frontend.tf`), but both
+  cover only `feohledger.com` + `*.feohledger.com`. A vanity host is
+  still per-customer work: Caddy (Step 3a) today, or the by-hand AWS
+  branch of Step 3b.
 
 ---
 
@@ -199,6 +200,18 @@ Constraints worth knowing:
   host* to HTTPS for a year in visitors' browsers. That is normally
   fine and desirable — but tell the customer, because it is their
   namespace, not yours.
+
+> **Once the SPA is off the VM.** Since `docs/decisions.md` §278 the platform's
+> own hosts (`feohledger.com`, `*.feohledger.com`) are served from S3 +
+> CloudFront. Vanity hosts stay on Caddy (issue #582, option (b)): each needs
+> its own certificate, and CloudFront would need one per customer. While
+> `deploy.sh` still builds the SPA on the VM, the `import spa` block above
+> works as written. After the step-4 cleanup removes that local build, a
+> vanity block must **proxy the SPA from CloudFront and rewrite `Host` to the
+> platform domain**, because CloudFront refuses a `Host` that isn't one of its
+> alternate names. `/api` keeps the vanity `Host`, since that is how the backend
+> finds the tenant. The step-4 change ships the snippet for this; don't
+> hand-roll one before then.
 
 ### 3b. AWS shape — ACM + CloudFront
 

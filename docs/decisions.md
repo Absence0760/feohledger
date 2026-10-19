@@ -11458,3 +11458,78 @@ Caddy image, error text and empty 404 alike.
   the same failure with no path change.
 - *An absolute symlink*: it would name the host path, which does not exist inside
   the container.
+
+## 278. The SPA moves to S3 + CloudFront ahead of the rest of the ECS build-out (#582, 2026-10-19)
+
+The static frontend is served from a private S3 bucket through CloudFront
+(`infra/frontend.tf`), and the API stays on the VM (§254). The first release
+deploy (#579) took every host down. Caddy bind-mounted a directory the deploy
+deletes and recreates, and the orphaned mount served 404s. §277 fixes that on
+the VM, but the bug class exists only because a web server serves files that a
+deploy rebuilds in place. An upload plus an invalidation has no empty moment and
+keeps the previous build's files. One wildcard certificate on the distribution
+also covers every tenant with no per-host Let's Encrypt step. The trigger
+`docs/minimal-deployment.md` gave for this move was global latency. It turned out
+to be deploy safety, at roughly $0–1 a month, so the frontend goes now and the
+backend's move to ECS keeps its own trigger.
+
+- **The fallback names the files, not "has an extension".** adapter-static
+  emits one document (nothing is prerendered), so every route is
+  `/index.html`. A CloudFront Function can't ask S3 whether a key exists, and
+  the usual stand-in, "no file extension → index.html", 404s any route whose
+  last segment contains a dot (an invoice number, a vendor name, an email).
+  `infra/cloudfront/spa-router.js` passes `/_app/*`, `/marketing/*` and a list
+  of root files through, and rewrites everything else.
+  `frontend/src/lib/deploy/spaRouter.test.ts` runs that source against
+  `frontend/static/`, so a new root file fails CI until it is listed. 403/404
+  custom error responses were rejected because they also turn a genuinely
+  missing asset into a 200 HTML page.
+- **A missing asset is a 404.** Behind OAC, S3 answers 403 for a missing key
+  unless the reader may `ListBucket`. CloudFront gets both, pinned to the
+  distribution's ARN.
+- **The publish never deletes what an open page loads.**
+  `deploy/publish-frontend.sh` uploads hashed `_app/immutable/*` first (a
+  year's immutable cache, `--size-only`), then the other static files, then
+  `index.html` and `_app/version.json` last with `no-cache`. It invalidates
+  `/*` and waits for the invalidation, and only then prunes hashed files that
+  are absent from this build and more than 30 days old. The old disarmed
+  `aws-deploy.yml` job's `s3 sync --delete` would have removed chunks an open
+  tab still lazy-loads. It was deleted, so there is one path to the bucket. A
+  custom cache policy (minimum TTL 0) replaces the managed CachingOptimized
+  policy, whose 1 s minimum would override `no-cache`.
+- **One approval, backend first.** The SPA builds in an ungated job (no AWS,
+  no secrets) while the reviewer decides. It publishes inside the same
+  `production` job, after the VM step, so a new UI never calls an API that
+  hasn't shipped. A second job in the environment that `needs:` the first would
+  pause for a second approval. `deploy/smoke-frontend.sh` then checks the edge
+  for this build's `version.json`, the SPA on `/` and on a dotted deep link, a
+  404 for a missing asset, and HSTS. It adds the apex and a tenant host to the
+  check once the apex answers with CloudFront's `x-amz-cf-id`, so it follows
+  the DNS cutover without a second flag.
+- **DNS moves by one variable, and back by the same one.**
+  `frontend_on_cloudfront` (default `false`) turns the apex and `*.` A records
+  into aliases and adds AAAA records. `api.` stays on the Elastic IP, and the
+  apex's MX/TXT records are untouched. The stack can be applied and tested on
+  the distribution's own hostname first, and rolling back is one apply while
+  Caddy still serves the SPA. Removing the SPA from the VM is a separate,
+  tracked step a day later (`docs/followups.md`), and within ~30 days, because
+  Caddy can't renew certificates for hosts that no longer resolve to it.
+- **SSE-S3, logs v2, no WAF.** The build is public, so a CMK would only add a
+  key-policy grant. CloudFront's legacy logging needs bucket ACLs, which the
+  access-logs sink disables (§166), so access logs use CloudWatch log delivery
+  instead. A WAF costs ~$5+/month in front of files that are public anyway.
+  Both Trivy findings are suppressed inline with those reasons.
+- **Vanity domains stay on Caddy** (#582 option (b)). Each needs its own
+  certificate, CloudFront would need one per customer, and none is in use yet.
+  After the VM cleanup a vanity block proxies the SPA from CloudFront with
+  `Host` rewritten to the platform domain, and keeps `/api` on the vanity
+  `Host`.
+
+**Rejected.** *Keeping the VM-only fix (§277) and deferring CloudFront to the
+ECS build-out*: that leaves the same class of failure one refactor away, and
+the Let's Encrypt per-host limit in place. *A separate frontend workflow*: it
+would race the VM deploy or need its own approval. *Staging apex and wildcard
+separately*: both serve the same build from the same distribution, so a
+staggered cutover tests nothing the `*.cloudfront.net` check and the post-cutover
+smoke run don't. Instead it leaves a window in which the marketing host and the
+tenant hosts serve different builds.

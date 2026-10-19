@@ -176,6 +176,52 @@ hour, and the exclude also hides them from dnf-automatic's own reporting.
 Check them here, where a bounce is fine:
 `sudo dnf upgrade --refresh 'docker*' 'containerd*'`
 
+## The SPA on S3 + CloudFront
+
+The SPA also ships from the release. Once `FRONTEND_PUBLISH_ENABLED` is armed
+(`../infra/README.md` § Frontend on CloudFront), `vm-deploy.yml` builds it in an
+ungated job while the reviewer decides. After the VM step succeeds (backend
+first, so a new UI never calls an API that hasn't shipped), the same approved
+job publishes it to the bucket with `publish-frontend.sh` and checks the edge
+with `smoke-frontend.sh` (`docs/decisions.md` §278). Neither script runs on
+this VM.
+
+`publish-frontend.sh` uploads in an order that never breaks a page someone
+already has open:
+
+1. The hashed `_app/immutable/*` files go first, a year's cache, and existing
+   keys are skipped.
+2. The other static files go next.
+3. `index.html`, then `_app/version.json`, go last, both `no-cache`.
+4. It invalidates `/*` and waits for the invalidation to finish.
+5. Only then does it prune hashed files that are both unused by this build and
+   older than `FRONTEND_PRUNE_DAYS` (30).
+
+Nothing is deleted on the way in, because an open page lazy-loads chunks from
+the build it started on.
+
+Until the DNS cutover (`frontend_on_cloudfront`), the apex and tenant hosts are
+still this VM's Caddy, serving the build `deploy.sh` makes here. The smoke check
+notices which one answers and checks the apex only once it is CloudFront.
+
+### Frontend rollback
+
+- **A bad build, with infrastructure fine**: publish an older build. Run `Deploy
+  to the VM` by hand from an older release tag that contains this publish step.
+  That rolls the VM back to the same commit, so the frontend and backend stay
+  matched. For the frontend alone, build the older tag locally and run the same
+  script with your own credentials, from the repo root:
+  `git worktree add ../feoh-rollback <tag> && cd ../feoh-rollback/frontend && pnpm install --frozen-lockfile && PUBLIC_API_URL=https://api.feohledger.com PUBLIC_SITE_URL=https://feohledger.com pnpm build && cd .. && AWS_PROFILE=feohledger FRONTEND_BUCKET=$(terraform -chdir=../feohledger/infra output -raw frontend_bucket) CLOUDFRONT_DISTRIBUTION_ID=$(terraform -chdir=../feohledger/infra output -raw frontend_distribution_id) deploy/publish-frontend.sh frontend/build`
+  An older build's hashed files are re-uploaded if they were already pruned.
+- **Tags from before this publish step**: restore the previous versions of
+  `index.html` and `_app/version.json` in the versioned bucket (S3 console →
+  object → Versions), then invalidate `/*`. Their hashed files are still there
+  for 30 days, and as noncurrent versions for 90.
+- **CloudFront itself misbehaving**: set `frontend_on_cloudfront = false` and
+  apply (`../infra/README.md` § Frontend on CloudFront). The apex and tenants
+  go back to this VM's Caddy, which keeps serving the SPA until the step-4
+  cleanup removes it.
+
 ## Tenants
 
 `./add-tenant.sh <slug> --name "Company" --admin-email admin@company.com` —

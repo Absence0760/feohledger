@@ -149,7 +149,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**104 open: 87 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**106 open: 88 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -568,16 +568,19 @@ honestly be folded into the slice that surfaced it.
       serves, and the policy is scoped to that. *Updated 2026-10-18:* the VM half
       is done — `infra/deploy.tf` grants the role SSM Run Command of one
       document on the app VM, and `vm-deploy.yml` deploys on a release
-      (`docs/decisions.md` §275). What remains is the ECS half. As written, `aws-deploy.yml` needs ECR push, ECS
+      (`docs/decisions.md` §275). *Updated 2026-10-19:* the SPA half is done
+      too — `infra/frontend.tf` grants the S3 publish and CloudFront
+      invalidation on the one bucket and distribution, and the frontend job left
+      `aws-deploy.yml` (§278). What remains is the ECS half. As written, `aws-deploy.yml` needs ECR push, ECS
       register/update + `run-task`/`describe-tasks`, `iam:PassRole` on the task
-      and execution roles, `lambda:UpdateFunctionCode`, S3 sync and CloudFront
-      invalidation (`docs/production-deployment.md` § Credentials), and every
+      and execution roles and `lambda:UpdateFunctionCode`
+      (`docs/production-deployment.md` § Credentials), and every
       one of those targets a resource `infra/` does not define yet. A policy
       written today would either be `*`-wide or name ARNs that do not exist, so
       nothing was written. **Durable fix:** an `aws_iam_role_policy` on the
       bootstrap role — looked up with `data "aws_iam_role"`, never managed from
-      here — in the same change that adds the ECR repository, ECS service,
-      frontend bucket + distribution and worker Lambdas, scoped to exactly those
+      here — in the same change that adds the ECR repository, ECS service
+      and worker Lambdas, scoped to exactly those
       ARNs. (The RDS master password is already handled — a write-only
       attribute fed at apply time, `infra/README.md` § Secrets; the
       `carlpett/sops` data source this entry used to name was dropped because
@@ -589,6 +592,30 @@ honestly be folded into the slice that surfaced it.
       (this repo is on immutable subject claims). That half is fixed; what is
       left there is dispatching `AWS OIDC preflight` to prove the assume, which
       does not need this policy.
+
+### Surfaced by moving the SPA to S3 + CloudFront (2026-10-19, issue #582, decisions §278)
+
+- [ ] **(c) Remove the SPA from the VM once CloudFront has served it for a day
+      (#582 cut-over step 4).** After `frontend_on_cloudfront = true`, the VM
+      still builds and serves the SPA. `deploy/deploy.sh` runs the
+      `frontend-build` service (minutes of CPU credits per deploy, and the
+      `../frontend/build` mount #583 made safe), `deploy/Caddyfile` keeps the
+      `(spa)` snippet and the apex block, and `deploy/add-tenant.sh` still
+      writes a `tenants.caddy` host block per tenant. That is the rollback path
+      for the first day, which is why it was not removed in the same change.
+      After that it is cost, and a slow failure: once DNS points at CloudFront,
+      Caddy cannot renew those Let's Encrypt certificates, so a rollback after
+      ~90 days would land on expired ones. **Durable fix:** Caddy keeps only
+      `api.<domain>`. Drop `frontend-build`, the pnpm-store volume and the mount
+      from `compose.prod.yml` and `deploy.sh`, and stop `add-tenant.sh` /
+      `remove-tenant.sh` touching `tenants.caddy` for platform hosts. Ship the
+      vanity-host block that proxies the SPA from CloudFront with
+      `header_up Host <platform domain>` and keeps `/api` on the vanity `Host`
+      (`docs/founder-runbooks/custom-domain-provisioning.md` § 3a). Update
+      `docs/minimal-deployment.md` § Key decisions 2 and the SSM document's
+      timeout comment. Rollback after this means re-deploying the old commit.
+      **Trigger:** one day of clean CloudFront traffic after the DNS cutover,
+      and no later than ~30 days after it.
 
 ### Surfaced by the round-26 parallel batch (2026-09-17)
 
@@ -1689,6 +1716,19 @@ as oversights.
       comes first.
 
 ## (b) Operator steps on merged code
+
+- [ ] **Apply the SPA's S3 + CloudFront stack and cut DNS over to it.**
+      `infra/frontend.tf` and the publish step in `vm-deploy.yml` are merged
+      but inert until an operator applies the stack, sets the
+      `FRONTEND_BUCKET` / `CLOUDFRONT_DISTRIBUTION_ID` environment secrets and
+      the `APP_URL` / `PUBLIC_API_URL` / `FRONTEND_PUBLISH_ENABLED` repository
+      variables, publishes a release, and then sets `frontend_on_cloudfront =
+      true`. Until then the SPA is still served by the VM's Caddy, from a build
+      the VM makes on every deploy (#579's outage class, which #583 patches on
+      the VM side). Steps, in
+      order: `infra/README.md` § Frontend on CloudFront (decisions §278).
+      **Trigger:** next session with AWS access, once #583 has merged. The (c)
+      VM-cleanup entry follows a day after the cutover.
 
 - [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
       Accounting and Blackbaud.** Until then those ERPs connect only when a

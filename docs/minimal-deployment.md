@@ -42,7 +42,9 @@ The app was designed local-first, and that carries straight into a cheap deploy:
   an `FEOH_*_ENABLED` flag.
 - The frontend is a static SPA; its build-time inputs are `PUBLIC_API_URL` and
   `PUBLIC_SITE_URL` (the link-preview card's image origin), both derived by
-  `deploy.sh` from domains the env already declares.
+  `deploy.sh` from domains the env already declares — and, for the S3 +
+  CloudFront copy, set as the repository variables `PUBLIC_API_URL` / `APP_URL`
+  that `vm-deploy.yml`'s build job reads.
 - Tenant routing is subdomain → `X-Tenant-Slug`; CORS for that is already
   solved by `FEOH_CORS_PRODUCTION_DOMAIN` (wildcard subdomain regex).
 
@@ -66,6 +68,7 @@ when each piece graduates.
 | RDS `db.t4g.micro` Postgres 16, single-AZ (2 vCPU burstable, 1 GB) | ~$11.70 |
 | RDS storage 20 GB gp3 (backup storage up to the DB's size is free) | ~$2.30 |
 | VPC flow logs (rejected traffic only) + CloudWatch alarms | ~$1–2 |
+| SPA on S3 + CloudFront (inside CloudFront's always-free 1 TB / 10M requests) | ~$0–1 |
 | **Total** | **~$45–55** |
 
 This is the stack `infra/` defines (`docs/decisions.md` §254). Both instances are
@@ -108,6 +111,13 @@ Resizing is a change to `app_instance_type` in the tfvars (a stop → change-typ
    tenant subdomain — plain HTTP-01, no DNS plugin, no extra IAM); move to a
    wildcard cert via DNS-01 + the Route 53 plugin only when tenant churn makes
    the list annoying.
+   **Superseded for the SPA by S3 + CloudFront** (`infra/frontend.tf`,
+   `docs/decisions.md` §278). The first release deploy took the site down
+   because the files Caddy served were rebuilt in place. An upload plus an
+   invalidation has no empty moment, and one wildcard certificate covers every
+   tenant. Until the DNS cutover (`frontend_on_cloudfront`) and the step-4
+   cleanup after it, Caddy still serves the SPA as described here and is the
+   rollback path. It keeps `api.` either way.
 3. **Everything stays in `local` dispatch mode.** The Lambda/SQS split exists
    for burst isolation, which a pilot doesn't have.
 4. **Secrets follow the estate pattern.** This repo is public — `*.sops` files
@@ -591,7 +601,7 @@ rebuilding the stack:
 | Multi-AZ RDS (a standby in a second AZ) | An uptime SLA that a single-AZ instance's failover-by-PITR cannot meet | `multi_az = true` on the instance — roughly doubles the RDS rows of the cost table. No app or deploy change: the endpoint host name stays the same across a failover. |
 | Managed Redis (ElastiCache) | Same HA push | Same seam: set `FEOH_REDIS_URL` in the sops env, redeploy. Redis holds only ephemeral state (blocklist / MFA / rate limits) — no data migration. |
 | SQS + Lambda async workers | Extraction/OCR saturates the VM | Already implemented and bundled in the same image (`awslambdaric`). Provision queues + functions (production-deployment.md § Lambda workers), flip `FEOH_EXTRACTION_MODE=lambda` + `FEOH_SQS_*_QUEUE_URL` in the sops env, redeploy. Same pattern for the ERP and audit modes. |
-| CloudFront + S3 frontend | Global latency / offloading the VM | The build artifact is identical. Arm the committed `aws-deploy.yml` pipeline (its § Arming checklist), then drop the SPA hosts from Caddy. |
+| ~~CloudFront + S3 frontend~~ | ~~Global latency / offloading the VM~~ | **Built** (`infra/frontend.tf`, published by `vm-deploy.yml`; `docs/decisions.md` §278). The trigger turned out to be deploy safety, not latency. Cutover steps: `infra/README.md` § Frontend on CloudFront. |
 | Wildcard TLS certificate | Tenant count makes per-host certs noisy (Let's Encrypt ~50 certs/week limit) | DNS already wildcards; swap the Caddy image for an xcaddy build with the Route 53 DNS plugin and replace `tenants.caddy` with one `*.feohledger.com` site block. |
 | Real provider adapters (payments, cards, AI extraction, ERP, sanctions…) | Going live with real money / real data | Per-org `Organization.settings.*` flips + sops keys — zero infrastructure. |
 | Background sweeps (payment reconciler, audit shipping, renewals, dunning…) | First real payments / compliance needs | `FEOH_*_ENABLED=true` in the sops env, redeploy. |

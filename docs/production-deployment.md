@@ -33,7 +33,7 @@ This document describes the recommended AWS deployment architecture for producti
 | Service | Deploy As | Trigger | Why |
 |---|---|---|---|
 | FastAPI API | ECS/Fargate | ALB | Connection pooling, low latency, multi-tenant DB routing |
-| Frontend | S3 + CloudFront | HTTP | Static SPA, global CDN caching |
+| Frontend | S3 + CloudFront | HTTP | Static SPA, global CDN caching. **Built** — `infra/frontend.tf`, published by `vm-deploy.yml` (`docs/decisions.md` §278); the rest of this table is the scale-up target |
 | Invoice Extraction | Lambda | SQS | Bursty, CPU-heavy, scales to zero |
 | ERP Integration | Lambda | SQS | Async retries, external API isolation, DLQ support |
 | Audit Logging | Lambda | EventBridge/SNS | Fire-and-forget, decoupled from request path |
@@ -188,11 +188,19 @@ Two workflows fire on `release: published`, and **nothing else** — production
 deploys happen only through a published release, never an ad-hoc manual run.
 Every job in both is gated by the `production` GitHub Environment:
 
-`.github/workflows/aws-deploy.yml` deploys the web stack to AWS:
+The SPA is **not** in this pipeline. It already runs on S3 + CloudFront
+(`infra/frontend.tf`) and ships from `vm-deploy.yml`, after the VM deploy, through
+`deploy/publish-frontend.sh` — hashed assets first and never deleted on the way
+in, entry documents last and uncached, then an invalidation the run waits for
+and a smoke check against the edge (`docs/decisions.md` §278). The old
+`frontend` job here did `aws s3 sync --delete`, which removes the chunks an open
+page is still loading; it was deleted so there is one path to the bucket. If the
+backend moves to ECS, that publish step moves with it.
+
+`.github/workflows/aws-deploy.yml` deploys the backend half to AWS:
 
 | Job | Target | Steps |
 |---|---|---|
-| `frontend` | S3 + CloudFront | `pnpm build` → `aws s3 sync --delete` → CloudFront invalidation |
 | `backend` | ECS / Fargate | `docker build backend` → push to ECR (commit-SHA tag) → register a new task-definition revision with that image → **run DB migrations** (one-off Fargate task) → `update-service` → wait for stable |
 | `lambdas` | Lambda (extraction / ERP / audit) | `needs: backend` → point every function in `LAMBDA_FUNCTIONS` at the **same** image the backend job just pushed (`update-function-code --image-uri`) → wait for update |
 
@@ -219,11 +227,14 @@ GitHub Environment (Settings → Environments → `production`) apply: **GitHub
 pauses the job for the required reviewer's approval before any deploy step
 runs**. Add your reviewer / wait-timer / branch rules there.
 
-Note on granularity: when one release triggers several jobs that share the
-`production` environment, a single reviewer approval releases all of them in
-that run. If you need to approve services **independently** (e.g. ship the
-backend but hold the frontend), give them separate environments
-(`production-backend`, `production-frontend`, …), each with its own rules.
+Note on granularity: a reviewer approves the jobs waiting at the gate *at that
+moment*. A job that reaches the gate later — one that `needs:` an already
+approved job — pauses for a second approval. That is why `vm-deploy.yml`
+publishes the SPA inside its one approved job, after the VM step, and builds it
+in an ungated job beforehand, instead of a second `production` job. If you need
+to approve services **independently** (e.g. ship the backend but hold the
+frontend), give them separate environments (`production-backend`,
+`production-frontend`, …), each with its own rules.
 
 ### Database migrations
 
@@ -264,8 +275,10 @@ scoped to this repository **and** the `production` environment
 `repo:<owner>/<repo>:environment:production`), with least-privilege permissions
 for ECR push, ECS register/update + `run-task`/`describe-tasks` (the migration
 task), `iam:PassRole` for the task + execution roles, `lambda:UpdateFunctionCode`
-on the worker functions, S3 sync, and CloudFront invalidation. Store its ARN as
-the `AWS_DEPLOY_ROLE_ARN` **environment secret** on `production`.
+on the worker functions. (The SPA's S3 upload and CloudFront invalidation are
+already granted, scoped to the one bucket and distribution, by
+`infra/frontend.tf`.) Store its ARN as the `AWS_DEPLOY_ROLE_ARN` **environment
+secret** on `production`.
 
 **Status:** the role exists. The estate account bootstrap created
 `feohledger-deploy` in the FeohLedger AWS account with exactly that trust policy
@@ -286,23 +299,23 @@ least-privilege policy lands with the workload stack it has to name — tracked 
 | `ECS_CONTAINER_NAME` | variable | environment | Container name within the task def to swap the image on + target for the migration command override. |
 | `ECS_SUBNETS` | variable | environment | Comma-separated private subnet IDs for the one-off migration task (e.g. `subnet-a,subnet-b`). |
 | `ECS_SECURITY_GROUPS` | variable | environment | Comma-separated security-group IDs for the migration task (needs DB egress). |
-| `FRONTEND_BUCKET` | variable | environment | S3 bucket serving the SPA. |
-| `CLOUDFRONT_DISTRIBUTION_ID` | variable | environment | Distribution to invalidate. |
 | `LAMBDA_FUNCTIONS` | variable | environment | Comma/space-separated Lambda function names for the async workers (extraction / ERP / audit). Each is updated to the new image. |
-| `PUBLIC_API_URL` | variable | environment | API base URL — baked into the frontend build; also the backend job's deploy URL. |
-| `APP_URL` | variable | environment | Public site origin (e.g. `https://feohledger.com`) — the frontend job's deploy URL, and baked into the frontend build as `PUBLIC_SITE_URL` (trailing slash stripped), the origin of the link-preview card's absolute `og:image` URL. **Required**: the Build step fails when it is empty, because SvelteKit would otherwise ship a root-relative image URL silently. See [environment.md](environment.md) § Frontend. |
+| `PUBLIC_API_URL` | variable | **repository** | API base URL — the backend job's deploy URL. Also baked into the SPA build in `vm-deploy.yml`'s ungated `build-frontend` job, which is why it is repository-scoped. |
+
+The SPA publish's own settings (`APP_URL`, `FRONTEND_PUBLISH_ENABLED`,
+`FRONTEND_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`) belong to `vm-deploy.yml` and
+are listed in `infra/README.md` § Frontend on CloudFront.
 
 ### Arming the AWS pipeline
 
 `aws-deploy.yml` is committed as a **scaffold** and stays inert until armed, so
 a release won't turn it red before the infrastructure exists. To go live:
 
-1. Build the AWS infra in `infra/` (ECR, ECS cluster/service/task family,
-   frontend S3 bucket, CloudFront distribution, the three worker Lambda
-   functions + their SQS triggers) — the stack today is the KMS key, the S3
-   buckets and the us-east-1 ACM certificate for the platform domain
-   (`infra/acm.tf`, output `platform_certificate_arn`), which the distribution
-   attaches.
+1. Build the AWS infra in `infra/` (ECR, ECS cluster/service/task family, the
+   three worker Lambda functions + their SQS triggers) — the stack today is the
+   single VM + RDS, the KMS key, the S3 buckets, and the SPA's bucket +
+   CloudFront distribution (`infra/frontend.tf`) on the us-east-1 platform
+   certificate (`infra/acm.tf`).
 2. Provision each worker function with its `ImageConfig` — entrypoint
    `python -m awslambdaric`, command its handler (see *Lambda workers* above).
    The RIC is already bundled in the image, so nothing else is needed here.
@@ -312,7 +325,6 @@ a release won't turn it red before the infrastructure exists. To go live:
    protection rules (reviewer / wait timer).
 5. Set the repository variable `AWS_DEPLOY_ENABLED=true`.
 
-Until step 5, the AWS jobs (`backend`, `lambdas`, `frontend`) skip via the
-kill switch — `backend`/`frontend` on their `if:` guard, `lambdas` because it
-`needs: backend`. (`mobile-release.yml` does not run on a release at all — it
+Until step 5, the AWS jobs (`backend`, `lambdas`) skip via the kill switch —
+`backend` on its `if:` guard, `lambdas` because it `needs: backend`. (`mobile-release.yml` does not run on a release at all — it
 builds on a `mobile-v*` tag or by hand, gated by the `production` reviewer.)
