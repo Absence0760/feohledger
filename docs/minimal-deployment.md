@@ -102,7 +102,8 @@ Resizing is a change to `app_instance_type` in the tfvars (a stop → change-typ
    MinIO container — less RAM, real durability, pennies at pilot volume.
 2. **Caddy on the VM serves the frontend.** GitHub Pages can't serve wildcard
    tenant subdomains and CloudFront+ACM is more moving parts. Caddy serves the
-   static `frontend/build`, reverse-proxies `api.feohledger.com` to the backend, and
+   static SPA (published releases under `deploy/www/`, swapped atomically —
+   `deploy/README.md` § How the SPA is served), reverse-proxies `api.feohledger.com` to the backend, and
    auto-provisions TLS. Start with an **explicit hostname list** (one line per
    tenant subdomain — plain HTTP-01, no DNS plugin, no extra IAM); move to a
    wildcard cert via DNS-01 + the Route 53 plugin only when tenant churn makes
@@ -244,8 +245,12 @@ redeploy can never pick up an upstream retag; bumps arrive as Dependabot
   Caddy's `X-Forwarded-For` — untrusted, every user would collapse into the
   proxy's container IP and the signup/login caps would throttle everyone
   collectively.
-- `caddy` — ports 80/443, mounts the built `frontend/build` as the site root
-  plus `deploy/Caddyfile` (domains via env) and the per-VM, gitignored
+- `caddy` — ports 80/443, mounts `deploy/www/` at `/srv` and serves
+  `/srv/current`, a symlink `deploy.sh` swaps by rename to each newly published
+  release, keeping the previous one for an instant rollback. Never the build
+  output itself: the build deletes and recreates `frontend/build`, and a bind
+  mount left on the deleted directory served every page as an empty 404 (#579,
+  `docs/decisions.md` §277). Plus `deploy/Caddyfile` (domains via env) and the per-VM, gitignored
   `deploy/tenants.caddy` host list (one block per tenant subdomain —
   per-host HTTP-01 certs, no DNS plugin; maintained by `add-tenant.sh`, not
   by hand):
@@ -322,7 +327,12 @@ pnpm store cached in a volume) and the backend image, runs
 the new API serves traffic (same ordering contract as the future ECS
 pipeline), then rolls the containers with `up -d --wait` — the deploy fails
 loudly if the API healthcheck never passes, and a failed build or migration
-leaves the previous containers serving. Flags: `--no-pull`, `--ref <sha>`,
+leaves the previous containers serving. Only then does the new SPA go live — a
+copy of the build under `deploy/www/releases/`, switched in by one symlink
+rename — followed by a Caddy reload and a **smoke check**: `curl` from the VM,
+through its own Caddy, must get a 200 with a non-empty body from
+`https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health`, or the deploy
+fails (`deploy/README.md` § Deploys, § How the SPA is served). Flags: `--no-pull`, `--ref <sha>`,
 `--backend-only`, `--frontend-only`. Only one deploy runs at a time (a `flock`
 on `deploy/.deploy.lock`), and after the checkout the script re-runs the
 `deploy.sh` it just checked out, so a release that changes the deploy steps is

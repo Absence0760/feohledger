@@ -6,7 +6,10 @@
 # node:24 container — no Node/pnpm needed on the VM) →
 # build backend → run migrations BEFORE the new code serves traffic (control
 # plane + every tenant DB — same ordering contract as the future ECS
-# pipeline) → roll containers and wait for the API healthcheck.
+# pipeline) → roll containers and wait for the API healthcheck → publish the
+# frontend build as the live release (an atomic symlink swap under deploy/www/,
+# which is what Caddy mounts) → reload Caddy → smoke-check the site and the API
+# through this VM's own Caddy.
 #
 # Usage: deploy.sh [--no-pull | --ref <sha>] [--backend-only|--frontend-only]
 #
@@ -53,7 +56,7 @@ done
 	die "--ref and --no-pull contradict each other: --ref checks a commit out. $USAGE"
 
 # ── Preflight — fail with a clear message before doing any work ──────────────
-for cmd in docker sops git flock; do
+for cmd in docker sops git flock curl; do
 	command -v "$cmd" >/dev/null || die "'$cmd' not installed — run deploy/bootstrap-vm.sh first."
 done
 docker compose version >/dev/null 2>&1 || die "docker compose plugin missing — run deploy/bootstrap-vm.sh first."
@@ -93,14 +96,29 @@ echo "==> database: ${DB_MODE}"
 # the Caddyfile's `import tenants.caddy` always resolves.
 [ -f tenants.caddy ] || cp tenants.caddy.example tenants.caddy
 
+# The SPA Caddy serves is the release `www/current` points at (deploy/lib.sh
+# § The SPA Caddy serves). A backend-only deploy publishes none, so it needs one
+# to exist already — on a VM moving to this layout, run a full deploy first.
+WWW=www
+# Created here, before any compose call, so it is this user's: a bind-mount
+# source that does not exist yet is created by the Docker daemon, as root, and
+# the publish step could then never write into it.
+(umask 022 && mkdir -p "$WWW")
+# "Live" means the link resolves to a page — a dangling `current` (its release
+# deleted by hand) passes `[ -L ]` and serves nothing.
+www_is_live() { [ -e "$WWW/current/index.html" ]; }
+[ "$DO_FRONTEND" = 1 ] || www_is_live ||
+	die "no live frontend release under deploy/${WWW}/ (www/current is missing or points at nothing) — run a full ./deploy.sh (not --backend-only) first."
+
+API_DOMAIN=$(feoh_env API_DOMAIN)
+APP_DOMAIN=$(feoh_env APP_DOMAIN)
+
 # ── Frontend ─────────────────────────────────────────────────────────────────
 if [ "$DO_FRONTEND" = 1 ]; then
 	# PUBLIC_API_URL is baked into the static build (declared `static` in frontend/src/env.ts).
 	# PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html (link
 	# previews); SvelteKit would substitute an empty string for it silently, which
 	# is why it comes from APP_DOMAIN, which decrypt-env.sh refuses empty.
-	API_DOMAIN=$(grep -E '^API_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
-	APP_DOMAIN=$(grep -E '^APP_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
 	# pnpm's version is declared once, as `packageManager` in package.json
 	# (frontend/CLAUDE.md § The lockfile) — the field CI's pnpm/action-setup
 	# reads, so this builds with the pnpm that wrote the lockfile. Read after the
@@ -119,6 +137,24 @@ if [ "$DO_FRONTEND" = 1 ]; then
 		-e PUBLIC_API_URL="https://${API_DOMAIN}" \
 		-e PUBLIC_SITE_URL="https://${APP_DOMAIN}" \
 		frontend-build
+	# The build lands in frontend/build, which nothing serves — it is the
+	# staging copy. It goes live as a release after the roll below, so a failed
+	# migration or an API that never comes healthy leaves the old SPA in front
+	# of the old API. Unique per run (the lock above serialises deploys).
+	RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD)"
+	publish_frontend() {
+		# The site is public static files: world-readable, unlike the secrets
+		# this script's umask exists for.
+		(umask 022 && feoh_publish_frontend "$REPO_ROOT/frontend/build" "$WWW" "$RELEASE_ID") ||
+			die "could not publish the frontend build as release ${RELEASE_ID}. If the error above is a permission error, deploy/${WWW}/ is probably root's: the Docker daemon creates a missing bind-mount source as root, which happens when compose started Caddy before deploy.sh created the directory. Fix it once with: sudo chown -R $(id -un): $(pwd)/${WWW}"
+	}
+	# A VM with no live release (a first deploy, the first on this layout, or a
+	# dangling `current`): nothing useful is being served from www/, so publish
+	# now and a Caddy the roll recreates starts with a site, not a 404 window.
+	if ! www_is_live; then
+		publish_frontend
+		PUBLISHED=1
+	fi
 fi
 
 # ── Backend ──────────────────────────────────────────────────────────────────
@@ -140,9 +176,20 @@ fi
 echo "==> rolling containers"
 "${COMPOSE[@]}" up -d --wait --wait-timeout 300
 
-# Pick up Caddyfile / tenants.caddy edits without a container restart. A
-# failure here is a real config error — do not suppress it.
-"${COMPOSE[@]}" exec caddy caddy reload --config /etc/caddy/Caddyfile
+if [ "$DO_FRONTEND" = 1 ] && [ "${PUBLISHED:-0}" = 0 ]; then
+	publish_frontend
+fi
+
+# Pick up Caddyfile / tenants.caddy edits — a reload, or a recreate when the
+# container's single-file mounts are stale (lib.sh). A failure here is a real
+# config error — do not suppress it.
+feoh_caddy_reload || die "caddy did not take the new config — see the error above; the site may be serving the previous config."
+
+# Prove the site actually serves, from outside the containers: the API's own
+# healthcheck stays green through a Caddy that serves nothing (#579).
+if ! feoh_smoke_check "$APP_DOMAIN" / || ! feoh_smoke_check "$API_DOMAIN" /api/health; then
+	die "post-deploy smoke check failed — the stack is up but not serving. See docs/troubleshooting.md § Every page 404s while the API is healthy; to roll the SPA back, deploy/README.md § Rolling the frontend back."
+fi
 
 # Reclaim disk: every deploy leaves the previous api image dangling, and on
 # a 30 GB volume months of deploys pile up until Postgres runs out of space.
@@ -162,4 +209,4 @@ if [ "$DB_MODE" = external ] &&
 	echo "NOTE: the local postgres container is still running, but the API now uses the external database. Once the cut-over is verified: ./compose.sh --profile localdb stop postgres" >&2
 fi
 
-echo "deploy complete — API healthcheck passed."
+echo "deploy complete — API healthcheck and smoke check passed."

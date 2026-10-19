@@ -22,11 +22,11 @@ The whole flow is four commands on a fresh VM:
 |---|---|
 | `bootstrap-vm.sh` | One-time, idempotent VM setup (Amazon Linux 2023): docker + compose plugin + sops + cronie (AL2023 ships no cron daemon) + AWS CLI, automatic security updates (dnf-automatic; docker/containerd excluded so the stack never bounces at a random hour), 2 GB swap, nightly backup cron, IMDSv2 hop-limit fix. Other distros get the manual list. |
 | `compose.prod.yml` | Redis (AOF) + API + Caddy, plus Postgres (pgvector) under the `localdb` profile for container mode only. No DB host ports; S3 is real AWS. API healthcheck lets deploys verify themselves. Container logs capped (json-file, 10 MB × 5 per service) so they can't fill the 30 GB disk. `FEOH_DATABASE_URL` (set → RDS) and `FEOH_REDIS_URL` are override seams; `PGSSLMODE` is passed to the api (default `prefer`). The one-shot `pgtools` service (same Postgres image, RDS CA bundle mounted, `tools` profile) carries the pg client tools for RDS. Also the one-shot `frontend-build` service (Node image + pnpm-store cache) behind a `build` profile, so `up` never starts it — `deploy.sh` runs it. Every image is `repo:tag@sha256:…`, bumped by Dependabot (`backend/docs/docker.md` § Image pinning). |
-| `Caddyfile` | TLS + static SPA + `api.feohledger.com` reverse proxy. Domains via env. |
+| `Caddyfile` | TLS + static SPA (served from `/srv/current`, the live release under the gitignored `www/` — § How the SPA is served) + `api.feohledger.com` reverse proxy. Domains via env. |
 | `tenants.caddy.example` | Template for the per-VM tenant host list (`tenants.caddy`, gitignored). `add-tenant.sh` maintains it — manual edits rarely needed. |
-| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). Also `feoh_sync_source`, `deploy.sh`'s checkout step: main's tip, or with `--ref` exactly one commit that must be on `origin/main`, always leaving the checkout on `main`. |
+| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). Also `feoh_sync_source`, `deploy.sh`'s checkout step: main's tip, or with `--ref` exactly one commit that must be on `origin/main`, always leaving the checkout on `main`. And the serving half: `feoh_publish_frontend` (a build becomes the live release by an atomic symlink swap), `feoh_caddy_reload` (reload, or recreate when Caddy's single-file mounts are stale) and `feoh_smoke_check` (the post-deploy fetch through the VM's own Caddy). |
 | `compose.sh` / `psql.sh` | Ad-hoc `docker compose` / `psql` with the database mode applied — use these instead of a bare `docker compose -f compose.prod.yml …`, which in container mode would start the stack without its database. |
-| `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → Caddy reload. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
+| `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → publish the SPA as a release under `www/` (atomic symlink swap, § How the SPA is served) → Caddy reload (or recreate, if its mounted config is stale) → smoke check of the site and the API through the VM's own Caddy. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
 | `add-tenant.sh` | Tenant DB + org + admin user (same `provision_tenant` path as signup) + Caddy host block + reload, in one shot. Generates a temp password (first-login change forced) unless `--admin-password` given. |
 | `remove-tenant.sh` | The inverse of `add-tenant.sh`, and the deletion `/legal/dpa` § 13 promises within 60 days of termination: removes the Caddy host block and reloads (stop serving first), runs `scripts/delete_tenant.py` in the api container (documents → tenant DB → control-plane rows), then deletes every version of that tenant's nightly dumps from the backup bucket. `--dry-run` prints the inventory and changes nothing; otherwise it makes you type the slug back. Prints the written confirmation to send the customer, including the two residues it does NOT reach. |
 | `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. On RDS these are the long-retention, provider-independent copy beside RDS's automated backups + PITR (globals with `--no-role-passwords`); in container mode they are the whole DR story. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. |
@@ -95,6 +95,63 @@ serves traffic, and fails loudly (via the compose healthcheck) if the API
 doesn't come up. If the build or migration step fails, the previously-running
 containers keep serving. Only one deploy runs at a time — a second one, manual
 or released, refuses to start while the first holds `.deploy.lock`.
+
+The deploy ends with a **smoke check**: from the VM, `curl` fetches
+`https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health` through this VM's
+own Caddy (`--resolve <host>:443:127.0.0.1` — no public DNS or hairpin NAT
+involved, but the real hostname, certificate and site block) and fails the
+deploy unless each answers 200 with a non-empty body, retrying for up to a
+minute while a just-recreated Caddy loads its certificates. The API's own
+healthcheck stays green through a Caddy that serves nothing, which is how
+v0.1.0 shipped every page as an empty 404 (#579).
+
+### How the SPA is served
+
+Caddy does **not** mount `frontend/build`. The build deletes and recreates that
+directory, a bind mount keeps the inode it started with, and the container is
+left on an orphaned empty directory: every page 404s with an empty body and
+`docker exec` into Caddy is refused (#579, `docs/decisions.md` §277). Instead
+Caddy mounts the gitignored `deploy/www/`, which is never replaced, and serves
+`/srv/current`:
+
+```
+deploy/www/
+├── current  -> releases/<UTC timestamp>-<commit>   (live)
+├── previous -> releases/<…>                        (the one before)
+└── releases/<id>/                                  (exactly these two are kept)
+```
+
+`frontend/build` is only the build's staging copy. After the roll succeeds,
+`deploy.sh` copies it to `releases/<id>` and points `current` at it with a single
+rename (`feoh_publish_frontend` in `lib.sh`), so a request sees the old release
+or the new one, never a gap — and a failed migration or an API that never comes
+healthy leaves the old SPA in front of the old API. A `--backend-only` deploy
+publishes nothing and needs a release to exist already.
+
+**Rolling the frontend back** to the previous release is one rename, no
+rebuild and no reload (Caddy resolves the symlink per request); from `deploy/`:
+`ln -sfn "$(readlink www/previous)" www/current.new && mv -T www/current.new www/current`
+
+**A `--ref` older than this layout is refused** (v0.1.0 and everything before
+it): that commit's own `deploy.sh` and compose file would mount
+`frontend/build` into Caddy again and bring back the empty-404 outage on its
+first rebuild. Roll the SPA back with the swap above; rolling the whole stack
+back to a pre-layout commit is not supported.
+
+**Moving a VM to this layout needs nothing by hand.** The first deploy of a
+commit with this change finds no `www/current`, publishes the new build there
+*before* rolling, and `up -d --wait` recreates Caddy because its volumes
+changed, so the new container starts with the site already in place. The old
+`frontend/build` stays where it is as the staging copy.
+
+Caddy's two config files are still single-file mounts, which pin an inode the
+same way: a Caddyfile changed by a git checkout, or a `tenants.caddy` saved by
+an editor that writes a new file and renames it, is invisible to the running
+container, and `caddy reload` would reload the old copy and report success.
+`deploy.sh`, `add-tenant.sh` and `remove-tenant.sh` all reload through
+`feoh_caddy_reload`, which compares what the container sees with the files on
+disk and recreates Caddy (a second or two of downtime) instead of reloading
+when they differ.
 
 `--ref` refuses a commit that is not on `origin/main` (a release tagged on a
 branch fails rather than ships unreviewed code) and a checkout with modified

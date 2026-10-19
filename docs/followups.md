@@ -1583,7 +1583,10 @@ scope (§260) — do not fold them into any of these.
       day-one CI job driving the real deploy commands plus a browser
       walkthrough, production-shaped fixtures, single-owner rules with
       shown-equals-allowed parity tests, Compose version parity, a scripted
-      deploy + restore rehearsal, and the further tests listed there.
+      deploy + restore rehearsal, and the further tests listed there. One
+      piece has landed: every deploy now ends with a smoke check of the site
+      and the API through the VM's own Caddy (#579, decisions §277) — it
+      would have caught the v0.1.0 empty-404 outage.
       **Trigger:** the next change to `deploy/`, Alembic bootstrap or
       `tenant_provisioning`, and in any case before customer #2.
 

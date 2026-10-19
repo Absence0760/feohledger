@@ -3,7 +3,12 @@
 # subdomain. Each host also needs a DNS A record pointing at this VM.
 #
 # After editing, apply without downtime:
-#   docker compose -f compose.prod.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+#   ./compose.sh exec caddy caddy reload --config /etc/caddy/Caddyfile
+# Caddy mounts this single file, so the container keeps the inode it started
+# with: an editor that saves by writing a new file and renaming it over this one
+# leaves Caddy reading the old list and the reload silently changes nothing. Edit
+# in place, or recreate instead: ./compose.sh up -d --no-deps --force-recreate caddy
+# (add-tenant.sh, remove-tenant.sh and deploy.sh check for this themselves).
 #
 # Example — the `acme` tenant on feohledger.com:
 #

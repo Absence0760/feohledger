@@ -164,12 +164,21 @@ services:
       API_DOMAIN: ${API_DOMAIN:?set in deploy/.env (via sops)}
       ACME_EMAIL: ${ACME_EMAIL:?set in deploy/.env (via sops)}
     volumes:
+      # Single-file mounts pin the file's inode: one replaced by rename (a git
+      # checkout, an editor) is invisible to the running container until it is
+      # recreated. deploy/lib.sh::feoh_caddy_reload checks for exactly that and
+      # recreates instead of reloading a stale copy.
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Per-VM tenant host list (gitignored; deploy.sh seeds it from the
       # committed .example). Add a block per tenant subdomain + reload.
       - ./tenants.caddy:/etc/caddy/tenants.caddy:ro
-      # Static SPA built by deploy.sh (pnpm -C frontend build).
-      - ../frontend/build:/srv:ro
+      # The static SPA: deploy/www/ (gitignored), whose `current` symlink
+      # deploy.sh swaps to each newly published release; the Caddyfile serves
+      # /srv/current. NEVER mount ../frontend/build here: the build deletes and
+      # recreates that directory, a bind mount pins the old inode, and Caddy is
+      # left serving an orphaned empty directory — every page 404 and `exec`
+      # refused (#579, docs/decisions.md §277). www/ itself is never replaced.
+      - ./www:/srv:ro
       # Certificates + ACME account state — must persist across restarts or
       # Let's Encrypt rate limits will bite.
       - caddy_data:/data
