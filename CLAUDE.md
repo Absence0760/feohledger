@@ -59,6 +59,8 @@ pnpm erp:up                   # fake ERP server (fake-erp :12112, opt-in `erp` p
 pnpm test:erp                 # ERP adapter e2e (tests-e2e/erp/) — real HTTP against fake-erp; skips if it's down
 pnpm commerce:up              # fake commerce platforms (fake-commerce :12113, opt-in `commerce` profile) for the commerce adapters (commerce:down / commerce:logs too)
 pnpm test:commerce            # commerce e2e (tests-e2e/commerce/) — mock path always; provider specs skip if fake-commerce is down
+pnpm day-one:up               # day-one rehearsal (#575): EMPTY Postgres → deploy's own migration step → production-shaped API → add-tenant → re-run must be a no-op (own ports; day-one:down / day-one:logs)
+pnpm test:day-one             # the day-one Playwright journey (tests-e2e/day-one/, own config) against that stack
 pnpm services:up              # everything at once: core + IdPs + LocalStack + Ollama + stripe-mock + Mailpit + fake-erp + fake-commerce (services:down / services:logs / services:reset too)
 pnpm seed                     # python scripts/seed.py
 pnpm dev                      # backend (:8000) + frontend (:7777) together, one Ctrl-C stops both

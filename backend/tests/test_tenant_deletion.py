@@ -409,7 +409,7 @@ async def test_delete_tenant_leaves_a_neighbouring_org_untouched(
 async def test_deleting_an_unknown_slug_refuses_rather_than_reporting_success(
     realdb, _deletion_on_test_loop
 ):
-    with pytest.raises(TenantDeletionError, match="no organisation with slug"):
+    with pytest.raises(tenant_deletion.TenantNotFound, match="no organisation with slug"):
         await plan_tenant_deletion("nosuchtenant" + uuid.uuid4().hex[:6])
 
 
@@ -459,3 +459,66 @@ async def test_a_partner_org_with_children_is_refused(
             await delete_tenant(parent)
     finally:
         await engine.dispose()
+
+
+# ── The CLI's exit codes — deploy/remove-tenant.sh branches on them ──────────
+
+
+def _load_delete_tenant_cli():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "delete_tenant.py"
+    spec = importlib.util.spec_from_file_location("_delete_tenant_cli", path)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    return cli
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        # The ONE code remove-tenant.sh reads as "already gone, carry on".
+        (tenant_deletion.TenantNotFound("no organisation with slug 'x'"), 4),
+        # Every other refusal stops it before it deletes the backups.
+        (TenantDeletionError("'x' is a partner organisation with 2 child tenant(s)"), 2),
+    ],
+)
+async def test_the_cli_exit_code_tells_not_found_from_a_refusal(monkeypatch, capsys, error, code):
+    cli = _load_delete_tenant_cli()
+    monkeypatch.setattr(cli, "plan_tenant_deletion", AsyncMock(side_effect=error))
+    monkeypatch.setattr(cli, "delete_tenant", AsyncMock(side_effect=AssertionError("deleted")))
+    monkeypatch.setattr("sys.argv", ["delete_tenant.py", "--slug", "x", "--dry-run"])
+
+    assert await cli.main() == code
+    assert str(error) in capsys.readouterr().err
+
+
+async def test_the_cli_refuses_to_delete_without_confirmation(monkeypatch):
+    cli = _load_delete_tenant_cli()
+    monkeypatch.setattr(
+        cli,
+        "plan_tenant_deletion",
+        AsyncMock(return_value=_FakePlan(uuid.uuid4(), "x", "X", "feoh_x", True, {})),
+    )
+    monkeypatch.setattr(cli, "_print_plan", lambda _plan: None)
+    monkeypatch.setattr(cli, "delete_tenant", AsyncMock(side_effect=AssertionError("deleted")))
+    monkeypatch.setattr("sys.argv", ["delete_tenant.py", "--slug", "x", "--confirm", "y"])
+
+    assert await cli.main() == 3
+
+
+async def test_the_cli_fails_when_the_deletion_itself_refuses(monkeypatch):
+    cli = _load_delete_tenant_cli()
+    monkeypatch.setattr(
+        cli,
+        "plan_tenant_deletion",
+        AsyncMock(return_value=_FakePlan(uuid.uuid4(), "x", "X", "feoh_x", True, {})),
+    )
+    monkeypatch.setattr(cli, "_print_plan", lambda _plan: None)
+    monkeypatch.setattr(
+        cli, "delete_tenant", AsyncMock(side_effect=TenantDeletionError("refused mid-way"))
+    )
+    monkeypatch.setattr("sys.argv", ["delete_tenant.py", "--slug", "x", "--yes"])
+
+    assert await cli.main() == 2

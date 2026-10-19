@@ -754,6 +754,9 @@ def test_a_dangling_current_is_not_kept_as_previous(tmp_path: Path) -> None:
 
 DEPLOY_DOCKER_STUB = """#!/bin/sh
 printf '%s\\n' "$*" >> "$STUB_DIR/calls"
+if [ -n "${STUB_FAIL:-}" ]; then
+  case "$*" in *"$STUB_FAIL"*) exit 1 ;; esac
+fi
 case "$*" in
   *frontend-build*)
     rm -rf "$REPO/frontend/build"
@@ -813,7 +816,7 @@ class Stack:
         (self.www / "releases" / name / "index.html").write_text(f"<!doctype html>{name}\n")
         os.symlink(f"releases/{name}", self.www / "current")
 
-    def run(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run(self, *args: str, fail: str = "") -> subprocess.CompletedProcess[str]:
         (self.root / "calls").write_text("")
         return subprocess.run(
             ["bash", str(self.deploy / "deploy.sh"), "--no-pull", *args],
@@ -826,6 +829,7 @@ class Stack:
                 "REPO": str(self.repo),
                 "BUILD_MARK": "new-build",
                 "FEOH_SMOKE_INTERVAL": "0",
+                "STUB_FAIL": fail,
             },
         )
 
@@ -911,3 +915,39 @@ def test_backend_only_leaves_a_live_release_alone(stack: Stack) -> None:
         arg for line in (stack.root / "curl_calls").read_text().splitlines() for arg in line.split()
     }
     assert {"https://app.example.com/", "https://api.example.com/api/health"} <= curl_args
+
+
+@pytest.mark.parametrize(
+    "fail",
+    [
+        "deploy_migrate.sh",  # the migration step (init, alembic, every tenant)
+        "build api",
+        "frontend-build",
+    ],
+)
+def test_a_failed_build_or_migration_fails_the_deploy_before_the_roll(
+    stack: Stack, fail: str
+) -> None:
+    """deploy.sh rolls new code only over a schema that migrated: a failed
+    migration (migrate_all_tenants exits non-zero on any failed tenant, #570)
+    or build must stop it before `up`, with the old release still live."""
+    stack.live_release("old")
+
+    result = stack.run(fail=fail)
+
+    assert result.returncode != 0
+    assert not any("up -d --wait --wait-timeout 300" in c for c in stack.calls())
+    assert os.readlink(stack.www / "current") == "releases/old"
+    assert "deploy complete" not in result.stdout
+
+
+def test_a_failed_post_deploy_prune_warns_but_the_deploy_stands(stack: Stack) -> None:
+    """The deliberate non-failure: disk hygiene after a deploy that is already
+    live and smoke-checked."""
+    stack.live_release("old")
+
+    result = stack.run(fail="image prune")
+
+    assert result.returncode == 0, result.stderr
+    assert "WARN: dangling-image prune failed" in result.stderr
+    assert "deploy complete" in result.stdout

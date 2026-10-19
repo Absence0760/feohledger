@@ -165,27 +165,37 @@ async def update_scheduled_report(
     the re-enable not having worked."""
     row = await _get_or_404(db, schedule_id)
 
-    changes = body.model_dump(exclude_unset=True)
+    # Only a value that differs from the stored one is applied and named in the
+    # audit row — the edit form resends every field, and recording presence
+    # made the trail claim a recipient change on a save that only renamed the
+    # schedule (#575).
+    submitted = body.model_dump(exclude_unset=True)
+    changes = {field: value for field, value in submitted.items() if getattr(row, field) != value}
     for field, value in changes.items():
         setattr(row, field, value)
 
-    if changes.get("enabled") is True and row.last_run_status == "failure":
+    # Keyed on what was SUBMITTED, not on `changes`: "enable" on a schedule that
+    # is still enabled but failing (under the 5-strike limit) is the operator
+    # acknowledging the failure, and it must still reset the marker.
+    if submitted.get("enabled") is True and row.last_run_status == "failure":
         row.last_run_status = None
         row.last_run_error = None
+        changes["last_run_status"] = None
 
-    row.updated_at = datetime.now(UTC)
-    await dispatch_audit(
-        db,
-        correlation_id=uuid.uuid4(),
-        organization_id=org_id,
-        actor_id=user.id,
-        action="scheduled_report.updated",
-        entity_type="scheduled_report",
-        entity_id=row.id,
-        # Field NAMES only for what changed — a recipient list edit must not
-        # write the addresses into the append-only trail.
-        details={**_audit_details(row), "fields_changed": sorted(changes)},
-    )
+    if changes:
+        row.updated_at = datetime.now(UTC)
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=org_id,
+            actor_id=user.id,
+            action="scheduled_report.updated",
+            entity_type="scheduled_report",
+            entity_id=row.id,
+            # Field NAMES only for what changed — a recipient list edit must not
+            # write the addresses into the append-only trail.
+            details={**_audit_details(row), "fields_changed": sorted(changes)},
+        )
     await db.commit()
     await db.refresh(row)
     return ScheduledReportResponse.from_db(row)

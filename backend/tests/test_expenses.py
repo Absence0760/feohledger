@@ -318,6 +318,65 @@ async def test_update_expense(realdb):
         assert len(actions) >= 1
 
 
+async def test_update_expense_audit_names_exactly_what_changed(realdb):
+    """`expense.updated` names every field that moved and nothing else (#575):
+    a GL recode alone used to write no row, a report move beside a field edit
+    dropped `report_id`, and a resent unchanged value is not a change."""
+    from app.models.gl_account import GLAccount
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with mk() as s:
+        gl = GLAccount(
+            organization_id=org_id,
+            code=f"6{uuid.uuid4().int % 100000:05d}",
+            name="Travel",
+            account_type="expense",
+        )
+        s.add(gl)
+        await s.commit()
+        gl_id = str(gl.id)
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        eid = (
+            await c.post(
+                "/api/expenses",
+                json={"expense_date": "2026-06-01", "amount": "10.00", "merchant": "Uber"},
+            )
+        ).json()["id"]
+        rid = (
+            await c.post("/api/expense-reports", json={"report_number": f"AUD-{eid[:6]}"})
+        ).json()["id"]
+        steps = [
+            {"amount": "10.00", "merchant": "Uber"},  # resent, nothing changed
+            {"gl_account_id": gl_id},  # GL recode alone
+            {"report_id": rid, "merchant": "Lyft", "amount": "10.00"},  # move + edit
+        ]
+        for body in steps:
+            resp = await c.patch(f"/api/expenses/{eid}", json=body)
+            assert resp.status_code == 200, resp.text
+
+    async with mk() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog)
+                    .where(
+                        AuditLog.action == "expense.updated",
+                        AuditLog.entity_id == uuid.UUID(eid),
+                    )
+                    .order_by(AuditLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [sorted(r.details["fields"]) for r in rows] == [
+        ["gl_account_id"],
+        ["merchant", "report_id"],
+    ]
+
+
 async def test_delete_expense(realdb):
     async with realdb.client(key="a", role="ap_clerk") as c:
         eid = (

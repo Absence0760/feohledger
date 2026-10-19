@@ -1,0 +1,208 @@
+import type { APIRequestContext } from '@playwright/test';
+
+import { API_BASE } from './env';
+import { deleteInvoicesWhere, deleteVendorsWhere, tenantPsql } from './helpers';
+
+/**
+ * Production-shaped rows for layout tests (#575 § 2).
+ *
+ * The seed's strings are short — "Acme Supplies", `INV-1001`, `demo@acme.com`
+ * — and a real tenant's are not. #574 was a queue table that fit every seeded
+ * row and overflowed the page the first day a customer used it: an email in
+ * the Assignee column, an ERP invoice number, a seven-figure amount. A layout
+ * test is only as strict as the strings it is measured with, so every layout
+ * spec draws them from here rather than inventing its own.
+ *
+ * `REALISTIC` is the value set; `seedRealisticRows` puts one of each into a
+ * tenant through the API (vendors, invoices, contracts, credit memos and the
+ * assignee user), falling back to `tenantPsql` only for state the API
+ * deliberately does not expose — an invoice's workflow status (no endpoint
+ * mints an approved or paid invoice, by design), a completed payment, and an
+ * exception row (raised by the system, never by a client).
+ * `purgeRealisticRows` removes all of it.
+ */
+
+/** Marks every row this module creates, so teardown can find exactly them. */
+export const REALISTIC_MARKER = 'LYT575';
+
+export const REALISTIC = {
+	/** A legal-entity name the way an ERP exports it — ~90 characters, no break. */
+	longVendor: `Northwind Industrial Fasteners & Precision Components International Holdings (EMEA) GmbH ${REALISTIC_MARKER}`,
+	/** Accented Latin, a macron, CJK and a typographic dash in one name. */
+	nonAsciiVendor: `Ōsaka Seimitsu Kōgyō 株式会社 — Société Générale d’Équipements Zürich ${REALISTIC_MARKER}`,
+	/** ERP-shaped invoice numbers: long, and with no natural break point. */
+	invoiceNumbers: [
+		`${REALISTIC_MARKER}-INV-2026-000012345678901-ACCOUNTSPAYABLE-EMEA-NORTH`,
+		`${REALISTIC_MARKER}/AP/2026/10/000987654321/REV-03/SUPPLEMENTARY`,
+		`${REALISTIC_MARKER}-ERP-77889900112233445566778899`
+	],
+	/** Large amounts: the 13-integer-digit ceiling of `Numeric(15, 2)`, and two big ones. */
+	amounts: ['9876543210987.65', '12345678.90', '987654321.00'],
+	contractNumber: `${REALISTIC_MARKER}-MSA-2026-EMEA-NORTH-000123456789`,
+	contractTitle:
+		'Master Services and Supply Agreement for Precision Fasteners, Tooling and Field Services (EMEA)',
+	memoNumber: `${REALISTIC_MARKER}-CM-2026-000045678901234`,
+	/** A routing alias, not a person: long local part, long subsidiary domain. */
+	assigneeEmail: (slug: string) =>
+		`accounts.payable.escalations+${REALISTIC_MARKER.toLowerCase()}-${slug}@northwind-industrial-fasteners-international.example.com`,
+	assigneeName: 'Accounts Payable Escalations — Regional Controller (EMEA North)'
+} as const;
+
+export interface RealisticRows {
+	vendorIds: string[];
+	invoiceIds: string[];
+	assigneeUserId: string | null;
+}
+
+async function login(
+	request: APIRequestContext,
+	slug: string,
+	creds: { email: string; password: string }
+): Promise<Record<string, string>> {
+	const resp = await request.post(`${API_BASE}/api/auth/login`, {
+		headers: { 'X-Tenant-Slug': slug },
+		data: creds
+	});
+	if (!resp.ok()) throw new Error(`login for realistic-row seeding failed: ${resp.status()}`);
+	const body = (await resp.json()) as { access_token?: string };
+	if (!body.access_token) throw new Error('login for realistic-row seeding returned no token');
+	return { Authorization: `Bearer ${body.access_token}`, 'X-Tenant-Slug': slug };
+}
+
+async function postJson<T>(
+	request: APIRequestContext,
+	path: string,
+	headers: Record<string, string>,
+	data: unknown
+): Promise<T> {
+	const resp = await request.post(`${API_BASE}${path}`, { headers, data });
+	if (!resp.ok()) {
+		throw new Error(`POST ${path} → ${resp.status()}: ${(await resp.text()).slice(0, 300)}`);
+	}
+	return (await resp.json()) as T;
+}
+
+/**
+ * Seed one of each realistic value into `slug`'s tenant, signed in as `admin`.
+ * Always pair with `purgeRealisticRows(slug, rows)` — it also removes rows a
+ * previous, killed run left behind, so call it first as well.
+ */
+export async function seedRealisticRows(
+	request: APIRequestContext,
+	slug: string,
+	admin: { email: string; password: string }
+): Promise<RealisticRows> {
+	const headers = await login(request, slug, admin);
+
+	const vendorIds: string[] = [];
+	for (const name of [REALISTIC.longVendor, REALISTIC.nonAsciiVendor]) {
+		const v = await postJson<{ id: string }>(request, '/api/vendors', headers, {
+			name,
+			email: `remittance.advice+${REALISTIC_MARKER.toLowerCase()}@northwind-industrial-fasteners-international.example.com`
+		});
+		vendorIds.push(v.id);
+	}
+
+	const invoiceIds: string[] = [];
+	const vendorsByInvoice = [REALISTIC.longVendor, REALISTIC.nonAsciiVendor, REALISTIC.longVendor];
+	for (let i = 0; i < REALISTIC.invoiceNumbers.length; i++) {
+		const inv = await postJson<{ id: string }>(request, '/api/invoices', headers, {
+			vendor: vendorsByInvoice[i],
+			invoice_number: REALISTIC.invoiceNumbers[i],
+			amount: REALISTIC.amounts[i],
+			currency: 'USD',
+			invoice_date: '2026-10-01',
+			due_date: '2026-10-31'
+		});
+		invoiceIds.push(inv.id);
+	}
+
+	await postJson(request, '/api/contracts', headers, {
+		contract_number: REALISTIC.contractNumber,
+		title: REALISTIC.contractTitle,
+		contract_type: 'msa',
+		vendor_id: vendorIds[0],
+		currency: 'USD',
+		total_value: REALISTIC.amounts[0],
+		spend_limit: REALISTIC.amounts[0],
+		end_date: '2027-12-31'
+	});
+	await postJson(request, '/api/credit-memos', headers, {
+		memo_number: REALISTIC.memoNumber,
+		vendor_id: vendorIds[1],
+		amount: REALISTIC.amounts[2],
+		currency: 'USD',
+		reason: 'Volume rebate true-up for Q3 deliveries across all EMEA North distribution centres'
+	});
+
+	// The assignee is a real user, so the exception row carries an address the
+	// app itself would have put there.
+	const user = await postJson<{ id: string }>(request, '/api/admin/users', headers, {
+		email: REALISTIC.assigneeEmail(slug),
+		full_name: REALISTIC.assigneeName,
+		role_names: ['ap_manager']
+	});
+
+	// Workflow state the API refuses to mint on purpose (an invoice reaches
+	// `approved` / `paid` only through the state machine): one approved invoice
+	// for the payment queue, one paid with its completed payment for history.
+	const [approvedId, paidId, openId] = invoiceIds;
+	tenantPsql(`UPDATE invoices SET status = 'approved' WHERE id = '${approvedId}'`, slug);
+	tenantPsql(`UPDATE invoices SET status = 'paid' WHERE id = '${paidId}'`, slug);
+	tenantPsql(
+		`INSERT INTO payments (id, invoice_id, amount, method, status, reference, completed_at, created_at, updated_at)
+		 VALUES (gen_random_uuid(), '${paidId}', ${REALISTIC.amounts[1]}, 'ach', 'completed',
+		         '${REALISTIC_MARKER}-ACH-TRACE-0210000210000123456789', now(), now(), now())`,
+		slug
+	);
+	for (const [invoiceId, type, severity] of [
+		[openId, 'po_mismatch', 'error'],
+		[approvedId, 'duplicate', 'warning']
+	] as const) {
+		tenantPsql(
+			`INSERT INTO exceptions (id, invoice_id, exception_type, severity, status, organization_id,
+			                         description, assigned_to, assigned_to_user_id, created_at, updated_at)
+			 SELECT gen_random_uuid(), i.id, '${type}', '${severity}', 'open', i.organization_id,
+			        '${REALISTIC_MARKER} PO ${REALISTIC.invoiceNumbers[2]} does not match the received quantity on line 14 of 27',
+			        '${REALISTIC.assigneeEmail(slug)}', '${user.id}', now(), now()
+			 FROM invoices i WHERE i.id = '${invoiceId}'`,
+			slug
+		);
+	}
+
+	return { vendorIds, invoiceIds, assigneeUserId: user.id };
+}
+
+/**
+ * Remove everything `seedRealisticRows` created in `slug` — by marker, so a
+ * killed run's leftovers go too. The vendors' whole graph (invoices, payments,
+ * exceptions, contracts, credit memos) is owned by `deleteVendorsWhere`; the
+ * assignee user is deleted through the API when the seeding run is known.
+ */
+export async function purgeRealisticRows(
+	request: APIRequestContext,
+	slug: string,
+	admin: { email: string; password: string },
+	rows?: RealisticRows
+): Promise<void> {
+	deleteVendorsWhere(`name LIKE '%${REALISTIC_MARKER}'`, slug);
+	// An invoice whose vendor match missed (vendor_id NULL) is not in that graph.
+	deleteInvoicesWhere(`invoice_number LIKE '${REALISTIC_MARKER}%'`, slug);
+	const headers = await login(request, slug, admin);
+	const userIds = new Set<string>(rows?.assigneeUserId ? [rows.assigneeUserId] : []);
+	// A previous run's assignee, found by its address through the API rather
+	// than the shared control plane (`controlPsql` is for ids a test created).
+	const list = await request.get(`${API_BASE}/api/admin/users`, {
+		headers,
+		params: { search: REALISTIC_MARKER.toLowerCase() }
+	});
+	if (list.ok()) {
+		const body = (await list.json()) as { items: { email: string; id: string }[] };
+		for (const u of body.items) {
+			if (u.email === REALISTIC.assigneeEmail(slug)) userIds.add(u.id);
+		}
+	}
+	for (const id of userIds) {
+		await request.delete(`${API_BASE}/api/admin/users/${id}`, { headers });
+	}
+}

@@ -10,6 +10,7 @@
 	} from '#lib/types/invoice.ts';
 	import { PERM_INVOICE_APPROVE } from '#lib/types/admin.ts';
 	import { formatMoney, isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
+	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -1768,7 +1769,7 @@
 						{/if}
 						<input
 							type="file"
-							accept=".pdf,.png,.jpg,.jpeg,.tiff"
+							accept={INVOICE_FILE_ACCEPT}
 							bind:this={fileInput}
 							onchange={handleFileSelected}
 							hidden

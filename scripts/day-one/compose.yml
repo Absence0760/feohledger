@@ -1,0 +1,49 @@
+# The day-one stack's services (#575): layered over backend/docker-compose.yml
+# by scripts/day-one/stack.sh, never used on its own.
+#
+#   docker compose -p feoh-day-one -f backend/docker-compose.yml -f scripts/day-one/compose.yml …
+#
+# The images are backend/docker-compose.yml's — that file is the only place a
+# ref is written (docs/decisions.md §203). What this file changes:
+#
+#   - ports: alternates (55432 / 56379 / 59000 / 51025 / 58025 / 54566), so the
+#     stack can run beside a developer's everyday `pnpm db:up` stack, which
+#     holds the defaults. Each is overridable through the DAY_ONE_* variable.
+#   - volumes: none. Postgres starts EMPTY on every run — no init-tenants.sql,
+#     no pgdata left from a previous one — because an empty database is the
+#     condition being tested. Data lives in tmpfs and goes with the container.
+#
+# Project `feoh-day-one` keeps the containers and network apart from the
+# `backend` project.
+name: feoh-day-one
+
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:${DAY_ONE_PG_PORT:-55432}:5432"
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  redis:
+    ports: !override
+      - "127.0.0.1:${DAY_ONE_REDIS_PORT:-56379}:6379"
+
+  minio:
+    command: server /data
+    ports: !override
+      - "127.0.0.1:${DAY_ONE_S3_PORT:-59000}:9000"
+    volumes: !reset []
+    tmpfs:
+      - /data
+
+  mailpit:
+    ports: !override
+      - "127.0.0.1:${DAY_ONE_SMTP_PORT:-51025}:1025"
+      - "127.0.0.1:${DAY_ONE_MAILPIT_PORT:-58025}:8025"
+
+  localstack:
+    ports: !override
+      - "127.0.0.1:${DAY_ONE_AWS_PORT:-54566}:4566"
+    volumes: !override
+      - ./localstack/init/ready.d:/etc/localstack/init/ready.d:ro

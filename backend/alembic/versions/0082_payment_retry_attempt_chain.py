@@ -70,7 +70,9 @@ def upgrade() -> None:
         DO $$
         BEGIN
             IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = '{_FK_NAME}'
+                -- Or create_all's name for it: see 0029's guard (0113).
+                SELECT 1 FROM pg_constraint
+                WHERE conname IN ('{_FK_NAME}', 'payments_retry_of_payment_id_fkey')
             ) THEN
                 ALTER TABLE payments
                     ADD CONSTRAINT {_FK_NAME}

@@ -680,7 +680,10 @@
 
 	.cf-bar-row {
 		display: grid;
-		grid-template-columns: 90px 1fr 110px;
+		/* The amount column is at least the old fixed 110px, so short figures
+		   still line up, but never narrower than its figure: a fixed track let a
+		   thirteen-digit total run past the card (#575). The bar gives way. */
+		grid-template-columns: 90px minmax(0, 1fr) minmax(110px, max-content);
 		align-items: center;
 		gap: 12px;
 	}
@@ -713,6 +716,7 @@
 	.cf-bar-amount {
 		font-size: 0.82rem;
 		text-align: right;
+		white-space: nowrap;
 		font-variant-numeric: tabular-nums;
 	}
 

@@ -28,8 +28,8 @@ The whole flow is four commands on a fresh VM:
 | `compose.sh` / `psql.sh` | Ad-hoc `docker compose` / `psql` with the database mode applied — use these instead of a bare `docker compose -f compose.prod.yml …`, which in container mode would start the stack without its database. |
 | `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → publish the SPA as a release under `www/` (atomic symlink swap, § How the SPA is served) → Caddy reload (or recreate, if its mounted config is stale) → smoke check of the site and the API through the VM's own Caddy. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
 | `add-tenant.sh` | Tenant DB + org + admin user (same `provision_tenant` path as signup) + Caddy host block + reload, in one shot. Generates a temp password (first-login change forced) unless `--admin-password` given. |
-| `remove-tenant.sh` | The inverse of `add-tenant.sh`, and the deletion `/legal/dpa` § 13 promises within 60 days of termination: removes the Caddy host block and reloads (stop serving first), runs `scripts/delete_tenant.py` in the api container (documents → tenant DB → control-plane rows), then deletes every version of that tenant's nightly dumps from the backup bucket. `--dry-run` prints the inventory and changes nothing; otherwise it makes you type the slug back. Prints the written confirmation to send the customer, including the two residues it does NOT reach. |
-| `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. On RDS these are the long-retention, provider-independent copy beside RDS's automated backups + PITR (globals with `--no-role-passwords`); in container mode they are the whole DR story. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. |
+| `remove-tenant.sh` | The inverse of `add-tenant.sh`, and the deletion `/legal/dpa` § 13 promises within 60 days of termination: removes the Caddy host block and reloads (stop serving first), runs `scripts/delete_tenant.py` in the api container (documents → tenant DB → control-plane rows), then deletes every version of that tenant's nightly dumps from the backup bucket. `--dry-run` prints the inventory and changes nothing; otherwise it makes you type the slug back. Only `delete_tenant.py`'s exit 4 (no such organisation) lets it carry on to the Caddy and backup legs of a tenant already deleted; any other inventory failure (api down, database unreachable, a partner organisation refused) stops it before it changes anything. Prints the written confirmation to send the customer, including the two residues it does NOT reach. |
+| `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. On RDS these are the long-retention, provider-independent copy beside RDS's automated backups + PITR (globals with `--no-role-passwords`); in container mode they are the whole DR story. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. Fails, without pinging, if the server's database list does not include the control plane `feohledger` — an empty list used to report success. |
 | `restore.sh` | Streams a night's dumps back from S3 — each DB via `pg_restore --create` (skips existing DBs unless `--force`). Container mode replays globals first; on RDS it skips them and restores with `--no-owner --no-acl` so everything belongs to the master user. Stops the api for the duration, rolls the stack back up after. Test it once against a scratch stack. On RDS, a point-in-time restore is the first choice (`docs/minimal-deployment.md` § Point-in-time restore). |
 | `decrypt-env.sh` | Decrypts `prod.sops.yaml` to `.env` and checks it — required keys, JWT key strength, values compose's `env_file` would silently rewrite, and the database mode (RDS: a URL `lib.sh` can parse, `PGSSLMODE` `verify-full`; container: `POSTGRES_PASSWORD`, no TLS mode it cannot serve) — before it replaces the current `.env`. `deploy.sh` runs it; run it on its own to check a new secrets file without deploying. |
 | `prod.sops.yaml.example` | Template for the VM's secrets file: flat YAML keyed by env var name, every value quoted. The encrypted original lives in `infra-secrets` (`docs/decisions.md` §171). |
@@ -224,6 +224,33 @@ notices which one answers and checks the apex only once it is CloudFront.
   apply (`../infra/README.md` § Frontend on CloudFront). The apex and tenants
   go back to this VM's Caddy, which keeps serving the SPA until the step-4
   cleanup removes it.
+
+## Rehearsed on every PR: the day-one job
+
+The first production deploy (#566) found nine defects in the most basic paths
+because nothing had ever run these steps in sequence from zero. CI's
+`day-one-e2e` job (`.github/workflows/ci.yml`, required through `CI gate`) now
+does, on every PR touching `backend/`, `frontend/`, `deploy/` or
+`scripts/day-one/` (#575):
+
+1. an **empty** Postgres (no `seed.py`, no pytest harness, no `init-tenants.sql`);
+2. the deploy's migration step — `backend/scripts/deploy_migrate.sh`, the very
+   file `deploy.sh` runs in the api container, so the two cannot drift;
+3. the production image booted on its own entrypoint with production-shaped
+   settings (`FEOH_ENVIRONMENT=production`, MFA on, signup off, `smtp` email,
+   the credential KMS key on LocalStack);
+4. the first tenant, provisioned through `lib.sh::feoh_tenant_argv` — the
+   command `add-tenant.sh` execs — with a generated temporary password;
+5. the migration step **again**, failing on any change to any database's
+   schema or Alembic version (a deploy must be idempotent);
+6. the Playwright journey in `frontend/tests-e2e/day-one/`.
+
+So a change to a deploy step changes what the job runs. Keep it that way:
+`deploy.sh` and `add-tenant.sh` call the shared file / function rather than
+spelling the commands, and `backend/tests/test_control_plane_bootstrap.py` +
+`test_deploy_add_tenant.py` fail on a restated copy. It all lives in
+`scripts/day-one/stack.sh`; `pnpm day-one:up && pnpm test:day-one` runs it on a
+laptop, on its own ports beside the dev stack.
 
 ## Tenants
 
