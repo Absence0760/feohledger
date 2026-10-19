@@ -20,7 +20,7 @@ columns changes. Widening ``varchar`` is a catalog-only change in PostgreSQL: no
 table rewrite, and the two partial unique indexes on ``code`` stay valid.
 
 Revision ID: 0114_gl_code_width
-Revises: 0112_free_plan_erp
+Revises: 0113_schema_build_parity
 Create Date: 2026-10-19
 
 18 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
@@ -40,7 +40,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision = "0114_gl_code_width"
-down_revision = "0112_free_plan_erp"
+down_revision = "0113_schema_build_parity"
 branch_labels = None
 depends_on = None
 
