@@ -948,6 +948,7 @@ Severity: `error`, `warning`, `info`. Auto-detected by `invoice_warnings.py`. `e
 | `scripts/sso_break_glass.py` | CLI wrapper around `services.sso_break_glass.lift_sso_only` — clears `settings.sso.sso_only` (and nothing else) for one SSO-only tenant whose IdP has stopped working, after writing an `organization.sso_only_lifted` audit row; refuses to change anything if the row cannot be written. `--slug`, optional `--reason` (ticket ref, no PII). Procedure: `../docs/founder-runbooks/sso-break-glass.md` |
 | `scripts/init_control_plane.py` | Builds an EMPTY control-plane database — `CONTROL_TABLES` via `create_all`, the four system roles and Alembic's version row at head, in one transaction — and is a no-op on an initialised one. Alembic's chain has no step that creates the control plane, so `deploy/deploy.sh` runs this before `alembic upgrade head`; it refuses (exit 2) a database Alembic stamped while empty. `services/control_plane_bootstrap.py` |
 | `scripts/migrate_all_tenants.py` | Runs `alembic upgrade head` on every tenant DB; exits non-zero if any tenant failed (every tenant is still attempted) |
+| `scripts/deploy_migrate.sh` | The deploy's whole database step — `init_control_plane.py`, `alembic upgrade head`, `migrate_all_tenants.py`, fail-fast. Every deploy runs this ONE file (`deploy/deploy.sh`, `aws-deploy.yml`'s Fargate task, CI's day-one job in `scripts/day-one/`); never restate the sequence, `tests/test_control_plane_bootstrap.py` fails on a copy |
 
 ## Self-service tenant signup
 

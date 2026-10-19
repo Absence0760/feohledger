@@ -6,9 +6,9 @@ Alembic stamped head over a schema it never built — its chain has no revision
 that creates the control plane — and the tenant fan-out then died on
 `relation "organizations" does not exist`.
 
-The end-to-end cases drive the real deploy command line
-(`init_control_plane.py`, then `alembic upgrade head`, then
-`migrate_all_tenants.py`) as subprocesses against a scratch database on the local
+The end-to-end cases run the deploy's own migration file,
+`scripts/deploy_migrate.sh` (`init_control_plane.py`, then `alembic upgrade
+head`, then `migrate_all_tenants.py`), against a scratch database on the local
 Postgres, because the defect lived in how those three interact with an empty
 database — something a mocked connection cannot show. Skipped when Postgres is
 unreachable, like the realdb harness. Each name is uniquified per run.
@@ -38,9 +38,13 @@ from app.services.tenant_provisioning import CONTROL_TABLES, _parse_maintenance_
 BACKEND = Path(__file__).resolve().parents[1]
 REPO = BACKEND.parent
 
-DEPLOY_MIGRATE = (
-    "python scripts/init_control_plane.py && alembic upgrade head"
-    " && python scripts/migrate_all_tenants.py"
+DEPLOY_MIGRATE_SH = BACKEND / "scripts" / "deploy_migrate.sh"
+# What every deploy entry point runs: one file, never the sequence restated.
+DEPLOY_MIGRATE = "sh scripts/deploy_migrate.sh"
+SEQUENCE = (
+    "python scripts/init_control_plane.py",
+    "alembic upgrade head",
+    "python scripts/migrate_all_tenants.py",
 )
 
 
@@ -69,7 +73,19 @@ def test_system_roles_are_exactly_the_rbac_roles():
     assert set(SYSTEM_ROLE_DESCRIPTIONS) == set(ALL_ROLES)
 
 
-# ── Every migration entry point runs the bootstrap first ────────────────────
+# ── Every migration entry point runs the one file ──────────────────────────
+
+
+def test_the_migration_file_runs_the_bootstrap_first_and_fails_fast():
+    """`init_control_plane.py` before Alembic, every tenant after, and `set -e`
+    so a failed step stops the deploy before any later one runs."""
+    lines = [
+        ln.strip()
+        for ln in DEPLOY_MIGRATE_SH.read_text().splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
+    assert lines[0] == "set -eu"
+    assert [ln for ln in lines if ln.startswith(("python ", "alembic "))] == list(SEQUENCE)
 
 
 @pytest.mark.parametrize(
@@ -77,17 +93,18 @@ def test_system_roles_are_exactly_the_rbac_roles():
     [
         "deploy/deploy.sh",
         ".github/workflows/aws-deploy.yml",
+        "scripts/day-one/stack.sh",
         "docs/minimal-deployment.md",
         "docs/production-deployment.md",
         "docs/backup-disaster-recovery.md",
     ],
 )
-def test_every_deploy_migration_runs_init_first(path):
+def test_every_deploy_migration_runs_the_shared_file(path):
     text = (REPO / path).read_text()
-    assert DEPLOY_MIGRATE in text
-    # No surviving spelling that skips the bootstrap.
-    bare = "alembic upgrade head && python scripts/migrate_all_tenants.py"
-    assert text.count(bare) == text.count(DEPLOY_MIGRATE)
+    assert "scripts/deploy_migrate.sh" in text
+    # No entry point restates the sequence — a copy is what drifts (#575).
+    for step in ("alembic upgrade head && ", "init_control_plane.py && "):
+        assert step not in text, f"{path} restates the migration sequence"
 
 
 # ── End to end against a scratch database ──────────────────────────────────
@@ -109,14 +126,18 @@ async def scratch_control_db():
         await maint.close()
 
 
-def _run(command: str, db_name: str) -> subprocess.CompletedProcess:
+def _run(command: str, db_name: str, tmp_path: Path) -> subprocess.CompletedProcess:
     env = {**os.environ, "FEOH_DATABASE_URL": _make_tenant_url(db_name)}
     env.pop("FEOH_MIGRATE_TENANT", None)
-    # The deploy's own command line, with this interpreter in place of the
-    # container's `python` / `alembic` on PATH.
-    command = command.replace("python ", f"{sys.executable} ").replace(
-        "alembic ", f"{sys.executable} -m alembic "
-    )
+    # The deploy's own file, unmodified. In the image `python` and `alembic` are
+    # on PATH; here a shim directory points both at this interpreter.
+    shims = tmp_path / "shims"
+    shims.mkdir(exist_ok=True)
+    (shims / "python").write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    (shims / "alembic").write_text(f'#!/bin/sh\nexec "{sys.executable}" -m alembic "$@"\n')
+    for shim in shims.iterdir():
+        shim.chmod(0o755)
+    env["PATH"] = f"{shims}:{env.get('PATH', '/usr/bin:/bin')}"
     return subprocess.run(
         ["sh", "-c", command],
         cwd=BACKEND,
@@ -138,10 +159,10 @@ async def _tables(dsn: dict) -> set[str]:
         await conn.close()
 
 
-async def test_deploy_command_initialises_an_empty_control_plane(scratch_control_db):
+async def test_deploy_command_initialises_an_empty_control_plane(scratch_control_db, tmp_path):
     name, dsn = scratch_control_db
 
-    result = _run(DEPLOY_MIGRATE, name)
+    result = _run(DEPLOY_MIGRATE, name, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Empty control-plane database" in result.stdout
     assert "Control plane initialised at" in result.stdout
@@ -172,12 +193,12 @@ async def test_deploy_command_initialises_an_empty_control_plane(scratch_control
     assert version == heads
 
 
-async def test_second_deploy_is_a_no_op(scratch_control_db):
+async def test_second_deploy_is_a_no_op(scratch_control_db, tmp_path):
     name, dsn = scratch_control_db
-    assert _run(DEPLOY_MIGRATE, name).returncode == 0
+    assert _run(DEPLOY_MIGRATE, name, tmp_path).returncode == 0
     before = await _tables(dsn)
 
-    again = _run(DEPLOY_MIGRATE, name)
+    again = _run(DEPLOY_MIGRATE, name, tmp_path)
     assert again.returncode == 0, again.stdout + again.stderr
     assert "Control plane already initialised." in again.stdout
     assert await _tables(dsn) == before
@@ -189,7 +210,7 @@ async def test_second_deploy_is_a_no_op(scratch_control_db):
         await conn.close()
 
 
-async def test_a_database_stamped_while_empty_is_refused(scratch_control_db):
+async def test_a_database_stamped_while_empty_is_refused(scratch_control_db, tmp_path):
     """The state the first production deploy left behind."""
     name, dsn = scratch_control_db
     conn = await asyncpg.connect(**dsn)
@@ -199,7 +220,7 @@ async def test_a_database_stamped_while_empty_is_refused(scratch_control_db):
     finally:
         await conn.close()
 
-    result = _run(DEPLOY_MIGRATE, name)
+    result = _run(DEPLOY_MIGRATE, name, tmp_path)
     assert result.returncode == 2
     assert "DROP DATABASE feohledger" in result.stderr
     # It stopped before Alembic, and changed nothing.
