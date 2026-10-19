@@ -11592,6 +11592,31 @@ with the expiry and a paste-this-link fallback, and a workspace button over a
 set-off credentials panel with a "keep this email" line (added to both parts).
 The plaintext part is never rewritten.
 
+**Only a URL the sender built becomes a link.** No text is ever scanned for
+URLs. A name, a company name or a rejection reason is free text, and the
+signup greeting goes to any address typed into the form: "your account is
+locked, sign in at https://evil.example/login" entered as a name would
+otherwise be a live link inside a genuine email from us. A hand-written body
+passes its own URLs to `email_button` / `email_fallback_link`; a derived body
+links only the URLs the sender lists in `EmailMessage.links`, and only when one
+stands alone on its line or as a panel value. Every other URL renders as inert
+text, the password cell included. Both blocks raise on anything but an absolute
+http(s) URL, so no future caller can put `javascript:` behind a button. An
+origin allowlist (public URL plus the tenant template) was rejected: white-label
+tenants serve their portal from their own domains, which no static list knows,
+and an origin check still admits any path on a trusted host. Some mail clients
+autolink a bare URL in text by themselves. The layout cannot stop that, and the
+plaintext part has always carried the same text.
+
+**The inbox preview is never derived.** The first sentence is exactly where a
+sign-in code or a credential sits, so a preheader is fixed copy the sender opts
+into. The sign-in-code, password-reset, invite and portal-reset senders set one
+that names no code, link or credential; the rest send none, and the client
+previews the body as it always did. Filtering the derived line for digits or
+URLs was rejected: a temporary password is alphanumeric and a name can hold
+anything, so a denylist cannot know what a credential looks like, while an
+opt-in has nothing to miss.
+
 **Why derive instead of hand-writing all fourteen.** Ten senders get the
 layout without editing them, and the fifteenth gets it by default; hand-writing
 each would leave the next new sender plain again. Their texts already have the
@@ -11607,8 +11632,11 @@ shapes the derivation reads, because the plaintext was written for a human.
   document asks for, so the card is light with a dark override where honoured.
 
 **Guards.** `backend/tests/test_email_layout.py` pins the derivation rules,
-escaping, the document shell, that SES and SMTP attach the HTML part to a
-text-only message, and fails on a `body_html = f"<…"` send site;
-`backend/tests/test_signup.py` checks both signup emails as the adapter would
-send them. `backend/docs/notifications.md` § The HTML layout carries the
+escaping, that a hostile URL in free text and an undeclared URL never become a
+link, the http(s)-only href rule, that no preheader is derived and the
+sign-in-code and reset emails preview without their code or link, the document
+shell, that SES and SMTP attach the HTML part to a text-only message, and fails
+on a `body_html = f"<…"` send site; `backend/tests/test_signup.py` checks both
+signup emails as the adapter would send them, including a phishing URL typed as
+the admin name. `backend/docs/notifications.md` § The HTML layout carries the
 working form.

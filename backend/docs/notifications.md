@@ -426,12 +426,13 @@ A send site has two ways in:
 
 - **Write no HTML.** Leave `EmailMessage.body_html` unset and the body is derived
   from `body_text` by `layout.text_to_html`: blank lines split paragraphs, a line
-  that is only a URL becomes the button (labelled by a lead-in line ending in
-  `:`, or "Open <product>" in `EmailMessage.locale`), indented `Label: value`
-  lines become a set-off panel, four or more lines stay monospace, and each
-  button's raw URL is repeated at the end for a client that won't follow it.
-  Most senders — invites, password resets, sign-in codes, scheduled reports,
-  workflow email steps — take this path, and a new send site gets it for free.
+  that is only a URL **listed in `EmailMessage.links`** becomes the button
+  (labelled by a lead-in line ending in `:`, or "Open <product>" in
+  `EmailMessage.locale`), indented `Label: value` lines become a set-off panel,
+  four or more lines stay monospace, and each button's raw URL is repeated at the
+  end for a client that won't follow it. Most senders — invites, password
+  resets, sign-in codes, scheduled reports, workflow email steps — take this
+  path, and a new send site gets it for free.
 - **Hand-write the body** from the layout's blocks (`email_paragraph`,
   `email_button`, `email_note`, `email_credentials`, `email_fallback_link`), as
   the signup verification and welcome emails, the virtual-card email and the
@@ -440,8 +441,20 @@ A send site has two ways in:
   typed. `tests/test_email_layout.py` fails on a `body_html = f"<…"` send site.
 
 `body_text` is never rewritten — it goes out unchanged as the plaintext part.
-`EmailMessage.preheader` overrides the derived preview line; the welcome email
-sets it so nothing about the credentials can reach an inbox preview.
+
+**Only a URL the sender built is ever a link.** Text is never scanned for URLs,
+because a name or reason interpolated into it is free text and a URL typed there
+would be a phishing link inside a genuine email. Pass your own URLs to
+`email_button` / `email_fallback_link`, or list them in `EmailMessage.links` for
+a derived body; anything else renders as inert text. Both blocks raise
+`ValueError` on anything but an absolute http(s) URL.
+
+**The preview line is opt-in.** No preheader is derived from the body: its first
+sentence is where a code or credential sits. A sender that wants one sets
+`EmailMessage.preheader` to fixed copy, and any email carrying a sign-in code,
+reset link, token or credential must set one that names none of them. The
+sign-in-code, password-reset, user-invite, supplier-invite, portal-reset and
+signup welcome senders do. Unset, the client previews the body as it always did.
 
 ## Localized email
 
