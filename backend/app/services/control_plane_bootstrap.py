@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO
 from app.models import Base
 from app.models.user import Role
+from app.services.schema_version import record_head
 from app.services.tenant_provisioning import CONTROL_TABLES
 
 # Canonical system-role set, keyed by the same ROLE_* constants `app.api.deps`
@@ -137,13 +138,4 @@ async def initialise(engine: AsyncEngine, head_revision: str) -> None:
             lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables, checkfirst=True)
         )
         await _seed_system_roles(conn)
-        await conn.execute(
-            text(
-                "CREATE TABLE alembic_version ("
-                "version_num VARCHAR(32) NOT NULL, "
-                "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-            )
-        )
-        await conn.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES (:v)"), {"v": head_revision}
-        )
+        await record_head(conn, head_revision)

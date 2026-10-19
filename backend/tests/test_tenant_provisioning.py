@@ -21,6 +21,8 @@ the control-plane org/user rows and the Postgres database they make.
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -337,6 +339,44 @@ async def test_create_tenant_cli_exits_2_on_a_reserved_slug(monkeypatch, capsys)
     engine.dispose.assert_awaited_once()
 
 
+async def test_create_tenant_cli_prints_the_tenants_own_url(monkeypatch, capsys):
+    """The CLI printed `http://<slug>.localhost:7777` on every server — on the
+    production VM too, where `add-tenant.sh` runs it (#575)."""
+    spec = importlib.util.spec_from_file_location("_create_tenant_cli", _CREATE_TENANT_CLI)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    engine = MagicMock()
+    engine.dispose = AsyncMock()
+    monkeypatch.setattr(cli, "control_engine", engine)
+    monkeypatch.setattr(
+        cli,
+        "provision_tenant",
+        AsyncMock(return_value=MagicMock(db_name="feoh_northwind")),
+    )
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.feohledger.example")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_tenant.py",
+            "--name",
+            "Northwind",
+            "--slug",
+            "northwind",
+            "--admin-email",
+            "admin@northwind.test",
+            "--admin-password",
+            "Aa1-not-used-000000",
+        ],
+    )
+
+    await cli.main()
+
+    out = capsys.readouterr().out
+    assert "Login at:    https://northwind.feohledger.example\n" in out
+    assert "localhost" not in out
+
+
 # ---------------------------------------------------------------------------
 # End-to-end provision_tenant against a live Postgres (realdb)
 # ---------------------------------------------------------------------------
@@ -643,6 +683,93 @@ async def test_provision_tenant_respects_must_change_password_false(
                 assert user.must_change_password is False
         finally:
             await engine.dispose()
+    finally:
+        await _cleanup_org(slug)
+
+
+async def _tenant_version(db_name: str) -> str | None:
+    import asyncpg
+
+    from app.services.tenant_provisioning import asyncpg_connect_kwargs
+
+    conn = await asyncpg.connect(**asyncpg_connect_kwargs(settings.database_url, database=db_name))
+    try:
+        if await conn.fetchval("SELECT to_regclass('public.alembic_version')") is None:
+            return None
+        return await conn.fetchval("SELECT version_num FROM alembic_version")
+    finally:
+        await conn.close()
+
+
+async def test_a_provisioned_tenant_is_recorded_at_head_so_the_next_deploy_is_a_no_op(
+    realdb, throwaway_slug, _provision_on_test_loop
+):
+    """#575: a tenant built by `create_all` carried no version row, so the next
+    deploy's `migrate_all_tenants.py` replayed the whole chain onto it from base
+    — not a no-op: the multi-entity revisions added a second, differently named
+    foreign key beside each one `create_all` built. CI's day-one job caught it."""
+    from app.services.schema_version import head_revision
+
+    slug = throwaway_slug
+    db_name = f"{settings.tenant_db_prefix}{slug}"
+    try:
+        await provision_tenant(
+            company_name="Stamped Co",
+            slug=slug,
+            admin_email=f"admin@{slug}.test",
+            admin_name="Stamped Admin",
+            admin_password="Sup3rSecret!pw",
+        )
+        assert await _tenant_version(db_name) == head_revision()
+
+        # What migrate_all_tenants.py runs per tenant, against this one.
+        backend = Path(__file__).resolve().parents[1]
+        upgrade = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=backend,
+            env={**os.environ, "FEOH_MIGRATE_TENANT": db_name},
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert upgrade.returncode == 0, upgrade.stderr
+        assert "Running upgrade" not in upgrade.stderr, upgrade.stderr
+    finally:
+        await _cleanup_org(slug)
+
+
+async def test_rebuilding_tenant_tables_keeps_the_revision_alembic_recorded(
+    realdb, throwaway_slug, _provision_on_test_loop
+):
+    """`_create_tenant_tables` is additive (`checkfirst`) and is re-run over
+    existing tenants (the pytest harness does it every session). A tenant Alembic
+    already tracks is at the revision it says; recording head over that would
+    skip whatever revisions it has not had yet."""
+    import asyncpg
+
+    from app.services.tenant_provisioning import _create_tenant_tables, asyncpg_connect_kwargs
+
+    slug = throwaway_slug
+    db_name = f"{settings.tenant_db_prefix}{slug}"
+    try:
+        result = await provision_tenant(
+            company_name="Behind Co",
+            slug=slug,
+            admin_email=f"admin@{slug}.test",
+            admin_name="Behind Admin",
+            admin_password="Sup3rSecret!pw",
+        )
+        conn = await asyncpg.connect(
+            **asyncpg_connect_kwargs(settings.database_url, database=db_name)
+        )
+        try:
+            await conn.execute("UPDATE alembic_version SET version_num = '0100_older'")
+        finally:
+            await conn.close()
+
+        await _create_tenant_tables(db_name, organization_id=result.organization_id)
+
+        assert await _tenant_version(db_name) == "0100_older"
     finally:
         await _cleanup_org(slug)
 

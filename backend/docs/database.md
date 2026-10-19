@@ -329,6 +329,18 @@ A database here is built **two ways**, and only one of them runs Alembic:
 | Alembic | `alembic upgrade head` / `scripts/migrate_all_tenants.py` | every EXISTING tenant + the control plane |
 | `create_all` | `Base.metadata.create_all` in `services/tenant_provisioning._create_tenant_tables` (tenants) and `services/control_plane_bootstrap.create_control_tables` (control plane) | every NEW tenant, the control plane on a fresh install (`scripts/init_control_plane.py`, which records Alembic at head in the same transaction — the chain has no revision that creates the control plane), and the pytest `realdb` harness |
 
+**Both `create_all` paths record Alembic at head in the same transaction**
+(`services/schema_version.record_head`), because the ORM *is* the head schema.
+A new tenant used not to: it carried no `alembic_version` row, so the next
+deploy's `migrate_all_tenants.py` replayed all ~114 revisions onto it from base.
+That replay is not a no-op — the multi-entity revisions add a second,
+differently named foreign key (`fk_<table>_entity`) beside each one `create_all`
+built — and CI's day-one job, which re-runs the deploy's migration step after
+provisioning and diffs every schema, is what found it (#575). A tenant that was
+provisioned before the fix had its chain replayed on its first deploy and now
+carries those redundant duplicate foreign keys; they enforce the same reference
+and are harmless. A database that already has a version row keeps it.
+
 `create_all` builds **exactly what the ORM declares**. So an index written into a
 migration and never declared on its model reaches migrated databases and
 *silently never reaches a freshly-provisioned one*. Nothing notices: the reads

@@ -25,6 +25,7 @@ from app.models import Base
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
 from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscription
+from app.services.schema_version import head_revision, record_head
 from app.utils.emails import normalize_email
 from app.utils.passwords import hash_password
 from app.utils.slug import validate_slug_format
@@ -212,6 +213,9 @@ PROVISIONED_STEPS_CONFIG: dict = {
 
 
 async def _create_tenant_tables(db_name: str, organization_id: uuid.UUID | None = None) -> None:
+    # Resolved before any DDL: a chain with two heads fails here, with nothing
+    # created, rather than after the tables exist with no version recorded.
+    head = head_revision()
     tenant_url = _make_tenant_url(db_name)
     engine = create_async_engine(tenant_url)
     tenant_tables = [
@@ -227,6 +231,12 @@ async def _create_tenant_tables(db_name: str, organization_id: uuid.UUID | None 
                 sync_conn, tables=tenant_tables, checkfirst=True
             )
         )
+        # The ORM is the head schema, so record it as such in this same
+        # transaction. Without the row the next deploy's migrate_all_tenants.py
+        # replays the whole chain onto this tenant from base, which is not a
+        # no-op (`services/schema_version.py`, #575). A tenant Alembic already
+        # tracks keeps its row.
+        await record_head(conn, head)
         # SOX: install the DB-level append-only guard on audit_log. Migration
         # 0022 does the same across existing tenants; this keeps tenants created
         # outside Alembic (fresh provisioning + the test harness) consistent.
