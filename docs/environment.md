@@ -7,7 +7,7 @@ the place to check before raising either.
 
 | Tool | Pinned to | Where it is declared |
 |------|-----------|----------------------|
-| Node | **24** (Active LTS, EOL 2028-04-30) | `node-version:` on every `setup-node` step in `.github/workflows/` — `ci.yml` (×4), `sso-e2e`, `web-bundle-budget`, `compliance-drift`, `aws-deploy`, `audit` |
+| Node | **24** (Active LTS, EOL 2028-04-30) | `node-version:` on every `setup-node` step in `.github/workflows/` — `ci.yml` (×4), `sso-e2e`, `web-bundle-budget`, `compliance-drift`, `vm-deploy`, `audit` |
 | pnpm | **10.12.4** | `packageManager` in the root **and** `frontend/package.json`; no workflow passes a `version:` input |
 | Python | **3.12+** | `backend/pyproject.toml` |
 | Dart | **^3.11.4** | `environment.sdk` in `mobile/pubspec.yaml` (the Flutter 3.41+ floor in the root `CLAUDE.md` is not declared in the pubspec) |

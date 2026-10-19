@@ -261,13 +261,38 @@ resource "aws_eip" "app" {
 # every tenant lives on <slug>.<domain> — one wildcard covers them all. Names
 # that already carry their own records (the mail subdomain, DKIM selectors) are
 # not affected: a wildcard only answers for names that do not exist.
+#
+# The apex and the wildcard are the SPA, so they point at the CloudFront
+# distribution (frontend.tf) once var.frontend_on_cloudfront is true, and at the
+# VM's Caddy until then. Only their A records change (plus an AAAA, which the
+# VM — IPv4 only — never had); the apex's Migadu MX/TXT records are separate
+# and untouched. api.<domain> stays on the VM either way. Rolling back is
+# setting the variable to false and applying: Route 53 swaps each record in one
+# atomic change, and the VM's Caddy still serves the SPA until the step-4
+# cleanup removes it (issue #582).
+
+locals {
+  spa_records = {
+    apex    = var.domain_name
+    tenants = "*.${var.domain_name}"
+  }
+}
 
 resource "aws_route53_record" "apex" {
   zone_id = data.aws_route53_zone.platform.zone_id
   name    = var.domain_name
   type    = "A"
-  ttl     = 300
-  records = [aws_eip.app.public_ip]
+  ttl     = var.frontend_on_cloudfront ? null : 300
+  records = var.frontend_on_cloudfront ? null : [aws_eip.app.public_ip]
+
+  dynamic "alias" {
+    for_each = var.frontend_on_cloudfront ? [aws_cloudfront_distribution.frontend] : []
+    content {
+      name                   = alias.value.domain_name
+      zone_id                = alias.value.hosted_zone_id
+      evaluate_target_health = false
+    }
+  }
 }
 
 resource "aws_route53_record" "api" {
@@ -282,6 +307,29 @@ resource "aws_route53_record" "tenants" {
   zone_id = data.aws_route53_zone.platform.zone_id
   name    = "*.${var.domain_name}"
   type    = "A"
-  ttl     = 300
-  records = [aws_eip.app.public_ip]
+  ttl     = var.frontend_on_cloudfront ? null : 300
+  records = var.frontend_on_cloudfront ? null : [aws_eip.app.public_ip]
+
+  dynamic "alias" {
+    for_each = var.frontend_on_cloudfront ? [aws_cloudfront_distribution.frontend] : []
+    content {
+      name                   = alias.value.domain_name
+      zone_id                = alias.value.hosted_zone_id
+      evaluate_target_health = false
+    }
+  }
+}
+
+resource "aws_route53_record" "spa_ipv6" {
+  for_each = var.frontend_on_cloudfront ? local.spa_records : {}
+
+  zone_id = data.aws_route53_zone.platform.zone_id
+  name    = each.value
+  type    = "AAAA"
+
+  alias {
+    name                   = aws_cloudfront_distribution.frontend.domain_name
+    zone_id                = aws_cloudfront_distribution.frontend.hosted_zone_id
+    evaluate_target_health = false
+  }
 }

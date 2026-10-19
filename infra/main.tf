@@ -13,8 +13,10 @@
 #   - monitoring.tf : alarms
 #   - deploy.tf   : release deploys — the SSM document that runs deploy.sh on
 #                   the VM, and the deploy role's grant to run only that
+#   - frontend.tf : the SPA on S3 + CloudFront, and the deploy role's grant to
+#                   publish to that bucket and distribution only
 #
-# The scale-up architecture (ECS, ALB, CloudFront) is
+# The rest of the scale-up architecture (ECS, ALB) is
 # docs/production-deployment.md and is not built.
 #
 # The `terraform` block pins versions and keeps state in the S3 bucket the
