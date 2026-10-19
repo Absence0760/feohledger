@@ -43,7 +43,6 @@ NULL link on that basis — they re-judge it by evidence and stamp the realm.
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from sqlalchemy import or_
@@ -53,15 +52,11 @@ from app.services.erp_adapters.dispatcher import MOCK_ADAPTER_KEY, resolve_adapt
 
 __all__ = [
     "LEGACY_REALM_KEY",
-    "REALM_MAX_LENGTH",
     "connection_realm",
     "legacy_links_trusted",
     "link_is_live",
     "live_link_clause",
 ]
-
-#: Width of the ``erp_link_realm`` columns.
-REALM_MAX_LENGTH = 255
 
 #: Adapters connected through OAuth: the consent's provider company id.
 _OAUTH_ADAPTERS = frozenset({"quickbooks_online", "xero", "sage_accounting", "blackbaud_fe_nxt"})
@@ -110,10 +105,9 @@ def connection_realm(erp_config: Any) -> str | None:
         # Merge.dev (globally unique ids) and any adapter that has not named
         # its company fields: the adapter is the realm.
         identity = ""
-    realm = f"{key}:{identity}"
-    if len(realm) > REALM_MAX_LENGTH:
-        realm = f"{key}:sha256:{hashlib.sha256(identity.encode()).hexdigest()}"
-    return realm
+    # Stored whole (the columns are `text`): a shortened form would either
+    # merge two companies' realms or need a digest of configuration values.
+    return f"{key}:{identity}"
 
 
 def legacy_links_trusted(erp_config: Any, realm: str | None) -> bool:
