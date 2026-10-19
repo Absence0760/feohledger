@@ -12,7 +12,7 @@
 	 * `label` is what the reader is told is missing, phrased to stand alone
 	 * inside a sentence: "governed by the laws of [governing law to be confirmed]".
 	 */
-	let { value, label } = $props<{ value: string | null; label: string }>();
+	let { value, label }: { value: string | null; label: string } = $props();
 </script>
 
 {#if value && value.trim()}{value}{:else}<span class="fact-pending">[{label} to be confirmed]</span>{/if}
