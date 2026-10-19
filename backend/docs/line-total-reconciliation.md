@@ -34,8 +34,11 @@ Equally, a mismatch is **not** rejected with a 422: `tax_amount`,
 
 ## What happens instead
 
-`invoice_warnings.reconcile_line_totals(invoice, line_total)` — pure, no DB — is
-the primitive. A sum reconciles when it matches, within a **one-cent**
+`invoice_warnings.line_total_reconciles(line_total, *, amount, subtotal,
+tax_amount, shipping_amount, discount_amount)` — pure, no DB, returns a bool —
+is **the** definition of "the lines reconcile", and
+`reconcile_line_totals(invoice, line_total)` wraps it to build the mismatch
+payload. A sum reconciles when it matches, within a **one-cent**
 tolerance (`LINE_TOTAL_TOLERANCE`; every money column is `Numeric(15, 2)` so a
 sum of them is exact — the tolerance only absorbs rounding in the derived
 figure), **any** of:
@@ -80,6 +83,26 @@ best-effort: a failure is logged PII-free and never breaks saving an invoice.
 Gated by the `line_total_mismatch_enabled` rule (default `true` — set
 `settings.fraud_rules.line_total_mismatch_enabled: false` to opt out, like the
 other rules).
+
+### Extraction's self-correction pass uses the same definition
+
+`extraction_self_correction._check_line_items_sum` runs on the raw extraction,
+before any line is saved, and its `self_correction_line_items_sum` warning docks
+the `amount` field's confidence — which feeds auto-approval. It calls
+`line_total_reconciles` with the extraction's parsed header values (read through
+the same `_clean_decimal` convention the invoice row is written with), so it
+accepts exactly the three bases above at the same one-cent tolerance.
+
+It used to compare the line sum to `amount` alone, within 2 %. Every ordinary
+tax-exclusive invoice — lines summing to the subtotal, sales tax / VAT on top,
+the normal US and UK shape — was therefore told "line items total doesn't match
+invoice amount" and lost confidence on a figure that was correct, while this
+gate (rightly) stayed silent: issue #566's smoke test, lines 1,919.15, subtotal
+1,919.15, tax 101.71, total 2,020.86. The relative 2 % was dropped rather than
+kept as a parameter because two tolerances are two definitions: it let a gap the
+gate blocks (2 % of a large invoice is real money) pass the check that guards
+auto-approval silently. The warning's code and params are unchanged when it does
+fire. Covered by `tests/test_extraction_self_correction.py` (§ 7b).
 
 ## Extraction replaces the lines, it never appends
 
@@ -189,7 +212,8 @@ against the actual `reconciles_with_header` the backend returned.
 `backend/tests/test_invoice_line_items_save.py`:
 
 - the pure primitive across all three reconciliation bases, the one-cent
-  tolerance, and a genuine divergence
+  tolerance, and a genuine divergence — plus the shared `line_total_reconciles`
+  directly, including its `None` handling
 - a reconciling save writes exactly one `invoice.line_items_edited` audit row
   and raises no mismatch signal
 - a diverging save leaves `invoice.amount` **untouched** and raises the `error`

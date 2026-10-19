@@ -17,6 +17,7 @@ from decimal import Decimal
 from app.services.decimal_convention import AmountConvention
 from app.services.extraction_adapters.base import ExtractionResult
 from app.services.invoice_warning_catalog import warning
+from app.services.invoice_warnings import line_total_reconciles
 
 # Tolerances for "approximately equal" checks.
 TOTAL_TOLERANCE = Decimal("0.02")  # 2 %
@@ -173,7 +174,24 @@ def _check_line_items_sum(
     report: SelfCorrectionReport,
     convention: AmountConvention | None = None,
 ) -> None:
-    """sum(line_items.total) ≈ amount."""
+    """sum(line_items.total) reconciles with the header money.
+
+    "Reconciles" is ``invoice_warnings.line_total_reconciles`` — the SAME
+    definition the payment-blocking ``line_total_mismatch`` check uses: the sum
+    may match ``amount`` (tax-inclusive lines), ``subtotal``, or the net derived
+    from ``amount - tax - shipping + discount`` (tax-exclusive lines). Comparing
+    to ``amount`` alone flagged every ordinary tax-exclusive invoice (the normal
+    US/UK shape) and docked ``amount``'s confidence, which can suppress
+    auto-approval for an invoice the payment gate itself considers consistent.
+
+    Tolerance: this adopts the gate's absolute one cent (``LINE_TOTAL_TOLERANCE``)
+    rather than this module's 2 % ``TOTAL_TOLERANCE``. Two tolerances would be
+    two definitions again — a 2 % slop let a sum the gate then blocks pass here
+    silently (2 % of a large invoice is a lot of money), so the checker that
+    feeds auto-approval would be the LOOSER of the two. Line totals are
+    two-decimal money read the same way the writer reads them, so their sum is
+    exact; the cent only absorbs rounding in the derived net.
+    """
     if not result.line_items:
         return
     amount = _to_decimal(result.amount.value, convention)
@@ -189,7 +207,14 @@ def _check_line_items_sum(
     if li_sum == 0:
         return  # no totals on line items — skip
 
-    if not _approx_eq(li_sum, amount, TOTAL_TOLERANCE):
+    if not line_total_reconciles(
+        li_sum,
+        amount=amount,
+        subtotal=_to_decimal(result.subtotal.value, convention),
+        tax_amount=_to_decimal(result.tax_amount.value, convention),
+        shipping_amount=_to_decimal(result.shipping_amount.value, convention),
+        discount_amount=_to_decimal(result.discount_amount.value, convention),
+    ):
         report.violations.append(
             {
                 **warning(

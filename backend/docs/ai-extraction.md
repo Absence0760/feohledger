@@ -278,9 +278,19 @@ Runs after `_apply_extraction()`, before line items are saved. Implemented in `s
 
 **Invariant checks (4):**
 
-1. **Total reconciliation** — `|subtotal + tax_amount - amount| / amount <= 2%`
+1. **Total reconciliation** — `|subtotal + tax_amount + shipping_amount - discount_amount - amount| / amount <= 2%` (skipped when no subtotal was extracted)
 2. **Date ordering** — `due_date >= invoice_date`
-3. **Line items sum** — `|sum(line_item.total) - amount| / amount <= 2%`
+3. **Line items sum** — `sum(line_item.total)` must reconcile with the header by
+   `invoice_warnings.line_total_reconciles`, the **same definition the
+   payment-blocking `line_total_mismatch` check uses**: within one cent of
+   `amount` (tax-inclusive lines), of `subtotal`, or of
+   `amount - tax_amount - shipping_amount + discount_amount` (tax-exclusive
+   lines). It used to compare to `amount` alone at 2 %, so every ordinary
+   tax-exclusive invoice — the normal US/UK shape — was warned about and had its
+   `amount` confidence docked, which could suppress auto-approval for an invoice
+   the payment gate itself accepted (issue #566). The gate's absolute cent
+   replaced the 2 % slop so the two checks cannot disagree in either direction.
+   See `line-total-reconciliation.md`.
 4. **Line item math** — per line: `|quantity * unit_price - total| / total <= 1%`
 
 **On violation:**

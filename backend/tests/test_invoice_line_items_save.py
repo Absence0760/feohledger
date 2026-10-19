@@ -39,7 +39,7 @@ from sqlalchemy import select
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.workflow import AuditLog
-from app.services.invoice_warnings import reconcile_line_totals
+from app.services.invoice_warnings import line_total_reconciles, reconcile_line_totals
 
 # ---------------------------------------------------------------------------
 # Pure reconciliation primitive — no DB
@@ -87,6 +87,31 @@ def test_reconciles_against_derived_net_when_no_subtotal():
 def test_one_cent_of_rounding_is_tolerated():
     assert reconcile_line_totals(_header(), Decimal("1500.01")) is None
     assert reconcile_line_totals(_header(), Decimal("1499.99")) is None
+
+
+def test_shared_definition_accepts_each_basis_and_is_none_safe():
+    """`line_total_reconciles` is the ONE definition the payment gate and
+    extraction's self-correction pass share (issue #566 — they disagreed)."""
+    us = {
+        "amount": Decimal("2020.86"),
+        "subtotal": Decimal("1919.15"),
+        "tax_amount": Decimal("101.71"),
+        "shipping_amount": None,
+        "discount_amount": None,
+    }
+    assert line_total_reconciles(Decimal("1919.15"), **us)  # subtotal
+    assert line_total_reconciles(Decimal("2020.86"), **us)  # amount
+    assert line_total_reconciles(Decimal("1919.15"), **{**us, "subtotal": None})  # derived net
+    assert not line_total_reconciles(Decimal("1500.00"), **us)
+    # An absent subtotal is not a zero basis, and absent adjustments read as 0.
+    assert not line_total_reconciles(
+        Decimal("0"),
+        amount=Decimal("10.00"),
+        subtotal=None,
+        tax_amount=None,
+        shipping_amount=None,
+        discount_amount=None,
+    )
 
 
 def test_genuine_divergence_is_reported_against_the_header_amount():
