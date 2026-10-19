@@ -132,6 +132,12 @@ publishes nothing and needs a release to exist already.
 rebuild and no reload (Caddy resolves the symlink per request); from `deploy/`:
 `ln -sfn "$(readlink www/previous)" www/current.new && mv -T www/current.new www/current`
 
+**A `--ref` older than this layout is refused** (v0.1.0 and everything before
+it): that commit's own `deploy.sh` and compose file would mount
+`frontend/build` into Caddy again and bring back the empty-404 outage on its
+first rebuild. Roll the SPA back with the swap above; rolling the whole stack
+back to a pre-layout commit is not supported.
+
 **Moving a VM to this layout needs nothing by hand.** The first deploy of a
 commit with this change finds no `www/current`, publishes the new build there
 *before* rolling, and `up -d --wait` recreates Caddy because its volumes

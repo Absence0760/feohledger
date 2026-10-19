@@ -35,6 +35,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = REPO_ROOT / "deploy"
 LIB_SH = DEPLOY / "lib.sh"
 DEPLOY_SH = DEPLOY / "deploy.sh"
+PROD_COMPOSE = DEPLOY / "compose.prod.yml"
+CADDYFILE = DEPLOY / "Caddyfile"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vm-deploy.yml"
 INFRA_VARIABLES = REPO_ROOT / "infra" / "variables.tf"
 INFRA_DEPLOY_TF = REPO_ROOT / "infra" / "deploy.tf"
@@ -67,8 +69,12 @@ def _git_env() -> dict[str, str]:
 
 
 class Checkout:
-    """An `origin` with main (first → second) and a branch commit off it, plus
-    the VM's clone of it, sitting on main at `second`."""
+    """An `origin` with main (pre_layout → first → second) and a branch commit
+    off `first`, plus the VM's clone of it, sitting on main at `second`.
+
+    `pre_layout` carries a compose file that mounts frontend/build into Caddy,
+    as every commit before decisions §277 did; from `first` on it is the real
+    compose.prod.yml."""
 
     def __init__(self, root: Path) -> None:
         origin = root / "origin.git"
@@ -76,8 +82,19 @@ class Checkout:
         work = root / "author"
         _git(root, "clone", "--quiet", str(origin), str(work))
         _git(work, "checkout", "--quiet", "-b", "main")
+        compose = work / "deploy" / "compose.prod.yml"
+        compose.parent.mkdir()
+        compose.write_text(
+            "services:\n  caddy:\n    volumes:\n"
+            "      # - ./www:/srv:ro is what a later commit mounts\n"
+            "      - ../frontend/build:/srv:ro\n"
+        )
+        _git(work, "add", "deploy/compose.prod.yml")
+        _git(work, "commit", "--quiet", "-m", "pre-layout")
+        self.pre_layout = _git(work, "rev-parse", "HEAD")
+        compose.write_text(PROD_COMPOSE.read_text())
         (work / "app.txt").write_text("one\n")
-        _git(work, "add", "app.txt")
+        _git(work, "add", "app.txt", "deploy/compose.prod.yml")
         _git(work, "commit", "--quiet", "-m", "first")
         self.first = _git(work, "rev-parse", "HEAD")
         (work / "app.txt").write_text("two\n")
@@ -173,6 +190,29 @@ def test_anything_but_a_full_sha_is_refused_before_git_runs(checkout: Checkout, 
     assert result.returncode != 0
     assert "full 40-character commit sha" in result.stderr
     assert checkout.head() == checkout.second
+
+
+def test_a_commit_from_before_the_www_layout_is_refused(checkout: Checkout) -> None:
+    """Its own deploy.sh + compose file would mount frontend/build into Caddy
+    again — the #579 full-site 404 on its first rebuild. A rollback to v0.1.0
+    would do exactly that."""
+    result = checkout.sync(checkout.pre_layout)
+
+    assert result.returncode != 0
+    assert "predates the deploy/www/ SPA layout" in result.stderr
+    assert "Rolling the frontend back" in result.stderr
+    assert checkout.head() == checkout.second
+
+
+def test_the_real_compose_file_satisfies_the_layout_check() -> None:
+    """The check greps a commit's compose.prod.yml; if this file stopped matching,
+    every release deploy would be refused."""
+    result = subprocess.run(
+        ["bash", "-c", f'. "{LIB_SH}"; grep -Eq "$FEOH_WWW_MOUNT_RE" "{PROD_COMPOSE}"'],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_a_sha_origin_does_not_have_is_refused(checkout: Checkout) -> None:
@@ -333,9 +373,6 @@ def test_workflow_redacts_tenant_names_from_the_public_log() -> None:
 # mounts a directory that is never replaced, a release goes live by a symlink
 # rename inside it, the previous release is kept, and the deploy ends by
 # fetching the site through the VM's own Caddy.
-
-PROD_COMPOSE = DEPLOY / "compose.prod.yml"
-CADDYFILE = DEPLOY / "Caddyfile"
 
 
 def _lib(
@@ -614,3 +651,261 @@ def test_deploy_publishes_only_through_the_atomic_swap() -> None:
     frontend = DEPLOY_SH.read_text().split("# ── Frontend", 1)[1].split("# ── Backend", 1)[0]
     assert "rm -rf" not in frontend
     assert "ln -s" not in frontend, "deploy.sh swaps the live release itself, bypassing lib.sh"
+
+
+# ── Redeploys and rollbacks ──────────────────────────────────────────────────
+
+
+def _releases(root: Path) -> list[str]:
+    return sorted(p.name for p in (root / "www" / "releases").iterdir())
+
+
+def _links(root: Path) -> tuple[str, str | None]:
+    www = root / "www"
+    previous = os.readlink(www / "previous") if (www / "previous").is_symlink() else None
+    return os.readlink(www / "current"), previous
+
+
+def _readme_rollback() -> str:
+    """The rollback command exactly as deploy/README.md prints it."""
+    line = next(
+        ln
+        for ln in (DEPLOY / "README.md").read_text().splitlines()
+        if "readlink www/previous" in ln
+    )
+    return line.strip().strip("`")
+
+
+def test_redeploying_an_identical_build_is_a_new_release(tmp_path: Path) -> None:
+    """A redeploy of the same commit gets a fresh id; the rotation still holds."""
+    for release in ("r1", "r2", "r3"):
+        _build(tmp_path, "same")
+        result = _publish(tmp_path, release)
+        assert result.returncode == 0, result.stderr
+
+    assert _links(tmp_path) == ("releases/r3", "releases/r2")
+    assert _releases(tmp_path) == ["r2", "r3"]
+    assert "same" in (tmp_path / "www" / "current" / "index.html").read_text()
+
+
+def test_the_readme_rollback_then_a_publish_prunes_the_bad_release(tmp_path: Path) -> None:
+    for release, marker in (("r1", "one"), ("r2", "good"), ("r3", "bad")):
+        _build(tmp_path, marker)
+        assert _publish(tmp_path, release).returncode == 0
+
+    rollback = subprocess.run(
+        ["bash", "-c", f"set -euo pipefail\n{_readme_rollback()}"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+    assert rollback.returncode == 0, rollback.stderr
+    assert _links(tmp_path) == ("releases/r2", "releases/r2")
+    assert "good" in (tmp_path / "www" / "current" / "index.html").read_text()
+    # A rollback deletes nothing: the bad release is still there to inspect.
+    assert _releases(tmp_path) == ["r2", "r3"]
+
+    _build(tmp_path, "fixed")
+    result = _publish(tmp_path, "r4")
+
+    assert result.returncode == 0, result.stderr
+    # The rolled-back-to release is what the fix replaced, so it is `previous`;
+    # the bad one was neither, so it is gone.
+    assert _links(tmp_path) == ("releases/r4", "releases/r2")
+    assert _releases(tmp_path) == ["r2", "r4"]
+    assert "good" in (tmp_path / "www" / "previous" / "index.html").read_text()
+
+
+def test_publishing_never_deletes_what_current_or_previous_names(tmp_path: Path) -> None:
+    """Whatever sequence of publishes and rollbacks, both links always resolve."""
+    www = tmp_path / "www"
+    steps = ["r1", "r2", "rollback", "r3", "rollback", "rollback", "r4", "r5", "rollback"]
+    for step in steps:
+        if step == "rollback":
+            subprocess.run(["bash", "-c", _readme_rollback()], cwd=tmp_path, check=True)
+        else:
+            _build(tmp_path, step)
+            assert _publish(tmp_path, step).returncode == 0
+        assert (www / "current" / "index.html").exists(), step
+        if (www / "previous").is_symlink():
+            assert (www / "previous" / "index.html").exists(), step
+
+
+def test_a_dangling_current_is_not_kept_as_previous(tmp_path: Path) -> None:
+    (tmp_path / "www" / "releases").mkdir(parents=True)
+    os.symlink("releases/gone", tmp_path / "www" / "current")
+    _build(tmp_path, "one")
+
+    result = _publish(tmp_path, "r1")
+
+    assert result.returncode == 0, result.stderr
+    assert _links(tmp_path) == ("releases/r1", None)
+
+
+# ── deploy.sh end to end, against stubs ──────────────────────────────────────
+#
+# The real deploy.sh and lib.sh run in a scratch repo with `docker`, `sops`,
+# `git` and `curl` stubbed and decrypt-env.sh replaced; flock, cp, ln and mv are
+# real. The docker stub plays the frontend build (deleting and recreating
+# frontend/build, as SvelteKit does) and records, at `up -d --wait`, which
+# release www/current resolved to — that is what Caddy would start serving.
+
+DEPLOY_DOCKER_STUB = """#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_DIR/calls"
+case "$*" in
+  *frontend-build*)
+    rm -rf "$REPO/frontend/build"
+    mkdir -p "$REPO/frontend/build"
+    echo "<!doctype html>$BUILD_MARK" > "$REPO/frontend/build/index.html" ;;
+  *"up -d --wait --wait-timeout 300"*)
+    if [ -e "$REPO/deploy/www/current/index.html" ]; then
+      echo "AT-ROLL live $(readlink "$REPO/deploy/www/current")" >> "$STUB_DIR/calls"
+    else
+      echo "AT-ROLL nothing" >> "$STUB_DIR/calls"
+    fi ;;
+  *"exec -T caddy cat /etc/caddy/"*)
+    for arg; do last=$arg; done
+    cat "$REPO/deploy/${last##*/}" ;;
+esac
+exit 0
+"""
+
+DEPLOY_CURL_STUB = """#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_DIR/curl_calls"
+while [ $# -gt 0 ]; do
+  [ "$1" = "-o" ] && out=$2
+  shift
+done
+echo "<!doctype html>" > "$out"
+printf 200
+"""
+
+
+class Stack:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.repo = root / "repo"
+        self.deploy = self.repo / "deploy"
+        self.deploy.mkdir(parents=True)
+        for name in ("deploy.sh", "lib.sh", "Caddyfile", "tenants.caddy.example"):
+            shutil.copy2(DEPLOY / name, self.deploy / name)
+        (self.deploy / "prod.sops.yaml").write_text("{}\n")
+        decrypt = self.deploy / "decrypt-env.sh"
+        decrypt.write_text(
+            "#!/bin/sh\nprintf 'APP_DOMAIN=app.example.com\\nAPI_DOMAIN=api.example.com\\n"
+            "POSTGRES_PASSWORD=x\\n' > .env\n"
+        )
+        decrypt.chmod(0o755)
+        (self.repo / "frontend").mkdir()
+        (self.repo / "frontend" / "package.json").write_text(
+            '{\n  "packageManager": "pnpm@10.0.0"\n}\n'
+        )
+        self.path = _with_stub(root, "docker", DEPLOY_DOCKER_STUB)
+        _with_stub(root, "sops", "#!/bin/sh\nexit 0\n")
+        _with_stub(root, "git", "#!/bin/sh\necho abcdef123456\n")
+        _with_stub(root, "curl", DEPLOY_CURL_STUB)
+        self.www = self.deploy / "www"
+
+    def live_release(self, name: str) -> None:
+        (self.www / "releases" / name).mkdir(parents=True)
+        (self.www / "releases" / name / "index.html").write_text(f"<!doctype html>{name}\n")
+        os.symlink(f"releases/{name}", self.www / "current")
+
+    def run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        (self.root / "calls").write_text("")
+        return subprocess.run(
+            ["bash", str(self.deploy / "deploy.sh"), "--no-pull", *args],
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": self.path,
+                "HOME": str(self.root),
+                "STUB_DIR": str(self.root),
+                "REPO": str(self.repo),
+                "BUILD_MARK": "new-build",
+                "FEOH_SMOKE_INTERVAL": "0",
+            },
+        )
+
+    def calls(self) -> list[str]:
+        return (self.root / "calls").read_text().splitlines()
+
+    def releases(self) -> list[str]:
+        return sorted(p.name for p in (self.www / "releases").iterdir())
+
+
+@pytest.fixture
+def stack(tmp_path: Path) -> Stack:
+    return Stack(tmp_path)
+
+
+def test_a_first_deploy_publishes_before_the_roll_and_only_once(stack: Stack) -> None:
+    """The one-time migration: no www/ yet, so the release must already be live
+    when `up` recreates Caddy onto the new mount — and not be published twice."""
+    result = stack.run()
+
+    assert result.returncode == 0, result.stderr
+    [release] = stack.releases()
+    calls = stack.calls()
+    assert f"AT-ROLL live releases/{release}" in calls
+    assert result.stdout.count("published release") == 1
+    assert not (stack.www / "previous").exists()
+    assert "new-build" in (stack.www / "current" / "index.html").read_text()
+    # It is the build's own output being published, which needs the build first.
+    build = next(i for i, c in enumerate(calls) if "frontend-build" in c)
+    roll = next(i for i, c in enumerate(calls) if "up -d --wait --wait-timeout 300" in c)
+    assert build < roll
+
+
+def test_a_redeploy_publishes_after_the_roll(stack: Stack) -> None:
+    stack.live_release("old")
+
+    result = stack.run()
+
+    assert result.returncode == 0, result.stderr
+    # Caddy still served the old release while the API rolled.
+    assert "AT-ROLL live releases/old" in stack.calls()
+    assert result.stdout.count("published release") == 1
+    new = os.readlink(stack.www / "current")
+    assert new != "releases/old"
+    assert os.readlink(stack.www / "previous") == "releases/old"
+    assert stack.releases() == sorted(["old", new.removeprefix("releases/")])
+
+
+def test_a_dangling_current_is_republished_before_the_roll(stack: Stack) -> None:
+    stack.www.mkdir()
+    os.symlink("releases/gone", stack.www / "current")
+
+    result = stack.run()
+
+    assert result.returncode == 0, result.stderr
+    [release] = stack.releases()
+    assert f"AT-ROLL live releases/{release}" in stack.calls()
+    assert not (stack.www / "previous").exists()
+
+
+@pytest.mark.parametrize("state", ["absent", "dangling"])
+def test_backend_only_refuses_without_a_live_release(stack: Stack, state: str) -> None:
+    if state == "dangling":
+        stack.www.mkdir()
+        os.symlink("releases/gone", stack.www / "current")
+
+    result = stack.run("--backend-only")
+
+    assert result.returncode != 0
+    assert "no live frontend release" in result.stderr
+    assert not any("up -d" in c or "build api" in c for c in stack.calls())
+
+
+def test_backend_only_leaves_a_live_release_alone(stack: Stack) -> None:
+    stack.live_release("old")
+
+    result = stack.run("--backend-only")
+
+    assert result.returncode == 0, result.stderr
+    assert os.readlink(stack.www / "current") == "releases/old"
+    assert not any("frontend-build" in c for c in stack.calls())
+    curls = (stack.root / "curl_calls").read_text()
+    assert "https://app.example.com/" in curls
+    assert "https://api.example.com/api/health" in curls

@@ -104,8 +104,11 @@ WWW=www
 # source that does not exist yet is created by the Docker daemon, as root, and
 # the publish step could then never write into it.
 (umask 022 && mkdir -p "$WWW")
-[ "$DO_FRONTEND" = 1 ] || [ -L "$WWW/current" ] ||
-	die "no published frontend release under deploy/${WWW}/ — run a full ./deploy.sh (not --backend-only) first."
+# "Live" means the link resolves to a page — a dangling `current` (its release
+# deleted by hand) passes `[ -L ]` and serves nothing.
+www_is_live() { [ -e "$WWW/current/index.html" ]; }
+[ "$DO_FRONTEND" = 1 ] || www_is_live ||
+	die "no live frontend release under deploy/${WWW}/ (www/current is missing or points at nothing) — run a full ./deploy.sh (not --backend-only) first."
 
 API_DOMAIN=$(feoh_env API_DOMAIN)
 APP_DOMAIN=$(feoh_env APP_DOMAIN)
@@ -143,12 +146,12 @@ if [ "$DO_FRONTEND" = 1 ]; then
 		# The site is public static files: world-readable, unlike the secrets
 		# this script's umask exists for.
 		(umask 022 && feoh_publish_frontend "$REPO_ROOT/frontend/build" "$WWW" "$RELEASE_ID") ||
-			die "could not publish the frontend build as release ${RELEASE_ID}."
+			die "could not publish the frontend build as release ${RELEASE_ID}. If the error above is a permission error, deploy/${WWW}/ is probably root's: the Docker daemon creates a missing bind-mount source as root, which happens when compose started Caddy before deploy.sh created the directory. Fix it once with: sudo chown -R $(id -un): $(pwd)/${WWW}"
 	}
-	# A VM with no release yet (a first deploy, or the first on this layout):
-	# no container serves www/ before the roll recreates Caddy onto it, so
-	# publish now and the new Caddy starts with a site instead of a 404 window.
-	if ! [ -L "$WWW/current" ]; then
+	# A VM with no live release (a first deploy, the first on this layout, or a
+	# dangling `current`): nothing useful is being served from www/, so publish
+	# now and a Caddy the roll recreates starts with a site, not a 404 window.
+	if ! www_is_live; then
 		publish_frontend
 		PUBLISHED=1
 	fi

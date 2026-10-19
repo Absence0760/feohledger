@@ -114,6 +114,11 @@ feoh_pg_run() {
 #            origin/main the next plain pull still fast-forwards. A modified
 #            tracked file is refused: the deploy would no longer be the commit
 #            it names.
+#
+# A sha whose compose.prod.yml does not mount ./www into Caddy is refused too
+# (FEOH_WWW_MOUNT_RE, below).
+FEOH_WWW_MOUNT_RE='^[[:space:]]*-[[:space:]]*\./www:/srv(:ro)?[[:space:]]*$'
+
 feoh_sync_source() {
 	local root=$1 ref=${2:-}
 	if [ -z "$ref" ]; then
@@ -135,6 +140,15 @@ feoh_sync_source() {
 	fi
 	if ! git -C "$root" merge-base --is-ancestor "$ref" origin/main; then
 		echo "commit ${ref} is not on origin/main; only commits on main are deployed. Tag a commit on main and publish the release again." >&2
+		return 1
+	fi
+	# A commit from before the www/ layout (docs/decisions.md §277) would be
+	# deployed by its own deploy.sh and compose.prod.yml, which mount
+	# ../frontend/build into Caddy again — the full-site 404 outage of #579 the
+	# moment its build runs. Refused before the checkout moves.
+	if ! git -C "$root" show "${ref}:deploy/compose.prod.yml" 2>/dev/null |
+		grep -Eq "$FEOH_WWW_MOUNT_RE"; then
+		echo "commit ${ref} predates the deploy/www/ SPA layout (docs/decisions.md §277): its compose file mounts frontend/build into Caddy, which serves every page as an empty 404 after a rebuild (#579). To roll the SPA back, swap to the previous release instead (deploy/README.md § Rolling the frontend back); rolling the stack back to a pre-layout commit is not supported." >&2
 		return 1
 	fi
 	# Explicit returns throughout: callers run this as `feoh_sync_source … || die`,
@@ -182,7 +196,9 @@ feoh_publish_frontend() {
 	rm -rf "$www/releases/.staging-"* || return 1
 	cp -R --preserve=mode,timestamps "$build" "$www/releases/.staging-$id" || return 1
 	mv -T "$www/releases/.staging-$id" "$www/releases/$id" || return 1
-	if [ -L "$www/current" ]; then
+	# Only a release that still exists is worth keeping as `previous`; a
+	# dangling `current` names nothing to roll back to.
+	if [ -L "$www/current" ] && [ -e "$www/current/index.html" ]; then
 		prev=$(readlink "$www/current") || return 1
 	fi
 	ln -sfn "releases/$id" "$www/current.new" || return 1

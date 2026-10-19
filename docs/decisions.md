@@ -11415,10 +11415,18 @@ Caddy image, error text and empty 404 alike.
   SPA on a 30 GB disk).
 - **Publish after the roll.** The swap happens after `up -d --wait` passes, so a
   failed migration or an unhealthy API leaves the old SPA in front of the old API.
-  The one exception is a VM with no release yet (a first deploy, or the first on
-  this layout): nothing serves `www/` until the roll recreates Caddy onto it, so
-  it publishes first and the new container starts with a site. That is also the
-  whole one-time migration: changing Caddy's volumes makes `up` recreate it.
+  The one exception is a VM with no live release (a first deploy, the first on
+  this layout, or a `current` whose release was deleted — "live" means
+  `current/index.html` resolves, not merely that the link exists): nothing
+  useful is served from `www/`, so it publishes first and a container the roll
+  recreates starts with a site. That is also the whole one-time migration:
+  changing Caddy's volumes makes `up` recreate it.
+- **No rollback past the layout.** `deploy.sh --ref` to a commit whose
+  `compose.prod.yml` does not mount `./www` (v0.1.0 and earlier) is refused in
+  `feoh_sync_source`, before the checkout moves: that commit's own deploy.sh
+  would run, mount `frontend/build` again, and recreate the outage on its first
+  rebuild. Rolling the SPA back is the `previous` swap; rolling the stack back to
+  a pre-layout commit is unsupported.
 - **The deploy ends with a smoke check** (`feoh_smoke_check`): `curl` from the VM
   to `https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health` with
   `--resolve <host>:443:127.0.0.1` — through the VM's own Caddy under the real
