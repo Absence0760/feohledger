@@ -12,6 +12,21 @@ brew services stop postgresql@17   # adjust version as needed
 
 Then re-run `seed.py` or restart the backend.
 
+## Deploy fails: `relation "organizations" does not exist`, or `init_control_plane: … alembic_version … no organizations`
+
+The control-plane database was migrated by Alembic while it was empty. Alembic's
+chain has no revision that creates the control plane, so it stamped head over
+nothing (`docs/decisions.md` §274). `deploy.sh` now runs
+`scripts/init_control_plane.py` first, which builds an empty control plane
+correctly — but a database already stamped that way is refused rather than
+guessed at. It cannot hold any data, so recreate it and deploy again, from
+`deploy/` on the VM:
+
+```bash
+./psql.sh -d postgres -c 'DROP DATABASE feohledger' -c 'CREATE DATABASE feohledger'
+./deploy.sh
+```
+
 ## `bcrypt` errors
 
 ```

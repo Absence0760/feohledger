@@ -28,7 +28,7 @@ from app.database import control_engine, control_session_factory
 from app.models.organization import Organization
 
 
-async def main():
+async def main() -> int:
     async with control_session_factory() as session:
         result = await session.execute(select(Organization.db_name))
         db_names = [row[0] for row in result.all()]
@@ -37,10 +37,11 @@ async def main():
 
     if not db_names:
         print("No tenants found in control plane.")
-        return
+        return 0
 
     print(f"Migrating {len(db_names)} tenant database(s)...")
 
+    failed: list[str] = []
     for db_name in db_names:
         print(f"\n--- {db_name} ---")
         env = {**os.environ, "FEOH_MIGRATE_TENANT": db_name}
@@ -52,11 +53,20 @@ async def main():
         )
         if result.returncode != 0:
             print(f"  FAILED: {result.stderr}")
+            failed.append(db_name)
         else:
             print("  OK")
 
+    # Every tenant is still attempted, so one bad database does not strand the
+    # rest behind it — but the run fails. `deploy.sh` migrates before it rolls
+    # the new code, and only a non-zero exit stops it serving that code against
+    # a tenant whose schema it does not match.
+    if failed:
+        print(f"\n{len(failed)} tenant migration(s) FAILED: {', '.join(failed)}", file=sys.stderr)
+        return 1
     print("\nDone.")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

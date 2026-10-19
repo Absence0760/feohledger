@@ -223,7 +223,7 @@ backend but hold the frontend), give them separate environments
 
 ### Database migrations
 
-The `backend` job runs `alembic upgrade head && python scripts/migrate_all_tenants.py`
+The `backend` job runs `python scripts/init_control_plane.py && alembic upgrade head && python scripts/migrate_all_tenants.py`
 as a one-off Fargate task on the freshly-registered task definition **before**
 rolling the service, so new code never serves against an un-migrated schema and
 the revision fans out to **every tenant DB** (not just the control plane). A

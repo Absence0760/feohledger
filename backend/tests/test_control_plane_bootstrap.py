@@ -1,0 +1,274 @@
+"""A deploy against an EMPTY control-plane database must produce a usable one.
+
+The first production deploy (#566, `docs/decisions.md` §274) ran
+`alembic upgrade head && migrate_all_tenants.py` against a fresh RDS database:
+Alembic stamped head over a schema it never built — its chain has no revision
+that creates the control plane — and the tenant fan-out then died on
+`relation "organizations" does not exist`.
+
+The end-to-end cases drive the real deploy command line
+(`init_control_plane.py`, then `alembic upgrade head`, then
+`migrate_all_tenants.py`) as subprocesses against a scratch database on the local
+Postgres, because the defect lived in how those three interact with an empty
+database — something a mocked connection cannot show. Skipped when Postgres is
+unreachable, like the realdb harness. Each name is uniquified per run.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+import asyncpg
+import pytest
+
+from app.api.deps import ALL_ROLES
+from app.config import settings
+from app.database import _make_tenant_url
+from app.services.control_plane_bootstrap import (
+    SYSTEM_ROLE_DESCRIPTIONS,
+    ControlPlaneState,
+    classify,
+)
+from app.services.tenant_provisioning import CONTROL_TABLES, _parse_maintenance_dsn
+
+BACKEND = Path(__file__).resolve().parents[1]
+REPO = BACKEND.parent
+
+DEPLOY_MIGRATE = (
+    "python scripts/init_control_plane.py && alembic upgrade head"
+    " && python scripts/migrate_all_tenants.py"
+)
+
+
+# ── The decision ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("has_organizations", "has_alembic_version", "expected"),
+    [
+        (True, True, ControlPlaneState.PRESENT),
+        # A control plane seed.py built and Alembic never touched.
+        (True, False, ControlPlaneState.PRESENT),
+        (False, False, ControlPlaneState.FRESH),
+        # The #566 state: stamped head over nothing.
+        (False, True, ControlPlaneState.STAMPED_EMPTY),
+    ],
+)
+def test_classify(has_organizations, has_alembic_version, expected):
+    assert (
+        classify(has_organizations=has_organizations, has_alembic_version=has_alembic_version)
+        is expected
+    )
+
+
+def test_system_roles_are_exactly_the_rbac_roles():
+    assert set(SYSTEM_ROLE_DESCRIPTIONS) == set(ALL_ROLES)
+
+
+# ── Every migration entry point runs the bootstrap first ────────────────────
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "deploy/deploy.sh",
+        ".github/workflows/aws-deploy.yml",
+        "docs/minimal-deployment.md",
+        "docs/production-deployment.md",
+        "docs/backup-disaster-recovery.md",
+    ],
+)
+def test_every_deploy_migration_runs_init_first(path):
+    text = (REPO / path).read_text()
+    assert DEPLOY_MIGRATE in text
+    # No surviving spelling that skips the bootstrap.
+    bare = "alembic upgrade head && python scripts/migrate_all_tenants.py"
+    assert text.count(bare) == text.count(DEPLOY_MIGRATE)
+
+
+# ── End to end against a scratch database ──────────────────────────────────
+
+
+@pytest.fixture
+async def scratch_control_db():
+    dsn = _parse_maintenance_dsn()
+    try:
+        maint = await asyncpg.connect(**dsn)
+    except (OSError, asyncpg.PostgresError) as exc:
+        pytest.skip(f"requires a live Postgres (pnpm db:up): {exc}")
+    name = f"cpboot_{uuid.uuid4().hex[:12]}"
+    await maint.execute(f'CREATE DATABASE "{name}"')
+    try:
+        yield name, {**dsn, "database": name}
+    finally:
+        await maint.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        await maint.close()
+
+
+def _run(command: str, db_name: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "FEOH_DATABASE_URL": _make_tenant_url(db_name)}
+    env.pop("FEOH_MIGRATE_TENANT", None)
+    # The deploy's own command line, with this interpreter in place of the
+    # container's `python` / `alembic` on PATH.
+    command = command.replace("python ", f"{sys.executable} ").replace(
+        "alembic ", f"{sys.executable} -m alembic "
+    )
+    return subprocess.run(
+        ["sh", "-c", command],
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+
+async def _tables(dsn: dict) -> set[str]:
+    conn = await asyncpg.connect(**dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+        )
+        return {r["table_name"] for r in rows}
+    finally:
+        await conn.close()
+
+
+async def test_deploy_command_initialises_an_empty_control_plane(scratch_control_db):
+    name, dsn = scratch_control_db
+
+    result = _run(DEPLOY_MIGRATE, name)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Empty control-plane database" in result.stdout
+    assert "Control plane initialised at" in result.stdout
+    assert "No tenants found in control plane." in result.stdout
+
+    tables = await _tables(dsn)
+    assert CONTROL_TABLES <= tables
+    # Only the control plane: no tenant table leaked in.
+    assert tables - CONTROL_TABLES == {"alembic_version"}
+
+    conn = await asyncpg.connect(**dsn)
+    try:
+        roles = {
+            r["name"]
+            for r in await conn.fetch("SELECT name FROM roles WHERE organization_id IS NULL")
+        }
+        version = await conn.fetchval("SELECT version_num FROM alembic_version")
+    finally:
+        await conn.close()
+    assert roles == set(ALL_ROLES)
+    heads = subprocess.run(
+        [sys.executable, "-m", "alembic", "heads"],
+        cwd=BACKEND,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()[0]
+    assert version == heads
+
+
+async def test_second_deploy_is_a_no_op(scratch_control_db):
+    name, dsn = scratch_control_db
+    assert _run(DEPLOY_MIGRATE, name).returncode == 0
+    before = await _tables(dsn)
+
+    again = _run(DEPLOY_MIGRATE, name)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "Control plane already initialised." in again.stdout
+    assert await _tables(dsn) == before
+
+    conn = await asyncpg.connect(**dsn)
+    try:
+        assert await conn.fetchval("SELECT count(*) FROM roles") == len(ALL_ROLES)
+    finally:
+        await conn.close()
+
+
+async def test_a_database_stamped_while_empty_is_refused(scratch_control_db):
+    """The state the first production deploy left behind."""
+    name, dsn = scratch_control_db
+    conn = await asyncpg.connect(**dsn)
+    try:
+        await conn.execute("CREATE TABLE alembic_version (version_num varchar(32) PRIMARY KEY)")
+        await conn.execute("INSERT INTO alembic_version VALUES ('0111_commerce_inventory_sync')")
+    finally:
+        await conn.close()
+
+    result = _run(DEPLOY_MIGRATE, name)
+    assert result.returncode == 2
+    assert "DROP DATABASE feohledger" in result.stderr
+    # It stopped before Alembic, and changed nothing.
+    assert await _tables(dsn) == {"alembic_version"}
+
+
+async def test_a_failed_tenant_migration_fails_the_run(monkeypatch):
+    """`deploy.sh` rolls new code only if migrations exit 0 — a tenant that
+    failed used to print FAILED and still exit 0."""
+    import scripts.migrate_all_tenants as mat
+
+    class _Result:
+        def all(self):
+            return [("feoh_ok",), ("feoh_broken",)]
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, _stmt):
+            return _Result()
+
+    class _Engine:
+        async def dispose(self):
+            return None
+
+    attempted = []
+
+    def fake_run(argv, env, **_kw):
+        attempted.append(env["FEOH_MIGRATE_TENANT"])
+        rc = 1 if env["FEOH_MIGRATE_TENANT"] == "feoh_broken" else 0
+        return subprocess.CompletedProcess(argv, rc, "", "boom" if rc else "")
+
+    monkeypatch.setattr(mat, "control_session_factory", lambda: _Session())
+    monkeypatch.setattr(mat, "control_engine", _Engine())
+    monkeypatch.setattr(mat.subprocess, "run", fake_run)
+
+    assert await mat.main() == 1
+    assert attempted == ["feoh_ok", "feoh_broken"]
+
+
+async def test_initialise_is_all_or_nothing(scratch_control_db, monkeypatch):
+    """A failure after the tables are built must leave NO tables behind —
+    otherwise the next run calls the database PRESENT with no roles and no
+    version row (review of #570)."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    import app.services.control_plane_bootstrap as cpb
+
+    name, dsn = scratch_control_db
+
+    async def boom(_conn):
+        raise RuntimeError("role seed failed")
+
+    monkeypatch.setattr(cpb, "_seed_system_roles", boom)
+    engine = create_async_engine(_make_tenant_url(name))
+    try:
+        with pytest.raises(RuntimeError):
+            await cpb.initialise(engine, "0111_commerce_inventory_sync")
+        assert await cpb.inspect(engine) is ControlPlaneState.FRESH
+    finally:
+        await engine.dispose()
+    assert await _tables(dsn) == set()
+
+
+def test_the_deployed_url_is_untouched_by_these_tests():
+    """Guard the fixture: every case above targets a scratch database, never the
+    configured control plane."""
+    assert "cpboot_" not in settings.database_url
