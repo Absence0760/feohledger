@@ -301,7 +301,8 @@ async def update_organization(
     if body.settings is not None:
         _validate_settings_patch(body.settings)
 
-        # Saving a LIVE ERP adapter is a Growth feature (decisions §258). Only
+        # Saving a LIVE ERP adapter is plan-gated, and one routed through
+        # Merge.dev is Scale-only (decisions §258, §281). Only
         # the `erp` key this PATCH carries is checked: re-saving the company
         # profile on a downgraded tenant whose stored ERP is live must still
         # work, and clearing the key or choosing `mock` is never refused.
@@ -944,8 +945,9 @@ async def test_erp_connection(
 ):
     """Test the ERP connection. Uses request body config if provided, otherwise saved config.
 
-    A live adapter needs ``FEATURE_ERP_INTEGRATIONS`` (decisions §258) — a test
-    reaches the real ERP with the tenant's credentials. ``mock`` stays open.
+    A live adapter is plan-gated like a save (``ensure_live_erp_entitled``,
+    decisions §258 / §281) — a test reaches the real ERP with the tenant's
+    credentials, and a Merge.dev one is a Merge connection. ``mock`` stays open.
     """
     # Stored secrets join the test only while the form names the saved ERP at
     # the saved destination (`provider_credentials.config_for_connection_test`).

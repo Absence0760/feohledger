@@ -4,7 +4,8 @@ Each gate is driven three ways where it applies: the plan lacks the feature →
 a coded 402 (``plan_feature_required`` naming the feature), the plan has it →
 allowed, and — for SSO, SCIM, entities, webhooks — what a DOWNGRADED tenant
 keeps. The harness's orgs hold no subscription unless a test arranges one
-(``realdb.subscribe``), which reads exactly like ``free``.
+(``realdb.subscribe``), which reads exactly like ``free`` — Free's grants, which
+since decisions §281 are the direct ERP adapters and nothing else.
 
 The downgrade rules this file pins, because each is a deliberate call (§258):
 
@@ -16,7 +17,11 @@ The downgrade rules this file pins, because each is a deliberate call (§258):
   leaver; provisioning and group grants are refused.
 * Entities: only CREATING one is gated; existing extra entities keep working.
 * Webhooks: switching a subscription off stays open; nothing new is queued.
-* ERP: only a LIVE adapter is gated; ``mock`` stays open on every plan.
+* ERP: only a LIVE adapter is gated; ``mock`` stays open on every plan. Every
+  catalog plan, Free included, grants the direct adapters (§281); a config that
+  routes through Merge.dev needs ``erp_merge`` too, which only Scale grants
+  (§256). The refusal side of ``erp_integrations`` is a negotiated plan that
+  leaves it out (``_negotiated_plan``), since no catalog plan does.
 """
 
 from __future__ import annotations
@@ -33,9 +38,11 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.api.deps import PLAN_FEATURE_REQUIRED, plan_feature_refusal
 from app.models.organization import Organization
 from app.models.user import User
+from app.services.billing.entitlements import NO_PLAN_ENTITLEMENTS
 from app.services.billing.plan_catalog import (
     ALL_FEATURES,
     FEATURE_ERP_INTEGRATIONS,
+    FEATURE_ERP_MERGE,
     FEATURE_MULTI_ENTITY,
     FEATURE_PUBLIC_API,
     FEATURE_SCIM,
@@ -65,6 +72,11 @@ SAML_READY = {
 }
 LIVE_ERP = {"type": "netsuite", "integration_method": "direct", "account_id": "1234567"}
 MOCK_ERP = {"type": "mock", "integration_method": "direct"}
+MERGE_ERP = {"type": "sage_intacct", "integration_method": "merge_dev"}
+# No `integration_method`: the dispatcher defaults it to Merge.dev, so the gate
+# must read this as the Merge connection it is, not as a direct Xero.
+TYPE_ONLY_ERP = {"type": "xero"}
+NEGOTIATED_PREFIX = "gate_test_"
 
 
 def _assert_plan_refusal(resp, feature: str) -> None:
@@ -88,6 +100,69 @@ async def _write_settings(realdb, key: str = "a", **values) -> None:
         org.settings = merged
         flag_modified(org, "settings")
         await s.commit()
+
+
+async def _negotiated_plan(realdb, entitlements: dict, key: str = "a") -> None:
+    """Bind ``key``'s org to a throwaway non-catalog plan granting ``entitlements``
+    — the shape of an operator-configured Enterprise contract, and the only way
+    left to reach a refusal for a feature every catalog plan grants. Remove it
+    with ``realdb.purge_plans(NEGOTIATED_PREFIX, org_ids=[...])``."""
+    from decimal import Decimal
+
+    from app.models.billing import Plan, Subscription
+
+    org_id = realdb.info(key).org_id
+    async with realdb.control_sessionmaker()() as s:
+        await s.execute(delete(Subscription).where(Subscription.organization_id == org_id))
+        plan = Plan(
+            id=uuid.uuid4(),
+            code=f"{NEGOTIATED_PREFIX}{uuid.uuid4().hex[:8]}",
+            name="Negotiated",
+            monthly_price=Decimal("0.00"),
+            currency="USD",
+            entitlements=entitlements,
+            trial_days=0,
+        )
+        s.add(plan)
+        await s.flush()
+        s.add(
+            Subscription(id=uuid.uuid4(), organization_id=org_id, plan_id=plan.id, status="active")
+        )
+        await s.commit()
+
+
+async def _purge_negotiated(realdb, key: str = "a") -> None:
+    await realdb.purge_plans(NEGOTIATED_PREFIX, org_ids=[realdb.info(key).org_id])
+
+
+async def _approved_invoice(realdb, prefix: str, key: str = "a") -> uuid.UUID:
+    from decimal import Decimal
+
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    invoice_id = uuid.uuid4()
+    async with realdb.sessionmaker(key)() as s:
+        s.add(
+            Invoice(
+                id=invoice_id,
+                correlation_id=uuid.uuid4(),
+                organization_id=realdb.info(key).org_id,
+                vendor_name="Plan Gate Supplies",
+                invoice_number=f"{prefix}-{invoice_id.hex[:6]}",
+                amount=Decimal("100.00"),
+                currency="USD",
+                status=InvoiceStatus.approved,
+            )
+        )
+        await s.commit()
+    return invoice_id
+
+
+async def _invoice_status(realdb, invoice_id, key: str = "a"):
+    from app.models.invoice import Invoice
+
+    async with realdb.sessionmaker(key)() as s:
+        return (await s.get(Invoice, invoice_id)).status
 
 
 async def _org(realdb, key: str = "a") -> Organization:
@@ -160,10 +235,50 @@ def test_plan_scoped_settings_passes_through_a_settings_dict_without_sso():
 # ---------------------------------------------------------------------------
 
 
+def test_no_plan_reads_as_free():
+    """An org with no live plan (provisioned before baseline subscriptions, or
+    canceled by dunning) is granted what Free grants — no more, and, since Free
+    carries the direct ERP adapters (§281), no less either."""
+    from app.services.billing.plan_catalog import DEFAULT_PLAN_CATALOG
+
+    free = next(p for p in DEFAULT_PLAN_CATALOG if p["code"] == "free")
+    assert NO_PLAN_ENTITLEMENTS == free["entitlements"] == {FEATURE_ERP_INTEGRATIONS: True}
+
+
+@pytest.mark.asyncio
+async def test_a_lapsed_paid_plan_reads_as_free_not_below_it(realdb):
+    """A Scale subscription the dunning sweep canceled leaves no live plan; the
+    org keeps Free's direct ERP rather than dropping to nothing (§281)."""
+    from app.models.billing import Subscription
+
+    await realdb.subscribe("a", "scale")
+    async with realdb.control_sessionmaker()() as s:
+        sub = (
+            await s.execute(
+                select(Subscription).where(Subscription.organization_id == realdb.info("a").org_id)
+            )
+        ).scalar_one()
+        sub.status = "canceled"
+        await s.commit()
+
+    async with realdb.client(key="a") as c:
+        assert (await c.get("/api/auth/me")).json()["entitlements"] == [FEATURE_ERP_INTEGRATIONS]
+        saved = await c.patch("/api/organization", json={"settings": {"erp": LIVE_ERP}})
+        assert saved.status_code == 200, saved.text
+        _assert_plan_refusal(
+            await c.patch("/api/organization", json={"settings": {"erp": MERGE_ERP}}),
+            FEATURE_ERP_MERGE,
+        )
+
+
 @pytest.mark.asyncio
 async def test_auth_me_lists_the_granted_features(realdb):
     async with realdb.client(key="a") as c:
-        assert (await c.get("/api/auth/me")).json()["entitlements"] == []
+        assert (await c.get("/api/auth/me")).json()["entitlements"] == [FEATURE_ERP_INTEGRATIONS]
+
+    await realdb.subscribe("a", "free")
+    async with realdb.client(key="a") as c:
+        assert (await c.get("/api/auth/me")).json()["entitlements"] == [FEATURE_ERP_INTEGRATIONS]
 
     await realdb.subscribe("a", "growth")
     async with realdb.client(key="a") as c:
@@ -574,18 +689,86 @@ async def test_existing_entities_keep_working_after_a_downgrade(realdb):
 
 @pytest.mark.asyncio
 async def test_saving_a_live_erp_needs_the_erp_feature(realdb):
-    async with realdb.client(key="a") as c:
-        _assert_plan_refusal(
-            await c.patch("/api/organization", json={"settings": {"erp": LIVE_ERP}}),
-            FEATURE_ERP_INTEGRATIONS,
-        )
-        # The local-first mock ERP is open on every plan (guard rail 7).
-        mock = await c.patch("/api/organization", json={"settings": {"erp": MOCK_ERP}})
-        assert mock.status_code == 200, mock.text
+    await _negotiated_plan(realdb, {})
+    try:
+        async with realdb.client(key="a") as c:
+            _assert_plan_refusal(
+                await c.patch("/api/organization", json={"settings": {"erp": LIVE_ERP}}),
+                FEATURE_ERP_INTEGRATIONS,
+            )
+            # The local-first mock ERP is open on every plan (guard rail 7).
+            mock = await c.patch("/api/organization", json={"settings": {"erp": MOCK_ERP}})
+            assert mock.status_code == 200, mock.text
+    finally:
+        await _purge_negotiated(realdb)
 
     await realdb.subscribe("a", "growth")
     async with realdb.client(key="a") as c:
         resp = await c.patch("/api/organization", json={"settings": {"erp": LIVE_ERP}})
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_free_connects_a_direct_erp_and_pushes_to_it(realdb, monkeypatch):
+    """§281: Free is one direct ERP that imports and pushes. The save and the
+    push both pass the gate on the Free plan itself."""
+    from app.api import workflow as workflow_api
+    from app.models.invoice import InvoiceStatus
+
+    dispatched: list[uuid.UUID] = []
+
+    async def _record(invoice_id, *_args, **_kwargs):
+        dispatched.append(invoice_id)
+
+    # The adapter call behind the push is not this test's subject; the gate is.
+    monkeypatch.setattr(workflow_api, "dispatch_erp", _record)
+
+    await realdb.subscribe("a", "free")
+    async with realdb.client(key="a") as c:
+        saved = await c.patch("/api/organization", json={"settings": {"erp": LIVE_ERP}})
+    assert saved.status_code == 200, saved.text
+
+    invoice_id = await _approved_invoice(realdb, "FP")
+    async with realdb.client(key="a") as c:
+        pushed = await c.post(f"/api/invoices/{invoice_id}/send-to-erp")
+    assert pushed.status_code == 202, pushed.text
+    assert dispatched == [invoice_id]
+    assert await _invoice_status(realdb, invoice_id) == InvoiceStatus.sending_to_erp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plan", ["free", "growth"])
+async def test_merge_dev_is_scale_only(realdb, plan):
+    """§256: every Merge connection past the first three is billed to us, so
+    neither Free nor Growth may save, test or push one — including a config
+    that names only a `type`, which the dispatcher routes through Merge."""
+    from app.models.invoice import InvoiceStatus
+
+    await realdb.subscribe("a", plan)
+    async with realdb.client(key="a") as c:
+        for config in (MERGE_ERP, TYPE_ONLY_ERP):
+            _assert_plan_refusal(
+                await c.patch("/api/organization", json={"settings": {"erp": config}}),
+                FEATURE_ERP_MERGE,
+            )
+        _assert_plan_refusal(
+            await c.post("/api/organization/test-erp", json=MERGE_ERP), FEATURE_ERP_MERGE
+        )
+
+    # A Merge config already stored (a Scale tenant that downgraded) is refused
+    # before the transition, like any other push the plan lacks (§258).
+    invoice_id = await _approved_invoice(realdb, "MG")
+    await _write_settings(realdb, erp=dict(MERGE_ERP))
+    async with realdb.client(key="a") as c:
+        _assert_plan_refusal(
+            await c.post(f"/api/invoices/{invoice_id}/send-to-erp"), FEATURE_ERP_MERGE
+        )
+        _assert_plan_refusal(await c.post("/api/vendors/sync-erp"), FEATURE_ERP_MERGE)
+    assert await _invoice_status(realdb, invoice_id) == InvoiceStatus.approved
+
+    await realdb.subscribe("a", "scale")
+    async with realdb.client(key="a") as c:
+        resp = await c.patch("/api/organization", json={"settings": {"erp": MERGE_ERP}})
     assert resp.status_code == 200, resp.text
 
 
@@ -603,55 +786,46 @@ async def test_a_downgraded_tenant_can_still_save_unrelated_settings(realdb):
 
 @pytest.mark.asyncio
 async def test_reaching_a_live_erp_needs_the_erp_feature(realdb):
-    async with realdb.client(key="a") as c:
-        _assert_plan_refusal(
-            await c.post("/api/organization/test-erp", json=LIVE_ERP), FEATURE_ERP_INTEGRATIONS
-        )
-        mock_test = await c.post("/api/organization/test-erp", json=MOCK_ERP)
-    assert mock_test.status_code == 200
-    assert mock_test.json()["success"] is True
+    await _negotiated_plan(realdb, {})
+    try:
+        async with realdb.client(key="a") as c:
+            _assert_plan_refusal(
+                await c.post("/api/organization/test-erp", json=LIVE_ERP),
+                FEATURE_ERP_INTEGRATIONS,
+            )
+            mock_test = await c.post("/api/organization/test-erp", json=MOCK_ERP)
+        assert mock_test.status_code == 200
+        assert mock_test.json()["success"] is True
 
-    await _write_settings(realdb, erp=dict(LIVE_ERP))
-    async with realdb.client(key="a") as c:
-        for path in (
-            "/api/vendors/sync-erp",
-            "/api/gl-accounts/sync-erp",
-            "/api/purchase-orders/sync-erp",
-        ):
-            _assert_plan_refusal(await c.post(path), FEATURE_ERP_INTEGRATIONS)
+        await _write_settings(realdb, erp=dict(LIVE_ERP))
+        async with realdb.client(key="a") as c:
+            for path in (
+                "/api/vendors/sync-erp",
+                "/api/gl-accounts/sync-erp",
+                "/api/purchase-orders/sync-erp",
+            ):
+                _assert_plan_refusal(await c.post(path), FEATURE_ERP_INTEGRATIONS)
+    finally:
+        await _purge_negotiated(realdb)
 
 
 @pytest.mark.asyncio
 async def test_sending_an_invoice_to_a_live_erp_needs_the_erp_feature(realdb):
     """Refused BEFORE the transition: the invoice stays `approved` (still
     payable directly) instead of parking in `sending_to_erp`."""
-    from decimal import Decimal
+    from app.models.invoice import InvoiceStatus
 
-    from app.models.invoice import Invoice, InvoiceStatus
-
-    invoice_id = uuid.uuid4()
-    async with realdb.sessionmaker("a")() as s:
-        s.add(
-            Invoice(
-                id=invoice_id,
-                correlation_id=uuid.uuid4(),
-                organization_id=realdb.info("a").org_id,
-                vendor_name="Plan Gate Supplies",
-                invoice_number=f"PG-{invoice_id.hex[:6]}",
-                amount=Decimal("100.00"),
-                currency="USD",
-                status=InvoiceStatus.approved,
-            )
-        )
-        await s.commit()
-
+    invoice_id = await _approved_invoice(realdb, "PG")
     await _write_settings(realdb, erp=dict(LIVE_ERP))
-    async with realdb.client(key="a") as c:
-        _assert_plan_refusal(
-            await c.post(f"/api/invoices/{invoice_id}/send-to-erp"), FEATURE_ERP_INTEGRATIONS
-        )
-    async with realdb.sessionmaker("a")() as s:
-        assert (await s.get(Invoice, invoice_id)).status == InvoiceStatus.approved
+    await _negotiated_plan(realdb, {})
+    try:
+        async with realdb.client(key="a") as c:
+            _assert_plan_refusal(
+                await c.post(f"/api/invoices/{invoice_id}/send-to-erp"), FEATURE_ERP_INTEGRATIONS
+            )
+    finally:
+        await _purge_negotiated(realdb)
+    assert await _invoice_status(realdb, invoice_id) == InvoiceStatus.approved
 
 
 # ---------------------------------------------------------------------------

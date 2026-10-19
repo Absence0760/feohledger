@@ -1,6 +1,6 @@
 """``scripts/seed.py`` — which plan each seeded tenant lands on.
 
-The seed used to put every org on ``free``, whose entitlements are ``{}``. With
+The seed used to put every org on ``free``, whose entitlements were ``{}``. With
 the public API, and since decisions §258 SSO, SCIM, multiple entities, live
 ERPs and outbound webhooks too, behind a plan gate, that made whole product
 surfaces unreachable on a fresh clone without hand-editing the control plane —
@@ -31,6 +31,7 @@ from app.services.billing.entitlements import get_entitlements, has_entitlement
 from app.services.billing.plan_catalog import (
     ALL_FEATURES,
     DEFAULT_PLAN_CATALOG,
+    FEATURE_ERP_INTEGRATIONS,
     ensure_plan_catalog,
     ensure_subscription,
 )
@@ -43,8 +44,12 @@ def _grants_every_feature(entitlements: dict) -> bool:
     return all(has_entitlement(entitlements, f) for f in ALL_FEATURES)
 
 
-def _grants_no_feature(entitlements: dict) -> bool:
-    return not any(has_entitlement(entitlements, f) for f in ALL_FEATURES)
+#: What Free grants since decisions §281: the direct ERP adapters, nothing else.
+_FREE_GRANTS = {FEATURE_ERP_INTEGRATIONS}
+
+
+def _grants_only_free(entitlements: dict) -> bool:
+    return {f for f in ALL_FEATURES if has_entitlement(entitlements, f)} == _FREE_GRANTS
 
 
 def test_acme_lands_on_a_plan_that_actually_grants_every_feature():
@@ -72,14 +77,15 @@ def test_e2e_workers_land_on_a_plan_that_grants_every_feature():
     assert _grants_every_feature(spec["entitlements"])
 
 
-def test_techflow_stays_unentitled():
-    """``techflow`` keeps the refusal side of every gate — and the upgrade
-    prompt — exercisable on a local stack."""
+def test_techflow_stays_on_the_free_grants():
+    """``techflow`` keeps the refusal side of every gate but the direct ERP —
+    and the upgrade prompt — exercisable on a local stack. Merge.dev's refusal
+    (``erp_merge``) is among them."""
     spec = _CATALOG_BY_CODE.get(seed_script.TECHFLOW_PLAN_CODE)
     assert spec is not None, f"{seed_script.TECHFLOW_PLAN_CODE!r} is not in DEFAULT_PLAN_CATALOG"
-    assert _grants_no_feature(spec["entitlements"]), (
-        f"{seed_script.TECHFLOW_PLAN_CODE!r} now grants a plan feature — the seed "
-        "no longer demonstrates every gate refusing someone"
+    assert _grants_only_free(spec["entitlements"]), (
+        f"{seed_script.TECHFLOW_PLAN_CODE!r} grants more than Free's direct ERP — the "
+        "seed no longer demonstrates every other gate refusing someone"
     )
 
 
@@ -131,7 +137,7 @@ async def _live_subscriptions(realdb, org_id):
 
 async def test_baseline_entitles_the_demo_tenant_and_leaves_the_other_free(realdb, monkeypatch):
     """A fresh control plane: after the seed's billing baseline, the demo
-    tenant's live plan grants every feature and the second one grants none."""
+    tenant's live plan grants every feature and the second one grants only what Free does."""
     acme_org, tech_org = realdb.info("a").org_id, realdb.info("b").org_id
     _point_seed_at(monkeypatch, acme_org, tech_org)
     await _clear_billing(realdb, [acme_org, tech_org])
@@ -145,7 +151,7 @@ async def test_baseline_entitles_the_demo_tenant_and_leaves_the_other_free(reald
             acme_ents = await get_entitlements(s, acme_org)
             tech_ents = await get_entitlements(s, tech_org)
         assert _grants_every_feature(acme_ents)
-        assert _grants_no_feature(tech_ents)
+        assert _grants_only_free(tech_ents)
     finally:
         await _clear_billing(realdb, [acme_org, tech_org])
 
@@ -175,7 +181,7 @@ async def test_re_seed_repairs_a_demo_tenant_stranded_on_free(realdb, monkeypatc
 
         async with ctrl_mk() as s:
             ents = await get_entitlements(s, acme_org)
-        assert _grants_no_feature(ents), "precondition: the 402 state"
+        assert _grants_only_free(ents), "precondition: the 402 state for everything but ERP"
 
         async with ctrl_mk() as s:
             await seed_script.ensure_demo_billing_baseline(s)

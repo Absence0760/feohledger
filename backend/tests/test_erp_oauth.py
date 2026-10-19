@@ -382,10 +382,49 @@ async def test_authorize_without_any_app_is_refused(realdb, monkeypatch):
     assert resp.status_code == 409
 
 
-async def test_authorize_is_plan_gated(realdb, platform_app):
+@pytest.mark.plan("free")
+async def test_authorize_is_open_on_free(realdb, platform_app):
+    """QuickBooks Online is a direct adapter, and Free carries those
+    (decisions §281)."""
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
-    assert resp.status_code == 402
+    assert resp.status_code == 200, resp.text
+
+
+async def test_authorize_is_plan_gated(realdb, platform_app):
+    """No catalog plan leaves the direct ERPs out since §281, so the refusal is
+    a negotiated plan's that does."""
+    from decimal import Decimal
+
+    from sqlalchemy import delete
+
+    from app.models.billing import Plan, Subscription
+
+    org_id = realdb.info("a").org_id
+    async with realdb.control_sessionmaker()() as s:
+        await s.execute(delete(Subscription).where(Subscription.organization_id == org_id))
+        plan = Plan(
+            id=uuid.uuid4(),
+            code=f"oauth_gate_test_{uuid.uuid4().hex[:8]}",
+            name="Negotiated",
+            monthly_price=Decimal("0.00"),
+            currency="USD",
+            entitlements={},
+            trial_days=0,
+        )
+        s.add(plan)
+        await s.flush()
+        s.add(
+            Subscription(id=uuid.uuid4(), organization_id=org_id, plan_id=plan.id, status="active")
+        )
+        await s.commit()
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
+        assert resp.status_code == 402
+        assert resp.json()["detail"]["params"] == {"feature": "erp_integrations"}
+    finally:
+        await realdb.purge_plans("oauth_gate_test_", org_ids=[org_id])
 
 
 @pytest.mark.plan("scale")

@@ -50,7 +50,9 @@ async def test_ensure_plan_catalog_creates_all_default_plans(realdb):
             await s.commit()
 
         assert set(by_code) == {"free", "growth", "scale"}
-        assert by_code["free"].entitlements == {}
+        assert by_code["free"].entitlements == {"erp_integrations": True}
+        assert "erp_merge" not in by_code["growth"].entitlements
+        assert by_code["scale"].entitlements.get("erp_merge") is True
         assert by_code["growth"].entitlements.get("public_api") is True
         assert by_code["scale"].entitlements.get("public_api") is True
 

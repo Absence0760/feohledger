@@ -21,6 +21,7 @@ export const PLAN_CURRENCY = 'USD';
 export const PLAN_FEATURES = [
 	'public_api',
 	'erp_integrations',
+	'erp_merge',
 	'sso',
 	'scim',
 	'sso_enforcement',
@@ -59,7 +60,9 @@ export const PLANS = [
 		includedAiInvoices: 100,
 		overageUnitPrice: null,
 		trialDays: 0,
-		features: [],
+		features: [
+			'erp_integrations',
+		],
 	},
 	{
 		code: 'growth',
@@ -84,6 +87,7 @@ export const PLANS = [
 		features: [
 			'public_api',
 			'erp_integrations',
+			'erp_merge',
 			'sso',
 			'scim',
 			'sso_enforcement',
