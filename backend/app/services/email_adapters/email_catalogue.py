@@ -135,6 +135,14 @@ _EN: dict[str, str] = {
         "You'll be asked to change your password when you first sign in."
     ),
     "signup.welcome.signoff": "Welcome aboard!",
+    # Buttons + notes in the HTML layout (`email_adapters.layout`).
+    "signup.verify.cta": "Confirm and create workspace",
+    "signup.welcome.cta": "Open your workspace",
+    "signup.welcome.keep_note": (
+        "Keep this email until you've signed in and chosen your own password."
+    ),
+    "email.layout.open_cta": "Open {product}",
+    "email.layout.fallback_link": "Button not working? Paste this link into your browser:",
 }
 
 # --- German ------------------------------------------------------------------
@@ -176,6 +184,16 @@ _DE: dict[str, str] = {
         "Sie werden bei der ersten Anmeldung aufgefordert, Ihr Passwort zu ändern."
     ),
     "signup.welcome.signoff": "Willkommen an Bord!",
+    "signup.verify.cta": "Bestätigen und Arbeitsbereich erstellen",
+    "signup.welcome.cta": "Arbeitsbereich öffnen",
+    "signup.welcome.keep_note": (
+        "Bewahren Sie diese E-Mail auf, bis Sie sich "
+        "angemeldet und Ihr eigenes Passwort gewählt haben."
+    ),
+    "email.layout.open_cta": "{product} öffnen",
+    "email.layout.fallback_link": (
+        "Schaltfläche funktioniert nicht? Fügen Sie diesen Link in Ihren Browser ein:"
+    ),
 }
 
 # --- French ------------------------------------------------------------------
@@ -217,6 +235,16 @@ _FR: dict[str, str] = {
         "Il vous sera demandé de changer votre mot de passe lors de votre première connexion."
     ),
     "signup.welcome.signoff": "Bienvenue à bord !",
+    "signup.verify.cta": "Confirmer et créer l'espace de travail",
+    "signup.welcome.cta": "Ouvrir votre espace de travail",
+    "signup.welcome.keep_note": (
+        "Conservez cet e-mail jusqu'à ce que vous vous soyez "
+        "connecté et ayez choisi votre propre mot de passe."
+    ),
+    "email.layout.open_cta": "Ouvrir {product}",
+    "email.layout.fallback_link": (
+        "Le bouton ne fonctionne pas ? Collez ce lien dans votre navigateur :"
+    ),
 }
 
 # --- Spanish -----------------------------------------------------------------
@@ -258,6 +286,13 @@ _ES: dict[str, str] = {
         "Se le pedirá que cambie su contraseña la primera vez que inicie sesión."
     ),
     "signup.welcome.signoff": "¡Bienvenido a bordo!",
+    "signup.verify.cta": "Confirmar y crear el espacio de trabajo",
+    "signup.welcome.cta": "Abrir su espacio de trabajo",
+    "signup.welcome.keep_note": (
+        "Conserve este correo hasta que haya iniciado sesión y elegido su propia contraseña."
+    ),
+    "email.layout.open_cta": "Abrir {product}",
+    "email.layout.fallback_link": "¿El botón no funciona? Pegue este enlace en su navegador:",
 }
 
 # --- Portuguese (Brazil) -----------------------------------------------------
@@ -297,6 +332,11 @@ _PT_BR: dict[str, str] = {
     "signup.welcome.password_label": "Senha",
     "signup.welcome.change_note": ("Você será solicitado a alterar sua senha no primeiro login."),
     "signup.welcome.signoff": "Bem-vindo a bordo!",
+    "signup.verify.cta": "Confirmar e criar o espaço de trabalho",
+    "signup.welcome.cta": "Abrir seu espaço de trabalho",
+    "signup.welcome.keep_note": "Guarde este e-mail até entrar e escolher sua própria senha.",
+    "email.layout.open_cta": "Abrir {product}",
+    "email.layout.fallback_link": "O botão não funciona? Cole este link no seu navegador:",
 }
 
 # --- Japanese ----------------------------------------------------------------
@@ -336,6 +376,15 @@ _JA: dict[str, str] = {
     "signup.welcome.password_label": "パスワード",
     "signup.welcome.change_note": "初回サインイン時にパスワードの変更を求められます。",
     "signup.welcome.signoff": "ようこそ！",
+    "signup.verify.cta": "確認してワークスペースを作成",
+    "signup.welcome.cta": "ワークスペースを開く",
+    "signup.welcome.keep_note": (
+        "サインインしてご自身のパスワードを設定するまで、このメールを保管してください。"
+    ),
+    "email.layout.open_cta": "{product} を開く",
+    "email.layout.fallback_link": (
+        "ボタンが機能しない場合は、このリンクをブラウザに貼り付けてください："
+    ),
 }
 
 _CATALOGUE: dict[str, dict[str, str]] = {
