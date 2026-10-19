@@ -906,6 +906,8 @@ def test_backend_only_leaves_a_live_release_alone(stack: Stack) -> None:
     assert result.returncode == 0, result.stderr
     assert os.readlink(stack.www / "current") == "releases/old"
     assert not any("frontend-build" in c for c in stack.calls())
-    curls = (stack.root / "curl_calls").read_text()
-    assert "https://app.example.com/" in curls
-    assert "https://api.example.com/api/health" in curls
+    curl_args = {
+        arg for line in (stack.root / "curl_calls").read_text().splitlines() for arg in line.split()
+    }
+    assert "https://app.example.com/" in curl_args
+    assert "https://api.example.com/api/health" in curl_args
