@@ -52,7 +52,12 @@ STATE_DIR=${DAY_ONE_STATE_DIR:-$REPO_ROOT/.day-one-state}
 IMAGE=feoh-day-one-api
 API_CONTAINER=feoh-day-one-api
 KMS_ALIAS=alias/feohledger-app-local
-COMPOSE=(docker compose -p feoh-day-one -f backend/docker-compose.yml -f scripts/day-one/compose.yml)
+# The profiles are named on every call, not only on `up`: naming a service on
+# `up` starts it whatever its profile, but `down` only removes the services of
+# the active profiles, and would leave Mailpit (with the last run's inbox) and
+# LocalStack running into the next one.
+COMPOSE=(docker compose -p feoh-day-one -f backend/docker-compose.yml -f scripts/day-one/compose.yml
+	--profile mail --profile aws)
 SERVICES=(postgres redis minio mailpit localstack)
 
 die() {
@@ -141,6 +146,10 @@ cmd_up() {
 	[ "$tables" = 0 ] && [ "$dbs" = 0 ] ||
 		die "Postgres is not empty (${tables} control-plane table(s), ${dbs} tenant database(s)) — run '$0 down' first."
 	echo "==> Postgres is empty"
+	# So is the inbox: the suite reads the invitation and reset emails from it.
+	local mail
+	mail=$(curl -fsS "http://127.0.0.1:${MAILPIT_PORT}/api/v1/messages?limit=1" | jq -r .total)
+	[ "$mail" = 0 ] || die "Mailpit already holds ${mail} message(s) — run '$0 down' first."
 }
 
 cmd_build() {
