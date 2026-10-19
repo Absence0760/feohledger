@@ -26,6 +26,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { erpRefusalText } from '#lib/api/erpRefusals.ts';
 	import { invoiceWarningText, poMatchIssueText } from '#lib/api/invoiceWarnings.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { formatList } from '#lib/utils/list.ts';
@@ -1491,6 +1492,10 @@
 			erp_reference: (latest.details as Record<string, unknown>)?.erp_reference as string | undefined,
 			erp_document_id: (latest.details as Record<string, unknown>)?.erp_document_id as string | undefined,
 			last_error: (latest.details as Record<string, unknown>)?.error as string | undefined,
+			// `{code, params}` for a refusal (`services/erp.erp_refusal_record`):
+			// stated in the reader's language with what to do, the English above
+			// being the fallback for a code this build does not know.
+			refusal: (latest.details as Record<string, unknown>)?.refusal,
 			action: latest.action,
 			actor: latest.actor_name,
 			time: latest.created_at,
@@ -2314,7 +2319,9 @@
 								{#if erpInfo?.last_error}
 									<div class="erp-row erp-error">
 										<span class="erp-label">{m('invoices.modal.erp.error')}</span>
-										<span class="erp-value">{erpInfo.last_error}</span>
+										<span class="erp-value" data-testid="erp-error">
+											{erpRefusalText(erpInfo.refusal, m) ?? erpInfo.last_error}
+										</span>
 									</div>
 								{/if}
 							</div>

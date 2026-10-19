@@ -19,6 +19,7 @@ import {
 	erpReferenceFromAudit,
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
+	syncAndListGlAccounts,
 	syncErpGlAccounts,
 	syncErpVendors,
 	testErpConnection
@@ -46,10 +47,15 @@ import {
  *      as a Bill. The bill read back FROM THE FAKE carries the exact approved
  *      amount, the synced vendor id and the synced account id — so the
  *      assertion is on what the ERP holds, not on what we sent.
- *   3. Fail closed — an invoice whose vendor never synced is refused before
- *      anything is posted, and so is an invoice number longer than QBO's
+ *   3. Same-named sub-accounts — the fake, like the real sandbox, has a
+ *      "Job Materials" under two parents. The chart sync keeps both, each
+ *      keyed by its FullyQualifiedName, and an invoice coded to one posts a
+ *      Bill on THAT account's id, never the other's (decisions §284).
+ *   4. Fail closed — an invoice whose vendor never synced is refused before
+ *      anything is posted, and the invoice modal says what to do about it in
+ *      the reader's language; so is an invoice number longer than QBO's
  *      21-character DocNumber (refused, never silently truncated).
- *   4. Disconnect — clears the connection, and a later send cannot post.
+ *   5. Disconnect — clears the connection, and a later send cannot post.
  */
 
 const PROVIDER = 'quickbooks_online';
@@ -181,6 +187,40 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 		}
 	});
 
+	test('same-named sub-accounts are two accounts, and the bill posts to the one picked', async ({
+		page
+	}) => {
+		await syncErpVendors(page);
+		const chart = await syncAndListGlAccounts(page);
+		const byCode = new Map(chart.map((a) => [a.code, a]));
+		// Keyed by the path QuickBooks keeps unique, never the shared Name.
+		expect(byCode.get('Job Expenses:Job Materials')?.name).toBe('Job Expenses:Job Materials');
+		expect(byCode.get('Landscaping Services:Job Materials')?.name).toBe(
+			'Landscaping Services:Job Materials'
+		);
+		expect(byCode.has('Job Materials')).toBe(false);
+
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-QBO-SUB',
+			invoiceNumber: `S${Date.now() % 1e9}-${Math.floor(Math.random() * 1e4)}`,
+			amount: '42.00',
+			vendor: 'Fake ERP Vendor A',
+			glAccount: 'Job Expenses:Job Materials'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			const bill = await billFromFake(page, await erpReferenceFromAudit(page, inv.id));
+			expect(
+				bill.Line.map(
+					(l: { AccountBasedExpenseLineDetail?: { AccountRef?: { value: string } } }) =>
+						l.AccountBasedExpenseLineDetail?.AccountRef?.value
+				)
+			).toEqual(['62']); // Job Expenses:Job Materials — not Landscaping's 63
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
 	test('an invoice whose vendor never synced is refused, not posted', async ({ page }) => {
 		await syncErpGlAccounts(page);
 		const inv = await createApprovedInvoice(page, {
@@ -191,6 +231,24 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 		try {
 			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
 			expect(await erpFailureFromAudit(page, inv.id)).toContain('vendor_not_linked');
+
+			// The modal states the refusal as something to act on — not the
+			// server's "QuickBooks Online post refused: vendor_not_linked" —
+			// and keeps the retry for after the fix.
+			await page.goto(`/invoices?id=${inv.id}`);
+			const error = page.getByTestId('erp-error');
+			await expect(error).toHaveText(
+				"This vendor isn't in QuickBooks Online yet. Sync vendors from QuickBooks Online, or add the vendor there, then retry."
+			);
+			await expect(page.getByRole('button', { name: 'Retry ERP Send' })).toBeVisible();
+
+			// ...in the reader's language.
+			await page.evaluate(() => localStorage.setItem('feoh_locale', 'de'));
+			await page.goto(`/invoices?id=${inv.id}`);
+			await expect(page.getByTestId('erp-error')).toHaveText(
+				'Dieser Lieferant ist noch nicht in QuickBooks Online. Synchronisieren Sie die Lieferanten aus QuickBooks Online oder legen Sie den Lieferanten dort an und versuchen Sie es dann erneut.'
+			);
+			await page.evaluate(() => localStorage.removeItem('feoh_locale'));
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}

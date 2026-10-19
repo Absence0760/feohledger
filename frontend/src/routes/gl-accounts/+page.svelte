@@ -22,6 +22,7 @@
 	 * pair with a "Showing all N" claim.
 	 */
 	import { listGlAccounts, syncGlAccountsFromErp, updateGlAccount } from '#lib/api/glAccounts.ts';
+	import { glSyncReportLines } from '#lib/utils/erpSyncReport.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { GlAccount } from '#lib/types/glAccount.ts';
 	import {
@@ -263,7 +264,11 @@
 		syncing = true;
 		try {
 			const result = await syncGlAccountsFromErp();
-			toast(result.message, 'success');
+			// A refused or unlinked code is something to act on (recode its
+			// invoices), so it is its own warning, not a clause in the summary.
+			for (const line of glSyncReportLines(result, m)) {
+				toast(line.text, line.tone, line.tone === 'warning' ? 12_000 : undefined);
+			}
 			await load();
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('glAccounts.toast.syncFailed'), 'error');

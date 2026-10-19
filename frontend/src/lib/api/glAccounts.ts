@@ -112,11 +112,28 @@ export function updateGlAccount(id: string, body: GlAccountUpdate): Promise<GlAc
 	return api.patch<GlAccount>(`/api/gl-accounts/${id}`, body);
 }
 
+/** One ERP code the sync refused to link (`services/gl_account_sync`). */
+export interface GlAccountSyncConflict {
+	code: string;
+	reason: 'duplicate_code' | 'duplicate_erp_id' | 'code_taken' | 'ambiguous_legacy' | 'code_too_long';
+	erp_account_ids: string[];
+}
+
 export interface GlAccountSyncResult {
 	success: boolean;
 	message: string;
 	created: number;
 	updated: number;
+	unchanged: number;
+	linked: number;
+	conflict_count: number;
+	/** Capped at 50; `conflict_count` is exact. */
+	conflicts: GlAccountSyncConflict[];
+	unlinked_count: number;
+	/** Codes of rows whose ERP link the sync removed. Capped at 50. */
+	unlinked: string[];
+	code_drift_count: number;
+	code_drift: { code: string; erp_code: string }[];
 	adapter: string;
 }
 

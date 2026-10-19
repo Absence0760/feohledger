@@ -36,6 +36,16 @@ describe('glAccountOptionLabel', () => {
 		).toBe('6000 — Office Supplies');
 	});
 
+	it('prints a code that is also the name once', () => {
+		const path = 'Job Expenses:Job Materials';
+		expect(
+			glAccountOptionLabel(option({ code: path, name: path }), SINGLE, {
+				withName: true,
+				unknownEntity: UNKNOWN
+			})
+		).toBe(path);
+	});
+
 	it('leaves a shared account bare — NULL entity_id means every chart', () => {
 		expect(
 			glAccountOptionLabel(option({ entity_id: null }), MULTI, { unknownEntity: UNKNOWN })

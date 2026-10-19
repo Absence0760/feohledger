@@ -96,6 +96,10 @@ export interface GlAccountScope {
  * shared ∪ the selected entity), so this only ever fires in the consolidated
  * view, which is precisely where the reader has no other signal.
  *
+ * The name is left out when it is the code itself: a QuickBooks chart without
+ * account numbers is keyed by each account's full path, and its name is that
+ * same path (§284), so `code — name` would print it twice.
+ *
  * `unknownEntity` is passed in (the caller supplies
  * `m('glAccounts.scope.unknownEntity')`) rather than resolved here, for the
  * same reason `entities` is structural: no i18n store import in a types module.
@@ -105,7 +109,12 @@ export function glAccountOptionLabel(
 	scope: GlAccountScope,
 	opts: { withName?: boolean; unknownEntity: string }
 ): string {
-	const base = opts.withName ? `${account.code} — ${account.name}` : account.code;
+	// An account whose code IS its name — a QuickBooks account keyed by its
+	// full path, `Job Expenses:Job Materials` (decisions §284) — reads once.
+	const base =
+		opts.withName && account.name !== account.code
+			? `${account.code} — ${account.name}`
+			: account.code;
 	if (!scope.multiEntity || !account.entity_id) return base;
 	const entityId = account.entity_id;
 	const name = scope.entities.find((e) => e.id === entityId)?.name ?? opts.unknownEntity;

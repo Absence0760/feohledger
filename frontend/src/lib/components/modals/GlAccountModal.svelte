@@ -147,7 +147,7 @@
 				<input
 					type="text"
 					bind:value={code}
-					maxlength="50"
+					maxlength="100"
 					required={!editing}
 					readonly={editing}
 					aria-describedby={editing ? 'gl-code-fixed' : undefined}
@@ -170,7 +170,7 @@
 			</label>
 			<label>
 				<span>{m('glAccounts.createModal.field.parentCode')}</span>
-				<input type="text" bind:value={parentCode} maxlength="50" />
+				<input type="text" bind:value={parentCode} maxlength="100" />
 			</label>
 		</div>
 
