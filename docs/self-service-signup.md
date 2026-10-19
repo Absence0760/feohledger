@@ -37,10 +37,19 @@ keeps the default (`true`) and **must** set `FEOH_HCAPTCHA_SECRET` and
 whose tenants are provisioned by hand sets `FEOH_SIGNUP_ENABLED=false` and may
 leave both hCaptcha values empty.
 
+The two hCaptcha values must come from the **same hCaptcha account**: the
+sitekey from the site's entry under *Sites*, the secret from *Settings →
+Secrets → Account-level Secret* (not the API key, which `/siteverify`
+rejects). A pair from two accounts fails every signup with
+`sitekey-secret-mismatch` in the API log, while the widget itself renders and
+solves normally. The site's hostname is the apex (`feohledger.com`), where
+`/signup` lives; hCaptcha rejects a wildcard. Quote both values in the sops
+file: a secret starting `0x` is otherwise read by YAML as a number.
+
 ## User journey
 
 1. Visitor lands on the apex domain (no subdomain) and clicks **Create your workspace**.
-2. `/signup` form: company name, desired slug, admin name, admin email, hCaptcha.
+2. `/signup` form: company name, desired slug, admin name, admin email, hCaptcha (rendered in its dark theme, since the app is dark-only).
 3. Form submits `POST /api/signup/start`. Backend validates, records an `EmailVerification` row, and emails a verification link (`PUBLIC_URL/verify?token=...`).
 4. User clicks the link. `/verify?token=...` calls `POST /api/signup/complete`. Backend re-checks availability, provisions the tenant (DB + org + admin user), generates a 16-char temp password, sends the welcome email with tenant URL + credentials.
 5. User receives the welcome email, clicks the tenant URL, signs in with the temp password.
