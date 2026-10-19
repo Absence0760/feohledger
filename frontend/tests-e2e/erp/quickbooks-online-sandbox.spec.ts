@@ -204,6 +204,8 @@ type GlRow = {
 };
 /** The whole chart, retired rows included (the list defaults to active only). */
 async function chart(page: Page): Promise<Map<string, GlRow>> {
+	// Inactive rows too: the sync retires Bank Charges (inactive in
+	// QuickBooks), and a retired row is still linked and still ours.
 	const resp = await page.request.get(`${API_BASE}/api/gl-accounts`, {
 		headers: await authedTenantHeaders(page),
 		params: { active_only: 'false' }
@@ -302,8 +304,19 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 		// its own code in this company, so the realm pass adopts them all and
 		// moves none.
 		const legacyLinks = COMPANY.legacy_chart.filter((r) => r.erp_account_id).length;
+		// Rows earlier specs in this worker linked under ANOTHER connection
+		// (the mock ERP) carry ids this company never issued. Their links are
+		// dropped and recorded (rule 0), never kept on a colliding id — before
+		// §284's realms they would have stayed linked.
+		const legacyCodes = new Set(COMPANY.legacy_chart.map((r) => r.code));
+		const foreign = [...before.values()].filter(
+			(r) => r.erp_account_id && !legacyCodes.has(r.code)
+		);
+		const unlinked = [...live.unlinked, ...foreign.map((r) => r.code)].sort();
 		expect(summary).toEqual({
 			...live,
+			unlinked,
+			unlinked_count: unlinked.length,
 			updated: live.updated + 1,
 			deactivated: ['Bank Charges'],
 			deactivated_count: 1,
@@ -313,10 +326,15 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 			success: true,
 			adapter: PROVIDER
 		});
-		expect(byCode(result.link_changes)).toEqual(byCode(live.link_changes));
+		expect(byCode(result.link_changes)).toEqual(
+			byCode([
+				...live.link_changes,
+				...foreign.map((r) => ({ code: r.code, from: r.erp_account_id, to: null }))
+			])
+		);
 		expect(message).toBe(
 			`Synced ${live.created} new, ${live.updated + 1} updated GL accounts; ` +
-				`${live.conflict_count} not linked, ${live.unlinked_count} unlinked`
+				`${live.conflict_count} not linked, ${unlinked.length} unlinked`
 		);
 
 		const after = await chart(page);

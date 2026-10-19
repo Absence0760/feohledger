@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
@@ -707,6 +707,15 @@ async def test_a_confirmed_link_is_kept_by_every_later_sync(realdb, restore_sett
     row = (await _chart(realdb))["Depreciation"]
     assert (row.erp_account_id, row.erp_link_realm) == ("40", PROD)
     assert row.erp_link_confirmed_at is not None
+    # Cleared as SQL NULL, not a JSON `null`: "needs a decision" is a NULL
+    # test everywhere outside the ORM (the e2e, an operator's query).
+    async with realdb.sessionmaker(TENANT)() as s:
+        pending = (
+            await s.execute(
+                text("SELECT count(*) FROM gl_accounts WHERE erp_link_candidates IS NOT NULL")
+            )
+        ).scalar_one()
+    assert pending == 0
 
 
 async def test_a_confirmed_sub_account_choice_survives_rule_4(realdb, restore_settings):
