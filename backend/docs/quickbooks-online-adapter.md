@@ -255,6 +255,15 @@ sandbox. Build and test against free Intuit sandbox companies throughout.
 - fake-erp: `/qbo/oauth2/token` and `/qbo/v3/company/{realm}/…` routes, plus a
   `quickbooks` spec in `frontend/tests-e2e/erp/` (connect → sync → post →
   webhook → paid).
+- The live sandbox, replayed (#598): the Intuit sample company tested live on
+  2026-10-19 is recorded in `tools/fake-erp/fixtures/qbo_sandbox_company.json`
+  with our pre-§284 chart and the live syncs' answers. The fake serves it as a
+  second company (`fake_company=sandbox` at authorize; `tools/fake-erp/README.md`)
+  to `frontend/tests-e2e/erp/quickbooks-online-sandbox.spec.ts` (repair replay,
+  pushes, vendors, token expiry / rotation / revocation, disconnect revoke), and
+  `backend/tests/test_qbo_sandbox_replay.py` replays the same file through the
+  adapter and both syncs in-process. A defect found against the real sandbox
+  goes into that fixture, so CI keeps it found.
 - A manual sandbox checklist per release: one bill end to end, a duplicate
   retry, a payment write-back, a token refresh.
 
