@@ -200,13 +200,13 @@ test.describe('/exceptions — search, sort and severity', () => {
 		await stubQueue(page);
 		await page.goto('/exceptions?type=fraud_flag');
 
-		const fraud = page.locator('.type-chip', { hasText: 'Fraud Flag' });
+		const fraud = page.getByTestId('exception-type-filters').locator('.filter-chip', { hasText: 'Fraud Flag' });
 		await expect(fraud).toHaveAttribute('aria-pressed', 'true');
 		await expect(fraud.locator('.count')).toHaveText('0');
 
 		await fraud.click();
 		await expect(page).not.toHaveURL(/type=/);
-		await expect(page.locator('.type-chip', { hasText: 'All types' })).toHaveAttribute(
+		await expect(page.getByTestId('exception-type-filters').locator('.filter-chip', { hasText: 'All types' })).toHaveAttribute(
 			'aria-pressed',
 			'true'
 		);
