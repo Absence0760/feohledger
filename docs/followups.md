@@ -151,7 +151,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**105 open: 87 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**103 open: 87 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1708,19 +1708,6 @@ as oversights.
 
 ## (b) Operator steps on merged code
 
-- [ ] **Apply the SPA's S3 + CloudFront stack and cut DNS over to it.**
-      `infra/frontend.tf` and the publish step in `vm-deploy.yml` are merged
-      but inert until an operator applies the stack, sets the
-      `FRONTEND_BUCKET` / `CLOUDFRONT_DISTRIBUTION_ID` environment secrets and
-      the `APP_URL` / `PUBLIC_API_URL` / `FRONTEND_PUBLISH_ENABLED` repository
-      variables, publishes a release, and then sets `frontend_on_cloudfront =
-      true`. Until then the SPA is still served by the VM's Caddy, from a build
-      the VM makes on every deploy (#579's outage class, which #583 patches on
-      the VM side). Steps, in
-      order: `infra/README.md` § Frontend on CloudFront (decisions §278).
-      **Trigger:** next session with AWS access, once #583 has merged. The (c)
-      VM-cleanup entry follows a day after the cutover.
-
 - [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
       Accounting and Blackbaud.** Until then those ERPs connect only when a
       tenant brings its own app (decisions §270). Steps: register each app
@@ -1833,17 +1820,6 @@ from that work is the one entry below.
       The manual recipe in [backend/CLAUDE.md](../backend/CLAUDE.md)
       § Dependency lock stays the documented fallback.
       **Trigger:** an operator provisioning either credential.
-
-- [ ] **(b) Deployed databases may already hold rows the three newly-enforced
-      UNIQUE indexes forbid.** Migration 0093 pre-flights all three and refuses
-      with a counts-only, PII-free message rather than dying mid-`CREATE UNIQUE
-      INDEX` ([decisions.md](decisions.md) §109). If it refuses: duplicate
-      Positive Pay check-issue files → establish which went to the bank and
-      `DELETE /api/positive-pay/{id}` the others; two live subscriptions for one
-      org → cancel the superseded row; two orgs sharing a SCIM bearer digest →
-      re-mint one. All six local tenants and the local control plane pre-flighted
-      clean. **Trigger:** the next `alembic upgrade head` /
-      `migrate_all_tenants.py` on a deployed environment.
 
 - [ ] **(b) Enable the retention sweep to expire Positive Pay files in a
       deployed environment.** `positive_pay` is now a retention record class and
