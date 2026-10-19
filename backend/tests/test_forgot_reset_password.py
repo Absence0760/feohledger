@@ -259,11 +259,21 @@ async def test_reset_password_expired_token_rejected(realdb, fake_redis):
     docstring: expired and unknown are deliberately the same outcome)."""
     from app.services import password_reset
 
-    user_id = uuid.uuid4()
+    # A REAL user: with a random id the reset 400s on the user lookup whether
+    # or not the token was evicted, and the test proves nothing about expiry.
+    email = await _create_throwaway_user(realdb, TENANT, password=SEED_PASSWORD)
+    mk = realdb.control_sessionmaker()
+    async with mk() as s:
+        from sqlalchemy import select
+
+        user_id = (await s.execute(select(User.id).where(User.email == email))).scalar_one()
     token = await password_reset.issue_reset_token(user_id)
-    key = password_reset._reset_key(token)
-    # Simulate the Redis-side TTL eviction directly on the fake's keyspace.
-    fake_redis.strings.pop(key, None)
+    # Simulate the Redis-side TTL eviction on the store `password_reset`
+    # actually reads (the autouse stub — `fake_redis` backs only the session
+    # tracking), first proving the token was live.
+    store = await password_reset.get_redis()
+    assert await password_reset.peek_reset_token(token) == user_id
+    await store.delete(password_reset._reset_key(token))
 
     async with realdb.client(key=TENANT, role=None) as c:
         resp = await c.post(
@@ -306,3 +316,66 @@ async def test_reset_password_weak_password_rejected(realdb, fake_redis, monkeyp
             json={"token": token, "new_password": "short"},
         )
     assert weak_resp.status_code == 422
+
+
+async def _user_id_for(realdb, email: str) -> uuid.UUID:
+    from sqlalchemy import select
+
+    mk = realdb.control_sessionmaker()
+    async with mk() as s:
+        return (await s.execute(select(User.id).where(User.email == email))).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_check_refuses_a_deactivated_account_without_spending_the_token(realdb, fake_redis):
+    """`/reset-password/check` mirrors the reset's refusal for an account
+    deactivated after the link was issued — and, being a read, leaves the
+    token in the store either way."""
+    from sqlalchemy import update
+
+    from app.services import password_reset
+
+    email = await _create_throwaway_user(realdb, TENANT, password=SEED_PASSWORD)
+    user_id = await _user_id_for(realdb, email)
+    token = await password_reset.issue_reset_token(user_id)
+
+    async with realdb.client(key=TENANT, role=None) as c:
+        live = await c.post("/api/auth/reset-password/check", json={"token": token})
+        assert live.status_code == 200
+        assert live.json() == {"email": email}
+
+        mk = realdb.control_sessionmaker()
+        async with mk() as s:
+            await s.execute(update(User).where(User.id == user_id).values(is_active=False))
+            await s.commit()
+
+        refused = await c.post("/api/auth/reset-password/check", json={"token": token})
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == "Invalid or expired reset link."
+    assert await password_reset.peek_reset_token(token) == user_id
+
+
+@pytest.mark.asyncio
+async def test_check_has_its_own_rate_limit_budget(realdb, fake_redis, monkeypatch):
+    """20 checks a minute per IP, and spending them does not spend the
+    redemption budget — loading the page can never lock out the submit."""
+    from app.config import settings as cfg
+    from app.services import password_reset
+
+    monkeypatch.setattr(cfg, "rate_limit_enabled", True)
+    email = await _create_throwaway_user(realdb, TENANT, password=SEED_PASSWORD)
+    token = await password_reset.issue_reset_token(await _user_id_for(realdb, email))
+
+    async with realdb.client(key=TENANT, role=None) as c:
+        codes = [
+            (await c.post("/api/auth/reset-password/check", json={"token": token})).status_code
+            for _ in range(21)
+        ]
+        assert codes[:20] == [200] * 20
+        assert codes[20] == 429
+
+        redeemed = await c.post(
+            "/api/auth/reset-password",
+            json={"token": token, "new_password": "StillAllowed!42"},
+        )
+    assert redeemed.status_code == 200, redeemed.text

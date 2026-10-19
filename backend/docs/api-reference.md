@@ -97,6 +97,9 @@ full): `/gl-accounts` — it feeds the invoice GL dropdown, which needs every ro
 | `GET`   | `/api/auth/me`               | * | Get current user (roles, `must_change_password`, `mfa_enabled`, `mfa_required_by_org`, `password_sign_in_closed` — the org's `sso_only` rule exactly as login and the step-up enforce it, so `/profile` stops offering the password as a proof there; `docs/decisions.md` §201 — plus `has_password`, `User.hashed_password is not None`, a property of THIS account rather than the org: false for every OIDC/SAML/SCIM-provisioned member, so `/profile` replaces the dead Change-password form with a sentence instead; `docs/authentication.md` § An account can have no password at all) |
 | `PATCH` | `/api/auth/me`               | * | Update own name or password                                        |
 | `POST`  | `/api/auth/change-password`  | * | Set a new password (clears `must_change_password`)                 |
+| `POST`  | `/api/auth/forgot-password`  | (public) | `{email}` → the same generic response whether or not it matched; emails a single-use reset link (`FEOH_PASSWORD_RESET_TTL_MINUTES`). Works for an account with no password yet (SSO/SCIM-provisioned, or a signup admin whose set-password link expired). |
+| `POST`  | `/api/auth/reset-password/check` | (public) | `{token}` → `{email}` for a live reset token, without consuming it; `400 "Invalid or expired reset link."` otherwise. What the reset page reads on load, so a link scanner's visit never spends the token. 20/min per IP. |
+| `POST`  | `/api/auth/reset-password`   | (public) | `{token, new_password}` — redeems the token (single-use), sets the password, clears `must_change_password`, revokes every session. Also redeems signup's set-password link (`docs/decisions.md` §282). |
 | `GET`   | `/api/auth/sessions`         | * | The caller's own live sessions, newest first — `{id (jti), created_at, expires_at, ip, device, method, current}`. Expired-but-tracked entries are pruned, not listed. |
 | `DELETE`| `/api/auth/sessions/{jti}`   | * | End one of the caller's own sessions (blocklists the JTI). Opaque 404 for a JTI that isn't the caller's — same answer as one already gone. Returns `{revoked: 1}`. |
 | `POST`  | `/api/auth/sessions/revoke-others` | * | Sign out everywhere except the current session. Idempotent (`{revoked: 0}` when there's nothing else). |
@@ -172,7 +175,7 @@ Groups map to RBAC roles via `settings.sso.scim_group_role_map` (`{displayName: 
 |---------|---------------------------|-------------|
 | `GET`   | `/api/signup/slug-check`  | `?slug=<s>` — availability check for the signup form's inline UX |
 | `POST`  | `/api/signup/start`       | Rate-limited + captcha-verified. Creates `email_verifications` row and sends verification email. |
-| `POST`  | `/api/signup/complete`    | Consumes token, provisions tenant (DB + org + admin user), sends welcome email. |
+| `POST`  | `/api/signup/complete`    | Consumes token, provisions tenant (DB + org + an admin user with no password), returns `{status, slug, tenant_url, admin_email, set_password_url}` and emails the same single-use `set_password_url` in the welcome email (`null` when no tenant URL is configured — Forgot password then). |
 
 All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before validating the body, opening a session or spending a rate limit. See [`docs/self-service-signup.md`](../../docs/self-service-signup.md) for the full flow.
 

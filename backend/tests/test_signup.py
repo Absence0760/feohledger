@@ -25,6 +25,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
+from urllib.parse import quote, unquote
 
 import pytest
 import pytest_asyncio
@@ -33,6 +34,9 @@ from sqlalchemy import delete, select
 from app.models.billing import Subscription
 from app.models.organization import Organization
 from app.models.signup import EmailVerification
+from app.models.user import User
+from app.services import password_reset
+from app.services.tenant_provisioning import ProvisioningResult
 
 
 def _unique_slug() -> str:
@@ -429,6 +433,19 @@ async def _seed_verification(
     return token
 
 
+def _provision_mock(user_id: uuid.UUID, org_id: uuid.UUID | None = None) -> AsyncMock:
+    """`provision_tenant` stand-in returning what the real one would."""
+    return AsyncMock(
+        return_value=ProvisioningResult(
+            organization_id=org_id or uuid.uuid4(), user_id=user_id, db_name="feoh_unused"
+        )
+    )
+
+
+def _token_of(url: str) -> str:
+    return unquote(url.split("token=")[1].split("&")[0])
+
+
 async def test_signup_complete_provisions_and_marks_consumed(realdb, monkeypatch, cleanup_signup):
     from app.api import signup as signup_mod
 
@@ -441,7 +458,8 @@ async def test_signup_complete_provisions_and_marks_consumed(realdb, monkeypatch
 
     # Don't actually create a Postgres database — assert provision_tenant is
     # invoked with the captured payload.
-    provision = AsyncMock()
+    user_id = uuid.uuid4()
+    provision = _provision_mock(user_id)
     monkeypatch.setattr(signup_mod, "provision_tenant", provision)
 
     async with realdb.client(key="a", role=None) as c:
@@ -453,14 +471,20 @@ async def test_signup_complete_provisions_and_marks_consumed(realdb, monkeypatch
     assert body["slug"] == slug
     assert body["admin_email"] == email
     assert slug in body["tenant_url"]
+    # The set-password link: the tenant's own reset page, in set mode, carrying
+    # a live reset token for exactly the user just provisioned.
+    link = body["set_password_url"]
+    assert link.startswith(f"{body['tenant_url']}/login/reset-password?token=")
+    assert link.endswith("&mode=set")
+    assert await password_reset.peek_reset_token(_token_of(link)) == user_id
 
     provision.assert_awaited_once()
     kwargs = provision.await_args.kwargs
     assert kwargs["slug"] == slug
     assert kwargs["admin_email"] == email
-    assert kwargs["must_change_password"] is True
-    # A real, sufficiently-long temp password is generated and passed through.
-    assert len(kwargs["admin_password"]) >= 12
+    # No password is generated, so there is none to force-change (decisions §282).
+    assert kwargs["admin_password"] is None
+    assert kwargs["must_change_password"] is False
 
     # The verification is now consumed.
     mk = realdb.control_sessionmaker()
@@ -561,7 +585,26 @@ def test_ordinary_names_pass_the_link_check(name):
     _validate_admin_name(name)  # raises on refusal
 
 
-async def test_welcome_email_sets_the_credentials_apart(realdb, monkeypatch, cleanup_signup):
+@pytest.fixture
+def session_redis(monkeypatch):
+    """The zset+hash fake a real `/auth/login` and `/auth/reset-password` need
+    (session tracking and revocation) — same override
+    `test_forgot_reset_password.py::fake_redis` installs. Reset tokens stay in
+    the autouse stub `password_reset` reads."""
+    from tests.test_session_management import FakeRedis
+
+    fake = FakeRedis()
+
+    async def _get_redis():
+        return fake
+
+    monkeypatch.setattr("app.redis.get_redis", _get_redis)
+    return fake
+
+
+async def _complete_capturing(realdb, monkeypatch, cleanup_signup, *, provision=None):
+    """Run /complete for a fresh verification, capturing the welcome email.
+    Returns (response json, the sent message, the email address)."""
     from app.api import signup as signup_mod
 
     slugs, emails = cleanup_signup
@@ -570,33 +613,397 @@ async def test_welcome_email_sets_the_credentials_apart(realdb, monkeypatch, cle
     slugs.append(slug)
     emails.append(email)
     token = await _seed_verification(realdb, slug=slug, email=email)
-    provision = AsyncMock()
-    monkeypatch.setattr(signup_mod, "provision_tenant", provision)
+    monkeypatch.setattr(signup_mod, "provision_tenant", provision or _provision_mock(uuid.uuid4()))
     capture = _CaptureAdapter()
     monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
 
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post("/api/signup/complete", json={"token": token})
-    assert resp.status_code == 200
-    tenant_url = resp.json()["tenant_url"]
-    temp_password = provision.await_args.kwargs["admin_password"]
-
+    assert resp.status_code == 200, resp.text
     (msg,) = capture.sent
+    return resp.json(), msg, email
+
+
+async def test_welcome_email_carries_a_set_password_link_and_no_password(
+    realdb, monkeypatch, cleanup_signup
+):
+    body, msg, email = await _complete_capturing(realdb, monkeypatch, cleanup_signup)
+    link = body["set_password_url"]
+    tenant_url = body["tenant_url"]
     html = _rendered_html(msg)
-    assert f'href="{tenant_url}"' in html
-    assert ">Open your workspace</a>" in html
-    # The credentials sit in their own panel, the password in monospace.
+
+    # The button and its paste-this fallback are the set-password link, the one
+    # the /verify response returned — one token for both.
+    assert f'href="{link.replace("&", "&amp;")}"' in html
+    assert ">Set your password</a>" in html
+    assert f"  {link}" in msg.body_text.splitlines()
+    # The expiry and the way out when it has passed, in both parts.
+    expiry = (
+        "This link expires in 72 hours and works once. If it has expired, use Forgot "
+        "password on the sign-in page to get a new one."
+    )
+    assert expiry in msg.body_text
+    assert expiry in html
+
+    # The workspace URL and the email sit in the panel as plain values, not links.
     panel = html[html.index('class="feoh-panel"') :]
     panel = panel[: panel.index("</table>")]
-    assert email in panel
-    assert temp_password in panel
-    assert "monospace" in panel
-    # Both parts tell them to keep the email until they have their own password.
-    keep = "Keep this email until you've signed in and chosen your own password."
-    assert keep in msg.body_text
-    assert keep.replace("'", "&#x27;") in html
-    # The inbox preview never carries the credentials.
-    assert temp_password not in (msg.preheader or "")
+    assert tenant_url in panel and email in panel
+    assert "<a " not in panel
+    assert "monospace" not in panel
+
+    # The sign-in link opens the login page with the address prefilled.
+    sign_in = f"{tenant_url}/login?email={quote(email)}"
+    assert f'href="{sign_in}"' in html
+    assert f"  {sign_in}" in msg.body_text.splitlines()
+
+    # No password, label or "change it" copy anywhere.
+    for part in (msg.body_text, html):
+        assert "Password:" not in part
+        assert "temporary" not in part.lower()
+        assert "change your password" not in part.lower()
+
+    # The inbox preview is fixed copy: never the link, never the token.
+    token = _token_of(link)
+    assert msg.preheader == "Your workspace is live."
+    assert token not in msg.preheader and "token" not in msg.preheader
+
+
+async def test_welcome_email_expiry_follows_the_configured_ttl(realdb, monkeypatch, cleanup_signup):
+    """The copy states the lifetime the token was actually stored with."""
+    from app.config import settings as cfg
+
+    monkeypatch.setattr(cfg, "signup_set_password_ttl_hours", 48)
+    ttls: list[int] = []
+    real_issue = password_reset.issue_reset_token
+
+    async def _spy(user_id, *, ttl_seconds=None):
+        ttls.append(ttl_seconds)
+        return await real_issue(user_id, ttl_seconds=ttl_seconds)
+
+    monkeypatch.setattr(password_reset, "issue_reset_token", _spy)
+    _, msg, _ = await _complete_capturing(realdb, monkeypatch, cleanup_signup)
+    assert ttls == [48 * 3600]
+    assert "This link expires in 48 hours" in msg.body_text
+
+
+async def test_without_a_tenant_url_signup_refuses_before_provisioning(
+    realdb, monkeypatch, cleanup_signup
+):
+    """Nowhere to point a set-password OR a forgot-password link: a passwordless
+    admin would have no way in, so /complete refuses with 503 before creating
+    anything, mints no token, and leaves the verification usable for a retry."""
+    from app.api import signup as signup_mod
+    from app.config import settings as cfg
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    token = await _seed_verification(realdb, slug=slug, email=email)
+    monkeypatch.setattr(cfg, "tenant_url_template", "")
+    provision = _provision_mock(uuid.uuid4())
+    monkeypatch.setattr(signup_mod, "provision_tenant", provision)
+    issue = AsyncMock()
+    monkeypatch.setattr(password_reset, "issue_reset_token", issue)
+    capture = _CaptureAdapter()
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post("/api/signup/complete", json={"token": token})
+    assert resp.status_code == 503
+    provision.assert_not_awaited()
+    issue.assert_not_awaited()
+    assert capture.sent == []
+    mk = realdb.control_sessionmaker()
+    async with mk() as s:
+        row = (
+            await s.execute(select(EmailVerification).where(EmailVerification.token == token))
+        ).scalar_one()
+        assert row.consumed_at is None
+
+
+async def test_the_complete_response_is_never_cached_and_the_issuance_is_audited(
+    realdb, monkeypatch, cleanup_signup
+):
+    """The body carries a live credential, so no cache may keep it; and minting
+    it writes the same PII-free audit action a forgot-password request does."""
+    from app.api import signup as signup_mod
+
+    audits: list[dict] = []
+
+    async def _audit(**kwargs):
+        audits.append(kwargs)
+
+    monkeypatch.setattr(signup_mod, "dispatch_auth_audit", _audit)
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    token = await _seed_verification(realdb, slug=slug, email=email)
+    user_id, org_id = uuid.uuid4(), uuid.uuid4()
+    monkeypatch.setattr(signup_mod, "provision_tenant", _provision_mock(user_id, org_id))
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: _CaptureAdapter())
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post("/api/signup/complete", json={"token": token})
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-store"
+    reset_token = _token_of(resp.json()["set_password_url"])
+    (row,) = audits
+    assert row["action"] == "auth.password_reset.requested"
+    assert row["organization_id"] == org_id and row["entity_id"] == user_id
+    assert row["details"]["via"] == "signup"
+    assert reset_token not in repr(row) and email not in repr(row)
+
+
+@pytest.mark.parametrize("locale", ["de", "fr", "es", "pt-BR", "ja"])
+def test_the_welcome_email_renders_in_every_locale_with_the_lifetime_filled(locale):
+    from app.api.signup import _welcome_email
+    from app.services.email_adapters import translate
+
+    text, html = _welcome_email(
+        locale=locale,
+        name="Ada",
+        email="ada@acme.example",
+        tenant_url="https://acme.app.example",
+        set_password_url="https://acme.app.example/login/reset-password?token=t&mode=set",
+        sign_in="https://acme.app.example/login?email=ada%40acme.example",
+    )
+    for part in (text, html):
+        assert "72" in part
+        assert "{hours}" not in part
+    assert translate("signup.welcome.set_password_cta", locale) in html
+    assert translate("signup.welcome.set_password_cta", "en") != translate(
+        "signup.welcome.set_password_cta", locale
+    )
+
+
+async def test_a_token_store_failure_still_returns_the_provisioned_workspace(
+    realdb, monkeypatch, cleanup_signup, caplog
+):
+    """The tenant exists and the verification is spent by then, so a Redis
+    failure must not 500 a visitor who cannot retry; they fall back to Forgot
+    password, which works for this account like any other."""
+    monkeypatch.setattr(
+        password_reset, "issue_reset_token", AsyncMock(side_effect=ConnectionError("redis down"))
+    )
+    body, msg, _ = await _complete_capturing(realdb, monkeypatch, cleanup_signup)
+    assert body["status"] == "provisioned"
+    assert body["set_password_url"] is None
+    assert "Forgot password" in msg.body_text
+
+
+async def test_the_set_password_token_never_reaches_a_log_line(
+    realdb, monkeypatch, cleanup_signup, caplog
+):
+    """Our own log lines carry the slug at most — including when the welcome
+    email fails and the handler logs loudly about it."""
+    import logging
+
+    from app.api import signup as signup_mod
+
+    class _Failing:
+        async def send(self, message) -> None:
+            raise RuntimeError("smtp down")
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    token = await _seed_verification(realdb, slug=slug, email=email)
+    monkeypatch.setattr(signup_mod, "provision_tenant", _provision_mock(uuid.uuid4()))
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: _Failing())
+
+    with caplog.at_level(logging.DEBUG):
+        async with realdb.client(key="a", role=None) as c:
+            resp = await c.post("/api/signup/complete", json={"token": token})
+    assert resp.status_code == 200
+    reset_token = _token_of(resp.json()["set_password_url"])
+    assert "Welcome email failed" in caplog.text
+    assert reset_token not in caplog.text
+    assert "reset-password" not in caplog.text
+
+
+async def test_the_set_password_link_sets_the_password_once_and_survives_link_scanners(
+    realdb, monkeypatch, cleanup_signup, session_redis
+):
+    """End to end against the real reset endpoints with a real control-plane
+    user: the account starts with no password (login refused), the link's page
+    data can be fetched any number of times — a corporate mail scanner opening
+    the link, or the page re-rendering — without spending the token, then the
+    one submit sets the password and the token is dead."""
+    user_id = uuid.uuid4()
+    org_id = realdb.info("a").org_id
+    login_email = f"setpw-{uuid.uuid4().hex[:10]}@example.com"
+
+    async def _fake_provision(**kwargs):
+        mk = realdb.control_sessionmaker()
+        async with mk() as s:
+            s.add(
+                User(
+                    id=user_id,
+                    email=login_email,
+                    full_name=kwargs["admin_name"],
+                    hashed_password=None,
+                    is_active=True,
+                    organization_id=org_id,
+                    must_change_password=kwargs["must_change_password"],
+                )
+            )
+            await s.commit()
+        return ProvisioningResult(organization_id=org_id, user_id=user_id, db_name="unused")
+
+    try:
+        body, _, _ = await _complete_capturing(
+            realdb, monkeypatch, cleanup_signup, provision=AsyncMock(side_effect=_fake_provision)
+        )
+        token = _token_of(body["set_password_url"])
+        chosen = "MyOwnChoice!2026"
+
+        async with realdb.client(key="a", role=None) as c:
+            # No password exists yet, so nothing can sign in to the account.
+            refused = await c.post(
+                "/api/auth/login", json={"email": login_email, "password": chosen}
+            )
+            assert refused.status_code == 401
+
+            # A scanner's GETs of the page itself never reach the API; the
+            # page's own read is a non-consuming check, safe to repeat.
+            for _ in range(3):
+                check = await c.post("/api/auth/reset-password/check", json={"token": token})
+                assert check.status_code == 200, check.text
+                assert check.json() == {"email": login_email}
+
+            first = await c.post(
+                "/api/auth/reset-password", json={"token": token, "new_password": chosen}
+            )
+            assert first.status_code == 200, first.text
+
+            # Single use: the token is gone for redemption and for the check.
+            again = await c.post(
+                "/api/auth/reset-password",
+                json={"token": token, "new_password": "SecondTry!2026x"},
+            )
+            assert again.status_code == 400
+            gone = await c.post("/api/auth/reset-password/check", json={"token": token})
+            assert gone.status_code == 400
+            assert gone.json()["detail"] == "Invalid or expired reset link."
+
+            ok = await c.post("/api/auth/login", json={"email": login_email, "password": chosen})
+            assert ok.status_code == 200, ok.text
+            assert ok.json()["must_change_password"] is False
+    finally:
+        mk = realdb.control_sessionmaker()
+        async with mk() as s:
+            await s.execute(delete(User).where(User.id == user_id))
+            await s.commit()
+
+
+async def test_forgot_password_works_for_a_signup_admin_who_never_set_one(
+    realdb, monkeypatch, cleanup_signup, session_redis
+):
+    """The expired-link way out the email names: Forgot password issues a fresh
+    reset link for the passwordless account, and redeeming it sets a password."""
+    from app.services.email_adapters.console_adapter import ConsoleAdapter
+
+    user_id = uuid.uuid4()
+    login_email = f"setpw-{uuid.uuid4().hex[:10]}@example.com"
+    mk = realdb.control_sessionmaker()
+    async with mk() as s:
+        s.add(
+            User(
+                id=user_id,
+                email=login_email,
+                full_name="Signup Admin",
+                hashed_password=None,
+                is_active=True,
+                organization_id=realdb.info("a").org_id,
+                must_change_password=False,
+            )
+        )
+        await s.commit()
+
+    sent: list = []
+
+    async def _fake_send(self, message):  # noqa: ANN001
+        sent.append(message)
+
+    monkeypatch.setattr(ConsoleAdapter, "send", _fake_send, raising=True)
+    try:
+        async with realdb.client(key="a", role=None) as c:
+            resp = await c.post("/api/auth/forgot-password", json={"email": login_email})
+            assert resp.status_code == 200
+            # The send runs on a detached task; let it finish.
+            import asyncio
+
+            for _ in range(50):
+                if sent:
+                    break
+                await asyncio.sleep(0)
+            (msg,) = sent
+            token = msg.body_text.split("token=")[1].split()[0]
+            reset = await c.post(
+                "/api/auth/reset-password", json={"token": token, "new_password": "Recovered!2026"}
+            )
+            assert reset.status_code == 200, reset.text
+            ok = await c.post(
+                "/api/auth/login", json={"email": login_email, "password": "Recovered!2026"}
+            )
+            assert ok.status_code == 200, ok.text
+    finally:
+        async with mk() as s:
+            await s.execute(delete(User).where(User.id == user_id))
+            await s.commit()
+
+
+async def test_an_expired_set_password_token_is_refused_by_check_and_reset(realdb):
+    """Expiry as the token's consumer sees it: the Redis mapping is gone. The
+    in-memory fake keeps no clock, so the eviction is done by hand on the
+    store `password_reset` actually reads."""
+    token = await password_reset.issue_reset_token(uuid.uuid4(), ttl_seconds=3600)
+    r = await password_reset.get_redis()
+    await r.delete(password_reset._reset_key(token))
+    async with realdb.client(key="a", role=None) as c:
+        check = await c.post("/api/auth/reset-password/check", json={"token": token})
+        reset = await c.post(
+            "/api/auth/reset-password", json={"token": token, "new_password": "TooLate!2026xx"}
+        )
+    assert check.status_code == 400
+    assert reset.status_code == 400
+
+
+async def test_issue_reset_token_stores_the_requested_lifetime(monkeypatch):
+    stored: dict[str, int] = {}
+
+    class _Recorder:
+        async def setex(self, key, ttl, value):
+            stored[key] = ttl
+
+    async def _get():
+        return _Recorder()
+
+    monkeypatch.setattr(password_reset, "get_redis", _get)
+    signup_token = await password_reset.issue_reset_token(uuid.uuid4(), ttl_seconds=72 * 3600)
+    reset_token = await password_reset.issue_reset_token(uuid.uuid4())
+    from app.config import settings as cfg
+
+    assert stored[password_reset._reset_key(signup_token)] == 72 * 3600
+    assert stored[password_reset._reset_key(reset_token)] == cfg.password_reset_ttl_minutes * 60
+    with pytest.raises(ValueError):
+        await password_reset.issue_reset_token(uuid.uuid4(), ttl_seconds=0)
+
+
+def test_the_signup_ttl_setting_refuses_a_non_positive_value():
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(signup_set_password_ttl_hours=0)
 
 
 async def test_signup_complete_unknown_token_returns_uniform_410(realdb):

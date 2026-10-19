@@ -34,9 +34,10 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +51,8 @@ from app.schemas.signup import (
     SignupStartResponse,
     SlugCheckResponse,
 )
+from app.services import password_reset
+from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.branding import get_brand_context
 from app.services.email_adapters import (
     EmailMessage,
@@ -68,9 +71,8 @@ from app.services.rate_limit import check_rate_limit, resolve_client_ip
 from app.services.tenant_provisioning import provision_tenant
 from app.utils.emails import looks_like_email
 from app.utils.hcaptcha import CaptchaError, verify_captcha
-from app.utils.passwords import generate_temp_password
 from app.utils.slug import SlugError, ensure_slug_available, validate_slug_format
-from app.utils.tenant_urls import tenant_base_url
+from app.utils.tenant_urls import password_reset_url, sign_in_url, tenant_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +296,7 @@ async def signup_start(
 async def signup_complete(
     body: SignupCompleteRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_control_db),
 ):
     await check_rate_limit(
@@ -331,17 +334,34 @@ async def signup_complete(
     except SlugError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    # 3. Provision the tenant.
-    temp_password = generate_temp_password()
+    # 2b. Refuse BEFORE provisioning when there is nowhere to send the admin.
+    #     The admin will have no password, and both the set-password link and
+    #     forgot-password need a tenant base URL to build a link; without one
+    #     the workspace would exist with no way into it. 503 leaves the
+    #     verification unconsumed, so the visitor can retry once it is fixed.
+    if not tenant_base_url(verification.slug):
+        logger.error(
+            "Signup refused: no tenant base URL configured (slug=%s); the admin "
+            "would have no way to set a password",
+            verification.slug,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Workspace creation is temporarily unavailable. Please try again later.",
+        )
+
+    # 3. Provision the tenant. The admin gets NO password: they choose their
+    #    own through the set-password link minted below (decisions §282), so
+    #    there is no credential to email and nothing to force-change.
     try:
-        await provision_tenant(
+        provisioned = await provision_tenant(
             company_name=verification.company_name,
             slug=verification.slug,
             admin_email=verification.email,
             admin_name=verification.admin_name,
-            admin_password=temp_password,
+            admin_password=None,
             plan="free",
-            must_change_password=True,
+            must_change_password=False,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Provisioning failed for slug=%s", verification.slug)
@@ -356,59 +376,37 @@ async def signup_complete(
     verification.consumed_at = datetime.now(UTC)
     await db.flush()
 
-    # 5. Send the welcome email with the tenant URL and credentials. Reuse the
-    #    locale captured at signup-start (stashed in `meta`) so the welcome lands
-    #    in the same language as the verification email. The URL / credentials
-    #    are locale-independent — only the surrounding copy changes.
+    # 5. The set-password link: one single-use reset token, the same one the
+    #    forgot-password flow mints, redeemed by the same page and endpoint.
+    #    One token serves both the browser that just proved it can read this
+    #    mailbox (the /verify response) and the welcome email to that mailbox,
+    #    so whichever is used first kills the other.
+    set_password_url = await _mint_set_password_url(verification.slug, provisioned.user_id)
+    if set_password_url is not None:
+        # The forgot-password request is audited; so is this issuance, PII-free
+        # (never the link or token). Fail-soft, like every auth audit row.
+        await dispatch_auth_audit(
+            organization_id=provisioned.organization_id,
+            actor_id=None,
+            action="auth.password_reset.requested",
+            entity_id=provisioned.user_id,
+            details={"via": "signup", "ip": resolve_client_ip(request) or ""},
+        )
+    # The response carries a live credential: never let a cache keep it.
+    response.headers["Cache-Control"] = "no-store"
+
+    # 6. Send the welcome email. Reuse the locale captured at signup-start
+    #    (stashed in `meta`) so the welcome lands in the same language as the
+    #    verification email. URLs are locale-independent — only copy changes.
     tenant_url = _tenant_url(verification.slug)
     locale = normalize_locale((verification.meta or {}).get("locale"))
-    greeting = translate("signup.welcome.greeting", locale, name=verification.admin_name)
-    url_label = translate("signup.welcome.url_label", locale)
-    email_label = translate("signup.welcome.email_label", locale)
-    pw_label = translate("signup.welcome.password_label", locale)
-    welcome_body = "\n".join(
-        [
-            greeting,
-            "",
-            translate("signup.welcome.body", locale),
-            "",
-            # Omit the line entirely rather than render an empty label when no
-            # tenant base URL is configured — same posture as the admin invite
-            # and the supplier-portal invite.
-            *([f"  {url_label}:      {tenant_url}"] if tenant_url else []),
-            f"  {email_label}:    {verification.email}",
-            f"  {pw_label}: {temp_password}",
-            "",
-            translate("signup.welcome.change_note", locale),
-            translate("signup.welcome.keep_note", locale),
-            "",
-            translate("signup.welcome.signoff", locale),
-            "",
-        ]
-    )
-    live = translate("signup.welcome.body", locale)
-    credentials = [
-        *([(url_label, tenant_url)] if tenant_url else []),
-        (email_label, verification.email),
-        (pw_label, temp_password),
-    ]
-    welcome_html = (
-        email_paragraph(greeting)
-        + email_paragraph(live)
-        + (
-            email_button(
-                tenant_url, translate("signup.welcome.cta", locale), get_brand_context(None)
-            )
-            if tenant_url
-            else ""
-        )
-        # Only the workspace URL is a link; the email and password are inert text.
-        + email_credentials(credentials, links=(tenant_url,) if tenant_url else ())
-        + email_note(
-            f"{translate('signup.welcome.change_note', locale)} "
-            f"{translate('signup.welcome.keep_note', locale)}"
-        )
-        + email_paragraph(translate("signup.welcome.signoff", locale))
+    body_text, body_html = _welcome_email(
+        locale=locale,
+        name=verification.admin_name,
+        email=verification.email,
+        tenant_url=tenant_url,
+        set_password_url=set_password_url,
+        sign_in=sign_in_url(verification.slug, email=verification.email),
     )
     email_adapter = get_email_adapter()
     try:
@@ -416,19 +414,21 @@ async def signup_complete(
             EmailMessage(
                 to=verification.email,
                 subject=translate("signup.welcome.subject", locale, slug=verification.slug),
-                body_text=welcome_body,
-                body_html=welcome_html,
+                body_text=body_text,
+                body_html=body_html,
                 locale=locale,
-                # Not derived: the derived preview would be the first sentence, and
-                # nothing about the credentials belongs in an inbox preview.
-                preheader=live,
+                # Fixed copy, never derived: the derived preview would reach the
+                # set-password link, which does not belong in an inbox preview.
+                preheader=translate("signup.welcome.body", locale),
             )
         )
     except Exception:  # noqa: BLE001
-        # Provisioning succeeded — we still return success to the caller, but
-        # log loudly so ops can resend manually if needed.
+        # Provisioning succeeded — we still return success to the caller, who
+        # holds the same set-password link in the response. Log loudly (the
+        # slug only, never the link) so ops can follow up.
         logger.exception(
-            "Welcome email failed for slug=%s. Tenant provisioned; manual resend required.",
+            "Welcome email failed for slug=%s. Tenant provisioned; the /verify page "
+            "still carries the set-password link.",
             verification.slug,
         )
 
@@ -436,4 +436,86 @@ async def signup_complete(
         slug=verification.slug,
         tenant_url=tenant_url,
         admin_email=verification.email,
+        set_password_url=set_password_url,
     )
+
+
+async def _mint_set_password_url(slug: str, user_id: uuid.UUID) -> str | None:
+    """The new admin's set-password link, or ``None`` when Redis refuses it.
+
+    The tenant base URL was already checked before provisioning, so the
+    builder has somewhere to point. A token-store failure must not fail the
+    request: the tenant exists and the verification is consumed, so a 500
+    here would strand a workspace the visitor cannot retry into. The admin
+    still has Forgot password, which works for this account like any other
+    (`/auth/forgot-password` needs only an active user and that same URL).
+    """
+    try:
+        token = await password_reset.issue_reset_token(
+            user_id, ttl_seconds=settings.signup_set_password_ttl_hours * 3600
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not mint the set-password token (slug=%s)", slug)
+        return None
+    return password_reset_url(slug, None, token, set_password=True)
+
+
+def _welcome_email(
+    *,
+    locale: str,
+    name: str,
+    email: str,
+    tenant_url: str,
+    set_password_url: str | None,
+    sign_in: str | None,
+) -> tuple[str, str]:
+    """The welcome email's plaintext and HTML parts — the same content in both.
+
+    No password anywhere: the admin has none until they choose one. Only URLs
+    built here are links (decisions §280) — the button and its paste-this
+    fallback (the set-password link), and the sign-in link. The panel's values
+    are plain text, the workspace URL included, so the panel never offers a
+    second, competing call to action.
+    """
+    greeting = translate("signup.welcome.greeting", locale, name=name)
+    live = translate("signup.welcome.body", locale)
+    url_label = translate("signup.welcome.url_label", locale)
+    email_label = translate("signup.welcome.email_label", locale)
+    signoff = translate("signup.welcome.signoff", locale)
+    if set_password_url:
+        lead = translate("signup.welcome.set_password_lead", locale)
+        expiry = translate(
+            "signup.welcome.set_password_expiry",
+            locale,
+            hours=settings.signup_set_password_ttl_hours,
+        )
+    else:
+        lead = translate("signup.welcome.no_link", locale)
+        expiry = ""
+    sign_in_intro = translate("signup.welcome.sign_in_intro", locale)
+    # Omit a row entirely rather than render an empty label when no tenant base
+    # URL is configured — same posture as the admin and supplier-portal invites.
+    panel = [*([(url_label, tenant_url)] if tenant_url else []), (email_label, email)]
+
+    text_lines = [greeting, "", live, lead, ""]
+    if set_password_url:
+        text_lines += [f"  {set_password_url}", "", expiry, ""]
+    text_lines += [f"  {label}: {value}" for label, value in panel]
+    if sign_in:
+        text_lines += ["", sign_in_intro, f"  {sign_in}"]
+    text_lines += ["", signoff, ""]
+
+    brand = get_brand_context(None)
+    html = email_paragraph(greeting) + email_paragraph(f"{live} {lead}")
+    if set_password_url:
+        html += email_button(
+            set_password_url, translate("signup.welcome.set_password_cta", locale), brand
+        ) + email_note(expiry)
+    html += email_credentials(panel, mono=False)
+    if set_password_url:
+        fallback = translate("email.layout.fallback_link", locale)
+        html += email_fallback_link(fallback, set_password_url)
+    if sign_in:
+        html += email_fallback_link(sign_in_intro, sign_in)
+    html += email_paragraph(signoff)
+    return "\n".join(text_lines), html

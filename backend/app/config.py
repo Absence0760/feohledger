@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 # Environment names that are NOT a deployed/production environment. In these,
@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     # email and click through, short enough that a lingering inbox message
     # months later is inert.
     password_reset_ttl_minutes: int = 30
+    # Lifetime of the set-password link a self-service signup admin is sent
+    # instead of a temporary password (`api/signup.py`, `docs/decisions.md`
+    # §282). Same token as the reset link above, longer life: the reset link is
+    # minted for someone at the keyboard who asked for it, while this one is
+    # minted the moment a workspace exists and must survive a closed tab and a
+    # weekend. Seventy-two hours covers Friday evening to Monday morning, is
+    # three times the verification link that precedes it, and is still a
+    # single-use link that dies on first use — where the temporary password it
+    # replaces stayed valid in the inbox until someone signed in.
+    signup_set_password_ttl_hours: int = Field(default=72, ge=1)
 
     # S3 / MinIO
     s3_endpoint_url: str = "http://localhost:9000"

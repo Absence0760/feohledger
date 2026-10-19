@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 from app.config import settings
 from app.schemas.organization import looks_like_http_url
@@ -92,6 +92,52 @@ def tenant_base_url(slug: str | None, org_settings: Mapping[str, Any] | None = N
             return ""
         template = template.replace(_SLUG_PLACEHOLDER, slug)
     return template.rstrip("/")
+
+
+def password_reset_url(
+    slug: str | None,
+    org_settings: Mapping[str, Any] | None,
+    token: str,
+    *,
+    set_password: bool = False,
+) -> str | None:
+    """The tenant-hosted reset page for ``token``, or ``None`` with no base URL.
+
+    One builder for both links that redeem a reset token: the forgot-password
+    email and signup's set-password link (``docs/decisions.md`` §282).
+    ``set_password`` adds ``mode=set``, which changes only the page's copy
+    ("Set your password" rather than "Set a new password") — the token, the
+    endpoint and the single-use redemption are identical.
+
+    ``None`` rather than a relative path: an operator who has blanked
+    ``FEOH_TENANT_URL_TEMPLATE`` and set no per-org override has left us
+    nowhere to point, and ``/login/reset-password?token=…`` in an email body is
+    a dead link that also leaks a live single-use credential to no purpose.
+
+    Nested under ``/login/`` because the root layout redirects an
+    unauthenticated visitor off any top-level path not starting with ``/login``.
+    """
+    base = tenant_base_url(slug, org_settings)
+    if not base:
+        return None
+    url = f"{base}/login/reset-password?token={quote(token)}"
+    return f"{url}&mode=set" if set_password else url
+
+
+def sign_in_url(
+    slug: str | None, org_settings: Mapping[str, Any] | None = None, *, email: str | None = None
+) -> str | None:
+    """The tenant's sign-in page, with ``email`` prefilled when given.
+
+    The login page reads ``?email=`` into its email field and nothing else
+    (``frontend/src/lib/utils/prefillEmail.ts``). An address in a link we email
+    to that same address tells its reader nothing they did not know.
+    """
+    base = tenant_base_url(slug, org_settings)
+    if not base:
+        return None
+    query = f"?{urlencode({'email': email})}" if email else ""
+    return f"{base}/login{query}"
 
 
 def platform_domain() -> str | None:

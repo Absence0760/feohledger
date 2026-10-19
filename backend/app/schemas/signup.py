@@ -28,6 +28,13 @@ class SignupCompleteResponse(BaseModel):
     slug: str
     tenant_url: str
     admin_email: str
+    # The new admin's single-use set-password link (the same one the welcome
+    # email carries). Returned to the browser that just proved it can read the
+    # admin's mailbox by opening the verification link — the email goes to
+    # that same inbox, so this discloses nothing the email does not
+    # (decisions §282). None when the token
+    # could not be stored; the admin then uses Forgot password.
+    set_password_url: str | None = None
 
 
 class SlugCheckResponse(BaseModel):

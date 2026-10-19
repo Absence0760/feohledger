@@ -304,15 +304,18 @@ async def provision_tenant(
     slug: str,
     admin_email: str,
     admin_name: str,
-    admin_password: str,
+    admin_password: str | None,
     plan: str = "free",
     must_change_password: bool = True,
 ) -> ProvisioningResult:
     """End-to-end: DB + org + admin user + tenant tables.
 
-    On success, the admin can log in immediately at the tenant subdomain
-    and will be forced to change their password on first login (unless
-    must_change_password is disabled for internal tenants).
+    With an ``admin_password`` the admin can log in immediately at the tenant
+    subdomain and, with ``must_change_password`` (the default), is forced to
+    change it on first login — the partner and CLI provisioning paths. With
+    ``None`` the admin has no password at all until they redeem a set-password
+    link; self-service signup does that, and passes
+    ``must_change_password=False`` since the password is their own choice.
 
     Raises ``SlugError`` before any database work when ``slug`` fails
     ``utils.slug.validate_slug_format``. The API callers validate first to
@@ -362,7 +365,7 @@ async def _provision_into(
     slug: str,
     admin_email: str,
     admin_name: str,
-    admin_password: str,
+    admin_password: str | None,
     plan: str,
     must_change_password: bool,
 ) -> ProvisioningResult:
@@ -379,7 +382,12 @@ async def _provision_into(
             # Normalized like every other `users.email` write (`utils/emails`).
             email=normalize_email(admin_email),
             full_name=admin_name,
-            hashed_password=await hash_password(admin_password),
+            # None = no password yet: the self-service signup admin chooses their
+            # own through a set-password link (`api/signup.py`, decisions §282),
+            # and until then `/auth/login` refuses the account like an SSO-only one.
+            hashed_password=(
+                await hash_password(admin_password) if admin_password is not None else None
+            ),
             is_active=True,
             organization_id=org_id,
             must_change_password=must_change_password,

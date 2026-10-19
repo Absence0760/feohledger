@@ -647,6 +647,34 @@ async def test_provision_tenant_respects_must_change_password_false(
         await _cleanup_org(slug)
 
 
+async def test_provision_tenant_without_a_password_leaves_the_admin_passwordless(
+    realdb, throwaway_slug, _provision_on_test_loop
+):
+    """Self-service signup's shape (decisions §282): no hash is stored, so no
+    password signs in until the admin redeems their set-password link."""
+    slug = throwaway_slug
+    try:
+        result = await provision_tenant(
+            company_name="Signup Co",
+            slug=slug,
+            admin_email=f"admin@{slug}.test",
+            admin_name="Signup Admin",
+            admin_password=None,
+            must_change_password=False,
+        )
+        engine, mk = await _control_mk()
+        try:
+            async with mk() as s:
+                user = (await s.execute(select(User).where(User.id == result.user_id))).scalar_one()
+                assert user.hashed_password is None
+                assert user.must_change_password is False
+                assert user.is_active is True
+        finally:
+            await engine.dispose()
+    finally:
+        await _cleanup_org(slug)
+
+
 async def test_provision_tenant_duplicate_slug_raises_and_keeps_one_org(
     realdb, throwaway_slug, _provision_on_test_loop
 ):
