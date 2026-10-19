@@ -949,3 +949,101 @@ async def test_a_not_active_vendor_outranks_the_card_rail_pin(realdb):
     assert row["blocked"] is True
     assert row["blocked_reason"] == "vendor_not_active"
     assert row["required_method"] is None
+
+
+# ── record_outside_refusal: a different question from `blocked` ────────────
+#
+# `blocked` answers "would a payment RUN refuse this row". Recording a payment
+# the customer already made outside FeohLedger is gated differently — notably
+# it does NOT gate the vendor's status (`services/external_payment` docstring:
+# the money has already left the customer's bank). The page used to hide the
+# record action on every `blocked` row, so an approved invoice from a new,
+# auto-created (unverified) vendor had no action at all (#566).
+
+
+def _record_body(invoice_id: uuid.UUID) -> dict:
+    from app.utils.dates import utc_today
+
+    return {
+        "invoice_id": str(invoice_id),
+        "method": "check",
+        "reference": f"CHK-{invoice_id.hex[:8]}",
+        "paid_on": utc_today().isoformat(),
+    }
+
+
+@pytest.mark.parametrize("vendor_status", ["unverified", "inactive", "rejected"])
+async def test_a_not_active_vendors_row_is_blocked_for_runs_but_recordable_outside(
+    realdb, vendor_status
+):
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    number = f"Q-REC-VND-{vendor_status}"
+    inv_id = await _seed_invoice(mk, org_id, number=number)
+    await _link_vendor(mk, org_id, inv_id, status=vendor_status)
+
+    row = (await _queue(realdb, mk))[number]
+    assert row["blocked"] is True
+    assert row["blocked_reason"] == "vendor_not_active"
+    assert row["record_outside_refusal"] is None
+
+    # And the endpoint agrees: the action the queue offers is one that works.
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/payments/record-outside", json=_record_body(inv_id))
+    assert resp.status_code == 201, resp.text
+
+
+async def test_a_blocking_exception_row_is_neither_runnable_nor_recordable(realdb):
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    inv_id = await _seed_invoice(mk, org_id, number="Q-REC-DUP")
+    await _add_exception(mk, org_id, inv_id, exception_type="duplicate")
+
+    row = (await _queue(realdb, mk))["Q-REC-DUP"]
+    assert row["blocked"] is True
+    assert row["record_outside_refusal"] == "external_payment_blocking_exception"
+
+
+async def test_the_queues_record_outside_verdict_matches_the_endpoints_own(realdb):
+    """One row per gate, then every row is actually POSTed: the queue's field
+    must be exactly the code `record-outside` refuses with (or `None` exactly
+    when it records), so a page gating on it can neither hide a working action
+    nor offer one that can only 409. Compared directly rather than trusted."""
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+
+    clean = await _seed_invoice(mk, org_id, number="Q-RV-CLEAN")
+    flagged = await _seed_invoice(mk, org_id, number="Q-RV-FLAGGED")
+    await _add_exception(mk, org_id, flagged, exception_type="fraud_flag")
+    credited = await _seed_invoice(mk, org_id, number="Q-RV-CREDITED", amount="500.00")
+    await _apply_credit(mk, org_id, credited, amount="500.00")
+    part = await _seed_invoice(mk, org_id, number="Q-RV-PART", amount="500.00")
+    await _apply_credit(mk, org_id, part, amount="100.00")
+    carded = await _seed_invoice(mk, org_id, number="Q-RV-CARD")
+    await _mint_card(mk, org_id, carded)
+    moved = await _seed_invoice(mk, org_id, number="Q-RV-MOVED")
+    await _apply_credit(mk, org_id, moved, amount="100.00")
+    await _set_currency(mk, moved, "EUR")
+    unverified = await _seed_invoice(mk, org_id, number="Q-RV-UNVERIFIED")
+    await _link_vendor(mk, org_id, unverified, status="unverified")
+
+    expected = {
+        clean: None,
+        flagged: "external_payment_blocking_exception",
+        credited: "external_payment_nothing_to_pay",
+        part: None,
+        carded: "external_payment_card_live",
+        moved: "external_payment_credit_conflict",
+        unverified: None,
+    }
+    rows = {item["id"]: item for item in (await _queue_result(realdb, mk))["items"]}
+    assert {i: rows[str(i)]["record_outside_refusal"] for i in expected} == expected
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        for inv_id, code in expected.items():
+            resp = await c.post("/api/payments/record-outside", json=_record_body(inv_id))
+            if code is None:
+                assert resp.status_code == 201, (inv_id, resp.text)
+            else:
+                assert resp.status_code == 409, (inv_id, resp.text)
+                assert resp.json()["detail"]["code"] == code

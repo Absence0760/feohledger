@@ -76,6 +76,7 @@ from app.services.external_payment import (
     ExternalPaymentRefused,
     paid_on_timestamp,
     record_invoice_paid_outside,
+    record_outside_refusals,
     record_run_payment_paid_outside,
     run_payment_refusal,
 )
@@ -845,6 +846,9 @@ async def payment_queue(
       virtual card already claims the invoice, and `virtual_card` converges onto
       that card rather than opening a second outflow). Not blocked: the row is
       still selectable, pinned to that rail.
+    * `record_outside_refusal` — the code `POST /api/payments/record-outside`
+      would refuse this row with (`external_payment_*`), or `None`. Independent
+      of `blocked`: a run refuses an unverified vendor, recording does not.
 
     The money totals (`total_amount` / `total_savings` / `by_currency`) and the
     `total` / `selectable_total` / `blocked_total` counts describe the WHOLE
@@ -887,6 +891,13 @@ async def payment_queue(
     # omitting it is the fail-closed reading (every rail non-converging), which
     # is what surfaces the card claim as `required_method`.
     refusals = await run_refusal_reasons(db, [inv for inv, _ in rows])
+    # A DIFFERENT question from `refusals`: may this row be recorded as paid
+    # outside FeohLedger? Answered by the gates `record-outside` itself applies
+    # (`external_payment.record_outside_refusals`), because the two diverge —
+    # a run refuses a vendor that is not `active`, recording deliberately does
+    # not (the money has already left the customer's bank). Gating the action
+    # on `blocked` hid it from every invoice of a new, unverified vendor (#566).
+    record_refusals = await record_outside_refusals(db, [inv for inv, _ in rows])
     # What a run booked today would move per row — net of applied credits,
     # minus an ACCEPTED early-payment discount whose deadline today meets
     # (`payment_runs.payable_amounts`, the figure the builder books). Distinct
@@ -969,6 +980,15 @@ async def payment_queue(
                 "blocked": refusal is not None and refusal.only_method is None,
                 "blocked_reason": refusal.reason if refusal else None,
                 "required_method": refusal.only_method if refusal else None,
+                # The coded refusal `POST /api/payments/record-outside` would
+                # give this row whoever records it, or `None` when the action
+                # may be offered. Same vocabulary as that endpoint's own
+                # refusals (`external_payment_*`). Segregation of duties is
+                # NOT folded in: it depends on the recorder, and the server's
+                # 403 is what tells them a colleague must record it.
+                "record_outside_refusal": (
+                    record_refusals[inv.id].code if inv.id in record_refusals else None
+                ),
             }
         )
 

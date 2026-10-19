@@ -2,7 +2,9 @@ import type { Locator, Page } from '@playwright/test';
 import {
 	API_BASE,
 	authedTenantHeaders,
+	deleteVendorsWhere,
 	expect,
+	loadMoreUntilRow,
 	tenantPsql,
 	test
 } from '../fixtures/helpers';
@@ -17,6 +19,10 @@ import {
  *  - On a record-only tenant the run dialog offers no Execute at all, and a
  *    draft run is recorded as paid by the customer's bank instead. The NACHA
  *    bank-file refusal for an unconfigured tenant is stated in the dialog.
+ *  - The record action follows what record-outside accepts, not the run's
+ *    `blocked` flag: an invoice from a new, unverified vendor is blocked for a
+ *    run yet still recordable, while a blocking-exception row offers neither
+ *    (issue #566).
  *  - The NACHA bank-file lifecycle: the first export CLAIMS the run
  *    (`draft → exported`, no Execute, no Cancel), a second file must be asked
  *    for explicitly (armed Regenerate; the bare re-export 409s), "Bank
@@ -36,6 +42,7 @@ interface QueueItem {
 	invoice_number: string;
 	blocked?: boolean;
 	required_method?: string | null;
+	record_outside_refusal?: string | null;
 	accepted_discount_amount?: string | null;
 }
 
@@ -176,6 +183,96 @@ test.describe('/payments — paying outside FeohLedger', () => {
 			);
 		} finally {
 			resetInvoice(target.id, sourceStatus);
+		}
+	});
+
+	test('an unverified vendor\'s invoice is blocked for a run but still recordable (#566)', async ({
+		page
+	}) => {
+		await putPaymentsSettings(page, { ...(savedPayments ?? {}), require_run_segregation: false });
+		const tag = `REC566-${Date.now().toString(36)}`;
+		const vendorName = `${tag} New Supplier`;
+		// A brand-new supplier, exactly as invoice intake auto-creates one:
+		// `unverified`, so no payment RUN may pay it.
+		tenantPsql(
+			`INSERT INTO vendors (id, organization_id, name, status, source, accepts_virtual_cards, is_1099_eligible, kyc_status, screening_status, payments_blocked, risk_level, created_at, updated_at)
+			 SELECT gen_random_uuid(), (SELECT organization_id FROM vendors LIMIT 1), '${vendorName}', 'unverified', 'manual', false, false, 'not_required', 'unscreened', false, 'unknown', now(), now()`
+		);
+		const vendorId = tenantPsql(`SELECT id FROM vendors WHERE name='${vendorName}'`).trim();
+		const h = await headers(page);
+
+		async function approvedInvoice(number: string): Promise<string> {
+			const resp = await page.request.post(`${API_BASE}/api/invoices`, {
+				headers: h,
+				data: { vendor: vendorName, invoice_number: number, amount: 180.0, currency: 'USD' }
+			});
+			expect(resp.status(), await resp.text()).toBe(201);
+			const id = ((await resp.json()) as { id: string }).id;
+			// POST ignores a client-supplied status by design.
+			tenantPsql(
+				`UPDATE invoices SET status='approved', vendor_id='${vendorId}' WHERE id='${id}'`
+			);
+			return id;
+		}
+
+		try {
+			const recordableId = await approvedInvoice(`${tag}-OK`);
+			const flaggedId = await approvedInvoice(`${tag}-DUP`);
+			tenantPsql(
+				`INSERT INTO exceptions (id, invoice_id, organization_id, exception_type, severity, description, status)
+				 SELECT gen_random_uuid(), i.id, i.organization_id, 'duplicate', 'error', 'e2e #566', 'open'
+				 FROM invoices i WHERE i.id='${flaggedId}'`
+			);
+
+			// The live payload states both verdicts per row, independently.
+			const rows = new Map((await getQueue(page)).map((q) => [q.id, q]));
+			expect(rows.get(recordableId)).toMatchObject({
+				blocked: true,
+				blocked_reason: 'vendor_not_active',
+				record_outside_refusal: null
+			});
+			expect(rows.get(flaggedId)).toMatchObject({
+				blocked: true,
+				record_outside_refusal: 'external_payment_blocking_exception'
+			});
+
+			await page.goto('/payments');
+			const okRow = page.locator('table tbody tr', { hasText: `${tag}-OK` });
+			const dupRow = page.locator('table tbody tr', { hasText: `${tag}-DUP` });
+			await loadMoreUntilRow(page, okRow);
+			await loadMoreUntilRow(page, dupRow);
+			await expect(okRow).toBeVisible();
+			await expect(dupRow).toBeVisible();
+			// Positive signal first: the row the server accepts offers the action...
+			const recordOk = okRow.getByRole('button', {
+				name: `Record as paid — invoice ${tag}-OK`
+			});
+			await expect(recordOk).toBeVisible();
+			// ...and the one it would refuse whoever recorded it offers none.
+			await expect(
+				dupRow.getByRole('button', { name: `Record as paid — invoice ${tag}-DUP` })
+			).toHaveCount(0);
+
+			await recordOk.click();
+			const dialog = page.getByRole('dialog', {
+				name: 'Record a payment made outside FeohLedger'
+			});
+			await expect(dialog).toBeVisible();
+			await dialog.getByTestId('record-method').selectOption('check');
+			await dialog.getByTestId('record-reference').fill(`CHK-${tag}`);
+			const recorded = page.waitForResponse(
+				(r) =>
+					new URL(r.url()).pathname === '/api/payments/record-outside' &&
+					r.request().method() === 'POST'
+			);
+			await dialog.getByTestId('record-confirm').click();
+			expect((await recorded).status()).toBe(201);
+			await expect(dialog).toBeHidden();
+			await expect(okRow).toHaveCount(0);
+			expect(await getInvoiceStatus(page, recordableId)).toBe('paid');
+		} finally {
+			// Takes the invoices, their payments and exceptions with the vendor.
+			deleteVendorsWhere(`name='${vendorName}'`);
 		}
 	});
 
