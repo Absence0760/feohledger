@@ -5,13 +5,15 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Seven entries are open**: the paid-plan features no route enforces and the
-direct ERP adapters posting bills without the ERP's vendor and account ids (both
-found scoping QuickBooks, 2026-10-07, at the top),
+**Six entries are open**: the remove-tenant backup deletion the VM's IAM role
+refuses (found 2026-10-18, at the top),
 the expense-report Attach dead end found while
 writing the help centre, the `all`-mode approval-chain segregation deadlock,
 the legal-contents smooth-scroll race and the e2e cleanup race directly below,
-and the `payments/` local-e2e flake near the bottom. The assistant
+and the `payments/` local-e2e flake near the bottom. The paid-plan features no
+route enforced and the direct ERP adapters posting bills without the ERP's
+vendor and account ids were struck on 2026-10-07 and 2026-10-08, but this line
+went on counting them as open — it said "seven" over five. The assistant
 payment-forecast role gap, found in the same help-centre pass, was struck on
 2026-10-06. The `queue-blocked` entry
 beside it was struck on 2026-10-04. Its defect, a spec helper that counted
@@ -23,9 +25,10 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Seventeen of the twenty-four `##`
+refuses to start against a stale database. Nineteen of the twenty-five `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
-fifteen" while the file held fifteen struck in total, the two above included.)
+fifteen" while the file held fifteen struck in total, the two above included,
+and later "seventeen of the twenty-four" while nineteen were struck.)
 They are kept because the *diagnosis* is the
 expensive part and is worth not re-deriving. Add a new entry at the top when a
 defect is diagnosed but can't be fixed in the same session.
@@ -47,6 +50,58 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## `remove-tenant.sh` cannot delete a tenant's backup versions under the VM's IAM role
+
+**Found 2026-10-18** (#566), reading `deploy/remove-tenant.sh` against
+`infra/compute.tf`. Not yet hit: no tenant has been terminated in production.
+
+**Root cause.** `deploy/remove-tenant.sh` runs on the VM (it needs
+`deploy/.env` and `docker compose exec` into the api container), and its AWS
+calls carry no profile, so they use the instance profile's role. Its backup leg
+lists every version and delete marker of `pg/*/feoh_<slug>.dump`
+(`aws s3api list-object-versions`, `list_backup_versions`) and deletes each one
+by id (`aws s3api delete-object --version-id`, step 4). Those need
+`s3:ListBucketVersions` on the backups bucket and `s3:DeleteObjectVersion` on
+its objects. The VM role (`aws_iam_role_policy.app`, built from
+`data.aws_iam_policy_document.app_permissions`) grants neither: Sid `Backups`
+allows only `s3:GetObject` / `s3:PutObject` / `s3:AbortMultipartUpload`, and
+Sid `ListDataBuckets` only `s3:ListBucket`, which does not cover listing
+versions. The bucket is versioned (`aws_s3_bucket_versioning.backups`), so
+there are versions to remove.
+
+**Evidence.** By reading the code, not by a run: the policy statements above,
+and the two `aws s3api` calls in the script. The omission is deliberate in
+spirit — the `Backups` statement's comment says neither backup script deletes,
+because the lifecycle rule expires old dumps — and `remove-tenant.sh` was added
+later without revisiting it.
+
+**Blast radius.** On the Terraform-built VM the script fails closed, and
+early: the listing runs once in the inventory step, before the confirmation
+prompt, so AccessDenied stops the run (`set -e` on the failed command
+substitution) before the Caddy host, documents, tenant database or
+control-plane rows are touched, and `--dry-run` fails the same way. Nothing is
+wrongly reported — the script refuses to read a failed listing as "nothing to
+delete" — but no part of the termination `/legal/dpa` § 13 promises within 60
+days (`docs/backup-disaster-recovery.md` § What's not in scope here) can be
+completed with the script as written. Run by hand step by step instead, the
+backup dumps would only age out under `expire-old-backups` at 90 days, past the
+promised 60.
+
+**Recommended fix.** (1) Run the backup-deletion leg with the operator's own
+SSO credentials from the workstation, keeping the VM unable to destroy backups:
+split it out of `remove-tenant.sh` into its own script (or have it take an AWS
+profile and run that leg off-VM), with the same `/`-anchored listing and the
+same re-list verification before the confirmation prints. A compromised VM then
+still cannot wipe the backup history, which is the property the `Backups`
+statement and the append-only audit bucket are built around. (2) The simpler
+alternative is to grant the VM role `s3:ListBucketVersions` on the backups
+bucket and `s3:DeleteObjectVersion` on `${backups}/pg/*`; it works as the
+script stands, but it lets a compromised VM delete every backup, so it trades
+the recovery guarantee for convenience. Recommend (1). Either way, update
+`deploy/README.md`, `docs/backup-disaster-recovery.md` and the runbook in the
+same change. Trigger: before the first tenant termination in production — not
+blocking the first deploy.
 
 ## ~~Six of the seven plan features are sold but not enforced~~ — FIXED 2026-10-07
 
