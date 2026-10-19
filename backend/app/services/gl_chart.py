@@ -46,6 +46,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gl_account import GLAccount
+from app.services.erp_link_realm import link_is_live
 
 
 @dataclass(frozen=True)
@@ -351,6 +352,9 @@ async def resolve_erp_account_ids(
     organization_id: uuid.UUID,
     entity_id: uuid.UUID | None,
     codes: Iterable[str | None],
+    *,
+    realm: str | None = None,
+    trust_legacy: bool = False,
 ) -> dict[str, str]:
     """Map each of ``codes`` to its account's ERP id (``erp_account_id``) in
     the invoice's own chart — shared ∪ ``entity_id``'s own. One query.
@@ -366,6 +370,14 @@ async def resolve_erp_account_ids(
     A code that resolves to no account, or to one with no ``erp_account_id``
     (never synced from the ERP), is ABSENT from the result. The ERP push
     refuses such a line rather than guess.
+
+    So is one whose link belongs to another ERP company: ``realm`` is the
+    connection being posted to, and a link stamped with any other realm — or
+    a pre-0115 NULL one unless ``trust_legacy`` — does not resolve
+    (``services/erp_link_realm``, docs/decisions.md §284). An id only means
+    something in the company that issued it. ``realm`` None filters nothing.
+    The row still decides precedence: an entity's own row whose link is dead
+    does not fall back to the shared account.
     """
     wanted = sorted({c for c in codes if c})
     if not wanted:
@@ -377,7 +389,12 @@ async def resolve_erp_account_ids(
     )
     rows = (
         await db.execute(
-            select(GLAccount.code, GLAccount.entity_id, GLAccount.erp_account_id).where(
+            select(
+                GLAccount.code,
+                GLAccount.entity_id,
+                GLAccount.erp_account_id,
+                GLAccount.erp_link_realm,
+            ).where(
                 GLAccount.organization_id == organization_id,
                 GLAccount.code.in_(wanted),
                 in_chart,
@@ -386,7 +403,9 @@ async def resolve_erp_account_ids(
     ).all()
     shared: dict[str, str | None] = {}
     own: dict[str, str | None] = {}
-    for code, owner, erp_id in rows:
+    for code, owner, erp_id, link_realm in rows:
+        if erp_id and not link_is_live(link_realm, realm, trust_legacy=trust_legacy):
+            erp_id = None
         (shared if owner is None else own)[code] = erp_id
     resolved: dict[str, str] = {}
     for code in wanted:

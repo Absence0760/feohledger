@@ -723,7 +723,10 @@ def test_list_vendors_pages_and_maps(token, no_override):
     qbo.request, seen = _query_router({"Vendor": [page1, page2]})
     vendors = _run_with(qbo, lambda: _adapter().list_vendors())
     assert len(vendors) == 1001
-    assert seen[1] == "select * from Vendor STARTPOSITION 1001 MAXRESULTS 1000"
+    # Inactive vendors too (§284): a plain select returns active ones only.
+    assert seen[1] == (
+        "select * from Vendor where Active IN (true, false) STARTPOSITION 1001 MAXRESULTS 1000"
+    )
     acme = vendors[-1]
     assert (acme.erp_vendor_id, acme.name, acme.email, acme.payment_terms) == (
         "2000",
@@ -821,7 +824,10 @@ def test_list_gl_accounts_names_by_path_and_records_the_legacy_name(token, no_ov
     assert by_id["1"].legacy_codes == ("Job Expenses",)
 
 
-def test_list_pos_resolves_a_line_account_by_id_not_by_its_name(token, no_override):
+def test_list_pos_reads_no_chart_and_never_takes_a_line_account_by_name(token, no_override):
+    """PO lines carry no GL account (nothing persists or reads one), so the PO
+    sync spends no chart read on it — and the AccountRef's name, which two
+    sub-accounts can share, is never taken as one."""
     po = {
         "Id": "130",
         "DocNumber": "PO-1",
@@ -835,14 +841,11 @@ def test_list_pos_resolves_a_line_account_by_id_not_by_its_name(token, no_overri
             }
         ],
     }
-    accounts = [
-        {"Id": "8", "Name": "Job Materials", "FullyQualifiedName": "Job Expenses:Job Materials"},
-        {"Id": "9", "Name": "Job Materials", "FullyQualifiedName": "Landscaping:Job Materials"},
-    ]
     qbo = _Qbo()
-    qbo.request, _ = _query_router({"PurchaseOrder": [[po]], "Account": [accounts]})
+    qbo.request, queries = _query_router({"PurchaseOrder": [[po]]})
     (got,) = _run_with(qbo, lambda: _adapter().list_pos())
-    assert got.line_items[0].gl_account == "Landscaping:Job Materials"
+    assert got.line_items[0].gl_account is None
+    assert all("from Account" not in q for q in queries)
 
 
 def test_vendor_acctnum_is_not_taken_as_our_vendor_code(token, no_override):

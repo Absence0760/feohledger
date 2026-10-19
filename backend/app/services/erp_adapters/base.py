@@ -420,6 +420,11 @@ class GLAccountPayload:
     erp_account_id: str | None = None
     parent_code: str | None = None
     legacy_codes: tuple[str, ...] = ()
+    #: False for an account the ERP has made inactive. An adapter EMITS such
+    #: accounts rather than dropping them: their ids are still the ERP's, so a
+    #: row linked to one is not "dead", and the sync marks the row inactive in
+    #: our chart (it never creates a row for one).
+    active: bool = True
 
 
 @dataclass
@@ -441,6 +446,14 @@ class VendorPayload:
     address: str | None = None
     tax_id: str | None = None
     payment_terms: str | None = None
+    #: False for a vendor the ERP has made inactive — emitted, not dropped, for
+    #: the same reason as ``GLAccountPayload.active``. The sync never creates
+    #: or links a payee for one, and marks a linked vendor ``inactive``.
+    active: bool = True
+    #: A value an earlier version of the adapter wrote into ``code`` that was
+    #: never our identifier (QuickBooks' ``AcctNum``: our account number AT
+    #: the vendor). The sync clears it from an ERP-created vendor's ``code``.
+    legacy_code: str | None = None
 
 
 class ErpAdapter:

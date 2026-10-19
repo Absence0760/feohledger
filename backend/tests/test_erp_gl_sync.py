@@ -133,14 +133,18 @@ def test_bc_list_gl_accounts_maps_accounts_into_payloads(monkeypatch):
         client.get = AsyncMock(return_value=_mock_response(200, body))
         out = _run(_bc_adapter(monkeypatch).list_gl_accounts())
 
-    assert [(a.code, a.name, a.account_type, a.erp_account_id) for a in out] == [
-        ("6100", "Office Supplies", "expense", "g-6100"),
-        ("2100", "Accounts Payable", "liability", "g-2100"),
-        ("1000", "Cash", "asset", "g-1000"),
-        ("3000", "Capital", "equity", "g-3000"),
-        ("4000", "Sales", "revenue", "g-4000"),
-        ("5000", "COGS", "expense", "g-5000"),
-        ("9000", "Misc", None, "g-9000"),
+    # A blocked account is EMITTED as inactive (§284): its id still exists,
+    # so a row linked to it is not mistaken for a link to a deleted account,
+    # and the sync retires the row rather than leaving it codable.
+    assert [(a.code, a.name, a.account_type, a.erp_account_id, a.active) for a in out] == [
+        ("6100", "Office Supplies", "expense", "g-6100", True),
+        ("2100", "Accounts Payable", "liability", "g-2100", True),
+        ("1000", "Cash", "asset", "g-1000", True),
+        ("3000", "Capital", "equity", "g-3000", True),
+        ("4000", "Sales", "revenue", "g-4000", True),
+        ("5000", "COGS", "expense", "g-5000", True),
+        ("9000", "Misc", None, "g-9000", True),
+        ("6900", "Old", None, "g-6900", False),
     ]
     url = client.get.await_args.args[0]
     assert url == f"{_BC_API}/sandbox/api/v2.0/companies(co)/accounts"
@@ -244,7 +248,8 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
                 "accttype": "OthExpense",
                 "isinactive": "F",
             },
-            # Inactive — nothing should be newly coded to it.
+            # Inactive — emitted as such: the sync retires a row linked to
+            # it and creates none, but its id still exists.
             {
                 "id": "140",
                 "acctnumber": "6900",
@@ -252,7 +257,9 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
                 "accttype": "Expense",
                 "isinactive": "T",
             },
-            # A name too long to be a code is skipped, never truncated.
+            # A name too long to be a code is emitted as it is, so the sync
+            # refuses it `code_too_long` (never truncated) and its id stays
+            # live for a row already linked to it.
             {
                 "id": "150",
                 "acctnumber": None,
@@ -268,10 +275,12 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
         client.post = AsyncMock(return_value=_mock_response(200, body))
         out = _run(_netsuite_adapter().list_gl_accounts())
 
-    assert [(a.code, a.erp_account_id, a.account_type) for a in out] == [
-        ("6100", "120", "expense"),
-        ("2000", "7", "liability"),
-        ("Travel", "130", "expense"),
+    assert [(a.code, a.erp_account_id, a.account_type, a.active) for a in out] == [
+        ("6100", "120", "expense", True),
+        ("2000", "7", "liability", True),
+        ("Travel", "130", "expense", True),
+        ("6900", "140", "expense", False),
+        ("x" * 101, "150", "expense", True),
     ]
     url = client.post.await_args.args[0]
     assert url.startswith(

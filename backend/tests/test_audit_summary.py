@@ -89,7 +89,7 @@ def _events():
             action="invoice.erp_submitted",
             actor_name=None,
             created_at="2026-05-01T10:09:00+00:00",
-            details={"erp_reference": "ERP-77", "to_status": "sent_to_erp"},
+            details={"erp_reference": "ERP-77"},
         ),
     ]
 
@@ -181,7 +181,7 @@ def test_template_summary_is_deterministic_and_covers_events():
     assert "Acme Hosting" in a.text
     # actor attribution for approval
     assert "Manny Manager" in a.text
-    assert "sent to ERP" in a.text
+    assert "submitted to ERP" in a.text
     # Exception activity is why an invoice stalls — the reviewer catching up
     # needs to see it named, and who cleared it. The type is rendered as its
     # humanized label (EXCEPTION_TYPE_LABELS), not the raw snake_case code.
@@ -399,3 +399,160 @@ def test_scrub_details_handles_a_non_object_details_column(bad):
     from app.services.audit_summary import _scrub_details
 
     assert _scrub_details(bad) == {}
+
+
+# ---------- ERP outcomes: the summary never contradicts the trail ----------
+
+
+def _erp_trail(*outcome_actions: str) -> list[AuditEvent]:
+    """created → approved → erp_submitted → <outcome rows>, as
+    `transition_invoice` writes them (old_status / new_status details)."""
+    rows = [
+        ("invoice.created", None, {"to_status": "new"}),
+        ("invoice.approved", "Tina TechAdmin", {"old_status": "new", "new_status": "approved"}),
+        (
+            "invoice.erp_submitted",
+            "Tina TechAdmin",
+            {"old_status": "approved", "new_status": "sending_to_erp"},
+        ),
+    ]
+    outcome_status = {
+        "invoice.erp_failed": "failed",
+        "invoice.erp_confirmed": "sent_to_erp",
+        "invoice.completed": "done",
+        "invoice.erp_retried": "sending_to_erp",
+    }
+    for action in outcome_actions:
+        rows.append((action, None, {"new_status": outcome_status[action]}))
+    return [
+        AuditEvent(action=a, actor_name=actor, created_at=f"2026-10-19T10:0{i}:00+00:00", details=d)
+        for i, (a, actor, d) in enumerate(rows)
+    ]
+
+
+def test_template_summary_says_a_failed_erp_send_failed():
+    """The live defect (2026-10-19): a trail ending in `invoice.erp_failed`
+    read "... then sent to ERP." — the failure row was dropped and the
+    submission was worded as a delivery."""
+    inv = _invoice(invoice_number="LVC-1", amount=Decimal("77.10"), status="failed")
+    text = build_template_summary(inv, _erp_trail("invoice.erp_failed"), None).text
+    assert text == (
+        "Invoice LVC-1 from Acme Hosting for 77.10 USD was created (new), then approved "
+        "by Tina TechAdmin, then submitted to ERP, then failed to post to the ERP."
+    )
+    assert "sent to ERP" not in text
+
+
+def test_template_summary_says_an_accepted_erp_send_was_accepted():
+    inv = _invoice(status="done")
+    text = build_template_summary(
+        inv, _erp_trail("invoice.erp_confirmed", "invoice.completed"), None
+    ).text
+    assert text.endswith("then submitted to ERP, then accepted by the ERP, then marked complete.")
+    assert "failed" not in text
+
+
+def test_template_summary_reads_a_retry_after_failure():
+    """An active phrase carries its own verb; the passive run after it
+    re-opens with "was"."""
+    text = build_template_summary(
+        _invoice(status="done"),
+        _erp_trail("invoice.erp_failed", "invoice.erp_retried", "invoice.erp_confirmed"),
+        None,
+    ).text
+    assert (
+        "then failed to post to the ERP, then was resubmitted to ERP, "
+        "then accepted by the ERP." in text
+    )
+
+
+def test_template_summary_names_an_erp_status_report():
+    events = [
+        AuditEvent("invoice.erp_status_posted_in_erp", None, None, {"erp_type": "x"}),
+        AuditEvent("invoice.erp_status_something_new", None, None, {}),
+    ]
+    text = build_template_summary(_invoice(), events, None).text
+    assert "was posted in the ERP, then updated by the ERP." in text
+
+
+def test_build_prompt_carries_erp_outcome_and_its_meaning():
+    """The LLM path sees the failure row with its status, and is told that a
+    submission is not an acceptance."""
+    prompt = build_prompt(_invoice(status="failed"), _erp_trail("invoice.erp_failed"), None)
+    assert "invoice.erp_failed" in prompt
+    assert '"new_status": "failed"' in prompt
+    assert "STARTED, not that it succeeded" in prompt
+
+
+def test_summarize_fails_soft_to_a_template_that_names_the_failure():
+    """The mock / no-key path of `summarize` is the template — it must say
+    the send failed too."""
+    result = asyncio.run(
+        summarize(
+            _invoice(status="failed"),
+            _erp_trail("invoice.erp_failed"),
+            None,
+            config={"api_key": "", "model": ""},
+        )
+    )
+    assert result.text.endswith("then failed to post to the ERP.")
+
+
+def _invoice_actions_written_under_app() -> set[str]:
+    """Every literal `invoice.*` audit action passed as `action=` /
+    `action_name=` (or assigned to a local `action`) anywhere under `app/`.
+    f-strings contribute their literal prefix plus `*`."""
+    import ast
+    from pathlib import Path
+
+    app_dir = Path(__file__).resolve().parent.parent / "app"
+    found: set[str] = set()
+
+    def collect(node: ast.AST) -> None:
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.JoinedStr):
+                head = sub.values[0] if sub.values else None
+                if isinstance(head, ast.Constant) and str(head.value).startswith("invoice."):
+                    found.add(str(head.value) + "*")
+            elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                if sub.value.startswith("invoice."):
+                    found.add(sub.value)
+
+    for path in app_dir.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.keyword) and node.arg in ("action", "action_name"):
+                collect(node.value)
+            elif isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "action" for t in node.targets
+            ):
+                collect(node.value)
+    return found
+
+
+def test_every_invoice_audit_action_is_summarized_or_deliberately_skipped():
+    """An action the template does not know is skipped silently — which is
+    how `invoice.erp_failed` vanished from the summary. So every `invoice.*`
+    action written under `app/` must be phrased, or listed as deliberately
+    unsummarized."""
+    from app.services.audit_summary import (
+        _ACTION_PHRASES,
+        _ERP_STATUS_PREFIX,
+        _UNSUMMARIZED_ACTIONS,
+    )
+
+    actions = _invoice_actions_written_under_app()
+    assert "invoice.erp_failed" in actions, "the scan must see real call sites"
+    assert _ERP_STATUS_PREFIX + "*" in actions, "the scan must see the f-string site"
+    unknown = sorted(
+        a
+        for a in actions
+        if a not in _ACTION_PHRASES
+        and a not in _UNSUMMARIZED_ACTIONS
+        # `invoice.erp_status_<status>` is phrased by prefix (`_phrase_for`).
+        and not a.startswith(_ERP_STATUS_PREFIX)
+    )
+    assert unknown == [], (
+        f"audit actions with no summary phrase: {unknown} — add each to "
+        "_ACTION_PHRASES or, if it is not an outcome, to _UNSUMMARIZED_ACTIONS"
+    )

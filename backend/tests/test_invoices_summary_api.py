@@ -219,3 +219,87 @@ async def test_summary_cache_fill_never_rolls_back_a_concurrent_edit(realdb):
         after = (await s.execute(select(Invoice).where(Invoice.id == inv_uuid))).scalar_one()
     assert after.amount == Decimal("9500.00")
     assert after.updated_at == edited_version, "the edit's version must survive"
+
+
+async def test_cached_summary_regenerates_when_an_erp_send_fails(realdb):
+    """A summary cached while the send was in flight must not survive the
+    failure: the `invoice.erp_failed` row moves the fingerprint and the
+    regenerated text names the failure (the 2026-10-19 live defect read
+    "then sent to ERP." for a failed send)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    inv_id, corr = await _add_invoice(mk, org_id, number="INV-ERP-FAIL")
+    await _add_audit_row(mk, org_id, corr, action="invoice.approved")
+    await _add_audit_row(
+        mk, org_id, corr, action="invoice.erp_submitted", details={"new_status": "sending_to_erp"}
+    )
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        in_flight = await c.get(f"/api/invoices/{inv_id}/summary")
+        assert in_flight.status_code == 200, in_flight.text
+        assert in_flight.json()["text"].endswith("then submitted to ERP.")
+
+        await _add_audit_row(
+            mk, org_id, corr, action="invoice.erp_failed", details={"new_status": "failed"}
+        )
+        after = await c.get(f"/api/invoices/{inv_id}/summary")
+        assert after.status_code == 200
+        assert after.json()["text"].endswith(
+            "then submitted to ERP, then failed to post to the ERP."
+        )
+
+
+async def test_summary_says_an_accepted_erp_send_was_accepted(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    inv_id, corr = await _add_invoice(mk, org_id, number="INV-ERP-OK")
+    for action in ("invoice.approved", "invoice.erp_submitted", "invoice.erp_confirmed"):
+        await _add_audit_row(mk, org_id, corr, action=action)
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.get(f"/api/invoices/{inv_id}/summary")
+    assert resp.status_code == 200, resp.text
+    text = resp.json()["text"]
+    assert text.endswith("then submitted to ERP, then accepted by the ERP.")
+    assert "failed" not in text
+
+
+async def test_summary_cached_by_an_older_generator_is_regenerated(realdb):
+    """The fingerprint only moves when an audit row lands, so a summary cached
+    by an older generator (one that misread `erp_failed`) would otherwise be
+    served for as long as the trail stays still. The cache entry carries the
+    generator's format version, and another version is rebuilt."""
+    from sqlalchemy import update
+
+    from app.services.audit_summary import SUMMARY_FORMAT_VERSION
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    inv_id, corr = await _add_invoice(mk, org_id, number="INV-ERP-OLD")
+    await _add_audit_row(mk, org_id, corr, action="invoice.erp_submitted")
+    await _add_audit_row(mk, org_id, corr, action="invoice.erp_failed")
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        first = await c.get(f"/api/invoices/{inv_id}/summary")
+        assert first.status_code == 200
+
+    # Rewrite the cache as the pre-fix generator left it: same fingerprint,
+    # wrong text, no format version.
+    async with mk() as s:
+        inv = await s.get(Invoice, uuid.UUID(inv_id))
+        cached = dict(inv.meta["audit_summary"])
+        assert cached["format_version"] == SUMMARY_FORMAT_VERSION
+        cached.pop("format_version")
+        cached["text"] = "Invoice INV-ERP-OLD ... was sent to ERP."
+        await s.execute(
+            update(Invoice)
+            .where(Invoice.id == inv.id)
+            .values(meta={**inv.meta, "audit_summary": cached})
+        )
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        again = await c.get(f"/api/invoices/{inv_id}/summary")
+    assert again.status_code == 200
+    assert "sent to ERP" not in again.json()["text"]
+    assert again.json()["text"].endswith("then failed to post to the ERP.")

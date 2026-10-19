@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import settings
-from app.models.gl_account import GL_CODE_MAX_LENGTH
 from app.services.erp_adapters.base import (
     POSTED_TOTAL_MISMATCH,
     POSTED_TOTAL_UNCONFIRMED,
@@ -477,8 +476,8 @@ class BusinessCentralAdapter(ErpAdapter):
 
         This sync is the only writer of ``gl_accounts.erp_account_id`` for BC,
         and that id (the account's GUID) is what ``post_invoice`` posts each
-        line against as ``accountId``. Heading / total accounts and blocked
-        accounts are skipped: BC refuses a line on either.
+        line against as ``accountId``. Heading / total accounts are skipped (BC
+        refuses a line on one); blocked accounts are emitted ``active=False``.
         """
         out: list[GLAccountPayload] = []
         for raw in await self._list_collection("accounts"):
@@ -634,25 +633,26 @@ def _bc_account_to_payload(raw: dict) -> GLAccountPayload | None:
     ``code`` is the account No. (``number``), the code an AP clerk picks;
     ``erp_account_id`` is its ``id`` GUID, what a bill line is posted on.
     Only ``Posting`` accounts are kept (a Heading / Total / Begin-End Total
-    cannot carry an entry) and blocked ones are skipped, as NetSuite's chart
-    sync skips inactive accounts. A No. longer than the code column
-    (``GL_CODE_MAX_LENGTH``) is skipped rather than truncated, so two accounts
-    never merge.
+    cannot carry an entry).
+
+    Emitted, not dropped: a blocked account as ``active=False`` and a No.
+    longer than ``gl_accounts.code`` as it is — the sync marks the first
+    inactive in our chart and refuses the second ``code_too_long`` (never
+    truncated, so two accounts never merge), and still knows both ids exist.
     """
     account_id = raw.get("id")
     number = str(raw.get("number") or "")
-    if not account_id or not number or len(number) > GL_CODE_MAX_LENGTH:
-        return None
-    if raw.get("blocked") is True:
+    if not account_id or not number:
         return None
     account_type = raw.get("accountType")
     if account_type is not None and str(account_type) != "Posting":
         return None
     return GLAccountPayload(
         code=number,
-        name=str(raw.get("displayName") or number),
+        name=str(raw.get("displayName") or number)[:255],
         account_type=_BC_ACCOUNT_CATEGORIES.get(str(raw.get("category") or "").strip().lower()),
         erp_account_id=str(account_id),
+        active=raw.get("blocked") is not True,
     )
 
 

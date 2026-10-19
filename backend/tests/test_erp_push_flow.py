@@ -416,7 +416,13 @@ async def test_send_to_erp_internal_passes_org_erp_config_to_call_erp():
     inst = _instance()
     db = AsyncMock()
     call_erp = AsyncMock(return_value="ERP-REF-1")
-    cfg = {"type": "netsuite", "integration_method": "direct", "account_id": "ACCT"}
+    cfg = {
+        "type": "netsuite",
+        "integration_method": "direct",
+        "account_id": "ACCT",
+        # Migrated while connected to this account: its NULL-realm links count.
+        "legacy_link_realm": "netsuite:acct",
+    }
 
     with (
         patch("app.services.workflow_engine.dispatch_audit", new=_AuditRecorder()),
@@ -447,7 +453,13 @@ async def test_call_erp_dispatches_via_configured_adapter_not_mock():
         ref = await _call_erp(
             _line_items_db([]),
             _invoice(),
-            {"integration_method": "merge_dev", "api_key": "k", "account_token": "t"},
+            {
+                "integration_method": "merge_dev",
+                "api_key": "k",
+                "account_token": "t",
+                # Migrated while on this connection: its NULL-realm links count.
+                "legacy_link_realm": "merge_dev:",
+            },
         )
 
     assert ref == "merge-inv-77"
@@ -503,10 +515,11 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None):
     * `_fetch_line_items` — the given rows, in the order given (mirrors the
       real query's ORDER BY);
     * the vendor link — `vendor_erp_id` (None models an unlinked vendor);
-    * the chart — `accounts`, `(code, entity_id, erp_account_id)` rows, which
-      `gl_chart.resolve_erp_account_ids` folds (its SQL filter is proven
-      against a real tenant in the realdb tests below). Default: every line's
-      code, shared, with an `ERP-<code>` id.
+    * the chart — `accounts`, `(code, entity_id, erp_account_id[,
+      erp_link_realm])` rows, which `gl_chart.resolve_erp_account_ids` folds
+      (its SQL filter is proven against a real tenant in the realdb tests
+      below). A row without a realm is a pre-0115 (NULL) link. Default: every
+      line's code, shared, with an `ERP-<code>` id.
 
     `db.calls` records the table of each statement, in order.
     """
@@ -525,7 +538,9 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None):
             return SimpleNamespace(scalar_one_or_none=lambda: vendor_erp_id)
         if "FROM gl_accounts" in sql:
             db.calls.append("gl_accounts")
-            return SimpleNamespace(all=lambda: list(accounts))
+            return SimpleNamespace(
+                all=lambda: [tuple(a) + (None,) * (4 - len(a)) for a in accounts]
+            )
         raise AssertionError(f"unexpected query: {sql}")
 
     db.execute = execute
@@ -585,7 +600,12 @@ async def test_call_erp_includes_line_items_in_payload():
         await _call_erp(
             db,
             _invoice(),
-            {"integration_method": "merge_dev", "api_key": "k", "account_token": "t"},
+            {
+                "integration_method": "merge_dev",
+                "api_key": "k",
+                "account_token": "t",
+                "legacy_link_realm": "merge_dev:",
+            },
         )
 
     # The adapter serialises the body itself (`content=`, not `json=`) so the
@@ -702,6 +722,10 @@ _NETSUITE_CFG = {
     "type": "netsuite",
     "integration_method": "direct",
     "account_id": "FAKE123",
+    # Migrated while connected to this account (migration 0115), so the
+    # fakes' NULL-realm links are trusted — see the realm tests in
+    # test_erp_link_realm.py for the other cases.
+    "legacy_link_realm": "netsuite:fake123",
     "consumer_key": "ck",
     "consumer_secret": "cs",
     "token_id": "ti",

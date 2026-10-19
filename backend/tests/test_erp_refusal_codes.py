@@ -32,6 +32,7 @@ NOT_REFUSALS = {
     "MOCK_ADAPTER_KEY",  # dispatcher keys
     "MERGE_DEV_ADAPTER_KEY",
     "OAUTH_KEY",  # catalog keys
+    "LEGACY_REALM_KEY",
     "METHOD_DIRECT",
     "METHOD_MERGE_DEV",
 }

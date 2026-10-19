@@ -259,9 +259,13 @@ def test_netsuite_list_vendors_maps_suiteql_rows_into_vendor_payloads():
         client.post = AsyncMock(return_value=_make_mock_response(200, body))
         vendors = _run(adapter.list_vendors())
 
-    assert [(v.erp_vendor_id, v.name, v.code) for v in vendors] == [
-        ("25", "Acme Supplies Ltd", "ACME-01"),
-        ("26", "Jane Contractor", "Jane Contractor"),
+    # An inactive vendor is emitted as such (§284): the sync never creates a
+    # payee for it, but a vendor linked to it is not mistaken for a link to a
+    # deleted record.
+    assert [(v.erp_vendor_id, v.name, v.code, v.active) for v in vendors] == [
+        ("25", "Acme Supplies Ltd", "ACME-01", True),
+        ("26", "Jane Contractor", "Jane Contractor", True),
+        ("27", "Old Co", "Old Co", False),
     ]
     assert vendors[0].email == "a@vendor.test"
     assert vendors[0].phone == "555-0100"

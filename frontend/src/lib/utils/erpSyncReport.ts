@@ -29,6 +29,7 @@ export interface GlSyncReport {
 	updated: number;
 	conflicts?: ReadonlyArray<{ code: string }>;
 	unlinked?: ReadonlyArray<string>;
+	deactivated?: ReadonlyArray<string>;
 }
 
 /** The vendor sync response's fields this reads. */
@@ -37,6 +38,8 @@ export interface VendorSyncReport {
 	updated: number;
 	unchanged: number;
 	conflicts?: ReadonlyArray<{ name: string }>;
+	/** Vendors whose link was made in another ERP company and was dropped. */
+	unlinked?: ReadonlyArray<string>;
 }
 
 export function glSyncReportLines(result: GlSyncReport, t: Translate): SyncReportLine[] {
@@ -60,6 +63,13 @@ export function glSyncReportLines(result: GlSyncReport, t: Translate): SyncRepor
 			tone: 'warning'
 		});
 	}
+	const deactivated = result.deactivated ?? [];
+	if (deactivated.length) {
+		lines.push({
+			text: t('glAccounts.toast.syncDeactivated', { codes: formatList([...deactivated]) }),
+			tone: 'warning'
+		});
+	}
 	return lines;
 }
 
@@ -78,6 +88,13 @@ export function vendorSyncReportLines(result: VendorSyncReport, t: Translate): S
 	if (names.length) {
 		lines.push({
 			text: t('vendors.toast.syncConflicts', { names: formatList(names) }),
+			tone: 'warning'
+		});
+	}
+	const unlinked = result.unlinked ?? [];
+	if (unlinked.length) {
+		lines.push({
+			text: t('vendors.toast.syncUnlinked', { names: formatList([...unlinked]) }),
 			tone: 'warning'
 		});
 	}

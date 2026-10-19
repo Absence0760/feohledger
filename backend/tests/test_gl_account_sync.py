@@ -82,8 +82,10 @@ def _qbo_chart() -> list[dict]:
 
 
 async def _qbo_payloads(rows: list[dict]) -> list[GLAccountPayload]:
-    async def query_all(self, entity):
-        assert entity == "Account"
+    async def query_all(self, entity, *, include_inactive=False):
+        # The chart read must include inactive accounts (§284): QuickBooks'
+        # plain select returns active ones only.
+        assert (entity, include_inactive) == ("Account", True)
         return rows
 
     with patch.object(QuickBooksOnlineAdapter, "_query_all", query_all):

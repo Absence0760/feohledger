@@ -82,6 +82,11 @@ _SAFE_DETAIL_KEYS = frozenset(
     {
         "from_status",
         "to_status",
+        # What `workflow_engine.transition_invoice` actually writes on every
+        # status change — bare status codes, no PII. Without them the LLM saw
+        # an ERP send's `invoice.erp_failed` row with no status at all.
+        "old_status",
+        "new_status",
         "status",
         "reason",
         "fields_corrected",
@@ -128,6 +133,11 @@ Audit timeline (oldest → newest, JSON):
 Write a SINGLE concise paragraph (no lists, no headings, no preamble) that \
 covers, where present: how the invoice was created/extracted, status \
 transitions, field corrections, exception resolutions, and ERP sync events. \
+State only outcomes the timeline records, and never one it contradicts: \
+`invoice.erp_submitted` means a send to the ERP STARTED, not that it \
+succeeded; only `invoice.erp_confirmed` means the ERP accepted the invoice, \
+and `invoice.erp_failed` means the send failed. The invoice's current \
+`status` is authoritative for where it stands now. \
 End with one short confidence-context clause when extraction context is \
 present (e.g. "auto-extracted at 95% confidence with RAG priors applied").
 
@@ -227,27 +237,116 @@ def parse_response(text: str) -> AuditSummaryResult | None:
 
 # ---------- Deterministic template (the "mock adapter" path) ---------------
 
-_ACTION_PHRASES = {
-    "invoice.uploaded": "uploaded",
-    "invoice.created": "created",
-    "invoice.extraction_completed": "AI-extracted",
-    "invoice.extraction_dispatched": "queued for extraction",
-    "invoice.extraction_failed": "extraction failed",
-    "invoice.submitted_for_review": "submitted for review",
-    "invoice.approved": "approved",
-    "invoice.rejected": "rejected",
-    "invoice.resubmitted": "resubmitted for review",
-    "invoice.erp_submitted": "sent to ERP",
-    "invoice.completed": "marked complete",
+#: Bumped whenever the summary's wording or event coverage changes. Part of the
+#: cache key alongside the audit fingerprint: a summary cached by an older
+#: generator stays wrong for as long as its trail stays still, so a cache entry
+#: from another version is regenerated even when no audit row has moved.
+#: v2 — ERP outcomes (`erp_failed` / `erp_confirmed` / ...) are summarized, and
+#: `erp_submitted` reads "submitted to ERP", not "sent to ERP".
+SUMMARY_FORMAT_VERSION = 2
+
+# Each phrase is the predicate of "Invoice X <predicate>". A PASSIVE phrase
+# ("approved") follows "was"; an ACTIVE one ("failed to post to the ERP")
+# carries its own verb. `build_template_summary` inserts "was" before a passive
+# phrase that opens the sentence or follows an active one.
+#
+# Every `invoice.*` action written under `app/` must be here or in
+# `_UNSUMMARIZED_ACTIONS` — `tests/test_audit_summary.py` scans for them. An
+# action missing from both used to be skipped silently, which is how a send
+# that ended in `invoice.erp_failed` read as "then sent to ERP.": the summary
+# stated the opposite of how the trail ended.
+_PASSIVE = False
+_ACTIVE = True
+_ACTION_PHRASES: dict[str, tuple[str, bool]] = {
+    "invoice.uploaded": ("uploaded", _PASSIVE),
+    "invoice.created": ("created", _PASSIVE),
+    "invoice.created_from_po": ("created from a purchase order", _PASSIVE),
+    "invoice.imported_csv": ("imported from CSV", _PASSIVE),
+    "invoice.peppol_received": ("received over PEPPOL", _PASSIVE),
+    "invoice.submitted_by_vendor": ("submitted by the vendor", _PASSIVE),
+    "invoice.resubmitted_by_vendor": ("resubmitted by the vendor", _PASSIVE),
+    "invoice.intercompany_routed": ("routed inter-company", _PASSIVE),
+    "invoice.extraction_completed": ("AI-extracted", _PASSIVE),
+    "invoice.extraction_dispatched": ("queued for extraction", _PASSIVE),
+    "invoice.extraction_triggered": ("queued for extraction", _PASSIVE),
+    "invoice.extraction_reset": ("reset for another extraction", _PASSIVE),
+    "invoice.extraction_failed": ("failed AI extraction", _ACTIVE),
+    "invoice.extraction_failed_fallback": ("failed AI extraction", _ACTIVE),
+    "invoice.extraction_timed_out": ("timed out during AI extraction", _ACTIVE),
+    "invoice.extraction_reaped": ("timed out during AI extraction", _ACTIVE),
+    "invoice.ai_reading_paused": ("held because AI reading is paused", _PASSIVE),
+    "invoice.submitted_for_review": ("submitted for review", _PASSIVE),
+    "invoice.assigned_for_review": ("assigned for review", _PASSIVE),
+    "invoice.approval_step": ("approved at one level of its approval chain", _PASSIVE),
+    "invoice.approval_escalated": ("escalated for approval", _PASSIVE),
+    "invoice.approved": ("approved", _PASSIVE),
+    "invoice.auto_approved": ("auto-approved", _PASSIVE),
+    "invoice.rejected": ("rejected", _PASSIVE),
+    "invoice.resubmitted": ("resubmitted for review", _PASSIVE),
+    "invoice.bulk_status_change": ("moved by a bulk status change", _PASSIVE),
+    # ERP. `erp_submitted` is the START of a send — the invoice entered
+    # `sending_to_erp` — and says nothing about how it ended. Only
+    # `erp_confirmed` means the ERP accepted it; `erp_failed` means it did not.
+    "invoice.erp_submitted": ("submitted to ERP", _PASSIVE),
+    "invoice.erp_retried": ("resubmitted to ERP", _PASSIVE),
+    "invoice.erp_confirmed": ("accepted by the ERP", _PASSIVE),
+    "invoice.erp_failed": ("failed to post to the ERP", _ACTIVE),
+    "invoice.peppol_sent": ("sent over PEPPOL", _PASSIVE),
+    "invoice.peppol_send_failed": ("failed to send over PEPPOL", _ACTIVE),
+    "invoice.payment_scheduled": ("scheduled for payment", _PASSIVE),
+    "invoice.card_payment_scheduled": ("scheduled for virtual-card payment", _PASSIVE),
+    "invoice.voided_return_to_approved": (
+        "returned to approved when its payment was voided",
+        _PASSIVE,
+    ),
+    "invoice.paid_via_erp_sync": ("marked paid", _PASSIVE),
+    "invoice.paid_via_erp_report": ("reported paid by the ERP", _PASSIVE),
+    "invoice.paid_via_settlement_acceptance": ("marked paid", _PASSIVE),
+    "invoice.paid_outside": ("marked paid outside the platform", _PASSIVE),
+    "invoice.completed": ("marked complete", _PASSIVE),
     # Exception-queue events. These now reach the invoice's trail (they are
     # correlation-keyed to it — see services/exception_lifecycle), and a reviewer
     # catching up needs them: a duplicate / fraud flag is why the invoice
     # stalled, and clearing one is what let it move.
-    "exception.raised": "flagged",
-    "exception.resolved": "had its exception cleared",
-    "exception.escalated": "had its exception escalated",
-    "exception.dismissed": "had its exception dismissed",
+    "exception.raised": ("flagged", _PASSIVE),
+    "exception.resolved": ("had its exception cleared", _ACTIVE),
+    "exception.escalated": ("had its exception escalated", _ACTIVE),
+    "exception.dismissed": ("had its exception dismissed", _ACTIVE),
 }
+
+#: The ERP's own status reports (`api/erp_webhook.py`) are named per target
+#: status — `invoice.erp_status_<status>` — so they match by prefix.
+_ERP_STATUS_PREFIX = "invoice.erp_status_"
+_ERP_STATUS_PHRASES: dict[str, tuple[str, bool]] = {
+    "posted_in_erp": ("posted in the ERP", _PASSIVE),
+    "paid": ("reported paid by the ERP", _PASSIVE),
+    "failed": ("reported failed by the ERP", _PASSIVE),
+}
+_ERP_STATUS_FALLBACK = ("updated by the ERP", _PASSIVE)
+
+#: `invoice.*` actions deliberately left out of the prose: edits and
+#: attachments (the field-level history is the timeline's job, and none of
+#: them is an outcome), plus the deletion row, which no live invoice has.
+_UNSUMMARIZED_ACTIONS = frozenset(
+    {
+        "invoice.edited",
+        "invoice.line_items_edited",
+        "invoice.gl_recoded",
+        "invoice.file_attached",
+        "invoice.file_replaced",
+        "invoice.file_deleted",
+        "invoice.contract_linked",
+        "invoice.contract_unlinked",
+        "invoice.experiment_assigned",
+        "invoice.deleted",
+    }
+)
+
+
+def _phrase_for(action: str) -> tuple[str, bool] | None:
+    if action.startswith(_ERP_STATUS_PREFIX):
+        return _ERP_STATUS_PHRASES.get(action[len(_ERP_STATUS_PREFIX) :], _ERP_STATUS_FALLBACK)
+    return _ACTION_PHRASES.get(action)
 
 
 def _build_confidence_context(extraction_meta: dict | None) -> str | None:
@@ -286,11 +385,12 @@ def build_template_summary(
     if amount is not None:
         head += f" for {amount} {currency}"
 
-    phrases: list[str] = []
+    phrases: list[tuple[str, bool]] = []
     for e in events:
-        phrase = _ACTION_PHRASES.get(e.action)
-        if not phrase:
+        entry = _phrase_for(e.action)
+        if entry is None:
             continue
+        phrase, active = entry
         if e.action.startswith("exception."):
             # Name the exception type — "flagged (duplicate)" reads as the
             # reason the invoice stalled; a bare "flagged" doesn't.
@@ -300,7 +400,7 @@ def build_template_summary(
                 phrase = f"{phrase} ({label})"
             if e.action != "exception.raised" and e.actor_name:
                 phrase = f"{phrase} by {e.actor_name}"
-            phrases.append(phrase)
+            phrases.append((phrase, active))
             continue
 
         to_status = e.details.get("to_status") or e.details.get("status")
@@ -308,15 +408,21 @@ def build_template_summary(
             phrase = f"{phrase} by {e.actor_name}"
         elif to_status and phrase not in ("approved", "rejected"):
             phrase = f"{phrase} ({to_status})"
-        phrases.append(phrase)
+        phrases.append((phrase, active))
 
     if phrases:
         # De-dupe consecutive repeats while preserving order.
-        deduped: list[str] = []
+        deduped: list[tuple[str, bool]] = []
         for p in phrases:
             if not deduped or deduped[-1] != p:
                 deduped.append(p)
-        body = "was " + ", then ".join(deduped) + "."
+        # "was" opens each run of passive phrases; an active phrase has its own verb.
+        rendered: list[str] = []
+        previous_active = True
+        for phrase, active in deduped:
+            rendered.append(phrase if active or not previous_active else f"was {phrase}")
+            previous_active = active
+        body = ", then ".join(rendered) + "."
     else:
         current = str(invoice.status.value if hasattr(invoice.status, "value") else invoice.status)
         body = f"is currently {current} with no recorded timeline activity yet."
@@ -517,6 +623,7 @@ async def get_or_build_summary(
         not force
         and cached
         and cached.get("source_fingerprint") == current_fp
+        and cached.get("format_version") == SUMMARY_FORMAT_VERSION
         and cached.get("text")
     ):
         return {
@@ -536,6 +643,7 @@ async def get_or_build_summary(
         "text": result.text,
         "confidence_context": result.confidence_context,
         "source_fingerprint": current_fp,
+        "format_version": SUMMARY_FORMAT_VERSION,
         "generated_at": generated_at,
         "model": config.get("model") or "",
     }

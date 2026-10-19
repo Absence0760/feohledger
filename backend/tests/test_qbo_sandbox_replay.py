@@ -22,6 +22,7 @@ syncs answer exactly what they answered live (``live_sync``).
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 from collections import Counter
 from pathlib import Path
@@ -37,6 +38,7 @@ from app.models.vendor import Vendor
 from app.services import erp_oauth
 from app.services.erp_adapters import quickbooks_online
 from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+from app.services.erp_link_realm import connection_realm
 from app.services.gl_account_sync import AMBIGUOUS_LEGACY, sync_chart_from_erp
 from app.services.vendor_sync import sync_vendors_from_erp
 
@@ -61,6 +63,14 @@ CONFIG = {
     "integration_method": "direct",
     "oauth": {"provider": "quickbooks_online", "external_tenant_id": REALM},
 }
+#: The connection realm the endpoints stamp links with (§284).
+LINK_REALM = connection_realm(CONFIG)
+#: Every pre-0115 link in the seeded state is confirmed by this company's own
+#: pull (the same id holds the row's code, or the legacy key it was synced
+#: under; the same vendor name), so rule 0 adopts them all and moves none —
+#: the repair below is rules 3 and 4 alone, exactly as live.
+ADOPTED_CHART_LINKS = sum(1 for r in COMPANY["legacy_chart"] if r.get("erp_account_id"))
+ADOPTED_VENDOR_LINKS = sum(1 for v in COMPANY["legacy_vendors"] if v.get("erp_vendor_id"))
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +189,14 @@ def test_a_query_returns_active_records_unless_it_asks_for_inactive_ones():
     assert FAKE.run_query(entities, "select * from Account STARTPOSITION 200") == {}
     with pytest.raises(FAKE.QboFault):
         FAKE.run_query(entities, "select * from Account where Name = 'Software'")
+    # A condition after the paging terms is refused, as Intuit's parser does.
+    with pytest.raises(FAKE.QboFault):
+        FAKE.run_query(entities, "select * from Account MAXRESULTS 5 where Active = false")
+    # Blanks are blanks, and a quoted value is matched exactly as sent.
+    assert ids("select  *\tfrom Vendor\n where  Active IN ( false )", "Vendor") == ["57"]
+    bills = {"Bill": [{"Id": "1", "DocNumber": "A  and where B"}, {"Id": "2", "DocNumber": "A"}]}
+    found = FAKE.run_query(bills, "select * from Bill where DocNumber = 'A  and where B'")
+    assert [b["Id"] for b in found["Bill"]] == ["1"]
 
 
 # ---------------------------------------------------------------------------
@@ -212,17 +230,24 @@ async def test_the_chart_is_keyed_by_what_quickbooks_keeps_unique(sandbox):
     assert by_id["2"].account_type == "equity"
 
     # What the query asked for decides whether the inactive Bank Charges (8)
-    # reaches the sync: the adapter's statement is pinned with it.
-    assert sandbox.statements == ["select * from Account STARTPOSITION 1 MAXRESULTS 1000"]
-    assert "8" not in by_id and len(accounts) == 90
+    # reaches the sync: the adapter's statement is pinned with it. Live, the
+    # plain select dropped it, so our row stayed active and linked; the query
+    # now asks for inactive records too and the account arrives inactive.
+    assert sandbox.statements == [
+        "select * from Account where Active IN (true, false) STARTPOSITION 1 MAXRESULTS 1000"
+    ]
+    assert len(accounts) == 91
+    assert by_id["8"].active is False
+    assert all(a.active for a in accounts if a.erp_account_id != "8")
 
 
 async def test_paging_walks_the_whole_chart(sandbox, monkeypatch):
     monkeypatch.setattr(quickbooks_online, "_PAGE_SIZE", 25)
     accounts = await _adapter().list_gl_accounts()
-    assert len(accounts) == 90
+    assert len(accounts) == 91
     assert sandbox.statements == [
-        f"select * from Account STARTPOSITION {start} MAXRESULTS 25" for start in (1, 26, 51, 76)
+        f"select * from Account where Active IN (true, false) STARTPOSITION {start} MAXRESULTS 25"
+        for start in (1, 26, 51, 76)
     ]
 
 
@@ -240,7 +265,10 @@ async def test_vendors_keep_their_names_terms_and_never_take_acctnum_as_code(san
     # "NW-778812" is OUR account number at Northwind, not Northwind's code.
     assert northwind.code is None
     assert vendors["32"].payment_terms == "Due on receipt"
-    assert "57" not in vendors and len(vendors) == 28  # Squeaky Kleen is inactive
+    # Squeaky Kleen is inactive: read, and marked so (live it was never read).
+    assert len(vendors) == 29 and vendors["57"].active is False
+    # The AcctNum rides as legacy_code, for the old mapping's cleanup only.
+    assert northwind.legacy_code == "NW-778812"
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +288,11 @@ async def _sync_chart(realdb):
     accounts = await _adapter().list_gl_accounts()
     async with realdb.sessionmaker(TENANT)() as s:
         result = await sync_chart_from_erp(
-            s, organization_id=realdb.info(TENANT).org_id, entity_id=None, accounts=accounts
+            s,
+            organization_id=realdb.info(TENANT).org_id,
+            entity_id=None,
+            accounts=accounts,
+            realm=LINK_REALM,
         )
         await s.commit()
     return result
@@ -281,14 +313,26 @@ def _comparable(summary: dict) -> dict:
 
 
 async def test_the_live_sync_of_the_pre_284_chart_replays_exactly(realdb, sandbox):
+    """The live answer, plus exactly what the inactive-inclusive query adds:
+    Bank Charges (8), inactive in QuickBooks, is retired in our chart — one
+    more "updated" — where live it was never read and stayed active."""
     await _seed_legacy_chart(realdb)
     assert len(await _chart(realdb)) == 81  # "89 accounts became 81 rows"
 
     result = await _sync_chart(realdb)
 
+    live = COMPANY["live_sync"]["gl_accounts"]
     assert _comparable(result.summary(capped=False)) == _comparable(
-        COMPANY["live_sync"]["gl_accounts"]
+        {
+            **live,
+            "updated": live["updated"] + 1,
+            "deactivated": ["Bank Charges"],
+            "deactivated_count": 1,
+            "realm": LINK_REALM,
+            "realm_adopted": ADOPTED_CHART_LINKS,
+        }
     )
+    assert (await _chart(realdb))["Bank Charges"].is_active is False
 
 
 async def test_after_the_repair_every_path_has_its_own_correctly_linked_row(realdb, sandbox):
@@ -349,6 +393,35 @@ async def test_a_second_sync_changes_nothing_and_still_refuses_the_same_codes(re
     }
 
 
+async def test_a_confirmed_choice_settles_a_locked_out_account_for_good(realdb, sandbox):
+    """Depreciation (40) was refused live because our bare-name row could mean
+    it or Truck:Depreciation (39). Once a person confirms 40 (what
+    ``POST /api/gl-accounts/{id}/erp-link`` writes), later syncs keep it."""
+    from datetime import UTC, datetime
+
+    await _seed_legacy_chart(realdb)
+    await _sync_chart(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        row = (
+            await s.execute(select(GLAccount).where(GLAccount.code == "Depreciation"))
+        ).scalar_one()
+        offered = sorted(a["erp_account_id"] for a in row.erp_link_candidates["accounts"])
+        assert (row.erp_account_id, offered) == (None, ["39", "40"])
+        row.erp_account_id = "40"
+        row.erp_link_realm = LINK_REALM
+        row.erp_link_confirmed_at = datetime.now(UTC)
+        row.erp_link_candidates = None
+        await s.commit()
+
+    again = (await _sync_chart(realdb)).summary(capped=False)
+
+    assert [c["code"] for c in again["conflicts"]] == ["Maintenance and Repair"]
+    assert again["link_changes"] == [] and again["unlinked"] == []
+    chart = await _chart(realdb)
+    assert chart["Depreciation"].erp_account_id == "40"
+    assert chart["Truck:Depreciation"].erp_account_id == "39"
+
+
 async def test_the_live_vendor_sync_replays_exactly(realdb, sandbox):
     org_id = realdb.info(TENANT).org_id
     async with realdb.sessionmaker(TENANT)() as s:
@@ -356,26 +429,29 @@ async def test_the_live_vendor_sync_replays_exactly(realdb, sandbox):
             s.add(Vendor(organization_id=org_id, status="active", source="erp_sync", **row))
         await s.commit()
 
-    pulled = [
-        {
-            "erp_vendor_id": v.erp_vendor_id,
-            "name": v.name,
-            "code": v.code,
-            "email": v.email,
-            "phone": v.phone,
-            "address": v.address,
-            "tax_id": v.tax_id,
-            "payment_terms": v.payment_terms,
-        }
-        for v in await _adapter().list_vendors()
-    ]
+    # As the endpoint hands them over (`dataclasses.asdict`).
+    pulled = [dataclasses.asdict(v) for v in await _adapter().list_vendors()]
     async with realdb.sessionmaker(TENANT)() as s:
-        result = await sync_vendors_from_erp(s, org_id, pulled)
+        result = await sync_vendors_from_erp(s, org_id, pulled, realm=LINK_REALM)
         await s.commit()
 
-    assert result == COMPANY["live_sync"]["vendors"]
+    # The live answer, plus what reading inactive records adds: Squeaky Kleen
+    # (57), inactive in QuickBooks, is deactivated here instead of staying an
+    # active payee.
+    live = COMPANY["live_sync"]["vendors"]
+    assert result == {
+        **live,
+        "updated": live["updated"] + 1,
+        "unchanged": live["unchanged"],
+        "unlinked": [],
+        "deactivated": 1,
+        "codes_cleared": 0,
+        "realm_adopted": ADOPTED_VENDOR_LINKS,
+        "realm": LINK_REALM,
+    }
     async with realdb.sessionmaker(TENANT)() as s:
         vendors = {v.erp_vendor_id: v for v in (await s.execute(select(Vendor))).scalars().all()}
+    assert vendors["57"].status == "inactive"
     assert vendors["60"].code is None
     assert vendors["60"].payment_terms == "Net 60"
     assert vendors["59"].name == "Ærøskøbing Café & Søn ApS"
