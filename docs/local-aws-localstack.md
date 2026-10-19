@@ -36,10 +36,11 @@ pnpm aws:down      # stop it when done
 | SES identity | `no-reply@localhost` | `ses` email adapter |
 | CloudWatch log group | `/ap/audit` | `cloudwatch` audit sink |
 | S3 bucket (Object Lock) | `feoh-audit-worm` | `s3_objectlock` audit sink — versioned, **COMPLIANCE mode, 2555-day default retention**, matching `infra/s3.tf`'s audit-logs bucket. The adapter's boot check requires all three, so a bucket created with Object Lock merely *enabled* is refused (`backend/docs/audit-log-shipping.md`). |
+| KMS key | `alias/feohledger-app-local` | `FEOH_CREDENTIAL_KMS_KEY_ID` — the envelope key `services/credential_crypto` seals tenant provider credentials under (production: infra/'s `alias/feohledger-app-<environment>`). A deployed environment refuses to boot without one, so CI's day-one job (`scripts/day-one/`) boots production-shaped against this alias. |
 
 The single knob is **`FEOH_AWS_ENDPOINT_URL`** (`app/config.py`). When set, the SQS
-dispatch clients, the `ses` email adapter, and the `cloudwatch` / `s3_objectlock`
-audit sinks all build their boto3 client against it. LocalStack accepts any
+dispatch clients, the `ses` email adapter, the `cloudwatch` / `s3_objectlock`
+audit sinks and the credential-sealing KMS client all build their boto3 client against it. LocalStack accepts any
 credentials, but boto3 still needs *some* present — hence the dummy
 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
 

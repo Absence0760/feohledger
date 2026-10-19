@@ -14,8 +14,9 @@ So a fresh install is built the same way a fresh tenant is (`database.md`
 `CONTROL_TABLES`, then Alembic recorded at head, because the ORM already IS the
 head schema (`test_migration_model_index_parity.py` holds that). The four
 system roles are seeded with it — `provision_tenant` grants a new tenant's
-admin the `admin` role only if that row exists, and skips silently when it
-does not, so a control plane without them provisions admins who can do nothing.
+admin the system `admin` role and refuses to provision without it, so a control
+plane without them could not take a tenant at all; `ensure_system_roles` restores
+any that go missing on every later deploy.
 
 `scripts/init_control_plane.py` is the entry point; `deploy/deploy.sh` runs it
 before `alembic upgrade head`.
@@ -33,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO
 from app.models import Base
 from app.models.user import Role
+from app.services.schema_version import record_head
 from app.services.tenant_provisioning import CONTROL_TABLES
 
 # Canonical system-role set, keyed by the same ROLE_* constants `app.api.deps`
@@ -101,10 +103,11 @@ async def create_control_tables(engine: AsyncEngine) -> None:
         )
 
 
-async def _seed_system_roles(conn: AsyncConnection) -> None:
-    """Insert any missing system role. Never touches a row that exists — the
-    `uq_roles_system_name` partial index is the conflict target."""
-    await conn.execute(
+async def _seed_system_roles(conn: AsyncConnection) -> int:
+    """Insert any missing system role and return how many were missing. Never
+    touches a row that exists — the `uq_roles_system_name` partial index is the
+    conflict target."""
+    result = await conn.execute(
         pg_insert(Role)
         .values(
             [
@@ -117,6 +120,18 @@ async def _seed_system_roles(conn: AsyncConnection) -> None:
             index_where=Role.organization_id.is_(None),
         )
     )
+    return result.rowcount
+
+
+async def ensure_system_roles(engine: AsyncEngine) -> int:
+    """Restore any system role an initialised control plane is missing.
+
+    `initialise` seeds them once; this keeps them true on every deploy after,
+    so a control plane that lost one (or predates the bootstrap) is repaired
+    rather than left to provision admins `provision_tenant` now refuses to
+    create. Returns how many were added — 0 on a healthy control plane."""
+    async with engine.begin() as conn:
+        return await _seed_system_roles(conn)
 
 
 async def initialise(engine: AsyncEngine, head_revision: str) -> None:
@@ -137,13 +152,4 @@ async def initialise(engine: AsyncEngine, head_revision: str) -> None:
             lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables, checkfirst=True)
         )
         await _seed_system_roles(conn)
-        await conn.execute(
-            text(
-                "CREATE TABLE alembic_version ("
-                "version_num VARCHAR(32) NOT NULL, "
-                "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-            )
-        )
-        await conn.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES (:v)"), {"v": head_revision}
-        )
+        await record_head(conn, head_revision)

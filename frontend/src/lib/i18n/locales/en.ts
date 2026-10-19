@@ -4026,6 +4026,9 @@ export const en = {
 	'auth.login.or': 'or',
 	'auth.login.signInWith': 'Sign in with {provider}',
 	'auth.login.forgotPassword': 'Forgot password?',
+	'auth.login.devAccounts.heading': 'Dev accounts',
+	'auth.login.devAccounts.hint': 'Local development only. Pick a seeded account to fill the form.',
+	'auth.login.devAccounts.fill': 'Fill the form as {email}, {role}',
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Reset your password',

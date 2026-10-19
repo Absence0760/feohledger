@@ -3801,6 +3801,9 @@ export const messages = {
 	'auth.login.or': 'oder',
 	'auth.login.signInWith': 'Anmelden mit {provider}',
 	'auth.login.forgotPassword': 'Passwort vergessen?',
+	'auth.login.devAccounts.heading': 'Entwicklungskonten',
+	'auth.login.devAccounts.hint': 'Nur für die lokale Entwicklung. Wählen Sie ein Seed-Konto, um das Formular auszufüllen.',
+	'auth.login.devAccounts.fill': 'Formular als {email} ausfüllen, {role}',
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Passwort zurücksetzen',

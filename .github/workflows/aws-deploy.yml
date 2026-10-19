@@ -143,7 +143,7 @@ jobs:
             --task-definition "${{ steps.taskdef.outputs.arn }}" \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ vars.ECS_SUBNETS }}],securityGroups=[${{ vars.ECS_SECURITY_GROUPS }}],assignPublicIp=DISABLED}" \
-            --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"sh\",\"-c\",\"python scripts/init_control_plane.py && alembic upgrade head && python scripts/migrate_all_tenants.py\"]}]}" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"sh\",\"scripts/deploy_migrate.sh\"]}]}" \
             --query 'tasks[0].taskArn' --output text)"
           echo "Migration task: $task_arn"
           aws ecs wait tasks-stopped \

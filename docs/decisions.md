@@ -11743,6 +11743,66 @@ idempotent, and the downgrade removes the two keys.
 and §258's "the `realdb` harness's orgs hold no subscription — which reads
 exactly like `free`", which stays true only because no plan now reads as Free.
 
+## 282. A migrated database converges on the ORM, and the whole schema is compared (#575, migration 0113, 2026-10-19)
+
+**Context.** `test_migration_model_index_parity.py` held the chain and the models
+to the same indexes, statically. Nothing compared the rest of the schema, so
+#575 added `backend/tests/test_schema_build_parity.py`: build a tenant (and a
+control plane) by running the whole chain over the pre-Alembic schema, build
+another by `create_all`, and diff the full catalogue. The first run found five
+kinds of difference — server defaults no model declares, hand-named FKs,
+ON DELETE actions, UNIQUE indexes the models declare as constraints, and
+columns / indexes / a table the chain never built — and a sixth hiding behind
+the defaults (nullability and a varchar width). A third case, replaying the
+chain over a `create_all` tenant, found the one that reaches production: a new
+tenant is not stamped, so its first deploy runs every revision, and 0029, 0051
+and 0082 guarded their FKs by their own names only. A tenant that has been
+deployed over since it was provisioned carries 14 duplicate foreign keys.
+
+**Decision.**
+
+- **The ORM is the head schema; a revision moves the migrated side to it.**
+  §274 already builds a fresh control plane on that claim, and every production
+  database was built by `create_all`, so this direction changes nothing there
+  but the duplicates. `0113_schema_build_parity` drops the 142 defaults (each
+  column has a Python `default=` the ORM always sends, so a raw INSERT that
+  leaned on one already failed in production), renames the hand-named FKs or
+  drops the duplicate where both exist, re-creates four FKs without the ON
+  DELETE action the models do not declare, promotes four UNIQUE indexes to
+  constraints in place (`USING INDEX`), and adds what the chain never built.
+  Its `downgrade()` is a no-op: the two builds differed before it, so there is
+  no single prior schema to return to.
+- **The three guards are fixed at the source too**, accepting either name, so a
+  replay no longer creates the duplicates 0113 then removes.
+- **The test is opt-out.** A new difference fails it; an allowed one needs an
+  `ALLOWED` entry with its reason, and a stale entry fails. The pre-Alembic
+  schema is a committed snapshot (`tests/fixtures/pre_0001_schema/`) with the
+  script that re-derives it from `f6d93ab1^`, because CI checkouts are shallow.
+
+- **A tenant provisioned before the head stamp is replayed, not stamped.**
+  `services/schema_version.record_head` now records a new tenant at head in
+  the transaction that builds it (#575's day-one work), so the deploy after
+  provisioning is a no-op. Tenants provisioned earlier carry no version row
+  (one in production today), and `migrate_all_tenants.py` names each such
+  tenant in its log, then replays the chain over it. Stamping it instead
+  would be wrong: `create_all` built it at the head of the release that
+  provisioned it, not today's head, so a stamp would skip every revision
+  since. With the three guards fixed, the replay changes nothing a revision
+  would not have changed and adds no duplicate FK
+  (`test_a_tenant_provisioned_before_the_stamp_is_replayed_safely`). Tenants
+  whose replay already ran (two in production, at 0111, each with the 14
+  duplicates) lose the duplicates to 0113 on their next deploy.
+
+**Rejected.**
+- *Leaving the duplicate FKs in place as harmless.* They enforce the same
+  reference, but each is checked again on every write to 11 business tables,
+  and a later revision that drops or alters one by name would leave its twin.
+- *Declaring the 142 defaults on the models instead.* The defensible
+  direction for a fresh design, but it changes every production table to match
+  development databases, where the other way changes none.
+- *Stamping an unversioned existing tenant at today's head in
+  `migrate_all_tenants.py`.* See above: its schema is the head of its own
+  release, which the parity check cannot vouch for as today's.
 
 ## 284. GL accounts and vendors link by the ERP's unique key; a push refusal is a code the reader can act on (migration 0114, 2026-10-19)
 

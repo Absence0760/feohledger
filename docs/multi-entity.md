@@ -263,8 +263,15 @@ Which rows an entity reaches by id matches what its list shows: strict
 vendor stays reachable from every entity, the `vendor_matching` rule) and for
 workflow definitions (a NULL definition is org-wide). Catalog items also
 validate their `vendor_id` / `gl_account_id` against the catalog's entity ∪
-NULL, as requisitions and intake already did. Guards:
+NULL, as requisitions and intake already did, and a contract's `vendor_id`
+is checked the same way — on create against the selected entity (the contract
+then takes the vendor's entity), on `PATCH` against the contract's own entity,
+so the consolidated view cannot re-point one subsidiary's contract at another's
+supplier. Intake, catalogs and contracts share one lookup,
+`services/vendor_matching.get_vendor_in_scope` (an out-of-scope vendor is the
+same `404 "Vendor not found"` as an unknown one). Guards:
 `backend/tests/test_procurement_entity_scope.py`,
+`backend/tests/test_contracts.py`,
 `backend/tests/test_entity_scope_by_id_sweep.py` (shared probe:
 `tests/entity_scope_probe.py`).
 

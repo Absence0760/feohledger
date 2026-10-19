@@ -2307,18 +2307,34 @@
 								<div class="form-grid" style="margin-top: 14px;">
 									<label>
 										<span>{extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}</span>
-										<input type="password" bind:value={extractionApiKey} placeholder="sk-..." />
+										<input
+											type="password"
+											bind:value={extractionApiKey}
+											placeholder="sk-..."
+											autocomplete="new-password"
+											spellcheck="false"
+										/>
 									</label>
 								</div>
 							{:else if extractionProvider === 'aws_textract'}
 								<div class="form-grid" style="margin-top: 14px;">
 									<label>
 										<span>{m('org.extraction.awsKeyId')}</span>
-										<input type="text" bind:value={extractionAwsKeyId} />
+										<input
+											type="text"
+											bind:value={extractionAwsKeyId}
+											autocomplete="off"
+											spellcheck="false"
+										/>
 									</label>
 									<label>
 										<span>{m('org.extraction.awsSecret')}</span>
-										<input type="password" bind:value={extractionAwsSecret} />
+										<input
+											type="password"
+											bind:value={extractionAwsSecret}
+											autocomplete="new-password"
+											spellcheck="false"
+										/>
 									</label>
 									<label>
 										<span>{m('org.extraction.awsRegion')}</span>
