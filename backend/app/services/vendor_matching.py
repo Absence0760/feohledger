@@ -2,6 +2,7 @@
 
 import uuid
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
@@ -92,6 +93,49 @@ def _candidate_query(entity_id: uuid.UUID | None) -> Select:
     query = select(Vendor).where(Vendor.status.in_(_MATCHABLE_STATUSES))
     query = apply_entity_scope(query, Vendor, entity_id, include_shared=True)
     return query.order_by(Vendor.entity_id.is_(None), Vendor.created_at, Vendor.id)
+
+
+async def get_vendor_in_scope(
+    db: AsyncSession,
+    vendor_id: uuid.UUID,
+    *,
+    org_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+) -> Vendor:
+    """Load a vendor a caller is LINKING to a row in ``entity_id``, or 404.
+
+    The one owner of "may this row point at that supplier?" for every router
+    that stores a ``vendor_id`` link (intake, catalogs, contracts). An
+    org-only lookup accepted a sibling subsidiary's supplier record, and the
+    link then rode onward — onto a requisition and PO, or a contract's spend
+    rollup — committing subsidiary A's spend against B's vendor (and its bank
+    details). Entity isolation is a data-layer invariant, so it is checked
+    here, before the referencing row is written.
+
+    ``entity_id`` is the entity the referencing row belongs to (or will, on
+    create) — not necessarily the caller's selector, since a by-id edit may
+    come from the consolidated view. Admitted: that entity ∪ unstamped
+    (NULL) vendors, the :func:`_candidate_query` rule above — excluding an
+    unstamped supplier would push the caller into minting a duplicate.
+    ``entity_id is None`` is a passthrough, so single-entity tenants and the
+    consolidated view are unchanged.
+
+    An out-of-scope id gets the SAME opaque 404 as an unknown one, so the
+    response cannot enumerate another subsidiary's vendors.
+    """
+    vendor = (
+        await db.execute(
+            apply_entity_scope(
+                select(Vendor).where(Vendor.id == vendor_id, Vendor.organization_id == org_id),
+                Vendor,
+                entity_id,
+                include_shared=True,
+            )
+        )
+    ).scalar_one_or_none()
+    if vendor is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+    return vendor
 
 
 async def match_vendor(

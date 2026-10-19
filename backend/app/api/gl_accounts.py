@@ -499,7 +499,8 @@ async def sync_gl_accounts_from_erp(
         raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configured")
-    # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
+    # A sync reaches the live ERP — plan-gated, Merge.dev on Scale only; `mock`
+    # stays open (§258, §281).
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter

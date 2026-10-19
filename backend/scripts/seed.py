@@ -122,7 +122,9 @@ E2E_TENANT_COUNT = int(os.environ.get("FEOH_E2E_TENANT_COUNT", "4"))
 # `techflow` deliberately stays on `free`, so a local stack demonstrates BOTH
 # sides of every plan gate: one tenant that reaches each feature and one that
 # is correctly refused (and shows the upgrade prompt). A seed where every
-# tenant is entitled would make the 402 path unexercisable locally.
+# tenant is entitled would make the 402 path unexercisable locally. Free does
+# carry the direct ERP adapters (decisions §281), so techflow's ERP refusal is
+# the Merge.dev one (`erp_merge`).
 ACME_PLAN_CODE = "scale"
 TECHFLOW_PLAN_CODE = "free"
 

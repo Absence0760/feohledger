@@ -63,6 +63,13 @@ Access the app via a tenant subdomain:
 
 All demo accounts use password `demo`.
 
+Under `pnpm dev` the login page shows a **Dev accounts** panel listing the
+seeded accounts for the tenant you are on (acme, techflow, or an `e2e<N>`
+worker tenant); clicking one fills the email and password. It exists only in
+the dev server — `import.meta.env.DEV` drops it from `pnpm build`, and CI's
+Frontend job checks the build (`pnpm check:build:dev-accounts`) so it never
+reaches the deployed site.
+
 **Acme Corp** (http://acme.localhost:7777):
 
 | Email                      | Name            | Role       |

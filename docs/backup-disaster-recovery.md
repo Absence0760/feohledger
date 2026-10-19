@@ -116,9 +116,9 @@ Everything in this section lives only on the VM. None of it is in S3, none of it
    aws s3 ls s3://<backups-bucket>/pg/          # find the latest date
    cd deploy && ./restore.sh <YYYY-MM-DD>
    ```
-4. (Container mode.) Bring every restored database up to the current schema head. The migration commands run **inside the api container**, not on the host — there is no venv on the VM. These are the same commands `deploy/deploy.sh` runs:
+4. (Container mode.) Bring every restored database up to the current schema head. The migration commands run **inside the api container**, not on the host — there is no venv on the VM. This is the same file `deploy/deploy.sh` runs (`backend/scripts/deploy_migrate.sh`: `init_control_plane.py`, `alembic upgrade head`, `migrate_all_tenants.py`):
    ```bash
-   ./compose.sh run --rm api sh -c "python scripts/init_control_plane.py && alembic upgrade head && python scripts/migrate_all_tenants.py"
+   ./compose.sh run --rm api sh scripts/deploy_migrate.sh
    ```
    Step 2 already ran these once, but it ran them against an empty cluster — the restore in step 3 is what put the tenant databases there, so they need it again.
 5. Rebuild `deploy/tenants.caddy`. A fresh VM has the empty seeded copy, so **every tenant subdomain is unserved until its block is back**. List the slugs from the control plane and append one block each, then reload Caddy without a restart:

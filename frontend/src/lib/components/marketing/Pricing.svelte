@@ -6,7 +6,7 @@
 	import { reveal } from '#lib/actions/reveal.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { PLANS } from '#lib/marketing/plans.generated.ts';
-	import { CORE_FEATURE_KEYS, pricingTiers, topPlanName } from '#lib/marketing/pricing.ts';
+	import { pricingTiers, topPlanName } from '#lib/marketing/pricing.ts';
 
 	// Every price, allowance, overage rate and feature below comes from the
 	// plan catalogue, via `lib/marketing/pricing.ts` over the GENERATED
@@ -82,7 +82,7 @@
 						: m('marketing.pricing.coreHeading')}
 				</p>
 				<ul class="plan-features">
-					{#each tier.buildsOn ? tier.addedFeatures : CORE_FEATURE_KEYS as key (key)}
+					{#each tier.listedFeatures as key (key)}
 						<li>
 							<span class="check" aria-hidden="true"><IconCheck /></span>
 							<span>{m(key)}</span>

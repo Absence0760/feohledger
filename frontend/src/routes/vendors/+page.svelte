@@ -1028,9 +1028,15 @@
 	   min-width keeps those two readable, so on a narrow window the table
 	   scrolls inside its region rather than crushing them. */
 	.vendor-table :global(table) {
-		/* The fixed columns total ~1,030px; this leaves Vendor and Email ~215px
-		   each before the table scrolls inside its region. */
-		min-width: 1460px;
+		/* The fixed columns total ~1,030px; this leaves Vendor and Email ~175px
+		   each before the table scrolls inside its region. Sized to the 1,388px
+		   region a 1666px window gives with the sidebar open — the bar #574 set
+		   for the exceptions queue. At 1460px it overflowed that region by 72px,
+		   so a new (unverified) vendor's Verify / Reject actions sat past the
+		   card's edge exactly where AP onboards suppliers (#575). Vendor names
+		   wrap and email clips with its full value in `title`, so the narrower
+		   share loses nothing. */
+		min-width: 1380px;
 	}
 	.vendor-table :global(th.checkbox-col) { width: 44px; }
 	.vendor-table :global(th.col-code) { width: 96px; }

@@ -76,6 +76,7 @@ from app.services.catalog_service import (
 )
 from app.services.punchout_adapters import PunchoutError
 from app.services.requisition_service import next_requisition_number, recompute_total
+from app.services.vendor_matching import get_vendor_in_scope
 from app.services.webhook_security import extract_signature_header, verify_hmac_sha256
 from app.tenant import (
     apply_entity_scope,
@@ -249,18 +250,7 @@ async def _resolve_vendor_id(
         vendor_uuid = uuid.UUID(raw)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid vendor_id")
-    exists = (
-        await db.execute(
-            apply_entity_scope(
-                select(Vendor.id).where(Vendor.id == vendor_uuid, Vendor.organization_id == org_id),
-                Vendor,
-                entity_id,
-                include_shared=True,
-            )
-        )
-    ).scalar_one_or_none()
-    if exists is None:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    await get_vendor_in_scope(db, vendor_uuid, org_id=org_id, entity_id=entity_id)
     return vendor_uuid
 
 

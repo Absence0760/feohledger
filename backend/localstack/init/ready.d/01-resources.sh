@@ -43,4 +43,18 @@ awslocal s3api put-object-lock-configuration --bucket feoh-audit-worm \
   --object-lock-configuration \
   'ObjectLockEnabled=Enabled,Rule={DefaultRetention={Mode=COMPLIANCE,Days=2555}}' >/dev/null 2>&1 || true
 
+# The app KMS key that seals tenant provider credentials
+# (`services/credential_crypto`), standing in for infra/'s
+# `alias/feohledger-app-<environment>`. Point the backend at it with
+# FEOH_CREDENTIAL_KMS_KEY_ID=alias/feohledger-app-local — a deployed
+# environment refuses to boot without a KMS key id, and CI's day-one job boots
+# production-shaped against this one. An alias can only be created once, so
+# only a missing one is created.
+if ! awslocal kms describe-key --key-id alias/feohledger-app-local >/dev/null 2>&1; then
+  echo "[init] creating KMS key alias/feohledger-app-local..."
+  key_id=$(awslocal kms create-key --description "feohledger app key (local)" \
+    --query KeyMetadata.KeyId --output text)
+  awslocal kms create-alias --alias-name alias/feohledger-app-local --target-key-id "$key_id"
+fi
+
 echo "[init] done. resources ready."

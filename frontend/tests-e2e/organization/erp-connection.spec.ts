@@ -251,12 +251,14 @@ test.describe('/organization ERP connection', () => {
 		}
 	});
 
-	test('Merge.dev offers the long tail and names its plan', async ({ page }) => {
+	test('Merge.dev offers the long tail on a plan that includes it', async ({ page }) => {
 		await page.goto('/organization?section=erp');
 		const card = panel(page);
 		try {
 			await card.getByTestId('erp-provider-select').selectOption('merge_dev');
-			await expect(card.getByText('Connecting through Merge.dev is part of the Scale plan.')).toBeVisible();
+			// The worker is on Scale, which grants `erp_merge`: the form, not the
+			// upgrade notice (`billing/plan-gates.spec.ts` covers the other side).
+			await expect(card.getByTestId('erp-merge-plan-upgrade')).toHaveCount(0);
 			const longTail = card.getByTestId('erp-merge-type');
 			await expect(longTail.locator('option[value="sap_s4hana"]')).toHaveCount(1);
 			// Merge.dev's catch-all is labelled from the catalogue, not the wire.

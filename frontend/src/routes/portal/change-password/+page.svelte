@@ -37,17 +37,43 @@
 			{#if error}<div class="error">{error}</div>{/if}
 		</div>
 
+		<!-- Password managers file a new password under the username field in
+		     the same form (the pattern `routes/change-password` uses). A supplier
+		     lands here with the temp their AP team issued, so this is the save
+		     that matters. Hidden, read-only, out of the tab order and the
+		     accessibility tree. -->
+		<input
+			type="email"
+			name="username"
+			autocomplete="username"
+			value={portalAuth.user?.email ?? ''}
+			readonly
+			hidden
+			tabindex="-1"
+			aria-hidden="true"
+		/>
 		<label>
 			<span>{m('portal.changePassword.current')}</span>
-			<input type="password" bind:value={currentPassword} required />
+			<input
+				type="password"
+				bind:value={currentPassword}
+				required
+				autocomplete="current-password"
+			/>
 		</label>
 		<label>
 			<span>{m('portal.changePassword.new')}</span>
-			<input type="password" bind:value={newPassword} required minlength="12" />
+			<input
+				type="password"
+				bind:value={newPassword}
+				required
+				minlength="12"
+				autocomplete="new-password"
+			/>
 		</label>
 		<label>
 			<span>{m('portal.changePassword.confirm')}</span>
-			<input type="password" bind:value={confirm} required />
+			<input type="password" bind:value={confirm} required autocomplete="new-password" />
 		</label>
 		<button type="submit" disabled={loading}>
 			{loading ? m('portal.changePassword.saving') : m('portal.changePassword.save')}

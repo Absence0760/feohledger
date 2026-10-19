@@ -63,6 +63,16 @@ feoh_pg pg_dumpall "${GLOBALS_FLAGS[@]}" |
 
 DBS=$(feoh_pg psql -d "$LIST_DB" -Atc \
 	"SELECT datname FROM pg_database WHERE datname = 'feohledger' OR datname LIKE 'feoh\\_%' ORDER BY datname")
+# A listing without the control plane is a listing of the wrong server or the
+# wrong database, not a quiet night. It used to dump nothing, report "backup
+# complete (0 databases)" and ping the heartbeat — the dead-man's-switch kept
+# reporting healthy over backups that held nothing.
+# A here-string, not a pipe: `grep -q` stops reading at its first match, and
+# under pipefail a writer still mid-list would die of SIGPIPE and fail this.
+grep -qx feohledger <<<"$DBS" || {
+	echo "backup.sh: the control-plane database 'feohledger' is not in the server's database list — refusing to report a backup that holds nothing." >&2
+	exit 1
+}
 
 for db in $DBS; do
 	feoh_pg pg_dump -Fc -d "$db" |
