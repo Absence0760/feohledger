@@ -19,9 +19,11 @@ from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.api.deps import ROLE_ADMIN
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
 from app.models import Base
+from app.models.billing import Subscription
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
 from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscription
@@ -91,6 +93,12 @@ CONTROL_TABLES: frozenset[str] = frozenset(
         "provider_credentials",
     }
 )
+
+
+class ControlPlaneNotInitialised(RuntimeError):
+    """The control plane lacks its baseline (the system roles), so a tenant
+    provisioned into it would be unusable. The role check runs before the
+    tenant database is created, so a broken control plane costs nothing."""
 
 
 @dataclass
@@ -298,6 +306,43 @@ async def organization_slug_exists(slug: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
+async def _system_admin_role(session) -> Role | None:
+    # The SYSTEM role (organization_id NULL) — an org's custom role may share
+    # the name, and must never be the one granted.
+    return (
+        await session.execute(
+            select(Role).where(Role.name == ROLE_ADMIN, Role.organization_id.is_(None))
+        )
+    ).scalar_one_or_none()
+
+
+_NO_ADMIN_ROLE = (
+    f"the control plane has no system {ROLE_ADMIN!r} role, so the new tenant's admin "
+    "would hold no role. Run scripts/init_control_plane.py (deploy.sh does), which "
+    "seeds the system roles."
+)
+
+
+async def _require_system_admin_role() -> None:
+    """Refuse up front, before a tenant database exists to clean up."""
+    async with control_session_factory() as session:
+        if await _system_admin_role(session) is None:
+            raise ControlPlaneNotInitialised(_NO_ADMIN_ROLE)
+
+
+async def _delete_control_rows(org_id: uuid.UUID) -> None:
+    """Undo `_provision_into`'s committed control-plane rows for one org."""
+    async with control_session_factory() as session:
+        user_ids = select(User.id).where(User.organization_id == org_id)
+        await session.execute(UserRole.__table__.delete().where(UserRole.user_id.in_(user_ids)))
+        await session.execute(User.__table__.delete().where(User.organization_id == org_id))
+        await session.execute(
+            Subscription.__table__.delete().where(Subscription.organization_id == org_id)
+        )
+        await session.execute(Organization.__table__.delete().where(Organization.id == org_id))
+        await session.commit()
+
+
 async def provision_tenant(
     *,
     company_name: str,
@@ -324,6 +369,7 @@ async def provision_tenant(
     """
     validate_slug_format(slug)
     db_name = f"{settings.tenant_db_prefix}{slug}"
+    await _require_system_admin_role()
 
     created_db = await _create_postgres_database(db_name)
     org_id = uuid.uuid4()
@@ -385,19 +431,21 @@ async def _provision_into(
             must_change_password=must_change_password,
         )
 
-        # Grant the admin role if it exists (created by seed.py). In a fresh
-        # DB without seeds, skip silently — RBAC roles can be provisioned
-        # later by an admin endpoint.
-        admin_role = (
-            await session.execute(select(Role).where(Role.name == "admin"))
-        ).scalar_one_or_none()
+        # The SYSTEM admin role (organization_id NULL — an org's custom role
+        # may share the name). It is part of the control-plane baseline
+        # (`control_plane_bootstrap`, run by every deploy), so a missing one is
+        # a broken control plane, and refused: provisioning used to skip the
+        # grant silently, creating an admin who could do nothing and no way for
+        # anyone to notice but that admin (#566).
+        admin_role = await _system_admin_role(session)
+        if admin_role is None:  # removed since provision_tenant checked
+            raise ControlPlaneNotInitialised(_NO_ADMIN_ROLE)
 
         session.add(org)
         session.add(user)
         await session.flush()
 
-        if admin_role is not None:
-            session.add(UserRole(user_id=user_id, role_id=admin_role.id))
+        session.add(UserRole(user_id=user_id, role_id=admin_role.id))
 
         # Baseline billing so this org isn't permanently locked out of every
         # entitlement-gated feature (issue #180) and can actually use
@@ -409,12 +457,30 @@ async def _provision_into(
         # "pro" that were never a real billing tier), not a `Plan.code`;
         # upgrading to a paid, entitled tier is what change-plan is for.
         await ensure_plan_catalog(session)
-        await ensure_subscription(session, organization_id=org_id, plan_code="free")
+        if await ensure_subscription(session, organization_id=org_id, plan_code="free") is None:
+            # ensure_plan_catalog creates `free` when it is missing, so this is
+            # unreachable unless that write silently failed — and an org with no
+            # subscription can never change plan (issue #180). Refused, like a
+            # missing role, rather than provisioning a tenant stuck on nothing.
+            raise ControlPlaneNotInitialised(
+                "the plan catalogue has no 'free' plan to subscribe the new tenant to."
+            )
 
         await session.commit()
         logger.info("Provisioned org %s (%s) + admin user %s", slug, org_id, admin_email)
 
-    await _create_tenant_tables(db_name, organization_id=org_id)
+    try:
+        await _create_tenant_tables(db_name, organization_id=org_id)
+    except Exception:
+        # The control-plane rows are already committed. Left behind, they name
+        # a database the caller is about to drop: the slug is burned, a retry
+        # trips the unique slug, and `create_tenant.py --skip-existing` (so
+        # add-tenant.sh) reports the dead tenant as "already exists" (#575).
+        try:
+            await _delete_control_rows(org_id)
+        except Exception:  # noqa: BLE001 — the original error is the one to raise
+            logger.exception("Failed to remove control-plane rows after a failed provision")
+        raise
 
     return ProvisioningResult(
         organization_id=org_id,

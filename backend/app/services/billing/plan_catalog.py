@@ -188,9 +188,9 @@ async def ensure_subscription(
     `status != "canceled"`). No-ops and returns the existing row if the org
     is already subscribed to anything — never creates a second live
     subscription. Returns `None` when `plan_code` isn't in the catalog yet
-    (a fresh control DB before `ensure_plan_catalog` has run) — mirrors the
-    "skip silently, don't crash provisioning" pattern already used for the
-    admin role lookup in `tenant_provisioning._provision_into`.
+    (a fresh control DB before `ensure_plan_catalog` has run). A caller for
+    which a missing plan is a broken control plane says so itself —
+    `tenant_provisioning._provision_into` raises on it.
 
     Having NO live subscription is not the same as the `(org, plan)` slot
     being free: `uq_subscription_org_plan` ignores status, so an org whose

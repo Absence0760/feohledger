@@ -805,6 +805,216 @@ async def test_provision_tenant_drops_orphan_db_when_provisioning_fails(
 
 
 # ---------------------------------------------------------------------------
+# Silent-skip audit (#575): what provisioning used to skip, it now refuses
+# ---------------------------------------------------------------------------
+
+
+async def test_provisioning_refuses_a_control_plane_without_the_system_roles(throwaway_slug):
+    """The #566 state: control-plane tables, no system roles. Provisioning used
+    to skip the admin grant silently and create an admin with no role; it now
+    refuses before writing anything — before it even creates the database."""
+    import asyncpg
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.database import _make_tenant_url
+    from app.services.control_plane_bootstrap import create_control_tables
+    from app.services.tenant_provisioning import (
+        ControlPlaneNotInitialised,
+        _parse_maintenance_dsn,
+    )
+
+    try:
+        maint = await asyncpg.connect(**_parse_maintenance_dsn())
+    except (OSError, asyncpg.PostgresError) as exc:
+        pytest.skip(f"requires a live Postgres (pnpm db:up): {exc}")
+    control_name = f"noroles_{uuid.uuid4().hex[:12]}"
+    await maint.execute(f'CREATE DATABASE "{control_name}"')
+    engine = create_async_engine(_make_tenant_url(control_name))
+    try:
+        await create_control_tables(engine)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        with patch.object(tenant_provisioning, "control_session_factory", factory):
+            with pytest.raises(ControlPlaneNotInitialised, match="init_control_plane"):
+                await provision_tenant(
+                    company_name="Roleless Co",
+                    slug=throwaway_slug,
+                    admin_email=f"admin@{throwaway_slug}.test",
+                    admin_name="Roleless Admin",
+                    admin_password="Sup3rSecret!pw",
+                )
+        async with factory() as s:
+            assert (await s.execute(select(func.count()).select_from(Organization))).scalar() == 0
+            assert (await s.execute(select(func.count()).select_from(User))).scalar() == 0
+        assert not await _database_exists(f"{settings.tenant_db_prefix}{throwaway_slug}")
+    finally:
+        await engine.dispose()
+        await maint.execute(f'DROP DATABASE IF EXISTS "{control_name}" WITH (FORCE)')
+        await maint.close()
+
+
+async def test_an_org_custom_role_named_admin_is_never_the_one_granted(realdb, throwaway_slug):
+    """The lookup is the SYSTEM role. An org may define its own role called
+    "admin"; the old name-only lookup either raised MultipleResultsFound or,
+    with no system role, granted the new tenant's admin another org's role."""
+    factory = realdb.control_sessionmaker()
+    custom = Role(name="admin", organization_id=realdb.info("a").org_id)
+    async with factory() as s:
+        s.add(custom)
+        await s.commit()
+    result = None
+    try:
+        with patch.object(tenant_provisioning, "control_session_factory", factory):
+            result = await provision_tenant(
+                company_name="Custom Role Co",
+                slug=throwaway_slug,
+                admin_email=f"admin@{throwaway_slug}.test",
+                admin_name="Custom Role Admin",
+                admin_password="Sup3rSecret!pw",
+            )
+        async with factory() as s:
+            granted = (
+                await s.execute(
+                    select(Role)
+                    .join(UserRole, UserRole.role_id == Role.id)
+                    .where(UserRole.user_id == result.user_id)
+                )
+            ).scalar_one()
+        assert granted.name == "admin"
+        assert granted.organization_id is None
+    finally:
+        async with factory() as s:
+            if result is not None:
+                await s.execute(
+                    UserRole.__table__.delete().where(UserRole.user_id == result.user_id)
+                )
+                await s.execute(User.__table__.delete().where(User.id == result.user_id))
+                await s.execute(
+                    Subscription.__table__.delete().where(
+                        Subscription.organization_id == result.organization_id
+                    )
+                )
+                await s.execute(
+                    Organization.__table__.delete().where(Organization.id == result.organization_id)
+                )
+            await s.execute(Role.__table__.delete().where(Role.id == custom.id))
+            await s.commit()
+        await _drop_database(f"{settings.tenant_db_prefix}{throwaway_slug}")
+
+
+async def test_a_failed_table_build_leaves_no_control_plane_rows(realdb, throwaway_slug):
+    """The org, admin, role grant and subscription commit before the tenant
+    tables are built. When the build fails and the database is dropped, those
+    rows used to stay — an org naming a database that no longer exists, a slug
+    no retry could reuse, and `create_tenant.py --skip-existing` (so
+    add-tenant.sh) reporting the dead tenant as "already exists"."""
+    factory = realdb.control_sessionmaker()
+
+    async def _tables_fail(*_args, **_kwargs):
+        raise RuntimeError("table build failed")
+
+    with (
+        patch.object(tenant_provisioning, "control_session_factory", factory),
+        patch.object(tenant_provisioning, "_create_tenant_tables", _tables_fail),
+    ):
+        with pytest.raises(RuntimeError, match="table build failed"):
+            await provision_tenant(
+                company_name="Half Built Co",
+                slug=throwaway_slug,
+                admin_email=f"admin@{throwaway_slug}.test",
+                admin_name="Half Built Admin",
+                admin_password="Sup3rSecret!pw",
+            )
+        assert not await tenant_provisioning.organization_slug_exists(throwaway_slug)
+    async with factory() as s:
+        users = (
+            await s.execute(
+                select(func.count())
+                .select_from(User)
+                .where(User.email == f"admin@{throwaway_slug}.test")
+            )
+        ).scalar()
+    assert users == 0
+    assert not await _database_exists(f"{settings.tenant_db_prefix}{throwaway_slug}")
+
+
+async def test_a_failed_orphan_drop_never_masks_the_provisioning_error(monkeypatch):
+    """The orphan-database cleanup is best-effort: when it fails too, it is
+    logged and the ORIGINAL error is what the caller sees."""
+
+    async def _boom(**_kwargs):
+        raise RuntimeError("the real provisioning failure")
+
+    async def _drop_fails(_db_name):
+        raise OSError("drop failed too")
+
+    monkeypatch.setattr(
+        tenant_provisioning, "_create_postgres_database", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(tenant_provisioning, "_provision_into", _boom)
+    monkeypatch.setattr(tenant_provisioning, "_drop_postgres_database", _drop_fails)
+    monkeypatch.setattr(tenant_provisioning, "_require_system_admin_role", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="the real provisioning failure"):
+        await provision_tenant(
+            company_name="Doomed Co",
+            slug="doomedco",
+            admin_email="admin@doomed.test",
+            admin_name="Doomed Admin",
+            admin_password="Sup3rSecret!pw",
+        )
+
+
+def _load_create_tenant_cli(monkeypatch, argv: list[str]):
+    spec = importlib.util.spec_from_file_location("_create_tenant_cli", _CREATE_TENANT_CLI)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    engine = MagicMock()
+    engine.dispose = AsyncMock()
+    monkeypatch.setattr(cli, "control_engine", engine)
+    monkeypatch.setattr(sys, "argv", ["create_tenant.py", *argv])
+    return cli
+
+
+_CLI_ARGS = [
+    "--name",
+    "Acme Co",
+    "--slug",
+    "acmeco",
+    "--admin-email",
+    "admin@acme.test",
+    "--admin-password",
+    "Aa1-not-used-000000",
+]
+
+
+async def test_create_tenant_skip_existing_skips_without_provisioning(monkeypatch, capsys):
+    """The one deliberate skip on this path, and what add-tenant.sh re-runs
+    rely on: an existing slug exits 0 and provisions nothing."""
+    cli = _load_create_tenant_cli(monkeypatch, [*_CLI_ARGS, "--skip-existing"])
+    monkeypatch.setattr(cli, "organization_slug_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        cli, "provision_tenant", AsyncMock(side_effect=AssertionError("provisioned anyway"))
+    )
+
+    assert await cli.main() is None
+    assert "already exists" in capsys.readouterr().out
+
+
+async def test_create_tenant_cli_fails_when_provisioning_fails(monkeypatch):
+    """Anything but a bad slug propagates, so `python scripts/create_tenant.py`
+    exits non-zero and add-tenant.sh stops before touching Caddy."""
+    from app.services.tenant_provisioning import ControlPlaneNotInitialised
+
+    cli = _load_create_tenant_cli(monkeypatch, _CLI_ARGS)
+    monkeypatch.setattr(
+        cli, "provision_tenant", AsyncMock(side_effect=ControlPlaneNotInitialised("no roles"))
+    )
+
+    with pytest.raises(ControlPlaneNotInitialised):
+        await cli.main()
+
+
+# ---------------------------------------------------------------------------
 # Role-name uniqueness (the constraint provision_tenant's role lookup relies on)
 # ---------------------------------------------------------------------------
 

@@ -72,13 +72,25 @@ fi
 # make the one leg most likely to need a retry the one that cannot have it.
 # A genuine typo is caught at the end of this section, where nothing at all is
 # found to remove.
+#
+# Only delete_tenant.py's "no such organisation" (exit 4) means that. Any other
+# failure — the api container down, the database unreachable, a partner org
+# refused — used to be read the same way, and the run went on to delete the
+# backups of a tenant whose live data was still there, then print the
+# confirmation the customer is sent.
 echo "==> inventory"
 TENANT_PRESENT=1
-if ! "${COMPOSE[@]}" exec -T api python scripts/delete_tenant.py --slug "$SLUG" --dry-run; then
+INVENTORY_RC=0
+"${COMPOSE[@]}" exec -T api python scripts/delete_tenant.py --slug "$SLUG" --dry-run || INVENTORY_RC=$?
+case "$INVENTORY_RC" in
+0) ;;
+4)
 	TENANT_PRESENT=0
 	echo "    No organisation with that slug — already deleted, or never existed."
 	echo "    Continuing: the Caddy and backup legs below key off the slug alone."
-fi
+	;;
+*) die "the tenant inventory failed (delete_tenant.py exit ${INVENTORY_RC}, error above) — nothing was changed." ;;
+esac
 
 # Every version and delete marker of this tenant's nightly dumps, across every
 # date prefix. Listed ONCE, here, at the top level — not from inside the delete

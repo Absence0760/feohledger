@@ -189,6 +189,30 @@ async def test_second_deploy_is_a_no_op(scratch_control_db):
         await conn.close()
 
 
+async def test_a_later_deploy_restores_a_missing_system_role(scratch_control_db):
+    """An initialised control plane is not a bare no-op: a system role that went
+    missing is restored, since provision_tenant refuses to provision without the
+    system admin role (#575 silent-skip audit)."""
+    name, dsn = scratch_control_db
+    assert _run(DEPLOY_MIGRATE, name).returncode == 0
+    conn = await asyncpg.connect(**dsn)
+    try:
+        await conn.execute("DELETE FROM roles WHERE name = 'admin' AND organization_id IS NULL")
+    finally:
+        await conn.close()
+
+    again = _run(DEPLOY_MIGRATE, name)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "restored 1 missing system role(s)" in again.stdout
+
+    conn = await asyncpg.connect(**dsn)
+    try:
+        roles = {r["name"] for r in await conn.fetch("SELECT name FROM roles")}
+    finally:
+        await conn.close()
+    assert roles == set(ALL_ROLES)
+
+
 async def test_a_database_stamped_while_empty_is_refused(scratch_control_db):
     """The state the first production deploy left behind."""
     name, dsn = scratch_control_db

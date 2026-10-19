@@ -56,6 +56,15 @@ class TenantDeletionError(RuntimeError):
     """A deletion that must not proceed — unknown slug, or a parent org."""
 
 
+class TenantNotFound(TenantDeletionError):
+    """No organisation has the slug: already deleted, or never existed.
+
+    Its own type because it is the one refusal a caller may treat as "nothing
+    left to do here" — ``deploy/remove-tenant.sh`` finishes the backup and Caddy
+    legs on it — where every other refusal must stop the run.
+    """
+
+
 # ---------------------------------------------------------------------------
 # What a deletion sweeps out of the control plane.
 #
@@ -157,7 +166,7 @@ async def _load_plan(session, slug: str) -> TenantDeletionPlan:
         )
     ).first()
     if row is None:
-        raise TenantDeletionError(
+        raise TenantNotFound(
             f"no organisation with slug {slug!r} — nothing to delete. "
             "(A tenant already deleted leaves no row; this is also what a typo looks like.)"
         )

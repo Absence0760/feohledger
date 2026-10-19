@@ -33,10 +33,17 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 
 from app.services.tenant_deletion import (
     TenantDeletionError,
+    TenantNotFound,
     delete_tenant,
     format_confirmation,
     plan_tenant_deletion,
 )
+
+#: No organisation has the slug. Distinct from 2 (any other refusal) and from
+#: an exception's 1, because `deploy/remove-tenant.sh` treats exactly this one as
+#: "the live data is already gone" and carries on with the backups — every
+#: other failure has to stop it before it deletes them.
+EXIT_NOT_FOUND = 4
 
 
 def _print_plan(plan) -> None:
@@ -77,6 +84,9 @@ async def main() -> int:
 
     try:
         plan = await plan_tenant_deletion(args.slug)
+    except TenantNotFound as exc:
+        print(f"delete_tenant: {exc}", file=sys.stderr)
+        return EXIT_NOT_FOUND
     except TenantDeletionError as exc:
         print(f"delete_tenant: {exc}", file=sys.stderr)
         return 2

@@ -27,7 +27,12 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from app.database import control_engine
-from app.services.control_plane_bootstrap import ControlPlaneState, initialise, inspect
+from app.services.control_plane_bootstrap import (
+    ControlPlaneState,
+    ensure_system_roles,
+    initialise,
+    inspect,
+)
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -59,7 +64,15 @@ async def main() -> int:
     try:
         state = await inspect(control_engine)
         if state is ControlPlaneState.PRESENT:
-            print("Control plane already initialised.")
+            # Not a bare no-op: the system roles are part of the baseline, and
+            # one gone missing would make every new tenant unprovisionable.
+            added = await ensure_system_roles(control_engine)
+            if added:
+                print(
+                    f"Control plane already initialised; restored {added} missing system role(s)."
+                )
+            else:
+                print("Control plane already initialised.")
             return 0
         if state is ControlPlaneState.STAMPED_EMPTY:
             print(STAMPED_EMPTY_HELP, file=sys.stderr)
