@@ -53,8 +53,15 @@ class Neighbor:
 
 
 def extract_invoice_text(file_bytes: bytes) -> str:
-    """Pull the text layer out of a PDF (or return empty for scanned docs)."""
-    if not file_bytes:
+    """Pull the text layer out of a PDF (or return empty for scanned docs).
+
+    Anything that is not a PDF — an image, a UBL / CII ``.xml`` e-invoice —
+    has no text layer to pull, so it is empty without asking PyMuPDF. Opening
+    those as a PDF failed every time, and logged a parser warning for every
+    image or e-invoice upload that described nothing wrong (#575).
+    """
+    # The header may follow a little leading junk; readers look in the first KiB.
+    if not file_bytes or b"%PDF-" not in file_bytes[:1024]:
         return ""
     try:
         import fitz  # PyMuPDF
