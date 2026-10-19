@@ -1139,9 +1139,8 @@ async def test_completing_an_approved_invoice_on_free(realdb, monkeypatch, erp, 
     """The completion leg (`POST /complete` on an approved invoice with the ERP
     step on): a direct ERP is pushed on Free; a Merge one is refused BEFORE the
     transition, so the invoice stays `approved` and payable."""
-    from app.models.invoice import InvoiceStatus
-
     from app.api import workflow as workflow_api
+    from app.models.invoice import InvoiceStatus
 
     async def _erp_step_on(*_args, **_kwargs):
         return True
