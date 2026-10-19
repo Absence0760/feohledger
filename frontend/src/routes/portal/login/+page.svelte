@@ -199,7 +199,7 @@
 
 			<label>
 				<span>{m('portal.login.email')}</span>
-				<input type="email" bind:value={email} required autocomplete="email" />
+				<input type="email" bind:value={email} required autocomplete="username" />
 			</label>
 			<label>
 				<span>{m('portal.login.password')}</span>

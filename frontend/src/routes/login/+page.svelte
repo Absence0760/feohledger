@@ -123,7 +123,7 @@
 		{#if !ssoOnly}
 			<label>
 				<span>{m('auth.login.email')}</span>
-				<input type="email" bind:value={email} required autocomplete="email" />
+				<input type="email" bind:value={email} required autocomplete="username" />
 			</label>
 			<label>
 				<span>{m('auth.login.password')}</span>

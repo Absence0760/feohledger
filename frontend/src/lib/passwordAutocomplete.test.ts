@@ -27,7 +27,10 @@ import { describe, expect, it } from 'vitest';
  * And a form that changes a password (it holds both a `current-password` and a
  * `new-password` input) must also carry an `autocomplete="username"` field —
  * hidden, read-only, as `routes/change-password/+page.svelte` does — or the
- * password manager files the new password against no account.
+ * password manager files the new password against no account. A sign-in form
+ * (a `current-password` input and an email/text identifier) must mark that
+ * identifier `autocomplete="username"` — `email` is not the token a password
+ * manager pairs a saved password with, even when the identifier is an address.
  *
  * Like `a11y/imageDragging.test.ts`, the template is parsed with the Svelte
  * compiler and only `ast.fragment` is walked, so a `<script>` comment that
@@ -125,6 +128,24 @@ function findings(source: string, path = 'inline.svelte'): string[] {
 	for (const form of collect(ast.fragment, 'form')) {
 		const inputs = collect(form.fragment, 'input');
 		const values = new Set(inputs.map(autocompleteOf));
+		// A SIGN-IN form (current password, nothing new): password managers pair
+		// the saved password with the `username` field, and `email` is not that
+		// token — the form's identifier must say `username` even when it is an
+		// address (`type="email"` stays; the token is about purpose, not shape).
+		// A step-up re-authentication (password only, no identifier field) is
+		// not a sign-in form and is left alone.
+		if (values.has('current-password') && !values.has('new-password')) {
+			for (const input of inputs) {
+				const type = (literal(attr(input, 'type')) ?? 'text').trim().toLowerCase();
+				if (type !== 'email' && type !== 'text') continue;
+				const value = autocompleteOf(input);
+				if (value === 'one-time-code' || value === 'username') continue;
+				out.push(
+					`${path}: a sign-in <form>'s account identifier must be autocomplete="username" ` +
+						`(found ${value ?? '(missing)'}) on ${excerpt(input, source)}`
+				);
+			}
+		}
 		if (values.has('current-password') && values.has('new-password') && !values.has('username')) {
 			out.push(
 				`${path}: a password-change <form> has no autocomplete="username" field ` +
@@ -165,6 +186,21 @@ describe('every password input declares its autocomplete purpose (#575)', () => 
 		expect(found[1]).toContain('shown ?');
 		expect(found[2]).toContain('autocomplete=nope');
 		expect(found[3]).toContain('password-change <form>');
+	});
+
+	it('a sign-in form needs a username identifier; a step-up form does not', () => {
+		const signIn = (email: string) =>
+			`<form><input type="email" ${email} /><input type="password" autocomplete="current-password" /></form>`;
+		expect(findings(signIn('autocomplete="email"'))[0]).toContain('found email');
+		expect(findings(signIn(''))[0]).toContain('found (missing)');
+		expect(findings(signIn('autocomplete="username"'))).toEqual([]);
+		// Re-authentication: a password and a one-time code, no identifier.
+		expect(
+			findings(
+				'<form><input type="password" autocomplete="current-password" />' +
+					'<input type="text" autocomplete="one-time-code" /></form>'
+			)
+		).toEqual([]);
 	});
 
 	it('every password input in src/ declares current-password / new-password / off', () => {
