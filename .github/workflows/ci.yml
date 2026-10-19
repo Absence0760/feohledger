@@ -504,7 +504,7 @@ jobs:
 
   # The iOS half of the Mobile job above, which runs on Linux and never touches
   # Xcode. Without this, the only iOS build is mobile-release.yml's, which runs
-  # once a release is published: after the merge, too late to block it. So an
+  # only on a mobile-v* tag: after the merge, too late to block it. So an
   # iOS change (the AppIcon set, the launch storyboard, a plugin bump) merged
   # unproven. This runs that job's exact build on the same runner image, so a
   # green PR means the release build compiles.

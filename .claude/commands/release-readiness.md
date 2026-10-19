@@ -6,7 +6,7 @@ Run a pre-tag readiness audit before publishing a GitHub release. Report a green
 
 ## Why this exists
 
-Releases here are **release-gated**: publishing a GitHub release fires `aws-deploy.yml` (backend → ECS/Fargate, Lambda workers, frontend → S3 + CloudFront) and `mobile-release.yml` (APK / unsigned IPA artifacts). Every job runs in the `production` environment, so its required reviewer approves before anything deploys, and `aws-deploy.yml` additionally sits behind the `AWS_DEPLOY_ENABLED` repository-variable kill switch. Cutting a tag with the working tree dirty, CI red, or unpushed commits means the deploy doesn't match what you think it does.
+Releases here are **release-gated**: publishing a GitHub release fires `vm-deploy.yml` (the single-VM deploy over SSM) and the dormant `aws-deploy.yml` (backend → ECS/Fargate, Lambda workers, frontend → S3 + CloudFront); `mobile-release.yml` (APK / unsigned IPA artifacts) runs on its own `mobile-v*` tags instead. Every job runs in the `production` environment, so its required reviewer approves before anything deploys, and `aws-deploy.yml` additionally sits behind the `AWS_DEPLOY_ENABLED` repository-variable kill switch. Cutting a tag with the working tree dirty, CI red, or unpushed commits means the deploy doesn't match what you think it does.
 
 The gates are scattered (CI status, working tree, push state, last-tag delta per workspace) and the human-eyeball version is unreliable. This command runs them in one shot.
 
