@@ -244,3 +244,9 @@ variable "alert_emails" {
     error_message = "Every entry in alert_emails must be an email address."
   }
 }
+
+variable "frontend_on_cloudfront" {
+  description = "Point the apex and the tenant wildcard at the SPA's CloudFront distribution (frontend.tf) instead of the VM. Leave false until a build has been published to the bucket and checked on the distribution's *.cloudfront.net name (issue #582 § Cut-over plan); setting it back to false is the rollback. api.<domain> stays on the VM either way."
+  type        = bool
+  default     = false
+}

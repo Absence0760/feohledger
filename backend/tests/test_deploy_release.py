@@ -301,7 +301,8 @@ def _workflow() -> dict:
 
 def _job() -> dict:
     jobs = _workflow()["jobs"]
-    assert list(jobs) == ["deploy"]
+    # build-frontend is the ungated SPA build; test_frontend_publish.py owns it.
+    assert list(jobs) == ["build-frontend", "deploy"]
     return jobs["deploy"]
 
 

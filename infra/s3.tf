@@ -357,7 +357,7 @@ resource "aws_s3_bucket_ownership_controls" "access_logs" {
 }
 
 # The S3 logging service principal writes the log objects. Pinned to this
-# account and to the three source buckets, so no other bucket can use this one
+# account and to the four source buckets, so no other bucket can use this one
 # as its log destination.
 data "aws_iam_policy_document" "access_logs_delivery" {
   statement {
@@ -378,6 +378,7 @@ data "aws_iam_policy_document" "access_logs_delivery" {
         aws_s3_bucket.invoice_files.arn,
         aws_s3_bucket.audit_logs.arn,
         aws_s3_bucket.backups.arn,
+        aws_s3_bucket.frontend.arn,
       ]
     }
 
@@ -385,6 +386,68 @@ data "aws_iam_policy_document" "access_logs_delivery" {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
       values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  # CloudFront standard logging (v2, frontend.tf) delivers through CloudWatch
+  # log delivery rather than the legacy ACL grant, which this bucket's
+  # BucketOwnerEnforced setting rules out. Only under cloudfront/, only from a
+  # delivery source in this account.
+  statement {
+    sid       = "CloudFrontAccessLogDelivery"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.access_logs.arn}/cloudfront/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:delivery-source:*"]
+    }
+  }
+
+  # Log delivery checks the destination's ACL before its first write, and
+  # refuses the delivery ("cannot access destination bucket") without this.
+  # ListBucket beside it is AWS's own recommendation: without it the checks
+  # still pass but leave AccessDenied noise in CloudTrail.
+  statement {
+    sid       = "CloudFrontAccessLogAclCheck"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketAcl", "s3:ListBucket"]
+    resources = [aws_s3_bucket.access_logs.arn]
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:delivery-source:*"]
     }
   }
 }

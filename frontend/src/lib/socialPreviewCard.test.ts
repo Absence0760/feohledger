@@ -41,14 +41,14 @@ const ENV_DEVELOPMENT = readOne(
 	}),
 	'.env.development',
 );
-const AWS_DEPLOY = readOne(
-	import.meta.glob('../../../.github/workflows/aws-deploy.yml', {
+const RELEASE_WORKFLOW = readOne(
+	import.meta.glob('../../../.github/workflows/vm-deploy.yml', {
 		query: '?raw',
 		import: 'default',
 		eager: true,
 		exhaustive: true,
 	}),
-	'aws-deploy.yml',
+	'vm-deploy.yml',
 );
 const VM_DEPLOY = readOne(
 	import.meta.glob('../../../deploy/deploy.sh', { query: '?raw', import: 'default', eager: true }),
@@ -221,10 +221,11 @@ describe('social preview card in src/app.html', () => {
 		// An origin and nothing else: a trailing slash would render `//og-image.png`.
 		expect(new URL(devValue!).origin).toBe(devValue);
 
-		// aws-deploy.yml derives it from APP_URL (failing when empty, trailing
-		// slash stripped); deploy.sh from APP_DOMAIN, which its preflight requires.
-		expect(AWS_DEPLOY).toContain('PUBLIC_SITE_URL="${APP_URL%/}" pnpm build');
-		expect(AWS_DEPLOY).toMatch(/if \[ -z "\$APP_URL" \]; then[\s\S]*?exit 1/);
+		// vm-deploy.yml's SPA build (S3 + CloudFront) derives it from APP_URL
+		// (failing when empty, trailing slash stripped); deploy.sh's VM build from
+		// APP_DOMAIN, which its preflight requires.
+		expect(RELEASE_WORKFLOW).toContain('PUBLIC_SITE_URL="${APP_URL%/}" pnpm build');
+		expect(RELEASE_WORKFLOW).toMatch(/if \[ -z "\$APP_URL" \]; then[\s\S]*?exit 1/);
 		expect(VM_DEPLOY).toContain('-e PUBLIC_SITE_URL="https://${APP_DOMAIN}"');
 	});
 

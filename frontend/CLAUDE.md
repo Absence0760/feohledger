@@ -100,7 +100,7 @@ session owned it. Never add a file there to turn a red check green.
 `package.json` declares `"packageManager": "pnpm@10.12.4"` — in **both** the
 repo root and here — and no `pnpm/action-setup` step in `.github/workflows/`
 passes a `version:` input any more. The action reads the manifest, so one edit
-moves CI, `sso-e2e`, `web-bundle-budget`, `aws-deploy`, `audit`, the VM's
+moves CI, `sso-e2e`, `web-bundle-budget`, `vm-deploy`, `audit`, the VM's
 `deploy/deploy.sh` (which reads the same field) and every contributor
 together. Before this, four different pnpm versions wrote one
 lockfile (CI on 9, `audit.yml` on 10, laptops on whatever, Dependabot on its
@@ -175,7 +175,7 @@ regenerate.
 
 CI runs Node **24** — every `setup-node` step across all six workflows that
 have one (`ci.yml` ×4, `sso-e2e`, `web-bundle-budget`, `compliance-drift`,
-`aws-deploy`, `audit`). 24 is the current Active LTS (Krypton, LTS since
+`vm-deploy`, `audit`). 24 is the current Active LTS (Krypton, LTS since
 2025-10-28, supported to 2028-04-30); Node 20 (Iron) went end-of-life on
 2026-04-30 and 22 (Jod) has been in maintenance since 2025-10-21. Pin the
 whole set together — a floor raised in one workflow and not another is worse
@@ -519,5 +519,7 @@ biometric login, swipe-to-approve.
 
 ## Deployment
 
-- **S3 + CloudFront**: publishing a GitHub release triggers `.github/workflows/aws-deploy.yml`, whose `Deploy Frontend (S3 + CloudFront)` job builds, `aws s3 sync`s to the bucket with `--delete`, and invalidates the distribution. A published **release** is the only trigger — never a push to `main` and never an ad-hoc manual run — so the deployed artifact always matches a named version, and the job runs in the `production` environment behind its required reviewer.
+- **S3 + CloudFront** (`infra/frontend.tf`, `docs/decisions.md` §278): a published release runs `.github/workflows/vm-deploy.yml`. Its ungated `build-frontend` job runs `pnpm build`. After the approved job has deployed the backend to the VM, it publishes the build with `deploy/publish-frontend.sh` and checks the edge with `deploy/smoke-frontend.sh`. **Never `aws s3 sync --delete` the bucket**: an open page lazy-loads chunks from the build it started on, so the publish uploads hashed assets first, the entry documents last, and only prunes old unused files after 30 days.
+- **Routing is a CloudFront Function, not a file-existence check.** `infra/cloudfront/spa-router.js` passes through `/_app/*`, `/marketing/*` and a named list of root files from `static/`, and rewrites everything else to `/index.html`. **Adding a new root-level file or directory to `static/` means adding it to that list.** `src/lib/deploy/spaRouter.test.ts` fails until you do. A route segment with a dot in it is still a route.
+- Until the DNS cutover, the VM's Caddy also serves a copy built by `deploy/deploy.sh`, and it is the rollback path.
 - Served from the bucket root, so the build sets no `BASE_PATH`.

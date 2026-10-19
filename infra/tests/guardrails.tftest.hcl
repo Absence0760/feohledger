@@ -6,7 +6,10 @@
 # apex-only guard, the access-log sink's delivery prerequisites, and the platform
 # domain's mail records (SES identity, DKIM, MAIL FROM, Migadu, DMARC) with their
 # input guards, and the release-deploy grant (deploy.tf): one document, one
-# instance, one sha-shaped parameter.
+# instance, one sha-shaped parameter; and the SPA stack (frontend.tf): a bucket
+# only this distribution reads, the platform certificate on the apex + wildcard,
+# a publish grant scoped to that bucket and distribution, and DNS that stays on
+# the VM until frontend_on_cloudfront moves it — with api. on the VM regardless.
 
 mock_provider "aws" {
   # A mocked policy document renders a random string, which the KMS key and
@@ -124,6 +127,45 @@ override_resource {
   override_during = plan
   values = {
     arn = "arn:aws:ssm:us-east-1:000000000000:document/feohledger-vm-deploy"
+  }
+}
+
+# The SPA stack (frontend.tf): the bucket and distribution ARNs are compared
+# exactly in the bucket and deploy-role policies, and the distribution's own
+# hostname is what the DNS alias records must point at.
+override_resource {
+  target          = aws_s3_bucket.access_logs
+  override_during = plan
+  values = {
+    arn = "arn:aws:s3:::feohledger-access-logs-test"
+  }
+}
+
+override_resource {
+  target          = aws_s3_bucket.frontend
+  override_during = plan
+  values = {
+    arn                         = "arn:aws:s3:::feohledger-frontend-test"
+    bucket_regional_domain_name = "feohledger-frontend-test.s3.us-east-1.amazonaws.com"
+  }
+}
+
+override_resource {
+  target          = aws_cloudfront_distribution.frontend
+  override_during = plan
+  values = {
+    arn            = "arn:aws:cloudfront::000000000000:distribution/E0123456789ABC"
+    id             = "E0123456789ABC"
+    domain_name    = "d0123456789abc.cloudfront.net"
+    hosted_zone_id = "Z2FDTNDATAQYW2"
+  }
+}
+
+override_resource {
+  target          = aws_eip.app
+  override_during = plan
+  values = {
+    public_ip = "192.0.2.10"
   }
 }
 
@@ -256,9 +298,29 @@ run "access_log_sink_accepts_s3_log_delivery" {
         aws_s3_bucket.invoice_files.arn,
         aws_s3_bucket.audit_logs.arn,
         aws_s3_bucket.backups.arn,
+        aws_s3_bucket.frontend.arn,
       ])
+      if contains(flatten([for p in s.principals : tolist(p.identifiers)]), "logging.s3.amazonaws.com")
     ])
-    error_message = "The delivery grant must name exactly the three source buckets, or any bucket in the account could log into the sink."
+    error_message = "The S3 delivery grant must name exactly the four source buckets, or any bucket in the account could log into the sink."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.access_logs_delivery.statement :
+      toset(s.resources) == toset(["arn:aws:s3:::feohledger-access-logs-test/cloudfront/*"])
+      if contains(flatten([for p in s.principals : tolist(p.identifiers)]), "delivery.logs.amazonaws.com") && contains(s.actions, "s3:PutObject")
+    ])
+    error_message = "CloudFront log delivery may write under cloudfront/ only."
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.access_logs_delivery.statement :
+      toset(s.actions) == toset(["s3:GetBucketAcl", "s3:ListBucket"]) && toset(s.resources) == toset(["arn:aws:s3:::feohledger-access-logs-test"])
+      if contains(flatten([for p in s.principals : tolist(p.identifiers)]), "delivery.logs.amazonaws.com")
+    ])
+    error_message = "CloudWatch log delivery reads the sink's ACL before writing; without s3:GetBucketAcl on the bucket the delivery is refused."
   }
 }
 
@@ -637,5 +699,168 @@ run "deploy_document_takes_only_a_commit_sha" {
   assert {
     condition     = element(one(jsondecode(aws_ssm_document.deploy.content).mainSteps).inputs.runCommand, -1) == "exit $rc"
     error_message = "The document must exit with deploy.sh's status, or a failed deploy reports success."
+  }
+}
+
+# ── SPA on S3 + CloudFront (frontend.tf) ─────────────────────────────────────
+
+run "frontend_bucket_is_never_public_and_only_this_distribution_reads_it" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.frontend.block_public_acls,
+      aws_s3_bucket_public_access_block.frontend.block_public_policy,
+      aws_s3_bucket_public_access_block.frontend.ignore_public_acls,
+      aws_s3_bucket_public_access_block.frontend.restrict_public_buckets,
+    ])
+    error_message = "The SPA bucket must block every form of public access; CloudFront reads it through OAC."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.frontend_bucket.statement :
+      flatten([for p in s.principals : tolist(p.identifiers)]) == ["cloudfront.amazonaws.com"]
+      && flatten([for c in s.condition : tolist(c.values) if c.variable == "AWS:SourceArn"]) == [aws_cloudfront_distribution.frontend.arn]
+      if s.effect == null || s.effect == "Allow"
+    ])
+    error_message = "Every Allow on the SPA bucket must go to the CloudFront service principal, pinned to this one distribution."
+  }
+
+  assert {
+    condition = contains(flatten([
+      for s in data.aws_iam_policy_document.frontend_bucket.statement : tolist(s.actions)
+      if s.effect == null || s.effect == "Allow"
+    ]), "s3:ListBucket")
+    error_message = "Without s3:ListBucket, S3 answers 403 for a missing key and a missing asset stops being a 404."
+  }
+
+  assert {
+    condition     = one(aws_s3_bucket_versioning.frontend.versioning_configuration).status == "Enabled"
+    error_message = "The SPA bucket must be versioned — restoring prior object versions is the frontend rollback."
+  }
+
+  assert {
+    condition     = aws_cloudfront_origin_access_control.frontend.signing_behavior == "always" && aws_cloudfront_origin_access_control.frontend.origin_access_control_origin_type == "s3"
+    error_message = "CloudFront must sign every origin request (OAC), or the private bucket refuses it."
+  }
+}
+
+run "distribution_serves_the_apex_and_every_tenant_on_the_platform_certificate" {
+  command = plan
+
+  assert {
+    condition     = toset(aws_cloudfront_distribution.frontend.aliases) == toset(["feohledger.com", "*.feohledger.com"])
+    error_message = "The distribution must answer the apex and the tenant wildcard — and only those (api. stays on the VM)."
+  }
+
+  assert {
+    condition     = one(aws_cloudfront_distribution.frontend.viewer_certificate).ssl_support_method == "sni-only" && one(aws_cloudfront_distribution.frontend.viewer_certificate).minimum_protocol_version == "TLSv1.2_2021"
+    error_message = "SNI with TLS 1.2+ only."
+  }
+
+  assert {
+    condition     = one(aws_cloudfront_distribution.frontend.default_cache_behavior).viewer_protocol_policy == "redirect-to-https"
+    error_message = "Plain HTTP must redirect, as Caddy did."
+  }
+
+  assert {
+    condition = anytrue([
+      for f in one(aws_cloudfront_distribution.frontend.default_cache_behavior).function_association :
+      f.event_type == "viewer-request"
+    ])
+    error_message = "The SPA router must run on viewer-request, or every deep link 404s."
+  }
+
+  assert {
+    condition     = aws_cloudfront_function.spa_router.runtime == "cloudfront-js-2.0" && aws_cloudfront_function.spa_router.publish
+    error_message = "The router must be published on the 2.0 runtime; an unpublished function never reaches the LIVE stage."
+  }
+
+  assert {
+    condition     = aws_cloudfront_cache_policy.frontend.min_ttl == 0
+    error_message = "A non-zero minimum TTL overrides index.html's no-cache, and a release would serve the previous build."
+  }
+
+  assert {
+    condition = alltrue([
+      one(one(aws_cloudfront_response_headers_policy.frontend.security_headers_config).strict_transport_security).access_control_max_age_sec == 31536000,
+      one(one(aws_cloudfront_response_headers_policy.frontend.security_headers_config).strict_transport_security).include_subdomains,
+      one(one(aws_cloudfront_response_headers_policy.frontend.security_headers_config).frame_options).frame_option == "DENY",
+      one(one(aws_cloudfront_response_headers_policy.frontend.security_headers_config).referrer_policy).referrer_policy == "strict-origin-when-cross-origin",
+    ])
+    error_message = "The SPA's security headers must match what Caddy served (deploy/Caddyfile)."
+  }
+}
+
+run "publish_grant_covers_only_this_bucket_and_distribution" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.deploy_frontend.statement : tolist(s.resources)
+      ])) == toset([
+      "arn:aws:s3:::feohledger-frontend-test",
+      "arn:aws:s3:::feohledger-frontend-test/*",
+      aws_cloudfront_distribution.frontend.arn,
+    ])
+    error_message = "The deploy role's frontend grant must name only the SPA bucket and this distribution."
+  }
+
+  assert {
+    condition = !contains(flatten([
+      for s in data.aws_iam_policy_document.deploy_frontend.statement : tolist(s.actions)
+    ]), "s3:GetObject")
+    error_message = "The publish never reads objects back; GetObject stays ungranted."
+  }
+
+  assert {
+    condition     = aws_iam_role_policy.deploy_frontend.role == "feohledger-deploy"
+    error_message = "The grant attaches to the baseline-owned deploy role by name."
+  }
+}
+
+run "spa_dns_stays_on_the_vm_until_the_cutover_variable" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.apex.records == toset(["192.0.2.10"]) && length(aws_route53_record.apex.alias) == 0
+    error_message = "By default the apex must stay on the VM's Elastic IP."
+  }
+
+  assert {
+    condition     = aws_route53_record.tenants.records == toset(["192.0.2.10"]) && length(aws_route53_record.tenants.alias) == 0
+    error_message = "By default the tenant wildcard must stay on the VM's Elastic IP."
+  }
+
+  assert {
+    condition     = length(aws_route53_record.spa_ipv6) == 0
+    error_message = "No AAAA record before the cutover — the VM has no IPv6 address."
+  }
+}
+
+run "cutover_moves_the_apex_and_tenants_to_cloudfront_and_leaves_api_on_the_vm" {
+  command = plan
+
+  variables {
+    frontend_on_cloudfront = true
+  }
+
+  assert {
+    condition = alltrue([
+      for r in [aws_route53_record.apex, aws_route53_record.tenants] :
+      one(r.alias).name == "d0123456789abc.cloudfront.net" && one(r.alias).zone_id == "Z2FDTNDATAQYW2" && r.records == null
+    ])
+    error_message = "After the cutover the apex and tenant A records must alias the distribution, with no static IP left beside it."
+  }
+
+  assert {
+    condition     = toset([for r in aws_route53_record.spa_ipv6 : r.name]) == toset(["feohledger.com", "*.feohledger.com"]) && alltrue([for r in aws_route53_record.spa_ipv6 : r.type == "AAAA"])
+    error_message = "CloudFront serves IPv6, so the apex and wildcard each get an AAAA alias."
+  }
+
+  assert {
+    condition     = aws_route53_record.api.records == toset(["192.0.2.10"])
+    error_message = "api.<domain> must stay on the VM through the cutover."
   }
 }

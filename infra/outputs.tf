@@ -49,7 +49,7 @@ output "app_instance_id" {
 }
 
 output "app_public_ip" {
-  description = "Elastic IP of the app VM. The apex, api. and *. records all point here."
+  description = "Elastic IP of the app VM. api. points here always; the apex and *. do until frontend_on_cloudfront moves them to CloudFront."
   value       = aws_eip.app.public_ip
 }
 
@@ -66,4 +66,19 @@ output "alerts_topic_arn" {
 output "vm_deploy_document_name" {
   description = "SSM command document the release workflow runs on the app VM (deploy.tf). .github/workflows/vm-deploy.yml names it directly; the two must agree."
   value       = aws_ssm_document.deploy.name
+}
+
+output "frontend_bucket" {
+  description = "S3 bucket holding the published SPA build — the FRONTEND_BUCKET secret on the production environment (.github/workflows/vm-deploy.yml)."
+  value       = aws_s3_bucket.frontend.bucket
+}
+
+output "frontend_distribution_id" {
+  description = "CloudFront distribution serving the SPA — the CLOUDFRONT_DISTRIBUTION_ID secret on the production environment."
+  value       = aws_cloudfront_distribution.frontend.id
+}
+
+output "frontend_distribution_domain" {
+  description = "The distribution's own *.cloudfront.net hostname, for testing a publish before frontend_on_cloudfront moves DNS."
+  value       = aws_cloudfront_distribution.frontend.domain_name
 }
