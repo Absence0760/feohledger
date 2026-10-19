@@ -20,8 +20,9 @@
  *    application, the invoice stale-edit 409, a wrong authenticator code, and
  *    the no-rail pilot's refusals (a record-only tenant's dispatch refusal,
  *    recording a payment made outside FeohLedger, the NACHA bank file), and
- *    the plan-feature 402 every tier gate answers with, and recording or
- *    cancelling a goods receipt;
+ *    the plan-feature 402 every tier gate answers with, recording or
+ *    cancelling a goods receipt, and an ERP send refused for an open duplicate
+ *    or fraud exception (stated by `api/erpRefusals.ts`);
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -44,6 +45,7 @@ import { exceptionTypeFallback, exceptionTypeLabelKey } from '#lib/types/excepti
 import { nachaFieldLabelKey } from '#lib/types/paymentExecution.ts';
 import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRefusal.ts';
 import { authRefusalText } from '#lib/api/authRefusals.ts';
+import { EXCEPTION_BLOCKS_ERP_EXPORT, erpRefusalText } from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
@@ -311,6 +313,11 @@ const BUILDERS: Record<string, Builder> = {
 		);
 		return t('refusal.invoiceRequiredFieldsMissing', { fields: formatList(labels) });
 	},
+	// `api/workflow.py` — `/complete`, `/send-to-erp`, `/retry-erp` refused
+	// for an open duplicate / fraud exception. One sentence with the invoice
+	// modal's ERP panel, which states the same code off the audit row.
+	[EXCEPTION_BLOCKS_ERP_EXPORT]: (p, t) =>
+		erpRefusalText({ code: EXCEPTION_BLOCKS_ERP_EXPORT, params: p }, t),
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
 	// `api/payments.py::_refuse_record_only` — every dispatching endpoint on a

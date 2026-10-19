@@ -51,6 +51,7 @@ from app.schemas.workflow import (
 from app.services import erp as erp_svc
 from app.services import review as review_svc
 from app.services.erp_dispatch import dispatch_erp
+from app.services.erp_export_gate import refuse_blocked_erp_export
 from app.services.extraction_dispatch import dispatch_extraction
 from app.services.invoice_warnings import refresh_warnings
 from app.services.storage import upload_invoice_file
@@ -470,6 +471,10 @@ async def send_to_erp(
     await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+    # An open duplicate / fraud exception refuses the push (decisions §286).
+    # Here, synchronously, so the invoice stays `approved` and the user is told
+    # what to do, rather than queueing a push the dispatcher would refuse.
+    await refuse_blocked_erp_export(db, invoice.id)
 
     # Transition to sending_to_erp before dispatching
     await transition_invoice(
@@ -507,6 +512,8 @@ async def retry_erp(
     await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+    # Same gate as send-to-erp; the invoice stays `failed` (decisions §286).
+    await refuse_blocked_erp_export(db, invoice.id)
 
     await erp_svc.retry_erp(db, invoice, actor_id=user.id)
     await db.commit()
@@ -723,6 +730,10 @@ async def complete_invoice(
         # so the invoice stays `approved` — still payable directly — rather
         # than parking in `sending_to_erp` for a push that will never run.
         await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
+        # The modal's "Send to ERP". Same gate as send-to-erp, and after
+        # `refresh_warnings` above, so a duplicate it found just now refuses
+        # too (decisions §286).
+        await refuse_blocked_erp_export(db, invoice.id)
         # Trigger ERP dispatch
         await transition_invoice(
             db,

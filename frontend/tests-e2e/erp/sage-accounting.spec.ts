@@ -40,7 +40,7 @@ import {
  *      connection test passes on the stored token.
  *   2. Full send — a GBP invoice stating 20% VAT posts; the purchase invoice
  *      read back FROM THE FAKE carries the exact gross, the synced contact,
- *      our invoice number and dates, and the VAT split 1000.00 + 200.00 at
+ *      our invoice number and dates, and the VAT split 1050.00 + 210.00 at
  *      the ledger's own GB_STANDARD rate.
  *   3. Fail closed — an unlinked vendor, and a taxed invoice on a ledger
  *      with no default tax rate, are refused before anything is posted.
@@ -129,8 +129,8 @@ test.describe('/erp sage_accounting adapter against fake-erp', () => {
 			prefix: 'E2E-SAGE',
 			invoiceDate: '2026-10-01',
 			dueDate: '2026-10-31',
-			amount: '1200.00',
-			taxAmount: '200.00',
+			amount: '1260.00',
+			taxAmount: '210.00',
 			currency: 'GBP',
 			vendor: SUPPLIER,
 			glAccount: '7500'
@@ -140,14 +140,14 @@ test.describe('/erp sage_accounting adapter against fake-erp', () => {
 			const posted = await sageInvoice(request, await erpReferenceFromAudit(page, inv.id));
 			expect(posted.contact.id).toBe('sage-contact-1');
 			expect(posted.vendor_reference ?? posted.reference).toBe(inv.invoice_number);
-			expect(Number(posted.total_amount)).toBe(1200);
+			expect(Number(posted.total_amount)).toBe(1260);
 			expect(posted.currency.id).toBe('GBP');
 			expect([posted.date, posted.due_date]).toEqual(['2026-10-01', '2026-10-31']);
-			// The VAT split: 1000.00 net + 200.00 at the ledger's own 20% rate.
+			// The VAT split: 1050.00 net + 210.00 at the ledger's own 20% rate.
 			type Line = { net_amount: string; tax_amount: string; tax_rate_id?: string };
 			const lines: Line[] = posted.invoice_lines;
-			expect(lines.reduce((sum, l) => sum + Number(l.net_amount), 0)).toBe(1000);
-			expect(lines.reduce((sum, l) => sum + Number(l.tax_amount), 0)).toBe(200);
+			expect(lines.reduce((sum, l) => sum + Number(l.net_amount), 0)).toBe(1050);
+			expect(lines.reduce((sum, l) => sum + Number(l.tax_amount), 0)).toBe(210);
 			expect(lines.map((l) => l.tax_rate_id)).toEqual(['GB_STANDARD']);
 		} finally {
 			await deleteInvoice(page, inv.id);
@@ -177,8 +177,8 @@ test.describe('/erp sage_accounting adapter against fake-erp', () => {
 			prefix: 'E2E-SAGE-NORATE',
 			invoiceDate: '2026-10-01',
 			dueDate: '2026-10-31',
-			amount: '1200.00',
-			taxAmount: '200.00',
+			amount: '1260.00',
+			taxAmount: '210.00',
 			currency: 'GBP',
 			vendor: SUPPLIER,
 			// sage-ledger-7600 carries no default tax rate and the org sets none.

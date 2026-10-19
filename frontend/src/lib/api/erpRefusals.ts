@@ -25,9 +25,16 @@
  */
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { formatList } from '#lib/utils/list.ts';
+import { exceptionTypeFallback, exceptionTypeLabelKey } from '#lib/types/exception.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
+
+/** An open duplicate / fraud exception refused the push before any adapter ran
+ *  (`backend/app/services/erp_export_gate.py`, decisions §286). It names the
+ *  exception TYPE, not a provider. The same code is the 409 the send doors
+ *  answer with, which `codedRefusals.ts` states through this module. */
+export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
 
 /** The refusals raised outside an adapter, which name no provider. */
 const PROVIDERLESS = new Set(['not_connected', 'erp_credentials_unavailable']);
@@ -73,7 +80,8 @@ const KEYS: Record<string, MessageKey> = {
 	due_date_missing: 'erpRefusal.dueDateMissing',
 	amount_not_positive: 'erpRefusal.amountNotPositive',
 	job_unconfirmed: 'erpRefusal.jobUnconfirmed',
-	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable'
+	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
+	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport'
 };
 
 /** The sentences that name Intuit's numeric fault code as `{code}`. */
@@ -103,6 +111,12 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 	const key = KEYS[refusal.code];
 	if (!key) return null;
 	if (PROVIDERLESS.has(refusal.code)) return t(key);
+	if (refusal.code === EXCEPTION_BLOCKS_ERP_EXPORT) {
+		const type = refusal.params.exception_type;
+		if (typeof type !== 'string' || !type.trim()) return null;
+		const label = exceptionTypeLabelKey(type);
+		return t(key, { type: label ? t(label) : exceptionTypeFallback(type) });
+	}
 	// The adapter's fixed literal ("QuickBooks Online"). Every other sentence
 	// names it, so a refusal recorded without one is stated by the server.
 	const provider = refusal.params.provider;

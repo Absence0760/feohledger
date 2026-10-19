@@ -248,6 +248,30 @@ PAYMENT_BLOCKING_EXCEPTION_TYPES = (
     "po_mismatch",
 )
 
+# The payment-blocking types that also refuse the ERP PUSH (decisions §286),
+# not just a payment run. Posting a bill records the liability in the ERP's own
+# books, and there a bookkeeper can pay it directly (QuickBooks "Mark as paid",
+# Bill Pay) without our run gate ever seeing it. So a flag that says the
+# liability itself is wrong has to stop the posting:
+#
+#   duplicate   the obligation is already booked; a second bill is a second
+#               liability for one debt.
+#   fraud_flag  the obligation may not exist, or not be owed to this payee.
+#
+# The other four say the liability is real and only its PAYMENT must wait —
+# a line-level discrepancy under an approved header amount, a rail that may
+# already hold an order, goods awaiting inspection, a bill over its PO or
+# receipt. Recording those in the ERP is correct accounting, and refusing it
+# would hide a genuine payable from the ledger. Order is the precedence the
+# refusal names when an invoice carries both.
+#
+# The one predicate is `services/payment_runs.blocking_exception_types`, and
+# clearing either type is the segregated sign-off of
+# `services/exception_lifecycle.segregation_refusal`, because both are members
+# of the tuple above (asserted below, so the two lists cannot drift apart).
+ERP_EXPORT_BLOCKING_EXCEPTION_TYPES = ("duplicate", "fraud_flag")
+assert set(ERP_EXPORT_BLOCKING_EXCEPTION_TYPES) <= set(PAYMENT_BLOCKING_EXCEPTION_TYPES)
+
 # Terminal payment states — a payment in one of these no longer represents a
 # LIVE claim on its invoice, so the "one live payment per invoice" idempotency
 # invariant (both the app-level guard and the `uq_payments_one_live_per_invoice`

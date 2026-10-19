@@ -6143,6 +6143,7 @@ export const messages = {
 	'erpRefusal.referenceInvalid': "{provider} a refusé cette facture car elle fait référence à un fournisseur ou à un compte qu'il n'accepte pas (erreur Intuit {code}). Vérifiez que le fournisseur et chaque compte de la facture existent et sont actifs dans {provider}, synchronisez-les à nouveau, puis réessayez.",
 	'erpRefusal.companySubscriptionInactive': "{provider} a refusé cette facture car l'abonnement de l'entreprise a pris fin, a été résilié ou présente un problème de facturation. Réglez-le dans {provider}, puis réessayez.",
 	'erpRefusal.intuitFault': "{provider} a refusé cette facture (erreur Intuit {code}). Comparez les informations de la facture avec {provider} et corrigez-les, puis réessayez. Si l'échec persiste, communiquez le code d'erreur à un administrateur.",
+	'erpRefusal.exceptionBlocksExport': "Cette facture a une exception ouverte ({type}). Résolvez-la ou rejetez-la dans Exceptions, puis envoyez la facture à l'ERP.",
 	'glAccounts.toast.synced': "{created} nouveaux comptes et {updated} comptes mis à jour synchronisés.",
 	'glAccounts.toast.syncConflicts': "Non associés, car le code est partagé par plusieurs comptes de l'ERP, déjà utilisé ou trop long : {codes}.",
 	'glAccounts.toast.syncUnlinked': "Dissociés, car le code ne désigne plus un seul compte de l'ERP ; réimputez leurs factures : {codes}.",

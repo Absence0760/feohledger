@@ -6071,6 +6071,7 @@ export const messages = {
 	'erpRefusal.referenceInvalid': "受け付けられない仕入先または勘定科目を参照しているため、{provider} がこの請求を拒否しました（Intuit エラー {code}）。仕入先と請求のすべての勘定科目が {provider} に存在し有効であることを確認し、再同期してから再試行してください。",
 	'erpRefusal.companySubscriptionInactive': "会社のサブスクリプションが終了、解約、または支払いの問題があるため、{provider} がこの請求を拒否しました。{provider} で解決してから再試行してください。",
 	'erpRefusal.intuitFault': "{provider} がこの請求を拒否しました（Intuit エラー {code}）。請求の内容を {provider} と照らし合わせて修正してから再試行してください。失敗が続く場合は、管理者にエラーコードを伝えてください。",
+	'erpRefusal.exceptionBlocksExport': "この請求書には未解決の例外（{type}）があります。「例外」で解決または却下してから、ERP に送信してください。",
 	'glAccounts.toast.synced': "新規 {created} 件、更新 {updated} 件の勘定科目を同期しました。",
 	'glAccounts.toast.syncConflicts': "コードが複数の ERP 勘定科目で共有されている、すでに使われている、または長すぎるため、紐付けませんでした: {codes}。",
 	'glAccounts.toast.syncUnlinked': "コードが 1 つの ERP 勘定科目を特定しなくなったため、紐付けを解除しました。該当する請求書を仕訳し直してください: {codes}。",

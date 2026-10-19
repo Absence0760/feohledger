@@ -16,6 +16,11 @@ from app.services.erp_adapters import (
     get_erp_adapter,
 )
 from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, NOT_CONNECTED
+from app.services.erp_export_gate import (
+    blocked_export_message,
+    blocked_export_refusal,
+    erp_export_blocking_exception,
+)
 from app.services.erp_link_realm import (
     connection_realm,
     legacy_links_trusted,
@@ -537,6 +542,15 @@ async def _call_erp(
     ``ORPHAN_DOCUMENT_NUMBER_KEY``) and carried on the raised error; a success
     clears them. The caller's commit persists all of it.
     """
+    # Before anything reaches an adapter: a bill whose liability is in question
+    # (an open duplicate or fraud flag) is never posted, because once it is in
+    # the ERP it can be paid there, past our payment-run gate (decisions §286).
+    blocking = await erp_export_blocking_exception(db, invoice.id)
+    if blocking is not None:
+        raise ErpPostRefusedError(
+            blocked_export_message(blocking), refusal=blocked_export_refusal(blocking)
+        )
+
     config = erp_config or {"type": "mock", "integration_method": "direct"}
 
     adapter = get_erp_adapter(config)

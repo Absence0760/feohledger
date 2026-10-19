@@ -6369,6 +6369,7 @@ export const en = {
 	'erpRefusal.referenceInvalid': "{provider} refused this bill because it refers to a vendor or account it doesn't accept (Intuit error {code}). Check that the vendor and every account on the bill exist and are active in {provider}, sync them again, then retry.",
 	'erpRefusal.companySubscriptionInactive': "{provider} refused this bill because the company's subscription has ended, was cancelled or has a billing problem. Resolve it in {provider}, then retry.",
 	'erpRefusal.intuitFault': "{provider} refused this bill (Intuit error {code}). Check the bill's details against {provider} and correct them, then retry. If it keeps failing, give an administrator the error code.",
+	'erpRefusal.exceptionBlocksExport': "This invoice has an open {type} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.",
 	'glAccounts.toast.synced': "Synced {created} new and {updated} updated accounts.",
 	'glAccounts.toast.syncConflicts': "Not linked, because the code is shared by more than one ERP account, already in use, or too long: {codes}.",
 	'glAccounts.toast.syncUnlinked': "Unlinked, because the code no longer identifies one ERP account — recode their invoices: {codes}.",

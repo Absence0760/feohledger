@@ -23,6 +23,28 @@ Invoice **approval gates on none of them**. So clearing one of these is the
 human sign-off that lets the money move — the last control between a flagged
 payable and a funded payment run.
 
+Two of them, `duplicate` and `fraud_flag`
+(`api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`), also refuse the **ERP
+push** while open or escalated: a bill in the ERP can be paid from inside the
+ERP, where the payment-run gate never sees it. Clearing one is then also what
+lets the invoice post ([erp-integration.md](erp-integration.md) § An open
+duplicate or fraud exception refuses the push; decisions §286). The
+`fraud_flag` a vendor bank-change approval opens on that vendor's approved
+invoices is included.
+
+Once a person has resolved or dismissed one of these two, `refresh_warnings`
+does not raise the same finding again **while the invoice is unchanged**. Each
+detector row carries `finding_fingerprint` (migration 0116), a hash of the
+finding's code and the invoice fields the duplicate and fraud rules read,
+stamped when the row is raised. A closed row suppresses the re-raise only when
+its fingerprint equals the invoice's current one, so an edit to the vendor,
+number, amount, dates or remit address raises the finding again.
+`record_decision` keeps the fingerprint on a resolve or dismiss only when a
+person decided (an `actor_id`, no `via` such as an agent or a PO-match refresh)
+and the invoice still hashes as it was raised, and every refresh voids the stamp
+of an open row the invoice has moved away from, so an edit made while someone
+was deciding (even one reverted before they click) never rides their verdict.
+
 ## Why the trail is in `audit_log`, not on the exception row
 
 The `exceptions` row cannot be that record:

@@ -53,7 +53,8 @@ describe('the registry pins the backend', () => {
 				const params = {
 					provider: 'QuickBooks Online',
 					accounts: ['6100'],
-					intuit_code: '6000'
+					intuit_code: '6000',
+					exception_type: 'duplicate'
 				};
 				const text = erpRefusalText({ code, params }, t);
 				expect(text, `${locale} ${code}`).toBeTruthy();
@@ -108,8 +109,33 @@ describe('erpRefusalText', () => {
 		);
 	});
 
+	it('says which open exception stopped the push, and what to do (§286)', () => {
+		expect(
+			erpRefusalText(
+				{ code: 'exception_blocks_erp_export', params: { exception_type: 'duplicate' } },
+				enT
+			)
+		).toBe(
+			`This invoice has an open ${en['exceptions.type.duplicate']} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.`
+		);
+		expect(
+			erpRefusalText(
+				{ code: 'exception_blocks_erp_export', params: { exception_type: 'fraud_flag' } },
+				translator(de, 'de')
+			)
+		).toContain(`(${de['exceptions.type.fraudFlag']})`);
+		// A type this build predates still reads, de-underscored.
+		expect(
+			erpRefusalText(
+				{ code: 'exception_blocks_erp_export', params: { exception_type: 'brand_new_kind' } },
+				enT
+			)
+		).toContain('open brand new kind exception');
+	});
+
 	it.each([
 		['no refusal recorded (a row from before coded refusals)', undefined],
+		['an exception refusal with no type', { code: 'exception_blocks_erp_export', params: {} }],
 		['an unknown code (a newer backend)', { code: 'brand_new', params: { provider: 'X' } }],
 		['a missing provider', { code: 'vendor_not_linked', params: {} }],
 		['a blank provider', { code: 'vendor_not_linked', params: { provider: ' ' } }],

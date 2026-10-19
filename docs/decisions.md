@@ -12188,3 +12188,115 @@ read-back is two or three GETs on a path that has already failed. *Retrying
 and succeeds on the re-read, so treating every 4xx alike would turn a
 concurrency race into a hard failure.
 
+## 286. An open duplicate or fraud exception refuses the ERP push, not only the payment run (migration 0116, 2026-10-19)
+
+**Found live.** In a QuickBooks Online test a clerk entered a second invoice
+with the vendor and number of one already posted. The app raised the
+`duplicate_invoice_number` warning and an open `duplicate` exception, a member
+of `PAYMENT_BLOCKING_EXCEPTION_TYPES`, so our payment runs would not pay it.
+Approval gates on none of those types (§169), so an admin approved it, and
+"Send to ERP" posted it as a second Bill. A posted bill can be paid from inside
+the ERP (QuickBooks "Mark as paid", Bill Pay), so the duplicate liability now
+sat where our payment-run control does not reach.
+
+**The rule:** the push refuses while the invoice has an open or escalated
+exception of a type that says the liability itself is wrong.
+`api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`, defined once beside the
+payment set and asserted to be a subset of it:
+
+| Type | Refuses the push? | Why |
+|---|---|---|
+| `duplicate` | yes | the obligation is already booked; a second bill is a second liability for one debt |
+| `fraud_flag` | yes | the obligation may not exist, or not be owed to this payee |
+| `line_total_mismatch` | no | the approver signed the header amount, which is never recomputed from lines and is the total the bill is posted and read back at (`posted_total`). The hold is on paying until the lines are reconciled |
+| `payment_reconciliation` | no | raised on a payment, after the bill exists; the liability is real and the question is whether a rail already holds an order |
+| `quality_hold` | no | goods received and awaiting inspection are still owed; ERP practice is to book the bill, hold payment, and credit any return |
+| `po_mismatch` | no | billing over the PO or ahead of receipt is the ERP's own 3-way-match hold; the vendor's claim is still recorded |
+
+For the four "no" types a bookkeeper paying from the ERP pays a real debt,
+perhaps early; for the two "yes" types they pay money that is not owed. A
+`fraud_flag` at `info` severity (a round amount) refuses too, because it is the
+same row that blocks the payment run: one row, one meaning, and a person clears
+it. So does the `fraud_flag` an approved vendor bank change opens on each of
+that vendor's approved invoices (`api/vendors._flag_payable_invoices_for_bank_change`),
+although it is about the payment destination rather than the debt: the change
+may itself be the BEC, and a bill in the ERP is paid against the ERP's own
+vendor record, which the same request may have changed too. Every approved bill
+for that vendor waits for a second person, and the fail-closed cost is that
+wait.
+
+**One chokepoint, plus a synchronous answer.** `services/erp._call_erp` asks
+`services/erp_export_gate.erp_export_blocking_exception` before it builds an
+adapter. Every push reaches it: `POST /complete` (the modal's "Send to ERP"),
+`/send-to-erp`, `/retry-erp`, the local dispatcher and the Lambda worker, all
+through `send_to_erp_internal`. It re-reads on each attempt, so a flag raised
+after the push was queued still stops it, and it raises `ErpPostRefusedError`,
+so the invoice lands at `failed` on the first attempt with
+`refusal = {code: "exception_blocks_erp_export", params: {exception_type}}` on
+`invoice.erp_failed`. The predicate is `payment_runs.blocking_exception_types`
+narrowed with `types=`, so "which flags are live" (anything but resolved or
+dismissed) stays one query. The three HTTP doors also ask, before their
+transition, and answer 409 with the same coded refusal: the push runs in the
+background, and a 202 that fails a second later would leave the user reading
+the audit trail to find out why. The invoice stays `approved` (or `failed`) and
+nothing is queued. The 409 commits first: `/complete` runs `refresh_warnings`,
+which may open the very duplicate the refusal names, and the rollback a raised
+`HTTPException` causes would otherwise send the user to an empty queue.
+
+**Clearing the flag is the segregated sign-off already in place.** Both types
+are payment-blocking, so `exception_lifecycle.record_decision` refuses anyone
+implicated in the invoice (§169–§170). The invoice's uploader cannot dismiss
+the duplicate and then post it; someone else can, and then the push goes
+through. Nothing in the gate writes to an exception.
+
+**A finding a person cleared stays cleared, while the invoice is unchanged.**
+`_ensure_exception` deduped only against open and escalated rows, so the next
+`refresh_warnings` re-opened a `duplicate` a reviewer had dismissed. With the
+gate, that made a legitimate invoice that shares a number (a vendor who reuses
+numbers yearly) unpostable, because `/complete` refreshes on every send. For
+these two types each detector row now carries `finding_fingerprint` (migration
+0116): a SHA-256 of the finding's code and the invoice fields those rules read
+(`invoice_warnings.finding_fingerprint`), stamped once when the row is raised.
+A row a person resolved or dismissed whose fingerprint equals the invoice's
+current one suppresses the re-raise; an edit to any of those fields raises it
+again. The one input a rule reads from outside the invoice row, the vendor
+email domain of `personal_email_domain`, is hashed from the finding's params.
+
+Matching on the finding's display params was the first version and the review
+rejected it both ways. Three findings have no params (`duplicate_invoice_number`,
+`remit_to_changed`, `future_invoice_date`), so one dismissal exempted the
+invoice from the same finding after an edit re-pointed it at another, already
+paid bill, or at an attacker's remit address: the warning showed but nothing
+blocked, weakening the payment-run gate as well as this one. Other params drift
+with no edit (a new vendor's age in days, a vendor mean, an LLM's wording), so
+a dismissal came back the next day. The fingerprint is over what the person
+judged, the invoice, not over what the sentence displays; it is hashed so the
+column holds no address.
+
+"A person, about this invoice" is enforced, not assumed.
+`exception_lifecycle.record_decision`, the one path that closes an exception,
+keeps the fingerprint on a resolve or dismiss only when a person decided (an
+`actor_id` and no `via`: not a PO-match refresh, not an agent) AND the invoice
+still hashes as it did when the finding was raised. The second condition is
+what the second review asked for: restamping the open row on each refresh let
+an implicated clerk re-point the invoice while a manager had the queue open,
+and the manager's dismissal then recorded a state they never saw. With the
+stamp fixed at raise time, that dismissal binds nothing, the next refresh
+raises the finding again, and a person sees the re-pointed invoice. The same
+holds for writers that change these fields without a refresh (vendor merge,
+the amount-mismatch and multi-PO agent resolvers). The third review closed the
+timed variant, an edit reverted just before the click (S1 to a clean-looking S2
+and back): every `refresh_warnings` voids the stamp of an open row the invoice
+no longer hashes to, whether or not the rule still fires, so once the invoice
+has diverged that row's verdict can never bind (`_void_stale_finding_stamps`).
+The cost of all three is one extra review round, never a dead end: the next
+refresh raises a fresh row stamped with the current state, and its dismissal
+holds. Escalation, including an agent's, leaves the stamp alone. Today no detector or agent closes either type
+anyway. A row closed before 0116 has no fingerprint and never suppresses, which
+is how it behaved. Other types keep re-opening after a person closes them,
+which is a follow-up.
+
+**Not done here** (`docs/followups.md`): a flag raised after the bill is
+already in the ERP leaves that bill payable there, and nothing yet offers the
+existing ERP void from the exception. Voiding automatically was rejected, since
+a flag can be false.
