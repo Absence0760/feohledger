@@ -1,6 +1,6 @@
 # infra/
 
-Infrastructure-as-code for the FeohLedger AWS account: the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`); the platform domain's registration settings and TLS certificate, its mail DNS (Migadu mailboxes and the SES sending identity) and a monthly cost budget; and the **workload stack** the app runs on — one VM plus an RDS database (`../docs/minimal-deployment.md`, `../docs/decisions.md` §254). The scale-up architecture (ECS, ALB, CloudFront) is `../docs/production-deployment.md` and is not built.
+Infrastructure-as-code for the FeohLedger AWS account: the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`); the platform domain's registration settings and TLS certificate, its mail DNS (Migadu mailboxes and the SES sending identity) and a monthly cost budget; and the **workload stack** the app runs on — one VM plus an RDS database (`../docs/minimal-deployment.md`, `../docs/decisions.md` §254), with the static SPA on S3 + CloudFront (§ Frontend on CloudFront, §278). The rest of the scale-up architecture (ECS, ALB) is `../docs/production-deployment.md` and is not built.
 
 ## Layout
 
@@ -22,6 +22,8 @@ infra/
 ├── database.tf                  # RDS Postgres 16: private, encrypted, TLS-only, point-in-time restore, write-only password
 ├── monitoring.tf                # SNS alerts topic + VM recovery/reboot and DB CPU/memory/storage alarms
 ├── deploy.tf                    # release deploys: the SSM command document that runs deploy.sh --ref, + the deploy role's grant to run it
+├── frontend.tf                  # the SPA: private S3 bucket + CloudFront (OAC, SPA router, headers, logs, alarms) + the deploy role's publish grant
+├── cloudfront/spa-router.js     # the CloudFront Function: built files pass through, routes become /index.html
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
 ├── terraform.tfvars.example     # committed template
@@ -40,8 +42,8 @@ Every resource in this module follows the SOC 2 baseline:
 | S3 Object Lock — governance mode, 365d | `s3.tf` — invoice-files bucket |
 | S3 Object Lock — compliance mode, 7y | `s3.tf` — audit-logs bucket |
 | SSE-KMS on every data bucket; SSE-S3 on the access-logs sink | `s3.tf` — the invoice-files, audit-logs and backups buckets reference `aws_kms_key.app`. AWS does not support SSE-KMS on a server-access-log destination, so the sink uses S3-managed keys (`../docs/decisions.md` §166) |
-| Server-access logging on every data bucket | `s3.tf` — delivered to the access-logs sink, whose bucket policy grants `logging.s3.amazonaws.com` `s3:PutObject`, pinned to this account and the three source buckets; ACLs disabled |
-| Public access block on every bucket | `s3.tf` — all four flags true |
+| Server-access logging on every data bucket | `s3.tf` — delivered to the access-logs sink, whose bucket policy grants `logging.s3.amazonaws.com` `s3:PutObject`, pinned to this account and the four source buckets (the SPA bucket included); CloudFront access logs arrive through `delivery.logs.amazonaws.com`, under `cloudfront/` only; ACLs disabled |
+| Public access block on every bucket | `s3.tf`, `frontend.tf` — all four flags true; the SPA bucket is read only by its CloudFront distribution (OAC) |
 | Lifecycle cost guards | `s3.tf` — backups bucket expires dumps after `backup_retention_days` (90d default; deliberately NO Object Lock — the lifecycle IS the retention policy), and every lifecycle rule reaps incomplete multipart uploads after 7 days |
 
 ### The deploy role is not owned here
@@ -201,7 +203,7 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 - **No SSH.** Port 22 is closed and there is no key pair; you reach the VM with Session Manager: `aws ssm start-session --target <app_instance_id> --profile feohledger` (needs the Session Manager plugin for the AWS CLI installed locally).
 - **The VM holds no AWS keys.** Its instance role can decrypt the sops secrets, read and write the three data buckets under the app key, and send mail as the platform domain — nothing else.
 - **The database is private.** Private subnets with no internet route, reachable only from the VM's security group, encrypted with the app key, TLS forced (`rds.force_ssl`), deletion-protected, IAM database authentication enabled (password login still works beside it; the app uses the password today), and restorable to any point in the last `db_backup_retention_days` (default 7). The nightly logical dumps (`../deploy/backup.sh`) keep 90 days beyond that.
-- **DNS.** The apex, `api.` and `*.` (every tenant) point at the VM's Elastic IP.
+- **DNS.** `api.` points at the VM's Elastic IP. The apex and `*.` (every tenant) do too until `frontend_on_cloudfront` moves them to the SPA's CloudFront distribution (§ Frontend on CloudFront).
 - **Alarms** go to `alert_emails` through SNS — each address must click AWS's confirmation link once. The VM recovers itself onto new hardware on a host failure and reboots on a guest failure.
 
 **The database password never enters Terraform state.** `db_master_password` is an *ephemeral* variable feeding RDS's *write-only* `password_wo`, so it is sent to AWS and stored nowhere else — not in state, not in a plan file. That is why this module does not read it through a `sops_file` data source (§ Secrets): a data source's value is written to state in plaintext. The operator supplies it at apply time from the private `infra-secrets` repo, as an environment variable on the one command.
@@ -266,6 +268,92 @@ reviewer, and sends SSM Run Command to the VM, which runs
    Until then a release skips the deploy job rather than failing it.
 6. **Publish a release** (or run `Deploy to the VM` by hand from `main`) and
    approve it; the run's log ends with the tail of `deploy.sh`'s output.
+
+## Frontend on CloudFront
+
+`frontend.tf` serves the SPA from a private S3 bucket through CloudFront
+(issue #582, `../docs/decisions.md` §278); the API stays on the VM. What it
+creates:
+
+- **The bucket** (`frontend_bucket` output; name derived from the account id,
+  so no tfvars entry): versioned, SSE-S3, every public-access flag on, server
+  access logs to the sink. The only reader is CloudFront, through Origin Access
+  Control and pinned to this distribution's ARN. It holds `s3:ListBucket` as
+  well as `s3:GetObject`, so a missing key is a real 404 instead of a 403.
+  Replaced versions expire after 90 days.
+- **The distribution** (`frontend_distribution_id`, `frontend_distribution_domain`):
+  `feohledger.com` + `*.feohledger.com` on the existing ACM certificate, TLS
+  1.2+, HTTP/2 + HTTP/3, IPv6, `PriceClass_100`. A cache policy honours each
+  object's own `Cache-Control` (a minimum TTL of 0, which the managed
+  CachingOptimized policy's 1 s minimum would override). A response-headers
+  policy sets the same four headers Caddy sets, and still no CSP.
+- **The SPA router**, a CloudFront Function on viewer-request
+  (`cloudfront/spa-router.js`): built files pass through and everything else
+  becomes `/index.html`. It names the files rather than testing for an
+  extension, because a route can contain a dot (`/invoices/INV-2026.001`).
+  `frontend/src/lib/deploy/spaRouter.test.ts` runs it against `frontend/static/`.
+- **Access logs** through CloudWatch log delivery into the access-logs sink under
+  `cloudfront/`. Not the legacy `logging_config`, which needs bucket ACLs the
+  sink disables.
+- **Alarms**: 5xx above 5% for 10 minutes and 4xx above 10% for 15 minutes, to
+  the alerts topic. The router means a route never 404s, so a 4xx surge means
+  missing files.
+- **The deploy role's grant** (`aws_iam_role_policy.deploy_frontend`): list,
+  put, delete and abort-multipart on that bucket, and create/get invalidation plus
+  get-distribution on that distribution. Nothing else, and no `GetObject`.
+- **DNS**: nothing moves until `frontend_on_cloudfront = true`. The apex and
+  `*.` A records then become aliases of the distribution, AAAA aliases appear,
+  and `api.` stays on the Elastic IP (`compute.tf` § DNS). The apex's Migadu
+  MX/TXT records are separate and untouched.
+
+The whole stack refuses an `aws_region` other than `us-east-1`. The certificate,
+the CloudFront metrics and the log-delivery source live there, and the alarms
+must publish to an SNS topic in the same region.
+
+**Cost**: CloudFront's always-free allowance (1 TB out and 10M requests a month)
+covers pilot traffic. S3 storage for a few builds and the alarms are cents, so
+the $75 budget is unaffected.
+
+**Operator steps** (cut-over plan in #582). The one-line commands assume you
+are in the repo root with `AWS_PROFILE=feohledger`.
+
+1. **Apply with DNS unchanged.** Plan and apply as in § Workload stack step 3.
+   The plan should add the `frontend.tf` resources and change only the
+   access-logs bucket policy (the SPA bucket as a log source, and CloudFront log delivery). It should not touch a Route 53
+   record.
+2. **Give the workflow its targets** as `production` environment secrets. The
+   bucket name embeds the account id and this repo's run logs are public:
+   `gh secret set FRONTEND_BUCKET --env production --repo Absence0760/feohledger --body "$(terraform -chdir=infra output -raw frontend_bucket)"`
+   and
+   `gh secret set CLOUDFRONT_DISTRIBUTION_ID --env production --repo Absence0760/feohledger --body "$(terraform -chdir=infra output -raw frontend_distribution_id)"`.
+3. **Set the two build variables** as repository variables (the SPA builds in
+   an ungated job, which can't read environment variables):
+   `gh variable set APP_URL --repo Absence0760/feohledger --body https://feohledger.com`
+   and `gh variable set PUBLIC_API_URL --repo Absence0760/feohledger --body https://api.feohledger.com`.
+4. **Arm the publish**:
+   `gh variable set FRONTEND_PUBLISH_ENABLED --repo Absence0760/feohledger --body true`.
+5. **Publish a release** and approve it. After the VM step the job uploads the
+   build, waits for the invalidation, and smoke-checks the distribution's
+   `*.cloudfront.net` name: this build's `version.json`, the SPA on `/` and on a
+   dotted deep link, a 404 for a missing asset, and HSTS.
+   `deploy/smoke-frontend.sh` runs the same checks by hand.
+6. **Try a tenant flow on the CloudFront hostname** before moving DNS. The
+   `*.cloudfront.net` name carries no tenant, so the app shows the marketing
+   page there. Sign-in is checked properly after step 7, on `sandbox.`.
+7. **Cut over**: `frontend_on_cloudfront = true` in `prod.tfvars`, then plan and
+   apply. The plan should change `aws_route53_record.apex` and `.tenants` from
+   the IP to an alias, and add two `spa_ipv6` records. Nothing else. The next
+   release's smoke check then covers the apex and a tenant host too: it notices
+   CloudFront's `x-amz-cf-id` header on the apex.
+8. **Watch for a day**, then remove the SPA from Caddy, `deploy.sh` and
+   `add-tenant.sh` (the step-4 follow-up in `../docs/followups.md`). Do it within
+   about 30 days: Caddy can no longer renew the apex and tenant certificates
+   once DNS points elsewhere.
+
+**Rollback**: set `frontend_on_cloudfront = false` and apply. The records swap
+back to the VM, whose Caddy still serves the SPA until step 8. For a bad
+*build*, rather than bad infrastructure, see `../deploy/README.md` § Frontend
+rollback.
 
 ## Secrets
 
