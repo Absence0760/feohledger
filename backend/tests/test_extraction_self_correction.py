@@ -218,6 +218,115 @@ async def test_line_items_sum_mismatch():
 
 
 # ---------------------------------------------------------------------------
+# 7b. line_items_sum — shares the payment gate's definition (issue #566)
+# ---------------------------------------------------------------------------
+
+
+def _us_tax_exclusive(**overrides) -> ExtractionResult:
+    """The #566 smoke-test invoice: tax-EXCLUSIVE lines summing to the subtotal,
+    sales tax on top. Every figure is internally consistent."""
+    fields = {
+        "amount": _field("2020.86"),
+        "subtotal": _field("1919.15"),
+        "tax_amount": _field("101.71"),
+        "line_items": [
+            _line_item(qty="1", price="1200.00", total="1200.00"),
+            _line_item(qty="1", price="719.15", total="719.15"),
+        ],
+    }
+    fields.update(overrides)
+    return _result(**fields)
+
+
+@pytest.mark.asyncio
+async def test_tax_exclusive_lines_matching_subtotal_are_not_a_violation():
+    """Lines = subtotal, total = subtotal + tax. The payment-blocking
+    `line_total_mismatch` check accepts this; self-correction must too — and
+    must not dock `amount`, which would suppress auto-approval."""
+    result = _us_tax_exclusive()
+    original_amount_conf = result.amount.confidence
+
+    report = await run_self_correction(result)
+
+    assert report.violations == []
+    assert "amount" not in report.confidence_penalties
+    assert result.amount.confidence == original_amount_conf
+
+
+@pytest.mark.asyncio
+async def test_tax_exclusive_lines_reconcile_via_derived_net_without_subtotal():
+    """No subtotal extracted, but tax is: the net is derived from the header
+    (amount - tax - shipping + discount), exactly as the payment gate does."""
+    result = _us_tax_exclusive(subtotal=_blank())
+
+    report = await run_self_correction(result)
+
+    assert "line_items_sum" not in {v["check"] for v in report.violations}
+    assert "amount" not in report.confidence_penalties
+
+
+@pytest.mark.asyncio
+async def test_derived_net_accounts_for_shipping_and_discount():
+    result = _result(
+        amount=_field("1095.00"),
+        tax_amount=_field("100.00"),
+        shipping_amount=_field("20.00"),
+        discount_amount=_field("25.00"),
+        line_items=[_line_item(qty="1", price="1000.00", total="1000.00")],
+    )
+    report = await run_self_correction(result)
+
+    assert "line_items_sum" not in {v["check"] for v in report.violations}
+
+
+@pytest.mark.asyncio
+async def test_tax_inclusive_lines_still_reconcile_against_amount():
+    result = _us_tax_exclusive(
+        line_items=[
+            _line_item(qty="1", price="1300.00", total="1300.00"),
+            _line_item(qty="1", price="720.86", total="720.86"),
+        ]
+    )
+    report = await run_self_correction(result)
+
+    assert report.violations == []
+
+
+@pytest.mark.asyncio
+async def test_lines_matching_no_basis_still_fire_with_unchanged_params():
+    """Lines (1,500.00) match neither the amount, the subtotal, nor the derived
+    net — a genuine extraction mistake, reported exactly as before: same code,
+    same params (the browser localizes from them), same `amount` penalty."""
+    result = _us_tax_exclusive(line_items=[_line_item(qty="1", price="1500.00", total="1500.00")])
+    report = await run_self_correction(result)
+
+    [violation] = [v for v in report.violations if v["check"] == "line_items_sum"]
+    assert violation["code"] == "self_correction_line_items_sum"
+    assert violation["params"] == {"lineItemsTotal": "1500.00", "amount": "2020.86"}
+    assert violation["fields_affected"] == ["amount"]
+    assert "amount" in report.confidence_penalties
+
+
+@pytest.mark.asyncio
+async def test_line_sum_uses_the_gates_one_cent_tolerance_not_two_percent():
+    """A 1 % gap used to pass under the old 2 % relative slop while the payment
+    gate (one cent, absolute) blocked the same invoice. One definition now."""
+    one_percent_off = _result(
+        amount=_field("1000.00"),
+        line_items=[_line_item(qty="1", price="990.00", total="990.00")],
+    )
+    report = await run_self_correction(one_percent_off)
+    assert "line_items_sum" in {v["check"] for v in report.violations}
+
+    within_a_cent = _result(
+        amount=_field("1000.00"),
+        line_items=[_line_item(qty="1", price="999.99", total="999.99")],
+    )
+    report = await run_self_correction(within_a_cent)
+    assert "line_items_sum" not in {v["check"] for v in report.violations}
+
+
+# ---------------------------------------------------------------------------
 # 8. line_item_unit_math — passes
 # ---------------------------------------------------------------------------
 

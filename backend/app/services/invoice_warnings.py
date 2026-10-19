@@ -640,31 +640,59 @@ def _dec(value) -> Decimal:
     return Decimal(str(value)) if value is not None else Decimal("0")
 
 
-def reconcile_line_totals(invoice: Invoice, line_total: Decimal) -> dict | None:
-    """Pure: does ``line_total`` reconcile with the invoice's header money?
+def line_total_reconciles(
+    line_total: Decimal,
+    *,
+    amount: Decimal | None,
+    subtotal: Decimal | None,
+    tax_amount: Decimal | None,
+    shipping_amount: Decimal | None,
+    discount_amount: Decimal | None,
+) -> bool:
+    """Pure: THE definition of "the lines reconcile with the header".
 
-    Returns ``None`` when it reconciles, else a PII-free payload describing the
-    divergence (exact decimal strings, never float).
-
-    A sum reconciles when it matches, within ``LINE_TOTAL_TOLERANCE``, any of:
+    True when ``line_total`` matches, within ``LINE_TOTAL_TOLERANCE``, any of:
 
     * ``amount``  — lines carry tax (the vision adapters' convention);
     * ``subtotal`` — lines are net of tax and the header states the subtotal;
     * ``amount - tax_amount - shipping_amount + discount_amount`` — lines are net
       of tax and the subtotal is absent, so it is derived from the header.
+
+    A ``None`` money field reads as zero, except ``subtotal``: an absent subtotal
+    is not a basis at all (a zero one would "reconcile" an empty line set).
+
+    Shared by the payment-blocking ``line_total_mismatch`` check
+    (``reconcile_line_totals``) and the post-extraction self-correction pass
+    (``extraction_self_correction._check_line_items_sum``). They used to disagree
+    — self-correction compared the lines to ``amount`` only, so every ordinary
+    tax-exclusive invoice got a "lines don't match" warning and a docked
+    ``amount`` confidence that the payment gate itself didn't agree with.
+    """
+    total = _dec(amount)
+    candidates = [total]
+    if subtotal is not None:
+        candidates.append(_dec(subtotal))
+    candidates.append(total - _dec(tax_amount) - _dec(shipping_amount) + _dec(discount_amount))
+    return any(abs(line_total - expected) <= LINE_TOTAL_TOLERANCE for expected in candidates)
+
+
+def reconcile_line_totals(invoice: Invoice, line_total: Decimal) -> dict | None:
+    """Pure: does ``line_total`` reconcile with the invoice's header money?
+
+    Returns ``None`` when it reconciles, else a PII-free payload describing the
+    divergence (exact decimal strings, never float). What "reconciles" means is
+    ``line_total_reconciles`` — one definition, shared with extraction's
+    self-correction pass.
     """
     amount = _dec(invoice.amount)
-    candidates: dict[str, Decimal] = {"amount": amount}
-    if invoice.subtotal is not None:
-        candidates["subtotal"] = _dec(invoice.subtotal)
-    candidates["net_of_header_adjustments"] = (
-        amount
-        - _dec(invoice.tax_amount)
-        - _dec(invoice.shipping_amount)
-        + _dec(invoice.discount_amount)
-    )
-
-    if any(abs(line_total - expected) <= LINE_TOTAL_TOLERANCE for expected in candidates.values()):
+    if line_total_reconciles(
+        line_total,
+        amount=invoice.amount,
+        subtotal=invoice.subtotal,
+        tax_amount=invoice.tax_amount,
+        shipping_amount=invoice.shipping_amount,
+        discount_amount=invoice.discount_amount,
+    ):
         return None
 
     # Report the divergence against the header amount — the figure a payment run
