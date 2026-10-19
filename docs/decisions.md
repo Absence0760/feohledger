@@ -11742,3 +11742,100 @@ idempotent, and the downgrade removes the two keys.
 "`erp_integrations` (Growth and Scale)" and "`erp_merge` doesn't exist yet",
 and §258's "the `realdb` harness's orgs hold no subscription — which reads
 exactly like `free`", which stays true only because no plan now reads as Free.
+
+
+## 284. GL accounts and vendors link by the ERP's unique key; a push refusal is a code the reader can act on (migration 0114, 2026-10-19)
+
+**Found live.** Against the real QuickBooks Online sandbox, a first chart sync
+into an empty chart reported 89 accounts as "81 new, 8 updated", and an invoice
+coded "Job Materials" — shown under "Job Expenses" in our picker — was posted as
+a Bill to "Landscaping Services:Job Materials". Two defects stacked:
+
+1. `quickbooks_online._account_code` keyed an account by `AcctNum or Name`.
+   QuickBooks keeps a `Name` unique only among its siblings; the sandbox repeats
+   eight sub-account names under two parents. Only `FullyQualifiedName` (the
+   colon-joined path) is unique, and `AcctNum` when numbering is on.
+2. `POST /api/gl-accounts/sync-erp` upserted by code, with a per-run `pending`
+   dict by code, so the second account with a code overwrote the first row's
+   `erp_account_id` and counted as "updated". The push resolves a code to that
+   id, so the bookkeeper's choice was silently replaced by whichever account the
+   sync read last.
+
+**The rule now: a row is linked to an ERP account only by a key the ERP keeps
+unique, and nothing ambiguous is linked at all** (`services/gl_account_sync`,
+backend/docs/erp-integration.md § GL accounts and vendors are linked by the
+ERP's unique key):
+
+- match by `erp_account_id` first (an ERP rename renames our row), then by
+  code; a row linked to another live account keeps its link and the newcomer is
+  refused (`code_taken`); a dead link (an id the pull no longer contains) is
+  re-pointed, which is the sandbox → production move;
+- a code two pulled accounts resolve to is refused for **both**
+  (`duplicate_code`) and an existing row with it loses its link — reported, never
+  counted as updated;
+- every adapter's `code` was audited against its provider's uniqueness rule
+  (the table in the doc). QuickBooks now uses `AcctNum`, else the path; Merge.dev
+  falls back to the Merge `id`, never the `name`. The others already used a
+  unique key (Xero `Code`, BC No., NetSuite `acctnumber`/`fullname`, Sage nominal
+  code / ID, Intacct ACCOUNTNO, SYSPRO `GlCode`, FE NXT account number).
+- **Vendors**: the name fallback in `vendor_sync` links a manually created
+  vendor only when the name is unique among the pulled records *and* among the
+  unlinked locals; otherwise it is reported (`ambiguous_name`) and nothing is
+  linked or created. It used `scalar_one_or_none`, so two local vendors with one
+  name was a 500 as well as a guess. QuickBooks `Vendor.AcctNum` stopped feeding
+  our vendor `code`: it is the company's account number *at* the vendor.
+
+**The code is never rewritten on an id match.** The obvious way to repair a
+collapsed row is to re-key it to the account's real code. Rejected: invoices,
+lines, recurring templates and contract lines record the GL as a **string**
+(`schemas/gl_account.GLAccountUpdate` makes `code` immutable for exactly this
+reason, and followups (c) tracks the FK that would lift it), so re-keying
+silently detaches every line coded to it. A drifted code is kept, stays
+correctly linked by id, and is reported (`code_drift`).
+
+**Repair of collapsed rows is an unlink, not a guess.** A pre-fix row "Job
+Materials" linked to Landscaping's id cannot say which account its invoices
+meant (our picker showed it under Job Expenses). `GLAccountPayload.legacy_codes`
+carries the key an older adapter used (QuickBooks' bare `Name`); a row whose
+code is the legacy key of more than one pulled account, and which no longer
+matches its linked account's current code, loses its link. Its invoices are then
+refused `account_not_linked`, naming the code, before any HTTP call, and each
+real account gets its own row. Only legacy keys count as evidence of a merge: a
+current code another account holds is a rename (rule 2's `code_taken`), and
+unlinking there would have re-pointed the old row's invoices at the newcomer.
+Residual, accepted: a collapsed row whose link landed on the account whose new
+code equals the old one (a top-level account named like the sub-accounts) looks
+exactly like a correct row and keeps its link.
+
+**Code length: widen to 100, the width that records a code.** QuickBooks paths
+pass 50 in the sandbox itself ("Landscaping Services:Job Materials:Decks and
+Patios" is 51). Considered:
+
+- *a short stable form within 50* (truncate + id): unreadable for ordinary
+  sub-accounts, in the one field a line picker shows;
+- *skip over-long accounts*, as NetSuite and BC did: a bookkeeper cannot code to
+  a real account at all;
+- *widen past 100*: every column that records a code (`invoices.gl_account`,
+  `invoice_line_items.gl_account`, recurring template and contract lines) is
+  `String(100)`, so a longer chart code could not be coded anywhere, and widening
+  those means touching the eight services that parse them.
+
+So `GL_CODE_MAX_LENGTH = 100` (migration `0114_gl_code_width`, tenant DBs,
+catalog-only `ALTER … TYPE varchar(100)`, downgrade refuses if a value would
+truncate), and the rare QuickBooks path past 100 keeps its head and ends
+`…#<Id>`, unique because the id is. NetSuite and BC skip at the new limit. The
+sync refuses anything longer (`code_too_long`) rather than let the database
+raise.
+
+**Push refusals are coded end to end.** The live test also showed the AP user
+the raw "QuickBooks Online post refused: vendor_not_linked" in the invoice
+modal: English-only, and a reason code is not an instruction. `ErpPostResult`
+now carries `refusal_code` / `refusal_provider`; `services/erp` records
+`refusal = {code, params}` beside `error` on `invoice.erp_failed` (`provider`,
+plus `accounts` for `account_not_linked`); and `api/erpRefusals.ts` states each
+of the registry's 34 codes (`base.ERP_REFUSAL_CODES`) in six locales with what to
+do. Two guards keep it complete: a backend scan that every reason constant under
+`erp_adapters/` is registered, and a vitest that reads the registry out of
+`base.py`. The code lives on the audit row rather than a new invoice column
+because that row is already where the panel reads the failure from, and it is
+append-only — the refusal a user saw is the refusal that was recorded.

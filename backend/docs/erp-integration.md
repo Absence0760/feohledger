@@ -896,7 +896,7 @@ ids**. The payload carries them (`InvoicePayload.vendor_erp_id`,
   the lines, resolved by `gl_chart.resolve_erp_account_ids` against the
   invoice's own chart: shared (`entity_id IS NULL`) ∪ the invoice entity's own,
   with the entity's row winning when both define the code (the override
-  precedence `_sync_match_query` applies). Another entity's account never
+  precedence `services/gl_account_sync._preference` applies). Another entity's account never
   resolves.
 - **Bounded** — two queries per push whatever the line count (one vendor read,
   one chart read for every distinct code). Only the vendor and chart syncs write
@@ -928,8 +928,10 @@ with one SuiteQL query (`POST …/services/rest/query/v1/suiteql`,
 `Prefer: transient`, `SELECT id, acctnumber, fullname, accttype, isinactive FROM
 account`), paged by `offset` / `hasMore` up to 1,000 rows. It skips inactive
 accounts, and skips an account whose name would have to stand in for a missing
-number but is longer than the 50-character code column, because truncating
-could merge two accounts onto one code. The REST record collection (`GET
+number but is longer than the code column (`GL_CODE_MAX_LENGTH`, 100 since
+migration 0114), because truncating could merge two accounts onto one code.
+`fullname` is the hierarchical `Parent : Child` path, so it is unique where a
+bare name is not. The REST record collection (`GET
 /account`) returns only ids and links, so it would cost one request per
 account.
 
@@ -946,6 +948,115 @@ through `_call_erp`), `tests/test_erp_adapter_error_pii.py` (every refusal, for
 every adapter, before any HTTP call), `tests/test_erp_adapter_idempotency.py`
 (NetSuite / BC body shape), `tests/test_erp_adapter_money_exact.py`,
 `tests/test_erp_gl_sync.py` (SuiteQL mapping + paging).
+
+### A refusal is recorded as a code the reader is told how to fix
+
+The English `error` on `invoice.erp_failed` names a reason code to a person who
+cannot act on one ("QuickBooks Online post refused: vendor_not_linked"). So the
+same row also carries `refusal = {code, params}`
+(`services/erp.erp_refusal_record`): the code (`ErpPostResult.refusal_code`,
+set by `erp_refusal` and by the coded post-create outcomes in `posted_total`,
+NetSuite, Business Central and Blackbaud), `params.provider` (the adapter's
+fixed literal) and, for `account_not_linked`, `params.accounts` — the GL codes
+on the invoice that resolved to no ERP id, or `[]` when the bill had a line with
+no account at all. An `ErpNotConnectedError` records `not_connected`, the
+unopenable-credentials path `erp_credentials_unavailable`; an HTTP failure
+(`erp_failure_message`) records none, since its text is already the diagnosis.
+
+The invoice modal's ERP panel states the code in the reader's language with the
+fix (`frontend/src/lib/api/erpRefusals.ts`, e.g. *"This vendor isn't in
+QuickBooks Online yet. Sync vendors from QuickBooks Online, or add the vendor
+there, then retry."*), keeps the Retry button, and falls back to `error` for a
+code it does not know or a row written before refusals were coded.
+
+**The registry is `erp_adapters/base.py::ERP_REFUSAL_CODES`.** A new reason
+needs an entry there and a message in all six locales:
+`tests/test_erp_refusal_codes.py` fails on a lower-snake reason constant under
+`erp_adapters/` that is not registered (and on an `erp_refusal` call given an
+inline literal), and `frontend/src/lib/api/erpRefusals.test.ts` reads the set
+out of `base.py` and fails on a code with no message, a message with no code,
+or a locale that leaves a placeholder unfilled.
+
+## GL accounts and vendors are linked by the ERP's unique key
+
+A bill posts on `gl_accounts.erp_account_id` (§ above), so which ERP account a
+row is linked to *is* where the money is booked. `POST /api/gl-accounts/sync-erp`
+links each pulled account through `services/gl_account_sync.sync_chart_from_erp`
+(docs/decisions.md §284):
+
+1. **By ERP id first.** A row already holding the account's `erp_account_id`
+   is that account: its name, type and parent follow the ERP, so a rename in the
+   ERP renames the row instead of creating a second one. Its **code is kept**
+   — invoices record the code as a string — and the drift is reported
+   (`code_drift`).
+2. **Then by code.** An unlinked row with the code is linked; so is one linked
+   to an id the pull no longer contains (a chart re-pointed from a sandbox to
+   the production company). A row with the code linked to *another* account in
+   the pull is a collision (`code_taken`), refused.
+3. **A code two pulled accounts resolve to is refused for both**
+   (`duplicate_code`): neither is created or linked, an existing row with that
+   code loses its link, and the response says so. Never "the later one wins".
+4. **A row keyed by a legacy code two accounts claim is unlinked**
+   (`GLAccountPayload.legacy_codes`). Before §284 QuickBooks sub-accounts were
+   keyed by their bare `Name`, which QuickBooks repeats across parents; such a
+   row may have merged two accounts and be linked to whichever the sync read
+   last. Its link is dropped, so invoices coded to it are refused
+   `account_not_linked` (naming the code) and get recoded; the row and the
+   invoices stay. Each real account gets its own row under its real code.
+
+A code longer than `GL_CODE_MAX_LENGTH` is refused (`code_too_long`), never
+truncated. The response and the `gl_account.synced_from_erp` audit row carry
+exact counts (`created`, `updated`, `unchanged`, `linked`, `conflict_count`,
+`unlinked_count`, `code_drift_count`) and the codes, capped at 50 each; the
+`/gl-accounts` page shows refused and unlinked codes as warnings apart from the
+summary. A collision is never counted as `updated`.
+
+**The code an adapter returns must be unique in that ERP.** Per adapter:
+
+| Adapter | `code` | Why it is unique |
+|---|---|---|
+| `quickbooks_online` | `AcctNum`, else `FullyQualifiedName`; a path over 100 characters keeps its head and ends `…#<Id>` | QuickBooks refuses a duplicate account number, and keeps a `Name` unique only among siblings, so the colon-joined path is the key. `name` is the path too. |
+| `merge_dev` | `account_number`, else the Merge `id` — never `name`; a record with no `id` is dropped | Account numbers are unique in every ERP behind Merge; a name is not (QuickBooks again). |
+| `netsuite` | `acctnumber`, else `fullname` | Numbers are unique; `fullname` is the hierarchical path. |
+| `dynamics_365_bc` | `number` (the No.) | The account table's primary key. |
+| `xero` | `Code` (accounts without one skipped) | Xero refuses a second account with the same code. |
+| `sage_accounting` | `nominal_code` | Unique per business ledger. |
+| `sage_accounting_za` | `ID` | The record id. |
+| `sage_intacct` | `id` (ACCOUNTNO) | The account's key. |
+| `syspro` | `GlCode` | The `GenMaster` key. |
+| `blackbaud_fe_nxt` | `account_number` | Unique in the FE NXT chart. |
+
+The sync's collision refusal is the backstop for an adapter that gets this
+wrong: a repeatable key leaves accounts unlinked, it never merges them.
+
+**Vendors** (`services/vendor_sync`) already matched by `erp_vendor_id` first.
+The name fallback — adopting a manually created, unlinked vendor of the same
+name — now applies only when exactly one pulled record has that name and
+exactly one unlinked local vendor does. Otherwise neither is linked nor created
+and the response reports it (`conflicts`, reason `ambiguous_name`): linking the
+wrong "Acme" posts its bills to another supplier's ERP record. QuickBooks'
+`Vendor.AcctNum` is no longer mapped to our vendor `code`: on a QuickBooks
+vendor it is the company's account number *at* the vendor, not an identifier
+for the vendor.
+
+**Repairing a chart synced before §284.** Run the chart sync again. Rule 1
+relinks every row by id; rule 4 unlinks each collapsed QuickBooks row and
+creates the accounts it had merged under their full paths; the response lists
+the unlinked codes. Recode the open invoices coded to those codes (their pushes
+are refused, naming the code, until you do), then retire the old rows from
+`/gl-accounts` once nothing open uses them. Nothing is deleted or recoded
+automatically: which of the merged accounts an invoice meant is a judgement the
+data cannot make. One case stays as it was: a collapsed row whose link happened
+to land on the account whose new code equals the old one (a top-level account
+sharing its name with sub-accounts) is indistinguishable from a correct row and
+keeps its link.
+
+Tests: `tests/test_gl_account_sync.py` (the 89 → 89 regression from the live
+sandbox chart, rename, duplicate, collision, dead link, legacy repair),
+`tests/test_vendor_sync.py`, `tests/test_erp_quickbooks_online_adapter.py`
+(`_account_code`, PO line account by id, vendor code), and
+`tests-e2e/erp/quickbooks-online.spec.ts` (same-named sub-accounts against the
+fake; the bill's `AccountRef` is the picked one).
 
 ## Idempotency (retry-safe pushes)
 

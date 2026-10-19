@@ -144,9 +144,9 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
 | Method | QuickBooks call | Notes |
 |---|---|---|
 | `test_connection` | `GET companyinfo/{realmId}` | Also records the company's country and home currency for the checks below |
-| `list_vendors` | `query: select * from Vendor` | `STARTPOSITION`/`MAXRESULTS 1000` paging; `Id` → `erp_vendor_id` |
-| `list_gl_accounts` | `query: select * from Account` | Map `Classification` to the asset/liability/equity/revenue/expense vocabulary |
-| `list_pos` | `query: select * from PurchaseOrder` | Plus/Advanced plans only; an empty list on Simple Start is correct |
+| `list_vendors` | `query: select * from Vendor` | `STARTPOSITION`/`MAXRESULTS 1000` paging; `Id` → `erp_vendor_id`. `code` is left unset: `Vendor.AcctNum` is the company's account number *at* the vendor, not an id for it (§284) |
+| `list_gl_accounts` | `query: select * from Account` | **`code` = `AcctNum`, else `FullyQualifiedName`** — never the bare `Name`, which QuickBooks repeats across parents (the sandbox has "Job Materials" under both "Job Expenses" and "Landscaping Services"). `name` is the path; a path over 100 characters ends `…#<Id>`. `legacy_codes` carries the old `Name` key so the sync can unlink a row a pre-§284 sync collapsed. Map `Classification` to the asset/liability/equity/revenue/expense vocabulary. See erp-integration.md § GL accounts and vendors are linked by the ERP's unique key |
+| `list_pos` | `query: select * from PurchaseOrder` | Plus/Advanced plans only; an empty list on Simple Start is correct. A line's account resolves by `AccountRef.value` to the chart sync's code (one extra `Account` read, only when a line names one), never by the ref's repeatable `name` |
 | `post_invoice` | `POST bill?requestid=<correlation_id>` | See below |
 | `get_invoice_status` | `GET bill/{id}` | `Balance == 0` → `paid`; `0 < Balance < TotalAmt` → `partially_paid`; else `open` |
 | `void_invoice` | `POST bill?operation=delete` | QuickBooks has no bill void, only delete. See open question 1 |

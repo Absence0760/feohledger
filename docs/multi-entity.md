@@ -86,7 +86,7 @@ someone reconciles the GL. Two guards, at different widths:
 
 A shared row and an entity's own row with the same code can still coexist at the
 data layer (a tenant predating the constraint may have them). Reads union the
-two; `api/gl_accounts._sync_match_query` resolves them deterministically,
+two; `services/gl_account_sync._preference` resolves them deterministically,
 preferring the entity's own.
 
 **The migration refuses to run over pre-existing duplicates**, naming the
