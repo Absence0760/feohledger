@@ -39,7 +39,8 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-12 — evaluating Baidu's Unlimited OCR opened
+**Last reconciled:** 2026-10-19 — the first production deploy (#566) opened one
+(c) entry, the day-one test gap tracked in #575, taking the file from 103 → 104. Before that, 2026-10-12 — evaluating Baidu's Unlimited OCR opened
 one (c) entry, a scanned-invoice benchmark before any self-hosted OCR
 adapter, taking the file from 102 → 103. Before that, the commerce inventory sync (decisions §273)
 landed with its five providers (WooCommerce, Shopify, Square, Lightspeed
@@ -148,7 +149,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**103 open: 86 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**104 open: 87 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1564,6 +1565,24 @@ scope (§260) — do not fold them into any of these.
       `docs/sub-processors.md` unchanged (self-hosted). **Trigger:** a customer
       or prospect asks for on-prem / no-third-party extraction of scanned
       invoices, or the next change to the `ollama` adapter's image mode.
+
+### Surfaced by the first production deploy (2026-10-18, #566, decisions §274)
+
+- [ ] **(c) Nothing tests the day-one path: an empty install to a first paid
+      invoice.** The first production deploy found nine defects on that path
+      (empty control plane never built, roles unseeded, a migration script that
+      exited 0 on failure, an action hidden for unverified vendors, a
+      tax-exclusive false positive, table overflow, an admin-typed password
+      reset, an inaccurate audit diff, a VM-only compose warning). Every test
+      database is built by `create_all` from tidy seed data, so the path a real
+      first customer takes never ran. **Durable fix:** the checklist in
+      [#575](https://github.com/Absence0760/feohledger/issues/575) — a no-seed
+      day-one CI job driving the real deploy commands plus a browser
+      walkthrough, production-shaped fixtures, single-owner rules with
+      shown-equals-allowed parity tests, Compose version parity, a scripted
+      deploy + restore rehearsal, and the further tests listed there.
+      **Trigger:** the next change to `deploy/`, Alembic bootstrap or
+      `tenant_provisioning`, and in any case before customer #2.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

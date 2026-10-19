@@ -21,13 +21,14 @@ each step.
   - [ ] Local business licence, if your city/county requires one
   - _Optional:_ EIN, separate bank account
   - [ ] TOS + Privacy + DPA + MSA templates ready
-- [ ] **Production deployment** — `production-deployment.md`
-  - [ ] AWS prod account
-  - [ ] Domain + ACM cert
-  - [ ] SOPS secrets populated
-  - [ ] `terraform apply` green
-  - [ ] First tenant provisioned in prod
-  - [ ] Smoke test passes
+- [x] **Production deployment** — `minimal-deployment.md` _(live since 2026-10-18, walkthrough #566)_
+  - [x] AWS prod account
+  - [x] Domain + ACM cert
+  - [x] SOPS secrets populated
+  - [x] `terraform apply` green (workload stack: VM + RDS + DNS + alarms)
+  - [x] First tenant provisioned in prod (a test tenant)
+  - [x] Smoke test passes — invoice → approval → recorded payment, plus a backup restored on the live stack
+  - [ ] Release-triggered deploys switched on (#571's enablement steps)
 - [ ] **Stripe billing** — `stripe-billing.md`
   - [ ] Pricing model decided
   - [ ] Stripe account active
