@@ -85,7 +85,7 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     #: — the ERP accounts the last sync found this UNLINKED row could mean and
     #: would not pick between. Non-NULL is "needs a decision"; cleared whenever
     #: the row is linked.
-    erp_link_candidates: Mapped[dict | None] = mapped_column(JSONB)
+    erp_link_candidates: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True
