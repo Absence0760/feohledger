@@ -71,13 +71,15 @@ def _mk_db(dup_count: int = 0, exception_count: int = 0):
 
     # Each execute() call returns a result whose `.scalar()` matches a
     # caller-controlled queue. The endpoint calls scalar() for both
-    # the dup-count and the exception-count.
+    # the dup-count and the exception-count. The first read is the stale-stamp
+    # check over open duplicate / fraud rows (`_void_stale_finding_stamps`,
+    # decisions §286), which finds none; every result also answers
+    # `.scalars().all()` with no rows, the shape `_ensure_exception` reads open
+    # duplicate / fraud rows in.
     results = [
+        _mk_scalar(0),
         _mk_scalar(dup_count),
-        _mk_scalar(exception_count),
-        _mk_scalar(exception_count),
-        _mk_scalar(exception_count),
-        _mk_scalar(exception_count),
+        *[_mk_scalar(exception_count) for _ in range(6)],
     ]
     db.execute = AsyncMock(side_effect=results)
     db.add = MagicMock()
@@ -88,6 +90,7 @@ def _mk_db(dup_count: int = 0, exception_count: int = 0):
 def _mk_scalar(val):
     m = MagicMock()
     m.scalar = MagicMock(return_value=val)
+    m.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
     return m
 
 

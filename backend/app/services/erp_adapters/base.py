@@ -232,6 +232,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "job_unconfirmed",
         # `services/erp` itself: the sealed ERP credentials could not be opened
         "erp_credentials_unavailable",
+        # `services/erp_export_gate`: an open duplicate / fraud exception (§286)
+        "exception_blocks_erp_export",
     }
 )
 

@@ -228,6 +228,7 @@ async def refresh_warnings(
         w for w in (invoice.warnings or []) if w.get("type") in UPSTREAM_WARNING_TYPES
     ]
     cfg = _fraud_config(org_settings)
+    await _void_stale_finding_stamps(db, invoice)
 
     # Missing required fields
     if not invoice.vendor_name or not invoice.vendor_name.strip():
@@ -1592,6 +1593,136 @@ async def _has_normalized_duplicate(db: AsyncSession, invoice: Invoice, vendor_m
     return any(normalize_invoice_number(number) == target for (number,) in rows.all())
 
 
+#: The invoice fields the `duplicate` and `fraud_flag` rules read: the header
+#: checks in :func:`refresh_warnings` and the LLM rule's candidate
+#: (`llm_fraud_detection.invoice_to_candidate`), plus the entity the duplicate
+#: scope follows. Over-inclusion only re-raises a finding a person then clears
+#: again; leaving one out would let an edit to it pass unseen.
+_FINDING_INPUT_FIELDS = (
+    "vendor_id",
+    "vendor_name",
+    "invoice_number",
+    "amount",
+    "currency",
+    "subtotal",
+    "tax_amount",
+    "invoice_date",
+    "due_date",
+    "remit_to_address",
+    "description",
+    "payment_method",
+    "po_number",
+    "entity_id",
+)
+
+
+#: Inputs a rule reads from OUTSIDE the invoice row, taken from the finding's
+#: own params. `personal_email_domain` reads the vendor's email: a change from
+#: one free-mail domain to another moves no invoice field. Every other
+#: duplicate / fraud param is either derived from the fields above (a round
+#: amount, rush days from the two dates) or drifts with no edit at all (a new
+#: vendor's age in days, a vendor mean and sigma, an LLM's wording), and a
+#: drifting input would re-raise what nobody changed.
+_EXTERNAL_FINDING_PARAMS: dict[str, tuple[str, ...]] = {
+    "personal_email_domain": ("domain",),
+}
+
+
+def finding_fingerprint(invoice: Invoice, code: str, params: dict | None = None) -> str:
+    """What a person judges when they clear a ``duplicate`` / ``fraud_flag``.
+
+    A SHA-256 of the finding's code and :data:`_FINDING_INPUT_FIELDS`. Not the
+    finding's display params: three findings have none
+    (``duplicate_invoice_number``, ``remit_to_changed``, ``future_invoice_date``),
+    so matching on them exempted the invoice from the same finding after an
+    edit re-pointed it at another bill; and others drift with no edit at all
+    (a vendor's age in days, a vendor mean, an LLM's wording), so matching on
+    them re-raised what nobody had changed. Hashed, so the stored value carries
+    no address or vendor detail.
+    """
+    import hashlib
+    import json
+
+    def _plain(value: object) -> object:
+        # `Decimal("1234.5")` from a PATCH and `Decimal("1234.50")` from the
+        # column are one amount.
+        return format(value.normalize(), "f") if isinstance(value, Decimal) else value
+
+    payload = {
+        "code": code,
+        **{f: _plain(getattr(invoice, f, None)) for f in _FINDING_INPUT_FIELDS},
+    }
+    for name in _EXTERNAL_FINDING_PARAMS.get(code, ()):
+        payload[f"param:{name}"] = (params or {}).get(name)
+    raw = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def _void_stale_finding_stamps(db: AsyncSession, invoice: Invoice) -> None:
+    """Void the stamp of an open row whose invoice has moved since it was raised.
+
+    The stamp is the invoice as the finding was raised, and
+    ``exception_lifecycle._bind_fingerprint_to_decision`` keeps it only if the
+    invoice still hashes the same when a person clears the row. That alone let
+    an edit be reverted in time: raised at S1 (a real duplicate), edited to a
+    clean-looking S2 while the reviewer reads the queue, reverted to S1 just
+    before they dismiss, and the verdict on S2 would suppress S1 for good. So
+    once any refresh sees the invoice differ from a row's stamp, the stamp is
+    voided and that row's verdict can never bind; the next refresh after it is
+    closed raises a fresh row for a person to judge. Checked whether or not the
+    rule still fires, since a clean-looking S2 is exactly when it does not.
+    """
+    from app.api.payments import ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
+
+    if invoice.id is None:
+        return
+    rows = (
+        (
+            await db.execute(
+                select(APException).where(
+                    APException.invoice_id == invoice.id,
+                    APException.exception_type.in_(ERP_EXPORT_BLOCKING_EXCEPTION_TYPES),
+                    APException.status.in_(["open", "escalated"]),
+                    APException.finding_fingerprint.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        current = finding_fingerprint(invoice, row.description_code or "", row.description_params)
+        if current != row.finding_fingerprint:
+            row.finding_fingerprint = None
+
+
+async def _finding_cleared_by_a_person(
+    db: AsyncSession, invoice: Invoice, exception_type: str, fingerprint: str
+) -> bool:
+    """Has a person already resolved or dismissed THIS finding on this invoice,
+    as it stands now? (decisions §286)
+
+    Only for ``api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES``, whose rows
+    carry a fingerprint. Re-opening one a reviewer had judged undid their
+    verdict on the next refresh, and ``POST /complete`` refreshes on every
+    "Send to ERP", so a legitimate invoice that shares a vendor's number could
+    never be posted. A closed row suppresses only while the invoice still
+    hashes as it did when the person decided; an edit to any field the rules
+    read re-raises it. ``exception_lifecycle.record_decision`` clears the
+    fingerprint on a decision no person made (a detector, an agent), and a row
+    closed before migration 0116 has none, so neither ever suppresses.
+    """
+    rows = await db.execute(
+        select(func.count()).where(
+            APException.invoice_id == invoice.id,
+            APException.exception_type == exception_type,
+            APException.status.in_(["resolved", "dismissed"]),
+            APException.finding_fingerprint == fingerprint,
+        )
+    )
+    return (rows.scalar() or 0) > 0
+
+
 async def _ensure_exception(
     db: AsyncSession,
     invoice: Invoice,
@@ -1616,15 +1747,45 @@ async def _ensure_exception(
         # A programming error at a literal call site, not a data condition —
         # raising beats persisting an unkeyed description nobody can localize.
         raise TypeError("_ensure_exception needs a catalogue finding, not composed prose")
-    existing = await db.execute(
-        select(func.count()).where(
-            APException.invoice_id == invoice.id,
-            APException.exception_type == exception_type,
-            APException.status.in_(["open", "escalated"]),
-        )
+    from app.api.payments import ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
+
+    fingerprint = (
+        finding_fingerprint(invoice, finding["code"], finding.get("params"))
+        if exception_type in ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
+        else None
     )
-    if (existing.scalar() or 0) > 0:
-        return  # already exists
+    if fingerprint is None:
+        existing = await db.execute(
+            select(func.count()).where(
+                APException.invoice_id == invoice.id,
+                APException.exception_type == exception_type,
+                APException.status.in_(["open", "escalated"]),
+            )
+        )
+        if (existing.scalar() or 0) > 0:
+            return  # already exists
+    else:
+        open_rows = (
+            (
+                await db.execute(
+                    select(APException).where(
+                        APException.invoice_id == invoice.id,
+                        APException.exception_type == exception_type,
+                        APException.status.in_(["open", "escalated"]),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if open_rows:
+            # Never restamped. The stamp is the invoice as the finding was
+            # raised; `record_decision` keeps it only if the invoice still
+            # hashes the same when a person clears the row, so an edit made
+            # while someone was deciding cannot ride their verdict.
+            return  # already exists
+        if await _finding_cleared_by_a_person(db, invoice, exception_type, fingerprint):
+            return
 
     # Auto-routing: org settings can map exception_type → user UUID
     # (and a default-SLA-hours per type). Both are optional — when
@@ -1654,7 +1815,7 @@ async def _ensure_exception(
 
     from app.services.exception_service import create_exception
 
-    await create_exception(
+    raised = await create_exception(
         db,
         exception_type=exception_type,
         severity=severity,
@@ -1677,6 +1838,8 @@ async def _ensure_exception(
         # `uploaded_by_id` / `segregation_actor_ids` is the axis that binds here.
         raised_by_user_id=None,
     )
+    if fingerprint is not None:
+        raised.finding_fingerprint = fingerprint
 
 
 async def _llm_anomaly_check(

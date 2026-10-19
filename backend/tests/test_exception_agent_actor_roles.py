@@ -38,6 +38,8 @@ def _exception():
         resolved_by=None,
         resolved_at=None,
         time_to_resolution_seconds=None,
+        # The decisions §286 stamp `record_decision` keeps or voids on a clear.
+        finding_fingerprint=None,
     )
 
 

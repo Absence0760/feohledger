@@ -508,10 +508,14 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
 # ---------------------------------------------------------------------------
 
 
-def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None):
-    """A fake AsyncSession answering the three reads `_call_erp` makes, routed
+def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_exceptions=()):
+    """A fake AsyncSession answering the four reads `_call_erp` makes, routed
     by the table each statement selects from:
 
+    * the export gate (`erp_export_gate`, decisions §286) — `open_exceptions`,
+      `(invoice_id, exception_type)` rows; none by default, so the push goes on
+      (the gate's own SQL is proven against a real tenant in
+      `test_erp_export_blocking_exceptions.py`);
     * `_fetch_line_items` — the given rows, in the order given (mirrors the
       real query's ORDER BY);
     * the vendor link — `vendor_erp_id` (None models an unlinked vendor);
@@ -530,6 +534,9 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None):
 
     async def execute(stmt, *_a, **_kw):
         sql = str(stmt)
+        if "FROM exceptions" in sql:
+            db.calls.append("exceptions")
+            return SimpleNamespace(all=lambda: list(open_exceptions))
         if "FROM invoice_line_items" in sql:
             db.calls.append("invoice_line_items")
             return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))

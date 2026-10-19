@@ -540,6 +540,40 @@ async def record_raised(
     )
 
 
+def _bind_fingerprint_to_decision(
+    exception: APException, invoice: Invoice | None, *, person: bool
+) -> None:
+    """Keep the row's ``finding_fingerprint`` only for a verdict on exactly it.
+
+    A closed ``duplicate`` / ``fraud_flag`` row whose fingerprint matches the
+    invoice stops the detector raising that finding again
+    (``invoice_warnings._finding_cleared_by_a_person``, decisions §286). So the
+    fingerprint survives a clearing decision only when:
+
+    * a PERSON made it: a detector's auto-close (no ``actor_id``) or an agent
+      (``via``) carries no verdict to honour; and
+    * the invoice still hashes as it did when the finding was raised. The stamp
+      is never refreshed while the row is open, so an edit made after it, while
+      the reviewer was reading the queue, or by a writer that skips
+      ``refresh_warnings``, leaves the two unequal. The verdict then binds
+      nothing, and the next refresh raises the finding for a person to see.
+
+    Escalation never reaches here: it is not a clearing decision, and the row
+    stays open with its stamp.
+    """
+    from app.services.invoice_warnings import finding_fingerprint
+
+    if (
+        person
+        and invoice is not None
+        and exception.description_code
+        and finding_fingerprint(invoice, exception.description_code, exception.description_params)
+        == exception.finding_fingerprint
+    ):
+        return
+    exception.finding_fingerprint = None
+
+
 async def record_decision(
     db: AsyncSession,
     *,
@@ -628,6 +662,8 @@ async def record_decision(
 
     old_status = exception.status
     new_status = apply_resolution(exception, action, resolution, actor_name)
+    if new_status in ("resolved", "dismissed") and exception.finding_fingerprint:
+        _bind_fingerprint_to_decision(exception, invoice, person=actor_id is not None and not via)
 
     details = _base_details(exception)
     details["old_status"] = old_status

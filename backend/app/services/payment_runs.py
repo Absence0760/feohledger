@@ -392,9 +392,17 @@ def is_retry_safe(payment: Payment) -> bool:
 
 
 async def blocking_exception_types(
-    db: AsyncSession, invoice_ids: list[uuid.UUID]
+    db: AsyncSession,
+    invoice_ids: list[uuid.UUID],
+    *,
+    types: tuple[str, ...] | None = None,
 ) -> dict[uuid.UUID, str]:
     """Map each blocked invoice id → the TYPE of exception blocking it.
+
+    ``types`` narrows the question to a subset — the ERP push passes
+    ``api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`` (decisions §286) — so
+    "which flags are still live" stays one predicate however many gates ask it.
+    Precedence is the order of whichever tuple is in force.
 
     The single definition of "is this invoice payable right now", shared by
     `blocked_invoice_ids` (which only needs the ids) and by the payment queue
@@ -415,14 +423,15 @@ async def blocking_exception_types(
 
     if not invoice_ids:
         return {}
+    blocking = PAYMENT_BLOCKING_EXCEPTION_TYPES if types is None else types
     rows = await db.execute(
         select(InvoiceException.invoice_id, InvoiceException.exception_type).where(
             InvoiceException.invoice_id.in_(invoice_ids),
-            InvoiceException.exception_type.in_(PAYMENT_BLOCKING_EXCEPTION_TYPES),
+            InvoiceException.exception_type.in_(blocking),
             InvoiceException.status.notin_(("resolved", "dismissed")),
         )
     )
-    rank = {t: i for i, t in enumerate(PAYMENT_BLOCKING_EXCEPTION_TYPES)}
+    rank = {t: i for i, t in enumerate(blocking)}
     unranked = len(rank)
     out: dict[uuid.UUID, str] = {}
     for invoice_id, exception_type in rows.all():

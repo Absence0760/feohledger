@@ -82,6 +82,17 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # `tests/test_exception_raiser_stamping.py` is the guard that keeps every
     # `create_exception` call site answering the question explicitly.
     raised_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # What a person judged, for a `duplicate` / `fraud_flag` detector row
+    # (migration 0116, decisions §286): a SHA-256 of the finding's code and the
+    # invoice fields those rules read (`invoice_warnings.finding_fingerprint`),
+    # stamped once, when the row is raised. A row a PERSON resolved or
+    # dismissed with a fingerprint equal to the invoice's current one stops the
+    # refresh re-raising that finding; an edit to any of those fields re-raises
+    # it. `exception_lifecycle.record_decision` keeps it only when a person
+    # clears the row AND the invoice still hashes as it was raised, so neither a
+    # detector or agent close nor an edit made mid-decision ever suppresses.
+    # NULL everywhere else, and on every row closed before 0116.
+    finding_fingerprint: Mapped[str | None] = mapped_column(String(64))
     # SLA: deadline derived from org settings at creation time. NULL =
     # no SLA configured for this exception type.
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
