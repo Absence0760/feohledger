@@ -383,7 +383,8 @@ async def signup_complete(
             if tenant_url
             else ""
         )
-        + email_credentials(credentials)
+        # Only the workspace URL is a link; the email and password are inert text.
+        + email_credentials(credentials, links=(tenant_url,) if tenant_url else ())
         + email_note(
             f"{translate('signup.welcome.change_note', locale)} "
             f"{translate('signup.welcome.keep_note', locale)}"

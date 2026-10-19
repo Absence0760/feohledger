@@ -15,13 +15,23 @@ what a hand-written body is made of, so a bespoke email and a derived one look
 like the same product. Every one of them HTML-escapes what it is given: a body
 is built from tenant- and vendor-supplied names, and none of them may become
 markup.
+
+**Only a URL the sender built becomes a link.** Text is never scanned for URLs:
+a name or a rejection reason is free text, and "your account is locked, sign in
+at https://…" typed into one must not become a clickable link inside a genuine
+email. A hand-written body passes its URLs to :func:`email_button` /
+:func:`email_fallback_link` explicitly; a derived body links only the URLs the
+sender declared in ``EmailMessage.links``. Both refuse anything but an absolute
+http(s) URL.
 """
 
 from __future__ import annotations
 
 import html
 import re
+from collections.abc import Collection
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from app.services.branding import BrandContext
@@ -50,8 +60,6 @@ _DARK_CSS = (
 )
 
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
-# Punctuation that ends a sentence rather than the URL it follows.
-_URL_TRAILING = ".,;:!?)]}'\""
 # An indented "Label:   value" line — the credentials / details blocks the
 # invite and reset emails write in their plaintext.
 _KV_RE = re.compile(r"^\s+([^:\n]{1,40}):\s+(\S.*)$")
@@ -59,6 +67,28 @@ _KV_RE = re.compile(r"^\s+([^:\n]{1,40}):\s+(\S.*)$")
 
 def _e(value: object) -> str:
     return html.escape("" if value is None else str(value), quote=True)
+
+
+def _safe_href(url: str) -> str:
+    """``url`` if it is an absolute http(s) URL; raises ``ValueError`` otherwise.
+
+    Every href the layout emits passes through here, so no caller can put a
+    ``javascript:`` / ``data:`` URL (or a relative one, which means nothing to a
+    mail client) behind a button.
+    """
+    raw = (url or "").strip()
+    parts = urlsplit(raw)
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        raise ValueError("email links must be absolute http(s) URLs")
+    return raw
+
+
+def _is_safe_href(url: str) -> bool:
+    try:
+        _safe_href(url)
+    except ValueError:
+        return False
+    return True
 
 
 def _readable_on(hex_color: str) -> str:
@@ -85,9 +115,8 @@ def _readable_on(hex_color: str) -> str:
 
 
 def email_paragraph(text: str) -> str:
-    """One paragraph of escaped text; URLs become links, newlines ``<br>``."""
-    lines = (text or "").split("\n")
-    inner = "<br>".join(_linkify(line) for line in lines)
+    """One paragraph of escaped text, newlines as ``<br>``. URLs stay text."""
+    inner = "<br>".join(_e(line) for line in (text or "").split("\n"))
     return (
         f'<p class="feoh-text" style="margin:0 0 16px;font-size:15px;line-height:1.6;'
         f'color:{_TEXT}">{inner}</p>'
@@ -98,7 +127,7 @@ def email_note(text: str) -> str:
     """A small muted paragraph — expiry notes, "ignore this if" lines."""
     return (
         f'<p class="feoh-muted" style="margin:0 0 16px;font-size:13px;line-height:1.55;'
-        f'color:{_MUTED}">{_linkify(text)}</p>'
+        f'color:{_MUTED}">{_e(text)}</p>'
     )
 
 
@@ -107,14 +136,16 @@ def email_button(url: str, label: str, brand: BrandContext) -> str:
 
     A table cell carries the colour (Outlook ignores padding and background on
     an ``<a>``), and the link fills it, so the whole button is the target.
+    Raises ``ValueError`` for anything but an absolute http(s) ``url``.
     """
+    href = _safe_href(url)
     accent = brand.accent_color
     fg = _readable_on(accent)
     return (
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         'style="margin:8px 0 24px"><tr>'
         f'<td align="center" bgcolor="{accent}" style="border-radius:8px;background:{accent}">'
-        f'<a href="{_e(url)}" target="_blank" style="display:inline-block;padding:13px 26px;'
+        f'<a href="{_e(href)}" target="_blank" style="display:inline-block;padding:13px 26px;'
         f"font-family:{_FONT};font-size:15px;font-weight:600;line-height:1.2;color:{fg};"
         f'text-decoration:none;border-radius:8px">{_e(label)}</a>'
         "</td></tr></table>"
@@ -122,27 +153,42 @@ def email_button(url: str, label: str, brand: BrandContext) -> str:
 
 
 def email_fallback_link(intro: str, url: str) -> str:
-    """The "button not working? paste this" line, with the raw URL beneath it."""
+    """The "button not working? paste this" line, with the raw URL beneath it.
+
+    Raises ``ValueError`` for anything but an absolute http(s) ``url``.
+    """
+    href = _safe_href(url)
     return (
         f'<p class="feoh-muted" style="margin:0 0 16px;font-size:12px;line-height:1.55;'
         f'color:{_MUTED}">{_e(intro)}<br>'
-        f'<a href="{_e(url)}" style="color:{_MUTED};word-break:break-all">{_e(url)}</a></p>'
+        f'<a href="{_e(href)}" style="color:{_MUTED};word-break:break-all">{_e(href)}</a></p>'
     )
 
 
-def email_credentials(rows: list[tuple[str, str]], *, mono: bool = True) -> str:
-    """A set-off panel of label / value rows (sign-in URL, email, password)."""
+def email_credentials(
+    rows: list[tuple[str, str]], *, mono: bool = True, links: Collection[str] = ()
+) -> str:
+    """A set-off panel of label / value rows (sign-in URL, email, password).
+
+    Values are escaped text. A value is a link only when it is exactly one of
+    ``links`` — the URLs the sender built — and an http(s) URL.
+    """
     cells = []
     for i, (label, value) in enumerate(rows):
         top = "" if i == 0 else f"border-top:1px solid {_BORDER};"
         value_font = f"font-family:{_MONO};" if mono else ""
+        shown = (
+            f'<a href="{_e(value)}" style="color:inherit;text-decoration:underline">{_e(value)}</a>'
+            if value in links and _is_safe_href(value)
+            else _e(value)
+        )
         cells.append(
             "<tr>"
             f'<td class="feoh-muted feoh-rule" style="{top}padding:10px 16px;font-size:13px;'
             f'color:{_MUTED};white-space:nowrap;vertical-align:top;width:1%">{_e(label)}</td>'
             f'<td class="feoh-text feoh-rule" style="{top}padding:10px 16px 10px 0;'
             f"{value_font}font-size:14px;color:{_TEXT};word-break:break-all;"
-            f'vertical-align:top">{_linkify(value)}</td>'
+            f'vertical-align:top">{shown}</td>'
             "</tr>"
         )
     return (
@@ -164,24 +210,6 @@ def email_preformatted(text: str) -> str:
     )
 
 
-def _linkify(text: str) -> str:
-    """Escape ``text``, turning each http(s) URL in it into a link."""
-    out: list[str] = []
-    pos = 0
-    for match in _URL_RE.finditer(text or ""):
-        url = match.group(0)
-        trail = ""
-        while url and url[-1] in _URL_TRAILING:
-            trail = url[-1] + trail
-            url = url[:-1]
-        out.append(_e(text[pos : match.start()]))
-        out.append(f'<a href="{_e(url)}" style="color:inherit;text-decoration:underline">')
-        out.append(f"{_e(url)}</a>{_e(trail)}")
-        pos = match.end()
-    out.append(_e((text or "")[pos:]))
-    return "".join(out)
-
-
 # ---------------------------------------------------------------------------
 # Plaintext → HTML
 # ---------------------------------------------------------------------------
@@ -193,18 +221,28 @@ def _is_url(line: str) -> bool:
 
 
 def text_to_html(
-    body_text: str, brand: BrandContext, *, cta_label: str, fallback_intro: str = ""
+    body_text: str,
+    brand: BrandContext,
+    *,
+    cta_label: str,
+    links: Collection[str] = (),
+    fallback_intro: str = "",
 ) -> str:
     """Derive an HTML body from a plaintext one.
 
     Blocks are split on blank lines, then each is read by its shape:
 
-    - a line that is only a URL becomes the call-to-action button; when the line
-      above it is a lead-in ending in ``:`` ("View the conversation and reply:"),
-      that lead-in is the button's label, otherwise ``cta_label`` is;
-    - a block of indented ``Label: value`` lines becomes the credentials panel;
+    - a line that is only a URL **the sender declared in** ``links`` becomes the
+      call-to-action button; when the line above it is a lead-in ending in ``:``
+      ("View the conversation and reply:"), that lead-in is the button's label,
+      otherwise ``cta_label`` is;
+    - a block of indented ``Label: value`` lines becomes the credentials panel
+      (a value that is a declared link is linked, nothing else is);
     - a block of four or more lines is tabular data and stays monospace;
-    - anything else is a paragraph, its URLs linked.
+    - anything else is a paragraph.
+
+    Any other URL — one inside a sentence, or on its own line but not declared —
+    stays inert text: it may have arrived inside an interpolated name.
 
     With ``fallback_intro`` set, each button's raw URL is repeated at the end
     under that line, for a client that will not follow the button.
@@ -220,14 +258,19 @@ def text_to_html(
         if url not in buttons:
             buttons.append(url)
 
+    declared = {u.strip() for u in links if _is_safe_href(u)}
+
+    def is_link(line: str) -> bool:
+        return line.strip() in declared and _is_url(line)
+
     for raw_block in re.split(r"\n\s*\n", (body_text or "").strip("\n")):
         lines = [ln for ln in raw_block.split("\n") if ln.strip()]
         if not lines:
             continue
-        if len(lines) == 1 and _is_url(lines[0]):
+        if len(lines) == 1 and is_link(lines[0]):
             button(lines[0].strip(), cta_label)
             continue
-        if len(lines) >= 2 and _is_url(lines[-1]) and not any(_is_url(x) for x in lines[:-1]):
+        if len(lines) >= 2 and is_link(lines[-1]) and not any(_is_url(x) for x in lines[:-1]):
             lead = lines[:-1]
             label_line = lead[-1].strip()
             if label_line.endswith(":") and len(label_line) <= 80:
@@ -240,7 +283,8 @@ def text_to_html(
             continue
         kv = [_KV_RE.match(ln) for ln in lines]
         if all(kv):
-            parts.append(email_credentials([(m.group(1).strip(), m.group(2).strip()) for m in kv]))
+            rows = [(m.group(1).strip(), m.group(2).strip()) for m in kv]
+            parts.append(email_credentials(rows, links=declared))
             continue
         if len(lines) >= 4:
             parts.append(email_preformatted("\n".join(lines)))
@@ -249,22 +293,6 @@ def text_to_html(
     if fallback_intro:
         parts.extend(email_fallback_link(fallback_intro, url) for url in buttons)
     return "".join(parts)
-
-
-def derive_preheader(body_text: str) -> str:
-    """The inbox preview line: the first real sentence of the plaintext.
-
-    Skips the greeting ("Hi Jared,") and bare links so the preview says what the
-    email is about.
-    """
-    for block in re.split(r"\n\s*\n", body_text or ""):
-        line = " ".join(block.split())
-        if not line or _is_url(line) or _KV_RE.match(block.split("\n")[0] or ""):
-            continue
-        if len(line) <= 40 and line.endswith((",", ":")):
-            continue
-        return line[:140]
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +315,8 @@ def render_email(
     footer = brand_email_footer_html(brand)
     name = _e(brand.product_name)
     # The preheader is hidden text the inbox shows as the preview; the trailing
-    # zero-width run stops clients pulling body text in after it.
+    # zero-width run stops clients pulling body text in after it. It is never
+    # derived from the body (see ``EmailMessage.preheader``).
     pre = (
         '<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">'
         f"{_e(preheader)}" + "&#8204;&nbsp;" * 40 + "</div>"

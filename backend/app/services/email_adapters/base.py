@@ -25,8 +25,19 @@ class EmailMessage:
     so an unbranded message still gets a consistent presentation.
 
     ``locale`` (a catalogue locale) sets the document language and the derived
-    body's default button label; ``preheader`` is the inbox preview line,
-    derived from the first sentence of ``body_text`` when unset.
+    body's default button label.
+
+    ``links`` are the URLs this sender built (a reset link, the workspace URL).
+    In a derived body only these become buttons or links; every other URL in
+    ``body_text`` stays inert text, because it may have arrived inside an
+    interpolated name. A hand-written ``body_html`` passes its URLs to the
+    layout blocks directly and needs none.
+
+    ``preheader`` is the inbox preview line. It is never derived from the body:
+    the first sentence of an email is where a sign-in code or a credential sits,
+    so a sender opts in with fixed copy, and an email carrying a code, token,
+    link or credential sets one that names none of them. Unset, no preheader is
+    sent and the client previews the body as it always has.
     """
 
     to: str
@@ -35,6 +46,7 @@ class EmailMessage:
     body_html: str | None = None
     brand: BrandContext | None = None
     locale: str | None = None
+    links: tuple[str, ...] = ()
     preheader: str | None = None
 
 
@@ -70,11 +82,7 @@ class EmailAdapter:
         from app.config import settings
         from app.services.branding import get_brand_context
         from app.services.email_adapters.email_catalogue import normalize_locale, translate
-        from app.services.email_adapters.layout import (
-            derive_preheader,
-            render_email,
-            text_to_html,
-        )
+        from app.services.email_adapters.layout import render_email, text_to_html
 
         brand = message.brand or get_brand_context(None)
         locale = normalize_locale(message.locale)
@@ -82,12 +90,8 @@ class EmailAdapter:
             message.body_text,
             brand,
             cta_label=translate("email.layout.open_cta", locale, product=brand.product_name),
+            links=message.links,
             fallback_intro=translate("email.layout.fallback_link", locale),
-        )
-        preheader = (
-            message.preheader
-            if message.preheader is not None
-            else derive_preheader(message.body_text)
         )
         # The platform mark is an image the frontend serves, so the header needs
         # its origin; a tenant logo is already an absolute URL.
@@ -95,7 +99,7 @@ class EmailAdapter:
             brand=brand,
             body_html=body,
             public_url=settings.public_url,
-            preheader=preheader,
+            preheader=message.preheader or "",
             lang=locale,
         )
 

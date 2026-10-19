@@ -516,6 +516,37 @@ async def test_verification_email_is_html_with_a_confirm_button(
     assert "<b>Eve</b> & co" in msg.body_text
 
 
+async def test_a_url_in_the_admin_name_is_never_a_link_in_the_verification_email(
+    realdb, monkeypatch, cleanup_signup
+):
+    """The name is free text sent to any address: a phishing link typed into it
+    must stay inert. Only the verify link the server built is clickable."""
+    import re
+
+    from app.api import signup as signup_mod
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    capture = _CaptureAdapter()
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
+
+    name = "your account is locked, sign in at https://evil.example/login"
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(
+            "/api/signup/start", json=_start_body(slug, email) | {"admin_name": name}
+        )
+    assert resp.status_code == 200
+
+    (msg,) = capture.sent
+    html = _rendered_html(msg)
+    hrefs = set(re.findall(r'href="([^"]*)"', html))
+    assert hrefs and all("/verify?token=" in h for h in hrefs)
+    assert "https://evil.example/login" in html  # shown, as text
+
+
 async def test_welcome_email_sets_the_credentials_apart(realdb, monkeypatch, cleanup_signup):
     from app.api import signup as signup_mod
 
