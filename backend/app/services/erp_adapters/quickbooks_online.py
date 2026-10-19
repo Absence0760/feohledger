@@ -515,7 +515,6 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         out = []
         for a in rows:
             code = _account_code(a)
-            legacy = _legacy_account_code(a)
             out.append(
                 GLAccountPayload(
                     code=code,
@@ -523,7 +522,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                     account_type=_CLASSIFICATION.get(str(a.get("Classification") or "").lower()),
                     erp_account_id=str(a["Id"]),
                     parent_code=code_by_id.get(str((a.get("ParentRef") or {}).get("value"))),
-                    legacy_codes=(legacy,) if legacy != code else (),
+                    legacy_codes=_legacy_account_codes(a),
                 )
             )
         return out
@@ -592,10 +591,15 @@ def _account_display_name(raw: dict) -> str:
     return str(raw.get("FullyQualifiedName") or raw.get("Name") or _account_code(raw))
 
 
-def _legacy_account_code(raw: dict) -> str:
-    """The code this adapter gave the account before §284: ``AcctNum``, else the
-    bare ``Name``. Read only by the sync's ambiguity check."""
-    return str(raw.get("AcctNum") or raw.get("Name") or raw.get("Id"))
+def _legacy_account_codes(raw: dict) -> tuple[str, ...]:
+    """Every code this adapter could have given the account before §284: its
+    ``AcctNum`` and its bare ``Name`` (a company may have turned numbering on
+    after a sync keyed it by name). Always emitted, even when equal to the
+    current code: a top-level "Job Materials" must count as one of the accounts
+    a merged "Job Materials" row may have meant. Read only by the sync's
+    ambiguity check."""
+    keys = (str(raw.get("AcctNum") or "").strip(), str(raw.get("Name") or "").strip())
+    return tuple(dict.fromkeys(k for k in keys if k))
 
 
 def _po_account_ids(raw: dict) -> list[str]:

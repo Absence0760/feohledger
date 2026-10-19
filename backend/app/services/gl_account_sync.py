@@ -55,7 +55,8 @@ CODE_TAKEN = "code_taken"  # our row with the code is linked to another live acc
 AMBIGUOUS_LEGACY = "ambiguous_legacy"  # our row's code is a legacy key two accounts share
 CODE_TOO_LONG = "code_too_long"  # longer than GL_CODE_MAX_LENGTH; never truncated
 
-#: Cap on the codes a response / audit row lists; the counts are always exact.
+#: Cap on the entries a sync RESPONSE lists; the counts are always exact, and
+#: the audit row lists everything.
 MAX_LISTED = 50
 
 
@@ -76,20 +77,32 @@ class ChartSyncResult:
     #: ``{"code", "erp_code"}`` for rows linked by id whose code is not the
     #: ERP's current one (kept: see rule 1).
     code_drift: list[dict] = field(default_factory=list)
+    #: ``{"code", "from", "to"}`` for every row whose ``erp_account_id`` this run
+    #: changed (``to`` None = unlinked) — where its bills posted before and
+    #: where they post now. The audit row records it in full.
+    link_changes: list[dict] = field(default_factory=list)
 
-    def summary(self) -> dict:
-        """The response / audit projection: exact counts, capped lists."""
+    def summary(self, *, capped: bool = True) -> dict:
+        """The response projection (lists capped at :data:`MAX_LISTED`; counts
+        always exact), or with ``capped=False`` the audit row's, which keeps
+        every entry — an audit of where money now posts that stops at 50 is
+        not one."""
+
+        def listed(items: list) -> list:
+            return items[:MAX_LISTED] if capped else list(items)
+
         return {
             "created": self.created,
             "updated": self.updated,
             "unchanged": self.unchanged,
             "linked": self.linked,
             "conflict_count": len(self.conflicts),
-            "conflicts": self.conflicts[:MAX_LISTED],
+            "conflicts": listed(self.conflicts),
             "unlinked_count": len(self.unlinked),
-            "unlinked": self.unlinked[:MAX_LISTED],
+            "unlinked": listed(self.unlinked),
             "code_drift_count": len(self.code_drift),
-            "code_drift": self.code_drift[:MAX_LISTED],
+            "code_drift": listed(self.code_drift),
+            "link_changes": listed(self.link_changes),
         }
 
 
@@ -153,9 +166,12 @@ async def sync_chart_from_erp(
             for code in codes:
                 refused.setdefault(code, DUPLICATE_ERP_ID)
     candidates = {code: group[0] for code, group in by_code.items() if code not in refused}
-    # Every id in the pull, refused ones included: a row linked to any of them
-    # points at an account that still exists, so its link is not "dead".
+    # Every id in the pull, refused and over-long ones included: a row linked to
+    # any of them points at an account that still exists, so its link is not
+    # "dead" and must not be re-pointed at whatever account holds its code.
     live_ids = {a.erp_account_id for g in by_code.values() for a in g if a.erp_account_id}
+    live_ids |= {a.erp_account_id for g in too_long.values() for a in g if a.erp_account_id}
+    code_of_id = {a.erp_account_id: code for code, a in candidates.items() if a.erp_account_id}
 
     # The ERP accounts each LEGACY code (an older adapter's key) named. Only
     # legacy codes: a row keyed by one that two accounts share may have merged
@@ -183,29 +199,44 @@ async def sync_chart_from_erp(
         .scalars()
         .all()
     )
+
+    def unlink(row: GLAccount) -> None:
+        if row.erp_account_id is not None:
+            result.link_changes.append({"code": row.code, "from": row.erp_account_id, "to": None})
+            row.erp_account_id = None
+            result.unlinked.append(row.code)
+
+    def legacy_ambiguous(row: GLAccount, erp_id: str | None) -> bool:
+        """Rule 4: did an older adapter key some OTHER account by ``row``'s code?"""
+        return bool(legacy_claims.get(row.code, set()) - {erp_id})
+
+    # The unlinks run over EVERY row in scope, not just the preferred one per
+    # key: a shared row and an entity's override can both hold a bad link, and
+    # whichever one this pass skipped would keep posting to it for the invoices
+    # that resolve to it.
+    for row in rows:
+        linked_to = row.erp_account_id
+        if linked_to is None:
+            continue
+        if row.code in refused:
+            # Rule 3: two ERP accounts answer to the code this row shows.
+            unlink(row)
+        elif (
+            linked_to in code_of_id
+            and row.code != code_of_id[linked_to]
+            and legacy_ambiguous(row, linked_to)
+        ):
+            # Rule 4: a pre-§284 row that merged this account with another.
+            # Its invoices are refused and recoded; nothing posts on a guess.
+            # The ERP account gets its own row under its real code below.
+            unlink(row)
+
     row_by_id: dict[str, GLAccount] = {}
     row_by_code: dict[str, GLAccount] = {}
     for row in rows:  # first one wins: the order IS the preference
         if row.erp_account_id:
             row_by_id.setdefault(row.erp_account_id, row)
         row_by_code.setdefault(row.code, row)
-
-    def unlink(row: GLAccount) -> None:
-        if row.erp_account_id is not None:
-            row.erp_account_id = None
-            result.unlinked.append(row.code)
-
-    # Rule 3: a refused code's existing row loses its link — two ERP accounts
-    # answer to the code it shows, so the link it holds is a guess.
-    for code in refused:
-        row = row_by_code.get(code)
-        if row is not None and row.erp_account_id is not None:
-            row_by_id.pop(row.erp_account_id, None)
-            unlink(row)
-
-    def legacy_ambiguous(row: GLAccount, erp_id: str | None) -> bool:
-        """Rule 4: did an older adapter key some OTHER account by ``row``'s code?"""
-        return bool(legacy_claims.get(row.code, set()) - {erp_id})
 
     claimed_rows: set[uuid.UUID] = set()
 
@@ -216,20 +247,11 @@ async def sync_chart_from_erp(
         # -- rule 1: by the ERP's id --------------------------------------
         row = row_by_id.get(erp_id) if erp_id else None
         if row is not None and row.id not in claimed_rows:
-            if row.code != code and legacy_ambiguous(row, erp_id):
-                # A pre-§284 row that merged this account with another: drop
-                # the link (its invoices get refused and recoded, nothing is
-                # posted on a guess). The ERP account itself is fine — it just
-                # has no row of its own yet, so fall through to the code match,
-                # which creates one under its real code.
-                row_by_id.pop(erp_id, None)
-                unlink(row)
-            else:
-                claimed_rows.add(row.id)
-                if row.code != code:
-                    result.code_drift.append({"code": row.code, "erp_code": code})
-                _apply(row, acct, result)
-                continue
+            claimed_rows.add(row.id)
+            if row.code != code:
+                result.code_drift.append({"code": row.code, "erp_code": code})
+            _apply(row, acct, result)
+            continue
 
         # -- rule 2: by code ----------------------------------------------
         row = row_by_code.get(code)
@@ -250,6 +272,7 @@ async def sync_chart_from_erp(
                 continue
             claimed_rows.add(row.id)
             if row.erp_account_id != erp_id:
+                result.link_changes.append({"code": code, "from": row.erp_account_id, "to": erp_id})
                 row.erp_account_id = erp_id
                 result.linked += 1
                 _apply(row, acct, result, count=False)

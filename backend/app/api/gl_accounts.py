@@ -512,7 +512,7 @@ async def sync_gl_accounts_from_erp(
         entity_type="gl_account",
         entity_id=org_id,
         details={
-            **summary,
+            **result.summary(capped=False),
             "adapter": adapter.erp_type,
             "entity_id": str(entity_id) if entity_id else None,
         },
@@ -520,10 +520,8 @@ async def sync_gl_accounts_from_erp(
     await db.commit()
     message = f"Synced {result.created} new, {result.updated} updated GL accounts"
     if result.conflicts or result.unlinked:
-        message += (
-            f"; {len(result.conflicts)} not linked (two ERP accounts share a code), "
-            f"{len(result.unlinked)} unlinked"
-        )
+        # The reasons differ per code (`conflicts[].reason`); say only the counts.
+        message += f"; {len(result.conflicts)} not linked, {len(result.unlinked)} unlinked"
     return {
         "success": True,
         "message": message,

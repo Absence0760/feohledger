@@ -129,7 +129,7 @@ async def test_qbo_same_named_sub_accounts_each_get_their_own_row(realdb):
     rows = _qbo_chart()
     accounts = await _qbo_payloads(rows)
     # What the pre-§284 key (the bare Name) made of this chart: 81 codes.
-    assert len({c for a in accounts for c in (a.legacy_codes or (a.code,))}) == 81
+    assert len({c for a in accounts for c in a.legacy_codes}) == 81
 
     result = await _sync(realdb, accounts)
 
@@ -245,6 +245,19 @@ async def test_a_sub_account_path_past_the_old_50_character_limit_is_stored(real
     assert (await _rows(realdb))[code].erp_account_id == "D"
 
 
+async def test_a_link_to_an_over_long_account_is_live_not_dead(realdb):
+    """The account the row is linked to is in the pull, just refused for its
+    length — so the row's link is not "dead" and is never re-pointed at the
+    other account that now shows the row's code."""
+    await _add(realdb, code="6100", name="Office", erp_account_id="L")
+    result = await _sync(
+        realdb, [_acct("x" * (GL_CODE_MAX_LENGTH + 1), "L"), _acct("6100", "OTHER")]
+    )
+    assert result.linked == 0
+    assert any(c["code"] == "6100" and c["reason"] == CODE_TAKEN for c in result.conflicts)
+    assert (await _rows(realdb))["6100"].erp_account_id == "L"
+
+
 async def test_an_over_long_code_is_refused_not_truncated(realdb):
     code = "x" * (GL_CODE_MAX_LENGTH + 1)
     result = await _sync(realdb, [_acct(code, "L")])
@@ -309,6 +322,33 @@ async def test_a_legacy_row_only_one_account_answers_to_keeps_its_link(realdb):
     assert (await _rows(realdb))["Bookkeeper"].erp_account_id == "77"
 
 
+async def test_a_merged_row_linked_to_the_sub_account_is_unlinked(realdb):
+    """A top-level "Job Materials" and one sub-account of that name were both
+    keyed "Job Materials" before §284, and the row ended up on the
+    sub-account. The top-level account's name is still a claim on the row, so
+    it is unlinked rather than left posting to the sub-account."""
+    rows = [
+        {"Id": "5", "Name": "Job Materials", "FullyQualifiedName": "Job Materials"},
+        {"Id": "60", "Name": "Job Expenses", "FullyQualifiedName": "Job Expenses"},
+        {
+            "Id": "1000",
+            "Name": "Job Materials",
+            "FullyQualifiedName": "Job Expenses:Job Materials",
+            "ParentRef": {"value": "60"},
+        },
+    ]
+    await _add(realdb, code="Job Materials", name="Job Materials", erp_account_id="1000")
+    result = await _sync(realdb, await _qbo_payloads(rows))
+
+    assert result.unlinked == ["Job Materials"]
+    assert result.link_changes == [{"code": "Job Materials", "from": "1000", "to": None}]
+    conflict = next(c for c in result.conflicts if c["code"] == "Job Materials")
+    assert conflict["reason"] == AMBIGUOUS_LEGACY
+    chart = await _rows(realdb)
+    assert chart["Job Materials"].erp_account_id is None
+    assert chart["Job Expenses:Job Materials"].erp_account_id == "1000"
+
+
 async def test_an_unlinked_row_a_legacy_code_names_twice_is_not_relinked(realdb):
     """A manual "Job Materials" row and a top-level QuickBooks account of that
     name: two sub-accounts were ALSO once keyed "Job Materials", so which one
@@ -328,6 +368,46 @@ async def test_an_unlinked_row_a_legacy_code_names_twice_is_not_relinked(realdb)
     assert conflict["reason"] == AMBIGUOUS_LEGACY
     assert conflict["erp_account_ids"] == ["1000", "1100", "5"]
     assert (await _rows(realdb))["Job Materials"].erp_account_id is None
+
+
+async def test_every_merged_row_in_scope_is_unlinked_not_just_the_preferred(realdb):
+    """Multi-entity: a shared "Job Materials" and an entity's own override can
+    both hold the merged link. Unlinking only the preferred one would leave the
+    other posting to Landscaping for every invoice that resolves to it."""
+    from app.models.entity import Entity
+
+    org_id = realdb.info(TENANT).org_id
+    async with realdb.sessionmaker(TENANT)() as s:
+        sub = Entity(organization_id=org_id, name="Sub", slug=f"sub-{uuid.uuid4().hex[:6]}")
+        s.add(sub)
+        await s.commit()
+        sub_id = sub.id
+    await _add(realdb, code="Job Materials", name="Shared", erp_account_id="1100")
+    await _add(realdb, code="Job Materials", name="Own", erp_account_id="1100", entity_id=sub_id)
+
+    result = await _sync(realdb, await _qbo_payloads(_qbo_chart()), entity_id=sub_id)
+
+    assert result.unlinked == ["Job Materials", "Job Materials"]
+    async with realdb.sessionmaker(TENANT)() as s:
+        legacy = (
+            (await s.execute(select(GLAccount).where(GLAccount.code == "Job Materials")))
+            .scalars()
+            .all()
+        )
+    assert [r.erp_account_id for r in legacy] == [None, None]
+
+
+async def test_the_audit_row_records_every_link_change_uncapped(realdb):
+    """Where each row's bills posted before and where they post now, for every
+    row — the response caps its lists at 50, the audit row does not."""
+    for i in range(60):
+        await _add(realdb, code=f"7{i:03d}", name=f"A{i}", erp_account_id=f"SANDBOX-{i}")
+    result = await _sync(realdb, [_acct(f"7{i:03d}", f"PROD-{i}") for i in range(60)])
+    assert result.linked == 60
+    assert len(result.summary()["link_changes"]) == 50
+    full = result.summary(capped=False)["link_changes"]
+    assert len(full) == 60
+    assert {"code": "7000", "from": "SANDBOX-0", "to": "PROD-0"} in full
 
 
 # ---------------------------------------------------------------------------
@@ -392,3 +472,13 @@ async def test_endpoint_reports_conflicts_by_code_never_as_updated(realdb, qbo_c
     assert body["conflicts"] == [
         {"code": "6100", "reason": DUPLICATE_CODE, "erp_account_ids": ["A", "B"]}
     ]
+    assert body["message"] == "Synced 0 new, 0 updated GL accounts; 1 not linked, 0 unlinked"
+
+    from app.models.workflow import AuditLog
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        row = (
+            await s.execute(select(AuditLog).where(AuditLog.action == "gl_account.synced_from_erp"))
+        ).scalar_one()
+    assert row.details["conflicts"] == body["conflicts"]
+    assert row.details["adapter"] == "merge_dev"

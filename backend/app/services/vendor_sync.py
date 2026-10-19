@@ -148,8 +148,10 @@ async def sync_vendors_from_erp(
         else:
             # Also check if there's a name match (might be manually created before ERP sync)
             name = erp_v.get("name", "")
-            if name and unlinked_names.get(name, 0) and (
-                pulled_names[name] > 1 or unlinked_names[name] > 1
+            if (
+                name
+                and unlinked_names.get(name, 0)
+                and (pulled_names[name] > 1 or unlinked_names[name] > 1)
             ):
                 # Ambiguous: which ERP record is which local vendor is a guess.
                 conflicts.setdefault(name, set()).add(str(erp_id))

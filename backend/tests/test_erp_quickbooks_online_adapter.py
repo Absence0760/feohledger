@@ -809,13 +809,16 @@ def test_list_gl_accounts_names_by_path_and_records_the_legacy_name(token, no_ov
     )
     assert by_id["8"].parent_code == "Job Expenses"
     assert by_id["8"].legacy_codes == ("Job Materials",)
-    # A numbered account was always keyed by its number; the name shows the path.
+    # A numbered account was keyed by its number — or by its name, had the
+    # company turned numbering on after a sync. The name shows the path.
     assert (by_id["9"].code, by_id["9"].name, by_id["9"].legacy_codes) == (
         "5200",
         "Landscaping:Job Materials",
-        (),
+        ("5200", "Job Materials"),
     )
-    assert by_id["1"].legacy_codes == ()
+    # Emitted even when it equals the current code: a top-level account is one
+    # of the accounts a merged row of that name may have meant.
+    assert by_id["1"].legacy_codes == ("Job Expenses",)
 
 
 def test_list_pos_resolves_a_line_account_by_id_not_by_its_name(token, no_override):
