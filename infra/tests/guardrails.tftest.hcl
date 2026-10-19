@@ -484,6 +484,11 @@ run "database_is_private_encrypted_tls_only_and_hard_to_delete" {
   }
 
   assert {
+    condition     = anytrue([for p in aws_db_parameter_group.main.parameter : p.name == "rds.force_ssl" && p.apply_method == "pending-reboot"])
+    error_message = "rds.force_ssl must declare apply_method = \"pending-reboot\", as AWS reports it, or every plan shows a no-op in-place update."
+  }
+
+  assert {
     condition     = aws_db_instance.main.engine == "postgres" && aws_db_instance.main.engine_version == "16"
     error_message = "The database must be Postgres 16 — the major version dev, CI and the compose stack run."
   }

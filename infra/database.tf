@@ -57,9 +57,16 @@ resource "aws_db_parameter_group" "main" {
   description = "Postgres 16 for ${var.project} ${var.environment}: TLS-only, connection logging."
 
   # Refuse any connection that is not TLS.
+  #
+  # apply_method is declared as AWS reports it back. Left at the provider's
+  # default ("immediate"), every plan showed an in-place update to
+  # "immediate" that applied and changed nothing, because AWS keeps reporting
+  # "pending-reboot" for this parameter. 1 is already the postgres16 family
+  # default, so no reboot is ever outstanding because of it.
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 
   # Connection and disconnection records for incident review (who connected,
