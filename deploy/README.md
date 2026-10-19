@@ -225,6 +225,33 @@ notices which one answers and checks the apex only once it is CloudFront.
   go back to this VM's Caddy, which keeps serving the SPA until the step-4
   cleanup removes it.
 
+## Rehearsed on every PR: the day-one job
+
+The first production deploy (#566) found nine defects in the most basic paths
+because nothing had ever run these steps in sequence from zero. CI's
+`day-one-e2e` job (`.github/workflows/ci.yml`, required through `CI gate`) now
+does, on every PR touching `backend/`, `frontend/`, `deploy/` or
+`scripts/day-one/` (#575):
+
+1. an **empty** Postgres (no `seed.py`, no pytest harness, no `init-tenants.sql`);
+2. the deploy's migration step — `backend/scripts/deploy_migrate.sh`, the very
+   file `deploy.sh` runs in the api container, so the two cannot drift;
+3. the production image booted on its own entrypoint with production-shaped
+   settings (`FEOH_ENVIRONMENT=production`, MFA on, signup off, `smtp` email,
+   the credential KMS key on LocalStack);
+4. the first tenant, provisioned through `lib.sh::feoh_tenant_argv` — the
+   command `add-tenant.sh` execs — with a generated temporary password;
+5. the migration step **again**, failing on any change to any database's
+   schema or Alembic version (a deploy must be idempotent);
+6. the Playwright journey in `frontend/tests-e2e/day-one/`.
+
+So a change to a deploy step changes what the job runs. Keep it that way:
+`deploy.sh` and `add-tenant.sh` call the shared file / function rather than
+spelling the commands, and `backend/tests/test_control_plane_bootstrap.py` +
+`test_deploy_add_tenant.py` fail on a restated copy. It all lives in
+`scripts/day-one/stack.sh`; `pnpm day-one:up && pnpm test:day-one` runs it on a
+laptop, on its own ports beside the dev stack.
+
 ## Tenants
 
 `./add-tenant.sh <slug> --name "Company" --admin-email admin@company.com` —

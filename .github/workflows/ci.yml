@@ -41,6 +41,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       mobile: ${{ steps.filter.outputs.mobile }}
       e2e: ${{ steps.filter.outputs.e2e }}
+      day_one: ${{ steps.filter.outputs.day_one }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: filter
@@ -66,6 +67,16 @@ jobs:
               - 'backend/**'
               - 'frontend/**'
               - 'tools/fake-erp/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+            # The day-one rehearsal also runs when only the deploy's own steps
+            # changed: it exists to prove they still build a working install.
+            day_one:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'deploy/**'
+              - 'scripts/day-one/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
               - '.github/workflows/ci.yml'
@@ -1395,6 +1406,127 @@ jobs:
           echo "===== backend.log =====" && tail -200 /tmp/backend.log || true
           docker compose -f backend/docker-compose.yml logs fake-erp || true
 
+  # Day one (#575): the first production deploy (#566) found nine defects in
+  # the most basic paths, because every other job starts from something tidier
+  # than a new customer's empty system: create_all databases, seed.py data,
+  # verified vendors, tax-inclusive mock extraction. This job starts from an
+  # EMPTY Postgres and runs the deploy's OWN steps, by running the same files
+  # rather than copies of their command lines:
+  #
+  #   - backend/scripts/deploy_migrate.sh, the migration step deploy/deploy.sh
+  #     and aws-deploy.yml run (init_control_plane, alembic, every tenant);
+  #   - deploy/lib.sh::feoh_tenant_argv, the provisioning add-tenant.sh runs;
+  #   - the production image (backend/Dockerfile) on its uvicorn entrypoint,
+  #     with production-shaped settings: FEOH_ENVIRONMENT=production, MFA on,
+  #     signup off, smtp email into Mailpit (a deployed env refuses `console`),
+  #     and the credential KMS key on LocalStack.
+  #
+  # Then it re-runs the migration step and fails on any schema change, and
+  # drives tests-e2e/day-one/ (no seed, no SQL) through first admin login,
+  # MFA enrolment, a tax-exclusive e-invoice from a new supplier, the AP
+  # Manager's review and recorded payment, and an admin password reset.
+  # Everything is in scripts/day-one/stack.sh, so a run on a laptop
+  # (`pnpm day-one:up && pnpm test:day-one`) is this job. No `services:`: the
+  # stack is its own compose project (scripts/day-one/compose.yml, layered on
+  # backend/docker-compose.yml, whose image refs it takes; decisions §203).
+  day-one-e2e:
+    name: Day-one e2e (empty install, production-shaped)
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.day_one == 'true'
+    timeout-minutes: 25
+
+    env:
+      # Serve the static build, as production does.
+      FEOH_E2E_USE_PREVIEW: "true"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.0.2
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Start an empty stack (Postgres, Redis, MinIO, Mailpit, LocalStack + KMS)
+        run: scripts/day-one/stack.sh up
+
+      - name: Build the production API image
+        run: scripts/day-one/stack.sh build
+
+      - name: Run the deploy's migration step against the empty database
+        run: scripts/day-one/stack.sh migrate
+
+      - name: Boot the API with production-shaped settings
+        run: scripts/day-one/stack.sh serve
+
+      - name: Provision the first tenant the way add-tenant.sh does
+        run: scripts/day-one/stack.sh provision
+
+      - name: Run the migration step again (it must change nothing)
+        run: scripts/day-one/stack.sh no-op
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          PUBLIC_API_URL: http://localhost:8000
+          # See the e2e-shard job's Build step for why this is here.
+          PUBLIC_PLATFORM_DOMAINS: localhost
+        run: pnpm build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: pnpm exec playwright install chromium
+
+      # Best-effort and bounded: see the e2e-shard job's step of the same name.
+      - name: Install Playwright font deps (best-effort)
+        working-directory: frontend
+        timeout-minutes: 3
+        continue-on-error: true
+        run: pnpm exec playwright install-deps chromium
+
+      - name: Run the day-one journey
+        working-directory: frontend
+        env:
+          PUBLIC_API_URL: http://localhost:8000
+          PUBLIC_PLATFORM_DOMAINS: localhost
+          # The stack above wrote the tenant file this suite reads; a skip here
+          # would mean it never ran. Fail instead.
+          FEOH_REQUIRE_INTEGRATION: "1"
+        run: pnpm exec playwright test --config=tests-e2e/day-one/playwright.config.ts
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
+        with:
+          name: playwright-report-day-one-e2e
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+
+      - name: API and container logs on failure
+        if: failure()
+        run: |
+          scripts/day-one/stack.sh logs 2>&1 | tail -300 || true
+          docker compose -p feoh-day-one -f backend/docker-compose.yml -f scripts/day-one/compose.yml \
+            --profile mail --profile aws logs --tail 200 || true
+
   # Single required status check for branch protection. `main` requires
   # only this context; it fans in on every job above via `needs` +
   # always(), failing the merge if any of them did not pass. A skipped
@@ -1421,6 +1553,7 @@ jobs:
       - e2e
       - service-e2e
       - erp-e2e
+      - day-one-e2e
     steps:
       - name: Require every upstream job to have passed
         env:

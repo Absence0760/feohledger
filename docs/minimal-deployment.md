@@ -333,7 +333,7 @@ keys (clear errors before any work happens), pulls main, decrypts secrets,
 builds the frontend in the `frontend-build` service's `node:24` container
 (`PUBLIC_API_URL` baked from `API_DOMAIN`, `PUBLIC_SITE_URL` from `APP_DOMAIN`;
 pnpm store cached in a volume) and the backend image, runs
-`python scripts/init_control_plane.py && alembic upgrade head && python scripts/migrate_all_tenants.py` **before**
+`sh scripts/deploy_migrate.sh` (`init_control_plane.py`, `alembic upgrade head`, `migrate_all_tenants.py`) **before**
 the new API serves traffic (same ordering contract as the future ECS
 pipeline), then rolls the containers with `up -d --wait` — the deploy fails
 loudly if the API healthcheck never passes, and a failed build or migration

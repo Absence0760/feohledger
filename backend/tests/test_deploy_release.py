@@ -920,7 +920,7 @@ def test_backend_only_leaves_a_live_release_alone(stack: Stack) -> None:
 @pytest.mark.parametrize(
     "fail",
     [
-        "init_control_plane.py",  # the migration command (init, alembic, every tenant)
+        "deploy_migrate.sh",  # the migration step (init, alembic, every tenant)
         "build api",
         "frontend-build",
     ],

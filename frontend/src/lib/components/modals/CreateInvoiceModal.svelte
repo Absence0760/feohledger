@@ -9,6 +9,7 @@
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { DEFAULT_CURRENCY } from '#lib/utils/money.ts';
+	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 
 	let { onclose, onsaved }: { onclose: () => void; onsaved: (invoice: Invoice) => void } =
 		$props();
@@ -202,7 +203,7 @@
 				<span>{m('invoices.createModal.file')}</span>
 				<input
 					type="file"
-					accept=".pdf,.png,.jpg,.jpeg,.tiff"
+					accept={INVOICE_FILE_ACCEPT}
 					aria-label={m('invoices.createModal.file')}
 					onchange={handleFileChange}
 				/>
