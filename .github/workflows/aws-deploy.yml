@@ -1,18 +1,24 @@
 name: Deploy to AWS
 
-# Production deploy pipeline for the AWS architecture in
-# docs/production-deployment.md — static frontend to S3 + CloudFront, the
-# FastAPI backend to ECS/Fargate. Both jobs reference the `production` GitHub
+# Production deploy pipeline for the backend half of the AWS architecture in
+# docs/production-deployment.md — the FastAPI backend to ECS/Fargate and the
+# async workers to Lambda. Every job references the `production` GitHub
 # Environment, so its protection rules (required reviewer / wait timer) gate
 # every run: GitHub pauses the job for approval before any AWS call happens.
 #
-# SCAFFOLD — inert by default. Both jobs are guarded by the repository
+# The static frontend is NOT shipped from here. It already lives on S3 +
+# CloudFront (infra/frontend.tf) and is published by vm-deploy.yml through
+# deploy/publish-frontend.sh, whose upload order keeps open pages working
+# (docs/decisions.md §278). This file's old `frontend` job did a plain
+# `sync --delete` and was removed so there is one path to the bucket; if the
+# backend moves to ECS, that publish moves with it rather than being rewritten.
+#
+# SCAFFOLD — inert by default. Every job is guarded by the repository
 # variable `AWS_DEPLOY_ENABLED`; until it is set to "true" they skip, so a
 # release can't turn this workflow red before the infrastructure exists.
 # Arm it only once ALL of the following are in place:
-#   1. Terraform infra: ECR repo, ECS cluster + service + task family,
-#      frontend S3 bucket, CloudFront distribution (see infra/, still a
-#      skeleton today — KMS + S3 only).
+#   1. Terraform infra: ECR repo, ECS cluster + service + task family (see
+#      infra/ — not built; the stack that exists is the single VM).
 #   2. A GitHub OIDC deploy role in AWS (trust policy scoped to this repo +
 #      the `production` environment) whose ARN is stored as the
 #      `AWS_DEPLOY_ROLE_ARN` environment secret.
@@ -216,78 +222,3 @@ jobs:
             aws lambda wait function-updated --function-name "$fn"
             echo "  $fn updated."
           done
-
-  frontend:
-    name: Deploy Frontend (S3 + CloudFront)
-    runs-on: ubuntu-latest
-    if: vars.AWS_DEPLOY_ENABLED == 'true'
-
-    defaults:
-      run:
-        working-directory: frontend
-
-    environment:
-      name: production
-      url: ${{ vars.APP_URL }}
-
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.0.2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Build
-        # Served from the bucket/CDN root, so no BASE_PATH. (A GitHub Pages
-        # deploy.yml used to set one for /<repo>; it was removed in 2996908c
-        # when this release-gated AWS deploy replaced it.)
-        #
-        # PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html,
-        # which link-preview crawlers need. It is the public site origin this
-        # job already deploys to, so it is derived from APP_URL rather than
-        # kept as a second variable that could disagree with it. An empty
-        # APP_URL fails here, because SvelteKit substitutes an empty string for
-        # an unset placeholder and would ship a root-relative image URL
-        # without complaint. The trailing slash is stripped so the image path
-        # can never become `//og-image.png`.
-        env:
-          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
-          APP_URL: ${{ vars.APP_URL }}
-        run: |
-          if [ -z "$APP_URL" ]; then
-            echo "::error::APP_URL is empty — set it on the production environment; it becomes PUBLIC_SITE_URL."
-            exit 1
-          fi
-          PUBLIC_SITE_URL="${APP_URL%/}" pnpm build
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Sync to S3
-        # `--delete` prunes stale assets so the bucket mirrors the build
-        # exactly. The build dir is relative to the `frontend` working dir.
-        run: aws s3 sync build/ "s3://${{ vars.FRONTEND_BUCKET }}/" --delete
-
-      - name: Invalidate CloudFront
-        # Bust the edge cache so the new SPA shell + assets go live
-        # immediately rather than after the cache TTL.
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
-            --paths '/*'

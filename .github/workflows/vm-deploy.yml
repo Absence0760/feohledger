@@ -17,13 +17,21 @@ name: Deploy to the VM
 #   reviewer approves. deploy.sh refuses a commit that is not on origin/main, so
 #   a release tagged on a branch fails instead of shipping unreviewed code.
 #
-# `aws-deploy.yml` is the separate, disarmed pipeline for the ECS/CloudFront
-# build-out (docs/production-deployment.md); this one is for the stack that
-# exists.
+# The SPA (S3 + CloudFront, infra/frontend.tf, docs/decisions.md §278) ships in
+# the SAME approved job, after the VM: backend first, so a new UI never calls an
+# API that has not shipped. It is built in a separate, ungated job (no AWS, no
+# secrets) that runs while the reviewer is still deciding — a second job in the
+# `production` environment would pause for a second approval. Publishing is
+# armed separately, by FRONTEND_PUBLISH_ENABLED=true, once infra/README.md §
+# Frontend on CloudFront is done; until then the build job is skipped, nothing
+# is uploaded, and the VM deploy runs exactly as before.
+#
+# `aws-deploy.yml` is the separate, disarmed pipeline for the ECS build-out
+# (docs/production-deployment.md); this one is for the stack that exists.
 #
 # Armed by the repository variable VM_DEPLOY_ENABLED=true, once the operator
 # steps in infra/README.md § Release deploys are done — until then a release
-# skips this job instead of failing it.
+# skips this workflow instead of failing it.
 
 on:
   release:
@@ -45,19 +53,94 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  build-frontend:
+    name: Build the SPA
+    runs-on: ubuntu-latest
+    # Only when the publish is armed: before that, its required variables may
+    # not exist yet, and a failed build here would block the VM deploy.
+    if: >-
+      vars.VM_DEPLOY_ENABLED == 'true'
+      && vars.FRONTEND_PUBLISH_ENABLED == 'true'
+      && !(github.event_name == 'release' && github.event.release.prerelease)
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        # The same two values deploy.sh bakes into the VM's build. Repository
+        # variables, not environment ones: this job is deliberately outside the
+        # `production` environment. Neither is secret.
+        #
+        # PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html,
+        # which link-preview crawlers need. It is the public site origin, so it
+        # is derived from APP_URL rather than kept as a second variable that
+        # could disagree with it. An empty APP_URL fails here, because SvelteKit
+        # substitutes an empty string for an unset placeholder and would ship a
+        # root-relative image URL without complaint. The trailing slash is
+        # stripped so the image path can never become `//og-image.png`.
+        env:
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "::error::APP_URL is empty — set it as a repository variable (https://feohledger.com); it becomes PUBLIC_SITE_URL."
+            exit 1
+          fi
+          if [ -z "$PUBLIC_API_URL" ]; then
+            echo "::error::PUBLIC_API_URL is empty — set it as a repository variable (https://api.feohledger.com)."
+            exit 1
+          fi
+          PUBLIC_SITE_URL="${APP_URL%/}" pnpm build
+
+      - name: Upload the build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-build
+          path: frontend/build
+          if-no-files-found: error
+          # Outlives the longest the `production` reviewer can leave the deploy
+          # job waiting (GitHub expires a pending deployment after 30 days), so
+          # the download after the VM step never finds it gone.
+          retention-days: 30
+
   deploy:
     name: Deploy release to the app VM
     runs-on: ubuntu-latest
+    # Runs when the SPA built OR was skipped (publish not armed). A failed build
+    # stops the deploy before approval: deploy.sh builds the same frontend on
+    # the VM, so that commit would fail there too, only later and half-shipped.
+    needs: build-frontend
     # Repository variable, not environment-scoped, so it is readable before the
     # environment gate. Prereleases are not production releases.
     if: >-
-      vars.VM_DEPLOY_ENABLED == 'true'
+      !cancelled()
+      && (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
+      && vars.VM_DEPLOY_ENABLED == 'true'
       && !(github.event_name == 'release' && github.event.release.prerelease)
     # deploy.sh builds the frontend and backend on a t4g.medium (~30 min at
     # worst). Worst case on the SSM side is 5 min to deliver + 45 min to run
-    # (the document's timeout) = 50; the poll gives up at 55, and the job at 60
-    # leaves room to collect the output.
-    timeout-minutes: 60
+    # (the document's timeout) = 50; the poll gives up at 55. The SPA publish
+    # after it is a few minutes of uploads plus an invalidation CloudFront
+    # finishes in well under ten, so the job at 70 leaves room for both.
+    timeout-minutes: 70
 
     # MUST match the deploy role's trust policy (`:environment:production`),
     # and carries the required reviewer.
@@ -161,3 +244,71 @@ jobs:
             exit 1
           fi
           echo "Deployed ${DEPLOY_SHA}."
+
+      # ── SPA → S3 + CloudFront, now that the backend it calls is live ──────
+
+      - name: Check out the publish scripts
+        if: vars.FRONTEND_PUBLISH_ENABLED == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: deploy
+          path: src
+
+      - name: Download the build
+        if: vars.FRONTEND_PUBLISH_ENABLED == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend-build
+          path: frontend-build
+
+      # The first session is up to an hour old by now (a slow VM deploy polls
+      # for 55 minutes), and the role's default session is one hour. A fresh
+      # one keeps the publish from dying on ExpiredToken with the backend
+      # already live.
+      - name: Refresh AWS credentials (OIDC)
+        if: vars.FRONTEND_PUBLISH_ENABLED == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Publish the SPA
+        if: vars.FRONTEND_PUBLISH_ENABLED == 'true'
+        env:
+          # Environment secrets for the same reason as VM_INSTANCE_ID: the
+          # bucket name embeds the AWS account id, and these run logs are public.
+          FRONTEND_BUCKET: ${{ secrets.FRONTEND_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: src/deploy/publish-frontend.sh frontend-build
+
+      - name: Check the edge serves this build
+        if: vars.FRONTEND_PUBLISH_ENABLED == 'true'
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -euo pipefail
+          edge=$(aws cloudfront get-distribution --id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --query Distribution.DomainName --output text)
+          echo "::add-mask::${edge}"
+          origins=("https://${edge}")
+          # Before the DNS cutover (infra variable frontend_on_cloudfront) the
+          # apex is still the VM's Caddy, serving its own build; after it, the
+          # apex and a tenant host must serve this one. CloudFront stamps every
+          # response with x-amz-cf-id, so the check follows DNS on its own. (A
+          # runner whose resolver still caches the pre-cutover A record sees
+          # Caddy and checks the distribution only — the next release covers
+          # the apex.) An apex that does not answer at all is an outage either
+          # way, so it fails the step rather than reading as "not cut over".
+          app=${APP_URL%/}
+          if ! headers=$(curl -sSI --max-time 20 "${app}/"); then
+            echo "::error::${app} did not answer."
+            exit 1
+          fi
+          if grep -qi '^x-amz-cf-id:' <<<"$headers"; then
+            origins+=("${app}" "https://smoke-check.${app#https://}")
+          else
+            echo "${app} is not on CloudFront yet; checking the distribution only."
+          fi
+          src/deploy/smoke-frontend.sh frontend-build "${origins[@]}"
