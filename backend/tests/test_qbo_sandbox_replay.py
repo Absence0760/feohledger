@@ -179,6 +179,14 @@ def test_a_query_returns_active_records_unless_it_asks_for_inactive_ones():
     assert FAKE.run_query(entities, "select * from Account STARTPOSITION 200") == {}
     with pytest.raises(FAKE.QboFault):
         FAKE.run_query(entities, "select * from Account where Name = 'Software'")
+    # A condition after the paging terms is refused, as Intuit's parser does.
+    with pytest.raises(FAKE.QboFault):
+        FAKE.run_query(entities, "select * from Account MAXRESULTS 5 where Active = false")
+    # Blanks are blanks, and a quoted value is matched exactly as sent.
+    assert ids("select  *\tfrom Vendor\n where  Active IN ( false )", "Vendor") == ["57"]
+    bills = {"Bill": [{"Id": "1", "DocNumber": "A  and where B"}, {"Id": "2", "DocNumber": "A"}]}
+    found = FAKE.run_query(bills, "select * from Bill where DocNumber = 'A  and where B'")
+    assert [b["Id"] for b in found["Bill"]] == ["1"]
 
 
 # ---------------------------------------------------------------------------

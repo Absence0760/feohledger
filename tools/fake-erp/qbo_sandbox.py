@@ -78,13 +78,63 @@ class QboFault(Exception):
 # Intuit's query language — the subset the adapter and the tests send
 # ---------------------------------------------------------------------------
 
-_SELECT = re.compile(r"\s*select\s+\*\s+from\s+(\w+)(?!\w)(.*)\Z", re.IGNORECASE | re.DOTALL)
-_WHERE_ACTIVE_IN = re.compile(r"\bActive\s+IN\s*\(([^)]*)\)", re.IGNORECASE)
-_WHERE_ACTIVE_EQ = re.compile(r"\bActive\s*=\s*(true|false)\b", re.IGNORECASE)
-_WHERE_DOCNUMBER = re.compile(r"\bDocNumber\s*=\s*'((?:[^'\\]|\\.)*)'", re.IGNORECASE)
-_START = re.compile(r"\bSTARTPOSITION\s+(\d+)", re.IGNORECASE)
-_MAX = re.compile(r"\bMAXRESULTS\s+(\d+)", re.IGNORECASE)
-_PAGING = re.compile(r"\b(STARTPOSITION|MAXRESULTS)\s+\d+", re.IGNORECASE)
+# Every pattern is matched against ONE clause of a statement :func:`_clauses`
+# has already split, with its blanks collapsed — so none needs `\s+`, and none
+# can backtrack on a long run of whitespace in a request-supplied query.
+_SELECT = re.compile(r"select \* from (\w+)", re.IGNORECASE)
+_WHERE_ACTIVE_IN = re.compile(r"Active IN ?\(([^)]*)\)", re.IGNORECASE)
+_WHERE_ACTIVE_EQ = re.compile(r"Active ?= ?(true|false)", re.IGNORECASE)
+_WHERE_DOCNUMBER = re.compile(r"DocNumber ?= ?'((?:[^'\\]|\\.)*)'", re.IGNORECASE)
+_PAGE_TERM = re.compile(r"(STARTPOSITION|MAXRESULTS) (\d+)", re.IGNORECASE)
+_KEYWORDS = ("where", "and", "startposition", "maxresults")
+
+
+def _clauses(statement: str) -> list[str]:
+    """Split ``statement`` at its top-level keywords in one linear pass.
+
+    ``select * from Account where Active IN (true,false) STARTPOSITION 1``
+    becomes ``["select * from Account", "where", "Active IN (true,false)",
+    "STARTPOSITION 1"]``: words are re-joined by one space, a quoted value is
+    kept exactly as sent (blanks and the words "and"/"where" inside it
+    included), and ``and`` only separates conditions.
+    """
+    words: list[str] = []
+    word: list[str] = []
+    quoted = escaped = False
+    for ch in statement:
+        if quoted:
+            word.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "'":
+                quoted = False
+        elif ch.isspace():
+            if word:
+                words.append("".join(word))
+                word = []
+        else:
+            word.append(ch)
+            quoted = ch == "'"
+    if word:
+        words.append("".join(word))
+
+    clauses: list[str] = []
+    current: list[str] = []
+    for w in words:
+        keyword = w.lower()
+        if keyword in _KEYWORDS:
+            if current:
+                clauses.append(" ".join(current))
+            current = [] if keyword in ("where", "and") else [w]
+            if keyword == "where":
+                clauses.append("where")
+        else:
+            current.append(w)
+    if current:
+        clauses.append(" ".join(current))
+    return clauses
 
 
 def _bool_list(raw: str) -> set[bool]:
@@ -100,37 +150,38 @@ def run_query(entities: dict[str, list[dict]], statement: str) -> dict:
     Returns the ``QueryResponse`` object. Unless the ``where`` clause filters on
     ``Active``, only active records answer — QuickBooks' own default, and the
     reason a sync that never asks for inactive ones cannot see them. A clause
-    this parser does not know is a ``QueryParserError``, never silently ignored.
+    this parser does not know is a ``QueryParserError``, never silently ignored;
+    so is a condition after the paging terms.
     """
-    match = _SELECT.match(statement)
-    if not match:
+    clauses = _clauses(statement)
+    head = _SELECT.fullmatch(clauses[0]) if clauses else None
+    if head is None or head.group(1) not in entities:
         raise QboFault(400, "4000", "QueryParserError", statement[:80])
-    entity, rest = match.group(1), match.group(2)
-    if entity not in entities:
-        raise QboFault(400, "4000", "QueryParserError", f"unknown entity {entity}")
+    entity = head.group(1)
     rows = list(entities[entity])
 
-    where = _PAGING.sub("", rest).strip()
     active: set[bool] = {True}
-    if where:
-        if not where.lower().startswith("where "):
-            raise QboFault(400, "4000", "QueryParserError", where[:80])
-        clauses = [c.strip() for c in re.split(r"\s+and\s+", where[6:], flags=re.IGNORECASE)]
-        for clause in clauses:
-            if m := _WHERE_ACTIVE_IN.fullmatch(clause):
-                active = _bool_list(m.group(1))
-            elif m := _WHERE_ACTIVE_EQ.fullmatch(clause):
-                active = {m.group(1).lower() == "true"}
-            elif m := _WHERE_DOCNUMBER.fullmatch(clause):
-                wanted = re.sub(r"\\(.)", r"\1", m.group(1))
-                rows = [r for r in rows if r.get("DocNumber") == wanted]
-            else:
-                raise QboFault(400, "4000", "QueryParserError", clause[:80])
+    paging = {"startposition": 1, "maxresults": DEFAULT_MAX_RESULTS}
+    in_where = False
+    for i, clause in enumerate(clauses[1:], start=1):
+        if clause == "where" and i == 1:
+            in_where = True
+        elif m := _PAGE_TERM.fullmatch(clause):
+            paging[m.group(1).lower()] = int(m.group(2))
+            in_where = False
+        elif in_where and (m := _WHERE_ACTIVE_IN.fullmatch(clause)):
+            active = _bool_list(m.group(1))
+        elif in_where and (m := _WHERE_ACTIVE_EQ.fullmatch(clause)):
+            active = {m.group(1).lower() == "true"}
+        elif in_where and (m := _WHERE_DOCNUMBER.fullmatch(clause)):
+            wanted = re.sub(r"\\(.)", r"\1", m.group(1))
+            rows = [r for r in rows if r.get("DocNumber") == wanted]
+        else:
+            raise QboFault(400, "4000", "QueryParserError", clause[:80])
     # A transaction (a Bill) has no Active flag; only list entities filter on it.
     rows = [r for r in rows if r.get("Active", True) in active]
 
-    start = int(_START.search(rest).group(1)) if _START.search(rest) else 1
-    size = int(_MAX.search(rest).group(1)) if _MAX.search(rest) else DEFAULT_MAX_RESULTS
+    start, size = paging["startposition"], paging["maxresults"]
     if start < 1 or not 1 <= size <= MAX_RESULTS_LIMIT:
         raise QboFault(400, "4000", "QueryParserError", "STARTPOSITION/MAXRESULTS")
     page = rows[start - 1 : start - 1 + size]
