@@ -1337,26 +1337,30 @@ async def update_my_company(
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     payload = body.model_dump(exclude_unset=True)
-    changed = sorted(payload.keys())
-    for field, value in payload.items():
-        setattr(vendor, field, value)
+    # Only a value that differs is applied and named: the portal form resends
+    # all three fields, and naming them by presence told AP the supplier had
+    # changed its address on a save that only fixed the phone number (#575).
+    changed = sorted(f for f, v in payload.items() if getattr(vendor, f) != v)
+    for field in changed:
+        setattr(vendor, field, payload[field])
     await db.flush()
 
-    await dispatch_audit(
-        db,
-        correlation_id=uuid.uuid4(),
-        organization_id=vendor.organization_id,
-        actor_id=None,
-        action="vendor.contact_updated_by_vendor",
-        entity_type="vendor",
-        entity_id=vendor.id,
-        # Log only which fields changed, never the values (address is PII).
-        details={
-            "actor_type": "vendor_user",
-            "vendor_user_id": str(vu.id),
-            "fields": changed,
-        },
-    )
+    if changed:
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=vendor.organization_id,
+            actor_id=None,
+            action="vendor.contact_updated_by_vendor",
+            entity_type="vendor",
+            entity_id=vendor.id,
+            # Log only which fields changed, never the values (address is PII).
+            details={
+                "actor_type": "vendor_user",
+                "vendor_user_id": str(vu.id),
+                "fields": changed,
+            },
+        )
     await db.commit()
     await db.refresh(vendor)
 
@@ -2014,23 +2018,29 @@ async def update_my_notification_preferences(
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     update = body.model_dump(exclude_unset=True)
+    # Compared on the EFFECTIVE preference (opt-out: unset reads as on), so the
+    # settings form resending every toggle names only the ones that flipped.
+    before = prefs_to_response(vu.notification_prefs)
     vu.notification_prefs = apply_pref_update(vu.notification_prefs, update)
+    after = prefs_to_response(vu.notification_prefs)
+    changed = sorted(f for f in update if before.get(f) != after.get(f))
     await db.flush()
 
-    await dispatch_audit(
-        db,
-        correlation_id=uuid.uuid4(),
-        organization_id=vendor.organization_id,
-        actor_id=None,
-        action="vendor_user.notification_prefs_updated",
-        entity_type="vendor_user",
-        entity_id=vu.id,
-        details={
-            "actor_type": "vendor_user",
-            "vendor_user_id": str(vu.id),
-            "fields": sorted(update.keys()),
-        },
-    )
+    if changed:
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=vendor.organization_id,
+            actor_id=None,
+            action="vendor_user.notification_prefs_updated",
+            entity_type="vendor_user",
+            entity_id=vu.id,
+            details={
+                "actor_type": "vendor_user",
+                "vendor_user_id": str(vu.id),
+                "fields": changed,
+            },
+        )
     await db.commit()
     await db.refresh(vu)
     return PortalNotificationPreferencesResponse(**prefs_to_response(vu.notification_prefs))

@@ -46,7 +46,7 @@
 	import SecretField from '#lib/components/ui/SecretField.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { FEATURE_ERP_INTEGRATIONS } from '#lib/types/planFeatures.ts';
+	import { FEATURE_ERP_INTEGRATIONS, FEATURE_ERP_MERGE } from '#lib/types/planFeatures.ts';
 	import {
 		BYO_APP_FIELDS,
 		MERGE_DEV_PROVIDER,
@@ -78,6 +78,7 @@
 		readOnly,
 		userLoaded,
 		entitled,
+		mergeEntitled,
 		onsaved
 	}: {
 		/** `settings.erp` from `GET /api/organization` (configuration only). */
@@ -86,8 +87,11 @@
 		readOnly: boolean;
 		/** `/auth/me` has resolved (gates below are meaningless before it). */
 		userLoaded: boolean;
-		/** The plan includes live ERP integrations (decisions §258). */
+		/** The plan includes the direct ERP adapters — every catalog plan does
+		 *  (decisions §258, §281); only a negotiated plan can leave them out. */
 		entitled: boolean;
+		/** The plan includes connecting through Merge.dev (Scale, §256). */
+		mergeEntitled: boolean;
 		/** The PATCH response, so the page keeps its `org` in step. */
 		onsaved?: (org: { settings: Record<string, unknown> }) => void;
 	} = $props();
@@ -532,147 +536,153 @@
 				</p>
 			{/if}
 
-			{#if provider.key === MERGE_DEV_PROVIDER}
-				<p class="card-hint notice">{m('org.erp.mergePlan')}</p>
-				<div class="form-grid">
-					<label class="full-width">
-						<span>{m('org.erp.mergeErp')}</span>
-						<select bind:value={mergeErpType} data-testid="erp-merge-type">
-							{#each catalog.merge_dev_long_tail as erp (erp.value)}
-								<option value={erp.value}>{optionLabel(erp.value, erp.label)}</option>
-							{/each}
-						</select>
-					</label>
-				</div>
-				<p class="card-hint field-gap">{m('org.erp.mergeHint')}</p>
-			{/if}
-
-			{#if mainFields.length}
-				<div class="form-grid">
-					{#each mainFields as f (f.name)}
-						{@render field(provider, f)}
-					{/each}
-				</div>
-			{/if}
-
-			{#if byoFields.length}
-				<details class="byo" bind:open={byoOpen} data-testid="erp-byo-app">
-					<summary>{m('org.erp.oauth.byoSummary')}</summary>
-					<p class="card-hint field-gap" class:notice={byoRequired} data-testid="erp-byo-hint">
-						{byoRequired
-							? m('org.erp.oauth.byoRequiredHint', { erp: providerLabel(provider) })
-							: m('org.erp.oauth.byoHint', { erp: providerLabel(provider) })}
-					</p>
+			{#if provider.key === MERGE_DEV_PROVIDER && !mergeEntitled}
+				<!-- Merge.dev is billed to us per connection, so it is a Scale
+				     feature (decisions §256, §281); the direct ERPs above are on
+				     every plan. -->
+				<PlanUpgradeNotice feature={FEATURE_ERP_MERGE} testId="erp-merge-plan-upgrade" />
+			{:else}
+				{#if provider.key === MERGE_DEV_PROVIDER}
 					<div class="form-grid">
-						{#each byoFields as f (f.name)}
+						<label class="full-width">
+							<span>{m('org.erp.mergeErp')}</span>
+							<select bind:value={mergeErpType} data-testid="erp-merge-type">
+								{#each catalog.merge_dev_long_tail as erp (erp.value)}
+									<option value={erp.value}>{optionLabel(erp.value, erp.label)}</option>
+								{/each}
+							</select>
+						</label>
+					</div>
+					<p class="card-hint field-gap">{m('org.erp.mergeHint')}</p>
+				{/if}
+
+				{#if mainFields.length}
+					<div class="form-grid">
+						{#each mainFields as f (f.name)}
 							{@render field(provider, f)}
 						{/each}
 					</div>
-					{#if oauthStatus}
-						<div class="redirect-uri" data-testid="erp-redirect-uri">
-							<span class="redirect-label" id="{uid}-redirect-label">
-								{m('org.erp.oauth.redirectUri')}
-							</span>
-							<div class="redirect-value">
-								<code id="{uid}-redirect-uri">{oauthStatus.redirect_uri}</code>
-								<button
-									type="button"
-									class="btn-test"
-									aria-describedby="{uid}-redirect-label"
-									onclick={copyRedirectUri}
-								>
-									{m('org.erp.oauth.copy')}
-								</button>
-							</div>
-							<p class="field-hint">
-								{m('org.erp.oauth.redirectUriHint', { erp: providerLabel(provider) })}
-							</p>
+				{/if}
+
+				{#if byoFields.length}
+					<details class="byo" bind:open={byoOpen} data-testid="erp-byo-app">
+						<summary>{m('org.erp.oauth.byoSummary')}</summary>
+						<p class="card-hint field-gap" class:notice={byoRequired} data-testid="erp-byo-hint">
+							{byoRequired
+								? m('org.erp.oauth.byoRequiredHint', { erp: providerLabel(provider) })
+								: m('org.erp.oauth.byoHint', { erp: providerLabel(provider) })}
+						</p>
+						<div class="form-grid">
+							{#each byoFields as f (f.name)}
+								{@render field(provider, f)}
+							{/each}
 						</div>
-					{/if}
-				</details>
-			{/if}
-
-			<p class="card-hint field-gap">
-				<a href={provider.docs_url} target="_blank" rel="noopener noreferrer">
-					{m('org.erp.docsLink', { erp: providerLabel(provider) })}
-				</a>
-			</p>
-
-			{#if isOAuth}
-				<div class="action-row" data-testid="erp-oauth">
-					<p
-						class="oauth-state"
-						class:connected={connection === 'connected'}
-						class:failure-text={connection === 'needs_reconnect'}
-						id="{uid}-oauth-state"
-						data-testid="erp-oauth-state"
-					>
-						{#if connection === 'connected'}
-							{oauthStatus?.external_tenant_id
-								? m('org.erp.oauth.connectedCompany', {
-										erp: providerLabel(provider),
-										id: oauthStatus.external_tenant_id
-									})
-								: m('org.erp.oauth.connected', { erp: providerLabel(provider) })}
-						{:else if connection === 'needs_reconnect'}
-							{m('org.erp.oauth.needsReconnect', { erp: providerLabel(provider) })}
-						{:else}
-							{m('org.erp.oauth.notConnected', { erp: providerLabel(provider) })}
+						{#if oauthStatus}
+							<div class="redirect-uri" data-testid="erp-redirect-uri">
+								<span class="redirect-label" id="{uid}-redirect-label">
+									{m('org.erp.oauth.redirectUri')}
+								</span>
+								<div class="redirect-value">
+									<code id="{uid}-redirect-uri">{oauthStatus.redirect_uri}</code>
+									<button
+										type="button"
+										class="btn-test"
+										aria-describedby="{uid}-redirect-label"
+										onclick={copyRedirectUri}
+									>
+										{m('org.erp.oauth.copy')}
+									</button>
+								</div>
+								<p class="field-hint">
+									{m('org.erp.oauth.redirectUriHint', { erp: providerLabel(provider) })}
+								</p>
+							</div>
 						{/if}
-					</p>
-					{#if oauthStatusFailed}
-						<p class="oauth-state failure-text">{m('org.erp.oauth.statusFailed')}</p>
-					{/if}
-					<div class="action-buttons">
-						{#if connection === 'connected'}
-							<button
-								class="btn-save-section"
-								disabled={saving || !provider.available}
-								onclick={save}
-							>
+					</details>
+				{/if}
+
+				<p class="card-hint field-gap">
+					<a href={provider.docs_url} target="_blank" rel="noopener noreferrer">
+						{m('org.erp.docsLink', { erp: providerLabel(provider) })}
+					</a>
+				</p>
+
+				{#if isOAuth}
+					<div class="action-row" data-testid="erp-oauth">
+						<p
+							class="oauth-state"
+							class:connected={connection === 'connected'}
+							class:failure-text={connection === 'needs_reconnect'}
+							id="{uid}-oauth-state"
+							data-testid="erp-oauth-state"
+						>
+							{#if connection === 'connected'}
+								{oauthStatus?.external_tenant_id
+									? m('org.erp.oauth.connectedCompany', {
+											erp: providerLabel(provider),
+											id: oauthStatus.external_tenant_id
+										})
+									: m('org.erp.oauth.connected', { erp: providerLabel(provider) })}
+							{:else if connection === 'needs_reconnect'}
+								{m('org.erp.oauth.needsReconnect', { erp: providerLabel(provider) })}
+							{:else}
+								{m('org.erp.oauth.notConnected', { erp: providerLabel(provider) })}
+							{/if}
+						</p>
+						{#if oauthStatusFailed}
+							<p class="oauth-state failure-text">{m('org.erp.oauth.statusFailed')}</p>
+						{/if}
+						<div class="action-buttons">
+							{#if connection === 'connected'}
+								<button
+									class="btn-save-section"
+									disabled={saving || !provider.available}
+									onclick={save}
+								>
+									{saving ? m('org.common.saving') : m('org.erp.save')}
+								</button>
+							{:else}
+								<button
+									class="btn-save-section"
+									disabled={connecting || !provider.available}
+									aria-describedby="{uid}-oauth-state"
+									onclick={connect}
+								>
+									{connection === 'needs_reconnect'
+										? m('org.erp.oauth.reconnect', { erp: providerLabel(provider) })
+										: m('org.erp.oauth.connect', { erp: providerLabel(provider) })}
+								</button>
+							{/if}
+							{#if connection !== 'not_connected'}
+								<span class="disconnect-action">
+									<RowAction
+										variant="danger"
+										armed={confirmDisconnect}
+										disabled={disconnecting}
+										onclick={onDisconnectClick}
+									>
+										{disconnecting
+											? m('org.erp.oauth.disconnecting')
+											: confirmDisconnect
+												? m('org.erp.oauth.disconnectConfirm')
+												: m('org.erp.oauth.disconnect')}
+									</RowAction>
+								</span>
+							{/if}
+						</div>
+					</div>
+				{:else}
+					<div class="action-row">
+						<div class="action-buttons">
+							<button class="btn-save-section" disabled={saving || !provider.available} onclick={save}>
 								{saving ? m('org.common.saving') : m('org.erp.save')}
 							</button>
-						{:else}
-							<button
-								class="btn-save-section"
-								disabled={connecting || !provider.available}
-								aria-describedby="{uid}-oauth-state"
-								onclick={connect}
-							>
-								{connection === 'needs_reconnect'
-									? m('org.erp.oauth.reconnect', { erp: providerLabel(provider) })
-									: m('org.erp.oauth.connect', { erp: providerLabel(provider) })}
+							<button class="btn-test" disabled={testing || !provider.available} onclick={test}>
+								{testing ? m('org.common.testing') : m('org.common.testConnection')}
 							</button>
-						{/if}
-						{#if connection !== 'not_connected'}
-							<span class="disconnect-action">
-								<RowAction
-									variant="danger"
-									armed={confirmDisconnect}
-									disabled={disconnecting}
-									onclick={onDisconnectClick}
-								>
-									{disconnecting
-										? m('org.erp.oauth.disconnecting')
-										: confirmDisconnect
-											? m('org.erp.oauth.disconnectConfirm')
-											: m('org.erp.oauth.disconnect')}
-								</RowAction>
-							</span>
-						{/if}
+						</div>
 					</div>
-				</div>
-			{:else}
-				<div class="action-row">
-					<div class="action-buttons">
-						<button class="btn-save-section" disabled={saving || !provider.available} onclick={save}>
-							{saving ? m('org.common.saving') : m('org.erp.save')}
-						</button>
-						<button class="btn-test" disabled={testing || !provider.available} onclick={test}>
-							{testing ? m('org.common.testing') : m('org.common.testConnection')}
-						</button>
-					</div>
-				</div>
+				{/if}
 			{/if}
 		{/if}
 	{/if}

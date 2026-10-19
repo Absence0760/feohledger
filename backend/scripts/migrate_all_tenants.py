@@ -22,10 +22,43 @@ from pathlib import Path
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(1, str(Path(__file__).resolve().parent.parent))
 
+import asyncpg
 from sqlalchemy import select
 
-from app.database import control_engine, control_session_factory
+from app.database import _make_tenant_url, control_engine, control_session_factory
 from app.models.organization import Organization
+from app.services.tenant_provisioning import asyncpg_connect_kwargs
+
+UNTRACKED_NOTE = (
+    "  NOTE: {db} has tables but no Alembic version (provisioned by create_all before "
+    "new tenants were recorded at head). Replaying the whole chain over it: every "
+    "revision is idempotent, so this applies only what postdates the release that "
+    "built it, and records the version (docs/decisions.md \u00a7282)."
+)
+
+
+async def _is_untracked(db_name: str) -> bool:
+    """A tenant with business tables and no ``alembic_version``.
+
+    Deliberately replayed, not stamped: ``create_all`` built it at the head of
+    whatever release provisioned it, which is not necessarily today's head, so
+    recording today's head would skip the revisions that came after. Only
+    reported here, loudly. A database this check cannot reach is not reported
+    — the ``alembic`` run that follows fails on it, and that failure fails the
+    deploy."""
+    try:
+        conn = await asyncpg.connect(**asyncpg_connect_kwargs(_make_tenant_url(db_name)))
+    except (OSError, asyncpg.PostgresError):
+        return False
+    try:
+        return bool(
+            await conn.fetchval(
+                "SELECT to_regclass('public.invoices') IS NOT NULL "
+                "AND to_regclass('public.alembic_version') IS NULL"
+            )
+        )
+    finally:
+        await conn.close()
 
 
 async def main() -> int:
@@ -44,6 +77,8 @@ async def main() -> int:
     failed: list[str] = []
     for db_name in db_names:
         print(f"\n--- {db_name} ---")
+        if await _is_untracked(db_name):
+            print(UNTRACKED_NOTE.format(db=db_name))
         env = {**os.environ, "FEOH_MIGRATE_TENANT": db_name}
         result = subprocess.run(
             [sys.executable, "-m", "alembic", "upgrade", "head"],

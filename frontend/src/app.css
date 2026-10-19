@@ -1015,6 +1015,12 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	letter-spacing: -0.025em;
 	line-height: 1.15;
 	font-variant-numeric: tabular-nums;
+	/* `.kpi` clips (`overflow: hidden`, for the top hairline), so a figure
+	   wider than its card — a thirteen-digit total in a five-card row — was
+	   silently cut off mid-number (#575). Let it wrap inside the card instead;
+	   a formatted figure has no spaces to break at, hence `anywhere`. */
+	overflow-wrap: anywhere;
+	min-width: 0;
 }
 .kpi-label {
 	font-size: 0.78rem;

@@ -103,7 +103,13 @@ BEGIN
         EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS entity_id uuid', t);
         EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (entity_id)',
                        'ix_' || t || '_entity_id', t);
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_' || t || '_entity') THEN
+        -- create_all names the same FK `<t>_entity_id_fkey`; a tenant it built
+        -- is not stamped, so its first deploy replays this, and a guard on our
+        -- name alone added a duplicate FK (0113_schema_build_parity).
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname IN ('fk_' || t || '_entity', t || '_entity_id_fkey')
+        ) THEN
             EXECUTE format(
                 'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (entity_id) '
                 'REFERENCES entities(id)',

@@ -436,6 +436,43 @@ async def test_create_and_lifecycle(realdb):
         assert r.json()["ended_at"] is not None
 
 
+async def test_update_audit_names_only_the_fields_that_changed(realdb):
+    """`workflow_experiment.updated` named every key in the body; a full-form
+    save now names only what differs, and a no-op save writes no row (#575)."""
+    from sqlalchemy import select
+
+    from app.models.workflow import AuditLog
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    defn_id, _ = await _seed_definition(mk, org_id)
+    body = _payload(defn_id)
+    body.pop("workflow_definition_id")
+
+    async with realdb.client(key="a", role="admin") as client:
+        r = await client.post("/api/experiments", json=_payload(defn_id))
+        assert r.status_code == 201, r.text
+        eid = r.json()["id"]
+        for step in (body, {**body, "name": "Renamed"}):
+            resp = await client.patch(f"/api/experiments/{eid}", json=step)
+            assert resp.status_code == 200, resp.text
+
+    async with mk() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "workflow_experiment.updated",
+                        AuditLog.entity_id == uuid.UUID(eid),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r.details["fields"] for r in rows] == [["name"]]
+
+
 async def test_results_not_enough_then_winner(realdb):
     from app.models.invoice import Invoice, InvoiceStatus
     from app.models.workflow import AuditLog

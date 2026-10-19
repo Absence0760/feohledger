@@ -112,8 +112,8 @@ export const messages = {
 	'marketing.pricing.included': '{count} {n, plural, one {KI-gelesene Rechnung} other {KI-gelesene Rechnungen}} pro Monat',
 	'marketing.pricing.pastLimit.pause': 'Darüber hinaus pausiert das Lesen per KI. Alles andere funktioniert weiter.',
 	'marketing.pricing.pastLimit.overage': 'Danach {price} je weiterer KI-gelesener Rechnung.',
-	'marketing.pricing.tagline.free': 'Zum Ausprobieren und für geringes Rechnungsvolumen.',
-	'marketing.pricing.tagline.growth': 'Für Teams, die ihr ERP und ihren Identitätsanbieter anbinden.',
+	'marketing.pricing.tagline.free': 'Für geringes Rechnungsvolumen, angebunden an Ihre Buchhaltung.',
+	'marketing.pricing.tagline.growth': 'Für mehr Rechnungsvolumen, die öffentliche API und Single Sign-on.',
 	'marketing.pricing.tagline.scale': 'Für Finanzteams mit mehreren Gesellschaften.',
 	'marketing.pricing.tagline.enterprise': 'Für verhandeltes Volumen und Vertragsbedingungen.',
 	'marketing.pricing.coreHeading': 'Kern der Kreditorenbuchhaltung:',
@@ -123,7 +123,8 @@ export const messages = {
 	'marketing.pricing.core.payments': 'Zahlungsläufe und ein vollständiger Prüfpfad',
 	'marketing.pricing.buildsOn': 'Alles aus {plan}, dazu:',
 	'marketing.pricing.feature.publicApi': 'Öffentliche API und Webhooks',
-	'marketing.pricing.feature.erpIntegrations': 'ERP-Integrationen (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.erpIntegrations': 'Direkte ERP-Anbindung (QuickBooks Online, Xero, NetSuite, Dynamics 365 und mehr)',
+	'marketing.pricing.feature.erpMerge': 'Jedes andere ERP über Merge.dev',
 	'marketing.pricing.feature.sso': 'Single Sign-on (SAML und OIDC)',
 	'marketing.pricing.feature.scim': 'SCIM-Benutzerbereitstellung',
 	'marketing.pricing.feature.ssoEnforcement': 'Single Sign-on für alle Benutzer vorschreiben',
@@ -1771,7 +1772,6 @@ export const messages = {
 	'org.erp.comingSoonHint': 'Die direkte Verbindung zu {erp} ist noch nicht verfügbar. Wählen Sie ein anderes ERP oder verbinden Sie es über Merge.dev.',
 	'org.erp.mergeErp': 'Ihr ERP',
 	'org.erp.mergeHint': 'Merge.dev verbindet ERPs, die wir nicht direkt anbinden. Ihren API-Schlüssel finden Sie im Merge.dev-Dashboard; das Konto-Token entsteht, wenn Sie Ihr ERP über Merge Link verbinden.',
-	'org.erp.mergePlan': 'Die Verbindung über Merge.dev ist im Scale-Tarif enthalten.',
 	'org.erp.docsLink': 'Einrichtungsanleitung für {erp} (öffnet in neuem Tab)',
 	'org.erp.optionalLabel': '{label} (optional)',
 	'org.erp.missingRequired': 'Bitte ausfüllen: {fields}.',
@@ -3801,6 +3801,9 @@ export const messages = {
 	'auth.login.or': 'oder',
 	'auth.login.signInWith': 'Anmelden mit {provider}',
 	'auth.login.forgotPassword': 'Passwort vergessen?',
+	'auth.login.devAccounts.heading': 'Entwicklungskonten',
+	'auth.login.devAccounts.hint': 'Nur für die lokale Entwicklung. Wählen Sie ein Seed-Konto, um das Formular auszufüllen.',
+	'auth.login.devAccounts.fill': 'Formular als {email} ausfüllen, {role}',
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Passwort zurücksetzen',
@@ -3827,6 +3830,17 @@ export const messages = {
 	'auth.resetPassword.invalidToken':
 		'Dieser Link zum Zurücksetzen ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen an.',
 	'auth.resetPassword.goToLogin': 'Zur Anmeldung',
+	'auth.resetPassword.retry': 'Erneut versuchen',
+	'auth.resetPassword.checkFailed':
+		'Wir konnten diesen Link gerade nicht prüfen. Bitte versuchen Sie es erneut.',
+	'auth.resetPassword.checking': 'Link wird geprüft…',
+	'auth.resetPassword.setExpiredHint':
+		'Links zum Festlegen des Passworts funktionieren nur einmal und laufen ab. Fordern Sie über „Passwort vergessen?“ einen neuen an — das funktioniert auch für Ihr neues Konto.',
+	'auth.resetPassword.setSuccess':
+		'Ihr Passwort ist festgelegt. Sie können sich jetzt anmelden.',
+	'auth.resetPassword.setSubmit': 'Passwort festlegen',
+	'auth.resetPassword.setSubtitle': 'Wählen Sie ein Passwort für Ihr neues Konto.',
+	'auth.resetPassword.setHeading': 'Passwort festlegen',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Zwei-Faktor-Verifizierung',
@@ -3895,8 +3909,9 @@ export const messages = {
 	'auth.signup.step1Body': 'Wählen Sie die Adresse, unter der sich Ihr Team anmeldet.',
 	'auth.signup.step2Title': 'Bestätigen Sie Ihre E-Mail-Adresse',
 	'auth.signup.step2Body': 'Wir senden einen Link, mit dem Sie bestätigen, dass die Adresse Ihnen gehört.',
-	'auth.signup.step3Title': 'Anmelden und Passwort festlegen',
-	'auth.signup.step3Body': 'Ihre Willkommens-E-Mail enthält ein vorläufiges Passwort für den Start.',
+	'auth.signup.step3Title': 'Passwort festlegen und anmelden',
+	'auth.signup.step3Body':
+		'Legen Sie es direkt auf der Bestätigungsseite fest oder über den Link in Ihrer Willkommens-E-Mail.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Passwort ändern — FeohLedger',
@@ -3923,15 +3938,21 @@ export const messages = {
 	'auth.verify.failed': 'Bestätigung fehlgeschlagen.',
 	'auth.verify.pendingHeading': 'Ihr Arbeitsbereich wird erstellt…',
 	'auth.verify.pendingSub':
-		'Das dauert in der Regel ein paar Sekunden — wir richten Ihre Datenbank ein und senden Ihre Zugangsdaten.',
+		'Das dauert meist nur wenige Sekunden — wir richten Ihre Datenbank ein und senden Ihre Willkommens-E-Mail.',
 	'auth.verify.successHeading': 'Ihr Arbeitsbereich ist bereit',
-	'auth.verify.successSubPre': 'Wir haben Ihren Anmeldelink und ein temporäres Passwort an ',
-	'auth.verify.successSubPost':
-		' gesendet. Melden Sie sich mit diesem Passwort zum ersten Mal an — direkt danach legen Sie Ihr eigenes fest.',
-	'auth.verify.step1': 'Öffnen Sie die Willkommens-E-Mail und kopieren Sie das temporäre Passwort.',
-	'auth.verify.step2': 'Melden Sie sich unten in Ihrem Arbeitsbereich an.',
-	'auth.verify.step3': 'Wählen Sie ein neues Passwort — und schon sind Sie drin.',
-	'auth.verify.continueTo': 'Weiter zu {slug} →',
+	'auth.verify.successSubPre': 'Wir haben außerdem einen Link zum Festlegen Ihres Passworts an ',
+	'auth.verify.successSubPost': ' gesendet, falls Sie das lieber später erledigen.',
+	'auth.verify.step1':
+		'Wählen Sie Ihr Passwort — die Schaltfläche unten führt Sie direkt dorthin.',
+	'auth.verify.step2':
+		'Melden Sie sich mit Ihrer E-Mail-Adresse und diesem Passwort in Ihrem Arbeitsbereich an.',
+	'auth.verify.step3':
+		'Laden Sie Ihr Team ein und verbinden Sie Ihre Tools — und schon sind Sie drin.',
+	'auth.verify.noLink':
+		'Verwenden Sie „Passwort vergessen?“ auf der Anmeldeseite Ihres Arbeitsbereichs, um Ihr Passwort festzulegen.',
+	'auth.verify.linkNote':
+		'Der Link funktioniert nur einmal. Falls er abgelaufen ist, verwenden Sie „Passwort vergessen?“ auf der Anmeldeseite.',
+	'auth.verify.setPassword': 'Passwort festlegen',
 	'auth.verify.errorHeading': 'Etwas ist schiefgelaufen',
 	'auth.verify.startOver': 'Von vorne beginnen',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
@@ -6093,11 +6114,13 @@ export const messages = {
 	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
 	'planFeature.publicApi': "Öffentliche API und Webhooks",
 	'planFeature.erpIntegrations': "ERP-Integrationen",
+	'planFeature.erpMerge': "ERP-Anbindung über Merge.dev",
 	'planFeature.sso': "Single Sign-on (OIDC / SAML)",
 	'planFeature.scim': "SCIM-Benutzerbereitstellung",
 	'planFeature.ssoEnforcement': "Single Sign-on verpflichtend machen",
 	'planFeature.multiEntity': "Mehrere Gesellschaften",
 	'planFeature.auditSiemExport': "Export des Prüfprotokolls an ein SIEM",
+	'planTier.free': "Free",
 	'planTier.growth': "Growth",
 	'planTier.scale': "Scale",
 	'planUpgrade.title': "Verfügbar im Tarif {plan}",

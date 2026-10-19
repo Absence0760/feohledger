@@ -464,8 +464,9 @@ async def send_to_erp(
     org: Organization = Depends(get_tenant),
     control_db: AsyncSession = Depends(get_control_db),
 ):
-    # Pushing to a LIVE ERP is a Growth feature (decisions §253/§258); the
-    # local-first `mock` ERP and an org with no ERP configured are never gated.
+    # Pushing to a LIVE ERP is plan-gated, Merge.dev on Scale only (decisions
+    # §258/§281); the local-first `mock` ERP and an org with no ERP configured
+    # are never gated.
     await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
@@ -500,8 +501,9 @@ async def retry_erp(
     org: Organization = Depends(get_tenant),
     control_db: AsyncSession = Depends(get_control_db),
 ):
-    # Pushing to a LIVE ERP is a Growth feature (decisions §253/§258); the
-    # local-first `mock` ERP and an org with no ERP configured are never gated.
+    # Pushing to a LIVE ERP is plan-gated, Merge.dev on Scale only (decisions
+    # §258/§281); the local-first `mock` ERP and an org with no ERP configured
+    # are never gated.
     await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)

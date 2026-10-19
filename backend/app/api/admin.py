@@ -235,15 +235,22 @@ async def update_role(
     if role.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Role not found")
 
+    # Named in the audit row only when the value actually DIFFERS — the same
+    # rule `update_user` follows (#566): the role editor resends both fields on
+    # every save, and a trail that names a re-sent permission list as changed
+    # claims a grant change that never happened.
     changed_fields = []
-    if body.description is not None:
+    if body.description is not None and body.description != role.description:
         role.description = body.description
         changed_fields.append("description")
     # A provided list (even empty) replaces the grants; omitting it (None)
-    # leaves them untouched. Sanitized to the known catalog.
+    # leaves them untouched. Sanitized to the known catalog, then compared as a
+    # set — order is not a change.
     if body.permissions is not None:
-        role.permissions = sanitize_permissions(body.permissions)
-        changed_fields.append("permissions")
+        new_permissions = sanitize_permissions(body.permissions)
+        if set(new_permissions) != set(role.permissions or []):
+            role.permissions = new_permissions
+            changed_fields.append("permissions")
     await db.commit()
     await db.refresh(role)
 

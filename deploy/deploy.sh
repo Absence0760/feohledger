@@ -165,11 +165,11 @@ if [ "$DO_BACKEND" = 1 ]; then
 	# there is none to start — the migration below is the first thing to reach it.
 	"${COMPOSE[@]}" up -d "${DB_SERVICES[@]}" redis
 	echo "==> running migrations (control plane + every tenant DB)"
-	# init_control_plane.py builds an EMPTY control plane first (tables, system
-	# roles, Alembic version row — one transaction) and is a no-op on an initialised one — Alembic's chain
-	# has no step that creates it (app/services/control_plane_bootstrap.py).
-	"${COMPOSE[@]}" run --rm api sh -c \
-		"python scripts/init_control_plane.py && alembic upgrade head && python scripts/migrate_all_tenants.py"
+	# init_control_plane.py, then alembic upgrade head, then
+	# migrate_all_tenants.py — the sequence lives in that one file, which CI's
+	# day-one job also runs against an empty database (#575), so the rehearsal
+	# cannot drift from this step.
+	"${COMPOSE[@]}" run --rm api sh scripts/deploy_migrate.sh
 fi
 
 # ── Roll + verify ────────────────────────────────────────────────────────────

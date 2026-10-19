@@ -66,7 +66,10 @@ def upgrade() -> None:
         DO $$
         BEGIN
             IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'fk_organizations_parent_org_id'
+                -- Or create_all's name for it: see 0029's guard (0113).
+                SELECT 1 FROM pg_constraint WHERE conname IN (
+                    'fk_organizations_parent_org_id', 'organizations_parent_org_id_fkey'
+                )
             ) THEN
                 ALTER TABLE organizations
                     ADD CONSTRAINT fk_organizations_parent_org_id

@@ -124,6 +124,40 @@ async def test_w9_patch_without_a_tax_id_change_does_not_rescreen(realdb):
 
 
 @pytest.mark.asyncio
+async def test_w9_patch_audit_names_only_fields_that_changed_and_never_the_tin(realdb):
+    """The W-9 form resends the stored TIN on every save. The audit row named
+    `tax_id` by presence, so a classification fix read on the trail as a TIN
+    change (#575). It now names only what differs — field NAMES only, never the
+    TIN — and a save that changes nothing writes no row."""
+    from app.models.workflow import AuditLog
+
+    vendor_id = await _seed_verified_vendor(realdb)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        for body in (
+            {"tax_id": "12-3456789", "tax_classification": "llc_s_corp"},
+            {"tax_id": "12-3456789", "tax_classification": "llc_s_corp"},
+        ):
+            resp = await c.patch(f"/api/tax/vendors/{vendor_id}/w9", json=body)
+            assert resp.status_code == 200, resp.text
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "vendor.tax_fields_updated",
+                        AuditLog.entity_id == vendor_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r.details for r in rows] == [{"changed_fields": ["tax_classification"]}]
+    assert "3456789" not in repr([r.details for r in rows])
+
+
+@pytest.mark.asyncio
 async def test_tin_verify_with_a_replacement_tax_id_rescreens(realdb):
     vendor_id = await _seed_verified_vendor(realdb, name="Blocked Party LLC")
     async with realdb.client(key=TENANT, role="ap_manager") as c:

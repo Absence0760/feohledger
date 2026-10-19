@@ -48,6 +48,7 @@
 	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
 	import {
 		FEATURE_ERP_INTEGRATIONS,
+		FEATURE_ERP_MERGE,
 		FEATURE_SSO,
 		FEATURE_SSO_ENFORCEMENT
 	} from '#lib/types/planFeatures.ts';
@@ -268,6 +269,7 @@
 	const ssoEntitled = $derived(auth.hasFeature(FEATURE_SSO));
 	const ssoEnforcementEntitled = $derived(auth.hasFeature(FEATURE_SSO_ENFORCEMENT));
 	const erpEntitled = $derived(auth.hasFeature(FEATURE_ERP_INTEGRATIONS));
+	const erpMergeEntitled = $derived(auth.hasFeature(FEATURE_ERP_MERGE));
 
 	// ── Section navigation ────────────────────────────────────────────────
 	// Fifteen panels' worth of unrelated concerns — company identity, DNS, chat
@@ -2305,18 +2307,34 @@
 								<div class="form-grid" style="margin-top: 14px;">
 									<label>
 										<span>{extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}</span>
-										<input type="password" bind:value={extractionApiKey} placeholder="sk-..." />
+										<input
+											type="password"
+											bind:value={extractionApiKey}
+											placeholder="sk-..."
+											autocomplete="new-password"
+											spellcheck="false"
+										/>
 									</label>
 								</div>
 							{:else if extractionProvider === 'aws_textract'}
 								<div class="form-grid" style="margin-top: 14px;">
 									<label>
 										<span>{m('org.extraction.awsKeyId')}</span>
-										<input type="text" bind:value={extractionAwsKeyId} />
+										<input
+											type="text"
+											bind:value={extractionAwsKeyId}
+											autocomplete="off"
+											spellcheck="false"
+										/>
 									</label>
 									<label>
 										<span>{m('org.extraction.awsSecret')}</span>
-										<input type="password" bind:value={extractionAwsSecret} />
+										<input
+											type="password"
+											bind:value={extractionAwsSecret}
+											autocomplete="new-password"
+											spellcheck="false"
+										/>
 									</label>
 									<label>
 										<span>{m('org.extraction.awsRegion')}</span>
@@ -2371,6 +2389,7 @@
 						{readOnly}
 						{userLoaded}
 						entitled={erpEntitled}
+						mergeEntitled={erpMergeEntitled}
 						onsaved={(data) => {
 							if (org) org = { ...org, settings: data.settings as unknown as OrgSettings };
 						}}

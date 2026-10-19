@@ -119,10 +119,11 @@ require-SSO, SCIM, a second entity, API keys and webhooks — with one coded 402
 and fixes what a downgrade keeps: the password reopens rather than locking an
 SSO tenant out, SCIM deprovisioning, existing entities, revoking keys and
 switching off or rotating a webhook stay open. `tests/test_plan_feature_gates.py`
-pins a Free refusal and a paid pass per gate. Two pieces remain, tracked in
+pins a Free refusal and a paid pass per gate. Two pieces remained, tracked in
 `docs/followups.md`: `audit_siem_export` has no tenant-configurable destination
-to gate, and Merge-routed ERPs are not yet split out as Scale-only `erp_merge`
-(§256) — `erp_integrations` admits them on Growth today.
+to gate, and Merge-routed ERPs were not yet split out as Scale-only `erp_merge`
+(§256). The second landed 2026-10-19 with decisions §281, which also put
+`erp_integrations` on Free.
 
 ## ~~The direct ERP adapters post bills without the ERP's vendor and account ids~~ — FIXED 2026-10-08
 

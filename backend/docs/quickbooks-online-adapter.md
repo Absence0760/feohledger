@@ -44,9 +44,10 @@ The rest of this file is the original plan.
 Merge's Launch plan is **$650/month for up to 10 production linked accounts,
 then $65 per linked account** (merge.dev/pricing, read 2026-10-07; first three
 free; Professional and Enterprise are contract-only). A linked account is one
-customer connected to one integration. The Growth plan is $49/month and
-includes `erp_integrations`, so every Growth customer who connects an ERP
-through Merge costs more than they pay.
+customer connected to one integration. The Growth plan is $49/month and Free
+is $0, and both include `erp_integrations` (decisions §281), so every such
+customer who connects an ERP through Merge would cost more than they pay. Merge
+is Scale-only (`erp_merge`, §256).
 
 QuickBooks Online is the ERP most of the SMB/mid-market segment runs on.
 Intuit's API costs nothing at the volumes in question: writes are "Core" calls
@@ -282,7 +283,8 @@ Three remain open.
    amount and leave the difference open? It has to be decided before Phase 4.
 4. ~~**Merge for Growth customers.**~~ Decided (`docs/decisions.md` §256):
    Merge-routed ERPs become a Scale-only `erp_merge` feature, and Growth's
-   `erp_integrations` covers the direct adapters.
+   `erp_integrations` covers the direct adapters. Built with §281, which also
+   puts `erp_integrations` on Free.
 
 **Total: about three weeks of engineering** (Phases 0–4), plus Intuit review
 time. Phase 0 is worth doing first on its own: it fixes the two adapters that

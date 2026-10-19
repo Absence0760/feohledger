@@ -130,17 +130,19 @@ _EN: dict[str, str] = {
     "signup.welcome.body": "Your workspace is live.",
     "signup.welcome.url_label": "URL",
     "signup.welcome.email_label": "Email",
-    "signup.welcome.password_label": "Password",
-    "signup.welcome.change_note": (
-        "You'll be asked to change your password when you first sign in."
-    ),
     "signup.welcome.signoff": "Welcome aboard!",
+    "signup.welcome.set_password_lead": "Choose a password to finish setting up your account.",
+    "signup.welcome.set_password_cta": "Set your password",
+    "signup.welcome.set_password_expiry": (
+        "This link expires in {hours} hours and works once. If it has expired, use Forgot"
+        " password on the sign-in page to get a new one."
+    ),
+    "signup.welcome.no_link": (
+        "To choose your password, use Forgot password on your workspace's sign-in page."
+    ),
+    "signup.welcome.sign_in_intro": "Once your password is set, sign in here:",
     # Buttons + notes in the HTML layout (`email_adapters.layout`).
     "signup.verify.cta": "Confirm and create workspace",
-    "signup.welcome.cta": "Open your workspace",
-    "signup.welcome.keep_note": (
-        "Keep this email until you've signed in and chosen your own password."
-    ),
     "email.layout.open_cta": "Open {product}",
     "email.layout.fallback_link": "Button not working? Paste this link into your browser:",
 }
@@ -179,17 +181,25 @@ _DE: dict[str, str] = {
     "signup.welcome.body": "Ihr Arbeitsbereich ist aktiv.",
     "signup.welcome.url_label": "URL",
     "signup.welcome.email_label": "E-Mail",
-    "signup.welcome.password_label": "Passwort",
-    "signup.welcome.change_note": (
-        "Sie werden bei der ersten Anmeldung aufgefordert, Ihr Passwort zu ändern."
-    ),
     "signup.welcome.signoff": "Willkommen an Bord!",
-    "signup.verify.cta": "Bestätigen und Arbeitsbereich erstellen",
-    "signup.welcome.cta": "Arbeitsbereich öffnen",
-    "signup.welcome.keep_note": (
-        "Bewahren Sie diese E-Mail auf, bis Sie sich "
-        "angemeldet und Ihr eigenes Passwort gewählt haben."
+    "signup.welcome.set_password_lead": (
+        "Wählen Sie ein Passwort, um die Einrichtung Ihres Kontos abzuschließen."
     ),
+    "signup.welcome.set_password_cta": "Passwort festlegen",
+    "signup.welcome.set_password_expiry": (
+        "Dieser Link läuft in {hours} Stunden ab "
+        "und funktioniert nur einmal. Falls er "
+        "abgelaufen ist, verwenden Sie „Passwort "
+        "vergessen?“ auf der Anmeldeseite, um "
+        "einen neuen anzufordern."
+    ),
+    "signup.welcome.no_link": (
+        "Um Ihr Passwort festzulegen, verwenden "
+        "Sie „Passwort vergessen?“ auf der "
+        "Anmeldeseite Ihres Arbeitsbereichs."
+    ),
+    "signup.welcome.sign_in_intro": "Sobald Ihr Passwort festgelegt ist, melden Sie sich hier an:",
+    "signup.verify.cta": "Bestätigen und Arbeitsbereich erstellen",
     "email.layout.open_cta": "{product} öffnen",
     "email.layout.fallback_link": (
         "Schaltfläche funktioniert nicht? Fügen Sie diesen Link in Ihren Browser ein:"
@@ -230,17 +240,26 @@ _FR: dict[str, str] = {
     "signup.welcome.body": "Votre espace de travail est actif.",
     "signup.welcome.url_label": "URL",
     "signup.welcome.email_label": "E-mail",
-    "signup.welcome.password_label": "Mot de passe",
-    "signup.welcome.change_note": (
-        "Il vous sera demandé de changer votre mot de passe lors de votre première connexion."
-    ),
     "signup.welcome.signoff": "Bienvenue à bord !",
-    "signup.verify.cta": "Confirmer et créer l'espace de travail",
-    "signup.welcome.cta": "Ouvrir votre espace de travail",
-    "signup.welcome.keep_note": (
-        "Conservez cet e-mail jusqu'à ce que vous vous soyez "
-        "connecté et ayez choisi votre propre mot de passe."
+    "signup.welcome.set_password_lead": (
+        "Choisissez un mot de passe pour terminer la configuration de votre compte."
     ),
+    "signup.welcome.set_password_cta": "Définir votre mot de passe",
+    "signup.welcome.set_password_expiry": (
+        "Ce lien expire dans {hours} heures et ne"
+        " fonctionne qu'une fois. S'il a expiré, "
+        "utilisez « Mot de passe oublié ? » sur "
+        "la page de connexion pour en obtenir un "
+        "nouveau."
+    ),
+    "signup.welcome.no_link": (
+        "Pour choisir votre mot de passe, "
+        "utilisez « Mot de passe oublié ? » sur "
+        "la page de connexion de votre espace de "
+        "travail."
+    ),
+    "signup.welcome.sign_in_intro": "Une fois votre mot de passe défini, connectez-vous ici :",
+    "signup.verify.cta": "Confirmer et créer l'espace de travail",
     "email.layout.open_cta": "Ouvrir {product}",
     "email.layout.fallback_link": (
         "Le bouton ne fonctionne pas ? Collez ce lien dans votre navigateur :"
@@ -281,16 +300,26 @@ _ES: dict[str, str] = {
     "signup.welcome.body": "Su espacio de trabajo está activo.",
     "signup.welcome.url_label": "URL",
     "signup.welcome.email_label": "Correo electrónico",
-    "signup.welcome.password_label": "Contraseña",
-    "signup.welcome.change_note": (
-        "Se le pedirá que cambie su contraseña la primera vez que inicie sesión."
-    ),
     "signup.welcome.signoff": "¡Bienvenido a bordo!",
-    "signup.verify.cta": "Confirmar y crear el espacio de trabajo",
-    "signup.welcome.cta": "Abrir su espacio de trabajo",
-    "signup.welcome.keep_note": (
-        "Conserve este correo hasta que haya iniciado sesión y elegido su propia contraseña."
+    "signup.welcome.set_password_lead": (
+        "Elija una contraseña para terminar de configurar su cuenta."
     ),
+    "signup.welcome.set_password_cta": "Establecer su contraseña",
+    "signup.welcome.set_password_expiry": (
+        "Este enlace caduca en {hours} horas y "
+        "solo funciona una vez. Si ha caducado, "
+        "use «¿Olvidaste tu contraseña?» en la "
+        "página de inicio de sesión para obtener "
+        "uno nuevo."
+    ),
+    "signup.welcome.no_link": (
+        "Para elegir su contraseña, use "
+        "«¿Olvidaste tu contraseña?» en la página"
+        " de inicio de sesión de su espacio de "
+        "trabajo."
+    ),
+    "signup.welcome.sign_in_intro": "Cuando haya establecido su contraseña, inicie sesión aquí:",
+    "signup.verify.cta": "Confirmar y crear el espacio de trabajo",
     "email.layout.open_cta": "Abrir {product}",
     "email.layout.fallback_link": "¿El botón no funciona? Pegue este enlace en su navegador:",
 }
@@ -329,12 +358,24 @@ _PT_BR: dict[str, str] = {
     "signup.welcome.body": "Seu espaço de trabalho está ativo.",
     "signup.welcome.url_label": "URL",
     "signup.welcome.email_label": "E-mail",
-    "signup.welcome.password_label": "Senha",
-    "signup.welcome.change_note": ("Você será solicitado a alterar sua senha no primeiro login."),
     "signup.welcome.signoff": "Bem-vindo a bordo!",
+    "signup.welcome.set_password_lead": (
+        "Escolha uma senha para concluir a configuração da sua conta."
+    ),
+    "signup.welcome.set_password_cta": "Definir sua senha",
+    "signup.welcome.set_password_expiry": (
+        "Este link expira em {hours} horas e "
+        "funciona uma única vez. Se tiver "
+        "expirado, use “Esqueceu a senha?” na "
+        "página de login para receber um novo."
+    ),
+    "signup.welcome.no_link": (
+        "Para escolher sua senha, use “Esqueceu a"
+        " senha?” na página de login do seu "
+        "espaço de trabalho."
+    ),
+    "signup.welcome.sign_in_intro": "Depois de definir sua senha, entre aqui:",
     "signup.verify.cta": "Confirmar e criar o espaço de trabalho",
-    "signup.welcome.cta": "Abrir seu espaço de trabalho",
-    "signup.welcome.keep_note": "Guarde este e-mail até entrar e escolher sua própria senha.",
     "email.layout.open_cta": "Abrir {product}",
     "email.layout.fallback_link": "O botão não funciona? Cole este link no seu navegador:",
 }
@@ -373,14 +414,22 @@ _JA: dict[str, str] = {
     "signup.welcome.body": "ワークスペースが有効になりました。",
     "signup.welcome.url_label": "URL",
     "signup.welcome.email_label": "メール",
-    "signup.welcome.password_label": "パスワード",
-    "signup.welcome.change_note": "初回サインイン時にパスワードの変更を求められます。",
     "signup.welcome.signoff": "ようこそ！",
-    "signup.verify.cta": "確認してワークスペースを作成",
-    "signup.welcome.cta": "ワークスペースを開く",
-    "signup.welcome.keep_note": (
-        "サインインしてご自身のパスワードを設定するまで、このメールを保管してください。"
+    "signup.welcome.set_password_lead": (
+        "パスワードを設定して、アカウントのセットアップを完了してください。"
     ),
+    "signup.welcome.set_password_cta": "パスワードを設定",
+    "signup.welcome.set_password_expiry": (
+        "このリンクの有効期限は {hours} 時間で、1 回のみ使用できます。"
+        "期限が切れた場合は、サインインページの「パスワードをお忘れですか？」"
+        "から新しいリンクを取得してください。"
+    ),
+    "signup.welcome.no_link": (
+        "パスワードを設定するには、ワークスペースのサインインページで"
+        "「パスワードをお忘れですか？」をご利用ください。"
+    ),
+    "signup.welcome.sign_in_intro": ("パスワードを設定したら、こちらからサインインしてください："),
+    "signup.verify.cta": "確認してワークスペースを作成",
     "email.layout.open_cta": "{product} を開く",
     "email.layout.fallback_link": (
         "ボタンが機能しない場合は、このリンクをブラウザに貼り付けてください："

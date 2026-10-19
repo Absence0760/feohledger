@@ -46,21 +46,12 @@ APP_DOMAIN=$(grep -E '^APP_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
 [ -n "$APP_DOMAIN" ] || die "APP_DOMAIN not set in the sops env."
 HOST="${SLUG}.${APP_DOMAIN}"
 
-FORCE_CHANGE=()
-if [ -z "$PASSWORD" ]; then
-	# Prefix guarantees the app's complexity rules (12+ chars, upper/lower/digit).
-	PASSWORD="Aa1-$(openssl rand -hex 12)"
-	FORCE_CHANGE=(--force-password-change)
-fi
-
-# --skip-existing makes the whole script re-runnable: if a previous run
-# provisioned the tenant but died before the Caddy step, the re-run skips
-# provisioning cleanly instead of tripping the deliberate duplicate-slug
-# error, and still repairs the Caddy side below.
-"${COMPOSE[@]}" exec -T api python scripts/create_tenant.py \
-	--name "$NAME" --slug "$SLUG" \
-	--admin-email "$EMAIL" --admin-password "$PASSWORD" \
-	--skip-existing "${FORCE_CHANGE[@]}"
+# The provisioning command itself is built by deploy/lib.sh, which CI's day-one
+# job runs too (#575): a generated temporary password unless one was given,
+# --skip-existing so a re-run after a failed Caddy step skips provisioning and
+# still repairs the Caddy side below.
+feoh_tenant_argv "$SLUG" "$NAME" "$EMAIL" "$PASSWORD" || die "could not generate a temporary password."
+"${COMPOSE[@]}" exec -T api "${FEOH_TENANT_ARGV[@]}"
 
 if ! grep -q "^${HOST} {" tenants.caddy 2>/dev/null; then
 	printf '\n%s {\n\timport spa\n}\n' "$HOST" >>tenants.caddy
@@ -75,7 +66,7 @@ feoh_caddy_reload || die "caddy did not take the new host block — see the erro
 echo
 echo "tenant ready: https://${HOST}"
 echo "  admin login: ${EMAIL}"
-if [ ${#FORCE_CHANGE[@]} -gt 0 ]; then
-	echo "  temp password: ${PASSWORD}  (share securely; change forced at first login)"
+if [ "$FEOH_TENANT_FORCED" = 1 ]; then
+	echo "  temp password: ${FEOH_TENANT_PASSWORD}  (share securely; change forced at first login)"
 fi
 echo "  DNS: covered by a wildcard *.${APP_DOMAIN} record; otherwise add an A record for ${HOST}."
