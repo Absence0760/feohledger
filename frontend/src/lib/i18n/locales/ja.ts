@@ -3788,6 +3788,16 @@ export const messages = {
 	'auth.resetPassword.invalidToken':
 		'このリセットリンクは無効か期限切れです。もう一度リクエストしてください。',
 	'auth.resetPassword.goToLogin': 'サインインへ',
+	'auth.resetPassword.retry': '再試行',
+	'auth.resetPassword.checkFailed':
+		'現在このリンクを確認できませんでした。もう一度お試しください。',
+	'auth.resetPassword.checking': 'リンクを確認しています…',
+	'auth.resetPassword.setExpiredHint':
+		'パスワード設定リンクは 1 回のみ使用でき、有効期限があります。「パスワードをお忘れですか？」から新しいリンクをリクエストしてください — 新しいアカウントでも利用できます。',
+	'auth.resetPassword.setSuccess': 'パスワードが設定されました。サインインできます。',
+	'auth.resetPassword.setSubmit': 'パスワードを設定',
+	'auth.resetPassword.setSubtitle': '新しいアカウントのパスワードを選択してください。',
+	'auth.resetPassword.setHeading': 'パスワードを設定',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': '二要素認証',
@@ -3856,8 +3866,9 @@ export const messages = {
 	'auth.signup.step1Body': 'チームがサインインするアドレスを選びます。',
 	'auth.signup.step2Title': 'メールアドレスを確認',
 	'auth.signup.step2Body': 'アドレスがご本人のものか確認するリンクをお送りします。',
-	'auth.signup.step3Title': 'サインインしてパスワードを設定',
-	'auth.signup.step3Body': 'ウェルカムメールに記載された仮パスワードで始められます。',
+	'auth.signup.step3Title': 'パスワードを設定してサインイン',
+	'auth.signup.step3Body':
+		'確認ページから直接、またはウェルカムメールのリンクから設定できます。',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'パスワード変更 — FeohLedger',
@@ -3883,16 +3894,16 @@ export const messages = {
 	'auth.verify.noToken': 'URLに確認トークンがありません。',
 	'auth.verify.failed': '確認に失敗しました。',
 	'auth.verify.pendingHeading': 'ワークスペースを作成しています…',
-	'auth.verify.pendingSub':
-		'通常は数秒かかります。データベースをプロビジョニングし、認証情報を送信しています。',
+	'auth.verify.pendingSub': '通常は数秒で完了します — データベースを準備し、ようこそメールを送信しています。',
 	'auth.verify.successHeading': 'ワークスペースの準備ができました',
-	'auth.verify.successSubPre': 'サインインリンクと一時パスワードを ',
-	'auth.verify.successSubPost':
-		' に送信しました。そのパスワードで初回サインインし、その直後にご自身のパスワードを設定してください。',
-	'auth.verify.step1': 'ようこそメールを開いて一時パスワードをコピーしてください。',
-	'auth.verify.step2': '下のワークスペースでサインインしてください。',
-	'auth.verify.step3': '新しいパスワードを選択すれば完了です。',
-	'auth.verify.continueTo': '{slug} へ進む →',
+	'auth.verify.successSubPre': '後で設定したい場合に備えて、パスワード設定用のリンクを ',
+	'auth.verify.successSubPost': ' にもメールで送信しました。',
+	'auth.verify.step1': 'パスワードを設定してください — 下のボタンから直接移動できます。',
+	'auth.verify.step2': 'メールアドレスとそのパスワードでワークスペースにサインインしてください。',
+	'auth.verify.step3': 'チームを招待してツールを接続すれば準備完了です。',
+	'auth.verify.noLink': 'パスワードを設定するには、ワークスペースのサインインページで「パスワードをお忘れですか？」をご利用ください。',
+	'auth.verify.linkNote': 'リンクは 1 回のみ使用できます。期限が切れた場合は、サインインページの「パスワードをお忘れですか？」をご利用ください。',
+	'auth.verify.setPassword': 'パスワードを設定',
 	'auth.verify.errorHeading': '問題が発生しました',
 	'auth.verify.startOver': '最初からやり直す',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)

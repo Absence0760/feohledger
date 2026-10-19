@@ -351,6 +351,12 @@ ALTERNATE_AUTH: dict[tuple[str, str], AlternateGate] = {
         "consume_reset_token GETDELs it atomically so a replay 400s like an expiry.",
         symbols=("consume_reset_token",),
     ),
+    ("POST", "/auth/reset-password/check"): AlternateGate(
+        "The same reset token, read without consuming it: answers the 400 "
+        "reset-password would for any token it would refuse, and tells only the "
+        "holder which account their link resets.",
+        symbols=("peek_reset_token",),
+    ),
     # --- SSO / SAML: the IdP's response is the credential -------------------
     ("POST", "/auth/sso/callback"): AlternateGate(
         "Server-minted single-use state, then the IdP's signed ID token "

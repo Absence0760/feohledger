@@ -31,7 +31,9 @@ import pytest
 from app.config import settings
 from app.utils.tenant_urls import (
     is_under_platform_domain,
+    password_reset_url,
     platform_domain,
+    sign_in_url,
     tenant_base_url,
 )
 
@@ -430,6 +432,42 @@ def test_scanners_ignore_prose():
     src = '"""Reads settings.tenant_url_template and does .replace("{slug}", s)."""\n'
     assert not template_read_lines(src)
     assert not substitution_lines(src)
+
+
+_VANITY = {"brand": {"tenant_url_template": "https://ap.acmecorp.example"}}
+
+
+def test_password_reset_url_shapes(monkeypatch):
+    """The one builder for both reset-token links (decisions §283)."""
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.app.example.com")
+    assert (
+        password_reset_url("acme", None, "a/b+c")
+        == "https://acme.app.example.com/login/reset-password?token=a/b%2Bc"
+    )
+    assert password_reset_url("acme", None, "t", set_password=True) == (
+        "https://acme.app.example.com/login/reset-password?token=t&mode=set"
+    )
+    assert "mode=set" not in password_reset_url("acme", None, "t")
+    # A vanity host wins, exactly as for every other tenant link.
+    assert password_reset_url("acme", _VANITY, "t") == (
+        "https://ap.acmecorp.example/login/reset-password?token=t"
+    )
+    monkeypatch.setattr(settings, "tenant_url_template", "")
+    assert password_reset_url("acme", None, "t", set_password=True) is None
+
+
+def test_sign_in_url_shapes(monkeypatch):
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.app.example.com")
+    assert sign_in_url("acme") == "https://acme.app.example.com/login"
+    assert sign_in_url("acme", email=None) == "https://acme.app.example.com/login"
+    assert sign_in_url("acme", email="a+b@x.com") == (
+        "https://acme.app.example.com/login?email=a%2Bb%40x.com"
+    )
+    assert sign_in_url("acme", _VANITY, email="a@x.com") == (
+        "https://ap.acmecorp.example/login?email=a%40x.com"
+    )
+    monkeypatch.setattr(settings, "tenant_url_template", "")
+    assert sign_in_url("acme", email="a@x.com") is None
 
 
 def test_scanners_flag_a_violation_planted_in_real_app_source():

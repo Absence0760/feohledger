@@ -105,7 +105,7 @@ def test_password_with_unicode_and_symbols_is_accepted():
 
 
 def test_generated_temp_password_passes_complexity():
-    """The temp password emitted by the signup welcome email must itself
+    """The temp password an admin invite or reset emails must itself
     satisfy complexity — otherwise the user's first login is immediately
     bounced to /change-password with a confusing error.
 
