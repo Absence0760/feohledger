@@ -107,7 +107,7 @@ Adding a provider: copy `app/services/email_adapters/console_adapter.py`, implem
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `FEOH_EMAIL_PROVIDER` | `console` | `console` or `ses` |
+| `FEOH_EMAIL_PROVIDER` | `console` | `console`, `ses` or `smtp`. A deployed env refuses to boot on `console`, which logs each email's full text (temporary passwords included) instead of sending it. |
 | `FEOH_EMAIL_FROM` | `no-reply@localhost` | Verified SES sender in prod |
 | `FEOH_AWS_SES_REGION` | `us-east-1` | Only used by the SES adapter |
 | `FEOH_PUBLIC_URL` | `http://localhost:7777` | Frontend URL — used to build verification links |

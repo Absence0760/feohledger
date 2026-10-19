@@ -53,6 +53,7 @@ REQUIRED = {
     "BACKUP_S3_BUCKET": "feohledger-backups",
     "FEOH_HCAPTCHA_SECRET": "dummy-captcha-secret",
     "FEOH_CREDENTIAL_KMS_KEY_ID": "alias/feohledger-app-prod",
+    "FEOH_EMAIL_PROVIDER": "ses",
 }
 
 SOPS_STUB = """#!/bin/sh
@@ -188,6 +189,17 @@ def test_an_open_signup_still_needs_the_captcha_secret(deploy: Deploy, signup: s
     result = deploy.run(_dotenv({"FEOH_HCAPTCHA_SECRET": None, "FEOH_SIGNUP_ENABLED": signup}))
     _assert_refused_and_kept(deploy, result)
     assert "FEOH_HCAPTCHA_SECRET" in result.stderr
+
+
+@pytest.mark.parametrize("provider", ["console", "Console", "CONSOLE "])
+def test_refuses_the_console_email_adapter(deploy: Deploy, provider: str) -> None:
+    """The app refuses to boot with it (config.py
+    `_refuse_console_email_in_deployed_envs`); refusing here fails the deploy
+    in its first second instead of at the healthcheck."""
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_dotenv({"FEOH_EMAIL_PROVIDER": provider}))
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_EMAIL_PROVIDER" in result.stderr
 
 
 @pytest.mark.parametrize("weak_key", ["change-me-in-production", "b" * 31])

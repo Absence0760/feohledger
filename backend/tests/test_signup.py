@@ -373,6 +373,7 @@ def test_config_requires_captcha_in_deployed_env():
     with pytest.raises(ValidationError):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="",
             secret_key=strong_key,
@@ -382,6 +383,7 @@ def test_config_requires_captcha_in_deployed_env():
     assert (
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="0xabc",
             secret_key=strong_key,
@@ -801,6 +803,7 @@ def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
     strong_key = "x" * 32
     closed = Settings(
         environment="production",
+        email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="",
         secret_key=strong_key,
@@ -812,6 +815,7 @@ def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
     with pytest.raises(ValidationError, match="FEOH_SIGNUP_ENABLED"):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="",
             secret_key=strong_key,
