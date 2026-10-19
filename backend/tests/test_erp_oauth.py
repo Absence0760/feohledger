@@ -555,10 +555,14 @@ async def test_callback_connects_and_redirects_home_without_secrets(realdb, plat
     assert datetime.fromisoformat(oauth["expires_at"]) > datetime.now(UTC)
     assert "refresh_token_expires_at" in oauth
 
-    (row,) = await _audit_actions(realdb)
-    assert row.action == "organization.erp_connected"
+    # The block saved before had no `integration_method`, so it named
+    # Merge.dev: the consent moves the ERP, and that is audited too (§284).
+    rows = {r.action: r for r in await _audit_actions(realdb)}
+    assert set(rows) == {"organization.erp_connected", "organization.erp_realm_changed"}
+    row = rows["organization.erp_connected"]
     assert row.details["provider"] == PROVIDER
     assert "SECRET" not in json.dumps(row.details)
+    assert "SECRET" not in json.dumps(rows["organization.erp_realm_changed"].details)
 
 
 @pytest.mark.plan("scale")
@@ -570,7 +574,14 @@ async def test_a_consent_to_another_company_is_audited_as_a_realm_change(
     resolving at the push, so the move is its own audit row. Reconnecting the
     same company is not a change."""
     await _set_settings(
-        realdb, {"erp": {"type": PROVIDER, "oauth": _connected_block(realdb.info("a").org_id)}}
+        realdb,
+        {
+            "erp": {
+                "type": PROVIDER,
+                "integration_method": "direct",
+                "oauth": _connected_block(realdb.info("a").org_id),
+            }
+        },
     )
     provider.handler = lambda url, data: _resp(200, _token_body(2))
     state = _state_of(await _authorize(realdb))

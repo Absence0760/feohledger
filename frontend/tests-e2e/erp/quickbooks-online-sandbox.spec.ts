@@ -283,15 +283,26 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 			success: boolean;
 			adapter: string;
 		};
+		// The live answer, plus what the inactive-inclusive query adds (§284):
+		// Bank Charges (8), inactive in QuickBooks, is retired here — one more
+		// "updated" — where live it was never read. Every pre-0115 link holds
+		// its own code in this company, so the realm pass adopts them all and
+		// moves none.
+		const legacyLinks = COMPANY.legacy_chart.filter((r) => r.erp_account_id).length;
 		expect(summary).toEqual({
 			...live,
+			updated: live.updated + 1,
+			deactivated: ['Bank Charges'],
+			deactivated_count: 1,
+			realm: `${PROVIDER}:${COMPANY.realm}`,
+			realm_adopted: legacyLinks,
 			link_changes: expect.any(Array),
 			success: true,
 			adapter: PROVIDER
 		});
 		expect(byCode(result.link_changes)).toEqual(byCode(live.link_changes));
 		expect(message).toBe(
-			`Synced ${live.created} new, ${live.updated} updated GL accounts; ` +
+			`Synced ${live.created} new, ${live.updated + 1} updated GL accounts; ` +
 				`${live.conflict_count} not linked, ${live.unlinked_count} unlinked`
 		);
 

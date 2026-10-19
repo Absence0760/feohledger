@@ -434,7 +434,12 @@ async def test_erp_vendor_sync_audits_create_update_and_link(realdb):
             actor_id=actor,
         )
         await s.commit()
-    assert result == {"created": 1, "updated": 1, "unchanged": 0, "conflicts": []}
+    assert {k: result[k] for k in ("created", "updated", "unchanged", "conflicts")} == {
+        "created": 1,
+        "updated": 1,
+        "unchanged": 0,
+        "conflicts": [],
+    }
 
     rows = await _audit_rows(realdb, "a", "vendor.synced_from_erp")
     assert {r.details["change"] for r in rows} == {"created", "linked"}

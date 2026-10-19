@@ -453,7 +453,13 @@ async def test_call_erp_dispatches_via_configured_adapter_not_mock():
         ref = await _call_erp(
             _line_items_db([]),
             _invoice(),
-            {"integration_method": "merge_dev", "api_key": "k", "account_token": "t"},
+            {
+                "integration_method": "merge_dev",
+                "api_key": "k",
+                "account_token": "t",
+                # Migrated while on this connection: its NULL-realm links count.
+                "legacy_link_realm": "merge_dev:",
+            },
         )
 
     assert ref == "merge-inv-77"
@@ -594,7 +600,12 @@ async def test_call_erp_includes_line_items_in_payload():
         await _call_erp(
             db,
             _invoice(),
-            {"integration_method": "merge_dev", "api_key": "k", "account_token": "t"},
+            {
+                "integration_method": "merge_dev",
+                "api_key": "k",
+                "account_token": "t",
+                "legacy_link_realm": "merge_dev:",
+            },
         )
 
     # The adapter serialises the body itself (`content=`, not `json=`) so the
