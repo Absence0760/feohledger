@@ -414,6 +414,53 @@ why 0048's `CREATE` now has no model declaration — plus a structural assertion
 that the composite still LEADS on that column, since the whole argument
 collapses if it ever stops.
 
+### Whole-schema parity (#575)
+
+Indexes are one part of the schema; the two builds have to agree on all of it.
+**`tests/test_schema_build_parity.py`** builds databases both ways on a real
+Postgres — throwaway, uniquely named, dropped afterwards — and compares the
+complete catalogue: every column's type, nullability, server default and
+identity; every constraint (PK / FK / UNIQUE / CHECK / EXCLUDE) by name and
+`pg_get_constraintdef`; every index by `pg_get_indexdef`; every trigger and the
+functions they call (`audit_log`'s immutability guard); sequences, enum types
+and extensions. Four builds are checked:
+
+| Case | Migrated side | Compared with |
+|------|---------------|---------------|
+| tenant | the pre-Alembic tenant schema + the whole chain | `_create_tenant_tables` |
+| tenant, first deploy | `_create_tenant_tables`, then the whole chain (a new tenant is not stamped, so its first `deploy.sh` replays every revision over it) | itself, before |
+| control plane, as seeded | the pre-Alembic control plane `seed.py` built (tenant-table copies included) + the chain | `control_plane_bootstrap.initialise` |
+| control plane, control tables only | the same, minus the tenant copies, so revisions that pick their branch by probing for `invoices` run their control DDL | `initialise` |
+
+The pre-Alembic schema is a committed snapshot of the models at `f6d93ab1^`, the
+day before `0001_signup` (`tests/fixtures/pre_0001_schema/`, with the
+`generate.py` that re-derives it). Allowed differences live in `ALLOWED`, each
+with its reason, and one that stops differing fails the test.
+
+**The ORM is the head schema.** When the two disagree, the revision that fixes
+it moves the migrated side to the model, not the other way round — a fresh
+control plane is built on exactly that claim (`docs/decisions.md` §274), and
+every production database was built by `create_all`. Migration
+**`0113_schema_build_parity`** closed the first sweep: 142 server defaults that
+revisions set and no model declares (the model's `default=` is Python-side),
+hand-named FKs where `create_all` uses `<table>_<column>_fkey`, ON DELETE actions
+the models do not declare, four UNIQUE indexes the models declare as
+constraints, and a handful of columns and indexes the chain never built. It also
+fixed the one finding that reached production: 0029 / 0051 / 0082 guarded their
+FKs by their own names only, so the first deploy after provisioning added 14
+duplicate FKs to the new tenant. Their guards now accept either name and 0113
+drops the duplicates.
+
+So, for a new revision:
+
+- **`ADD COLUMN … NOT NULL DEFAULT x` to backfill?** Either declare the same
+  `server_default` on the model, or `ALTER COLUMN … DROP DEFAULT` after the
+  backfill. A Python-side `default=` alone leaves the two builds different.
+- **Name a constraint by hand?** Give the model the same name, or guard on the
+  name `create_all` would give it as well as your own — an unstamped tenant
+  replays the revision over the ORM's spelling.
+- **ON DELETE, NOT NULL, a length, a UNIQUE** — say it the same way in both.
+
 ## Seeding
 
 Seed the control plane and both demo tenants:

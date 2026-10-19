@@ -11640,3 +11640,49 @@ on a `body_html = f"<…"` send site; `backend/tests/test_signup.py` checks both
 signup emails as the adapter would send them, including a phishing URL typed as
 the admin name. `backend/docs/notifications.md` § The HTML layout carries the
 working form.
+
+## 282. A migrated database converges on the ORM, and the whole schema is compared (#575, migration 0113, 2026-10-19)
+
+**Context.** `test_migration_model_index_parity.py` held the chain and the models
+to the same indexes, statically. Nothing compared the rest of the schema, so
+#575 added `backend/tests/test_schema_build_parity.py`: build a tenant (and a
+control plane) by running the whole chain over the pre-Alembic schema, build
+another by `create_all`, and diff the full catalogue. The first run found five
+kinds of difference — server defaults no model declares, hand-named FKs,
+ON DELETE actions, UNIQUE indexes the models declare as constraints, and
+columns / indexes / a table the chain never built — and a sixth hiding behind
+the defaults (nullability and a varchar width). A third case, replaying the
+chain over a `create_all` tenant, found the one that reaches production: a new
+tenant is not stamped, so its first deploy runs every revision, and 0029, 0051
+and 0082 guarded their FKs by their own names only. A tenant that has been
+deployed over since it was provisioned carries 14 duplicate foreign keys.
+
+**Decision.**
+
+- **The ORM is the head schema; a revision moves the migrated side to it.**
+  §274 already builds a fresh control plane on that claim, and every production
+  database was built by `create_all`, so this direction changes nothing there
+  but the duplicates. `0113_schema_build_parity` drops the 142 defaults (each
+  column has a Python `default=` the ORM always sends, so a raw INSERT that
+  leaned on one already failed in production), renames the hand-named FKs or
+  drops the duplicate where both exist, re-creates four FKs without the ON
+  DELETE action the models do not declare, promotes four UNIQUE indexes to
+  constraints in place (`USING INDEX`), and adds what the chain never built.
+  Its `downgrade()` is a no-op: the two builds differed before it, so there is
+  no single prior schema to return to.
+- **The three guards are fixed at the source too**, accepting either name, so a
+  replay no longer creates the duplicates 0113 then removes.
+- **The test is opt-out.** A new difference fails it; an allowed one needs an
+  `ALLOWED` entry with its reason, and a stale entry fails. The pre-Alembic
+  schema is a committed snapshot (`tests/fixtures/pre_0001_schema/`) with the
+  script that re-derives it from `f6d93ab1^`, because CI checkouts are shallow.
+
+**Rejected.**
+- *Declaring the 142 defaults on the models instead.* The defensible
+  direction for a fresh design, but it changes every production table to match
+  development databases, where the other way changes none.
+- *Stamping a new tenant at head when it is provisioned*, so the chain never
+  replays over it. It would also have avoided the duplicates, but the replay is
+  what every existing production tenant has already been through, and the
+  first-deploy case now holds every revision's guards to the ORM's spelling —
+  the property a stamp would only have hidden.
