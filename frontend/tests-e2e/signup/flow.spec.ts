@@ -12,8 +12,9 @@ import { SERVICES, skipUnlessReachable } from '../fixtures/services';
  *  2. The /verify page's error states (no token, invalid/expired token) — also
  *     runs anywhere; we drive it with bogus tokens.
  *  3. The full happy path landing → signup → verification email → /verify →
- *     welcome email (temp password) → first sign-in → forced password change →
- *     dashboard. Gated on Mailpit (the real outbound sink); ALSO needs the
+ *     "Set your password" (the same single-use link the welcome email carries;
+ *     no password is ever emailed, decisions §282) → sign in with the email
+ *     prefilled → dashboard. Gated on Mailpit (the real outbound sink); ALSO needs the
  *     backend on the `smtp` adapter pointed at Mailpit:
  *        pnpm mail:up && FEOH_EMAIL_PROVIDER=smtp FEOH_SMTP_PORT=1025 pnpm dev:backend
  *     If the backend is on `console` the verification email never arrives and
@@ -97,6 +98,14 @@ test.describe('/signup — form', () => {
 		await page.getByLabel('Your name').fill(name);
 		await page.getByLabel('Email').fill(email);
 	}
+
+	test('"what happens next" promises a set-password link, not a temporary password', async ({
+		page
+	}) => {
+		await page.goto('/signup');
+		await expect(page.getByText('Set your password and sign in')).toBeVisible();
+		await expect(page.getByText(/temporary/i)).toHaveCount(0);
+	});
 
 	test('submitting a valid form shows the "check your email" state', async ({ page }) => {
 		const slug = `e2eform${Date.now().toString().slice(-9)}`;
@@ -258,10 +267,10 @@ test.describe('/signup — form', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// 2. /verify — error states (no email needed)
+// 2. /verify — success + error states (stubbed or bogus tokens; no email needed)
 // ───────────────────────────────────────────────────────────────────────────
 
-test.describe('/verify — error states', () => {
+test.describe('/verify — outcomes', () => {
 	test.use({ baseURL: NO_TENANT_BASE });
 
 	test('no token in the URL surfaces an error', async ({ page }) => {
@@ -271,6 +280,52 @@ test.describe('/verify — error states', () => {
 		});
 		await expect(page.getByText(/no verification token/i)).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Start over' })).toBeVisible();
+	});
+
+	test('success offers "Set your password" straight to the server-built link', async ({ page }) => {
+		const setUrl = `${tenantBase('stubco')}/login/reset-password?token=stubbed&mode=set`;
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) =>
+				route.fulfill({
+					json: {
+						status: 'provisioned',
+						slug: 'stubco',
+						tenant_url: tenantBase('stubco'),
+						admin_email: 'admin@stubco.example',
+						set_password_url: setUrl
+					}
+				})
+		);
+		await page.goto('/verify?token=' + 'x'.repeat(40));
+		await expect(page.getByRole('heading', { name: 'Your workspace is ready' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Set your password' })).toHaveAttribute(
+			'href',
+			setUrl
+		);
+		await expect(page.getByText('admin@stubco.example')).toBeVisible();
+		// Nothing left to copy out of an email.
+		await expect(page.getByText(/temporary password/i)).toHaveCount(0);
+	});
+
+	test('success without a link points at Forgot password', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) =>
+				route.fulfill({
+					json: {
+						status: 'provisioned',
+						slug: 'stubco',
+						tenant_url: '',
+						admin_email: 'admin@stubco.example',
+						set_password_url: null
+					}
+				})
+		);
+		await page.goto('/verify?token=' + 'x'.repeat(40));
+		await expect(page.getByRole('heading', { name: 'Your workspace is ready' })).toBeVisible();
+		await expect(page.getByText(/use forgot password on your workspace/i)).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Set your password' })).toHaveCount(0);
 	});
 
 	test('an invalid/expired token surfaces the uniform error', async ({ page }) => {
@@ -294,7 +349,7 @@ test.describe('signup happy path (UI + Mailpit)', () => {
 		await skipUnlessReachable(SERVICES.mailpit);
 	});
 
-	test('new user: form → verify email → first sign-in → change password → dashboard', async ({
+	test('new user: form → verify email → set password → sign in → dashboard', async ({
 		page
 	}) => {
 		const slug = `e2eflow${Date.now().toString().slice(-9)}`;
@@ -322,29 +377,43 @@ test.describe('signup happy path (UI + Mailpit)', () => {
 			timeout: 20_000
 		});
 
-		// 3. Pull the temp password out of the welcome email.
+		// 3. The welcome email carries the same set-password link, and no password.
 		const welcomeBody = await waitForEmail(page, email, 'Your FeohLedger workspace');
-		const pwMatch = welcomeBody.match(/Password:\s*(\S+)/);
-		expect(pwMatch, 'temp password in welcome email').toBeTruthy();
-		const tempPassword = pwMatch![1];
+		expect(welcomeBody).not.toMatch(/Password:/);
+		const emailed = welcomeBody.match(/\S+\/login\/reset-password\?token=\S+&mode=set/);
+		expect(emailed, 'set-password link in welcome email').toBeTruthy();
+		const setPassword = page.getByRole('link', { name: 'Set your password' });
+		await expect(setPassword).toHaveAttribute('href', emailed![0]);
 
-		// 4. Sign in at the new tenant with the temp password.
-		await page.goto(`${tenantBase(slug)}/login`);
-		await page.locator('input[type="email"]').fill(email);
-		await page.locator('input[type="password"]').fill(tempPassword);
-		await page.locator('form button[type="submit"]').click();
+		// 4. "Set your password" goes straight to the tenant's set-password page.
+		await setPassword.click();
+		await expect(page).toHaveURL(new RegExp(`^${tenantBase(slug)}/login/reset-password\\?`));
+		await expect(page.getByRole('heading', { name: 'Set your password' })).toBeVisible();
+		await expect(page.locator('form input[autocomplete="username"]')).toHaveValue(email);
 
-		// 5. must_change_password forces the change-password screen.
-		await expect(page).toHaveURL(/\/change-password/, { timeout: 15_000 });
+		// A reload (or a mail scanner's visit) reads the token, never spends it.
+		await page.reload();
+		await expect(page.locator('form input[autocomplete="username"]')).toHaveValue(email);
 
-		// 6. Set a real password and land in the workspace.
+		// 5. Choose a password; the link is now spent.
 		const newPassword = 'Sup3rSecret!newpw';
-		await page.getByLabel('Current password').fill(tempPassword);
 		await page.getByLabel('New password', { exact: true }).fill(newPassword);
 		await page.getByLabel('Confirm new password').fill(newPassword);
-		await page.locator('form button[type="submit"]').click();
+		await page.getByRole('button', { name: 'Set password' }).click();
+		await expect(page.getByText('Your password is set. You can now sign in.')).toBeVisible();
 
-		// Lands on the authenticated dashboard (no longer on change-password/login).
+		// 6. Sign in with the address prefilled — no forced change, straight in.
+		await page.getByRole('link', { name: 'Go to sign in' }).click();
+		await expect(page.locator('input[type="email"]')).toHaveValue(email);
+		await page.locator('input[type="password"]').fill(newPassword);
+		await page.locator('form button[type="submit"]').click();
 		await expect(page).toHaveURL(TENANT_ROOT_URL, { timeout: 15_000 });
+
+		// 7. The emailed copy of the link died with that use (one token for both).
+		const token = new URL(emailed![0]).searchParams.get('token');
+		const spent = await page.request.post(`${API_BASE}/api/auth/reset-password/check`, {
+			data: { token }
+		});
+		expect(spent.status()).toBe(400);
 	});
 });

@@ -38,6 +38,23 @@ test.describe('/login', () => {
 		await expect(page.getByRole('button', { name: /Sign in/ })).toBeVisible();
 	});
 
+	test('?email= prefills the email field, and only with a plausible address', async ({ page }) => {
+		// The signup welcome email's sign-in link and the reset page's "go to
+		// sign in" both carry the account's address (decisions §282).
+		await page.goto('/login?email=' + encodeURIComponent('first+ap@acme.example'));
+		const field = page.locator('input[type="email"]');
+		await expect(field).toHaveValue('first+ap@acme.example');
+		// Prefilled, not committed: the visitor can still change it, and the
+		// password field is left for them to reach themselves.
+		await expect(field).not.toBeFocused();
+		await expect(page.locator('input[type="password"]')).toHaveValue('');
+
+		// A crafted value is dropped rather than shown in the field.
+		await page.goto('/login?email=' + encodeURIComponent('your account is locked, call us'));
+		await expect(page.getByRole('button', { name: /Sign in/ })).toBeVisible();
+		await expect(field).toHaveValue('');
+	});
+
 	test('rejects an unknown email/password and stays on /login', async ({ page }) => {
 		await signIn(page, { email: 'noone@nowhere.test', password: 'wrong-password' });
 

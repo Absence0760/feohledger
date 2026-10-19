@@ -3,7 +3,9 @@
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { emailFromQuery } from '#lib/utils/prefillEmail.ts';
 	import { api } from '#lib/api.ts';
 	import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -44,6 +46,9 @@
 	}
 
 	onMount(async () => {
+		// A sign-in link we built (the signup welcome email, the reset page's
+		// "go to sign in") names the account; the field is still editable.
+		email = emailFromQuery(page.url.searchParams);
 		// A tenant is configured for at most one protocol; query both and render
 		// whichever is enabled. Both are non-fatal — password login still works.
 		// On the platform apex (marketing / signup host) there is neither a slug

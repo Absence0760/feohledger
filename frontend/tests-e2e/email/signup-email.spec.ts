@@ -43,6 +43,13 @@ async function messageText(page: Page, id: string): Promise<string> {
 	return body.Text;
 }
 
+/** HTML part of a captured message. */
+async function messageHtml(page: Page, id: string): Promise<string> {
+	const resp = await page.request.get(`${MAILPIT}/api/v1/message/${id}`);
+	const body = (await resp.json()) as { HTML: string };
+	return body.HTML;
+}
+
 test.describe('Outbound email via Mailpit (signup)', () => {
 	test.beforeEach(async () => {
 		await skipUnlessReachable(SERVICES.mailpit);
@@ -86,19 +93,35 @@ test.describe('Outbound email via Mailpit (signup)', () => {
 			data: { token }
 		});
 		expect(complete.status(), await complete.text()).toBe(200);
-		const body = (await complete.json()) as { status: string; slug: string };
+		const body = (await complete.json()) as {
+			status: string;
+			slug: string;
+			set_password_url: string | null;
+		};
 		expect(body.status).toBe('provisioned');
 		expect(body.slug).toBe(slug);
+		expect(body.set_password_url).toMatch(/\/login\/reset-password\?token=[^&]+&mode=set$/);
 
-		// 5. The welcome email (temp password) also lands — there are now 2 to this address.
+		// 5. The welcome email lands too, carrying that same set-password link and
+		//    no password (decisions §282).
+		let welcome: MailpitMessage | null = null;
 		await expect
 			.poll(async () => {
 				const resp = await page.request.get(`${MAILPIT}/api/v1/search`, {
 					params: { query: `to:${email}` }
 				});
 				const j = (await resp.json()) as { messages: MailpitMessage[] };
-				return j.messages.length;
+				welcome = j.messages.find((m) => m.Subject.startsWith('Your FeohLedger workspace')) ?? null;
+				return welcome?.ID ?? null;
 			}, { timeout: 15_000 })
-			.toBeGreaterThanOrEqual(2);
+			.not.toBeNull();
+		const welcomeText = await messageText(page, welcome!.ID);
+		expect(welcomeText).toContain(body.set_password_url!);
+		expect(welcomeText).not.toMatch(/Password:/);
+		expect(welcomeText).toMatch(/expires in \d+ hours/);
+		// The HTML part's button is the same server-built link.
+		const html = await messageHtml(page, welcome!.ID);
+		expect(html).toContain(`href="${body.set_password_url!.replace(/&/g, '&amp;')}"`);
+		expect(html).toContain('>Set your password</a>');
 	});
 });

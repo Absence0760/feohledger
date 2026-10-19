@@ -64,25 +64,40 @@ test.describe('/login/reset-password', () => {
 		await expect(page.locator('input[type="password"]')).toHaveCount(0);
 	});
 
-	test('rejects a bogus token with the opaque invalid/expired message', async ({ page }) => {
+	test('a bogus token is refused before any password is typed', async ({ page }) => {
 		await page.goto('/login/reset-password?token=not-a-real-token');
 
-		await page.locator('input[type="password"]').first().fill('BrandNewPassw0rd!42');
-		await page.locator('input[type="password"]').nth(1).fill('BrandNewPassw0rd!42');
-		await page.getByRole('button', { name: /Reset password/i }).click();
-
-		// The backend's actual detail ("Invalid or expired reset link.",
-		// app/api/auth.py) is what renders here — the frontend's
-		// auth.resetPassword.invalidToken i18n string is only the fallback
-		// for a non-Error/network failure, a different path than this test
-		// exercises.
-		await expect(page.getByText(/invalid or expired/i)).toBeVisible();
+		// The page reads the token first (`/auth/reset-password/check`, which
+		// never consumes it), so an unknown, used or expired link explains
+		// itself up front and offers a fresh one instead of a form.
+		await expect(page.getByText(/invalid or has expired/i)).toBeVisible();
+		await expect(page.locator('input[type="password"]')).toHaveCount(0);
+		await expect(page.getByRole('link', { name: /Reset your password/i })).toHaveAttribute(
+			'href',
+			'/login/forgot-password'
+		);
 	});
 
+	test('a used set-password link names Forgot password as the way back in', async ({ page }) => {
+		await page.goto('/login/reset-password?token=not-a-real-token&mode=set');
+		await expect(page.getByRole('heading', { name: 'Set your password' })).toBeVisible();
+		await expect(page.getByText(/set-password links work once and expire/i)).toBeVisible();
+		await expect(page.getByRole('link', { name: /Reset your password/i })).toBeVisible();
+	});
+
+	/** Stub the non-consuming read on its exact pathname, as the account `email`. */
+	async function stubCheck(page: import('@playwright/test').Page, email: string) {
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) => route.fulfill({ json: { email } })
+		);
+	}
+
 	test('moves focus onto the confirmation once the password is reset', async ({ page }) => {
-		// Stubbed on its exact pathname: a real redemption needs a minted token
+		// Stubbed on exact pathnames: a real redemption needs a minted token
 		// and would change a seeded credential (see the file header). What is
 		// under test is only the page's reaction to a 2xx.
+		await stubCheck(page, 'someone@acme.example');
 		await page.route(
 			(url) => url.pathname === '/api/auth/reset-password',
 			(route) => route.fulfill({ json: { message: 'ok' } })
@@ -99,5 +114,93 @@ test.describe('/login/reset-password', () => {
 		const success = page.getByText(/your password has been reset/i);
 		await expect(success).toBeVisible();
 		await expect(success).toBeFocused();
+	});
+
+	test('opening the link (again and again) never redeems it — only the submit does', async ({
+		page
+	}) => {
+		// A corporate mail scanner fetches every link before the user does, and
+		// a user reloads. Neither may spend the single-use token.
+		const calls = { check: 0, redeem: 0 };
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) => {
+				calls.check += 1;
+				return route.fulfill({ json: { email: 'scan@acme.example' } });
+			}
+		);
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) => {
+				calls.redeem += 1;
+				return route.fulfill({ json: { message: 'ok' } });
+			}
+		);
+		await page.goto('/login/reset-password?token=stubbed-token&mode=set');
+		await expect(page.getByRole('button', { name: 'Set password' })).toBeVisible();
+		await page.reload();
+		await expect(page.getByRole('button', { name: 'Set password' })).toBeVisible();
+		expect(calls).toEqual({ check: 2, redeem: 0 });
+
+		await page.locator('input[type="password"]').first().fill('MyOwnChoice!2026');
+		await page.locator('input[type="password"]').nth(1).fill('MyOwnChoice!2026');
+		await page.getByRole('button', { name: 'Set password' }).click();
+		await expect(page.getByText('Your password is set. You can now sign in.')).toBeVisible();
+		expect(calls.redeem).toBe(1);
+	});
+
+	test('a failed check is not reported as a dead link, and can be retried', async ({ page }) => {
+		let fail = true;
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) =>
+				fail
+					? route.fulfill({ status: 429, json: { detail: 'Too many requests. Slow down.' } })
+					: route.fulfill({ json: { email: 'retry@acme.example' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
+		await expect(page.getByText(/invalid or has expired/i)).toHaveCount(0);
+
+		fail = false;
+		await page.getByRole('button', { name: 'Try again' }).click();
+		await expect(page.locator('form input[autocomplete="username"]')).toHaveValue(
+			'retry@acme.example'
+		);
+	});
+
+	test('set mode: a password manager can save the new password under the account', async ({
+		page
+	}) => {
+		const email = 'new-admin+ap@acme.example';
+		await stubCheck(page, email);
+		const redeemed: Array<{ token: string; new_password: string }> = [];
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			async (route) => {
+				redeemed.push(route.request().postDataJSON());
+				await route.fulfill({ json: { message: 'ok' } });
+			}
+		);
+		await page.goto('/login/reset-password?token=stubbed-token&mode=set');
+
+		await expect(page.getByRole('heading', { name: 'Set your password' })).toBeVisible();
+		// The username a password manager files the password under: the account
+		// email, in the same form, hidden and out of the tab order.
+		const username = page.locator('form input[autocomplete="username"]');
+		await expect(username).toHaveValue(email);
+		await expect(username).toBeHidden();
+		await expect(page.locator('form input[autocomplete="new-password"]')).toHaveCount(2);
+
+		await page.locator('input[type="password"]').first().fill('MyOwnChoice!2026');
+		await page.locator('input[type="password"]').nth(1).fill('MyOwnChoice!2026');
+		await page.getByRole('button', { name: 'Set password' }).click();
+
+		await expect(page.getByText('Your password is set. You can now sign in.')).toBeFocused();
+		expect(redeemed).toEqual([{ token: 'stubbed-token', new_password: 'MyOwnChoice!2026' }]);
+		// Onward to sign in with the address already filled in.
+		await page.getByRole('link', { name: 'Go to sign in' }).click();
+		await expect(page).toHaveURL(/\/login\?email=new-admin%2Bap%40acme\.example$/);
+		await expect(page.locator('input[type="email"]')).toHaveValue(email);
 	});
 });

@@ -12,6 +12,9 @@
 		slug: string;
 		tenant_url: string;
 		admin_email: string;
+		// Single-use link to choose the admin's first password (decisions §282).
+		// Null when the server could not build one; Forgot password is the way in.
+		set_password_url: string | null;
 	}
 
 	let phase = $state<'pending' | 'success' | 'error'>('pending');
@@ -71,7 +74,14 @@
 				<li>{m('auth.verify.step2')}</li>
 				<li>{m('auth.verify.step3')}</li>
 			</ol>
-			<a class="primary" href={result.tenant_url}>{m('auth.verify.continueTo', { slug: result.slug })}</a>
+			{#if result.set_password_url}
+				<!-- A full navigation to the tenant's own host; the link is built by
+				     the server, never assembled here. -->
+				<a class="primary" href={result.set_password_url}>{m('auth.verify.setPassword')}</a>
+				<p class="note">{m('auth.verify.linkNote')}</p>
+			{:else}
+				<p class="note">{m('auth.verify.noLink')}</p>
+			{/if}
 		{:else}
 			<p class="error">{errorMessage}</p>
 			<a class="start-over" href="/signup">{m('auth.verify.startOver')}</a>
@@ -144,6 +154,12 @@
 	}
 	.primary:hover {
 		transform: translateY(-1px);
+	}
+	.note {
+		margin: 0;
+		font-size: 0.85rem;
+		line-height: 1.55;
+		color: var(--text-muted);
 	}
 	.start-over {
 		align-self: flex-start;

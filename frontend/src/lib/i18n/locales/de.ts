@@ -3827,6 +3827,17 @@ export const messages = {
 	'auth.resetPassword.invalidToken':
 		'Dieser Link zum Zurücksetzen ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen an.',
 	'auth.resetPassword.goToLogin': 'Zur Anmeldung',
+	'auth.resetPassword.retry': 'Erneut versuchen',
+	'auth.resetPassword.checkFailed':
+		'Wir konnten diesen Link gerade nicht prüfen. Bitte versuchen Sie es erneut.',
+	'auth.resetPassword.checking': 'Link wird geprüft…',
+	'auth.resetPassword.setExpiredHint':
+		'Links zum Festlegen des Passworts funktionieren nur einmal und laufen ab. Fordern Sie über „Passwort vergessen?“ einen neuen an — das funktioniert auch für Ihr neues Konto.',
+	'auth.resetPassword.setSuccess':
+		'Ihr Passwort ist festgelegt. Sie können sich jetzt anmelden.',
+	'auth.resetPassword.setSubmit': 'Passwort festlegen',
+	'auth.resetPassword.setSubtitle': 'Wählen Sie ein Passwort für Ihr neues Konto.',
+	'auth.resetPassword.setHeading': 'Passwort festlegen',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Zwei-Faktor-Verifizierung',
@@ -3895,8 +3906,9 @@ export const messages = {
 	'auth.signup.step1Body': 'Wählen Sie die Adresse, unter der sich Ihr Team anmeldet.',
 	'auth.signup.step2Title': 'Bestätigen Sie Ihre E-Mail-Adresse',
 	'auth.signup.step2Body': 'Wir senden einen Link, mit dem Sie bestätigen, dass die Adresse Ihnen gehört.',
-	'auth.signup.step3Title': 'Anmelden und Passwort festlegen',
-	'auth.signup.step3Body': 'Ihre Willkommens-E-Mail enthält ein vorläufiges Passwort für den Start.',
+	'auth.signup.step3Title': 'Passwort festlegen und anmelden',
+	'auth.signup.step3Body':
+		'Legen Sie es direkt auf der Bestätigungsseite fest oder über den Link in Ihrer Willkommens-E-Mail.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Passwort ändern — FeohLedger',
@@ -3923,15 +3935,21 @@ export const messages = {
 	'auth.verify.failed': 'Bestätigung fehlgeschlagen.',
 	'auth.verify.pendingHeading': 'Ihr Arbeitsbereich wird erstellt…',
 	'auth.verify.pendingSub':
-		'Das dauert in der Regel ein paar Sekunden — wir richten Ihre Datenbank ein und senden Ihre Zugangsdaten.',
+		'Das dauert meist nur wenige Sekunden — wir richten Ihre Datenbank ein und senden Ihre Willkommens-E-Mail.',
 	'auth.verify.successHeading': 'Ihr Arbeitsbereich ist bereit',
-	'auth.verify.successSubPre': 'Wir haben Ihren Anmeldelink und ein temporäres Passwort an ',
-	'auth.verify.successSubPost':
-		' gesendet. Melden Sie sich mit diesem Passwort zum ersten Mal an — direkt danach legen Sie Ihr eigenes fest.',
-	'auth.verify.step1': 'Öffnen Sie die Willkommens-E-Mail und kopieren Sie das temporäre Passwort.',
-	'auth.verify.step2': 'Melden Sie sich unten in Ihrem Arbeitsbereich an.',
-	'auth.verify.step3': 'Wählen Sie ein neues Passwort — und schon sind Sie drin.',
-	'auth.verify.continueTo': 'Weiter zu {slug} →',
+	'auth.verify.successSubPre': 'Wir haben außerdem einen Link zum Festlegen Ihres Passworts an ',
+	'auth.verify.successSubPost': ' gesendet, falls Sie das lieber später erledigen.',
+	'auth.verify.step1':
+		'Wählen Sie Ihr Passwort — die Schaltfläche unten führt Sie direkt dorthin.',
+	'auth.verify.step2':
+		'Melden Sie sich mit Ihrer E-Mail-Adresse und diesem Passwort in Ihrem Arbeitsbereich an.',
+	'auth.verify.step3':
+		'Laden Sie Ihr Team ein und verbinden Sie Ihre Tools — und schon sind Sie drin.',
+	'auth.verify.noLink':
+		'Verwenden Sie „Passwort vergessen?“ auf der Anmeldeseite Ihres Arbeitsbereichs, um Ihr Passwort festzulegen.',
+	'auth.verify.linkNote':
+		'Der Link funktioniert nur einmal. Falls er abgelaufen ist, verwenden Sie „Passwort vergessen?“ auf der Anmeldeseite.',
+	'auth.verify.setPassword': 'Passwort festlegen',
 	'auth.verify.errorHeading': 'Etwas ist schiefgelaufen',
 	'auth.verify.startOver': 'Von vorne beginnen',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
