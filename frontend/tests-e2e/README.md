@@ -87,6 +87,7 @@ tests-e2e/
 │   ├── env.ts                       web origin + API base — see "Running from a worktree" below
 │   ├── helpers.ts                   per-worker fixtures + signIn / tenantPsql / etc.
 │   ├── services.ts                  reachability gates for the opt-in compose services
+│   ├── realisticRows.ts             production-shaped rows (long names / numbers / emails, non-ASCII, big amounts) — see "Layout guard" below
 │   └── globalSetup.ts               pre-run guard — see "Workflow shape guard" below
 ├── a11y/                            axe-core accessibility regression guard (WCAG 2.2 AA)
 ├── meta/                            source guards over the specs themselves — see "Row teardown" and "Ports" below
@@ -135,6 +136,21 @@ assertion; reuse it when adding a route to the guard. Automated tooling only
 covers the machine-detectable criteria — the manual screen-reader passes and
 the conformance docs (`docs/accessibility.md`, `docs/accessibility-vpat.md`)
 cover the rest.
+
+## Layout guard at desktop widths (`a11y/wide-layout.spec.ts`)
+
+`reflow.spec.ts` covers 320px. `wide-layout.spec.ts` covers the failure #574
+shipped at 1666px: a table that fit every seeded row and overflowed the card
+the first day a customer used it. It seeds `fixtures/realisticRows.ts` — long
+vendor names, ERP-length invoice numbers, an email assignee, a non-ASCII
+vendor, thirteen-digit amounts — through the API (falling back to
+`tenantPsql` only for workflow state no endpoint mints), then visits every
+page in `NAV` at 1280px and 1666px and asserts that no table, row action or KPI
+card leaves its container. At 1666px a table must fit outright; at 1280px it
+may scroll inside a `tabindex="0"` region. **Use `REALISTIC` for any new layout
+assertion** rather than inventing strings — short test strings are how #574
+passed. An overflow it reports is a layout defect to fix in the page; never
+widen its tolerance.
 
 ## Workflow shape guard (`fixtures/globalSetup.ts`)
 

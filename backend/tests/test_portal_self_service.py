@@ -539,6 +539,43 @@ async def test_company_patch_applies_contact_fields_live(realdb):
 
 
 @pytest.mark.asyncio
+async def test_company_patch_audit_names_only_the_contact_fields_that_changed(realdb):
+    """The portal form resends phone, address and email together; the trail
+    named all three on every save, so AP read a phone fix as an address change
+    (#575). Field NAMES only — the address is PII — and a no-op save writes no
+    row."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        for body in (
+            {"phone": "555-0100", "address": "1 Private Lane"},
+            {"phone": "555-0199", "address": "1 Private Lane"},
+            {"phone": "555-0199", "address": "1 Private Lane"},
+        ):
+            resp = await client.patch("/api/portal/company", json=body)
+            assert resp.status_code == 200, resp.text
+
+    async with mk() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog)
+                    .where(
+                        AuditLog.action == "vendor.contact_updated_by_vendor",
+                        AuditLog.entity_id == vendor_id,
+                    )
+                    .order_by(AuditLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r.details["fields"] for r in rows] == [["address", "phone"], ["phone"]]
+    assert "Private Lane" not in repr([r.details for r in rows])
+
+
+@pytest.mark.asyncio
 async def test_bank_change_stages_and_does_not_mutate_vendor(realdb):
     """The fraud control: a bank change creates a PENDING row and leaves
     `Vendor.bank_details` untouched."""

@@ -55,7 +55,7 @@
 		<form onsubmit={handleSubmit}>
 			<label>
 				<span>{m('auth.forgotPassword.email')}</span>
-				<input type="email" bind:value={email} required autocomplete="email" />
+				<input type="email" bind:value={email} required autocomplete="username" />
 			</label>
 			<button type="submit" disabled={loading}>
 				{loading ? m('auth.forgotPassword.sending') : m('auth.forgotPassword.submit')}

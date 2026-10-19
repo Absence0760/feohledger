@@ -405,6 +405,7 @@ async def update_contract(
     contract = await _get_contract_or_404(db, contract_id)
     payload = body.model_dump(exclude_unset=True)
 
+    changed: list[str] = []
     if "vendor_id" in payload and payload["vendor_id"] is not None:
         try:
             new_vendor = uuid.UUID(payload["vendor_id"])
@@ -415,10 +416,14 @@ async def update_contract(
         ).scalar_one_or_none()
         if not vendor:
             raise HTTPException(status_code=404, detail="Vendor not found")
-        contract.vendor_id = new_vendor
+        # Named in the audit row when it moves: re-pointing a contract at a
+        # different supplier was applied but never recorded, so a vendor-only
+        # edit wrote no row at all (#575).
+        if contract.vendor_id != new_vendor:
+            contract.vendor_id = new_vendor
+            changed.append("vendor_id")
     payload.pop("vendor_id", None)
 
-    changed: list[str] = []
     for field in _UPDATABLE_FIELDS:
         if field in payload:
             new_value = payload[field]

@@ -3831,6 +3831,9 @@ export const messages = {
 	'auth.login.or': 'ou',
 	'auth.login.signInWith': 'Entrar com {provider}',
 	'auth.login.forgotPassword': 'Esqueceu a senha?',
+	'auth.login.devAccounts.heading': 'Contas de desenvolvimento',
+	'auth.login.devAccounts.hint': 'Somente para desenvolvimento local. Escolha uma conta de teste para preencher o formulário.',
+	'auth.login.devAccounts.fill': 'Preencher o formulário como {email}, {role}',
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Redefinir sua senha',

@@ -487,6 +487,16 @@ jobs:
           PUBLIC_SITE_URL: http://localhost:7777
         run: pnpm build
 
+      # The login page's "Dev accounts" panel lists seeded credentials and
+      # lives behind `import.meta.env.DEV`; this proves the bundler actually
+      # dropped it from the build that ships to S3/CloudFront. Its own tests
+      # first, as with the guards above.
+      - name: The production build carries no dev-only seeded logins
+        working-directory: .
+        run: |
+          node --test scripts/check_dev_accounts_stripped.test.mjs
+          node scripts/check_dev_accounts_stripped.mjs
+
   mobile:
     name: Mobile
     runs-on: ubuntu-latest

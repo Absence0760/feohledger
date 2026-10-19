@@ -233,6 +233,44 @@ async def test_patch_preferences_persists_and_audits(realdb):
 
 
 @pytest.mark.asyncio
+async def test_full_form_save_audits_only_the_toggle_that_flipped(realdb):
+    """The settings form sends both toggles on every save. The trail names a
+    preference only when its EFFECTIVE value changed (#575) — an unset pref
+    reads as on, so re-sending `true` for it is not a change — and a save that
+    flips nothing writes no row."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+
+    client = _portal_client(realdb, vu_id, vendor_id)
+    try:
+        for body in (
+            {"email_on_payment": False, "email_on_rejection": True},
+            {"email_on_payment": False, "email_on_rejection": True},
+        ):
+            resp = await client.patch("/api/portal/notification-preferences", json=body)
+            assert resp.status_code == 200, resp.text
+    finally:
+        await client.aclose()
+
+    async with mk() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "vendor_user.notification_prefs_updated",
+                        AuditLog.entity_id == vu_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    await realdb.cleanup()
+    assert [r.details["fields"] for r in rows] == [["email_on_payment"]]
+
+
+@pytest.mark.asyncio
 async def test_preferences_require_vendor_auth(realdb):
     # No token → 401.
     client = realdb.client(key=TENANT, role=None)
