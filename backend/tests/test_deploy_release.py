@@ -909,5 +909,4 @@ def test_backend_only_leaves_a_live_release_alone(stack: Stack) -> None:
     curl_args = {
         arg for line in (stack.root / "curl_calls").read_text().splitlines() for arg in line.split()
     }
-    assert "https://app.example.com/" in curl_args
-    assert "https://api.example.com/api/health" in curl_args
+    assert {"https://app.example.com/", "https://api.example.com/api/health"} <= curl_args
