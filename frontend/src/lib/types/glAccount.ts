@@ -36,6 +36,45 @@ export interface GlAccount {
 	erp_account_id: string | null;
 	/** `null` = shared across every entity. See the note above. */
 	entity_id: string | null;
+	/**
+	 * "Needs a decision": the ERP accounts the last sync found this UNLINKED
+	 * row could mean and would not choose between (a pre-§284 QuickBooks row
+	 * "Depreciation" may be the top-level account or "Truck:Depreciation").
+	 * A person picks one through `POST /api/gl-accounts/{id}/erp-link`.
+	 * Absent from older responses; `null` when there is nothing to decide.
+	 */
+	erp_link_candidates?: GlAccountErpLinkCandidates | null;
+	/** Set when a person chose this row's ERP account (ISO timestamp). */
+	erp_link_confirmed_at?: string | null;
+}
+
+/** One ERP account an unlinked row could mean. */
+export interface GlAccountErpCandidate {
+	erp_account_id: string;
+	code: string;
+	name: string;
+}
+
+export interface GlAccountErpLinkCandidates {
+	/** The sync's refusal reason (`ambiguous_legacy`, `duplicate_code`). */
+	reason: string | null;
+	accounts: GlAccountErpCandidate[];
+}
+
+/** Is this row waiting for a person to say which ERP account it means? */
+export function needsErpDecision(account: Pick<GlAccount, 'erp_account_id' | 'erp_link_candidates'>): boolean {
+	return !account.erp_account_id && (account.erp_link_candidates?.accounts.length ?? 0) > 0;
+}
+
+/**
+ * A candidate's label: its code, plus its name when that says something the
+ * code does not (a QuickBooks account keyed by its path has the path as its
+ * name too — §284).
+ */
+export function erpCandidateLabel(candidate: GlAccountErpCandidate): string {
+	return candidate.name && candidate.name !== candidate.code
+		? `${candidate.code} — ${candidate.name}`
+		: candidate.code;
 }
 
 /**

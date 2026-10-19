@@ -115,7 +115,13 @@ export function updateGlAccount(id: string, body: GlAccountUpdate): Promise<GlAc
 /** One ERP code the sync refused to link (`services/gl_account_sync`). */
 export interface GlAccountSyncConflict {
 	code: string;
-	reason: 'duplicate_code' | 'duplicate_erp_id' | 'code_taken' | 'ambiguous_legacy' | 'code_too_long';
+	reason:
+		| 'duplicate_code'
+		| 'duplicate_erp_id'
+		| 'code_taken'
+		| 'ambiguous_legacy'
+		| 'code_too_long'
+		| 'missing_erp_id';
 	erp_account_ids: string[];
 }
 
@@ -134,6 +140,13 @@ export interface GlAccountSyncResult {
 	unlinked: string[];
 	code_drift_count: number;
 	code_drift: { code: string; erp_code: string }[];
+	/** Where each row's bills posted before and after; `to` null = unlinked. */
+	link_changes: { code: string; from: string | null; to: string | null }[];
+	/** Pre-0115 links this pull confirmed and stamped with the connection. */
+	realm_adopted?: number;
+	deactivated_count?: number;
+	/** Codes retired because the ERP made their account inactive. Capped at 50. */
+	deactivated?: string[];
 	adapter: string;
 }
 
@@ -144,4 +157,15 @@ export interface GlAccountSyncResult {
  */
 export function syncGlAccountsFromErp(): Promise<GlAccountSyncResult> {
 	return api.post<GlAccountSyncResult>('/api/gl-accounts/sync-erp', {});
+}
+
+/**
+ * `POST /api/gl-accounts/{id}/erp-link` — admin / ap_manager. Say which of the
+ * row's `erp_link_candidates` it means. The backend accepts only an id the
+ * last sync offered, under the connection it offered it from, links the row,
+ * marks the link confirmed so later syncs do not re-judge it, and audits the
+ * choice. Returns the row in the list's shape.
+ */
+export function confirmGlAccountErpLink(id: string, erpAccountId: string): Promise<GlAccount> {
+	return api.post<GlAccount>(`/api/gl-accounts/${id}/erp-link`, { erp_account_id: erpAccountId });
 }

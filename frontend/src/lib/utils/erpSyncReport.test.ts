@@ -23,6 +23,17 @@ describe('glSyncReportLines', () => {
 		expect(lines[1].text).toContain(': 6100.');
 		expect(lines[2].text).toContain('recode their invoices: Job Materials.');
 	});
+
+	it('warns about accounts retired because the ERP made them inactive', () => {
+		const lines = glSyncReportLines(
+			{ created: 0, updated: 1, conflicts: [], unlinked: [], deactivated: ['Bank Charges'] },
+			t
+		);
+		expect(lines[1]).toEqual({
+			text: 'Retired, because the ERP made them inactive: Bank Charges.',
+			tone: 'warning'
+		});
+	});
 });
 
 describe('vendorSyncReportLines', () => {
@@ -39,5 +50,15 @@ describe('vendorSyncReportLines', () => {
 			text: 'Not linked, because the name matches more than one vendor: Acme.',
 			tone: 'warning'
 		});
+	});
+
+	it('names the vendors whose link belonged to another ERP company', () => {
+		const lines = vendorSyncReportLines(
+			{ created: 1, updated: 1, unchanged: 0, conflicts: [], unlinked: ['Acme'] },
+			t
+		);
+		expect(lines.map((l) => l.tone)).toEqual(['success', 'warning']);
+		expect(lines[1].text).toContain('linked in another ERP company');
+		expect(lines[1].text).toContain(': Acme.');
 	});
 });
