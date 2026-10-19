@@ -143,8 +143,9 @@ cmd_up() {
 		"SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
 	dbs=$("${COMPOSE[@]}" exec -T postgres psql -U postgres -d postgres -tAc \
 		"SELECT count(*) FROM pg_database WHERE datname LIKE 'feoh\\_%'")
-	[ "$tables" = 0 ] && [ "$dbs" = 0 ] ||
+	if [ "$tables" != 0 ] || [ "$dbs" != 0 ]; then
 		die "Postgres is not empty (${tables} control-plane table(s), ${dbs} tenant database(s)) — run '$0 down' first."
+	fi
 	echo "==> Postgres is empty"
 	# So is the inbox: the suite reads the invitation and reset emails from it.
 	local mail

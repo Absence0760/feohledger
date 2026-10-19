@@ -54,6 +54,17 @@ export const REAL = {
 	total: '1785.00'
 } as const;
 
+/** Escape text for an XML element or attribute value. `&` first, or the
+ *  entities the later replacements introduce would be escaped again. */
+export function xmlEscape(text: string): string {
+	return text
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&apos;');
+}
+
 function isoDate(d: Date): string {
 	return d.toISOString().slice(0, 10);
 }
@@ -72,14 +83,14 @@ export function ublInvoice(today = new Date()): Buffer {
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-  <cbc:ID>${REAL.invoiceNumber}</cbc:ID>
+  <cbc:ID>${xmlEscape(REAL.invoiceNumber)}</cbc:ID>
   <cbc:IssueDate>${isoDate(today)}</cbc:IssueDate>
   <cbc:DueDate>${isoDate(due)}</cbc:DueDate>
   <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
   <cbc:DocumentCurrencyCode>USD</cbc:DocumentCurrencyCode>
-  <cac:OrderReference><cbc:ID>${REAL.poNumber}</cbc:ID></cac:OrderReference>
+  <cac:OrderReference><cbc:ID>${xmlEscape(REAL.poNumber)}</cbc:ID></cac:OrderReference>
   <cac:AccountingSupplierParty><cac:Party>
-    <cac:PartyName><cbc:Name>${REAL.vendorName.replace('&', '&amp;')}</cbc:Name></cac:PartyName>
+    <cac:PartyName><cbc:Name>${xmlEscape(REAL.vendorName)}</cbc:Name></cac:PartyName>
     <cac:PostalAddress>
       <cbc:StreetName>Königsallee 92a</cbc:StreetName>
       <cbc:CityName>Düsseldorf</cbc:CityName>
