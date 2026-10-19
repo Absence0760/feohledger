@@ -426,9 +426,22 @@ async def portal_change_password(
     except PasswordError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    was_forced = bool(vu.must_change_password)
     vu.hashed_password = await hash_password(body.new_password)
     vu.must_change_password = False
     await db.commit()
+
+    # The change's OWN row, written before the forced-logout side effect below —
+    # the portal twin of the employee `auth.password.changed`. Without it the
+    # only trace a supplier password change left was `portal.session.revoked`,
+    # so the trail could not say whether a supplier had ever replaced the temp
+    # their AP team issued (the account that can stage a bank-detail change).
+    # Fixed literals only, never a password.
+    await _audit_portal_mfa_event(
+        vu,
+        action="portal.password.changed",
+        details={"via": "change_password", "forced": was_forced},
+    )
 
     # AFTER the commit, so a Redis hiccup can't roll back a password the caller
     # was told was changed. `get_current_vendor_user` doesn't stash the JTI (it
@@ -636,11 +649,12 @@ STEP_UP_RATE_LIMIT_PER_MINUTE = 5
 
 
 async def _audit_portal_mfa_event(vu: VendorUser, *, action: str, details: dict) -> None:
-    """Write one PII-free MFA row onto a vendor user's auth trail.
+    """Write one PII-free MFA or credential row onto a vendor user's auth trail.
 
-    Every portal MFA row goes through here so the shape matches its employee
-    twin (`api/auth._audit_mfa_event`): the subject is the vendor user
-    (`actor_id` and `entity_id` both `vu.id`) and `details` carries fixed
+    Every portal MFA row — and `portal.password.changed` — goes through here
+    so the shape matches its employee twin (`api/auth._audit_mfa_event`): the
+    subject is the vendor user (`actor_id` and `entity_id` both `vu.id`) and
+    `details` carries fixed
     literals plus, on the sign-in rows, the client IP already recorded on
     `portal.login.failure` — never the TOTP secret, never a submitted password
     or code.

@@ -136,6 +136,40 @@ async def test_forgot_password_happy_path_and_old_password_stops_working(
         new_resp = await _login(c, email, new_password)
         assert new_resp.status_code == 200, new_resp.text
 
+    # Both halves of the credential change are on the tenant trail, PII-free:
+    # `{ip}` only — never the token, the new password, or the address.
+    from sqlalchemy import select
+
+    from app.models.workflow import AuditLog
+
+    async with realdb.control_sessionmaker()() as s:
+        user_id = (await s.execute(select(User.id).where(User.email == email))).scalar_one()
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(AuditLog)
+                    .where(
+                        AuditLog.entity_id == user_id,
+                        AuditLog.action.like("auth.password_reset.%"),
+                    )
+                    .order_by(AuditLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r.action for r in rows] == [
+        "auth.password_reset.requested",
+        "auth.password_reset.completed",
+    ]
+    assert rows[0].actor_id is None  # the requester is not authenticated
+    assert rows[1].actor_id == user_id
+    for row in rows:
+        assert set((row.details or {}).keys()) <= {"ip"}
+        blob = repr(row.details)
+        assert token not in blob and new_password not in blob and email not in blob
+
 
 @pytest.mark.asyncio
 async def test_a_passwordless_sso_user_can_set_a_password_once_the_plan_drops_sso(
