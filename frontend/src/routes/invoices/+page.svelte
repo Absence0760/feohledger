@@ -21,6 +21,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
@@ -90,6 +91,57 @@
 		await invoiceStore.fetchCounts(buildParams());
 	}
 
+	/**
+	 * Uploads whose extraction is still running, watched until it finishes.
+	 *
+	 * The list is fetched once, right after the upload, while every new row still
+	 * reads "Extracting"; nothing else refreshed it, so the row stayed "Extracting"
+	 * until the user reloaded the page — on a fresh install that is the first
+	 * thing anyone ever uploads (#575). Each upload is polled (the same bound as
+	 * the invoice modal's `pollForCompletion`: 30 ticks, 2 s apart) and the list
+	 * is refetched, with the page's own filters, whenever one settles. Stops when
+	 * none is pending, and when the page is left.
+	 */
+	const EXTRACTION_WATCH_TICKS = 30;
+	const EXTRACTION_WATCH_INTERVAL_MS = 2000;
+	let extractionWatchCancelled = false;
+	$effect(() => {
+		return () => {
+			extractionWatchCancelled = true;
+		};
+	});
+
+	async function watchExtractions(ids: string[]) {
+		let pending = ids;
+		for (let tick = 0; tick < EXTRACTION_WATCH_TICKS && pending.length > 0; tick++) {
+			await new Promise((resolve) => setTimeout(resolve, EXTRACTION_WATCH_INTERVAL_MS));
+			if (extractionWatchCancelled) return;
+			const still = await Promise.all(
+				pending.map(async (id) => {
+					try {
+						const inv = await api.get<{ status: string }>(`/api/invoices/${id}`);
+						return inv.status === 'pending' ? id : null;
+					} catch {
+						// Gone (deleted meanwhile) or unreadable: nothing left to wait for.
+						return null;
+					}
+				})
+			);
+			if (extractionWatchCancelled) return;
+			const next = still.filter((id): id is string => id !== null);
+			if (next.length < pending.length) {
+				try {
+					await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
+					await invoiceStore.fetchCounts(buildParams());
+				} catch {
+					// A failed refresh leaves the previous list on screen; the next
+					// settle (or a manual reload) refetches it.
+				}
+			}
+			pending = next;
+		}
+	}
+
 	async function handleUpload(e: Event) {
 		const input = e.target as HTMLInputElement;
 		const files = input.files;
@@ -99,17 +151,20 @@
 		const total = files.length;
 		let succeeded = 0;
 		let failed = 0;
+		const extracting: string[] = [];
 		const BATCH = 5;
 
 		for (let i = 0; i < total; i += BATCH) {
 			const batch = Array.from(files).slice(i, i + BATCH);
 			uploadProgress = total > 1 ? `Uploading ${Math.min(i + BATCH, total)} of ${total}...` : 'Uploading...';
 			const results = await Promise.allSettled(
-				batch.map((file) => api.upload('/api/invoices/upload', file))
+				batch.map((file) => api.upload<{ id: string; status: string }>('/api/invoices/upload', file))
 			);
 			for (let j = 0; j < results.length; j++) {
-				if (results[j].status === 'fulfilled') {
+				const result = results[j];
+				if (result.status === 'fulfilled') {
 					succeeded++;
+					if (result.value?.status === 'pending') extracting.push(result.value.id);
 				} else {
 					failed++;
 					const reason = (results[j] as PromiseRejectedResult).reason;
@@ -145,6 +200,8 @@
 			uploadProgress = '';
 			input.value = '';
 		}
+		// Not awaited: the button is free as soon as the files are up.
+		if (extracting.length > 0) void watchExtractions(extracting);
 	}
 
 	// Build query params from current filters and fetch from API
@@ -797,7 +854,7 @@
 
 <PageHeader title={m('invoices.title')}>
 	{#snippet actions()}
-		<input type="file" accept=".pdf,.png,.jpg,.jpeg,.tiff" multiple bind:this={fileInput} onchange={handleUpload} hidden />
+		<input type="file" accept={INVOICE_FILE_ACCEPT} multiple bind:this={fileInput} onchange={handleUpload} hidden />
 		{#if auth.isAdmin}
 			<button class="btn-secondary" onclick={() => (showBulkRecode = true)}>
 				{m('invoices.action.bulkRecode')}

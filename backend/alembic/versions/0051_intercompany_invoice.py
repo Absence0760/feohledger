@@ -55,13 +55,18 @@ _UPGRADE = [
     DO $$
     BEGIN
         IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = 'fk_invoices_counterparty_entity'
+            -- Or create_all's name for it: see 0029's guard (0113).
+            SELECT 1 FROM pg_constraint WHERE conname IN (
+                'fk_invoices_counterparty_entity', 'invoices_counterparty_entity_id_fkey'
+            )
         ) THEN
             ALTER TABLE invoices ADD CONSTRAINT fk_invoices_counterparty_entity
                 FOREIGN KEY (counterparty_entity_id) REFERENCES entities(id);
         END IF;
         IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = 'fk_invoices_intercompany_mirror'
+            SELECT 1 FROM pg_constraint WHERE conname IN (
+                'fk_invoices_intercompany_mirror', 'invoices_intercompany_mirror_id_fkey'
+            )
         ) THEN
             ALTER TABLE invoices ADD CONSTRAINT fk_invoices_intercompany_mirror
                 FOREIGN KEY (intercompany_mirror_id) REFERENCES invoices(id);

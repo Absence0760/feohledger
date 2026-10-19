@@ -493,6 +493,60 @@ inference is too heavy for CI).
 These all run in CI's **`service-e2e`** job (see below), which starts
 the containers and seeds SSO before running them.
 
+## The day-one suite (`day-one/`)
+
+One customer's first day, on an install a deploy has just built from an
+**empty** database (#575). Everything else in this tree runs against
+`seed.py` data — verified vendors, tax-inclusive mock extraction, short
+strings — which is how the first production deploy (#566) shipped nine
+defects in the most basic paths. This suite has none of it: the only rows
+that exist when it starts are the tenant and admin `deploy/add-tenant.sh`
+creates, and the journey makes the rest through the UI.
+
+| Step | What it proves |
+|---|---|
+| install | `/api/health`, signup reported closed (`FEOH_SIGNUP_ENABLED=false`), the tenant host serves `/login` |
+| first admin | the generated temporary password signs in, a change is forced, TOTP enrols |
+| invite | an AP Manager is created; the invitation reaches Mailpit with the tenant URL and the same temporary password the admin saw |
+| credentials | a provider secret is sealed (a deployed env refuses the local key, so this went through KMS) |
+| first invoice | a tax-exclusive UBL e-invoice (net lines, tax on the header) from an unknown, long, non-ASCII supplier is picked from the empty state's file dialog and reaches review **without a reload**; its only findings are the unverified vendor and the PO that does not exist |
+| AP Manager | forced change on first sign-in, clears the PO flag, verifies the supplier, approves, records it paid outside FeohLedger |
+| reset | the admin's reset issues a generated temporary password (also emailed), the old one stops working, the next sign-in is forced to change it, the new one works |
+| MFA | the admin signs back in through the TOTP challenge |
+
+The long strings (`fixtures.ts::REAL`) are the production-shaped values; every
+list page the journey visits is checked for horizontal page overflow at 1280 px.
+
+It has **its own config**, `day-one/playwright.config.ts` — the main one's
+`globalSetup` checks seeded tenants, and `playwright.config.ts` ignores this
+directory, so the 14 shards never run it. One worker, no retries: the tests are
+one ordered journey sharing two browser contexts (admin and AP Manager), and a
+retried step would start from a state the journey already moved past.
+
+Run it against the stack `scripts/day-one/stack.sh` builds (the CI job runs the
+same commands, step by step):
+
+```bash
+pnpm day-one:up          # empty stack → deploy's migrations → API → tenant → re-run must be a no-op
+pnpm test:day-one        # the journey
+pnpm day-one:down        # removes everything, data included
+```
+
+The stack is its own compose project on alternate ports, so it runs beside the
+dev stack; only the API (`:8000`) and the web origin (`:7777`) default to the
+usual ones. In a worktree, or with a dev server already up, move both and pass
+the same origins to Playwright:
+
+```bash
+DAY_ONE_API_PORT=8011 DAY_ONE_WEB_PORT=7811 pnpm day-one:up
+E2E_WEB_ORIGIN=http://localhost:7811 PUBLIC_API_URL=http://localhost:8011 pnpm test:day-one
+```
+
+The suite skips when no stack is up (it reads `.day-one-state/tenant.json`,
+written by `stack.sh provision`); CI sets `FEOH_REQUIRE_INTEGRATION` so a
+missing stack fails instead. The journey runs once per stack — `day-one:down`
+and `day-one:up` again before re-running it.
+
 ## CI
 
 `.github/workflows/ci.yml`'s `e2e` job runs the same flow on every
