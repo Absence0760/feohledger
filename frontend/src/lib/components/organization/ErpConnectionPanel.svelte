@@ -210,11 +210,15 @@
 	async function loadCatalog() {
 		catalogError = false;
 		try {
-			catalog = await getErpCatalog();
+			const loaded = await getErpCatalog();
+			// Every await comes BEFORE the catalogue is published: the dropdown
+			// renders the moment `catalog` is set, and a choice made in the
+			// window between that and this seed would be overwritten by it.
 			await loadStoredNames();
+			catalog = loaded;
 			const onFile = storedKey();
-			select(onFile && catalog.providers.some((p) => p.key === onFile) ? onFile : '');
-			if (catalog.providers.some((p) => p.auth === 'oauth')) await loadOAuthStatus();
+			select(onFile && loaded.providers.some((p) => p.key === onFile) ? onFile : '');
+			if (loaded.providers.some((p) => p.auth === 'oauth')) await loadOAuthStatus();
 		} catch {
 			catalogError = true;
 		}
