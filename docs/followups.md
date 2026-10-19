@@ -598,16 +598,17 @@ honestly be folded into the slice that surfaced it.
 - [ ] **(c) Remove the SPA from the VM once CloudFront has served it for a day
       (#582 cut-over step 4).** After `frontend_on_cloudfront = true`, the VM
       still builds and serves the SPA. `deploy/deploy.sh` runs the
-      `frontend-build` service (minutes of CPU credits per deploy, and the
-      `../frontend/build` mount #583 made safe), `deploy/Caddyfile` keeps the
+      `frontend-build` service (minutes of CPU credits per deploy) and swaps
+      releases under `deploy/www/` (§277), `deploy/Caddyfile` keeps the
       `(spa)` snippet and the apex block, and `deploy/add-tenant.sh` still
       writes a `tenants.caddy` host block per tenant. That is the rollback path
       for the first day, which is why it was not removed in the same change.
       After that it is cost, and a slow failure: once DNS points at CloudFront,
       Caddy cannot renew those Let's Encrypt certificates, so a rollback after
       ~90 days would land on expired ones. **Durable fix:** Caddy keeps only
-      `api.<domain>`. Drop `frontend-build`, the pnpm-store volume and the mount
-      from `compose.prod.yml` and `deploy.sh`, and stop `add-tenant.sh` /
+      `api.<domain>`. Drop `frontend-build`, the pnpm-store volume, the
+      `./www` mount and the release swap from `compose.prod.yml` and
+      `deploy.sh`, and stop `add-tenant.sh` /
       `remove-tenant.sh` touching `tenants.caddy` for platform hosts. Ship the
       vanity-host block that proxies the SPA from CloudFront with
       `header_up Host <platform domain>` and keeps `/api` on the vanity `Host`

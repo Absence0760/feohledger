@@ -211,8 +211,11 @@ notices which one answers and checks the apex only once it is CloudFront.
   That rolls the VM back to the same commit, so the frontend and backend stay
   matched. For the frontend alone, build the older tag locally and run the same
   script with your own credentials, from the repo root:
-  `git worktree add ../feoh-rollback <tag> && cd ../feoh-rollback/frontend && pnpm install --frozen-lockfile && PUBLIC_API_URL=https://api.feohledger.com PUBLIC_SITE_URL=https://feohledger.com pnpm build && cd .. && AWS_PROFILE=feohledger FRONTEND_BUCKET=$(terraform -chdir=../feohledger/infra output -raw frontend_bucket) CLOUDFRONT_DISTRIBUTION_ID=$(terraform -chdir=../feohledger/infra output -raw frontend_distribution_id) deploy/publish-frontend.sh frontend/build`
-  An older build's hashed files are re-uploaded if they were already pruned.
+  `git worktree add ../feoh-rollback <tag> && cd ../feoh-rollback/frontend && pnpm install --frozen-lockfile && PUBLIC_API_URL=https://api.feohledger.com PUBLIC_SITE_URL=https://feohledger.com pnpm build && cd .. && AWS_PROFILE=feohledger FRONTEND_BUCKET=$(terraform -chdir=../feohledger/infra output -raw frontend_bucket) CLOUDFRONT_DISTRIBUTION_ID=$(terraform -chdir=../feohledger/infra output -raw frontend_distribution_id) ../feohledger/deploy/publish-frontend.sh frontend/build`
+  It runs the *current* checkout's `publish-frontend.sh`, so this works for a
+  tag that predates the script too. An older build's hashed files are
+  re-uploaded if they were already pruned. Remove the worktree afterwards with
+  `git worktree remove ../feoh-rollback`.
 - **Tags from before this publish step**: restore the previous versions of
   `index.html` and `_app/version.json` in the versioned bucket (S3 console →
   object → Versions), then invalidate `/*`. Their hashed files are still there
