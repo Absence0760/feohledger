@@ -315,6 +315,7 @@ CASES = [
     ("/api/admin/users/{user_id}", "DELETE", _USER_MANAGE),
     ("/api/admin/users/bulk-delete", "POST", _USER_MANAGE),
     ("/api/admin/users/{user_id}/revoke-sessions", "POST", _USER_MANAGE),
+    ("/api/admin/users/{user_id}/reset-password", "POST", _USER_MANAGE),
     # The role list + permission catalog are the role editor's data source —
     # readable by whoever may assign roles, i.e. the same duty.
     ("/api/admin/roles", "GET", _USER_MANAGE),
