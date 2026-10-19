@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import copy
 import json
-import re
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -78,15 +77,70 @@ class QboFault(Exception):
 # Intuit's query language — the subset the adapter and the tests send
 # ---------------------------------------------------------------------------
 
-# Every pattern is matched against ONE clause of a statement :func:`_clauses`
-# has already split, with its blanks collapsed — so none needs `\s+`, and none
-# can backtrack on a long run of whitespace in a request-supplied query.
-_SELECT = re.compile(r"select \* from (\w+)", re.IGNORECASE)
-_WHERE_ACTIVE_IN = re.compile(r"Active IN ?\(([^)]*)\)", re.IGNORECASE)
-_WHERE_ACTIVE_EQ = re.compile(r"Active ?= ?(true|false)", re.IGNORECASE)
-_WHERE_DOCNUMBER = re.compile(r"DocNumber ?= ?'((?:[^'\\]|\\.)*)'", re.IGNORECASE)
-_PAGE_TERM = re.compile(r"(STARTPOSITION|MAXRESULTS) (\d+)", re.IGNORECASE)
+# No regular expressions: the query is request-supplied, so it is split by the
+# one linear scan in :func:`_clauses` and each clause is read with plain string
+# operations — nothing here can backtrack, whatever the input.
 _KEYWORDS = ("where", "and", "startposition", "maxresults")
+
+
+def _after(clause: str, keyword: str) -> str | None:
+    """The rest of ``clause`` after a leading ``keyword`` (case-insensitive),
+    blanks stripped; None when it does not start with it."""
+    if clause[: len(keyword)].lower() != keyword.lower():
+        return None
+    return clause[len(keyword) :].strip()
+
+
+def _quoted(value: str) -> str | None:
+    """A ``'…'`` literal's content with ``\\`` escapes undone, or None."""
+    if len(value) < 2 or value[0] != "'" or value[-1] != "'":
+        return None
+    out: list[str] = []
+    escaped = False
+    for ch in value[1:-1]:
+        if escaped:
+            out.append(ch)
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == "'":
+            return None  # an unescaped quote inside the literal
+        else:
+            out.append(ch)
+    return None if escaped else "".join(out)
+
+
+def _condition(clause: str) -> tuple[str, Any] | None:
+    """``("active", {bools})`` or ``("docnumber", value)``, or None."""
+    rest = _after(clause, "Active")
+    if rest is not None:
+        listed = _after(rest, "IN")
+        if listed is not None:
+            if len(listed) < 2 or listed[0] != "(" or listed[-1] != ")" or ")" in listed[1:-1]:
+                return None
+            return "active", _bool_list(listed[1:-1])
+        value = _after(rest, "=")
+        if value is not None and value.lower() in ("true", "false"):
+            return "active", {value.lower() == "true"}
+        return None
+    rest = _after(clause, "DocNumber")
+    value = _after(rest, "=") if rest is not None else None
+    literal = _quoted(value) if value is not None else None
+    return ("docnumber", literal) if literal is not None else None
+
+
+def _page_term(clause: str) -> tuple[str, int] | None:
+    parts = clause.split(" ")
+    if len(parts) == 2 and parts[0].lower() in _KEYWORDS[2:] and parts[1].isdigit():
+        return parts[0].lower(), int(parts[1])
+    return None
+
+
+def _entity(clause: str) -> str | None:
+    parts = clause.split(" ")
+    if len(parts) == 4 and [p.lower() for p in parts[:3]] == ["select", "*", "from"]:
+        return parts[3]
+    return None
 
 
 def _clauses(statement: str) -> list[str]:
@@ -154,10 +208,9 @@ def run_query(entities: dict[str, list[dict]], statement: str) -> dict:
     so is a condition after the paging terms.
     """
     clauses = _clauses(statement)
-    head = _SELECT.fullmatch(clauses[0]) if clauses else None
-    if head is None or head.group(1) not in entities:
+    entity = _entity(clauses[0]) if clauses else None
+    if entity is None or entity not in entities:
         raise QboFault(400, "4000", "QueryParserError", statement[:80])
-    entity = head.group(1)
     rows = list(entities[entity])
 
     active: set[bool] = {True}
@@ -166,18 +219,18 @@ def run_query(entities: dict[str, list[dict]], statement: str) -> dict:
     for i, clause in enumerate(clauses[1:], start=1):
         if clause == "where" and i == 1:
             in_where = True
-        elif m := _PAGE_TERM.fullmatch(clause):
-            paging[m.group(1).lower()] = int(m.group(2))
+            continue
+        if (term := _page_term(clause)) is not None:
+            paging[term[0]] = term[1]
             in_where = False
-        elif in_where and (m := _WHERE_ACTIVE_IN.fullmatch(clause)):
-            active = _bool_list(m.group(1))
-        elif in_where and (m := _WHERE_ACTIVE_EQ.fullmatch(clause)):
-            active = {m.group(1).lower() == "true"}
-        elif in_where and (m := _WHERE_DOCNUMBER.fullmatch(clause)):
-            wanted = re.sub(r"\\(.)", r"\1", m.group(1))
-            rows = [r for r in rows if r.get("DocNumber") == wanted]
-        else:
+            continue
+        condition = _condition(clause) if in_where else None
+        if condition is None:
             raise QboFault(400, "4000", "QueryParserError", clause[:80])
+        if condition[0] == "active":
+            active = condition[1]
+        else:
+            rows = [r for r in rows if r.get("DocNumber") == condition[1]]
     # A transaction (a Bill) has no Active flag; only list entities filter on it.
     rows = [r for r in rows if r.get("Active", True) in active]
 
