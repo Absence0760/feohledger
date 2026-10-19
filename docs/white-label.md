@@ -304,16 +304,19 @@ email adapters (`console` / `smtp` / `ses`) apply it uniformly via shared
   (`Acme Pay <no-reply@platform.com>` — the deliverable address is unchanged;
   an address that already has a display name, or is empty, is left alone; the
   name is sanitized of quotes / CR / LF so it can't break the header);
-- the **HTML** body is wrapped with a small brand header line (the mark
-  `BrandContext.mark` picks, then the product name in the accent color) and a
-  support-link footer (only when a support URL is set). The mark is a remote
+- the **HTML** part is the shared layout (`email_adapters/layout.py`,
+  `docs/decisions.md` §280) — every message gets one, derived from the plaintext
+  when the send site wrote no HTML. Its brand header sits above the card (the
+  mark `BrandContext.mark` picks, then the product name in the accent color),
+  buttons are filled in the accent with black or white text, whichever reads on
+  it, the derived body's default button reads "Open <product name>", and a
+  support-link footer appears only when a support URL is set. The mark is a remote
   `<img>`, not an attachment. A tenant logo loads from its `logo_url`. The
   platform mark loads from `FEOH_PUBLIC_URL` + `/email-mark.png`, a 96 px PNG in
   `frontend/static/` drawn at 32 px, and is emitted only when `FEOH_PUBLIC_URL`
   is an absolute http(s) URL. A deployed env still on the loopback default would
   show recipients a broken image, just as its links already go nowhere. A tenant
-  that renamed the product without a logo gets the name alone, byte-for-byte
-  the header from before the mark existed. `alt` is empty because the name sits
+  that renamed the product without a logo gets the name alone. `alt` is empty because the name sits
   beside the image, so a screen reader doesn't announce it twice and a client
   that blocks remote images still shows the name;
 - the **plaintext** body gets the same support-link footer.

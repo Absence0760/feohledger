@@ -412,6 +412,37 @@ catalogue** (`render` pulls them keyed by `notif.<event>.{title,body}` — see �
 Localized email); `locale=None` is English, which the **in-app** notification
 center always uses (the locale pref drives email only).
 
+## The HTML layout every email goes out in
+
+Every email has an HTML part, and it is always the one layout in
+`services/email_adapters/layout.py` (`docs/decisions.md` §280): a table-based,
+inline-styled 600px card on a neutral background, the brand header above it, a
+muted footer with the support link below, a hidden preheader (the inbox preview
+line) and a `prefers-color-scheme: dark` override. `EmailAdapter._branded_html`
+applies it, so SES and SMTP send it identically; the console adapter still logs
+only the plaintext.
+
+A send site has two ways in:
+
+- **Write no HTML.** Leave `EmailMessage.body_html` unset and the body is derived
+  from `body_text` by `layout.text_to_html`: blank lines split paragraphs, a line
+  that is only a URL becomes the button (labelled by a lead-in line ending in
+  `:`, or "Open <product>" in `EmailMessage.locale`), indented `Label: value`
+  lines become a set-off panel, four or more lines stay monospace, and each
+  button's raw URL is repeated at the end for a client that won't follow it.
+  Most senders — invites, password resets, sign-in codes, scheduled reports,
+  workflow email steps — take this path, and a new send site gets it for free.
+- **Hand-write the body** from the layout's blocks (`email_paragraph`,
+  `email_button`, `email_note`, `email_credentials`, `email_fallback_link`), as
+  the signup verification and welcome emails, the virtual-card email and the
+  supplier-chat link do. Never interpolate into markup directly: every block
+  HTML-escapes what it is given, and names here are free text a tenant or vendor
+  typed. `tests/test_email_layout.py` fails on a `body_html = f"<…"` send site.
+
+`body_text` is never rewritten — it goes out unchanged as the plaintext part.
+`EmailMessage.preheader` overrides the derived preview line; the welcome email
+sets it so nothing about the credentials can reach an inbox preview.
+
 ## Localized email
 
 Outbound transactional email renders server-side, so the recipient's language is

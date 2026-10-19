@@ -11568,3 +11568,47 @@ past the budget; `frontend/tests-e2e/marketing/landing.spec.ts` reads
 catches the per-element `calc()` delays the static scan cannot resolve. This
 supersedes rule 4 of §180; `frontend/docs/ui-patterns.md` § Motion carries the
 working form.
+
+## 280. Every email goes out in one HTML layout, derived from the plaintext when a sender writes none (2026-10-19)
+
+**Context.** Only four of the fourteen send sites wrote HTML, and those four
+were bare `<p>` fragments under a one-line brand header; the rest — signup
+verification, the welcome email carrying the temporary password, invites,
+password resets, sign-in codes — went out as plain text. The first real signup
+in production showed it: an email a new customer reads first looked like a
+log line. Three of the four HTML bodies also interpolated vendor and org names
+straight into markup.
+
+**Decided.** `services/email_adapters/layout.py` owns one email-client-safe
+document — tables and inline styles, a 600px card, the brand header above, a
+muted support footer below, a hidden preheader, `color-scheme` meta plus a
+`prefers-color-scheme: dark` override — and `EmailAdapter._branded_html`
+applies it to every message, so it is never `None` any more. A message with no
+`body_html` gets one derived from `body_text` by shape (a URL-only line is the
+button, indented `Label: value` lines a panel, long blocks monospace, the rest
+paragraphs). Hand-written bodies are assembled from the same escaping blocks,
+and the signup verification and welcome emails now have them: a confirm button
+with the expiry and a paste-this-link fallback, and a workspace button over a
+set-off credentials panel with a "keep this email" line (added to both parts).
+The plaintext part is never rewritten.
+
+**Why derive instead of hand-writing all fourteen.** Ten senders get the
+layout without editing them, and the fifteenth gets it by default; hand-writing
+each would leave the next new sender plain again. Their texts already have the
+shapes the derivation reads, because the plaintext was written for a human.
+
+**Rejected.**
+- *A template engine (Jinja) for email.* A dependency and a second escaping
+  model for a handful of shapes Python strings already cover.
+- *Converting the text with a Markdown renderer.* Plaintext URLs and indented
+  key/value lines are not Markdown, and a renderer passes raw HTML through —
+  the injection this change closes.
+- *A dark-first card.* Gmail and Outlook force a light canvas whatever the
+  document asks for, so the card is light with a dark override where honoured.
+
+**Guards.** `backend/tests/test_email_layout.py` pins the derivation rules,
+escaping, the document shell, that SES and SMTP attach the HTML part to a
+text-only message, and fails on a `body_html = f"<…"` send site;
+`backend/tests/test_signup.py` checks both signup emails as the adapter would
+send them. `backend/docs/notifications.md` § The HTML layout carries the
+working form.
