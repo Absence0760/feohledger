@@ -468,6 +468,92 @@ async def test_signup_complete_provisions_and_marks_consumed(realdb, monkeypatch
         assert row.consumed_at is not None
 
 
+class _CaptureAdapter:
+    """Stands in for the email adapter and keeps every message it is handed."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    async def send(self, message) -> None:
+        self.sent.append(message)
+
+
+def _rendered_html(message) -> str:
+    """The HTML part exactly as the SMTP/SES adapters would send it."""
+    from app.services.email_adapters.smtp_adapter import SmtpAdapter
+
+    mime = SmtpAdapter({"from_address": "no-reply@platform.test"})._build(message)
+    return mime.get_body(preferencelist=("html",)).get_content()
+
+
+async def test_verification_email_is_html_with_a_confirm_button(
+    realdb, monkeypatch, cleanup_signup
+):
+    from app.api import signup as signup_mod
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    capture = _CaptureAdapter()
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
+
+    body = _start_body(slug, email) | {"admin_name": "<b>Eve</b> & co"}
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post("/api/signup/start", json=body)
+    assert resp.status_code == 200
+
+    (msg,) = capture.sent
+    link = next(ln for ln in msg.body_text.splitlines() if "/verify?token=" in ln)
+    html = _rendered_html(msg)
+    assert f'href="{link.strip()}"' in html
+    assert ">Confirm and create workspace</a>" in html
+    assert "expires in 24 hours" in html
+    # The requester's own input is escaped, in the HTML and nowhere rewritten in text.
+    assert "<b>Eve" not in html
+    assert "&lt;b&gt;Eve&lt;/b&gt; &amp; co" in html
+    assert "<b>Eve</b> & co" in msg.body_text
+
+
+async def test_welcome_email_sets_the_credentials_apart(realdb, monkeypatch, cleanup_signup):
+    from app.api import signup as signup_mod
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    token = await _seed_verification(realdb, slug=slug, email=email)
+    provision = AsyncMock()
+    monkeypatch.setattr(signup_mod, "provision_tenant", provision)
+    capture = _CaptureAdapter()
+    monkeypatch.setattr(signup_mod, "get_email_adapter", lambda: capture)
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post("/api/signup/complete", json={"token": token})
+    assert resp.status_code == 200
+    tenant_url = resp.json()["tenant_url"]
+    temp_password = provision.await_args.kwargs["admin_password"]
+
+    (msg,) = capture.sent
+    html = _rendered_html(msg)
+    assert f'href="{tenant_url}"' in html
+    assert ">Open your workspace</a>" in html
+    # The credentials sit in their own panel, the password in monospace.
+    panel = html[html.index('class="feoh-panel"') :]
+    panel = panel[: panel.index("</table>")]
+    assert email in panel
+    assert temp_password in panel
+    assert "monospace" in panel
+    # Both parts tell them to keep the email until they have their own password.
+    keep = "Keep this email until you've signed in and chosen your own password."
+    assert keep in msg.body_text
+    assert keep.replace("'", "&#x27;") in html
+    # The inbox preview never carries the credentials.
+    assert temp_password not in (msg.preheader or "")
+
+
 async def test_signup_complete_unknown_token_returns_uniform_410(realdb):
     # A never-existed token returns the SAME 410 + message as a consumed or
     # expired one, so a scraper can't distinguish "never existed" from "did".

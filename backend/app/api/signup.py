@@ -49,11 +49,19 @@ from app.schemas.signup import (
     SignupStartResponse,
     SlugCheckResponse,
 )
+from app.services.branding import get_brand_context
 from app.services.email_adapters import (
     EmailMessage,
     get_email_adapter,
     normalize_locale,
     translate,
+)
+from app.services.email_adapters.layout import (
+    email_button,
+    email_credentials,
+    email_fallback_link,
+    email_note,
+    email_paragraph,
 )
 from app.services.rate_limit import check_rate_limit, resolve_client_ip
 from app.services.tenant_provisioning import provision_tenant
@@ -222,18 +230,28 @@ async def signup_start(
     # 6. Send the verification email (localized; the verify link is
     #    locale-independent — only the surrounding copy changes).
     verify_link = _public_url(f"/verify?token={token}")
+    greeting = translate("signup.verify.greeting", locale, name=body.admin_name)
+    lead = translate("signup.verify.body", locale, slug=body.slug)
+    expiry = translate("signup.verify.expiry", locale)
+    # Every layout block escapes what it is given: the name and slug are the
+    # requester's own input.
+    verify_html = (
+        email_paragraph(greeting)
+        + email_paragraph(lead)
+        + email_button(verify_link, translate("signup.verify.cta", locale), get_brand_context(None))
+        + email_note(expiry)
+        + email_fallback_link(translate("email.layout.fallback_link", locale), verify_link)
+    )
     email = get_email_adapter()
     try:
         await email.send(
             EmailMessage(
                 to=body.admin_email,
                 subject=translate("signup.verify.subject", locale),
-                body_text=(
-                    f"{translate('signup.verify.greeting', locale, name=body.admin_name)}\n\n"
-                    f"{translate('signup.verify.body', locale, slug=body.slug)}\n\n"
-                    f"{verify_link}\n\n"
-                    f"{translate('signup.verify.expiry', locale)}\n"
-                ),
+                body_text=f"{greeting}\n\n{lead}\n\n{verify_link}\n\n{expiry}\n",
+                body_html=verify_html,
+                locale=locale,
+                preheader=lead,
             )
         )
     except Exception as exc:  # noqa: BLE001
@@ -343,10 +361,34 @@ async def signup_complete(
             f"  {pw_label}: {temp_password}",
             "",
             translate("signup.welcome.change_note", locale),
+            translate("signup.welcome.keep_note", locale),
             "",
             translate("signup.welcome.signoff", locale),
             "",
         ]
+    )
+    live = translate("signup.welcome.body", locale)
+    credentials = [
+        *([(url_label, tenant_url)] if tenant_url else []),
+        (email_label, verification.email),
+        (pw_label, temp_password),
+    ]
+    welcome_html = (
+        email_paragraph(greeting)
+        + email_paragraph(live)
+        + (
+            email_button(
+                tenant_url, translate("signup.welcome.cta", locale), get_brand_context(None)
+            )
+            if tenant_url
+            else ""
+        )
+        + email_credentials(credentials)
+        + email_note(
+            f"{translate('signup.welcome.change_note', locale)} "
+            f"{translate('signup.welcome.keep_note', locale)}"
+        )
+        + email_paragraph(translate("signup.welcome.signoff", locale))
     )
     email_adapter = get_email_adapter()
     try:
@@ -355,6 +397,11 @@ async def signup_complete(
                 to=verification.email,
                 subject=translate("signup.welcome.subject", locale, slug=verification.slug),
                 body_text=welcome_body,
+                body_html=welcome_html,
+                locale=locale,
+                # Not derived: the derived preview would be the first sentence, and
+                # nothing about the credentials belongs in an inbox preview.
+                preheader=live,
             )
         )
     except Exception:  # noqa: BLE001
