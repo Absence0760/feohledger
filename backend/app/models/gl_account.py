@@ -8,6 +8,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, EntityMixin, TimestampMixin
 
+#: How long a GL code may be: the width of every column that RECORDS one —
+#: ``invoices.gl_account``, ``invoice_line_items.gl_account``,
+#: ``recurring_invoice_templates.gl_account`` and ``contract_line_items
+#: .gl_account`` are all ``String(100)`` — so a chart code always fits where it is
+#: coded. Was 50 until migration 0114, which cut QuickBooks sub-account paths
+#: ("Landscaping Services:Job Materials:Decks and Patios" is 51) out of the
+#: chart (docs/decisions.md §284).
+GL_CODE_MAX_LENGTH = 100
+
 
 class GLAccount(Base, EntityMixin, TimestampMixin):
     __tablename__ = "gl_accounts"
@@ -31,7 +40,7 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     # A shared "6000" and an entity's own "6000" therefore coexist by design —
     # that is an entity OVERRIDING the shared account, and the effective chart
     # `shared ∪ own` still resolves it to one row per entity because
-    # `api/gl_accounts._sync_match_query` prefers the entity's own.
+    # `services/gl_account_sync._preference` prefers the entity's own.
     # Migration 0088 installs both on existing tenants.
     __table_args__ = (
         Index(
@@ -52,12 +61,12 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    code: Mapped[str] = mapped_column(String(GL_CODE_MAX_LENGTH), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     account_type: Mapped[str | None] = mapped_column(
         String(50)
     )  # expense, asset, liability, revenue
-    parent_code: Mapped[str | None] = mapped_column(String(50))
+    parent_code: Mapped[str | None] = mapped_column(String(GL_CODE_MAX_LENGTH))
     is_active: Mapped[bool] = mapped_column(default=True)
     erp_account_id: Mapped[str | None] = mapped_column(String(255))
 

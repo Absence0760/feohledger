@@ -60,6 +60,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.models.gl_account import GL_CODE_MAX_LENGTH
 from app.services import erp_oauth
 from app.services.erp_adapters.base import (
     NOT_CONNECTED,
@@ -501,23 +502,50 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         return [_vendor_payload(v) for v in await self._query_all("Vendor") if v.get("Id")]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
+        """The chart, keyed by what is UNIQUE in QuickBooks (:func:`_account_code`).
+
+        ``name`` is the fully-qualified path too, so a picker that shows
+        ``code — name`` (or a numbered chart's ``5100 — …``) still tells two
+        same-named sub-accounts apart. ``legacy_codes`` carries the bare
+        ``Name`` this adapter keyed sub-accounts by before §284, which is how
+        the sync recognises a row that collapsed two accounts into one.
+        """
         rows = [a for a in await self._query_all("Account") if a.get("Id")]
         code_by_id = {str(a["Id"]): _account_code(a) for a in rows}
-        return [
-            GLAccountPayload(
-                code=_account_code(a),
-                name=a.get("Name") or _account_code(a),
-                account_type=_CLASSIFICATION.get(str(a.get("Classification") or "").lower()),
-                erp_account_id=str(a["Id"]),
-                parent_code=code_by_id.get(str((a.get("ParentRef") or {}).get("value"))),
+        out = []
+        for a in rows:
+            code = _account_code(a)
+            legacy = _legacy_account_code(a)
+            out.append(
+                GLAccountPayload(
+                    code=code,
+                    name=_account_display_name(a)[:255],
+                    account_type=_CLASSIFICATION.get(str(a.get("Classification") or "").lower()),
+                    erp_account_id=str(a["Id"]),
+                    parent_code=code_by_id.get(str((a.get("ParentRef") or {}).get("value"))),
+                    legacy_codes=(legacy,) if legacy != code else (),
+                )
             )
-            for a in rows
-        ]
+        return out
 
     async def list_pos(self) -> list[PoPayload]:
         """Purchase orders exist on QuickBooks Plus/Advanced only; on Simple
-        Start the query returns none, and an empty list is the right answer."""
-        return [_po_payload(p) for p in await self._query_all("PurchaseOrder")]
+        Start the query returns none, and an empty list is the right answer.
+
+        A PO line's account is resolved by its ``AccountRef`` id to the same
+        code the chart sync stores — never taken from the ref's ``name``, which
+        two sub-accounts can share. One extra chart read, only when a line
+        references an account.
+        """
+        raw_pos = await self._query_all("PurchaseOrder")
+        code_by_id: dict[str, str] = {}
+        if any(_po_account_ids(p) for p in raw_pos):
+            code_by_id = {
+                str(a["Id"]): _account_code(a)
+                for a in await self._query_all("Account")
+                if a.get("Id")
+            }
+        return [_po_payload(p, code_by_id) for p in raw_pos]
 
 
 def _private_note(correlation_id: str) -> str:
@@ -534,9 +562,50 @@ _CLASSIFICATION = {
 
 
 def _account_code(raw: dict) -> str:
-    """``AcctNum`` when the company numbers its accounts (off by default in
-    QuickBooks), else the account's name — what a bookkeeper codes against."""
+    """The account's code: whatever QuickBooks itself keeps UNIQUE.
+
+    * ``AcctNum`` when the company numbers its accounts (off by default) —
+      QuickBooks refuses a second account with the same number.
+    * otherwise ``FullyQualifiedName``, the colon-joined path
+      (``Job Expenses:Job Materials``). Never the bare ``Name``: QuickBooks
+      only keeps a name unique among its siblings, so two parents can each
+      have a "Job Materials" — and keying on the name collapsed them into one
+      row that posted to whichever the sync read last (docs/decisions.md §284).
+
+    A path longer than ``GL_CODE_MAX_LENGTH`` keeps its head and ends in
+    ``…#<Id>``: still unique (QuickBooks ids are), still recognisable, and
+    stable for as long as the account keeps its name. Truncating without the
+    id would let two long paths share a prefix and collide.
+    """
+    number = str(raw.get("AcctNum") or "").strip()
+    if number:
+        return number
+    path = str(raw.get("FullyQualifiedName") or raw.get("Name") or raw.get("Id"))
+    if len(path) <= GL_CODE_MAX_LENGTH:
+        return path
+    tail = f"…#{raw.get('Id')}"
+    return path[: GL_CODE_MAX_LENGTH - len(tail)] + tail
+
+
+def _account_display_name(raw: dict) -> str:
+    """The path, so a numbered chart's same-named sub-accounts read apart too."""
+    return str(raw.get("FullyQualifiedName") or raw.get("Name") or _account_code(raw))
+
+
+def _legacy_account_code(raw: dict) -> str:
+    """The code this adapter gave the account before §284: ``AcctNum``, else the
+    bare ``Name``. Read only by the sync's ambiguity check."""
     return str(raw.get("AcctNum") or raw.get("Name") or raw.get("Id"))
+
+
+def _po_account_ids(raw: dict) -> list[str]:
+    ids = []
+    for line in raw.get("Line") or []:
+        if isinstance(line, dict):
+            ref = (line.get("AccountBasedExpenseLineDetail") or {}).get("AccountRef") or {}
+            if ref.get("value"):
+                ids.append(str(ref["value"]))
+    return ids
 
 
 def _vendor_payload(raw: dict) -> VendorPayload:
@@ -549,7 +618,11 @@ def _vendor_payload(raw: dict) -> VendorPayload:
     return VendorPayload(
         erp_vendor_id=str(raw["Id"]),
         name=raw.get("DisplayName") or raw.get("CompanyName") or str(raw["Id"]),
-        code=raw.get("AcctNum"),
+        # Not ``AcctNum``: on a QuickBooks Vendor that is the company's account
+        # number AT the vendor (what goes on a remittance), not an identifier
+        # for the vendor. Our ``code`` is our own vendor identifier, so the sync
+        # leaves it alone (None never overwrites a local value).
+        code=None,
         email=(raw.get("PrimaryEmailAddr") or {}).get("Address"),
         phone=(raw.get("PrimaryPhone") or {}).get("FreeFormNumber"),
         address=address or None,
@@ -560,7 +633,7 @@ def _vendor_payload(raw: dict) -> VendorPayload:
     )
 
 
-def _po_payload(raw: dict) -> PoPayload:
+def _po_payload(raw: dict, code_by_id: dict[str, str] | None = None) -> PoPayload:
     lines: list[PoLinePayload] = []
     for line in raw.get("Line") or []:
         if not isinstance(line, dict):
@@ -575,7 +648,11 @@ def _po_payload(raw: dict) -> PoPayload:
                 quantity=_dec(detail.get("Qty")),
                 unit_price=_dec(detail.get("UnitPrice")),
                 total=_dec(line.get("Amount")),
-                gl_account=(account_detail.get("AccountRef") or {}).get("name"),
+                # By id, to the chart's code; an account the chart read did not
+                # return stays None rather than falling back to the ref's name.
+                gl_account=(code_by_id or {}).get(
+                    str((account_detail.get("AccountRef") or {}).get("value"))
+                ),
             )
         )
     status = str(raw.get("POStatus") or "Open").lower()

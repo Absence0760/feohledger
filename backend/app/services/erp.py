@@ -15,6 +15,7 @@ from app.services.erp_adapters import (
     LineItemPayload,
     get_erp_adapter,
 )
+from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, NOT_CONNECTED
 from app.services.gl_chart import resolve_erp_account_ids
 from app.services.workflow_engine import (
     complete_workflow,
@@ -142,6 +143,32 @@ def _build_payload(
     )
 
 
+def _unlinked_accounts(
+    invoice: Invoice, line_items: list[InvoiceLineItem], refs: ErpRefs
+) -> list[str]:
+    """The GL codes on the invoice that resolved to no ERP account id.
+
+    What an ``account_not_linked`` refusal names, so the reader knows which
+    account to sync or recode. Empty when the refusal was for a bill with no
+    account at all (an uncoded line and no header account).
+    """
+    codes = [invoice.gl_account, *(li.gl_account for li in line_items)]
+    return sorted({c for c in codes if c and c not in refs.account_erp_ids})
+
+
+def _result_refusal(
+    result, invoice: Invoice, line_items: list[InvoiceLineItem], refs: ErpRefs
+) -> dict | None:
+    """The coded refusal an adapter's failed result carries, or None."""
+    code = getattr(result, "refusal_code", None)
+    if not code:
+        return None
+    accounts = _unlinked_accounts(invoice, line_items, refs) if code == ACCOUNT_NOT_LINKED else None
+    return erp_refusal_record(
+        code, provider=getattr(result, "refusal_provider", None), accounts=accounts
+    )
+
+
 async def _fetch_line_items(db: AsyncSession, invoice_id: uuid.UUID) -> list[InvoiceLineItem]:
     """Load an invoice's line items in stable order.
 
@@ -235,16 +262,51 @@ class ErpPostFailedError(RuntimeError):
         *,
         erp_document_id: str | None = None,
         erp_document_number: str | None = None,
+        refusal: dict | None = None,
     ) -> None:
         super().__init__(message)
         self.erp_document_id = erp_document_id
         self.erp_document_number = erp_document_number
+        #: ``{"code", "params"}`` when the adapter refused with a stable reason
+        #: code (:func:`erp_refusal_record`) — what the browser localizes.
+        self.refusal = refusal
 
 
 class ErpPostRefusedError(ErpPostFailedError):
     """A non-retryable failure (``ErpPostResult.retryable`` False): a payload
     refused before calling the ERP, or a created bill whose booked total could
     not be confirmed as the approved amount. Never retried."""
+
+
+def erp_refusal_record(
+    code: str, *, provider: str | None = None, accounts: list[str] | None = None
+) -> dict:
+    """The coded form of a push refusal, as ``invoice.erp_failed`` records it.
+
+    ``{"code": <ERP_REFUSAL_CODES member>, "params": {...}}`` beside the English
+    ``error`` — the shape every coded refusal in this app takes, so the invoice
+    modal states it in the reader's language and says what to do
+    (``frontend/src/lib/api/erpRefusals.ts``), falling back to ``error`` for a
+    code it does not know. PII-free like ``error``: ``provider`` is the adapter's
+    fixed literal and ``accounts`` are GL codes, which are tenant configuration.
+    """
+    params: dict = {}
+    if provider:
+        params["provider"] = provider
+    if accounts is not None:
+        params["accounts"] = accounts
+    return {"code": code, "params": params}
+
+
+def _refusal_details(exc: BaseException) -> dict:
+    """``{"refusal": ...}`` for the failure audit row, or empty for an uncoded one."""
+    from app.services.erp_oauth import ErpNotConnectedError, ErpTokenRefreshError
+
+    refusal = getattr(exc, "refusal", None)
+    if refusal is None and isinstance(exc, ErpNotConnectedError):
+        if not isinstance(exc, ErpTokenRefreshError):
+            refusal = erp_refusal_record(NOT_CONNECTED)
+    return {"refusal": refusal} if refusal else {}
 
 
 def _orphan_details(exc: BaseException, state_data: dict | None) -> dict:
@@ -369,6 +431,7 @@ async def send_to_erp_internal(
                     details={
                         "error": str(exc),
                         "retries": attempt + 1,
+                        **_refusal_details(exc),
                         **_orphan_details(exc, instance.state_data if instance else None),
                     },
                 )
@@ -407,7 +470,11 @@ async def fail_erp_send_without_credentials(
         InvoiceStatus.failed,
         actor_id=actor_id,
         action_name="invoice.erp_failed",
-        details={"error": ERP_CREDENTIALS_UNAVAILABLE, "retries": 0},
+        details={
+            "error": ERP_CREDENTIALS_UNAVAILABLE,
+            "retries": 0,
+            "refusal": erp_refusal_record(ERP_CREDENTIALS_UNAVAILABLE),
+        },
     )
     await db.commit()
 
@@ -462,6 +529,7 @@ async def _call_erp(
             result.message or ("ERP post failed" if result.retryable else "ERP post refused"),
             erp_document_id=result.erp_document_id,
             erp_document_number=result.erp_document_number,
+            refusal=_result_refusal(result, invoice, line_items, refs),
         )
 
     return result.erp_document_id or result.erp_document_number or "UNKNOWN"

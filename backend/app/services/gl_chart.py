@@ -358,7 +358,7 @@ async def resolve_erp_account_ids(
     Resolution follows the chart rule this module owns: never another entity's
     account, and where a code exists in BOTH scopes the entity's own row is the
     account (it OVERRIDES the shared one — the precedence
-    ``api/gl_accounts._sync_match_query`` applies). ``entity_id`` None sees the
+    ``services/gl_account_sync._preference`` applies). ``entity_id`` None sees the
     shared chart alone. Read over every row, active or retired, like
     :meth:`ChartOwnership.in_own_chart`: the code on the invoice still names
     that account, and whether the ERP will post to it is the ERP's call.

@@ -98,6 +98,8 @@ def previous_bill_removed(provider: str) -> ErpPostResult:
         message=f"{provider} post failed: {PREVIOUS_BILL_REMOVED} (every earlier bill "
         f"for this invoice was deleted or voided in {provider})",
         retryable=False,
+        refusal_code=PREVIOUS_BILL_REMOVED,
+        refusal_provider=provider,
     )
 
 
@@ -123,6 +125,8 @@ def posted_total_failure(
         message=f"{provider} post failed: {POSTED_TOTAL_MISMATCH} ({detail})",
         raw_response=raw_response,
         retryable=False,
+        refusal_code=POSTED_TOTAL_MISMATCH,
+        refusal_provider=provider,
     )
 
 
@@ -154,6 +158,8 @@ async def check_posted_total(
             f"(the bill was created but {provider} reported no total)",
             raw_response=raw_response,
             retryable=False,
+            refusal_code=POSTED_TOTAL_UNCONFIRMED,
+            refusal_provider=provider,
         )
     outcome = VoidOutcome.NOT_VOIDED
     if document_id:

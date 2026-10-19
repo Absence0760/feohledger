@@ -290,6 +290,8 @@ def _unconfirmed(detail: str, process_id: str | None) -> ErpPostResult:
         raw_response={"process_id": process_id} if process_id else None,
         retryable=False,
         pending_job_id=process_id,
+        refusal_code=JOB_UNCONFIRMED,
+        refusal_provider=PROVIDER,
     )
 
 

@@ -750,6 +750,109 @@ def test_list_gl_accounts_maps_classification_and_parent(token, no_override):
     assert by_id["33"].account_type == "liability"
 
 
+# ---------------------------------------------------------------------------
+# account identity: the code is what QuickBooks keeps unique (§284)
+# ---------------------------------------------------------------------------
+
+
+def test_account_code_is_the_number_else_the_full_path_never_the_bare_name():
+    from app.services.erp_adapters.quickbooks_online import _account_code
+
+    assert _account_code({"Id": "7", "Name": "Office", "AcctNum": "6100"}) == "6100"
+    # Same Name under two parents — only the path tells them apart.
+    a = {"Id": "8", "Name": "Job Materials", "FullyQualifiedName": "Job Expenses:Job Materials"}
+    b = {
+        "Id": "9",
+        "Name": "Job Materials",
+        "FullyQualifiedName": "Landscaping Services:Job Materials",
+    }
+    assert _account_code(a) == "Job Expenses:Job Materials"
+    assert _account_code(b) == "Landscaping Services:Job Materials"
+    # A blank AcctNum is "not numbered", not a code.
+    assert _account_code({**a, "AcctNum": "  "}) == "Job Expenses:Job Materials"
+
+
+def test_an_over_long_path_keeps_its_head_and_ends_in_the_id():
+    from app.models.gl_account import GL_CODE_MAX_LENGTH
+    from app.services.erp_adapters.quickbooks_online import _account_code
+
+    path = ":".join(["A very long parent account name"] * 5)
+    one = _account_code({"Id": "41", "Name": "x", "FullyQualifiedName": path})
+    two = _account_code({"Id": "42", "Name": "x", "FullyQualifiedName": path + " too"})
+    assert len(one) == GL_CODE_MAX_LENGTH and one.endswith("…#41")
+    assert one.startswith(path[:40])
+    assert one != two  # same 98-char head, different ids
+
+
+def test_list_gl_accounts_names_by_path_and_records_the_legacy_name(token, no_override):
+    rows = [
+        {"Id": "1", "Name": "Job Expenses", "FullyQualifiedName": "Job Expenses"},
+        {
+            "Id": "8",
+            "Name": "Job Materials",
+            "FullyQualifiedName": "Job Expenses:Job Materials",
+            "ParentRef": {"value": "1"},
+        },
+        {
+            "Id": "9",
+            "Name": "Job Materials",
+            "AcctNum": "5200",
+            "FullyQualifiedName": "Landscaping:Job Materials",
+        },
+    ]
+    qbo = _Qbo()
+    qbo.request, _ = _query_router({"Account": [rows]})
+    by_id = {a.erp_account_id: a for a in _run_with(qbo, lambda: _adapter().list_gl_accounts())}
+    assert (by_id["8"].code, by_id["8"].name) == (
+        "Job Expenses:Job Materials",
+        "Job Expenses:Job Materials",
+    )
+    assert by_id["8"].parent_code == "Job Expenses"
+    assert by_id["8"].legacy_codes == ("Job Materials",)
+    # A numbered account was always keyed by its number; the name shows the path.
+    assert (by_id["9"].code, by_id["9"].name, by_id["9"].legacy_codes) == (
+        "5200",
+        "Landscaping:Job Materials",
+        (),
+    )
+    assert by_id["1"].legacy_codes == ()
+
+
+def test_list_pos_resolves_a_line_account_by_id_not_by_its_name(token, no_override):
+    po = {
+        "Id": "130",
+        "DocNumber": "PO-1",
+        "VendorRef": {"value": "56", "name": "Acme"},
+        "Line": [
+            {
+                "Amount": Decimal("10"),
+                "AccountBasedExpenseLineDetail": {
+                    "AccountRef": {"value": "9", "name": "Job Materials"}
+                },
+            }
+        ],
+    }
+    accounts = [
+        {"Id": "8", "Name": "Job Materials", "FullyQualifiedName": "Job Expenses:Job Materials"},
+        {"Id": "9", "Name": "Job Materials", "FullyQualifiedName": "Landscaping:Job Materials"},
+    ]
+    qbo = _Qbo()
+    qbo.request, _ = _query_router({"PurchaseOrder": [[po]], "Account": [accounts]})
+    (got,) = _run_with(qbo, lambda: _adapter().list_pos())
+    assert got.line_items[0].gl_account == "Landscaping:Job Materials"
+
+
+def test_vendor_acctnum_is_not_taken_as_our_vendor_code(token, no_override):
+    """On a QuickBooks Vendor, AcctNum is the company's account number AT the
+    vendor — not an identifier for the vendor — so it never lands in `code`."""
+    qbo = _Qbo()
+    qbo.request, _ = _query_router(
+        {"Vendor": [[{"Id": "56", "DisplayName": "Acme", "AcctNum": "CUST-99812"}]]}
+    )
+    (vendor,) = _run_with(qbo, lambda: _adapter().list_vendors())
+    assert vendor.code is None
+
+
 def test_list_pos_is_exact(token, no_override):
     po = {
         "Id": "130",

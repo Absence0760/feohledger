@@ -179,10 +179,76 @@ def erp_refusal_message(provider: str, reason: str) -> str:
     return f"{provider} post refused: {reason}"
 
 
+#: Every reason code an adapter can refuse a push with (:func:`erp_refusal`),
+#: plus the two non-retryable post-create outcomes that carry a code too
+#: (``posted_total.posted_total_failure`` / ``previous_bill_removed``). The
+#: browser states each in the reader's language from this code
+#: (``frontend/src/lib/api/erpRefusals.ts``), so a code missing here — or one
+#: here with no message there — fails ``tests/test_erp_refusal_codes.py`` and
+#: ``erpRefusals.test.ts``. A literal set rather than an import of each
+#: adapter's constant: ``base`` is imported by every adapter, so it cannot
+#: import them back.
+ERP_REFUSAL_CODES: frozenset[str] = frozenset(
+    {
+        # shared (`base`, `bill_allocation`, `posted_total`)
+        "vendor_not_linked",
+        "account_not_linked",
+        "not_connected",
+        "amount_mismatch",
+        "line_amount_missing",
+        "posted_total_mismatch",
+        "posted_total_unconfirmed",
+        "previous_bill_removed",
+        "tax_not_itemised",
+        "tax_rate_unresolved",
+        "missing_dates",
+        "duplicate_document_number",
+        # QuickBooks Online
+        "doc_number_too_long",
+        "currency_unknown",
+        "currency_not_enabled",
+        # Sage Business Cloud Accounting
+        "idempotency_lookup_incomplete",
+        # Business Central
+        "existing_invoice_not_open",
+        "line_amount_precision",
+        # SYSPRO / Sage Accounting ZA / Blackbaud FE NXT
+        "duplicate_invoice_number",
+        # Sage Accounting ZA
+        "currency_not_supported",
+        "foreign_currency_supplier",
+        "correlation_total_mismatch",
+        "tax_type_not_resolved",
+        "tax_mismatch",
+        "tax_not_stated",
+        # Blackbaud FE NXT
+        "subscription_key_missing",
+        "ap_account_not_configured",
+        "currency_not_configured",
+        "currency_mismatch",
+        "invoice_date_missing",
+        "due_date_missing",
+        "amount_not_positive",
+        "job_unconfirmed",
+        # `services/erp` itself: the sealed ERP credentials could not be opened
+        "erp_credentials_unavailable",
+    }
+)
+
+
 def erp_refusal(provider: str, reason: str) -> ErpPostResult:
-    """The non-retryable :class:`ErpPostResult` for a payload refused pre-flight."""
+    """The non-retryable :class:`ErpPostResult` for a payload refused pre-flight.
+
+    Carries ``reason`` and ``provider`` as data as well as in ``message``, so
+    ``services/erp`` can record the refusal as a code the browser localizes
+    rather than only as the English sentence.
+    """
     return ErpPostResult(
-        success=False, message=erp_refusal_message(provider, reason), retryable=False
+        success=False,
+        message=erp_refusal_message(provider, reason),
+        retryable=False,
+        refusal_code=reason,
+        refusal_provider=provider,
     )
 
 
@@ -215,6 +281,12 @@ class ErpPostResult:
     #: finish. ``services/erp`` persists it and hands it back as
     #: :attr:`InvoicePayload.pending_job_id` on the next attempt; None clears it.
     pending_job_id: str | None = None
+    #: The stable reason code of a non-retryable refusal (one of
+    #: :data:`ERP_REFUSAL_CODES`) and the provider literal that refused it.
+    #: Set by :func:`erp_refusal` and the ``posted_total`` outcomes; None for an
+    #: HTTP failure, whose code lives in ``message`` (:func:`erp_failure_message`).
+    refusal_code: str | None = None
+    refusal_provider: str | None = None
 
 
 @dataclass
@@ -268,6 +340,18 @@ class GLAccountPayload:
     doesn't classify the account; the API endpoint accepts that.
     `erp_account_id` is the upstream's canonical identifier so future
     pulls can detect renames.
+
+    **`code` must be a key the ERP itself keeps unique** across the whole
+    chart — an account number, a fully-qualified path, the record id — never
+    a display name the ERP lets two accounts share. The sync refuses any code
+    two accounts in one pull resolve to rather than link either
+    (`services/gl_account_sync`, docs/decisions.md §284), so a repeatable key
+    leaves accounts unlinked; it never merges them.
+
+    `legacy_codes` are codes an earlier version of the adapter gave the same
+    account (QuickBooks' bare `Name`, before §284). Only the sync's ambiguity
+    check reads them: an existing row still keyed by one of them that two
+    accounts claim is unlinked rather than trusted.
     """
 
     code: str
@@ -275,6 +359,7 @@ class GLAccountPayload:
     account_type: str | None = None
     erp_account_id: str | None = None
     parent_code: str | None = None
+    legacy_codes: tuple[str, ...] = ()
 
 
 @dataclass

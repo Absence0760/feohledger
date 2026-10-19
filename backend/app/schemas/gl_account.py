@@ -1,11 +1,13 @@
 from pydantic import BaseModel, Field
 
+from app.models.gl_account import GL_CODE_MAX_LENGTH
+
 
 class GLAccountCreate(BaseModel):
-    code: str = Field(..., max_length=50)
+    code: str = Field(..., max_length=GL_CODE_MAX_LENGTH)
     name: str = Field(..., max_length=255)
     account_type: str | None = None
-    parent_code: str | None = None
+    parent_code: str | None = Field(default=None, max_length=GL_CODE_MAX_LENGTH)
 
 
 class GLAccountUpdate(BaseModel):
@@ -36,6 +38,6 @@ class GLAccountUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     account_type: str | None = Field(default=None, max_length=50)
-    parent_code: str | None = Field(default=None, max_length=50)
+    parent_code: str | None = Field(default=None, max_length=GL_CODE_MAX_LENGTH)
     #: Retirement. There is no DELETE on this router — see the route docstring.
     is_active: bool | None = None

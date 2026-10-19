@@ -2798,8 +2798,50 @@ QBO_VENDORS = [
     {"Id": "57", "DisplayName": "Fake ERP Vendor B"},
 ]
 QBO_ACCOUNTS = [
-    {"Id": "7", "Name": "Office Expenses", "AcctNum": "6100", "Classification": "Expense"},
-    {"Id": "33", "Name": "Accounts Payable (A/P)", "Classification": "Liability"},
+    {
+        "Id": "7",
+        "Name": "Office Expenses",
+        "FullyQualifiedName": "Office Expenses",
+        "AcctNum": "6100",
+        "Classification": "Expense",
+    },
+    {
+        "Id": "33",
+        "Name": "Accounts Payable (A/P)",
+        "FullyQualifiedName": "Accounts Payable (A/P)",
+        "Classification": "Liability",
+    },
+    # Two parents with a same-named sub-account each, as the real sandbox
+    # company has ("Job Materials" under both). QuickBooks keeps a Name unique
+    # only among siblings; FullyQualifiedName is the unique key (decisions §284).
+    {
+        "Id": "60",
+        "Name": "Job Expenses",
+        "FullyQualifiedName": "Job Expenses",
+        "Classification": "Expense",
+    },
+    {
+        "Id": "61",
+        "Name": "Landscaping Services",
+        "FullyQualifiedName": "Landscaping Services",
+        "Classification": "Expense",
+    },
+    {
+        "Id": "62",
+        "Name": "Job Materials",
+        "FullyQualifiedName": "Job Expenses:Job Materials",
+        "SubAccount": True,
+        "ParentRef": {"value": "60"},
+        "Classification": "Expense",
+    },
+    {
+        "Id": "63",
+        "Name": "Job Materials",
+        "FullyQualifiedName": "Landscaping Services:Job Materials",
+        "SubAccount": True,
+        "ParentRef": {"value": "61"},
+        "Classification": "Expense",
+    },
 ]
 QBO_POS = [
     {

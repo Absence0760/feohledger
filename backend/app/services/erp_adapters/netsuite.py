@@ -12,6 +12,7 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
+from app.models.gl_account import GL_CODE_MAX_LENGTH
 from app.services.erp_adapters.base import (
     POSTED_TOTAL_MISMATCH,
     POSTED_TOTAL_UNCONFIRMED,
@@ -300,6 +301,8 @@ class NetSuiteAdapter(ErpAdapter):
                 message=f"NetSuite post unconfirmed: {POSTED_TOTAL_UNCONFIRMED} "
                 "(the bill was created but NetSuite reported no total)",
                 retryable=False,
+                refusal_code=POSTED_TOTAL_UNCONFIRMED,
+                refusal_provider="NetSuite",
             )
         try:
             deleted = await self.void_invoice(doc_id)
@@ -318,6 +321,8 @@ class NetSuiteAdapter(ErpAdapter):
             erp_document_number=payload.invoice_number,
             message=f"NetSuite post failed: {POSTED_TOTAL_MISMATCH} ({outcome})",
             retryable=False,
+            refusal_code=POSTED_TOTAL_MISMATCH,
+            refusal_provider="NetSuite",
         )
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
@@ -623,10 +628,10 @@ def _netsuite_account_to_payload(raw: dict) -> GLAccountPayload | None:
         return None
     name = raw.get("fullname") or ""
     code = str(raw.get("acctnumber") or name)
-    # `gl_accounts.code` is 50 characters. Truncating would let two long names
-    # collapse into one code — the sync would then write the second account's
-    # id onto the first — so an over-long name is skipped instead.
-    if not code or len(code) > 50:
+    # `gl_accounts.code` is GL_CODE_MAX_LENGTH characters. Truncating would let
+    # two long names collapse into one code — the sync would then write the
+    # second account's id onto the first — so an over-long name is skipped.
+    if not code or len(code) > GL_CODE_MAX_LENGTH:
         return None
     return GLAccountPayload(
         code=code,

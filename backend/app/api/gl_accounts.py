@@ -23,6 +23,7 @@ from app.models.user import User
 from app.schemas.gl_account import GLAccountCreate, GLAccountUpdate
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.gl_account_sync import sync_chart_from_erp
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
     provider_config,
@@ -98,38 +99,6 @@ def _duplicate_detail(code: str, entity_id: uuid.UUID | None) -> str:
     """409 body. Names the code (org configuration, not PII) and the chart."""
     where = "the selected entity's chart" if entity_id else "this tenant's chart of accounts"
     return f"GL account code '{code}' already exists in {where}."
-
-
-def _sync_match_query(code: str, org_id: uuid.UUID, entity_id: uuid.UUID | None):
-    """Find the account an ERP code should update, in the chart being synced.
-
-    Candidates are ``shared (NULL) ∪ the selected entity`` — the invoice-side
-    rule ``services/gl_recode._ActiveChart.is_valid_for`` already applies, so
-    the sync resolves a code exactly the way validation does. Matching on
-    ``(code, organization_id)`` alone (the pre-fix behaviour) meant a sync run
-    while subsidiary B was selected UPDATED subsidiary A's row instead of
-    creating B's, contradicting this route's own "same rule as manual create".
-
-    Ordering encodes which row wins when a code exists in both scopes:
-
-    * an entity is selected → **its own** row outranks the shared one (an
-      entity-specific account overrides the shared chart for that entity);
-    * consolidated → the **shared** row wins, because that is the chart a
-      consolidated sync creates into. Ties break oldest-first so the pick is
-      deterministic rather than whatever Postgres returns first.
-    """
-    is_shared = GLAccount.entity_id.is_(None)
-    query = apply_entity_scope(
-        select(GLAccount).where(
-            GLAccount.code == code,
-            GLAccount.organization_id == org_id,
-        ),
-        GLAccount,
-        entity_id,
-        include_shared=True,
-    )
-    preference = is_shared.desc() if entity_id is None else is_shared.asc()
-    return query.order_by(preference, GLAccount.created_at.asc(), GLAccount.id.asc())
 
 
 @router.get("")
@@ -297,7 +266,7 @@ async def _parent_chain_would_cycle(
     else:
         # Shared first, so that when a code exists in BOTH scopes the entity's
         # own row overwrites it in the mapping below — the same override
-        # precedence `_sync_match_query` applies.
+        # precedence `services/gl_account_sync._preference` applies.
         query = apply_entity_scope(
             query, GLAccount, account.entity_id, include_shared=True
         ).order_by(GLAccount.entity_id.is_(None).desc())
@@ -486,10 +455,13 @@ async def sync_gl_accounts_from_erp(
     New accounts land shared (NULL entity_id) in the consolidated view, or
     entity-specific when an entity is selected — same rule as manual create.
 
-    An ERP code is matched against the chart it is being synced INTO (shared ∪
-    the selected entity, via ``_sync_match_query``), not against every account
-    in the tenant: a sync run under subsidiary B used to update subsidiary A's
-    row rather than create B's, which is the opposite of the rule above.
+    An ERP account is matched against the chart it is being synced INTO (shared
+    ∪ the selected entity), by its ERP id first and then by code, and a code two
+    ERP accounts resolve to is refused rather than linked to either —
+    ``services/gl_account_sync`` holds the rules (docs/decisions.md §284). The
+    response reports what was refused (``conflicts``) and which existing rows
+    lost a link they could not be trusted with (``unlinked``), so the operator
+    can recode; the audit row carries the same summary.
     """
     try:
         erp_config = await provider_config(org, "erp", db=control_db)
@@ -524,50 +496,10 @@ async def sync_gl_accounts_from_erp(
             detail=f"ERP request failed: {type(exc).__name__}",
         ) from exc
 
-    created = 0
-    updated = 0
-    # Accounts created earlier in THIS run, keyed by code. They are not visible
-    # to the match query until flush, so without this an ERP catalogue that
-    # lists a code twice would insert two rows and trip the unique index at
-    # commit — a 500 after the audit row was already written.
-    pending: dict[str, GLAccount] = {}
-    for acct in erp_accounts:
-        existing = pending.get(acct.code)
-        if existing is None:
-            existing = (
-                (await db.execute(_sync_match_query(acct.code, org_id, entity_id)))
-                .scalars()
-                .first()
-            )
-
-        if existing:
-            # Only count as updated when something actually changes —
-            # otherwise re-running the sync would inflate the metric.
-            changed = False
-            if existing.name != acct.name:
-                existing.name = acct.name
-                changed = True
-            if acct.account_type and existing.account_type != acct.account_type:
-                existing.account_type = acct.account_type
-                changed = True
-            if acct.erp_account_id and existing.erp_account_id != acct.erp_account_id:
-                existing.erp_account_id = acct.erp_account_id
-                changed = True
-            if changed:
-                updated += 1
-        else:
-            account = GLAccount(
-                code=acct.code,
-                name=acct.name,
-                account_type=acct.account_type,
-                parent_code=acct.parent_code,
-                organization_id=org_id,
-                entity_id=entity_id,
-                erp_account_id=acct.erp_account_id or acct.code,
-            )
-            db.add(account)
-            pending[acct.code] = account
-            created += 1
+    result = await sync_chart_from_erp(
+        db, organization_id=org_id, entity_id=entity_id, accounts=erp_accounts
+    )
+    summary = result.summary()
 
     # One PII-free summary row per sync, not one per account — the trail records
     # that a bulk chart change happened, who ran it and how much it moved.
@@ -580,17 +512,21 @@ async def sync_gl_accounts_from_erp(
         entity_type="gl_account",
         entity_id=org_id,
         details={
-            "created": created,
-            "updated": updated,
+            **summary,
             "adapter": adapter.erp_type,
             "entity_id": str(entity_id) if entity_id else None,
         },
     )
     await db.commit()
+    message = f"Synced {result.created} new, {result.updated} updated GL accounts"
+    if result.conflicts or result.unlinked:
+        message += (
+            f"; {len(result.conflicts)} not linked (two ERP accounts share a code), "
+            f"{len(result.unlinked)} unlinked"
+        )
     return {
         "success": True,
-        "message": f"Synced {created} new, {updated} updated GL accounts",
-        "created": created,
-        "updated": updated,
+        "message": message,
+        **summary,
         "adapter": adapter.erp_type,
     }

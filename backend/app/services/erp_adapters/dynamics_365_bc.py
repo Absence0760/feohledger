@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import settings
+from app.models.gl_account import GL_CODE_MAX_LENGTH
 from app.services.erp_adapters.base import (
     POSTED_TOTAL_MISMATCH,
     POSTED_TOTAL_UNCONFIRMED,
@@ -351,6 +352,8 @@ class BusinessCentralAdapter(ErpAdapter):
                     message=f"{_PROVIDER} post refused: {POSTED_TOTAL_MISMATCH} "
                     f"(the draft was not deleted in {_PROVIDER})",
                     retryable=False,
+                    refusal_code=POSTED_TOTAL_MISMATCH,
+                    refusal_provider=_PROVIDER,
                 )
 
             post_resp = await client.post(
@@ -540,6 +543,8 @@ def _bc_posted(
             message=f"{_PROVIDER} post refused: {reason} "
             f"(the invoice is posted in {_PROVIDER} and was not deleted)",
             retryable=False,
+            refusal_code=reason,
+            refusal_provider=_PROVIDER,
         )
     message = (
         "Already posted to Business Central (idempotent — found by externalDocumentNumber)"
@@ -638,12 +643,13 @@ def _bc_account_to_payload(raw: dict) -> GLAccountPayload | None:
     ``erp_account_id`` is its ``id`` GUID, what a bill line is posted on.
     Only ``Posting`` accounts are kept (a Heading / Total / Begin-End Total
     cannot carry an entry) and blocked ones are skipped, as NetSuite's chart
-    sync skips inactive accounts. A No. longer than the 50-character code
-    column is skipped rather than truncated, so two accounts never merge.
+    sync skips inactive accounts. A No. longer than the code column
+    (``GL_CODE_MAX_LENGTH``) is skipped rather than truncated, so two accounts
+    never merge.
     """
     account_id = raw.get("id")
     number = str(raw.get("number") or "")
-    if not account_id or not number or len(number) > 50:
+    if not account_id or not number or len(number) > GL_CODE_MAX_LENGTH:
         return None
     if raw.get("blocked") is True:
         return None

@@ -1192,3 +1192,98 @@ async def test_send_to_erp_commits_the_orphan_bill_and_its_audit_row(realdb):
     assert fail_row.details["erp_document_id"] == "XERO-BILL-7"
     assert fail_row.details["erp_document_number"] == "BILL-0007"
     assert _PROVIDER_BODY_MARKER not in json.dumps(fail_row.details)
+
+
+# ---------------------------------------------------------------------------
+# A refusal is recorded as a code + params the browser localizes (§284)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_call_erp_account_refusal_names_the_unlinked_codes():
+    """`account_not_linked` carries WHICH codes resolved to no ERP account —
+    what the reader must sync or recode — beside the unchanged English."""
+    from app.services.erp import _call_erp
+
+    rows = [_line_item(gl_account="Job Materials"), _line_item(line_number=2, gl_account="6100")]
+    db = _line_items_db(rows, accounts=[("Job Materials", None, None), ("6100", None, "ERP-6100")])
+    with patch("httpx.AsyncClient") as cm:
+        with pytest.raises(ErpPostRefusedError) as exc:
+            await _call_erp(db, _invoice(), _NETSUITE_CFG)
+    cm.assert_not_called()
+    assert str(exc.value) == "NetSuite post refused: account_not_linked"
+    assert exc.value.refusal == {
+        "code": "account_not_linked",
+        "params": {"provider": "NetSuite", "accounts": ["Job Materials"]},
+    }
+
+
+@pytest.mark.asyncio
+async def test_call_erp_vendor_refusal_carries_its_code_and_provider():
+    from app.services.erp import _call_erp
+
+    with pytest.raises(ErpPostRefusedError) as exc:
+        await _call_erp(
+            _line_items_db([_line_item()], vendor_erp_id=None), _invoice(), _NETSUITE_CFG
+        )
+    assert exc.value.refusal == {"code": "vendor_not_linked", "params": {"provider": "NetSuite"}}
+
+
+@pytest.mark.asyncio
+async def test_failed_audit_row_carries_the_coded_refusal():
+    from app.services.erp import erp_refusal_record
+
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    recorder = _AuditRecorder()
+    refusal = erp_refusal_record("vendor_not_linked", provider="QuickBooks Online")
+    call_erp = AsyncMock(
+        side_effect=ErpPostRefusedError(
+            "QuickBooks Online post refused: vendor_not_linked", refusal=refusal
+        )
+    )
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", call_erp),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=_instance())),
+        patch("app.services.erp.asyncio.sleep", AsyncMock()),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert fail_row["details"]["error"] == "QuickBooks Online post refused: vendor_not_linked"
+    assert fail_row["details"]["refusal"] == {
+        "code": "vendor_not_linked",
+        "params": {"provider": "QuickBooks Online"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_missing_oauth_connection_is_recorded_as_not_connected():
+    from app.services.erp_oauth import ErpNotConnectedError
+
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    recorder = _AuditRecorder()
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", AsyncMock(side_effect=ErpNotConnectedError("x"))),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=_instance())),
+        patch("app.services.erp.asyncio.sleep", AsyncMock()),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert fail_row["details"]["refusal"] == {"code": "not_connected", "params": {}}
+
+
+@pytest.mark.asyncio
+async def test_a_transient_failure_records_no_refusal():
+    """An HTTP failure has no stable code to state; the modal shows its text."""
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    recorder = _AuditRecorder()
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", AsyncMock(side_effect=RuntimeError("boom"))),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=_instance())),
+        patch("app.services.erp.asyncio.sleep", AsyncMock()),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert "refusal" not in fail_row["details"]

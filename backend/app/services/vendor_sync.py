@@ -10,9 +10,10 @@ happen is unbounded growth describing nothing.
 """
 
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.vendor import Vendor
@@ -59,7 +60,19 @@ async def sync_vendors_from_erp(
         - tax_id: str | None
         - payment_terms: str | None
 
-    Returns summary: {created: int, updated: int, unchanged: int}
+    **A name only ever links a vendor when it is unambiguous on both sides.**
+    A record whose ``erp_vendor_id`` no local vendor holds may adopt a
+    manually-created, still-unlinked vendor of the same name — but only when
+    exactly one record in this pull has that name AND exactly one unlinked local
+    vendor does. Otherwise the record is neither linked nor created and is
+    reported in ``conflicts``: linking the wrong "Acme" posts its bills to
+    another supplier's ERP record, and creating a fresh row beside the
+    unlinked one(s) would only add another candidate for the same name
+    (docs/decisions.md §284). Linking stays by hand.
+
+    Returns summary: {created, updated, unchanged: int, conflicts: list of
+    {"name", "reason", "erp_vendor_ids"}} — the name is the vendor's business
+    name, which the per-vendor audit row already records.
     """
     now = datetime.now(UTC)
     created = 0
@@ -73,6 +86,25 @@ async def sync_vendors_from_erp(
     audited: list[tuple[Vendor, str, str]] = []
     # Existing vendors whose screened identity this pull changed.
     rescreen: list[Vendor] = []
+    conflicts: dict[str, set[str]] = {}
+
+    # How many records in this pull, and how many unlinked local vendors, carry
+    # each name — the two counts a name link must find to be exactly 1.
+    pulled_names = Counter(
+        v.get("name") for v in erp_vendors if v.get("erp_vendor_id") and v.get("name")
+    )
+    unlinked_names = dict(
+        (
+            await db.execute(
+                select(Vendor.name, func.count())
+                .where(
+                    Vendor.organization_id == organization_id,
+                    Vendor.erp_vendor_id.is_(None),
+                )
+                .group_by(Vendor.name)
+            )
+        ).all()
+    )
 
     for erp_v in erp_vendors:
         erp_id = erp_v.get("erp_vendor_id")
@@ -116,6 +148,12 @@ async def sync_vendors_from_erp(
         else:
             # Also check if there's a name match (might be manually created before ERP sync)
             name = erp_v.get("name", "")
+            if name and unlinked_names.get(name, 0) and (
+                pulled_names[name] > 1 or unlinked_names[name] > 1
+            ):
+                # Ambiguous: which ERP record is which local vendor is a guess.
+                conflicts.setdefault(name, set()).add(str(erp_id))
+                continue
             if name:
                 result = await db.execute(
                     select(Vendor).where(
@@ -188,7 +226,15 @@ async def sync_vendors_from_erp(
             actor_id=actor_id,
         )
 
-    return {"created": created, "updated": updated, "unchanged": unchanged}
+    return {
+        "created": created,
+        "updated": updated,
+        "unchanged": unchanged,
+        "conflicts": [
+            {"name": name, "reason": "ambiguous_name", "erp_vendor_ids": sorted(ids)}
+            for name, ids in sorted(conflicts.items())
+        ],
+    }
 
 
 async def _audit_synced(

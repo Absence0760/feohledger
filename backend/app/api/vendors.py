@@ -1695,15 +1695,16 @@ async def sync_vendors_from_erp_endpoint(
     )
     await db.commit()
 
-    return {
-        "success": True,
-        "message": (
-            f"Synced {result['created']} new, "
-            f"{result['updated']} updated, "
-            f"{result['unchanged']} unchanged"
-        ),
-        **result,
-    }
+    message = (
+        f"Synced {result['created']} new, "
+        f"{result['updated']} updated, "
+        f"{result['unchanged']} unchanged"
+    )
+    if result["conflicts"]:
+        message += (
+            f"; {len(result['conflicts'])} not linked (the name matches more than one vendor)"
+        )
+    return {"success": True, "message": message, **result}
 
 
 @router.post("/import-csv", status_code=status.HTTP_200_OK)

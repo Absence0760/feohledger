@@ -417,23 +417,23 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
 def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
     """Map a Merge.dev account record to our GLAccountPayload.
 
-    Returns None when the record has no `account_number` and no `name`
-    — those are the two fields the upsert in
-    `api/gl_accounts.py:sync_gl_accounts_from_erp` keys on, and a row
-    missing both isn't useful. Better to drop than to import a row
-    keyed on an opaque Merge id.
+    ``code`` is the account number when the underlying ERP numbers its
+    accounts (every one of them keeps the number unique), else the Merge
+    object ``id`` — never the ``name``. A name is a display label the ERP
+    lets two accounts share (QuickBooks' "Job Materials" under two parents),
+    and keyed on it two accounts collapse into one row that posts to the
+    wrong one (docs/decisions.md §284). A record with no ``id`` is dropped:
+    a Merge bill line posts against that id, so the row could never be used,
+    and its ``erp_account_id`` would otherwise have been its code.
+    A record with neither a number nor a name is dropped too: nobody could
+    pick it.
     """
-    code = raw.get("account_number") or raw.get("number")
-    name = raw.get("name")
-    if not code and not name:
+    merge_id = raw.get("id")
+    number = raw.get("account_number") or raw.get("number")
+    if not merge_id or not (number or raw.get("name")):
         return None
-    if not code:
-        # Merge sometimes ships the human name without a code (custom
-        # accounts on small ERPs). Fall back to the upstream id so we
-        # have *something* unique on the upsert key.
-        code = raw.get("id") or name
-    if not name:
-        name = code
+    code = number or merge_id
+    name = raw.get("name") or code
 
     raw_classification = (raw.get("classification") or "").upper()
     account_type = _MERGE_ACCOUNT_TYPE_MAP.get(raw_classification)
@@ -442,7 +442,7 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
         code=str(code),
         name=str(name),
         account_type=account_type,
-        erp_account_id=raw.get("id") or str(code),
+        erp_account_id=str(merge_id),
         parent_code=(
             raw.get("parent_account") if isinstance(raw.get("parent_account"), str) else None
         ),

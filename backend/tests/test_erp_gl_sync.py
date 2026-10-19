@@ -256,7 +256,7 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
             {
                 "id": "150",
                 "acctnumber": None,
-                "fullname": "x" * 51,
+                "fullname": "x" * 101,  # past GL_CODE_MAX_LENGTH (100)
                 "accttype": "Expense",
                 "isinactive": "F",
             },
@@ -379,7 +379,7 @@ def test_merge_dev_list_gl_accounts_classification_normalization():
     }
     for raw, expected in cases.items():
         body = {
-            "results": [{"name": "x", "account_number": "1", "classification": raw}],
+            "results": [{"id": "m-1", "name": "x", "account_number": "1", "classification": raw}],
             "next": None,
         }
         with patch("httpx.AsyncClient") as cm:
@@ -428,8 +428,8 @@ def test_merge_dev_list_gl_accounts_follows_pagination_cursor():
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
-    page1 = {"results": [{"name": "A", "account_number": "1"}], "next": "cursor-2"}
-    page2 = {"results": [{"name": "B", "account_number": "2"}], "next": None}
+    page1 = {"results": [{"id": "m-a", "name": "A", "account_number": "1"}], "next": "cursor-2"}
+    page2 = {"results": [{"id": "m-b", "name": "B", "account_number": "2"}], "next": None}
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=[_mock_response(200, page1), _mock_response(200, page2)])
@@ -488,3 +488,29 @@ def test_base_adapter_list_gl_accounts_default_is_empty_not_raises():
         erp_type = "bare"
 
     assert _run(Bare({}).list_gl_accounts()) == []
+
+
+def test_merge_dev_never_keys_an_account_by_its_name():
+    """Two unnumbered accounts named alike (QuickBooks sub-accounts behind
+    Merge) are two codes — their Merge ids — never one shared name, and a
+    record with no Merge id is dropped: its bill line could not reference it
+    (docs/decisions.md §284)."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "m-1", "name": "Job Materials", "classification": "EXPENSE"},
+            {"id": "m-2", "name": "Job Materials", "classification": "EXPENSE"},
+            {"name": "No id", "account_number": "9000"},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, body))
+        out = _run(adapter.list_gl_accounts())
+    assert [(a.code, a.erp_account_id, a.name) for a in out] == [
+        ("m-1", "m-1", "Job Materials"),
+        ("m-2", "m-2", "Job Materials"),
+    ]

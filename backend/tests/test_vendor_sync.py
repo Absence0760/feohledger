@@ -35,7 +35,7 @@ async def test_sync_creates_new_vendors(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 2, "updated": 0, "unchanged": 0}
+    assert result == {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
 
     async with mk() as s:
         vendors = (await s.execute(select(Vendor).order_by(Vendor.erp_vendor_id))).scalars().all()
@@ -62,7 +62,7 @@ async def test_sync_skips_rows_without_erp_id(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 1, "updated": 0, "unchanged": 0}
+    assert result == {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         count = (await s.execute(select(func.count()).select_from(Vendor))).scalar_one()
     assert count == 1
@@ -92,7 +92,7 @@ async def test_sync_updates_changed_fields(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 1, "unchanged": 0}
+    assert result == {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         v = (await s.execute(select(Vendor).where(Vendor.erp_vendor_id == "ERP-7"))).scalar_one()
     assert v.name == "New Name"
@@ -123,7 +123,7 @@ async def test_sync_unchanged_when_no_diff(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 0, "unchanged": 1}
+    assert result == {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
 
 
 async def test_sync_does_not_null_out_existing_fields(realdb):
@@ -151,7 +151,7 @@ async def test_sync_does_not_null_out_existing_fields(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 0, "unchanged": 1}
+    assert result == {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
     async with mk() as s:
         v = (await s.execute(select(Vendor).where(Vendor.erp_vendor_id == "ERP-K"))).scalar_one()
     assert v.email == "keep@vendor.test"
@@ -181,7 +181,7 @@ async def test_sync_links_name_match_and_activates(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 1, "unchanged": 0}
+    assert result == {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         rows = (await s.execute(select(Vendor))).scalars().all()
     # No duplicate created — the existing row was linked, not a new insert.
@@ -231,7 +231,7 @@ async def test_sync_filters_name_match_by_org(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 1, "updated": 0, "unchanged": 0}
+    assert result == {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         mine = (
             await s.execute(select(Vendor).where(Vendor.organization_id == org_id))
@@ -370,3 +370,85 @@ async def test_sync_erp_endpoint_tenant_isolation(realdb):
     async with mk_b() as s:
         count = (await s.execute(select(func.count()).select_from(Vendor))).scalar_one()
     assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# A name links a vendor only when it is unambiguous on both sides (§284)
+# ---------------------------------------------------------------------------
+
+
+async def _manual_vendor(realdb, name: str) -> uuid.UUID:
+    async with realdb.sessionmaker("a")() as s:
+        v = Vendor(
+            name=name,
+            organization_id=realdb.info("a").org_id,
+            status="unverified",
+            source="manual",
+        )
+        s.add(v)
+        await s.commit()
+        return v.id
+
+
+async def test_two_erp_vendors_sharing_a_local_name_link_neither(realdb):
+    """Linking whichever "Acme" came first would post one supplier's bills to
+    the other's ERP record. Neither is linked, neither is created."""
+    local = await _manual_vendor(realdb, "Acme")
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s,
+            realdb.info("a").org_id,
+            [
+                {"erp_vendor_id": "ERP-A1", "name": "Acme"},
+                {"erp_vendor_id": "ERP-A2", "name": "Acme"},
+            ],
+        )
+        await s.commit()
+    assert result == {
+        "created": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "conflicts": [
+            {"name": "Acme", "reason": "ambiguous_name", "erp_vendor_ids": ["ERP-A1", "ERP-A2"]}
+        ],
+    }
+    async with realdb.sessionmaker("a")() as s:
+        rows = (await s.execute(select(Vendor))).scalars().all()
+    assert [(r.id, r.erp_vendor_id) for r in rows] == [(local, None)]
+
+
+async def test_one_erp_vendor_matching_two_local_names_links_neither(realdb):
+    await _manual_vendor(realdb, "Globex")
+    await _manual_vendor(realdb, "Globex")
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s, realdb.info("a").org_id, [{"erp_vendor_id": "ERP-G", "name": "Globex"}]
+        )
+        await s.commit()
+    assert result["conflicts"] == [
+        {"name": "Globex", "reason": "ambiguous_name", "erp_vendor_ids": ["ERP-G"]}
+    ]
+    assert (result["created"], result["updated"]) == (0, 0)
+    async with realdb.sessionmaker("a")() as s:
+        linked = (
+            await s.execute(
+                select(func.count()).select_from(Vendor).where(Vendor.erp_vendor_id.is_not(None))
+            )
+        ).scalar_one()
+    assert linked == 0
+
+
+async def test_two_same_named_erp_vendors_with_no_local_are_both_created(realdb):
+    """No local candidate means no guess: each ERP record gets its own row,
+    linked by its own id."""
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s,
+            realdb.info("a").org_id,
+            [
+                {"erp_vendor_id": "ERP-I1", "name": "Initech"},
+                {"erp_vendor_id": "ERP-I2", "name": "Initech"},
+            ],
+        )
+        await s.commit()
+    assert result == {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
