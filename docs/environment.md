@@ -176,7 +176,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_LITHIC_API_KEY`   | (empty)                                                                  | Platform Lithic key for virtual cards |
 | `FEOH_LITHIC_SANDBOX`   | `true`                                                                   | Use Lithic sandbox endpoints |
 | `FEOH_NIUM_CLIENT_ID` / `_SECRET` / `_CUSTOMER_HASH_ID` / `_WALLET_HASH_ID` / `_SANDBOX` | (empty / `true`)                | Platform Nium config for virtual cards |
-| `FEOH_EMAIL_PROVIDER`   | `console`                                                                | `console` (logs to stdout) or `ses` |
+| `FEOH_EMAIL_PROVIDER`   | `console`                                                                | `console` (logs to stdout), `ses` or `smtp`. A deployed env (`FEOH_ENVIRONMENT` not local/CI) refuses to boot on `console`: it would log every temporary password, reset link and sign-in code instead of sending them |
 | `FEOH_EMAIL_FROM`       | `no-reply@localhost`                                                     | From-address on outbound transactional email |
 | `FEOH_AWS_SES_REGION`   | `us-east-1`                                                              | AWS region when `FEOH_EMAIL_PROVIDER=ses` |
 | `FEOH_PUBLIC_URL`       | `http://localhost:7777`                                                  | Where the frontend is served — used in outbound email links, and as the origin of the email header's brand mark (`/email-mark.png`), so a deployed env left on loopback shows recipients a broken image |

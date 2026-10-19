@@ -250,7 +250,15 @@ async def notify_supplier_of_ap_message(
     line = translate("chat.portal_link.body", None, org=org_name, ref=inv_ref)
     cta = translate("chat.portal_link.cta", None)
     body_text = f"{greeting}\n\n{line}\n\n{cta}\n  {link}\n"
-    body_html = f'<p>{greeting}</p><p>{line}</p><p><a href="{link}">{cta}</a></p>'
+    from app.services.email_adapters.layout import email_button, email_paragraph
+
+    brand = get_brand_context(org.settings)
+    # Escaped by the layout blocks: the org and vendor names are free text.
+    body_html = (
+        email_paragraph(greeting)
+        + email_paragraph(line)
+        + email_button(link, cta.rstrip(":").strip(), brand)
+    )
 
     try:
         adapter = get_email_adapter()
@@ -260,7 +268,7 @@ async def notify_supplier_of_ap_message(
                 subject=subject,
                 body_text=body_text,
                 body_html=body_html,
-                brand=get_brand_context(org.settings),
+                brand=brand,
             )
         )
     except Exception as exc:  # noqa: BLE001

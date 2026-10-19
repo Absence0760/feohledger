@@ -508,6 +508,8 @@ async def _send_credentials_email(
                     f"  Password: {temp_password}\n\n"
                     "You'll be asked to change your password on first sign-in.\n"
                 ),
+                links=(tenant_url,) if tenant_url else (),
+                preheader="Your sign-in details are inside.",
             )
         )
     except Exception:  # noqa: BLE001

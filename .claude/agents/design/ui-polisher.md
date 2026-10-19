@@ -252,9 +252,11 @@ Five rules in `ui-patterns.md` § Motion, each learned from a defect. The ones
 that bite a redesign: the last keyframe is the resting state (reduced motion
 shows only that frame — an entrance must end *visible*); a hidden starting
 state is set by script (`use:reveal`), never by a stylesheet, so a failed
-bundle is a plain page rather than a blank one; continuous motion over five
-seconds owes an in-page stop control (WCAG 2.2.2 — the OS preference does not
-discharge it); and fade with colour, not `opacity`, at rest.
+bundle is a plain page rather than a blank one; no animation runs past five
+seconds — finite iteration count, `delay + duration × count ≤ 5s`, ending on
+its resting frame — because that is how the public pages meet WCAG 2.2.2 with
+no pause control (decisions §279; the OS preference does not discharge it);
+and fade with colour, not `opacity`, at rest.
 
 **Nothing in the app shell is sticky or continuously animated.** A sticky strip
 intercepts the clicks Playwright scrolls to and hides focused controls. Do not

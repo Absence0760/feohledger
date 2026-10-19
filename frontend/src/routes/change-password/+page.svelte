@@ -86,6 +86,22 @@
 			{/if}
 		</div>
 
+		<!-- Password managers file a new password under the username field that
+		     sits in the same form; without one they offer to save it against no
+		     account, or not at all. A first sign-in lands here with a temporary
+		     password, so this is the save that matters. Hidden, read-only, and
+		     out of the tab order and the accessibility tree. -->
+		<input
+			type="email"
+			name="username"
+			autocomplete="username"
+			value={auth.user?.email ?? ''}
+			readonly
+			hidden
+			tabindex="-1"
+			aria-hidden="true"
+		/>
+
 		<label>
 			<span>{m('auth.changePassword.currentPassword')}</span>
 			<input

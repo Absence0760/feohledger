@@ -162,6 +162,10 @@
 		if (!captchaSitekey || !captchaEl || typeof hcaptcha?.render !== 'function') return;
 		hcaptcha.render(captchaEl, {
 			sitekey: captchaSitekey,
+			// The app is dark-only (app.css `color-scheme: dark`); hCaptcha's
+			// default light widget is a white box on the form. The markup's
+			// `data-theme` does the same for the implicit first render.
+			theme: 'dark',
 			callback: (token: string) => (captchaToken = token),
 			'expired-callback': () => (captchaToken = null)
 		});
@@ -347,6 +351,7 @@
 					class="h-captcha"
 					bind:this={captchaEl}
 					data-sitekey={captchaSitekey}
+					data-theme="dark"
 					data-callback="hcaptchaCallback"
 					data-expired-callback="hcaptchaExpired"
 				></div>

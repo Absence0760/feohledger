@@ -724,6 +724,19 @@ accessible:
    **Always pass a row-specific `ariaLabel`** (e.g. `Edit invoice INV-42`)
    — e2e specs select on it.
 
+   **The `ariaLabel` must contain the control's visible text, as one
+   unbroken run** (WCAG 2.5.3 Label in Name — axe's
+   `label-content-name-mismatch`, enforced by every axe spec since
+   axe-core 4.14). A row action reading "Compare routes" may be named
+   "Compare routes for invoice INV-42", never "Compare payment routes for
+   invoice INV-42": a voice-control user says what they see. Build the
+   label from the visible string rather than retyping it — the catalogue
+   template takes it as a parameter, so every locale keeps the match:
+   `m('payments.quotes.openAria', { action: m('payments.quotes.open'), invoice })`
+   with `'{action} for invoice {invoice}'`. Keep a badge or other extra
+   text *beside* the link, not inside it, or it becomes visible text the
+   label lacks (the `/workflows` "Default" badge).
+
 2. **Whole row** carries `class="clickable"` + an `onclick` that opens
    the same destination, gated by **`isRowOpenClick(e)`**
    (`#lib/utils/rowNav.ts`). The guard bails when the click lands on a
@@ -842,7 +855,9 @@ Rules, each one a constraint this layer had to satisfy:
   colour in one rule is `<Badge>`'s recipe and `badgeAudit` counts it.
 - **Nothing in the shell is sticky or continuously animated.** A sticky strip
   intercepts the clicks Playwright scrolls to and hides focused controls (2.4.11);
-  continuous motion would owe a 2.2.2 pause control. The ambient background is a
+  continuous motion would breach 2.2.2, which this product meets by never moving
+  for more than five seconds rather than with a pause control (§ Motion, rule 4).
+  The ambient background is a
   still, fixed pseudo-element; entrances are one-shot (modal rise, popover rise,
   tab indicator, empty-state illustration) and follow § Motion.
 - **axe scans run at rest.** `tests-e2e/a11y/axe-helper.ts` emulates reduced
@@ -956,12 +971,18 @@ inherit it for free. Reuse these; don't re-solve them per page.
      first frame (usually opacity 0) for the whole delay; that is why the
      reduced-motion rule zeroes delays. Guard:
      `tests-e2e/a11y/reduced-motion.spec.ts`.
-  4. **Continuous motion needs an in-page stop (WCAG 2.2.2).** Anything that
-     moves on its own for more than five seconds lives under a root carrying
-     `data-motion`, driven by `marketing/MotionToggle.svelte`; `app.css` pauses
-     every animation beneath it. A page that won't carry the control doesn't
-     get continuous motion — the auth pages use `<Atmosphere still>` and short
-     entrances instead. The OS preference does not discharge 2.2.2.
+  4. **All motion ends within 5 s (WCAG 2.2.2).** The criterion covers motion
+     that starts on its own and lasts more than five seconds, and this product
+     answers it by never doing that — not with a pause control (the landing
+     page's `MotionToggle` was removed; decisions §279). So: no `infinite`; a
+     finite iteration count with `delay + duration × count ≤ 5s`; `forwards`
+     fill so the animation rests on its last keyframe, which (rule 1) must
+     show everything. Something that cannot fit — a marquee — is rendered
+     static instead (`marketing/AdapterRail.svelte`). The OS preference does
+     not discharge 2.2.2. Guards: `src/lib/a11y/marketingMotion.test.ts` (no
+     `infinite`, literal timing within budget) and
+     `tests-e2e/marketing/landing.spec.ts` (every running animation's
+     `getComputedTiming().endTime` ≤ 5000 ms).
   5. **Fade with colour, not `opacity`, at rest.** A decorative watermark takes
      an `rgba()` colour; `opacity` composites a whole subtree
      (`opacityAudit.test.ts`). `opacity: 0` / `1` in a reveal or keyframe is fine.

@@ -1,7 +1,7 @@
 """Boot-time config guards (config.py model validators).
 
-A deployed environment must refuse to start with a fail-open captcha, no
-provider-credential KMS key, or the
+A deployed environment must refuse to start with a fail-open captcha, the
+log-only console email adapter, no provider-credential KMS key, or the
 well-known default / weak JWT signing key — both are silent
 misconfigurations that would otherwise ship to production. Local-dev / CI
 envs keep the convenient defaults.
@@ -22,6 +22,7 @@ def test_deployed_env_refuses_default_secret_key():
     with pytest.raises(ValidationError, match="FEOH_SECRET_KEY"):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
             secret_key="change-me-in-production",
@@ -32,6 +33,7 @@ def test_deployed_env_refuses_too_short_secret_key():
     with pytest.raises(ValidationError, match="FEOH_SECRET_KEY"):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
             secret_key="short",
@@ -41,6 +43,7 @@ def test_deployed_env_refuses_too_short_secret_key():
 def test_deployed_env_accepts_a_strong_secret_key():
     s = Settings(
         environment="production",
+        email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="hc",
         secret_key=_GOOD_KEY,
@@ -64,6 +67,7 @@ def test_deployed_env_refuses_lithic_live_key_with_sandbox_on():
     with pytest.raises(ValidationError, match="FEOH_LITHIC_SANDBOX"):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
             secret_key=_GOOD_KEY,
@@ -75,6 +79,7 @@ def test_deployed_env_refuses_lithic_live_key_with_sandbox_on():
 def test_deployed_env_accepts_lithic_live_key_with_sandbox_off():
     s = Settings(
         environment="production",
+        email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="hc",
         secret_key=_GOOD_KEY,
@@ -88,6 +93,7 @@ def test_deployed_env_refuses_nium_creds_with_sandbox_on():
     with pytest.raises(ValidationError, match="FEOH_NIUM_SANDBOX"):
         Settings(
             environment="production",
+            email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
             secret_key=_GOOD_KEY,
@@ -101,6 +107,7 @@ def test_deployed_env_without_card_keys_ignores_sandbox_flag():
     # must not block boot.
     s = Settings(
         environment="production",
+        email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="hc",
         secret_key=_GOOD_KEY,
@@ -122,13 +129,19 @@ def test_deployed_env_refuses_missing_credential_kms_key():
     # under a key derived from FEOH_SECRET_KEY — a dev convenience, not a
     # control (services/credential_crypto). Refuse to boot instead.
     with pytest.raises(ValidationError, match="FEOH_CREDENTIAL_KMS_KEY_ID"):
-        Settings(environment="production", hcaptcha_secret="hc", secret_key=_GOOD_KEY)
+        Settings(
+            environment="production",
+            email_provider="ses",
+            hcaptcha_secret="hc",
+            secret_key=_GOOD_KEY,
+        )
 
 
 def test_deployed_env_refuses_blank_credential_kms_key():
     with pytest.raises(ValidationError, match="FEOH_CREDENTIAL_KMS_KEY_ID"):
         Settings(
             environment="production",
+            email_provider="ses",
             hcaptcha_secret="hc",
             secret_key=_GOOD_KEY,
             credential_kms_key_id="   ",
@@ -138,3 +151,37 @@ def test_deployed_env_refuses_blank_credential_kms_key():
 def test_local_dev_needs_no_credential_kms_key():
     # Guard rail 7: a fresh clone seals with the local provider, no AWS account.
     assert Settings(environment="development").credential_kms_key_id == ""
+
+
+# ── Console email adapter (deployed-env boot guard) ───────────────────
+
+_DEPLOYED = {
+    "environment": "production",
+    "credential_kms_key_id": "alias/test-app",
+    "hcaptcha_secret": "hc",
+    "secret_key": _GOOD_KEY,
+}
+
+
+@pytest.mark.parametrize("provider", ["console", "Console", " console "])
+def test_deployed_env_refuses_the_console_email_adapter(provider):
+    # It logs each email's full text: temporary passwords, reset links and
+    # sign-in codes would land in production logs and never reach anyone.
+    with pytest.raises(ValidationError, match="FEOH_EMAIL_PROVIDER"):
+        Settings(**_DEPLOYED, email_provider=provider)
+
+
+def test_deployed_env_refuses_the_console_default_when_unset():
+    with pytest.raises(ValidationError, match="FEOH_EMAIL_PROVIDER"):
+        Settings(**_DEPLOYED)
+
+
+@pytest.mark.parametrize("provider", ["ses", "smtp"])
+def test_deployed_env_accepts_a_real_email_provider(provider):
+    assert Settings(**_DEPLOYED, email_provider=provider).email_provider == provider
+
+
+def test_local_dev_keeps_the_console_email_adapter():
+    # The local signup flow reads the welcome email's temporary password from
+    # this log (docs/self-service-signup.md § Testing the flow locally).
+    assert Settings(environment="development").email_provider == "console"

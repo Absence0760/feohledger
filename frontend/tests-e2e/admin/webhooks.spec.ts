@@ -175,7 +175,7 @@ test.describe('/admin/webhooks (admin)', () => {
 		const row = page.locator('tr', { hasText: name });
 		await expect(row).toBeVisible();
 
-		await row.getByRole('button', { name: `Rotate signing secret for ${name}` }).click();
+		await row.getByRole('button', { name: `Rotate secret for ${name}` }).click();
 		const dialog = page.getByRole('dialog', { name: 'Rotate signing secret' });
 		await expect(dialog).toBeVisible();
 		// The backend's own default is pre-selected, and the destructive
@@ -259,7 +259,7 @@ test.describe('/admin/webhooks (admin)', () => {
 		const reveal = page.getByRole('dialog', { name: 'Signing secret rotated' });
 
 		// ── First rotation: a real overlap window, so a pill is on the row ──
-		await row.getByRole('button', { name: `Rotate signing secret for ${name}` }).click();
+		await row.getByRole('button', { name: `Rotate secret for ${name}` }).click();
 		await expect(dialog).toBeVisible();
 		// Nothing is in flight yet, so no re-rotation warning.
 		await expect(dialog.getByTestId('rerotate-warning')).toHaveCount(0);
@@ -277,7 +277,7 @@ test.describe('/admin/webhooks (admin)', () => {
 		// ── Second rotation: hard cutover ──
 		await page
 			.locator('tr', { hasText: name })
-			.getByRole('button', { name: `Rotate signing secret for ${name}` })
+			.getByRole('button', { name: `Rotate secret for ${name}` })
 			.click();
 		await expect(dialog).toBeVisible();
 		// Re-rotating during a live window evicts the secret that window was

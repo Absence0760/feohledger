@@ -158,7 +158,9 @@ test.describe('/signup — form', () => {
 		// the sitekey, the submit endpoint (so the test can read what each
 		// attempt sent), and hCaptcha's script — faked with the one behaviour
 		// that matters here, IMPLICIT rendering: it draws a widget into each
-		// `.h-captcha` present when it loads, and nothing added later.
+		// `.h-captcha` present when it loads, and nothing added later. It also
+		// records the theme each widget got: implicit mode reads `data-theme`,
+		// an explicit render reads `opts.theme`.
 		const submissions: Array<{ captcha_token: string | null }> = [];
 		await page.route('**/api/public-config', (route) =>
 			route.fulfill({
@@ -180,6 +182,7 @@ test.describe('/signup — form', () => {
 					window.hcaptcha = {
 						render(el, opts) {
 							el.dataset.widget = String(++widgets);
+							el.dataset.renderedTheme = (opts && opts.theme) || el.dataset.theme || 'light';
 							window.__solveCaptcha = opts && opts.callback;
 						}
 					};
@@ -191,6 +194,8 @@ test.describe('/signup — form', () => {
 		await page.goto('/signup');
 		const widget = page.locator('.h-captcha');
 		await expect(widget).toHaveAttribute('data-widget', '1');
+		// The app is dark-only, so a light widget is a white box on the form.
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'dark');
 
 		await fillForm(page, {
 			company: 'Captcha Co',
@@ -210,6 +215,7 @@ test.describe('/signup — form', () => {
 		// A NEW container was mounted, long after the script loaded: only an
 		// explicit render puts a widget in it.
 		await expect(widget).toHaveAttribute('data-widget', '2');
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'dark');
 
 		// The spent token must not ride along: submitting unsolved is refused
 		// client-side and never reaches the endpoint.

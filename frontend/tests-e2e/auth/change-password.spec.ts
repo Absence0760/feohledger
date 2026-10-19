@@ -57,6 +57,12 @@ test.describe('/change-password', () => {
 			// must_change_password=true sends the user to /change-password.
 			await page.waitForURL(/\/change-password$/, { timeout: 10_000 });
 
+			// The form names the account, so a password manager files the new
+			// password under this user rather than offering to save it nowhere.
+			const accountField = page.locator('form input[autocomplete="username"]');
+			await expect(accountField).toHaveValue(created.email);
+			await expect(accountField).toBeHidden();
+
 			// Empty state: no hint is satisfied.
 			const items = page.locator('ul.strength li');
 			await expect(items).toHaveCount(4);

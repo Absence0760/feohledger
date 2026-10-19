@@ -713,10 +713,11 @@ def test_email_header_is_text_only_for_a_renamed_tenant_without_a_logo():
     brand = get_brand_context({"brand": {"product_name": "Acme Pay", "accent_color": "#112233"}})
     header = brand_email_html_header(brand, public_url=APP_ORIGIN)
     assert "<img" not in header
-    # Byte-for-byte the header these tenants received before the mark existed.
+    # The product name alone, in the tenant accent (the layout places it above
+    # the card — see tests/test_email_layout.py).
     assert header == (
-        '<div style="border-bottom:2px solid #112233;padding-bottom:8px;'
-        'margin-bottom:16px;font-weight:600;font-size:16px;color:#112233">Acme Pay</div>'
+        '<div style="font-weight:700;font-size:18px;line-height:32px;'
+        'letter-spacing:-0.01em;color:#112233">Acme Pay</div>'
     )
 
 

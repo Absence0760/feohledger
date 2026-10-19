@@ -13,11 +13,31 @@ if TYPE_CHECKING:
 class EmailMessage:
     """An outbound transactional email. Plaintext + optional HTML body.
 
+    Every message goes out with an HTML part in the shared layout
+    (``email_adapters.layout``). ``body_html`` is the hand-written body to put in
+    it; leave it unset and the body is derived from ``body_text``, so a send
+    site never has to write HTML to look right. ``body_text`` always goes out
+    unchanged as the plaintext part.
+
     ``brand`` is the optional resolved tenant brand (white-label). When set, the
-    adapter swaps the From display name to the tenant product name and prepends a
-    branded HTML header + appends a support-link footer. When unset, the
-    platform-default brand is used (see ``apply_brand``), so an unbranded message
-    still gets a sensible, consistent presentation.
+    adapter swaps the From display name to the tenant product name and brands
+    the HTML header and footer. When unset, the platform-default brand is used,
+    so an unbranded message still gets a consistent presentation.
+
+    ``locale`` (a catalogue locale) sets the document language and the derived
+    body's default button label.
+
+    ``links`` are the URLs this sender built (a reset link, the workspace URL).
+    In a derived body only these become buttons or links; every other URL in
+    ``body_text`` stays inert text, because it may have arrived inside an
+    interpolated name. A hand-written ``body_html`` passes its URLs to the
+    layout blocks directly and needs none.
+
+    ``preheader`` is the inbox preview line. It is never derived from the body:
+    the first sentence of an email is where a sign-in code or a credential sits,
+    so a sender opts in with fixed copy, and an email carrying a code, token,
+    link or credential sets one that names none of them. Unset, no preheader is
+    sent and the client previews the body as it always has.
     """
 
     to: str
@@ -25,6 +45,9 @@ class EmailMessage:
     body_text: str
     body_html: str | None = None
     brand: BrandContext | None = None
+    locale: str | None = None
+    links: tuple[str, ...] = ()
+    preheader: str | None = None
 
 
 class EmailAdapter:
@@ -49,27 +72,36 @@ class EmailAdapter:
         brand = message.brand or get_brand_context(None)
         return brand_email_from(brand, base)
 
-    def _branded_html(self, message: EmailMessage) -> str | None:
-        """The HTML body wrapped with the brand header + support footer.
+    def _branded_html(self, message: EmailMessage) -> str:
+        """The message as a complete HTML document in the shared layout.
 
-        Returns ``None`` when the message has no HTML body (text-only email),
-        leaving the plaintext untouched. Uses the platform-default brand when the
-        message carries none.
+        Never ``None``: a message with no ``body_html`` gets one derived from its
+        plaintext (``layout.text_to_html``). Uses the platform-default brand when
+        the message carries none.
         """
-        if not message.body_html:
-            return None
         from app.config import settings
-        from app.services.branding import (
-            brand_email_footer_html,
-            brand_email_html_header,
-            get_brand_context,
-        )
+        from app.services.branding import get_brand_context
+        from app.services.email_adapters.email_catalogue import normalize_locale, translate
+        from app.services.email_adapters.layout import render_email, text_to_html
 
         brand = message.brand or get_brand_context(None)
+        locale = normalize_locale(message.locale)
+        body = message.body_html or text_to_html(
+            message.body_text,
+            brand,
+            cta_label=translate("email.layout.open_cta", locale, product=brand.product_name),
+            links=message.links,
+            fallback_intro=translate("email.layout.fallback_link", locale),
+        )
         # The platform mark is an image the frontend serves, so the header needs
         # its origin; a tenant logo is already an absolute URL.
-        header = brand_email_html_header(brand, public_url=settings.public_url)
-        return header + message.body_html + brand_email_footer_html(brand)
+        return render_email(
+            brand=brand,
+            body_html=body,
+            public_url=settings.public_url,
+            preheader=message.preheader or "",
+            lang=locale,
+        )
 
     def _branded_text(self, message: EmailMessage) -> str:
         """The plaintext body with the support-link footer appended (if any)."""

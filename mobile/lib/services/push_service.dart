@@ -30,6 +30,22 @@ class PushService {
 
   String? get fcmToken => _fcmToken;
 
+  /// Test seam: stands in for an `onRegistered` emission without a Firebase
+  /// app, which a unit test cannot initialize.
+  @visibleForTesting
+  void debugSetRegistration(String? id) => _fcmToken = id;
+
+  /// Sends this device's current FCM registration to the backend, if FCM has
+  /// issued one. The auth gate calls this on every sign-in (fresh login or a
+  /// restored session): the registration attempted during [init] runs before
+  /// any session exists, so without this a device would only ever reach the
+  /// backend if its identifier happened to change while signed in.
+  Future<void> registerWithBackend() async {
+    final id = _fcmToken;
+    if (id == null) return;
+    await _registerToken(id);
+  }
+
   final _localNotifications = FlutterLocalNotificationsPlugin();
 
   /// Initialize FCM and request permissions.
@@ -50,17 +66,14 @@ class PushService {
         return;
       }
 
-      // Get FCM token
-      _fcmToken = await FirebaseMessaging.instance.getToken();
-      debugPrint('[push] FCM token: $_fcmToken');
-      if (_fcmToken != null) unawaited(_registerToken(_fcmToken!));
-
-      // Listen for token refresh
-      FirebaseMessaging.instance.onTokenRefresh.listen((token) {
-        _fcmToken = token;
-        debugPrint('[push] FCM token refreshed');
-        unawaited(_registerToken(token));
-      });
+      // Register this app instance with FCM. Since firebase_messaging 17 the
+      // device's push identity is its Firebase Installation ID (FID), delivered
+      // on `onRegistered` — on the first registration and again whenever it
+      // changes — replacing the deprecated `getToken()` + `onTokenRefresh`
+      // pair. Subscribe BEFORE calling `register()` so the first FID cannot be
+      // emitted into a stream nobody is listening to yet.
+      FirebaseMessaging.instance.onRegistered.listen(_onRegistered);
+      await FirebaseMessaging.instance.register();
 
       // Initialize local notifications for foreground display. The small icon
       // is a white silhouette: Android draws it from alpha alone, so the
@@ -83,6 +96,12 @@ class PushService {
     } catch (e) {
       debugPrint('[push] Init failed (Firebase not configured?): $e');
     }
+  }
+
+  void _onRegistered(String fid) {
+    _fcmToken = fid;
+    debugPrint('[push] FCM registration updated');
+    unawaited(_registerToken(fid));
   }
 
   void _handleForegroundMessage(RemoteMessage message) {
@@ -134,9 +153,11 @@ class PushService {
   /// the backend (`POST /api/notifications/device-token`). Mirrors the
   /// try/catch-and-log discipline of the rest of this service — a failure
   /// here (no network, not yet authenticated) must never crash or block push
-  /// setup. Silently no-ops before login (the caller has no JWT yet); the
-  /// token is re-sent on the next `onTokenRefresh` fire, so a session that
-  /// starts after this call still ends up registered.
+  /// setup. Before login it fails (the caller has no JWT yet) — and push init
+  /// runs before session restore, so on a cold start it always does. The
+  /// `onRegistered` stream does not help there: it fires only when the
+  /// identifier changes, not on every launch. [registerWithBackend] is the
+  /// retry, called by the auth gate on every sign-in.
   Future<void> _registerToken(String token) async {
     final platform = Platform.isIOS ? 'ios' : 'android';
     try {

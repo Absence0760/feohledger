@@ -53,7 +53,7 @@ and the manual audit is the tracked outstanding work.
 | 2.1.2 No Keyboard Trap | A | Supports | The shared `Modal` traps focus only while open and releases it on `Esc`/close; no other traps. |
 | 2.1.4 Character Key Shortcuts | A | Not Applicable | No single-character key shortcuts are implemented. |
 | 2.2.1 Timing Adjustable | A | Supports | No time limits on user interaction; session expiry re-prompts for login without data loss of in-progress work beyond auth. |
-| 2.2.2 Pause, Stop, Hide | A | Supports | In the app: no auto-updating/blinking content beyond brief toasts; loading indicators are not blinking content. On the public marketing page, the looping decorative animation (hero sequence, background, adapter rail) is stopped by an in-page Pause animation control in the header; the sign-in and signup pages have no continuous motion. |
+| 2.2.2 Pause, Stop, Hide | A | Supports | In the app: no auto-updating/blinking content beyond brief toasts; loading indicators are not blinking content. On the public marketing page, all motion ends within 5 s: each decorative animation (hero sequence, background drift, headline sheen) runs once and rests, and the adapter list is static, so nothing moves for more than five seconds and no pause control is needed. The sign-in and signup pages have no continuous motion. |
 | 2.3.1 Three Flashes or Below Threshold | A | Supports | No flashing content. |
 | 2.4.1 Bypass Blocks | A | Supports | Skip-to-content link is the first focusable element; consistent landmark structure provides additional bypass. |
 | 2.4.2 Page Titled | A | Supports | Each route sets a descriptive document title. |
@@ -61,7 +61,7 @@ and the manual audit is the tracked outstanding work.
 | 2.4.4 Link Purpose (In Context) | A | Partially Supports | Row links carry row-specific `aria-label`s; a full audit of link text in context is part of the manual pass. |
 | 2.5.1 Pointer Gestures | A | Supports | Interactions are single taps/clicks. The one drag surface — the workflow-builder canvas — carries a per-node single-pointer alternative (Move ↑ / Move ↓ on every step), so no path-based or multipoint gesture is required anywhere. |
 | 2.5.2 Pointer Cancellation | A | Supports | Actions fire on the up-event; no down-event commits. |
-| 2.5.3 Label in Name | A | Supports | Visible labels are contained in each control's accessible name; verified by axe. |
+| 2.5.3 Label in Name | A | Supports | Visible labels are contained in each control's accessible name; verified by axe (`label-content-name-mismatch`, a default rule since axe-core 4.14). Row-action labels are composed from the visible string (`frontend/docs/ui-patterns.md`). |
 | 2.5.4 Motion Actuation | A | Not Applicable | No motion/device-orientation-actuated functions (mobile camera OCR is an explicit button, not motion-triggered). |
 | 3.1.1 Language of Page | A | Supports | `<html lang="en-US">` is set. |
 | 3.2.1 On Focus | A | Supports | Focusing a control does not trigger a context change. |

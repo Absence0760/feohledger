@@ -68,7 +68,7 @@ test.describe('/invoices — Invoice detail file management', () => {
 		const detail = await openInvoiceDetail(page, uniqueNumber);
 
 		// (a) No file yet: "Upload File" is the only file-management affordance.
-		const uploadBtn = detail.getByRole('button', { name: 'Upload invoice file' });
+		const uploadBtn = detail.getByRole('button', { name: 'Upload File' });
 		await expect(uploadBtn).toBeVisible();
 		await expect(uploadBtn).toHaveText('Upload File');
 		await expect(detail.getByRole('button', { name: 'Replace' })).toHaveCount(0);
@@ -87,7 +87,7 @@ test.describe('/invoices — Invoice detail file management', () => {
 		// toast, modal stays open.
 		await expect(detail.getByRole('button', { name: 'Replace' })).toBeVisible({ timeout: 10_000 });
 		await expect(detail.getByRole('button', { name: 'Delete File' })).toBeVisible();
-		await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toHaveCount(0);
+		await expect(detail.getByRole('button', { name: 'Upload File' })).toHaveCount(0);
 		await expect(page.locator('.toast.error')).toHaveCount(0);
 		await expect(detail).toBeVisible();
 
@@ -115,12 +115,12 @@ test.describe('/invoices — Invoice detail file management', () => {
 		await deleteBtn.click();
 		await expect(detail.getByRole('button', { name: 'Confirm Delete' })).toBeVisible();
 		// Not yet deleted — the first click only arms the button.
-		await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toHaveCount(0);
+		await expect(detail.getByRole('button', { name: 'Upload File' })).toHaveCount(0);
 
 		await detail.getByRole('button', { name: 'Confirm Delete' }).click();
 
 		// File is gone: toolbar reverts to just "Upload File".
-		await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toBeVisible({
+		await expect(detail.getByRole('button', { name: 'Upload File' })).toBeVisible({
 			timeout: 10_000
 		});
 		await expect(detail.getByRole('button', { name: 'Replace' })).toHaveCount(0);
@@ -152,7 +152,7 @@ test.describe('/invoices — Invoice detail file management', () => {
 			await signInAndWait(page, tenantClerk);
 			await page.goto(`/invoices?id=${invoiceId}`);
 			const detail = page.locator('div.modal[role="dialog"]', { hasText: invoiceNumber });
-			await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toBeVisible({
+			await expect(detail.getByRole('button', { name: 'Upload File' })).toBeVisible({
 				timeout: 10_000
 			});
 
@@ -166,7 +166,7 @@ test.describe('/invoices — Invoice detail file management', () => {
 			await expect(detail.getByTestId('invoice-modal-status')).toHaveValue('Ready for Review', {
 				timeout: 10_000
 			});
-			await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toHaveCount(0);
+			await expect(detail.getByRole('button', { name: 'Upload File' })).toHaveCount(0);
 			await expect(detail.getByRole('button', { name: 'Replace' })).toHaveCount(0);
 			await expect(detail.getByRole('button', { name: 'Delete File' })).toHaveCount(0);
 		} finally {

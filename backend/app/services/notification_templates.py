@@ -21,6 +21,17 @@ from app.models.notification import (
 )
 
 
+def _html(body: str) -> str:
+    """The email body as an escaped layout paragraph.
+
+    Escaped because the vendor name and a rejection reason are free text.
+    Imported lazily for the same reason as ``translate`` in :func:`render`.
+    """
+    from app.services.email_adapters.layout import email_paragraph
+
+    return email_paragraph(body)
+
+
 @dataclass(frozen=True)
 class InvoiceContext:
     """The minimal, PII-free invoice fields a template may reference."""
@@ -94,8 +105,7 @@ def render(
         # most a short author label (e.g. "from supplier") — no message text.
         body += translate("notif.chat_message.note", locale, note=ctx.note)
 
-    body_html = f"<p>{body}</p>"
-    return RenderedNotification(title=title, body_text=body, body_html=body_html)
+    return RenderedNotification(title=title, body_text=body, body_html=_html(body))
 
 
 def render_contract_renewal(
@@ -118,7 +128,7 @@ def render_contract_renewal(
         f"Contract {contract_number}{vendor} expires on {end_date.isoformat()} ({when}). "
         "Review it for renewal."
     )
-    return RenderedNotification(title=title, body_text=body, body_html=f"<p>{body}</p>")
+    return RenderedNotification(title=title, body_text=body, body_html=_html(body))
 
 
 def render_cash_shortfall(
@@ -166,7 +176,7 @@ def render_cash_shortfall(
         f"{currency} {shortfall:,.2f} below your {currency} {threshold:,.2f} minimum."
         f"{more}{caveat} Review the cash-flow forecast before scheduling more payments."
     )
-    return RenderedNotification(title=title, body_text=body, body_html=f"<p>{body}</p>")
+    return RenderedNotification(title=title, body_text=body, body_html=_html(body))
 
 
 #: The AI-read-invoice usage notices (decisions §253), mildest first.
@@ -235,4 +245,4 @@ def render_ai_invoice_usage(
             f"Your organization has used {used:,} of the {included:,} AI-read invoices "
             f"included this month. {tail}"
         )
-    return RenderedNotification(title=title, body_text=body, body_html=f"<p>{body}</p>")
+    return RenderedNotification(title=title, body_text=body, body_html=_html(body))

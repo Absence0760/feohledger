@@ -446,7 +446,10 @@
 						class="btn-lifecycle"
 						disabled={busy}
 						onclick={handleGenerateNow}
-						aria-label={m('recurring.modal.lifecycle.generateNowAria', { name: template!.name })}
+						aria-label={m('recurring.modal.lifecycle.generateNowAria', {
+							action: m('recurring.modal.lifecycle.generateNow'),
+							name: template!.name
+						})}
 					>
 						{m('recurring.modal.lifecycle.generateNow')}
 					</button>

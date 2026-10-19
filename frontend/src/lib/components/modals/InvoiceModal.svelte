@@ -1744,7 +1744,6 @@
 								type="button"
 								class="btn-file-action"
 								disabled={uploadingFile}
-								aria-label={m('invoices.modal.file.uploadAria')}
 								onclick={() => fileInput?.click()}
 							>
 								{m('invoices.modal.file.upload')}

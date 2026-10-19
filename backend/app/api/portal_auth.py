@@ -83,6 +83,8 @@ async def _send_vendor_email_otp(vu: VendorUser, code: str) -> None:
             "If you didn't try to sign in, ignore this email and consider "
             "rotating your password."
         ),
+        # Fixed copy: the inbox preview must never show the code.
+        preheader="Use the code in this email to finish signing in.",
     )
     adapter = get_email_adapter()
     await adapter.send(msg)
