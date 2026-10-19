@@ -974,7 +974,7 @@ inherit it for free. Reuse these; don't re-solve them per page.
   4. **All motion ends within 5 s (WCAG 2.2.2).** The criterion covers motion
      that starts on its own and lasts more than five seconds, and this product
      answers it by never doing that — not with a pause control (the landing
-     page's `MotionToggle` was removed; decisions §278). So: no `infinite`; a
+     page's `MotionToggle` was removed; decisions §279). So: no `infinite`; a
      finite iteration count with `delay + duration × count ≤ 5s`; `forwards`
      fill so the animation rests on its last keyframe, which (rule 1) must
      show everything. Something that cannot fit — a marquee — is rendered

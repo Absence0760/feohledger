@@ -96,7 +96,7 @@ test.describe('landing — scroll reveal', () => {
 
 test.describe('landing — motion ends on its own (WCAG 2.2.2)', () => {
 	// The page has no pause control: it meets 2.2.2 by never moving for more
-	// than five seconds (decisions §278). This reads what the browser is
+	// than five seconds (decisions §279). This reads what the browser is
 	// actually running — every CSS animation and transition, including the
 	// per-element `calc()` delays the static guard
 	// (`src/lib/a11y/marketingMotion.test.ts`) cannot resolve — and checks each

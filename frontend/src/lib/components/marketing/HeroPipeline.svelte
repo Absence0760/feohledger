@@ -11,7 +11,7 @@
 	 * its PO, approved, paid. The card assembles once in about four seconds, the
 	 * extraction sweep and the stage rail run once over it, and then everything
 	 * holds on the finished card. **Nothing here runs past five seconds** — that
-	 * is how the page meets WCAG 2.2.2 with no pause control (decisions §278).
+	 * is how the page meets WCAG 2.2.2 with no pause control (decisions §279).
 	 *
 	 * **It is a drawing, not a screenshot.** A screenshot of the real app would
 	 * be a maintenance liability (it goes stale on the next restyle and nobody

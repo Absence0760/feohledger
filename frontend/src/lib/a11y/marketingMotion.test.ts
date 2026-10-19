@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * Every animation on the public marketing surfaces stops on its own within
- * five seconds (decisions §278).
+ * five seconds (decisions §279).
  *
  * That is how the landing page meets WCAG 2.2.2 Pause, Stop, Hide with no
  * pause control: the criterion only covers motion that starts automatically

@@ -29,7 +29,7 @@
 	 * backdrop shifting behind the fields is distraction there, however short.
 	 * Without `still` the aurora drifts ONCE, for at most five seconds, and
 	 * rests — WCAG 2.2.2 applies only to motion that runs longer than that, so
-	 * the marketing page needs no pause control (decisions §278).
+	 * the marketing page needs no pause control (decisions §279).
 	 *
 	 * `fixed` pins the layers to the viewport instead of the parent. The
 	 * marketing page takes it: sized to a 5,700 px document, the percentage-
@@ -78,7 +78,7 @@
 	   different duration (4.2s / 4.6s / 5s) so they settle one after
 	   another rather than as a block. They used to loop forever on
 	   23s / 31s / 41s periods; nothing on this page may move for more
-	   than five seconds (decisions §278).
+	   than five seconds (decisions §279).
 
 	   Every keyframe ENDS where the layer should rest, and `forwards`
 	   holds it there. `app.css` collapses animation-duration to

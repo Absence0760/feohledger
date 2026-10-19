@@ -531,7 +531,7 @@
 		/* One pass of the gradient across the words and back, then rest. It
 		   ends where it starts, so the resting frame — and the only frame under
 		   reduced motion — is the intended one. 4s: nothing on this page moves
-		   past five seconds (decisions §278). */
+		   past five seconds (decisions §279). */
 		animation: sheen 4s ease-in-out 1 forwards;
 	}
 	@keyframes sheen {

@@ -255,7 +255,7 @@ state is set by script (`use:reveal`), never by a stylesheet, so a failed
 bundle is a plain page rather than a blank one; no animation runs past five
 seconds — finite iteration count, `delay + duration × count ≤ 5s`, ending on
 its resting frame — because that is how the public pages meet WCAG 2.2.2 with
-no pause control (decisions §278; the OS preference does not discharge it);
+no pause control (decisions §279; the OS preference does not discharge it);
 and fade with colour, not `opacity`, at rest.
 
 **Nothing in the app shell is sticky or continuously animated.** A sticky strip

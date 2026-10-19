@@ -263,7 +263,7 @@ The current build implements:
   sequence, the background drift, the headline sheen) runs once, finishes
   inside five seconds and rests on a frame that hides nothing; the adapter list
   is a static row. With nothing past five seconds there is nothing to pause, so
-  the page carries no pause control (decisions §278). The auth pages carry no
+  the page carries no pause control (decisions §279). The auth pages carry no
   continuous motion either. Guarded statically by
   `frontend/src/lib/a11y/marketingMotion.test.ts` (no `infinite`, timing
   budget) and at runtime by `frontend/tests-e2e/marketing/landing.spec.ts`,

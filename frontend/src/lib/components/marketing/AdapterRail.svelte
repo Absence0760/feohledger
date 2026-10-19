@@ -21,7 +21,7 @@
 	 * Static, deliberately: a wrapped, centred row rather than the marquee it
 	 * used to be. A 46-second scroll cannot fit inside the five seconds of
 	 * motion this page allows itself (WCAG 2.2.2 with no pause control,
-	 * decisions §278), and a row the reader can scan beats one they have to
+	 * decisions §279), and a row the reader can scan beats one they have to
 	 * wait for — every name is visible at once, nothing is masked at the edges,
 	 * and the list is rendered once instead of twice.
 	 */
