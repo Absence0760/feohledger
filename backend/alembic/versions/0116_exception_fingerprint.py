@@ -18,14 +18,12 @@ and the invoice fields those rules read. A person-closed row suppresses the
 re-raise only while the invoice still hashes the same.
 
 Revision ID: 0116_exception_fingerprint
-Revises: 0114_gl_code_width
+Revises: 0115_erp_link_realm
 Create Date: 2026-10-19
 
 26 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
 
-0115 is reserved for PR #601's tenant migration. Until that lands this revises
-0114 so the branch keeps one head; it is re-chained onto #601's 0115 before
-merge.
+Chained after #601's ``0115_erp_link_realm``, so this branch merges after #601.
 
 TENANT DB ONLY: gated on ``exceptions`` existing, so a no-op on the control
 plane, fanned out by ``scripts/migrate_all_tenants.py``. Fresh tenants get the
@@ -40,7 +38,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision = "0116_exception_fingerprint"
-down_revision = "0114_gl_code_width"
+down_revision = "0115_erp_link_realm"
 branch_labels = None
 depends_on = None
 
