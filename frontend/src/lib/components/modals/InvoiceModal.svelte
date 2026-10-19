@@ -9,7 +9,7 @@
 		extractionAllowed
 	} from '#lib/types/invoice.ts';
 	import { PERM_INVOICE_APPROVE } from '#lib/types/admin.ts';
-	import { formatMoney, isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
+	import { formatMoney, isNegativeAmount, isPositiveAmount, moneyInputText, type MoneyAmount } from '#lib/utils/money.ts';
 	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -228,7 +228,9 @@
 	let loadedVersion = $state(invoice.updated_at);
 	let vendor = $state(invoice.vendor);
 	let invoice_number = $state(invoice.invoice_number);
-	let amount = $state(invoice.amount);
+	// At the currency's precision: the wire's JSON number reads `77.1` for
+	// 77.10 (`utils/money.ts::moneyInputText`).
+	let amount = $state<MoneyAmount>(moneyInputText(invoice.amount, invoice.currency));
 	let due_date = $state(invoice.due_date);
 	let status = $state(invoice.status);
 	let currentFileUrl = $state(invoice.file_url);
@@ -713,8 +715,10 @@
 		const payload: Record<string, unknown> = {
 			invoice_number,
 			due_date,
-			po_number,
-			description,
+			// A blank input is NULL, as for the fields below: an untouched empty
+			// input sent as "" used to write a phantom `null -> ""` edit row.
+			po_number: po_number || null,
+			description: description || null,
 			vendor_address: vendor_address || null,
 			vendor_tax_id: vendor_tax_id || null,
 			ship_to_address: ship_to_address || null,
@@ -942,7 +946,7 @@
 					// Extraction finished — update the modal fields with extracted data
 					vendor = updated.vendor || vendor;
 					invoice_number = updated.invoice_number || invoice_number;
-					amount = updated.amount || amount;
+					amount = updated.amount ? moneyInputText(updated.amount, updated.currency) : amount;
 					due_date = updated.due_date || due_date;
 					po_number = updated.po_number || po_number;
 					description = updated.description || description;
@@ -1208,9 +1212,11 @@
 		item_code: string | null;
 		description: string | null;
 		quantity: number | null;
-		unit_price: number | null;
-		tax: number | null;
-		total: number | null;
+		// Money: a JSON number on load (padded to the currency's precision by
+		// `loadLineItems`), then the exact text the user typed — never parseFloat.
+		unit_price: MoneyAmount;
+		tax: MoneyAmount;
+		total: MoneyAmount;
 		gl_account: string | null;
 	}
 
@@ -1615,7 +1621,12 @@
 			const fetched = await api.get<LineItem[]>(`/api/invoices/${invoice.id}/line-items`);
 			// Superseded by a newer load, or by an unsaved local edit.
 			if (!lineItemsSequence.canCommit(token)) return;
-			lineItems = fetched;
+			lineItems = fetched.map((li) => ({
+				...li,
+				unit_price: li.unit_price == null ? null : moneyInputText(li.unit_price, invoice.currency),
+				tax: li.tax == null ? null : moneyInputText(li.tax, invoice.currency),
+				total: li.total == null ? null : moneyInputText(li.total, invoice.currency),
+			}));
 		} catch {
 			// non-critical
 		}
@@ -2036,9 +2047,9 @@
 											<td class="li-num">{idx + 1}</td>
 											<td><input type="text" class="li-input" aria-label={m('invoices.modal.lineItems.descriptionAria', { n: idx + 1 })} value={li.description ?? ''} oninput={(e) => updateLineItem(idx, 'description', e.currentTarget.value)} /></td>
 											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.quantityAria', { n: idx + 1 })} value={li.quantity ?? ''} oninput={(e) => updateLineItem(idx, 'quantity', e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)} /></td>
-											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.unitPriceAria', { n: idx + 1 })} value={li.unit_price ?? ''} oninput={(e) => updateLineItem(idx, 'unit_price', e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)} /></td>
-											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.taxAria', { n: idx + 1 })} value={li.tax ?? ''} oninput={(e) => updateLineItem(idx, 'tax', e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)} /></td>
-											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.totalAria', { n: idx + 1 })} value={li.total ?? ''} oninput={(e) => updateLineItem(idx, 'total', e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)} /></td>
+											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.unitPriceAria', { n: idx + 1 })} value={li.unit_price ?? ''} oninput={(e) => updateLineItem(idx, 'unit_price', e.currentTarget.value || null)} /></td>
+											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.taxAria', { n: idx + 1 })} value={li.tax ?? ''} oninput={(e) => updateLineItem(idx, 'tax', e.currentTarget.value || null)} /></td>
+											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.totalAria', { n: idx + 1 })} value={li.total ?? ''} oninput={(e) => updateLineItem(idx, 'total', e.currentTarget.value || null)} /></td>
 											<td>
 											{#if glAccounts.length > 0}
 												<select class="li-input li-gl" aria-label={m('invoices.modal.lineItems.glAria', { n: idx + 1 })} value={li.gl_account ?? ''} onchange={(e) => updateLineItem(idx, 'gl_account', e.currentTarget.value)}>

@@ -172,6 +172,49 @@ export function parseMoneyForLayout(amount: MoneyAmount): number {
 }
 
 /**
+ * How many minor-unit digits `currency` carries (USD 2, JPY 0, BHD 3), read
+ * from `Intl`, never a table here. `2` when the code is missing or one `Intl`
+ * does not know, matching what every money column holds.
+ */
+export function currencyMinorUnits(currency?: string | null): number {
+	const code = resolveCurrency(currency);
+	if (code === null) return 2;
+	try {
+		return (
+			new Intl.NumberFormat('en', { style: 'currency', currency: code }).resolvedOptions()
+				.maximumFractionDigits ?? 2
+		);
+	} catch {
+		return 2;
+	}
+}
+
+/**
+ * The text an editable money INPUT starts from: the amount at its currency's
+ * minor-unit precision, so an invoice of 77.10 USD reads `77.10`, not `77.1`.
+ *
+ * Money crosses the wire as a JSON number (`schemas/money.py`), and a number
+ * has no trailing zeros to keep — `<input value={77.1}>` shows `77.1`, and
+ * `250` for 250.00. This pads the fraction TEXTUALLY: no arithmetic, no
+ * rounding, and a value with MORE digits than the currency carries is
+ * returned untouched rather than cut, because an input that silently trimmed
+ * a figure would submit a different amount on the next save.
+ *
+ * Plain unsigned/signed decimals only; anything else (an exponent form, junk)
+ * is returned as its own text. `''` for no amount.
+ */
+export function moneyInputText(amount: MoneyAmount, currency?: string | null): string {
+	if (amount === null || amount === undefined) return '';
+	const text = String(amount).trim();
+	const match = /^(-?\d+)(?:\.(\d*))?$/.exec(text);
+	if (!match) return text;
+	const [, whole, fraction = ''] = match;
+	const places = currencyMinorUnits(currency);
+	if (fraction.length >= places) return fraction ? `${whole}.${fraction}` : whole;
+	return `${whole}.${fraction.padEnd(places, '0')}`;
+}
+
+/**
  * Is this a strictly-positive amount?
  *
  * A *predicate*, not arithmetic — it never feeds a rendered figure, so
