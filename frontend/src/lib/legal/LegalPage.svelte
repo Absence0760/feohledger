@@ -18,12 +18,12 @@
 	 * the product inside that branch, and owns the backdrop and the 46rem
 	 * measure this component no longer declares.
 	 */
-	let { title, intro, children } = $props<{
+	let { title, intro, children }: {
 		title: string;
 		/** Optional one-paragraph orientation shown above the body text. */
 		intro?: string;
 		children: import('svelte').Snippet;
-	}>();
+	} = $props();
 
 	/* ---------------------------- table of contents ----------------------------
 	   Six documents and 91 top-level sections between them — the DPA alone has
