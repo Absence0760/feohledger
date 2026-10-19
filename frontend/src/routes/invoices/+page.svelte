@@ -1026,7 +1026,10 @@
 					}}
 				>
 					<td class="checkbox-col" title={SYSTEM_MANAGED_STATUSES.has(invoice.status) ? m('invoices.systemManagedTitle', { status: m(INVOICE_STATUS_LABEL_KEYS[invoice.status]) }) : ''}><input type="checkbox" aria-label={`Select invoice ${invoice.invoice_number}`} checked={selected.has(invoice.id)} disabled={SYSTEM_MANAGED_STATUSES.has(invoice.status)} onchange={() => toggleSelect(invoice.id)} /></td>
-					<td class="mono">
+					<td class="mono" title={invoice.invoice_number || undefined}>
+						<!-- Flex, so a long number gives way and its warning icon keeps
+						     its place (#575): `RowLink` ellipsizes, the icon never shrinks. -->
+						<span class="num-cell">
 						<RowLink
 							onclick={() => (editing = invoice)}
 							ariaLabel={`Edit invoice ${invoice.invoice_number || 'draft'}`}
@@ -1055,6 +1058,7 @@
 								</svg>
 							</span>
 						{/if}
+						</span>
 					</td>
 					<td>
 						{invoice.vendor || '—'}
@@ -1270,7 +1274,18 @@
 		border-bottom: none;
 	}
 
+	.num-cell {
+		display: flex;
+		align-items: center;
+		min-width: 0;
+	}
+	.num-cell :global(.row-link) {
+		flex: 0 1 auto;
+		min-width: 0;
+	}
+
 	.warning-icon {
+		flex-shrink: 0;
 		display: inline-flex;
 		vertical-align: middle;
 		margin-left: 4px;
