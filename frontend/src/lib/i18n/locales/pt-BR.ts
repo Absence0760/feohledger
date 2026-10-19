@@ -6156,6 +6156,7 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "O {provider} aceita apenas faturas com valor acima de zero. Corrija o valor ou registre uma nota de crédito.",
 	'erpRefusal.jobUnconfirmed': "O {provider} aceitou a fatura, mas não confirmou que ela foi criada. Tente novamente para verificar; ela não será enviada duas vezes.",
 	'erpRefusal.credentialsUnavailable': "Não foi possível abrir as credenciais do ERP agora. Tente novamente em alguns minutos; se continuar falhando, avise um administrador.",
+	'erpRefusal.exceptionBlocksExport': "Esta fatura tem uma exceção aberta ({type}). Resolva-a ou descarte-a em Exceções e, depois, envie a fatura ao ERP.",
 	'glAccounts.toast.synced': "{created} contas novas e {updated} atualizadas sincronizadas.",
 	'glAccounts.toast.syncConflicts': "Sem vínculo porque o código é compartilhado por mais de uma conta do ERP, já está em uso ou é longo demais: {codes}.",
 	'glAccounts.toast.syncUnlinked': "Desvinculadas porque o código não identifica mais uma única conta do ERP; recodifique as faturas delas: {codes}.",

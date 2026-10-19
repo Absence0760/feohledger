@@ -6132,6 +6132,7 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "{provider} nimmt nur Rechnungen über einen Betrag größer als null an. Korrigieren Sie den Betrag oder erfassen Sie stattdessen eine Gutschrift.",
 	'erpRefusal.jobUnconfirmed': "{provider} hat die Rechnung angenommen, aber noch nicht bestätigt, dass sie angelegt wurde. Versuchen Sie es erneut, um nachzusehen – sie wird nicht doppelt gesendet.",
 	'erpRefusal.credentialsUnavailable': "Die ERP-Zugangsdaten konnten gerade nicht geöffnet werden. Versuchen Sie es in einigen Minuten erneut; wenn es weiterhin fehlschlägt, wenden Sie sich an einen Administrator.",
+	'erpRefusal.exceptionBlocksExport': "Diese Rechnung hat eine offene Ausnahme ({type}). Lösen oder verwerfen Sie sie unter Ausnahmen und senden Sie die Rechnung dann an das ERP.",
 	'glAccounts.toast.synced': "{created} neue und {updated} aktualisierte Konten synchronisiert.",
 	'glAccounts.toast.syncConflicts': "Nicht verknüpft, weil der Code mehreren ERP-Konten gehört, bereits verwendet wird oder zu lang ist: {codes}.",
 	'glAccounts.toast.syncUnlinked': "Verknüpfung aufgehoben, weil der Code kein eindeutiges ERP-Konto mehr bezeichnet – kontieren Sie die zugehörigen Rechnungen um: {codes}.",

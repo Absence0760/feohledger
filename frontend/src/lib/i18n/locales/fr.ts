@@ -6132,6 +6132,7 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "{provider} n'accepte que les factures d'un montant supérieur à zéro. Corrigez le montant ou enregistrez plutôt un avoir.",
 	'erpRefusal.jobUnconfirmed': "{provider} a accepté la facture mais n'a pas confirmé sa création. Réessayez pour vérifier ; elle ne sera pas envoyée deux fois.",
 	'erpRefusal.credentialsUnavailable': "Les identifiants ERP n'ont pas pu être ouverts pour le moment. Réessayez dans quelques minutes ; si l'échec persiste, prévenez un administrateur.",
+	'erpRefusal.exceptionBlocksExport': "Cette facture a une exception ouverte ({type}). Résolvez-la ou rejetez-la dans Exceptions, puis envoyez la facture à l'ERP.",
 	'glAccounts.toast.synced': "{created} nouveaux comptes et {updated} comptes mis à jour synchronisés.",
 	'glAccounts.toast.syncConflicts': "Non associés, car le code est partagé par plusieurs comptes de l'ERP, déjà utilisé ou trop long : {codes}.",
 	'glAccounts.toast.syncUnlinked': "Dissociés, car le code ne désigne plus un seul compte de l'ERP ; réimputez leurs factures : {codes}.",

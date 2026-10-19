@@ -483,3 +483,22 @@ describe('the commerce refusals', () => {
 	});
 });
 
+describe('the ERP send refused for an open duplicate or fraud exception (§286)', () => {
+	it('states the 409 the send doors answer with, in the reader’s language', () => {
+		expect(
+			localizeApiDetail(
+				detail('exception_blocks_erp_export', { exception_type: 'duplicate' }),
+				enT
+			)
+		).toBe(
+			`This invoice has an open ${en['exceptions.type.duplicate']} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.`
+		);
+		expect(
+			codedRefusalText('exception_blocks_erp_export', { exception_type: 'fraud_flag' }, deT)
+		).toContain(`(${de['exceptions.type.fraudFlag']})`);
+	});
+
+	it('falls back to the server sentence when the type is missing', () => {
+		expect(codedRefusalText('exception_blocks_erp_export', {}, enT)).toBeNull();
+	});
+});

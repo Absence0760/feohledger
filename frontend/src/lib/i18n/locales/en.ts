@@ -6358,6 +6358,7 @@ export const en = {
 	'erpRefusal.amountNotPositive': "{provider} takes only invoices for more than zero. Correct the amount, or record a credit memo instead.",
 	'erpRefusal.jobUnconfirmed': "{provider} accepted the invoice but hasn't confirmed it was created. Retry to check again — it won't be sent twice.",
 	'erpRefusal.credentialsUnavailable': "The ERP credentials couldn't be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.",
+	'erpRefusal.exceptionBlocksExport': "This invoice has an open {type} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.",
 	'glAccounts.toast.synced': "Synced {created} new and {updated} updated accounts.",
 	'glAccounts.toast.syncConflicts': "Not linked, because the code is shared by more than one ERP account, already in use, or too long: {codes}.",
 	'glAccounts.toast.syncUnlinked': "Unlinked, because the code no longer identifies one ERP account — recode their invoices: {codes}.",

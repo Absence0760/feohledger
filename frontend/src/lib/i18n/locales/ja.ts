@@ -6060,6 +6060,7 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "{provider} は金額が 0 より大きい請求書のみ受け付けます。金額を修正するか、代わりにクレジットメモを登録してください。",
 	'erpRefusal.jobUnconfirmed': "{provider} は請求書を受け付けましたが、作成されたことをまだ確認できていません。再試行して確認してください（二重に送信されることはありません）。",
 	'erpRefusal.credentialsUnavailable': "現在 ERP の認証情報を開けませんでした。数分後に再試行してください。失敗が続く場合は管理者に連絡してください。",
+	'erpRefusal.exceptionBlocksExport': "この請求書には未解決の例外（{type}）があります。「例外」で解決または却下してから、ERP に送信してください。",
 	'glAccounts.toast.synced': "新規 {created} 件、更新 {updated} 件の勘定科目を同期しました。",
 	'glAccounts.toast.syncConflicts': "コードが複数の ERP 勘定科目で共有されている、すでに使われている、または長すぎるため、紐付けませんでした: {codes}。",
 	'glAccounts.toast.syncUnlinked': "コードが 1 つの ERP 勘定科目を特定しなくなったため、紐付けを解除しました。該当する請求書を仕訳し直してください: {codes}。",
