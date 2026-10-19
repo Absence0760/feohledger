@@ -3,7 +3,7 @@
 Why
 ---
 A database here is built one of two ways, and they must agree
-(`docs/decisions.md` §274, `backend/docs/database.md` § Schema parity):
+(`docs/decisions.md` §274, `backend/docs/database.md` § Whole-schema parity):
 
 * a database that predates a release runs the Alembic chain;
 * a NEW tenant (``tenant_provisioning._create_tenant_tables``) and a NEW control
@@ -19,8 +19,9 @@ built is not stamped, so the first ``deploy.sh`` after provisioning replays the
 whole chain over it, and 0029 / 0051 / 0082 guarded their foreign keys by their
 OWN names only. Each re-added an FK the tenant already had under
 ``create_all``'s name, so a tenant deployed over since it was provisioned
-carries 14 duplicate foreign keys, each checked again on every write. Those guards now accept either name, and
-step 2 drops the duplicates where they landed. Everything else differs only on
+carries 14 duplicate foreign keys, each checked again on every write. Those
+guards now accept either name, and step 2 drops the duplicates where they
+landed. Everything else differs only on
 databases that went through the chain — long-lived development databases, and
 any database restored from a pre-v0.1.0 backup — and is a no-op elsewhere.
 
@@ -371,10 +372,16 @@ def _plain_fks() -> None:
         )
         # 'a' is NO ACTION, the default the model's plain ForeignKey builds.
         if action is not None and action != "a":
+            # NOT VALID, then VALIDATE: the re-add would otherwise scan the
+            # child table holding ACCESS EXCLUSIVE on it and SHARE ROW EXCLUSIVE
+            # on the parent — `payments`, for one of these. VALIDATE scans
+            # under SHARE UPDATE EXCLUSIVE, which leaves writes running.
             op.execute(
                 f'ALTER TABLE "{table}" DROP CONSTRAINT "{name}", '
-                f'ADD CONSTRAINT "{name}" FOREIGN KEY ("{column}") REFERENCES "{ref}" (id)'
+                f'ADD CONSTRAINT "{name}" FOREIGN KEY ("{column}") '
+                f'REFERENCES "{ref}" (id) NOT VALID'
             )
+            op.execute(f'ALTER TABLE "{table}" VALIDATE CONSTRAINT "{name}"')
 
 
 def _unique_constraints(constraints: tuple[tuple[str, str, str], ...]) -> None:
@@ -449,9 +456,12 @@ def _control() -> None:
         )
         if plain:
             op.execute("DROP INDEX ix_email_verifications_token")
-            op.execute(
-                "CREATE UNIQUE INDEX ix_email_verifications_token ON email_verifications (token)"
-            )
+        # Unconditionally, and BEFORE the constraint goes: the token is never
+        # without a uniqueness guarantee, whatever state the table was in.
+        op.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_email_verifications_token "
+            "ON email_verifications (token)"
+        )
         if _has_constraint("email_verifications", "email_verifications_token_key"):
             op.execute(
                 "ALTER TABLE email_verifications DROP CONSTRAINT email_verifications_token_key"

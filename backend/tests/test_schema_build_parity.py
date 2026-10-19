@@ -3,7 +3,8 @@
 Why this file exists
 --------------------
 Every database in this project is built one of two ways (`backend/docs/
-database.md` § Index parity):
+database.md` § Index parity between the two provisioning paths; this file is
+its § Whole-schema parity):
 
 * a database that predates a release gets ``alembic upgrade head`` — every
   revision since ``0001_signup``, applied over whatever ``create_all`` built
@@ -96,7 +97,8 @@ SELECT c.relname AS tbl, a.attname AS col,
        format_type(a.atttypid, a.atttypmod) AS type,
        a.attnotnull AS not_null,
        pg_get_expr(d.adbin, d.adrelid) AS default,
-       a.attidentity AS identity, a.attgenerated AS generated
+       a.attidentity AS identity, a.attgenerated AS generated,
+       (SELECT collname FROM pg_collation WHERE oid = a.attcollation) AS collation
 FROM pg_attribute a
 JOIN pg_class c ON c.oid = a.attrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -115,12 +117,18 @@ WHERE n.nspname = 'public'
 """
 
 _INDEXES = """
-SELECT tablename AS tbl, indexname AS name, indexdef AS def
-FROM pg_indexes WHERE schemaname = 'public'
+SELECT c.relname AS tbl, i.relname AS name, pg_get_indexdef(x.indexrelid) AS def,
+       x.indisvalid AS valid, x.indisready AS ready
+FROM pg_index x
+JOIN pg_class i ON i.oid = x.indexrelid
+JOIN pg_class c ON c.oid = x.indrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
 """
 
 _TRIGGERS = """
-SELECT c.relname AS tbl, t.tgname AS name, pg_get_triggerdef(t.oid) AS def
+SELECT c.relname AS tbl, t.tgname AS name, pg_get_triggerdef(t.oid) AS def,
+       t.tgenabled AS enabled
 FROM pg_trigger t
 JOIN pg_class c ON c.oid = t.tgrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -129,9 +137,11 @@ WHERE n.nspname = 'public' AND NOT t.tgisinternal
 
 _FUNCTIONS = """
 SELECT p.proname AS name, pg_get_function_identity_arguments(p.oid) AS args,
-       p.prosrc AS src
+       p.prosrc AS src, l.lanname AS lang, p.prosecdef AS security_definer,
+       p.provolatile AS volatility, p.prorettype::regtype::text AS returns
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_language l ON l.oid = p.prolang
 WHERE n.nspname = 'public'
   AND NOT EXISTS (
       SELECT 1 FROM pg_depend d
@@ -178,11 +188,16 @@ async def snapshot(dsn: dict, tables: frozenset[str] | None = None) -> dict:
             return tables is None or tbl in tables
 
         for r in await conn.fetch(
-            "SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "SELECT relname, relrowsecurity, relforcerowsecurity, reloptions "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
             "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')"
         ):
             if keep(r["relname"]):
-                objects[("table", r["relname"])] = True
+                objects[("table", r["relname"])] = (
+                    r["relrowsecurity"],
+                    r["relforcerowsecurity"],
+                    tuple(r["reloptions"] or ()),
+                )
         for r in await conn.fetch(_COLUMNS):
             if keep(r["tbl"]):
                 objects[("column", f"{r['tbl']}.{r['col']}")] = (
@@ -191,18 +206,29 @@ async def snapshot(dsn: dict, tables: frozenset[str] | None = None) -> dict:
                     r["default"],
                     r["identity"] or None,
                     r["generated"] or None,
+                    r["collation"],
                 )
         for r in await conn.fetch(_CONSTRAINTS):
             if keep(r["tbl"]):
                 objects[("constraint", f"{r['tbl']}.{r['name']}")] = (r["kind"], r["def"])
         for r in await conn.fetch(_INDEXES):
             if keep(r["tbl"]):
-                objects[("index", f"{r['tbl']}.{r['name']}")] = r["def"]
+                objects[("index", f"{r['tbl']}.{r['name']}")] = (
+                    r["def"],
+                    r["valid"],
+                    r["ready"],
+                )
         for r in await conn.fetch(_TRIGGERS):
             if keep(r["tbl"]):
-                objects[("trigger", f"{r['tbl']}.{r['name']}")] = r["def"]
+                objects[("trigger", f"{r['tbl']}.{r['name']}")] = (r["def"], r["enabled"])
         for r in await conn.fetch(_FUNCTIONS):
-            objects[("function", f"{r['name']}({r['args']})")] = _norm(r["src"])
+            objects[("function", f"{r['name']}({r['args']})")] = (
+                _norm(r["src"]),
+                r["lang"],
+                r["security_definer"],
+                r["volatility"],
+                r["returns"],
+            )
         for r in await conn.fetch(_SEQUENCES):
             objects[("sequence", r["name"])] = tuple(r.values())[1:]
         for r in await conn.fetch(_ENUMS):
@@ -259,21 +285,19 @@ async def scratch():
         await maint.close()
 
 
-def _alembic_upgrade(env_overrides: dict[str, str]) -> None:
+def _alembic_upgrade(env_overrides: dict[str, str], target: str = "head") -> None:
     env = {**os.environ, **env_overrides}
     if "FEOH_MIGRATE_TENANT" not in env_overrides:
         env.pop("FEOH_MIGRATE_TENANT", None)
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", target],
         cwd=BACKEND,
         env=env,
         capture_output=True,
         text=True,
         timeout=480,
     )
-    assert result.returncode == 0, (
-        "the Alembic chain failed on a pre-0001 database:\n" + result.stderr[-4000:]
-    )
+    assert result.returncode == 0, "the Alembic chain failed:\n" + result.stderr[-4000:]
 
 
 async def _load_pre_0001(dsn: dict, which: str) -> None:
@@ -347,32 +371,152 @@ async def test_the_first_deploy_after_provisioning_leaves_a_fresh_tenant_alone(s
     _check("tenant", diff(after, before))
 
 
-async def test_0113_removes_the_duplicate_fks_an_earlier_replay_left(scratch):
-    """Production tenants provisioned before 0029 / 0051 / 0082 learned the
-    ORM's FK names already carry the duplicates their first deploy added. 0113
-    must drop them — keeping the ORM's — on a tenant stamped just below it."""
-    name, dsn = await scratch("td")
-    await _create_tenant_tables(name)
-    before = await snapshot(dsn)
+def _0113():
+    import importlib.util
+
+    path = BACKEND / "alembic" / "versions" / "0113_schema_build_parity.py"
+    spec = importlib.util.spec_from_file_location("_mig_0113", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+async def _stamp_below_0113(dsn: dict) -> None:
     conn = await asyncpg.connect(**dsn)
     try:
-        for table, column, ref, fk in [
-            ("invoices", "entity_id", "entities", "fk_invoices_entity"),
-            ("vendors", "entity_id", "entities", "fk_vendors_entity"),
-            ("payments", "retry_of_payment_id", "payments", "fk_payments_retry_of_payment_id"),
-        ]:
-            await conn.execute(
-                f'ALTER TABLE "{table}" ADD CONSTRAINT "{fk}" '
-                f'FOREIGN KEY ("{column}") REFERENCES "{ref}" (id)'
-            )
-        await conn.execute("CREATE TABLE alembic_version (version_num varchar(32) PRIMARY KEY)")
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(32) PRIMARY KEY)"
+        )
+        await conn.execute("DELETE FROM alembic_version")
         await conn.execute("INSERT INTO alembic_version VALUES ($1)", _revision_below_0113())
     finally:
         await conn.close()
+
+
+async def test_0113_removes_the_duplicate_fks_an_earlier_replay_left(scratch):
+    """A tenant provisioned before 0029 / 0051 / 0082 learned the ORM's FK
+    names carries the duplicates its first deploy added — all 14 of them. 0113
+    drops them, keeping the ORM's, on a tenant stamped just below it."""
+    name, dsn = await scratch("td")
+    await _create_tenant_tables(name)
+    before = await snapshot(dsn)
+    duplicates = 0
+    conn = await asyncpg.connect(**dsn)
+    try:
+        for table, old, new in _0113()._TENANT_FK_RENAMES:
+            definition = await conn.fetchval(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = $1 AND conrelid = to_regclass($2)",
+                new,
+                f"public.{table}",
+            )
+            assert definition, f"create_all built no {new} on {table}"
+            await conn.execute(f'ALTER TABLE "{table}" ADD CONSTRAINT "{old}" {definition}')
+            duplicates += 1
+    finally:
+        await conn.close()
+    assert duplicates == 14
+    await _stamp_below_0113(dsn)
+
     _alembic_upgrade({"FEOH_MIGRATE_TENANT": name})
+
     after = await snapshot(dsn)
     _drop_version_table(after)
     _check("tenant", diff(after, before))
+
+
+async def test_0113_removes_the_duplicate_partner_fk_on_a_control_plane(scratch):
+    name, dsn = await scratch("cd")
+    engine = create_async_engine(_make_tenant_url(name))
+    try:
+        await initialise(engine, _revision_below_0113())
+    finally:
+        await engine.dispose()
+    before = await snapshot(dsn, _control_scope())
+    conn = await asyncpg.connect(**dsn)
+    try:
+        await conn.execute(
+            "ALTER TABLE organizations ADD CONSTRAINT fk_organizations_parent_org_id "
+            "FOREIGN KEY (parent_org_id) REFERENCES organizations (id) ON DELETE SET NULL"
+        )
+    finally:
+        await conn.close()
+
+    _alembic_upgrade({"FEOH_DATABASE_URL": _make_tenant_url(name)})
+
+    after = await snapshot(dsn, _control_scope())
+    _drop_version_table(before, after)
+    _check("control/control_tables_only", diff(after, before))
+
+
+async def _insert_row(conn, table: str, nulls: set[str]) -> None:
+    """One row with every required column filled with a type-shaped dummy and
+    the ``nulls`` columns explicitly NULL. Run under
+    ``session_replication_role = replica`` so foreign keys are not checked: the
+    row exists only to be backfilled."""
+    cols = await conn.fetch(
+        "SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, "
+        "a.attnotnull AS not_null, a.atthasdef AS has_default "
+        "FROM pg_attribute a WHERE a.attrelid = to_regclass($1) "
+        "AND a.attnum > 0 AND NOT a.attisdropped",
+        f"public.{table}",
+    )
+    values: dict[str, str] = {}
+    for c in cols:
+        if c["name"] in nulls:
+            values[c["name"]] = "NULL"
+        elif c["not_null"] and not c["has_default"]:
+            t = c["type"]
+            if t == "uuid":
+                values[c["name"]] = "gen_random_uuid()"
+            elif t.startswith("vector("):
+                dims = int(t[len("vector(") : -1])
+                values[c["name"]] = "'[" + ",".join(["0"] * dims) + "]'"
+            elif t.startswith(("character", "text")):
+                values[c["name"]] = "'x'"
+            elif t.startswith(("integer", "bigint", "smallint", "numeric", "double", "real")):
+                values[c["name"]] = "0"
+            elif t == "boolean":
+                values[c["name"]] = "false"
+            elif t.startswith("timestamp"):
+                values[c["name"]] = "now()"
+            elif t == "date":
+                values[c["name"]] = "current_date"
+            elif t.startswith("json"):
+                values[c["name"]] = "'{}'"
+            else:
+                raise AssertionError(f"no dummy for {table}.{c['name']} ({t})")
+    names = ", ".join(f'"{n}"' for n in values)
+    await conn.execute(f'INSERT INTO "{table}" ({names}) VALUES ({", ".join(values.values())})')
+
+
+async def test_0113_backfills_nulls_and_is_idempotent_on_a_chain_built_tenant(scratch):
+    """The data-shaped half: rows the NOT NULL step has to backfill, then a
+    second run of 0113 over its own result, which must change nothing."""
+    name, dsn = await scratch("tq")
+    await _load_pre_0001(dsn, "tenant")
+    env = {"FEOH_MIGRATE_TENANT": name}
+    _alembic_upgrade(env, _revision_below_0113())
+    conn = await asyncpg.connect(**dsn)
+    try:
+        await conn.execute("SET session_replication_role = replica")
+        for table, column, _backfill in _0113()._TENANT_NOT_NULL:
+            await _insert_row(conn, table, {column})
+    finally:
+        await conn.close()
+
+    _alembic_upgrade(env)
+
+    conn = await asyncpg.connect(**dsn)
+    try:
+        assert await conn.fetchval("SELECT corrected_fields::text FROM invoice_embeddings") == "{}"
+        assert await conn.fetchval("SELECT status FROM quality_inspections") == "completed"
+    finally:
+        await conn.close()
+    once = await snapshot(dsn)
+    await _stamp_below_0113(dsn)
+    _alembic_upgrade(env)
+    assert diff(await snapshot(dsn), once) == {}
 
 
 def _control_scope() -> frozenset[str]:
