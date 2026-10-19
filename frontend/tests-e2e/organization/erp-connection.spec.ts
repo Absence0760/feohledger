@@ -377,6 +377,38 @@ test.describe('/organization ERP connection', () => {
 		}
 	});
 
+	test('a choice is never overwritten by the panel finishing its load', async ({ page }) => {
+		// The dropdown must not appear until the stored-secret names are in:
+		// the load seeds the selection from the saved config once they arrive,
+		// and a choice made before that used to be reset to "choose an ERP".
+		await stubStatus(page, () => oauthStatus());
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		await page.route(
+			(url) => url.pathname === '/api/organization/credentials',
+			async (route) => {
+				await gate;
+				await route.fallback();
+			}
+		);
+		await page.goto('/organization?section=erp');
+		const card = panel(page);
+		try {
+			await expect(card.getByText('Loading the ERP list…')).toBeVisible();
+			await expect(card.getByTestId('erp-provider-select')).toHaveCount(0);
+			release();
+			const select = card.getByTestId('erp-provider-select');
+			await select.selectOption('quickbooks_online');
+			await expect(card.getByTestId('erp-oauth-state')).toHaveText(
+				'Not connected to QuickBooks Online yet.'
+			);
+			await expect(select).toHaveValue('quickbooks_online');
+		} finally {
+			release();
+			await resetErp(page);
+		}
+	});
+
 	test('an OAuth error return is shown once and leaves the address bar', async ({ page }) => {
 		await stubStatus(page, () => oauthStatus());
 		await page.goto('/organization?section=erp&erp_error=access_denied');
