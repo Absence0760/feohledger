@@ -15,6 +15,7 @@ defusedxml for the request-supplied XML the SYSPRO routes parse.
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -26,6 +27,8 @@ from defusedxml import DefusedXmlException
 from defusedxml import ElementTree as SafeET
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+
+import qbo_sandbox
 
 app = FastAPI(title="fake-erp", docs_url=None, redoc_url=None)
 
@@ -2730,7 +2733,9 @@ def _qbo_issue() -> dict:
 
 
 @qbo.get("/oauth2/authorize")
-async def qbo_authorize(redirect_uri: str, state: str, client_id: str = "") -> Response:
+async def qbo_authorize(
+    redirect_uri: str, state: str, client_id: str = "", fake_company: str = ""
+) -> Response:
     from urllib.parse import urlencode
 
     from fastapi.responses import RedirectResponse
@@ -2741,6 +2746,12 @@ async def qbo_authorize(redirect_uri: str, state: str, client_id: str = "") -> R
     registered = _registered_redirect(redirect_uri)
     if registered is None:
         raise ProviderError(400, {"error": "invalid_request", "error_description": "redirect_uri"})
+    # The company picked on the consent screen: `sandbox` is the recorded
+    # Intuit sample company (qbo_sandbox.py); absent is this fake company.
+    if fake_company == qbo_sandbox.PROFILE:
+        return qbo_sandbox.authorize(registered, state)
+    if fake_company:
+        raise ProviderError(400, {"error": "invalid_request", "error_description": "fake_company"})
     st = _qbo()
     st["counter"] += 1
     code = f"fake-qbo-code-{st['counter']}"
@@ -2756,6 +2767,8 @@ async def qbo_token(request: Request) -> dict:
         raise ProviderError(401, {"error": "invalid_client"})
     raw = (await request.body()).decode("utf-8", errors="replace")
     form = {k: v[0] for k, v in parse_qs(raw).items()}
+    if qbo_sandbox.owns(form.get("code") or form.get("refresh_token")):
+        return qbo_sandbox.token(form)
     st = _qbo()
     if form.get("grant_type") == "authorization_code":
         code = form.get("code", "")
@@ -2774,10 +2787,26 @@ async def qbo_token(request: Request) -> dict:
 async def qbo_revoke(request: Request) -> Response:
     if not _qbo_client_ok(request):
         raise ProviderError(401, {"error": "invalid_client"})
+    revoked = _revoked_token(await request.body())
+    if qbo_sandbox.owns(revoked):
+        return qbo_sandbox.revoke(revoked)
     st = _qbo()
     st["refresh_token"] = None
     st["access_tokens"].clear()
     return Response(status_code=200)
+
+
+def _revoked_token(raw: bytes) -> str:
+    """The ``token`` of a revoke request — Intuit documents a JSON body; a form
+    body is read too, so a client sending either is recorded, not refused."""
+    text = raw.decode("utf-8", errors="replace")
+    try:
+        body = json.loads(text)
+        if isinstance(body, dict):
+            return str(body.get("token") or "")
+    except ValueError:
+        pass
+    return (parse_qs(text).get("token") or [""])[0]
 
 
 def _require_qbo_auth(request: Request, realm: str) -> None:
@@ -2963,6 +2992,9 @@ async def qbo_set_balance(body: dict) -> dict:
     return {"status": "ok"}
 
 
+# The sandbox company's routes name its realm literally, so they must be
+# registered before /qbo's {realm} routes to be matched first.
+app.include_router(qbo_sandbox.router)
 app.include_router(qbo)
 
 
