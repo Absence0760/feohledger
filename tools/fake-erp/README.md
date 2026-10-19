@@ -356,6 +356,6 @@ all under `/qbo/_admin/sandbox/`:
   call is a 401 the backend must answer with a refresh. Refresh tokens stay good.
 - `POST revoke-consent` — the user removed the app on Intuit's side; the next
   refresh is `invalid_grant`.
-- `GET stats` → `{"realm", "refreshes", "refresh_tokens", "revocations"}`
+- `GET stats` → `{"realm", "refreshes", "rejected", "refresh_tokens", "revocations"}`
   (fake tokens only).
 - `GET bills/{id}` — a bill as the company holds it, with no bearer.

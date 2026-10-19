@@ -164,6 +164,7 @@ def _fresh() -> dict[str, Any]:
         "connections": {},
         "access_ttl": DEFAULT_ACCESS_TTL,
         "refreshes": 0,
+        "rejected": 0,  # API calls refused 401 (an expired or unknown bearer)
         "revocations": [],  # every token POSTed to /oauth2/revoke, in order
         "bills": {},
         "requestids": {},
@@ -252,6 +253,7 @@ def _require_auth(request: Request) -> None:
         expiry = connection["access"].get(bearer)
         if expiry is not None and expiry > now:
             return
+    STATE["rejected"] += 1
     raise QboFault(401, "3200", "AuthenticationFailed", "Token expired or invalid")
 
 
@@ -406,6 +408,7 @@ async def admin_stats() -> dict:
     return {
         "realm": REALM,
         "refreshes": STATE["refreshes"],
+        "rejected": STATE["rejected"],
         "refresh_tokens": [c["refresh"] for c in STATE["connections"].values() if c["refresh"]],
         "revocations": list(STATE["revocations"]),
     }
