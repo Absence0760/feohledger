@@ -11721,7 +11721,8 @@ every new workspace is given.
 this. `ensure_plan_catalog` never touches an existing row. Unlike `0107`, which
 rewrote the whole column, it merges one key per row: `erp_integrations` into
 `free` and `erp_merge` into `scale`. An operator's other edits to a plan's grants
-survive. Growth is untouched. It is control-plane only (gated on `plans`) and
+survive, and a key the operator already set (`false` included) is left as it is.
+Growth is untouched. It is control-plane only (gated on `plans`) and
 idempotent, and the downgrade removes the two keys.
 
 **Rejected:**

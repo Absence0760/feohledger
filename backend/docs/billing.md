@@ -107,7 +107,8 @@ via `POST /api/billing/change-plan` to `growth` or `scale`.
 Migration **`0112_free_plan_erp`** brings an already-provisioned control plane
 onto §281: it merges `erp_integrations` into the existing `free` row and
 `erp_merge` into `scale` (`entitlements || {...}`, so an operator's other edits
-to a row's grants survive), and leaves `growth` alone. `ensure_plan_catalog`
+to a row's grants survive, and only when the key is absent, so an explicit `false`
+an operator set is kept), and leaves `growth` alone. `ensure_plan_catalog`
 never rewrites an existing row, so without it an older control plane would keep
 Free at `{}`. `0107_plan_catalog_v2` did the same job for §253, by rewriting the
 whole column.
