@@ -162,8 +162,12 @@ if [ "$CADDY_PRESENT" -eq 1 ]; then
 		skipping { next }
 		{ print }
 	' tenants.caddy >tenants.caddy.tmp
-	mv tenants.caddy.tmp tenants.caddy
-	"${COMPOSE[@]}" exec caddy caddy reload --config /etc/caddy/Caddyfile
+	# Rewritten IN PLACE, not `mv`d over: Caddy mounts this one file, and a bind
+	# mount keeps the inode it started with — after a rename the container still
+	# reads the old list and the reload keeps serving the removed host (#579).
+	cat tenants.caddy.tmp >tenants.caddy
+	rm -f tenants.caddy.tmp
+	feoh_caddy_reload || die "caddy did not take the new host list — ${HOST} may still be served."
 else
 	echo "==> no Caddy host block for ${HOST} (already removed)"
 fi

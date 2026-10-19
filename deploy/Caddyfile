@@ -12,9 +12,12 @@
 }
 
 # The static SvelteKit SPA. try_files matches adapter-static's
-# fallback: "index.html" — deep links rehydrate client-side.
+# fallback: "index.html" — deep links rehydrate client-side. The root is the
+# `current` symlink deploy.sh swaps atomically to each published release
+# (deploy/lib.sh § The SPA Caddy serves); it is resolved per request, so a swap
+# needs no reload.
 (spa) {
-	root * /srv
+	root * /srv/current
 	encode zstd gzip
 	# Tablestakes security headers for the static SPA. The API host doesn't
 	# need them here — the backend middleware (app/main.py) sets its own on

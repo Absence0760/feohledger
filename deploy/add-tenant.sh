@@ -67,8 +67,10 @@ if ! grep -q "^${HOST} {" tenants.caddy 2>/dev/null; then
 fi
 # Reload unconditionally (zero-downtime, no-op when nothing changed) — inside
 # the grep guard a re-run after "block appended but reload failed" would skip
-# the reload forever and the tenant host would never start serving.
-"${COMPOSE[@]}" exec caddy caddy reload --config /etc/caddy/Caddyfile
+# the reload forever and the tenant host would never start serving. Through
+# feoh_caddy_reload, which recreates Caddy instead when its mounted config is a
+# stale copy (lib.sh) — a reload would then reload the old host list.
+feoh_caddy_reload || die "caddy did not take the new host block — see the error above."
 
 echo
 echo "tenant ready: https://${HOST}"

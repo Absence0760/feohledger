@@ -142,3 +142,125 @@ feoh_sync_source() {
 	git -C "$root" checkout --quiet -B main "$ref" || return 1
 	echo "==> source: main at ${ref}"
 }
+
+# ── The SPA Caddy serves: published releases, swapped atomically ─────────────
+#
+# Caddy bind-mounts deploy/www/ at /srv and serves /srv/current, a RELATIVE
+# symlink (`releases/<id>`, so it resolves the same inside the container) to the
+# live build (docs/decisions.md §277). Never mount the build output itself: the
+# SvelteKit build deletes and recreates frontend/build, a bind mount pins the
+# directory's inode, and the container is left holding an orphaned, empty
+# directory — every page 404s with an empty body and runc refuses `exec`
+# ("current working directory is outside of container mount namespace root"),
+# which is the v0.1.0 outage (#579). www/ itself is never removed, so the mount
+# stays valid; only names inside it change, and a rename inside a mounted
+# directory is visible to the container at once.
+#
+# feoh_publish_frontend <build-dir> <www-dir> <release-id> copies a finished
+# build to <www-dir>/releases/<release-id>, then points `current` at it with a
+# rename (`ln -sfn` to a temp name, then `mv -T` — one rename(2)), so a request
+# sees the old release or the new one, never a missing or half-copied one. The
+# release it replaced stays, linked as `previous`, for an instant rollback
+# (deploy/README.md § Rolling the frontend back); every other one is pruned.
+feoh_publish_frontend() {
+	local build=$1 www=$2 id=$3 prev="" keep_prev="" rel
+	if ! [ -s "$build/index.html" ]; then
+		echo "${build}/index.html is missing or empty — refusing to publish a build that would serve nothing." >&2
+		return 1
+	fi
+	if ! [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+		echo "release id '${id}' is not a plain name." >&2
+		return 1
+	fi
+	mkdir -p "$www/releases" || return 1
+	if [ -e "$www/releases/$id" ]; then
+		echo "release ${id} is already published; refusing to overwrite a release that may be live." >&2
+		return 1
+	fi
+	# A copy, not a move: frontend/build belongs to the build container, and a
+	# copy cut short only ever leaves a staging name that nothing serves.
+	rm -rf "$www/releases/.staging-"* || return 1
+	cp -R --preserve=mode,timestamps "$build" "$www/releases/.staging-$id" || return 1
+	mv -T "$www/releases/.staging-$id" "$www/releases/$id" || return 1
+	if [ -L "$www/current" ]; then
+		prev=$(readlink "$www/current") || return 1
+	fi
+	ln -sfn "releases/$id" "$www/current.new" || return 1
+	mv -T "$www/current.new" "$www/current" || return 1
+	if [ -n "$prev" ] && [ "$prev" != "releases/$id" ]; then
+		ln -sfn "$prev" "$www/previous.new" || return 1
+		mv -T "$www/previous.new" "$www/previous" || return 1
+	fi
+	if [ -L "$www/previous" ]; then
+		keep_prev=$(readlink "$www/previous") || return 1
+	fi
+	for rel in "$www"/releases/*; do
+		[ -e "$rel" ] || continue
+		case "releases/${rel##*/}" in
+		"releases/$id" | "$keep_prev") ;;
+		*) rm -rf "$rel" || return 1 ;;
+		esac
+	done
+	echo "==> frontend: published release ${id}${prev:+ (previous: ${prev#releases/})}"
+}
+
+# feoh_caddy_reload makes the running Caddy serve the config on disk. Caddy
+# mounts Caddyfile and tenants.caddy as single files, and a single-file bind
+# mount pins the inode in the same way: a file replaced by rename — every git
+# checkout that changes the Caddyfile, an editor that saves by rename — leaves
+# the container reading the old one, and `caddy reload` then reloads the OLD
+# config and reports success. So compare what the container sees with the host
+# files first: identical → a zero-downtime reload; different (or unreadable) →
+# recreate the container, which re-resolves every mount. Writers still rewrite
+# these files in place (remove-tenant.sh does) so the reload is the usual path.
+# Needs COMPOSE (feoh_load_db_mode); run from deploy/.
+feoh_caddy_reload() {
+	local f stale=""
+	for f in Caddyfile tenants.caddy; do
+		if ! "${COMPOSE[@]}" exec -T caddy cat "/etc/caddy/$f" 2>/dev/null | cmp -s - "$f"; then
+			stale=$f
+			break
+		fi
+	done
+	if [ -n "$stale" ]; then
+		echo "==> caddy: the running container does not see the current ${stale} (a file replaced on the host keeps its old inode in a bind mount) — recreating caddy"
+		"${COMPOSE[@]}" up -d --no-deps --force-recreate --wait caddy || return 1
+	else
+		"${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || return 1
+	fi
+}
+
+# feoh_smoke_check <host> <path> fetches https://<host><path> through THIS VM's
+# Caddy — `--resolve <host>:443:127.0.0.1`, so it depends on neither public DNS
+# nor the network hairpinning back to the VM's own public IP — under the real
+# hostname, so SNI, the certificate and the site block are the ones users hit.
+# It passes on HTTP 200 with a non-empty body: the v0.1.0 outage answered 404
+# with an empty one while the API healthcheck stayed green. It retries for a
+# while (FEOH_SMOKE_ATTEMPTS × FEOH_SMOKE_INTERVAL seconds, default 20 × 3): a
+# just-recreated Caddy may still be loading its certificates, and on a first
+# deploy issuing them.
+feoh_smoke_check() {
+	local host=$1 path=$2 attempts=${FEOH_SMOKE_ATTEMPTS:-20} interval=${FEOH_SMOKE_INTERVAL:-3}
+	local url="https://${host}${path}" body err code="000" i
+	body=$(mktemp) || return 1
+	err=$(mktemp) || return 1
+	for ((i = 1; i <= attempts; i++)); do
+		# curl creates its -o file on the first byte, so an empty answer would
+		# otherwise leave the previous attempt's body in place to be counted.
+		: >"$body"
+		code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 10 \
+			--resolve "${host}:443:127.0.0.1" "$url" 2>"$err") || true
+		[ -n "$code" ] || code="000"
+		if [ "$code" = 200 ] && [ -s "$body" ]; then
+			rm -f "$body" "$err"
+			echo "==> smoke: ${url} → 200"
+			return 0
+		fi
+		if [ "$i" -lt "$attempts" ]; then
+			sleep "$interval"
+		fi
+	done
+	echo "smoke check failed: ${url} answered HTTP ${code} with $(wc -c <"$body" | tr -d ' ') byte(s) after ${attempts} attempt(s). $(head -c 300 "$err")" >&2
+	rm -f "$body" "$err"
+	return 1
+}

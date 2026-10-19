@@ -27,6 +27,43 @@ guessed at. It cannot hold any data, so recreate it and deploy again, from
 ./deploy.sh
 ```
 
+## Every page 404s while the API is healthy (production VM)
+
+**Symptom.** The apex, every tenant host and `/legal/*` answer **404 with an
+empty body**; `https://<API_DOMAIN>/api/health` is fine. A deploy may have
+failed at the Caddy step with:
+
+```
+OCI runtime exec failed: exec failed: unable to start container process: current working directory is outside of container mount namespace root -- possible container breakout detected: unknown
+```
+
+**Cause.** Caddy is serving a directory that no longer exists on the host. A bind
+mount pins the directory's inode: when the host directory is deleted and
+recreated — as the SvelteKit build does to `frontend/build` — the container keeps
+the orphaned, emptied original, so every file is missing, and runc refuses
+`docker exec` because the container's working directory (`/srv`) is outside the
+mount namespace. This was the v0.1.0 outage (#579), when Caddy mounted
+`frontend/build` directly; Caddy now mounts `deploy/www/`, which is never
+replaced, and serves the release its `current` symlink names
+(`deploy/README.md` § How the SPA is served, `docs/decisions.md` §277). Seeing it
+again means something replaced `deploy/www/` itself or Caddy is back on a
+directory that gets rebuilt.
+
+**Recovery** (on the VM; starting the container again re-resolves its bind
+mounts by path):
+
+```bash
+docker restart feoh-prod-caddy-1
+```
+
+If `www/current` is missing or points at a bad build, roll the SPA back from
+`deploy/` first: `ln -sfn "$(readlink www/previous)" www/current.new && mv -T www/current.new www/current`.
+
+**A related, quieter case:** a Caddyfile or `tenants.caddy` change that "reloads
+fine" but changes nothing — a single-file mount keeps a file replaced by rename
+at its old inode. The deploy scripts detect it and recreate Caddy
+(`feoh_caddy_reload`); by hand, `./compose.sh up -d --no-deps --force-recreate caddy`.
+
 ## `bcrypt` errors
 
 ```

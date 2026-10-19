@@ -10,3 +10,6 @@ prod.sops.yaml
 tenants.caddy
 # deploy.sh's one-deploy-at-a-time lock (flock).
 .deploy.lock
+# The published SPA releases Caddy serves (releases/<id>, current, previous) —
+# written by deploy.sh, mounted at /srv.
+/www/

@@ -11383,3 +11383,70 @@ not say when the approver set their password.
 - *Comparing values only for the audit row while still writing every field*:
   a resent email would still run the uniqueness check and the trail would be
   right by accident of the second step, not by rule.
+
+## 277. Caddy serves a stable directory; a release goes live by a symlink rename (#579, 2026-10-19)
+
+**Context.** The first release deploy (v0.1.0) left the whole SPA — apex, tenant
+hosts, `/legal/*` — answering 404 with an empty body while the API stayed
+healthy, and `deploy.sh` failed at `docker compose exec caddy caddy reload` with
+runc's "current working directory is outside of container mount namespace root".
+`compose.prod.yml` bind-mounted `../frontend/build` at `/srv`; the SvelteKit build
+deletes and recreates that directory; a bind mount pins the directory's inode, so
+the container kept the deleted original, empty, and its working directory (the
+image's `WORKDIR /srv`) was no longer inside the mount namespace. Earlier manual
+deploys happened to recreate Caddy (its compose config changed), which
+re-resolved the mount and hid the bug. Reproduced locally against the pinned
+Caddy image, error text and empty 404 alike.
+
+**Decision.**
+
+- **Caddy mounts `deploy/www/`** (gitignored, never replaced) and serves
+  `/srv/current`, a *relative* symlink to `releases/<UTC timestamp>-<commit>`, so
+  it resolves the same inside the container. `frontend/build` is only the build's
+  staging output; nothing serves it.
+- **A release goes live by one rename.** `lib.sh::feoh_publish_frontend` copies
+  the build to `releases/<id>` (via a staging name), makes the new link as
+  `current.new` and `mv -T`s it over `current` — rename(2), so a request sees the
+  old release or the new one and never a gap. Caddy resolves the root per
+  request; no reload is needed for the swap. A build with no non-empty
+  `index.html` is refused, and a published id is never overwritten.
+- **The previous release is kept** as `previous`; rollback is the same rename
+  pointed back, with no rebuild. Every other release is pruned (two copies of the
+  SPA on a 30 GB disk).
+- **Publish after the roll.** The swap happens after `up -d --wait` passes, so a
+  failed migration or an unhealthy API leaves the old SPA in front of the old API.
+  The one exception is a VM with no release yet (a first deploy, or the first on
+  this layout): nothing serves `www/` until the roll recreates Caddy onto it, so
+  it publishes first and the new container starts with a site. That is also the
+  whole one-time migration: changing Caddy's volumes makes `up` recreate it.
+- **The deploy ends with a smoke check** (`feoh_smoke_check`): `curl` from the VM
+  to `https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health` with
+  `--resolve <host>:443:127.0.0.1` — through the VM's own Caddy under the real
+  hostname, so SNI, certificate and site block are the real ones, without
+  depending on public DNS or hairpin NAT. 200 with a non-empty body or the deploy
+  fails, retried for about a minute for certificate loading. The API's
+  healthcheck alone was green throughout the outage.
+- **The same inode trap on Caddy's config files.** `Caddyfile` and `tenants.caddy`
+  are single-file mounts: a git checkout (which writes a new file) or
+  `remove-tenant.sh`'s `mv` left the container reading the old file, and
+  `caddy reload` reloaded the stale config and reported success — reproduced
+  too. `lib.sh::feoh_caddy_reload`, used by `deploy.sh`, `add-tenant.sh` and
+  `remove-tenant.sh`, compares what the container sees with the host files and
+  recreates Caddy when they differ, reloading otherwise; `remove-tenant.sh` now
+  rewrites the host list in place.
+
+**Rejected.**
+
+- *Restart or recreate Caddy on every deploy*: a few seconds of downtime per
+  deploy, and the build still deletes the directory the live container is
+  serving — between the delete and the restart the site is empty.
+- *Build straight into the mounted directory*: every build is a window where the
+  live site is half-written, and a failed build is what users get.
+- *Mount `deploy/` as Caddy's config directory* (a directory mount sees renamed
+  files): `deploy/` holds the decrypted `.env` and `prod.sops.yaml`, which the
+  internet-facing proxy has no business reading. Moving the two config files into
+  their own mounted directory would fix it structurally, at the cost of new paths
+  in every runbook that names `deploy/tenants.caddy`; the staleness check covers
+  the same failure with no path change.
+- *An absolute symlink*: it would name the host path, which does not exist inside
+  the container.
