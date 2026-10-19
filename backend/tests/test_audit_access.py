@@ -30,6 +30,19 @@ def test_build_field_diff_only_includes_changed_fields():
     assert diff == {"amount": {"old": "90.00", "new": "100.00"}}
 
 
+def test_build_field_diff_treats_null_and_blank_as_the_same_value():
+    """NULL and "" are the same absence of a value: one becoming the other is
+    not an edit (it wrote phantom `null -> ""` rows onto the SOX trail). A
+    blank becoming a real value, or the reverse, still is."""
+    before = {"po_number": None, "notes": "", "description": None, "project": "P1"}
+    after = {"po_number": "", "notes": None, "description": "set", "project": ""}
+    diff = build_field_diff(before, after, list(before))
+    assert diff == {
+        "description": {"old": None, "new": "set"},
+        "project": {"old": "P1", "new": ""},
+    }
+
+
 def test_build_field_diff_serialises_money_as_string_not_float():
     diff = build_field_diff(
         {"amount": Decimal("1234567.89")}, {"amount": Decimal("0.01")}, ["amount"]
