@@ -201,7 +201,7 @@ These are areas where we are genuinely ahead of most or all competitors:
 
 4. **Database-per-tenant isolation** — Most competitors use row-level tenant isolation. Our database-per-tenant architecture provides stronger security guarantees, easier compliance (data residency), and simpler tenant lifecycle management. Strong selling point for security-conscious enterprise buyers.
 
-5. **Self-service tenant provisioning** — Anonymous visitor → signup form → email verification → provisioned tenant with temp password → first-login password change, fully automated in ~30s. Every enterprise competitor (Tipalti, Coupa, Concur, Medius, Basware, Stampli, Airbase) is sales-led only. Bill.com has SMB self-serve; our implementation with hCaptcha + Redis rate limiting + two-phase (start → verify → complete) is production-ready PLG infrastructure.
+5. **Self-service tenant provisioning** — Anonymous visitor → signup form → email verification → provisioned tenant → set-password link → first sign-in, fully automated in ~30s. Every enterprise competitor (Tipalti, Coupa, Concur, Medius, Basware, Stampli, Airbase) is sales-led only. Bill.com has SMB self-serve; our implementation with hCaptcha + Redis rate limiting + two-phase (start → verify → complete) is production-ready PLG infrastructure.
 
 6. **Multi-provider virtual cards** — Lithic + Nium with automatic region-based provider selection. Most competitors partner with a single card issuer. Our multi-provider approach gives better global coverage and negotiating leverage.
 

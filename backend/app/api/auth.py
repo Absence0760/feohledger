@@ -36,6 +36,8 @@ from app.schemas.auth import (
     MFAEnrollVerifyRequest,
     MFAStepUpRequest,
     MFAVerifyRequest,
+    ResetPasswordCheckRequest,
+    ResetPasswordCheckResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
     SessionResponse,
@@ -93,7 +95,7 @@ from app.utils.passwords import (
     validate_password_complexity,
     verify_password,
 )
-from app.utils.tenant_urls import tenant_base_url
+from app.utils.tenant_urls import password_reset_url
 
 logger = logging.getLogger(__name__)
 
@@ -600,29 +602,14 @@ async def login(
 def _password_reset_url(org: Organization, token: str) -> str | None:
     """The tenant-hosted reset page, or ``None`` when no base URL is configured.
 
-    Same construction as the signup welcome email / supplier-portal invite —
-    `app/utils/tenant_urls.tenant_base_url` is the one resolver, so a tenant on
-    its own vanity hostname gets a reset link on THAT host rather than the
-    platform subdomain. Never a placeholder domain.
-
-    ``None`` rather than a relative path: an operator who has blanked
-    `FEOH_TENANT_URL_TEMPLATE` and set no per-org override has left us nowhere
-    to point, and `/login/reset-password?token=…` in an email body is a dead
-    link that also leaks a live single-use credential to no purpose. The caller
-    skips the send; the endpoint's generic response is unchanged either way, so
-    this is invisible to an enumerating caller.
+    `app/utils/tenant_urls.password_reset_url` is the one builder — signup's
+    set-password link uses it too — over `tenant_base_url`, the one resolver,
+    so a tenant on its own vanity hostname gets a reset link on THAT host
+    rather than the platform subdomain. Never a placeholder domain. The caller
+    skips the send on ``None``; the endpoint's generic response is unchanged
+    either way, so this is invisible to an enumerating caller.
     """
-    from urllib.parse import quote
-
-    template_base = tenant_base_url(org.slug, org.settings)
-    if not template_base:
-        return None
-    # Nested under `/login/` — same reason `/login/mfa` and the SSO/SAML
-    # callback pages are, not top-level routes: the root layout redirects any
-    # unauthenticated visitor off a top-level path unless it starts with
-    # `/login` (or is in its small public-paths allowlist), so this is the
-    # path of least footprint for a public, unauthenticated page.
-    return f"{template_base}/login/reset-password?token={quote(token)}"
+    return password_reset_url(org.slug, org.settings, token)
 
 
 async def _send_password_reset_email(user: User, reset_url: str) -> None:
@@ -709,6 +696,35 @@ async def forgot_password(
             )
 
     return ForgotPasswordResponse()
+
+
+@router.post("/reset-password/check", response_model=ResetPasswordCheckResponse)
+async def check_reset_token(
+    body: ResetPasswordCheckRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_control_db),
+):
+    """Is this reset link still good, and for which account? Public; the token
+    is the credential.
+
+    Read-only — `password_reset.peek_reset_token` never consumes the token. It
+    answers the same 400 for every token `reset_password` would refuse
+    (unknown, used, expired, or a user since deactivated), so it is no better
+    an oracle than redeeming would be, and it tells the holder only the address
+    of the account their link already resets. POST so the token rides a body,
+    not a query string an access log keeps. Rate-limited per IP on its own
+    budget, separate from redemption so loading the page cannot spend the
+    submit's allowance.
+    """
+    await check_rate_limit("auth_reset_password_check", request, limit=20, window_seconds=60)
+
+    user_id = await password_reset.peek_reset_token(body.token)
+    user = None
+    if user_id is not None:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+    return ResetPasswordCheckResponse(email=user.email)
 
 
 @router.post("/reset-password", response_model=ResetPasswordResponse)

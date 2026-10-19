@@ -4060,6 +4060,16 @@ export const en = {
 	'auth.resetPassword.invalidToken':
 		'This reset link is invalid or has expired. Please request a new one.',
 	'auth.resetPassword.goToLogin': 'Go to sign in',
+	'auth.resetPassword.retry': 'Try again',
+	'auth.resetPassword.checkFailed':
+		"We couldn't check this link just now. Please try again.",
+	'auth.resetPassword.checking': 'Checking your link…',
+	'auth.resetPassword.setExpiredHint':
+		'Set-password links work once and expire. Request a new one with Forgot password — it works for your new account too.',
+	'auth.resetPassword.setSuccess': 'Your password is set. You can now sign in.',
+	'auth.resetPassword.setSubmit': 'Set password',
+	'auth.resetPassword.setSubtitle': 'Choose a password for your new account.',
+	'auth.resetPassword.setHeading': 'Set your password',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Two-factor verification',
@@ -4128,8 +4138,9 @@ export const en = {
 	'auth.signup.step1Body': 'Pick the address your team will sign in at.',
 	'auth.signup.step2Title': 'Confirm your email',
 	'auth.signup.step2Body': 'We send a link to prove the address is yours.',
-	'auth.signup.step3Title': 'Sign in and set a password',
-	'auth.signup.step3Body': 'Your welcome email carries a temporary one to start with.',
+	'auth.signup.step3Title': 'Set your password and sign in',
+	'auth.signup.step3Body':
+		'Choose it straight from the confirmation page, or from the link in your welcome email.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Change password — FeohLedger',
@@ -4156,15 +4167,18 @@ export const en = {
 	'auth.verify.failed': 'Verification failed.',
 	'auth.verify.pendingHeading': 'Creating your workspace…',
 	'auth.verify.pendingSub':
-		"This usually takes a few seconds — we're provisioning your database and sending your credentials.",
+		"This usually takes a few seconds — we're provisioning your database and sending your welcome email.",
 	'auth.verify.successHeading': 'Your workspace is ready',
-	'auth.verify.successSubPre': 'We emailed your sign-in link and a temporary password to ',
-	'auth.verify.successSubPost':
-		". Use that password to sign in for the first time — you'll set your own right after.",
-	'auth.verify.step1': 'Open the welcome email and copy the temporary password.',
-	'auth.verify.step2': 'Sign in at your workspace below.',
-	'auth.verify.step3': "Choose a new password — then you're in.",
-	'auth.verify.continueTo': 'Continue to {slug} →',
+	'auth.verify.successSubPre': 'We also emailed a link to set your password to ',
+	'auth.verify.successSubPost': ", in case you'd rather do it later.",
+	'auth.verify.step1': 'Choose your password — the button below takes you straight there.',
+	'auth.verify.step2': 'Sign in to your workspace with your email and that password.',
+	'auth.verify.step3': "Invite your team and connect your tools — you're in.",
+	'auth.verify.noLink':
+		"Use Forgot password on your workspace's sign-in page to choose your password.",
+	'auth.verify.linkNote':
+		'The link works once. If it has expired, use Forgot password on the sign-in page.',
+	'auth.verify.setPassword': 'Set your password',
 	'auth.verify.errorHeading': 'Something went wrong',
 	'auth.verify.startOver': 'Start over',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)

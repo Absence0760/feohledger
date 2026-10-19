@@ -11804,6 +11804,136 @@ deployed over since it was provisioned carries 14 duplicate foreign keys.
   `migrate_all_tenants.py`.* See above: its schema is the head of its own
   release, which the parity check cannot vouch for as today's.
 
+## 283. Signup sends a single-use set-password link, never a temporary password (2026-10-19)
+
+**Context.** `POST /api/signup/complete` provisioned the new admin with a
+generated 16-character temporary password and `must_change_password`, and the
+welcome email printed it in a credentials panel (§280). Two problems. A
+working password sat in the inbox indefinitely: it stayed valid until somebody
+signed in, and an admin who never did left a live credential in a mailbox for
+months. And the user had to copy it out of the email by hand — an email cannot
+carry a copy button — then type it into a sign-in form only to be made to
+replace it. Supersedes the temporary-password part of the signup design
+(`docs/self-service-signup.md` before this change, and the "keep this email"
+panel §280 added); the rest of §280 (one layout, only server-built URLs are
+links, fixed preheaders) stands and this email follows it.
+
+**Decided.** The signup admin is provisioned with **no password**
+(`provision_tenant(admin_password=None)` → `hashed_password` NULL, the
+representation JIT- and SCIM-provisioned users already have; `/auth/login`
+refuses the account until a password exists) and `must_change_password=false`,
+since the password they set is their own. `/complete` then mints a
+**set-password link**, which is a forgot-password reset token and nothing
+else: `password_reset.issue_reset_token` (same Redis store, same keyed PBKDF2
+digest, same single-use `GETDEL` redemption through `POST
+/api/auth/reset-password`, same session revocation on use), built by
+`utils/tenant_urls.password_reset_url` — the forgot-password email's own
+builder, now shared — with `mode=set`, which changes only the reset page's
+copy. A second token type, store or redemption endpoint was rejected: it would
+be a second implementation of exactly the guarantees the reset token already
+has tests for.
+
+**Lifetime: 72 hours, `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS`.** The reset
+token's 30 minutes (`FEOH_PASSWORD_RESET_TTL_MINUTES`) is sized for someone who
+just clicked "Forgot password" and is waiting for the email. This link is
+minted the moment a workspace exists, for someone who may close the tab and
+come back on Monday: 72 hours covers a weekend and is three times the
+verification link before it. It is still strictly better than what it
+replaces — a temporary password had no expiry at all — and it dies on first
+use. Configurable because reset TTL already is; minimum 1.
+
+**The link goes to the browser as well as the inbox.** `/complete` returns
+`set_password_url`, and `/verify` shows a **Set your password** button
+straight to it. Returning a credential to the browser is acceptable here
+because of who is holding the browser: `/verify` is only reached through the
+verification link mailed to that same address, so the caller has just proved
+they can read the inbox the welcome email is going to. The response discloses
+nothing the email does not. It is **one token for both copies**, so whichever
+is used first spends the other — two tokens would leave a second live link in
+the inbox after the admin had already set their password in the browser.
+
+**A link scanner cannot spend it.** Corporate mail security (Safe Links,
+Proofpoint, Mimecast) fetches every link in an inbound email before the user
+sees it. The set-password page is a static SPA route whose GET touches no API,
+and the page's own load calls `POST /api/auth/reset-password/check`, which
+reads the token without consuming it (`peek_reset_token`) — so neither a
+scanner's GET nor a reload invalidates anything. Only submitting a new
+password does. The check answers the same opaque 400 for every token the
+reset would refuse, and otherwise returns the account email — which only the
+token's holder learns, for the account their link already resets — so it is
+no better an oracle than redemption, has its own per-IP budget, and is a POST
+so the token never rides an API query string. Its two uses: the page says
+"this link has expired" before anyone types a password, and it fills a hidden
+`autocomplete="username"` field (as `/change-password` does) so a password
+manager files the new password under the right account.
+
+**When there is no link.** With no tenant base URL configured, `/complete`
+answers `503` **before** provisioning and leaves the verification unconsumed:
+the admin would have no password, and both the set-password link and
+forgot-password need that URL to build a link, so the workspace would exist
+with no way into it. A Redis failure while minting yields no link rather than
+a 500, because by then the tenant exists and the verification is spent, so an
+error would strand a workspace the visitor cannot retry into; the email and
+the verify page then name **Forgot password**, which works for the account
+like any other — it needs only an active user, not an existing password. That
+is also the documented way out of an expired link.
+
+**What the browser copy costs, and what bounds it.** Putting the credential in
+the `/complete` response means whoever opens the verification link first holds
+the admin's set-password link — before this, a leaked verify link could only
+create the workspace, since the credential went to the mailbox. The holders
+that matter are a JS-rendering mail scanner that executes `/verify` (it would
+also have spent the verification, so the real user would see "invalid or
+expired" and sign up again — a scanner does not use what it fetched), and an
+access log that keeps the `/verify?token=` query string. Both are bounded: the
+verification token is single-use (`FOR UPDATE` + `consumed_at`) and expires in
+24 hours, so a logged copy is dead once the owner has clicked it; the response
+is sent `Cache-Control: no-store`; and issuing the set-password token writes
+the same PII-free `auth.password_reset.requested` audit row a forgot-password
+request does (`via: signup`), beside the `auth.password_reset.completed` row
+its redemption writes. Dropping the browser copy ("check your email") was the
+alternative; the operator chose the one-click path (2026-10-19), and the
+welcome email remains the fallback either way.
+
+**The welcome email** has the button, its paste-this fallback and the expiry
+("expires in N hours and works once; if it has expired, use Forgot password on
+the sign-in page"), the workspace URL and email as plain panel values (no
+password row, no monospace), and a sign-in link with the address prefilled
+(`tenant_urls.sign_in_url`, read by the login page's new `?email=` prefill —
+a plausible single address only, bound as the field's value, no autofocus).
+The preheader stays the fixed "Your workspace is live."; neither the token nor
+the link is in it or in any application log line (the dev-only `console`
+adapter prints whole messages by design, and is how the local flow reads the
+link).
+
+**Not changed here.** The other flows that still mail or return a temporary
+password — admin create user, admin password reset (§276), supplier-portal
+invite and portal reset, partner child provisioning — are listed in
+`docs/followups.md` with the same durable fix.
+
+**Guards.** `backend/tests/test_signup.py`: `/complete` provisions with no
+password and returns a live token for the provisioned user; the welcome email
+has the link as button and fallback, the configured expiry, plain panel values,
+the prefilled sign-in link, no password anywhere and a fixed preheader, in
+every locale; without a tenant URL `/complete` 503s before provisioning,
+minting or consuming anything, and a token-store failure still answers 200;
+the response is `no-store` and the issuance audited; the token never reaches a
+log line, even when the welcome email fails;
+end to end against the real reset endpoints, the account refuses login before
+a password exists, repeated checks leave the token usable, one submit sets the
+password, and the token is then dead to both check and reset; forgot-password
+works for a never-had-a-password admin; an evicted token is refused by both.
+`test_forgot_reset_password.py`: the check refuses a since-deactivated account
+without spending the token, and has its own rate budget; `test_tenant_url_resolver.py`
+pins both URL builders.
+`test_tenant_provisioning.py` pins the passwordless admin row;
+`frontend/tests-e2e/auth/forgot-password.spec.ts` the reset page's up-front
+refusal, that loading or reloading the page never redeems the token, that a
+failed check (429, outage) is retryable rather than "expired", set mode, the
+hidden username field and the prefilled sign-in link;
+`tests-e2e/auth/login.spec.ts` the prefill; `tests-e2e/signup/` and
+`tests-e2e/email/signup-email.spec.ts` the whole journey through Mailpit.
+
 ## 284. GL accounts and vendors link by the ERP's unique key; a push refusal is a code the reader can act on (migration 0114, 2026-10-19)
 
 **Found live.** Against the real QuickBooks Online sandbox, a first chart sync

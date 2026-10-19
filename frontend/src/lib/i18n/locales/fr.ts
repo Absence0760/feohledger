@@ -3837,6 +3837,17 @@ export const messages = {
 	'auth.resetPassword.invalidToken':
 		'Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.',
 	'auth.resetPassword.goToLogin': 'Aller à la connexion',
+	'auth.resetPassword.retry': 'Réessayer',
+	'auth.resetPassword.checkFailed':
+		"Nous n'avons pas pu vérifier ce lien pour le moment. Veuillez réessayer.",
+	'auth.resetPassword.checking': 'Vérification de votre lien…',
+	'auth.resetPassword.setExpiredHint':
+		"Les liens de définition du mot de passe ne fonctionnent qu'une fois et expirent. Demandez-en un nouveau avec « Mot de passe oublié ? » — cela fonctionne aussi pour votre nouveau compte.",
+	'auth.resetPassword.setSuccess':
+		'Votre mot de passe est défini. Vous pouvez maintenant vous connecter.',
+	'auth.resetPassword.setSubmit': 'Définir le mot de passe',
+	'auth.resetPassword.setSubtitle': 'Choisissez un mot de passe pour votre nouveau compte.',
+	'auth.resetPassword.setHeading': 'Définir votre mot de passe',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Vérification à deux facteurs',
@@ -3905,8 +3916,9 @@ export const messages = {
 	'auth.signup.step1Body': 'Choisissez l\'adresse à laquelle votre équipe se connectera.',
 	'auth.signup.step2Title': 'Confirmez votre e-mail',
 	'auth.signup.step2Body': 'Nous envoyons un lien pour vérifier que l\'adresse vous appartient.',
-	'auth.signup.step3Title': 'Connectez-vous et définissez un mot de passe',
-	'auth.signup.step3Body': 'Votre e-mail de bienvenue contient un mot de passe temporaire pour commencer.',
+	'auth.signup.step3Title': 'Définissez votre mot de passe et connectez-vous',
+	'auth.signup.step3Body':
+		'Choisissez-le directement sur la page de confirmation, ou depuis le lien de votre e-mail de bienvenue.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Changer le mot de passe — FeohLedger',
@@ -3933,15 +3945,21 @@ export const messages = {
 	'auth.verify.failed': 'Échec de la vérification.',
 	'auth.verify.pendingHeading': 'Création de votre espace de travail…',
 	'auth.verify.pendingSub':
-		'Cela prend généralement quelques secondes — nous provisionnons votre base de données et envoyons vos identifiants.',
+		'Cela prend généralement quelques secondes — nous préparons votre base de données et envoyons votre e-mail de bienvenue.',
 	'auth.verify.successHeading': 'Votre espace de travail est prêt',
-	'auth.verify.successSubPre': 'Nous avons envoyé votre lien de connexion et un mot de passe temporaire à ',
-	'auth.verify.successSubPost':
-		'. Utilisez ce mot de passe pour vous connecter la première fois — vous définirez le vôtre juste après.',
-	'auth.verify.step1': 'Ouvrez l\'e-mail de bienvenue et copiez le mot de passe temporaire.',
-	'auth.verify.step2': 'Connectez-vous à votre espace de travail ci-dessous.',
-	'auth.verify.step3': 'Choisissez un nouveau mot de passe — et vous y êtes.',
-	'auth.verify.continueTo': 'Continuer vers {slug} →',
+	'auth.verify.successSubPre':
+		'Nous avons aussi envoyé un lien pour définir votre mot de passe à ',
+	'auth.verify.successSubPost': ', si vous préférez le faire plus tard.',
+	'auth.verify.step1':
+		'Choisissez votre mot de passe — le bouton ci-dessous vous y mène directement.',
+	'auth.verify.step2':
+		'Connectez-vous à votre espace de travail avec votre e-mail et ce mot de passe.',
+	'auth.verify.step3': 'Invitez votre équipe et connectez vos outils — et vous y êtes.',
+	'auth.verify.noLink':
+		'Utilisez « Mot de passe oublié ? » sur la page de connexion de votre espace de travail pour choisir votre mot de passe.',
+	'auth.verify.linkNote':
+		"Le lien ne fonctionne qu'une fois. S'il a expiré, utilisez « Mot de passe oublié ? » sur la page de connexion.",
+	'auth.verify.setPassword': 'Définir votre mot de passe',
 	'auth.verify.errorHeading': 'Une erreur s\'est produite',
 	'auth.verify.startOver': 'Recommencer',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
