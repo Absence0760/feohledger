@@ -1,6 +1,7 @@
 """Schemas for user management endpoints."""
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from app.api.pagination import PageMeta
 
@@ -72,9 +73,26 @@ class CreateUserResponse(AdminUserResponse):
     temporary_password: str
 
 
+class ResetUserPasswordResponse(AdminUserResponse):
+    """Returned by an admin password reset — the generated temporary password,
+    shown once. Same shape as `CreateUserResponse` on purpose: both are "here
+    is a credential its owner must change at first sign-in"."""
+
+    temporary_password: str
+    # False when the forced logout failed (Redis unreachable) after the reset
+    # committed — the user's existing sessions may still be live, and the admin
+    # should run the standalone force-logout.
+    sessions_revoked: bool = True
+
+
 class UpdateUserRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     email: str | None = Field(default=None, max_length=320)
     is_active: bool | None = None
     role_names: list[str] | None = None
-    password: str | None = Field(default=None, min_length=6)
+    # REMOVED as a writable field (#566). Kept only so a request that still
+    # sends it is refused with a coded 422 by the handler instead of having the
+    # key silently dropped — an old client must learn the reset did not happen.
+    # Hidden from the schema; any type is accepted so the refusal, not a type
+    # error, is what the caller sees.
+    password: SkipJsonSchema[object | None] = None

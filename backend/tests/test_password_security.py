@@ -426,3 +426,92 @@ async def test_patch_me_without_a_password_does_not_touch_sessions(realdb, monke
             assert calls == []
         finally:
             await c.delete(f"/api/admin/users/{user_id}")
+
+
+# ---------------------------------------------------------------------------
+# A self-service password change writes its OWN audit row (#566).
+#
+# The only trace it used to leave was the `auth.session.revoked` row its forced
+# logout writes — a side effect, not the event — so the trail could not say
+# when an account's owner set the credential it signs in with, or whether the
+# forced change of an admin-issued temp ever happened.
+# ---------------------------------------------------------------------------
+
+
+async def _password_changed_rows(realdb, user_id):
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.models.workflow import AuditLog
+
+    async with realdb.sessionmaker("a")() as s:
+        return (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "auth.password.changed",
+                        AuditLog.entity_id == uuid.UUID(user_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.asyncio
+async def test_forced_change_password_writes_a_pii_free_audit_row(realdb):
+    import uuid
+
+    info = realdb.info("a")
+    async with realdb.client(key="a", role="admin") as c:
+        user_id, temp_password, mint = await _throwaway_user(c)
+        try:
+            resp = await c.post(
+                "/api/auth/change-password",
+                json={"current_password": temp_password, "new_password": "BrandNewPass123"},
+                headers={"Authorization": f"Bearer {mint(uuid.UUID(user_id), info.org_id)}"},
+            )
+            assert resp.status_code == 200, resp.text
+            rows = await _password_changed_rows(realdb, user_id)
+            assert len(rows) == 1
+            assert rows[0].actor_id == uuid.UUID(user_id)
+            # The invite temp carried must_change_password — this was the forced change.
+            assert rows[0].details == {"via": "change_password", "forced": True}
+            assert "BrandNewPass123" not in str(rows[0].details)
+            assert temp_password not in str(rows[0].details)
+        finally:
+            await c.delete(f"/api/admin/users/{user_id}")
+
+
+@pytest.mark.asyncio
+async def test_voluntary_profile_password_change_is_audited_not_forced(realdb):
+    import uuid
+
+    info = realdb.info("a")
+    async with realdb.client(key="a", role="admin") as c:
+        user_id, temp_password, mint = await _throwaway_user(c)
+        auth = {"Authorization": f"Bearer {mint(uuid.UUID(user_id), info.org_id)}"}
+        try:
+            first = await c.post(
+                "/api/auth/change-password",
+                json={"current_password": temp_password, "new_password": "BrandNewPass123"},
+                headers=auth,
+            )
+            assert first.status_code == 200, first.text
+            second = await c.patch(
+                "/api/auth/me",
+                json={"password": "AnotherNewPass456", "current_password": "BrandNewPass123"},
+                headers=auth,
+            )
+            assert second.status_code == 200, second.text
+            details = [r.details for r in await _password_changed_rows(realdb, user_id)]
+            assert {"via": "profile", "forced": False} in details
+
+            # A rename through the same endpoint is not a password change.
+            renamed = await c.patch("/api/auth/me", json={"full_name": "Renamed"}, headers=auth)
+            assert renamed.status_code == 200, renamed.text
+            assert len(await _password_changed_rows(realdb, user_id)) == 2
+        finally:
+            await c.delete(f"/api/admin/users/{user_id}")

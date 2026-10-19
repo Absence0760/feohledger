@@ -50,7 +50,7 @@ EXEMPT_PASSWORD_WRITES: dict[str, str] = {
     # VendorUser, but the scan is deliberately name-based rather than
     # type-inferred — a `.hashed_password =` is caught wherever it is — so they
     # are named here instead of guessed at.
-    "api/admin.py::update_user": "control-plane User, not a VendorUser",
+    "api/admin.py::reset_user_password": "control-plane User, not a VendorUser",
     "api/auth.py::reset_password": "control-plane User, not a VendorUser",
     "api/auth.py::_apply_new_password": "control-plane User, not a VendorUser",
     "services/privacy_erasure.py::erase_user": "control-plane User, not a VendorUser",

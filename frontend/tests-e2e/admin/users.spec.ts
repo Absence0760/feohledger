@@ -116,6 +116,9 @@ test.describe('/admin user lifecycle', () => {
 			// Name + email inputs pre-fill from the row.
 			await expect(modal.locator('input[type="text"]')).toHaveValue('Edit Me Original');
 			await expect(modal.locator('input[type="email"]')).toHaveValue(email);
+			// #566: no password input — a browser autofilled the admin's own
+			// password into the old one and saving a rename reset the user.
+			await expect(modal.locator('input[type="password"]')).toHaveCount(0);
 
 			const newName = 'Edit Me Renamed';
 			await modal.locator('input[type="text"]').fill(newName);
@@ -128,6 +131,9 @@ test.describe('/admin user lifecycle', () => {
 			await modal.getByRole('button', { name: /Save Changes/ }).click();
 			const resp = await patched;
 			expect(resp.status()).toBe(200);
+			// Only the field that changed is sent (#566 — the audit trail used to
+			// name every field the form resent).
+			expect(resp.request().postDataJSON()).toEqual({ full_name: newName });
 
 			// Modal closes; row reflects the new name.
 			await expect(modal).toBeHidden();

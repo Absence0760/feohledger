@@ -115,6 +115,75 @@ test.describe('/change-password', () => {
 		}
 	});
 
+	test('admin reset → temp sign-in is forced to /change-password → the new password works', async ({
+		page
+	}) => {
+		// #566: the reset issues a GENERATED temp the user must change; the Edit
+		// modal carries no password input (a browser used to autofill the
+		// admin's own password into it and silently reset the target on save).
+		await signInAndWait(page);
+		const created = await createTestUser(page);
+
+		try {
+			// Replace the invite temp first, so the forced change below can only
+			// have come from the reset.
+			await signOut(page);
+			await signIn(page, { email: created.email, password: created.temp_password });
+			await page.waitForURL(/\/change-password$/);
+			const ownPw = 'Owner-Chosen-1234';
+			await page.locator('input[autocomplete="current-password"]').fill(created.temp_password);
+			await page.locator('input[autocomplete="new-password"]').first().fill(ownPw);
+			await page.locator('input[autocomplete="new-password"]').last().fill(ownPw);
+			await page.getByRole('button', { name: 'Change password' }).click();
+			await page.waitForURL(TENANT_ROOT_URL, { timeout: 10_000 });
+			await signOut(page);
+
+			// Admin opens the user's Edit modal and resets.
+			await signInAndWait(page);
+			await page.goto('/admin');
+			const row = page.locator('table tbody tr', { hasText: created.email });
+			await expect(row).toBeVisible();
+			await row.getByRole('button', { name: 'Edit' }).click();
+			const modal = page.locator('div.modal[role="dialog"][aria-label="Edit user"]');
+			await expect(modal.locator('input[type="email"]')).toHaveValue(created.email);
+			await expect(modal.locator('input[type="password"]')).toHaveCount(0);
+
+			// Two-step: the first click only arms it.
+			await modal.getByRole('button', { name: 'Reset password' }).click();
+			const reset = page.waitForResponse(
+				(r) =>
+					r.url().includes(`/api/admin/users/${created.id}/reset-password`) &&
+					r.request().method() === 'POST'
+			);
+			await modal.getByRole('button', { name: 'Confirm reset' }).click();
+			expect((await reset).status()).toBe(200);
+
+			const cred = page.locator('div.modal[role="dialog"][aria-label="Password reset"]');
+			await expect(cred).toBeVisible();
+			const temp = (await cred.locator('.credential-value.password').textContent())?.trim() ?? '';
+			expect(temp.length).toBeGreaterThanOrEqual(12);
+			await cred.getByRole('button', { name: /^Done$/ }).click();
+
+			// The user's own password no longer works; the temp does, and forces a change.
+			await signOut(page);
+			await signIn(page, { email: created.email, password: temp });
+			await page.waitForURL(/\/change-password$/, { timeout: 10_000 });
+			const newPw = 'After-Reset-5678';
+			await page.locator('input[autocomplete="current-password"]').fill(temp);
+			await page.locator('input[autocomplete="new-password"]').first().fill(newPw);
+			await page.locator('input[autocomplete="new-password"]').last().fill(newPw);
+			await page.getByRole('button', { name: 'Change password' }).click();
+			await page.waitForURL(TENANT_ROOT_URL, { timeout: 10_000 });
+
+			await signOut(page);
+			await signIn(page, { email: created.email, password: newPw });
+			await page.waitForURL(TENANT_ROOT_URL, { timeout: 10_000 });
+			await signOut(page);
+		} finally {
+			await deleteTestUser(page, created.id);
+		}
+	});
+
 	test('Submit button stays disabled until both passwords match and are strong', async ({
 		page
 	}) => {

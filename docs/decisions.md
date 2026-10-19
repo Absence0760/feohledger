@@ -11266,3 +11266,65 @@ rolled new code over a tenant whose migration had failed.
 to every tenant too, and a revision that creates control tables must then probe
 which kind of database it is in — the same probe that misfired here. Running
 `seed.py` in production: it creates demo organizations and users.
+
+## 276. An admin resets a password to a forced-change temp, never to a value they type (#566, 2026-10-18)
+
+**Context.** `PATCH /api/admin/users/{id}` took a `password` and stored the
+admin-typed value with no `must_change_password`, so the admin went on knowing a
+working credential for someone else's account — unlike "Invite User", which
+issues a generated temp the owner must replace. The Edit modal exposed it as an
+optional password input with no `autocomplete`, and browsers autofilled the
+ADMIN's own saved password into it: saving an unrelated rename silently changed
+the target's password, which is how it surfaced in production (an approver's
+sign-in started failing `bad_password`). The same save logged
+`user.updated` with `changed_fields: ["full_name", "email", "password"]` though
+name and email were untouched — the handler named every field the body carried,
+and the form sends every field. And a user's own password change wrote no row of
+its own (only the forced logout's `auth.session.revoked`), so the trail could
+not say when the approver set their password.
+
+**Decision.**
+
+- **The reset is its own action**: `POST /api/admin/users/{id}/reset-password`,
+  `user.manage`, org-scoped, `_authorize_target_mutation`. It generates the temp
+  with `utils/passwords.generate_temp_password` (the invite's generator, so it
+  meets `validate_password_complexity`), sets `must_change_password`, revokes
+  every target session after the commit, mails it best-effort through the
+  invite's own path (`_send_credentials_email`, console adapter locally), returns
+  it once in the invite's response shape, and audits `user.password_reset` with
+  field names and counts only. A revoke failure after the commit is caught,
+  not raised: the response is the only place the temp is shown, so a 500 there
+  would lock the user out with no audit row. It is reported instead
+  (`sessions_revoked: false` on the response, `null` on the audit row, an error
+  toast telling the admin to retry).
+- **Not on your own account** (`400 admin_password_reset_self`): it would sign
+  you out of the tab you made it from and issue a temp for a password you
+  already know. Your own path is change-password.
+- **`PATCH` refuses `password` with a coded 422** (`admin_password_field_removed`)
+  instead of dropping the key. The field stays on `UpdateUserRequest` hidden from
+  the schema (`SkipJsonSchema`) only so the handler can see it; pydantic's
+  default would silently ignore an unknown key, and an old client must learn the
+  reset did not happen, not believe it did. Nothing else sends it — SCIM and
+  `/api/v1` have their own schemas, mobile never had the field.
+- **`PATCH` applies, and audits, only fields whose value differs.** Email
+  compares normalized. The UI also sends only edited fields, but the server rule
+  is what keeps the SOX trail honest for any client.
+- **A self-service change writes `auth.password.changed`**
+  (`{via, forced}`; `forced` = it replaced an issued temp), from
+  `/change-password` and `PATCH /auth/me` alike.
+- **UI**: no password input in the Edit modal; a two-click **Reset password**
+  (`RowAction` armed, the delete confirm's primitive) shows the temp in the
+  invite's credentials dialog.
+
+**Rejected.**
+
+- *Keeping the typed field with `autocomplete="new-password"`*: fixes autofill
+  only; the admin still chooses and keeps knowing the value, with no forced
+  change.
+- *Typed value plus `must_change_password`*: the admin still picks it, and a
+  typed field is still an autofill target.
+- *Silently ignoring `password` on PATCH*: an existing script would report a
+  reset that never happened.
+- *Comparing values only for the audit row while still writing every field*:
+  a resent email would still run the uniqueness check and the trail would be
+  right by accident of the second step, not by rule.

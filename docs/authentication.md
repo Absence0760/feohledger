@@ -239,6 +239,8 @@ Configured by `FEOH_MAX_CONCURRENT_SESSIONS` (default `5`; set to `0` to disable
 
 `PATCH /api/admin/users/{id}` snapshots the target's role set before applying changes. If roles change or `is_active` flips from true to false, the admin path calls `revoke_user_sessions(user_id)`, which blocklists every tracked JTI and clears the set. `DELETE /api/admin/users/{id}` does the same on deletion so a tombstoned user can't keep calling the API.
 
+`POST /api/admin/users/{id}/reset-password` revokes every session the target holds, after its commit (issue #160 — a reset must close the window a leaked token sits in).
+
 `POST /api/admin/users/{id}/revoke-sessions` is the same forced logout **on its own** — for incident response ("that laptop was stolen; keep the account, kill the sessions"), where the alternative was deactivate-and-reactivate, which locks the user out for the duration and records a suspension that never happened. Org-scoped (a user outside the caller's org is the same 404 as a missing one), gated on `user.manage`, idempotent, and audited as `user.sessions_revoked` with a count.
 
 ### Session set TTL
@@ -292,7 +294,9 @@ vendor had no way to end a stolen portal session.
 `PATCH /api/auth/me` now call `revoke_other_sessions(user.id, <caller's jti>)`
 after the commit — sparing the caller's own session, so they are not logged out
 of the tab they just used — and write the existing PII-free
-`auth.session.revoked` audit row. `POST /api/portal/auth/change-password`
+`auth.session.revoked` audit row. That row is the logout's, not the change's:
+the change itself writes `auth.password.changed` first (`{via, forced}`), so the
+trail can say when an owner set the credential they sign in with (#566). `POST /api/portal/auth/change-password`
 blocklists the vendor's current JTI and its tracked siblings.
 
 `PATCH /api/auth/me` was also the one password-setting path that never ran
@@ -380,6 +384,9 @@ Action names:
 | Logout | `auth.logout` |
 | Self-service session revoke (one, or everywhere else) | `auth.session.revoked` — PII-free, records only `{scope: "single"\|"others", revoked: <count>}` |
 | Admin force-logout of another user | `user.sessions_revoked` — PII-free, records only the revoked count |
+| Admin reset of another user's password (`POST /api/admin/users/{id}/reset-password`) | `user.password_reset` — PII-free, records `{changed_fields: ["password"], must_change_password: true, sessions_revoked: <count>}` (`null` when the forced logout failed — the reset still returns its temp, with `sessions_revoked: false` on the response); never the temp |
+| Admin edit of a user (`PATCH /api/admin/users/{id}`) | `user.updated` — `changed_fields` names only fields whose value actually changed (the Edit form resends every field; a resent unchanged value is neither applied nor named — #566). No values except `role_names` / `is_active` when those changed |
+| Self-service password change (`POST /auth/change-password`, incl. the forced first-login change; `PATCH /auth/me` with `password`) | `auth.password.changed` — PII-free, records `{via: "change_password" \| "profile", forced: <bool>}`; `forced` is true when it replaced an admin- or signup-issued temp. Written before the `auth.session.revoked` row the same change's forced logout writes, which is a side effect and not the event |
 | MFA challenge issued during login | `auth.mfa.challenge_issued` |
 | Successful MFA verify | `auth.mfa.verify.success` |
 | Failed MFA verify | `auth.mfa.verify.failure` |
@@ -1078,10 +1085,17 @@ exactly as before.
     subset of the caller's own effective permissions. Otherwise a custom role
     scoped to only `user.manage` could assign itself `admin` and take over the
     org.
-  - **Admin-set passwords obey the complexity policy.** An admin resetting a
-    user's password (`PATCH /api/admin/users/{id}` `password`) runs it through
-    the same `validate_password_complexity` as self-service change-password
-    (min 12, upper/lower/digit).
+  - **An admin never sets another user's password.** The reset is
+    `POST /api/admin/users/{id}/reset-password`: a temp from the shared
+    generator (so it satisfies `validate_password_complexity`),
+    `must_change_password=True`, every target session revoked, returned once
+    and emailed best-effort, audited `user.password_reset`. The earlier
+    admin-typed `password` on `PATCH /api/admin/users/{id}` let the admin keep
+    knowing the value with no forced change, and the Edit form's password input
+    took the admin's OWN password from browser autofill, so saving a rename
+    reset the target (#566). `PATCH` now refuses the field
+    (`422 admin_password_field_removed`); the reset refuses the caller's own
+    account (`400 admin_password_reset_self`). See `docs/decisions.md` §276.
   - **You cannot act on an account more privileged than your own.**
     Complexity alone never stopped the takeover it was once described as
     stopping — the actor *chooses* the password, so how strong it is is
@@ -1090,8 +1104,9 @@ exactly as before.
     custom role could `PATCH` an org admin's **password**, watch
     `revoke_user_sessions` end the real admin's sessions, and sign in as them —
     or simply `DELETE` the admins, or revoke their sessions on a loop.
-    `_authorize_target_mutation` now runs on `password`, `is_active`, `email`,
-    role removal, `DELETE /api/admin/users/{id}` and
+    `_authorize_target_mutation` now runs on `is_active`, `email`, role
+    removal, `POST /api/admin/users/{id}/reset-password`,
+    `DELETE /api/admin/users/{id}` and
     `POST /api/admin/users/{id}/revoke-sessions`: it refuses (403) when the
     TARGET holds the system `admin` role and the caller does not, or when the
     target's effective permissions are not a subset of the caller's. It shares
@@ -2001,7 +2016,7 @@ A "live factor" here means an enabled TOTP secret **or** at least one registered
 
 Neither field is required for a **first** enrollment: an account with no factor has nothing to protect, so onboarding stays frictionless. A missing or wrong step-up is a `400` with a generic message that reveals nothing about the account (in an SSO-only tenant the message names only the code and passkey proofs, which reveals nothing `/auth/{sso,saml}/config` does not already publish).
 
-An SSO-only account — no password, no TOTP secret — has no *stateless* credential to be challenged on, and is still never **exempted**: exempting it would let a stolen JWT plant an attacker-controlled passkey on an account the attacker never proved control of. Instead, if it holds a registered passkey, that passkey **is** the challenge: `POST /api/auth/mfa/step-up/passkey` mints an assertion challenge bound to the operation, and the signed response goes back as `assertion`. That is what makes a passwordless SSO deployment able to enroll, rotate and remove its own factors at all; before it, such an account was locked out of factor management and recovered only via an admin password-set (which cannot help in an SSO-only tenant, where the password is no step-up proof) — `PATCH /api/admin/users/{user_id}` with a `password` field (`app/api/admin.py`, `app/schemas/admin.py::AdminUserUpdate`); there is no `POST .../password` route (still the fallback for an account with *no* factor of any kind, which genuinely has nothing to prove). The password / TOTP checks stay pure in `services/mfa.step_up_verified`; the assertion path is `api/auth._step_up_satisfied` because it needs the DB and Redis.
+An SSO-only account — no password, no TOTP secret — has no *stateless* credential to be challenged on, and is still never **exempted**: exempting it would let a stolen JWT plant an attacker-controlled passkey on an account the attacker never proved control of. Instead, if it holds a registered passkey, that passkey **is** the challenge: `POST /api/auth/mfa/step-up/passkey` mints an assertion challenge bound to the operation, and the signed response goes back as `assertion`. That is what makes a passwordless SSO deployment able to enroll, rotate and remove its own factors at all; before it, such an account was locked out of factor management and recovered only via an admin password reset (which cannot help in an SSO-only tenant, where the password is no step-up proof) — `POST /api/admin/users/{user_id}/reset-password`, a generated temp the user must change (`app/api/admin.py`; still the fallback for an account with *no* factor of any kind, which genuinely has nothing to prove). The password / TOTP checks stay pure in `services/mfa.step_up_verified`; the assertion path is `api/auth._step_up_satisfied` because it needs the DB and Redis.
 
 Every step-up check is **throttled and audited**: 5 attempts per minute keyed on the *account* (not the client IP — the attacker already holds the victim's token and can rotate IPs), and a failure writes a PII-free `auth.mfa.step_up.failure` / `portal.mfa.step_up.failure` audit row carrying only the operation name. Without that, a credential-management endpoint that checks a password is an unlimited, silent password oracle. The same throttle + audit covers `/mfa/disable` on both surfaces.
 

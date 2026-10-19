@@ -20,7 +20,14 @@
 
 	let showCreateModal = $state(false);
 	let editingUser = $state<AdminUser | null>(null);
-	let createdCredentials = $state<{ email: string; password: string } | null>(null);
+	// The one-time credential dialog serves both an invite and a password reset:
+	// the same shape (a generated temp the user must change at first sign-in),
+	// only the heading and the instruction differ.
+	let createdCredentials = $state<{
+		kind: 'created' | 'reset';
+		email: string;
+		password: string;
+	} | null>(null);
 	let confirmDeleteId = $state<string | null>(null);
 
 	// Bulk-select state
@@ -36,7 +43,11 @@
 	let editName = $state('');
 	let editEmail = $state('');
 	let editRoles = $state<string[]>([]);
-	let editPassword = $state('');
+	// Two-step confirm on "Reset password": the first click arms it, the second
+	// performs it. A reset signs the user out everywhere and invalidates their
+	// password, so a stray click must not do it.
+	let confirmReset = $state(false);
+	let resetting = $state(false);
 
 	let saving = $state(false);
 
@@ -177,7 +188,7 @@
 		editName = user.full_name;
 		editEmail = user.email;
 		editRoles = user.roles.map((r) => r.name);
-		editPassword = '';
+		confirmReset = false;
 	}
 
 	async function handleCreate() {
@@ -191,8 +202,9 @@
 			});
 			showCreateModal = false;
 			createdCredentials = {
+				kind: 'created',
 				email: result.email,
-				password: (result as unknown as { temporary_password: string }).temporary_password,
+				password: result.temporary_password,
 			};
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('admin.users.toast.createFailed'), 'error');
@@ -205,21 +217,55 @@
 		if (!editingUser) return;
 		saving = true;
 		try {
-			const changes: Record<string, unknown> = {
-				full_name: editName.trim(),
-				email: editEmail.trim(),
-				role_names: editRoles,
-			};
-			if (editPassword.trim()) {
-				changes.password = editPassword;
+			// Send only what the admin actually changed. The server also ignores
+			// a field resent at its current value (#566), but a body that names
+			// only real edits keeps the request honest about intent.
+			const original = editingUser;
+			const changes: Parameters<typeof adminStore.updateUser>[1] = {};
+			if (editName.trim() !== original.full_name) changes.full_name = editName.trim();
+			if (editEmail.trim().toLowerCase() !== original.email.toLowerCase()) {
+				changes.email = editEmail.trim();
 			}
-			await adminStore.updateUser(editingUser.id, changes);
+			const before = original.roles.map((r) => r.name).sort();
+			const after = [...editRoles].sort();
+			if (before.length !== after.length || before.some((r, i) => r !== after[i])) {
+				changes.role_names = editRoles;
+			}
+			if (Object.keys(changes).length > 0) {
+				await adminStore.updateUser(original.id, changes);
+			}
 			toast(m('admin.users.toast.updated'), 'success');
 			editingUser = null;
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('admin.users.toast.updateFailed'), 'error');
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function handleResetPassword() {
+		if (!editingUser) return;
+		if (!confirmReset) {
+			confirmReset = true;
+			return;
+		}
+		resetting = true;
+		try {
+			const result = await adminStore.resetUserPassword(editingUser.id);
+			editingUser = null;
+			confirmReset = false;
+			createdCredentials = {
+				kind: 'reset',
+				email: result.email,
+				password: result.temporary_password,
+			};
+			if (result.sessions_revoked === false) {
+				toast(m('admin.users.toast.resetSessionsNotRevoked'), 'error');
+			}
+		} catch (err) {
+			toast(err instanceof Error ? err.message : m('admin.users.toast.resetFailed'), 'error');
+		} finally {
+			resetting = false;
 		}
 	}
 
@@ -442,10 +488,15 @@
 </Modal>
 
 <!-- Created Credentials Modal -->
-<Modal open={createdCredentials !== null} ariaLabel={m('admin.users.modal.created.aria')} width="sm" onclose={() => (createdCredentials = null)}>
+<Modal open={createdCredentials !== null} ariaLabel={createdCredentials?.kind === 'reset' ? m('admin.users.modal.reset.aria') : m('admin.users.modal.created.aria')} width="sm" onclose={() => (createdCredentials = null)}>
 	{#if createdCredentials}
-		<h2>{m('admin.users.modal.created.heading')}</h2>
-		<p class="modal-hint">{m('admin.users.modal.created.hint')}</p>
+		{#if createdCredentials.kind === 'reset'}
+			<h2>{m('admin.users.modal.reset.heading')}</h2>
+			<p class="modal-hint">{m('admin.users.modal.reset.hint')}</p>
+		{:else}
+			<h2>{m('admin.users.modal.created.heading')}</h2>
+			<p class="modal-hint">{m('admin.users.modal.created.hint')}</p>
+		{/if}
 		<div class="credentials-box">
 			<div class="credential-row">
 				<span class="credential-label">{m('admin.users.modal.created.email')}</span>
@@ -479,10 +530,30 @@
 				<span>{m('admin.users.field.email')}</span>
 				<input type="email" bind:value={editEmail} required />
 			</label>
-			<label>
-				<span>{m('admin.users.field.resetPassword')} <em class="hint">{m('admin.users.field.resetPasswordHint')}</em></span>
-				<input type="password" bind:value={editPassword} minlength="6" />
-			</label>
+			<!-- No password input here, deliberately (#566). A typed password was
+			     one the admin kept knowing, and a password field in this form got
+			     the ADMIN's own saved password autofilled into it, so saving a
+			     rename silently reset the user's credential. The reset issues a
+			     generated temp the user must change at next sign-in. Not offered
+			     on your own account — that is /profile's change-password. -->
+			{#if !isSelf(editingUser.id)}
+				<fieldset class="reset-password">
+					<legend>{m('admin.users.field.password')}</legend>
+					<p class="modal-hint">{m('admin.users.reset.hint')}</p>
+					<RowAction
+						variant="danger"
+						armed={confirmReset}
+						disabled={resetting}
+						onclick={handleResetPassword}
+					>
+						{resetting
+							? m('admin.users.reset.resetting')
+							: confirmReset
+								? m('admin.users.reset.confirm')
+								: m('admin.users.reset.action')}
+					</RowAction>
+				</fieldset>
+			{/if}
 			<fieldset>
 				<legend>{m('admin.users.roles.legend')}</legend>
 				<p class="modal-hint">{m('admin.users.roles.hint')}</p>
@@ -669,11 +740,11 @@
 		cursor: pointer;
 	}
 
-	.hint {
-		font-style: italic;
-		text-transform: none;
-		letter-spacing: normal;
-		font-weight: 400;
+	.reset-password {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 8px;
 	}
 
 	/* --- Credentials display --- */
