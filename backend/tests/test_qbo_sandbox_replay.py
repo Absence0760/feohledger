@@ -393,6 +393,35 @@ async def test_a_second_sync_changes_nothing_and_still_refuses_the_same_codes(re
     }
 
 
+async def test_a_confirmed_choice_settles_a_locked_out_account_for_good(realdb, sandbox):
+    """Depreciation (40) was refused live because our bare-name row could mean
+    it or Truck:Depreciation (39). Once a person confirms 40 (what
+    ``POST /api/gl-accounts/{id}/erp-link`` writes), later syncs keep it."""
+    from datetime import UTC, datetime
+
+    await _seed_legacy_chart(realdb)
+    await _sync_chart(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        row = (
+            await s.execute(select(GLAccount).where(GLAccount.code == "Depreciation"))
+        ).scalar_one()
+        offered = sorted(a["erp_account_id"] for a in row.erp_link_candidates["accounts"])
+        assert (row.erp_account_id, offered) == (None, ["39", "40"])
+        row.erp_account_id = "40"
+        row.erp_link_realm = LINK_REALM
+        row.erp_link_confirmed_at = datetime.now(UTC)
+        row.erp_link_candidates = None
+        await s.commit()
+
+    again = (await _sync_chart(realdb)).summary(capped=False)
+
+    assert [c["code"] for c in again["conflicts"]] == ["Maintenance and Repair"]
+    assert again["link_changes"] == [] and again["unlinked"] == []
+    chart = await _chart(realdb)
+    assert chart["Depreciation"].erp_account_id == "40"
+    assert chart["Truck:Depreciation"].erp_account_id == "39"
+
+
 async def test_the_live_vendor_sync_replays_exactly(realdb, sandbox):
     org_id = realdb.info(TENANT).org_id
     async with realdb.sessionmaker(TENANT)() as s:

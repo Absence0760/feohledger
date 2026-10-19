@@ -360,6 +360,66 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 		}
 	});
 
+	test('a person settles a locked-out top-level account, and its bills post there', async ({
+		page
+	}) => {
+		// Live, "Depreciation" (40) and "Maintenance and Repair" (72) were refused
+		// for good: our bare-name rows could mean them or a sub-account, and no
+		// sync may guess. The way out is a confirmed choice among what it offered.
+		await seedLegacyChart(page);
+		await syncChart(page);
+		const rows = (await (
+			await page.request.get(`${API_BASE}/api/gl-accounts`, {
+				headers: await authedTenantHeaders(page)
+			})
+		).json()) as Array<
+			GlRow & {
+				id: string;
+				erp_link_candidates: { reason: string; accounts: Array<{ erp_account_id: string }> } | null;
+			}
+		>;
+		const depreciation = rows.find((r) => r.code === 'Depreciation')!;
+		expect(depreciation.erp_account_id).toBeNull();
+		expect(depreciation.erp_link_candidates?.reason).toBe('ambiguous_legacy');
+		expect(depreciation.erp_link_candidates?.accounts.map((a) => a.erp_account_id).sort()).toEqual([
+			'39',
+			'40'
+		]);
+
+		const headers = { ...(await authedTenantHeaders(page)), 'Content-Type': 'application/json' };
+		const notOffered = await page.request.post(
+			`${API_BASE}/api/gl-accounts/${depreciation.id}/erp-link`,
+			{ headers, data: { erp_account_id: '72' } }
+		);
+		expect(notOffered.status()).toBe(422);
+		const confirmed = await page.request.post(
+			`${API_BASE}/api/gl-accounts/${depreciation.id}/erp-link`,
+			{ headers, data: { erp_account_id: '40' } }
+		);
+		expect(confirmed.status(), await confirmed.text()).toBe(200);
+
+		// The next sync keeps the person's choice and stops reporting the code.
+		const again = await syncChart(page);
+		expect(again.conflicts.map((c) => c.code)).toEqual(['Maintenance and Repair']);
+		expect((await chart(page)).get('Depreciation')?.erp_account_id).toBe('40');
+
+		await post(page, '/api/vendors/sync-erp');
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-QBOSB-DEP',
+			invoiceNumber: docNumber('D'),
+			amount: '45.00',
+			vendor: 'Ærøskøbing Café & Søn ApS',
+			glAccount: 'Depreciation'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			const { Bill } = await sandbox(`bills/${await erpReferenceFromAudit(page, inv.id)}`);
+			expect(lineAccounts(Bill)).toEqual(['40']);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
 	test('each Software account receives its own bills', async ({ page }) => {
 		expect((await post(page, '/api/vendors/sync-erp')).status()).toBe(200);
 		await syncChart(page);
