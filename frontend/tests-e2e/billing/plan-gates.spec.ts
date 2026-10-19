@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../fixtures/helpers';
+import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers';
 import { expectNoA11yViolations } from '../a11y/axe-helper';
 
 /**
@@ -91,6 +91,37 @@ test.describe('plan-gated settings', () => {
 		await expect(page.getByTestId('sso-plan-upgrade')).toBeVisible();
 		// The worker's SSO is off, and turning it ON is what the plan gates.
 		await expect(page.getByTestId('sso-enabled-toggle')).toBeDisabled();
+	});
+
+	test('on Free, a stored Merge.dev connection opens on the Scale notice', async ({ page }) => {
+		// A Scale tenant that saved Merge and then dropped to Free: the panel
+		// loads the stored choice, and offers no form to save it again. The
+		// worker is really on Scale, so the save below is allowed; only the
+		// browser's view of the plan is Free.
+		await page.goto('/organization?section=erp');
+		const headers = { ...(await authedTenantHeaders(page)), 'Content-Type': 'application/json' };
+		const saved = await page.request.patch(`${API_BASE}/api/organization`, {
+			headers,
+			data: { settings: { erp: { type: 'sage_intacct', integration_method: 'merge_dev' } } }
+		});
+		expect(saved.ok()).toBe(true);
+		try {
+			await stubEntitlements(page, FREE);
+			await page.reload();
+			const erp = page.getByTestId('erp-panel');
+			await expect(erp.getByTestId('erp-provider-select')).toHaveValue('merge_dev');
+			await expect(
+				erp.getByTestId('erp-merge-plan-upgrade').getByText('Available on Scale')
+			).toBeVisible();
+			await expect(erp.getByRole('button', { name: 'Save ERP Settings' })).toHaveCount(0);
+			await expect(erp.getByRole('button', { name: 'Test Connection' })).toHaveCount(0);
+		} finally {
+			const reset = await page.request.patch(`${API_BASE}/api/organization`, {
+				headers,
+				data: { settings: { erp: null } }
+			});
+			expect(reset.ok()).toBe(true);
+		}
 	});
 
 	test('a negotiated plan without the direct ERPs names Free as the tier', async ({ page }) => {

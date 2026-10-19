@@ -91,6 +91,11 @@ describe('the pricing grid matches the generated catalogue', () => {
 		for (const tier of tiers.slice(1)) expect(tier.listedFeatures).toEqual(tier.addedFeatures);
 	});
 
+	it('Free grants the direct ERP and nothing else (decisions §281)', () => {
+		const free = PLANS.find((p) => p.code === 'free');
+		expect(free?.features).toEqual(['erp_integrations']);
+	});
+
 	it('sells Merge.dev on the top tier only (decisions §256)', () => {
 		const withMerge = tiers.filter((t) => t.addedFeatures.includes(FEATURE_LABEL_KEYS.erp_merge));
 		expect(withMerge.map((t) => t.code)).toEqual([PLANS[PLANS.length - 1].code]);
