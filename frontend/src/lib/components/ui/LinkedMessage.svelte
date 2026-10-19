@@ -13,10 +13,10 @@
 	 * Renders real anchor elements, never `{@html}`: the only markup here is
 	 * markup this component wrote, and the message text binds as text.
 	 */
-	let { text, links } = $props<{
+	let { text, links }: {
 		text: string;
 		links: Record<string, { href: string; label: string }>;
-	}>();
+	} = $props();
 
 	let segments = $derived(splitTokens(text, Object.keys(links)));
 </script>
