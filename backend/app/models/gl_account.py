@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, text
+from sqlalchemy import DateTime, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -74,7 +74,7 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     #: (``services/erp_link_realm``). An id only means something in the company
     #: that issued it — QuickBooks numbers accounts per company — so a link from
     #: another realm is never posted to. NULL: linked before migration 0115.
-    erp_link_realm: Mapped[str | None] = mapped_column(String(255))
+    erp_link_realm: Mapped[str | None] = mapped_column(Text)
     #: Set when a person chose this row's ERP account among the candidates a
     #: sync could not choose between (``POST /api/gl-accounts/{id}/erp-link``).
     #: A confirmed link is not re-judged by the sync's ambiguity rules (3 and 4,

@@ -103,14 +103,14 @@ def _snapshot_legacy_realms(bind) -> None:
 
 def upgrade() -> None:
     if _has_table("gl_accounts"):
-        op.execute("ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS erp_link_realm varchar(255)")
+        op.execute("ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS erp_link_realm text")
         op.execute(
             "ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS erp_link_confirmed_at timestamptz"
         )
         op.execute("ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS erp_link_confirmed_by uuid")
         op.execute("ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS erp_link_candidates jsonb")
     if _has_table("vendors"):
-        op.execute("ALTER TABLE vendors ADD COLUMN IF NOT EXISTS erp_link_realm varchar(255)")
+        op.execute("ALTER TABLE vendors ADD COLUMN IF NOT EXISTS erp_link_realm text")
     if _has_table("organizations"):
         _snapshot_legacy_realms(op.get_bind())
 
