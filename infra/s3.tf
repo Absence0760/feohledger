@@ -425,10 +425,12 @@ data "aws_iam_policy_document" "access_logs_delivery" {
 
   # Log delivery checks the destination's ACL before its first write, and
   # refuses the delivery ("cannot access destination bucket") without this.
+  # ListBucket beside it is AWS's own recommendation: without it the checks
+  # still pass but leave AccessDenied noise in CloudTrail.
   statement {
     sid       = "CloudFrontAccessLogAclCheck"
     effect    = "Allow"
-    actions   = ["s3:GetBucketAcl"]
+    actions   = ["s3:GetBucketAcl", "s3:ListBucket"]
     resources = [aws_s3_bucket.access_logs.arn]
 
     principals {

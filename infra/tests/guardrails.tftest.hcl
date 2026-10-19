@@ -317,7 +317,7 @@ run "access_log_sink_accepts_s3_log_delivery" {
   assert {
     condition = anytrue([
       for s in data.aws_iam_policy_document.access_logs_delivery.statement :
-      toset(s.actions) == toset(["s3:GetBucketAcl"]) && toset(s.resources) == toset(["arn:aws:s3:::feohledger-access-logs-test"])
+      toset(s.actions) == toset(["s3:GetBucketAcl", "s3:ListBucket"]) && toset(s.resources) == toset(["arn:aws:s3:::feohledger-access-logs-test"])
       if contains(flatten([for p in s.principals : tolist(p.identifiers)]), "delivery.logs.amazonaws.com")
     ])
     error_message = "CloudWatch log delivery reads the sink's ACL before writing; without s3:GetBucketAcl on the bucket the delivery is refused."
