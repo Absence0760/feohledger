@@ -268,7 +268,7 @@ organizations
 | full_name | String | Display name |
 | hashed_password | String | Bcrypt hash (nullable for SSO-only users) |
 | is_active | Boolean | Account status |
-| must_change_password | Boolean | Forces a password change on next login (set when admins reset, or on signup) |
+| must_change_password | Boolean | Forces a password change on next login (set when an admin creates or resets a password; never on self-service signup, which sends a set-password link — decisions §283) |
 | sso_provider | String | OIDC provider label (`okta`, `entra`, `oidc`) — set on first SSO login |
 | sso_provider_id | String | Provider's `sub` claim — durable identifier for the user across email changes |
 | mfa_secret | String | Base32-encoded TOTP secret. Populated during enrollment, "active" once `mfa_enabled` flips true. |

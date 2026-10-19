@@ -3857,6 +3857,16 @@ export const messages = {
 	'auth.resetPassword.invalidToken':
 		'Este enlace de restablecimiento no es válido o ha caducado. Solicita uno nuevo.',
 	'auth.resetPassword.goToLogin': 'Ir a iniciar sesión',
+	'auth.resetPassword.retry': 'Reintentar',
+	'auth.resetPassword.checkFailed':
+		'No pudimos comprobar este enlace en este momento. Inténtalo de nuevo.',
+	'auth.resetPassword.checking': 'Comprobando tu enlace…',
+	'auth.resetPassword.setExpiredHint':
+		'Los enlaces para establecer la contraseña funcionan una sola vez y caducan. Solicita uno nuevo con «¿Olvidaste tu contraseña?»: también funciona para tu nueva cuenta.',
+	'auth.resetPassword.setSuccess': 'Tu contraseña está establecida. Ya puedes iniciar sesión.',
+	'auth.resetPassword.setSubmit': 'Establecer contraseña',
+	'auth.resetPassword.setSubtitle': 'Elige una contraseña para tu nueva cuenta.',
+	'auth.resetPassword.setHeading': 'Establece tu contraseña',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Verificación en dos pasos',
@@ -3925,8 +3935,9 @@ export const messages = {
 	'auth.signup.step1Body': 'Elige la dirección en la que tu equipo iniciará sesión.',
 	'auth.signup.step2Title': 'Confirma tu correo',
 	'auth.signup.step2Body': 'Te enviamos un enlace para comprobar que la dirección es tuya.',
-	'auth.signup.step3Title': 'Inicia sesión y define una contraseña',
-	'auth.signup.step3Body': 'Tu correo de bienvenida incluye una temporal para empezar.',
+	'auth.signup.step3Title': 'Establece tu contraseña e inicia sesión',
+	'auth.signup.step3Body':
+		'Elígela directamente en la página de confirmación o desde el enlace de tu correo de bienvenida.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Cambiar contraseña — FeohLedger',
@@ -3953,15 +3964,18 @@ export const messages = {
 	'auth.verify.failed': 'Error en la verificación.',
 	'auth.verify.pendingHeading': 'Creando tu espacio de trabajo…',
 	'auth.verify.pendingSub':
-		'Esto suele tardar unos segundos: estamos aprovisionando tu base de datos y enviando tus credenciales.',
+		'Suele tardar unos segundos: estamos preparando tu base de datos y enviando tu correo de bienvenida.',
 	'auth.verify.successHeading': 'Tu espacio de trabajo está listo',
-	'auth.verify.successSubPre': 'Enviamos tu enlace de acceso y una contraseña temporal a ',
-	'auth.verify.successSubPost':
-		'. Usa esa contraseña para iniciar sesión la primera vez: establecerás la tuya justo después.',
-	'auth.verify.step1': 'Abre el correo de bienvenida y copia la contraseña temporal.',
-	'auth.verify.step2': 'Inicia sesión en tu espacio de trabajo abajo.',
-	'auth.verify.step3': 'Elige una nueva contraseña y ya estás dentro.',
-	'auth.verify.continueTo': 'Continuar a {slug} →',
+	'auth.verify.successSubPre': 'También enviamos un enlace para establecer tu contraseña a ',
+	'auth.verify.successSubPost': ', por si prefieres hacerlo más tarde.',
+	'auth.verify.step1': 'Elige tu contraseña: el botón de abajo te lleva directamente.',
+	'auth.verify.step2': 'Inicia sesión en tu espacio de trabajo con tu correo y esa contraseña.',
+	'auth.verify.step3': 'Invita a tu equipo y conecta tus herramientas, y ya estás dentro.',
+	'auth.verify.noLink':
+		'Usa «¿Olvidaste tu contraseña?» en la página de inicio de sesión de tu espacio de trabajo para elegir tu contraseña.',
+	'auth.verify.linkNote':
+		'El enlace funciona una sola vez. Si ha caducado, usa «¿Olvidaste tu contraseña?» en la página de inicio de sesión.',
+	'auth.verify.setPassword': 'Establecer tu contraseña',
 	'auth.verify.errorHeading': 'Algo salió mal',
 	'auth.verify.startOver': 'Empezar de nuevo',
 	// Admin — Users & Roles host (routes/admin/+page.svelte)

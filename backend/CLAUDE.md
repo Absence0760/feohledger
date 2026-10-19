@@ -958,10 +958,10 @@ Two-step flow under `/api/signup`:
 |----------|---------|
 | `POST /api/signup/start` | Rate-limit check, captcha verify, slug-format check, slug-availability check. Creates an `EmailVerification` row (24h TTL) and sends a verification email. No tenant resources created yet. |
 | `GET /api/signup/slug-check?slug=…` | Cheap inline availability check for the signup form. |
-| `POST /api/signup/complete` | Consumes the token, re-checks slug availability, provisions the tenant via `services.tenant_provisioning.provision_tenant`, generates a temp password, sends the welcome email with tenant URL + credentials, marks the verification consumed. |
-| `POST /api/auth/change-password` | Authenticated. Validates current password, enforces complexity, sets the new hash and clears `User.must_change_password`. |
+| `POST /api/signup/complete` | Consumes the token, re-checks slug availability, provisions the tenant via `services.tenant_provisioning.provision_tenant` with an admin who has **no password** (`admin_password=None` → `hashed_password` NULL, `must_change_password=False`), marks the verification consumed, mints a set-password link and returns it as `set_password_url` while also emailing it in the welcome message. |
+| `POST /api/auth/reset-password/check` · `POST /api/auth/reset-password` | Public; the reset token is the credential. `check` reads it without consuming (`password_reset.peek_reset_token`) and returns the account email; only the reset submit spends it. |
 
-The welcome email contains the tenant URL (`FEOH_TENANT_URL_TEMPLATE`, e.g. `https://{slug}.app.com`) and a 16-char URL-safe temp password. The user is forced to change it on first login (`User.must_change_password` is `true` until they hit `/api/auth/change-password`).
+**No password is ever generated or emailed for signup** (`docs/decisions.md` §283). The set-password link IS a forgot-password reset token — `password_reset.issue_reset_token(user_id, ttl_seconds=FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS*3600)`, same store and single-use semantics — built by `utils/tenant_urls.password_reset_url(..., set_password=True)`, the forgot-password email's own builder. Don't add a second token type or a signup-only redemption endpoint, and never put the link or token in a log line or a preheader. The welcome email's sign-in link comes from `tenant_urls.sign_in_url(..., email=…)`.
 
 **Pluggable services:**
 

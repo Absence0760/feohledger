@@ -151,7 +151,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**103 open: 87 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**104 open: 88 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1612,6 +1612,35 @@ scope (§260) — do not fold them into any of these.
       would have caught the v0.1.0 empty-404 outage.
       **Trigger:** the next change to `deploy/`, Alembic bootstrap or
       `tenant_provisioning`, and in any case before customer #2.
+
+### Surfaced by replacing signup's temporary password (2026-10-19, decisions §283)
+
+- [ ] **(c) Five other flows still hand out a temporary password.** Signup now
+      sends a single-use set-password link; these still generate a password
+      with `utils/passwords.generate_temp_password` and email it, return it, or
+      both, leaving a working credential in an inbox or on an admin's screen
+      until someone signs in: (1) admin create user —
+      `POST /api/admin/users` (`api/admin.py::create_user`, emailed and
+      returned as `temporary_password`); (2) admin password reset —
+      `POST /api/admin/users/{id}/reset-password` (`api/admin.py`, decisions
+      §276, emailed and returned once); (3) supplier-portal invite —
+      `POST /api/vendors/{id}/portal-users` (`api/vendors.py::invite_vendor_portal_user`, emailed); (4)
+      supplier-portal password reset — `POST /api/vendors/{id}/portal-users/{vu}/reset-password`
+      (emailed); (5) partner child provisioning — `POST /api/partner/children/
+      provision` (`api/partner.py`, returned to the partner admin as
+      `temp_password`). **Durable fix:** the same shape as §283 — provision or
+      reset to no usable password, mint a set-password link and email that.
+      (1), (2) and (5) reuse `services/password_reset` and
+      `tenant_urls.password_reset_url(..., set_password=True)` unchanged
+      (control-plane `User`s; (5) emails the child's admin rather than
+      returning a secret to the partner). (3) and (4) need a portal
+      equivalent first: `VendorUser` lives in the tenant DB and the portal has
+      no forgot-password flow at all, so the token must carry the tenant slug
+      and redeem through a new portal reset page — which also gives suppliers
+      the self-service recovery they lack. §276's "never a value the admin
+      types" stands; the link replaces the temp, not that rule. **Trigger:**
+      the next change to any of those five endpoints or to their emails, and
+      before a second customer onboards users or suppliers.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

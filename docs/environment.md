@@ -185,6 +185,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | (empty)                                                   | hCaptcha keys for self-service signup. The secret is **required** in a deployed env while `FEOH_SIGNUP_ENABLED` is on (boot refuses otherwise), and not needed when it is off |
 | `FEOH_SIGNUP_RATE_LIMIT_PER_HOUR` | `5`                                                            | Max `/signup/start` + `/complete` per IP per hour (Redis sliding window) |
 | `FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR` | `3`                                                      | Max verification emails per target address per hour (anti email-bombing) |
+| `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS` | `72`                                                        | Lifetime of the single-use set-password link a signup admin gets instead of a temporary password (a reset token, redeemed at `/login/reset-password`). Minimum 1. See [self-service-signup.md](self-service-signup.md), `decisions.md` §283 |
 | `FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR` | `120`                                                      | Max `/signup/slug-check` per IP per hour (anti-enumeration) |
 | `FEOH_ENVIRONMENT`      | `development`                                                            | Deployment discriminator; non-dev values turn on prod guards (captcha required to boot) |
 | `FEOH_RAG_ENABLED`      | `true`                                                                   | RAG retrieval of similar invoices as few-shot examples |

@@ -1,6 +1,6 @@
 # Self-service tenant signup
 
-End-to-end flow for anonymous visitors to provision their own workspace. Landing page → signup form → verification email → workspace created → welcome email → first login → forced password change.
+End-to-end flow for anonymous visitors to provision their own workspace. Landing page → signup form → verification email → workspace created → **set your password** (one single-use link, shown on the verify page and in the welcome email) → sign in. No password is ever generated or emailed (`docs/decisions.md` §283).
 
 ## Turning signup off — `FEOH_SIGNUP_ENABLED`
 
@@ -51,24 +51,26 @@ file: a secret starting `0x` is otherwise read by YAML as a number.
 1. Visitor lands on the apex domain (no subdomain) and clicks **Create your workspace**.
 2. `/signup` form: company name, desired slug, admin name, admin email, hCaptcha (rendered in its dark theme, since the app is dark-only).
 3. Form submits `POST /api/signup/start`. Backend validates (including refusing an admin name that holds a web or email address: the name greets the reader of an email sent to whatever address the visitor typed, and mail clients auto-link a bare URL even in inert text), records an `EmailVerification` row, and emails a verification link (`PUBLIC_URL/verify?token=...`).
-4. User clicks the link. `/verify?token=...` calls `POST /api/signup/complete`. Backend re-checks availability, provisions the tenant (DB + org + admin user), generates a 16-char temp password, sends the welcome email with tenant URL + credentials.
-5. User receives the welcome email, clicks the tenant URL, signs in with the temp password.
-6. Login response sets `must_change_password=true` on the `/auth/me` user object. The frontend layout redirects to `/change-password`.
-7. User sets a new password (min 12 chars, upper/lower/digit). Backend clears the flag. User is taken to the dashboard.
+4. User clicks the link. `/verify?token=...` calls `POST /api/signup/complete`. Backend re-checks availability and provisions the tenant (DB + org + an admin user with **no password** — `hashed_password` NULL, the representation SSO-only users already have, so `/auth/login` refuses the account until a password exists; `must_change_password=false`). It then mints a **set-password link**: a forgot-password reset token (`services/password_reset.issue_reset_token`, same Redis store, keyed digest and single-use `GETDEL`) with a longer life, `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS` (default 72), built by the same `utils/tenant_urls.password_reset_url` as the reset email plus `&mode=set`. The link is returned to the browser (`set_password_url`) **and** emailed in the welcome message; it is one token, so whichever copy is used first spends the other.
+5. The verify page shows **Set your password**, a button straight to `<tenant>/login/reset-password?token=…&mode=set`. That page (the existing reset page) reads the token with `POST /api/auth/reset-password/check` — a read that never consumes it, so a mail scanner opening the link, or a reload, leaves it usable — fills a hidden `autocomplete="username"` field with the account email so a password manager saves the new password under it, and redeems the token with `POST /api/auth/reset-password` on submit. Only that submit spends the token.
+6. The confirmation links to `/login?email=<address>`; the login page prefills its email field from `?email=` (`frontend/src/lib/utils/prefillEmail.ts`, a plausible single address only). The user signs in with the password they chose — no forced change.
+7. An expired or used link explains itself on the reset page and offers **Forgot password**, which works for this account like any other (it needs only an active user, not an existing password).
+
+The welcome email carries the **Set your password** button (with the paste-this fallback and the expiry), the workspace URL and the email as plain panel values, and a sign-in link with the address prefilled — no password anywhere. Its preheader is fixed copy ("Your workspace is live."), never the link. With no tenant base URL configured, `/complete` refuses with `503` **before** provisioning and leaves the verification unconsumed — a passwordless admin with no link to set a password (forgot-password needs that URL too) would have no way in. A Redis failure while minting yields no link (the email and the verify page point at Forgot password) rather than failing a request whose tenant already exists. The response is sent `Cache-Control: no-store`, and the issuance is audited as `auth.password_reset.requested` with `via: signup`.
 
 ## Backend components
 
 | Layer | File |
 |-------|------|
 | Router | `app/api/signup.py` |
-| Router (change-password) | `app/api/auth.py` → `change_password()` |
+| Set-password redemption | `app/api/auth.py` → `check_reset_token()` + `reset_password()`; token store `app/services/password_reset.py`; link builder `app/utils/tenant_urls.py` → `password_reset_url()` / `sign_in_url()` |
 | Provisioning service | `app/services/tenant_provisioning.py` |
 | Email dispatcher | `app/services/email_adapters/` (`console`, `ses`) |
 | Rate limiter (Redis) | `app/services/rate_limit.py` |
 | Slug validator | `app/utils/slug.py` |
 | Captcha verifier | `app/utils/hcaptcha.py` |
 | Password helpers | `app/utils/passwords.py` |
-| Models | `app/models/signup.py` (`EmailVerification`) + `User.must_change_password` |
+| Models | `app/models/signup.py` (`EmailVerification`); the admin `User` starts with `hashed_password` NULL |
 | Migration | `alembic/versions/0001_self_service_signup.py` |
 
 ## Frontend components
@@ -78,8 +80,8 @@ file: a secret starting `0x` is otherwise read by YAML as a number.
 | Landing (no tenant) | `src/routes/+layout.svelte` (inline) |
 | Signup form | `src/routes/signup/+page.svelte` |
 | Verify handler | `src/routes/verify/+page.svelte` |
-| First-login redirect | `src/routes/+layout.svelte` (effect) |
-| Change password | `src/routes/change-password/+page.svelte` |
+| Set password (the reset page in `mode=set`) | `src/routes/login/reset-password/+page.svelte` |
+| Sign in (prefills `?email=`) | `src/routes/login/+page.svelte` + `src/lib/utils/prefillEmail.ts` |
 
 ## Abuse mitigations
 
@@ -92,7 +94,8 @@ file: a secret starting `0x` is otherwise read by YAML as a number.
 - **Reserved subdomains**: `utils/slug.py` → `RESERVED_SLUGS` blocks names that would collide with marketing/infra subdomains (`www`, `api`, `admin`, etc.). The check is enforced inside `provision_tenant` too, before any database work, so the operator CLI (`scripts/create_tenant.py`, and `deploy/add-tenant.sh` behind it) cannot provision a reserved or malformed slug; the CLI exits 2 with the reason.
 - **No orphan databases**: if provisioning fails after the tenant DB is created (control-plane insert or table creation errors), the DB this attempt created is dropped, so partial failures don't leak databases or squat the namespace.
 - **Log hygiene**: the submitter's email (PII) and raw captcha-network exception text are kept out of logs.
-- **Partial-failure visibility**: if the welcome email fails after provisioning, the tenant is usable but the admin needs a password reset. Logs warn loudly; a support runbook should resend manually.
+- **Partial-failure visibility**: if the welcome email fails after provisioning, the verify page still carries the set-password link, and Forgot password works for the account. Logs warn loudly, naming the slug only.
+- **No credential at rest in the inbox**: the welcome email holds a single-use link that dies on first use or after `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS`, where it used to hold a temporary password that stayed valid until someone signed in. Neither the token nor the link is written to an application log line or the preheader (the `console` adapter, dev-only, prints whole messages by design).
 
 ## Email
 
@@ -107,11 +110,12 @@ Adding a provider: copy `app/services/email_adapters/console_adapter.py`, implem
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `FEOH_EMAIL_PROVIDER` | `console` | `console`, `ses` or `smtp`. A deployed env refuses to boot on `console`, which logs each email's full text (temporary passwords included) instead of sending it. |
+| `FEOH_EMAIL_PROVIDER` | `console` | `console`, `ses` or `smtp`. A deployed env refuses to boot on `console`, which logs each email's full text (sign-in codes and set-password links included) instead of sending it. |
 | `FEOH_EMAIL_FROM` | `no-reply@localhost` | Verified SES sender in prod |
 | `FEOH_AWS_SES_REGION` | `us-east-1` | Only used by the SES adapter |
 | `FEOH_PUBLIC_URL` | `http://localhost:7777` | Frontend URL — used to build verification links |
-| `FEOH_TENANT_URL_TEMPLATE` | `http://{slug}.localhost:7777` | `{slug}` is substituted in the welcome email |
+| `FEOH_TENANT_URL_TEMPLATE` | `http://{slug}.localhost:7777` | `{slug}` is substituted in the welcome email and the set-password link; blank → `/signup/complete` answers 503 before provisioning |
+| `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS` | `72` | Lifetime of the signup admin's single-use set-password link (minimum 1). Longer than the 30-minute forgot-password link because nobody is waiting at the keyboard for it — see `docs/decisions.md` §283 |
 | `FEOH_ENVIRONMENT` | `development` | Deployment discriminator. Any value outside `development`/`dev`/`local`/`test`/`ci` is "deployed" and turns on the production safety guards (e.g. captcha must be configured). |
 | `FEOH_SIGNUP_ENABLED` | `true` | Master switch for `/api/signup/*`. `false` → every signup route 404s, `/signup` says signup is closed, and the hCaptcha secret is no longer required. See § Turning signup off. |
 | `FEOH_HCAPTCHA_SECRET` | *(empty)* | Empty skips verification — OK for local dev; a deployed env with signup on refuses to boot when empty. |
@@ -138,5 +142,5 @@ Tenant DBs are unaffected — both changes live in the control plane.
 3. Visit http://localhost:7777 — land on the CTA.
 4. Click **Create your workspace** → fill in the form (leave captcha empty, it's disabled locally).
 5. Watch the backend logs — the verification email is printed to stdout. Copy the verify link and paste it into your browser.
-6. The verify page shows progress → success. Watch logs again for the welcome email with the temp password.
-7. Visit `http://<slug>.localhost:7777`, sign in with the temp password, and you'll be redirected to `/change-password`.
+6. The verify page shows progress → success with a **Set your password** button. Click it — or take the same link from the welcome email in the logs (the line ending `/login/reset-password?token=…&mode=set`); it is one link, usable once.
+7. Choose a password on `http://<slug>.localhost:7777/login/reset-password`, follow **Go to sign in** (your email is already filled in), and sign in.
