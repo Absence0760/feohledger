@@ -10,12 +10,14 @@ isolation, audit rows, and exact ``Numeric`` money round-trips.
 import uuid
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import func, select
 
 from app.models.contract import Contract
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from app.models.workflow import AuditLog
+from tests.entity_scope_probe import two_entities
 
 
 async def _add_vendor(mk, org_id, name="Globex Industrial") -> str:
@@ -342,6 +344,163 @@ async def test_update_contract_audit_names_exactly_the_fields_that_changed(reald
             .all()
         )
     assert [r.details["fields"] for r in rows] == [["vendor_id"]]
+
+
+# ---------------------------------------------------------------------------
+# the vendor link is entity-scoped
+# ---------------------------------------------------------------------------
+
+
+async def _add_entity_vendor(mk, org_id, entity_id, name) -> str:
+    async with mk() as s:
+        v = Vendor(
+            organization_id=org_id, name=f"{name} {uuid.uuid4().hex[:6]}", entity_id=entity_id
+        )
+        s.add(v)
+        await s.commit()
+        return str(v.id)
+
+
+async def _load_contract(mk, contract_id: str) -> Contract:
+    async with mk() as s:
+        return (
+            await s.execute(select(Contract).where(Contract.id == uuid.UUID(contract_id)))
+        ).scalar_one()
+
+
+@pytest.mark.plan("scale")
+async def test_create_refuses_another_entitys_vendor(realdb):
+    """A contract created under subsidiary A cannot be struck against B's
+    vendor: the same opaque 404 as an unknown id, and nothing written. A's own
+    vendor and an unstamped (NULL-entity) one are both accepted."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="admin") as c:
+        default_id, other_id = await two_entities(c, slug=f"ct-{uuid.uuid4().hex[:8]}")
+        dflt, other = uuid.UUID(default_id), uuid.UUID(other_id)
+        foreign = await _add_entity_vendor(mk, org_id, other, "UK Supplier")
+        own = await _add_entity_vendor(mk, org_id, dflt, "US Supplier")
+        unstamped = await _add_entity_vendor(mk, org_id, None, "Legacy Supplier")
+        hdr = {"X-Entity-ID": default_id}
+
+        number = f"CT-{uuid.uuid4().hex[:8]}"
+        refused = await c.post(
+            "/api/contracts",
+            json={"contract_number": number, "title": "x", "vendor_id": foreign},
+            headers=hdr,
+        )
+        assert refused.status_code == 404, refused.text
+        assert refused.json()["detail"] == "Vendor not found"
+        async with mk() as s:
+            written = (
+                await s.execute(
+                    select(func.count())
+                    .select_from(Contract)
+                    .where(Contract.contract_number == number)
+                )
+            ).scalar_one()
+        assert written == 0
+
+        ok = await c.post(
+            "/api/contracts",
+            json={"contract_number": number, "title": "x", "vendor_id": own},
+            headers=hdr,
+        )
+        assert ok.status_code == 201, ok.text
+        legacy = await c.post(
+            "/api/contracts",
+            json={
+                "contract_number": f"CT-{uuid.uuid4().hex[:8]}",
+                "title": "x",
+                "vendor_id": unstamped,
+            },
+            headers=hdr,
+        )
+        assert legacy.status_code == 201, legacy.text
+
+    row = await _load_contract(mk, ok.json()["id"])
+    assert row.entity_id == dflt
+    assert str(row.vendor_id) == own
+
+
+@pytest.mark.plan("scale")
+async def test_update_refuses_another_entitys_vendor_even_from_consolidated_view(realdb):
+    """A re-point is checked against the CONTRACT's entity, so the consolidated
+    view (no selector) cannot move A's contract onto B's vendor either. The
+    refused PATCH changes nothing and audits nothing; an unstamped vendor is
+    still accepted."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="admin") as c:
+        default_id, other_id = await two_entities(c, slug=f"cu-{uuid.uuid4().hex[:8]}")
+        dflt, other = uuid.UUID(default_id), uuid.UUID(other_id)
+        foreign = await _add_entity_vendor(mk, org_id, other, "UK Supplier")
+        own = await _add_entity_vendor(mk, org_id, dflt, "US Supplier")
+        unstamped = await _add_entity_vendor(mk, org_id, None, "Legacy Supplier")
+
+        created = await _create_contract(c, own, contract_number=f"CT-{uuid.uuid4().hex[:8]}")
+        assert created.status_code == 201, created.text
+        contract_id = created.json()["id"]
+
+        for headers in ({}, {"X-Entity-ID": default_id}):
+            r = await c.patch(
+                f"/api/contracts/{contract_id}",
+                json={"vendor_id": foreign, "title": "Moved"},
+                headers=headers,
+            )
+            assert r.status_code == 404, r.text
+            assert r.json()["detail"] == "Vendor not found"
+
+        row = await _load_contract(mk, contract_id)
+        assert str(row.vendor_id) == own
+        assert row.title == "Master Services Agreement"
+        async with mk() as s:
+            audits = (
+                await s.execute(
+                    select(func.count())
+                    .select_from(AuditLog)
+                    .where(
+                        AuditLog.action == "contract.updated",
+                        AuditLog.entity_id == uuid.UUID(contract_id),
+                    )
+                )
+            ).scalar_one()
+        assert audits == 0
+
+        r = await c.patch(f"/api/contracts/{contract_id}", json={"vendor_id": unstamped})
+        assert r.status_code == 200, r.text
+        assert r.json()["vendor_id"] == unstamped
+
+
+async def test_single_entity_tenant_vendor_link_unchanged(realdb):
+    """With only the default entity, a vendor stamped to it links on create and
+    update with or without the selector — the scope check is invisible."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="ap_manager") as c:
+        listing = await c.get("/api/entities")
+        assert listing.status_code == 200, listing.text
+        entities = listing.json()
+        assert len(entities) == 1
+        default_id = entities[0]["id"]
+        stamped = await _add_entity_vendor(mk, org_id, uuid.UUID(default_id), "Globex")
+        other = await _add_entity_vendor(mk, org_id, uuid.UUID(default_id), "Initech")
+
+        plain = await _create_contract(c, stamped, contract_number=f"CT-{uuid.uuid4().hex[:8]}")
+        assert plain.status_code == 201, plain.text
+        scoped = await c.post(
+            "/api/contracts",
+            json={
+                "contract_number": f"CT-{uuid.uuid4().hex[:8]}",
+                "title": "x",
+                "vendor_id": stamped,
+            },
+            headers={"X-Entity-ID": default_id},
+        )
+        assert scoped.status_code == 201, scoped.text
+        r = await c.patch(f"/api/contracts/{plain.json()['id']}", json={"vendor_id": other})
+        assert r.status_code == 200, r.text
+        assert r.json()["vendor_id"] == other
 
 
 # ---------------------------------------------------------------------------

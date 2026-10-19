@@ -32,7 +32,6 @@ from app.api.deps import (
 from app.api.pagination import PaginationParams, pagination_params
 from app.models.procurement import IntakeRequest, IntakeStatus, PurchaseRequisition
 from app.models.user import User
-from app.models.vendor import Vendor
 from app.schemas.intake import (
     IntakeConvertRequest,
     IntakeConvertResponse,
@@ -49,6 +48,7 @@ from app.services.intake_service import (
     generate_request_number,
     guard_transition,
 )
+from app.services.vendor_matching import get_vendor_in_scope
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -140,18 +140,7 @@ async def _resolve_vendor_id(
         vendor_uuid = uuid.UUID(raw)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid vendor_id")
-    exists = (
-        await db.execute(
-            apply_entity_scope(
-                select(Vendor.id).where(Vendor.id == vendor_uuid, Vendor.organization_id == org_id),
-                Vendor,
-                entity_id,
-                include_shared=True,
-            )
-        )
-    ).scalar_one_or_none()
-    if exists is None:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    await get_vendor_in_scope(db, vendor_uuid, org_id=org_id, entity_id=entity_id)
     return vendor_uuid
 
 

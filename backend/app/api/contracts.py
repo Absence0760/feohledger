@@ -61,6 +61,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.contract_spend import compute_spend_summary
 from app.services.report_export import csv_safe_cell
 from app.services.storage import upload_contract_file
+from app.services.vendor_matching import get_vendor_in_scope
 from app.tenant import (
     apply_entity_scope,
     ensure_in_entity_scope,
@@ -288,14 +289,17 @@ async def create_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     try:
         vendor_uuid = uuid.UUID(body.vendor_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid vendor_id")
-    vendor = (await db.execute(select(Vendor).where(Vendor.id == vendor_uuid))).scalar_one_or_none()
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    # The contract takes the vendor's entity (below), so the vendor must be one
+    # the caller's selected entity can reach — its own or an unstamped one. An
+    # unscoped lookup let a caller working under subsidiary A strike a
+    # contract against B's supplier record.
+    vendor = await get_vendor_in_scope(db, vendor_uuid, org_id=org_id, entity_id=entity_id)
 
     owner_uuid: uuid.UUID | None = None
     if body.owner_user_id:
@@ -411,11 +415,16 @@ async def update_contract(
             new_vendor = uuid.UUID(payload["vendor_id"])
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid vendor_id")
-        vendor = (
-            await db.execute(select(Vendor).where(Vendor.id == new_vendor))
-        ).scalar_one_or_none()
-        if not vendor:
-            raise HTTPException(status_code=404, detail="Vendor not found")
+        # Scoped to the CONTRACT's entity, not just the caller's selector: from
+        # the consolidated view (no selector) an unscoped lookup re-pointed
+        # subsidiary A's contract at B's vendor. An unstamped contract falls
+        # back to the caller's selection.
+        await get_vendor_in_scope(
+            db,
+            new_vendor,
+            org_id=org_id,
+            entity_id=contract.entity_id if contract.entity_id is not None else entity_id,
+        )
         # Named in the audit row when it moves: re-pointing a contract at a
         # different supplier was applied but never recorded, so a vendor-only
         # edit wrote no row at all (#575).

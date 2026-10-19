@@ -40,7 +40,13 @@ A transition from a disallowed source status is refused with `409`.
 
 Tenant-scoped (`EntityMixin` + `TimestampMixin` + explicit `organization_id`).
 A contract follows the `entity_id` of the vendor it's struck with (multi-entity
-Phase 2), mirroring credit memos. Money is exact: every currency column is
+Phase 2), mirroring credit memos. The vendor must be reachable from the
+caller's selected entity on create (its own vendors ∪ unstamped ones), and a
+`PATCH` that re-points `vendor_id` is checked against the contract's own entity
+— even from the consolidated view — via
+`services/vendor_matching.get_vendor_in_scope`; another subsidiary's vendor is
+the same `404 "Vendor not found"` as an unknown id, and nothing is written.
+Money is exact: every currency column is
 `Numeric(15, 2)` — never float.
 
 ### `Contract` (`contracts`)
