@@ -372,3 +372,54 @@ export function readOAuthReturn(params: Pick<URLSearchParams, 'get'>): OAuthRetu
 	if (connected) return { kind: 'connected', provider: connected.slice(0, RETURN_PARAM_LIMIT) };
 	return null;
 }
+
+/**
+ * What `POST /api/organization/test-erp` answers. `code` says what happened
+ * (`connected`, `connection_failed`, `credentials_unavailable`,
+ * `unknown_adapter`); `provider` is the ERP's catalogue key (the Merge.dev
+ * linked ERP for a Merge.dev connection), `adapter` the unsupported key.
+ * `message` is the server's English, for a code this build does not know.
+ */
+export interface ErpTestResult {
+	success: boolean;
+	message: string;
+	code?: string;
+	provider?: string;
+	adapter?: string;
+}
+
+type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
+
+/**
+ * The test result in the reader's language, naming the ERP by its display
+ * name (`label`, the panel's `providerLabel`) rather than the backend's key.
+ * `tested` is the provider the form tested. Anything this build cannot state
+ * (an unknown code, a result for a different ERP than the form shows) is the
+ * server's own sentence.
+ */
+export function erpTestResultText(
+	result: ErpTestResult,
+	tested: ErpProvider,
+	label: (p: ErpProvider) => string,
+	t: Translate
+): string {
+	const sameErp =
+		tested.key === MERGE_DEV_PROVIDER ? !!result.provider : result.provider === tested.key;
+	switch (result.code) {
+		case 'connected':
+			return sameErp ? t('org.erp.test.connected', { erp: label(tested) }) : result.message;
+		case 'connection_failed':
+			if (!sameErp) return result.message;
+			return t(tested.auth === 'oauth' ? 'org.erp.test.failedOAuth' : 'org.erp.test.failed', {
+				erp: label(tested)
+			});
+		case 'credentials_unavailable':
+			return t('org.erp.test.credentialsUnavailable');
+		case 'unknown_adapter':
+			return result.adapter
+				? t('org.erp.test.unknownAdapter', { adapter: result.adapter })
+				: result.message;
+		default:
+			return result.message;
+	}
+}

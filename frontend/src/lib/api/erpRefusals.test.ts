@@ -50,7 +50,11 @@ describe('the registry pins the backend', () => {
 		for (const [locale, messages] of Object.entries(locales)) {
 			const t = translator(messages, locale);
 			for (const code of ERP_REFUSAL_CODES) {
-				const params = { provider: 'QuickBooks Online', accounts: ['6100'] };
+				const params = {
+					provider: 'QuickBooks Online',
+					accounts: ['6100'],
+					intuit_code: '6000'
+				};
 				const text = erpRefusalText({ code, params }, t);
 				expect(text, `${locale} ${code}`).toBeTruthy();
 				expect(text, `${locale} ${code} left a placeholder`).not.toMatch(/\{\w+\}/);
@@ -111,6 +115,53 @@ describe('erpRefusalText', () => {
 		['a blank provider', { code: 'vendor_not_linked', params: { provider: ' ' } }],
 		['accounts that are not strings', { code: 'account_not_linked', params: { provider: 'X', accounts: [1] } }],
 		['accounts absent', { code: 'account_not_linked', params: { provider: 'X' } }]
+	])('falls back to the server sentence for %s', (_label, refusal) => {
+		expect(erpRefusalText(refusal, enT)).toBeNull();
+	});
+});
+
+describe('refusals QuickBooks answered with (Intuit Fault codes)', () => {
+	const qbo = 'QuickBooks Online';
+
+	it('says a closed period is the date, and what to do', () => {
+		expect(
+			erpRefusalText({ code: 'period_closed', params: { provider: qbo, intuit_code: '6210' } }, enT)
+		).toBe(
+			'QuickBooks Online refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in QuickBooks Online, then retry.'
+		);
+	});
+
+	it('says the vendor is inactive', () => {
+		expect(
+			erpRefusalText({ code: 'vendor_inactive', params: { provider: qbo, intuit_code: '2500' } }, enT)
+		).toContain('its vendor is inactive or deleted there. Make the vendor active in QuickBooks Online');
+	});
+
+	it('names the inactive accounts by our GL code', () => {
+		expect(
+			erpRefusalText(
+				{ code: 'account_inactive', params: { provider: qbo, intuit_code: '2500', accounts: ['6100'] } },
+				enT
+			)
+		).toContain('because 6100 is inactive or deleted there');
+	});
+
+	it('names the Intuit code of an unmapped fault', () => {
+		expect(
+			erpRefusalText({ code: 'intuit_fault', params: { provider: qbo, intuit_code: '6000' } }, enT)
+		).toMatch(/^QuickBooks Online refused this bill \(Intuit error 6000\)\. /);
+		expect(
+			erpRefusalText(
+				{ code: 'reference_invalid', params: { provider: qbo, intuit_code: '2500' } },
+				translator(fr, 'fr')
+			)
+		).toContain('erreur Intuit 2500');
+	});
+
+	it.each([
+		['an inactive account with none named', { code: 'account_inactive', params: { provider: qbo, accounts: [] } }],
+		['an unmapped fault without its code', { code: 'intuit_fault', params: { provider: qbo } }],
+		['a code that is not a number', { code: 'intuit_fault', params: { provider: qbo, intuit_code: 'Acme' } }]
 	])('falls back to the server sentence for %s', (_label, refusal) => {
 		expect(erpRefusalText(refusal, enT)).toBeNull();
 	});

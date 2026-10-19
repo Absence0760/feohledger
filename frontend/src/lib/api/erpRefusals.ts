@@ -7,8 +7,10 @@
  * vendor_not_linked") and as `details.refusal = {code, params}`
  * (`backend/app/services/erp.py::erp_refusal_record`). The code is one of
  * `backend/app/services/erp_adapters/base.py::ERP_REFUSAL_CODES`; `params`
- * carries the adapter's `provider` literal and, for `account_not_linked`, the
- * GL `accounts` that resolved to no ERP account. This module states the code
+ * carries the adapter's `provider` literal and, for `account_not_linked` /
+ * `account_inactive`, the GL `accounts` concerned. A refusal QuickBooks itself
+ * answered with carries Intuit's numeric `intuit_code` too, and the sentences
+ * for an unmapped or unattributed fault name it, so it can be looked up. This module states the code
  * in the reader's language AND says what to do about it — the English string
  * is neither, it names a reason code to a person who cannot act on one.
  *
@@ -48,6 +50,12 @@ const KEYS: Record<string, MessageKey> = {
 	doc_number_too_long: 'erpRefusal.docNumberTooLong',
 	currency_unknown: 'erpRefusal.currencyUnknown',
 	currency_not_enabled: 'erpRefusal.currencyNotEnabled',
+	period_closed: 'erpRefusal.periodClosed',
+	vendor_inactive: 'erpRefusal.vendorInactive',
+	account_inactive: 'erpRefusal.accountInactive',
+	reference_invalid: 'erpRefusal.referenceInvalid',
+	company_subscription_inactive: 'erpRefusal.companySubscriptionInactive',
+	intuit_fault: 'erpRefusal.intuitFault',
 	idempotency_lookup_incomplete: 'erpRefusal.idempotencyLookupIncomplete',
 	existing_invoice_not_open: 'erpRefusal.existingInvoiceNotOpen',
 	line_amount_precision: 'erpRefusal.lineAmountPrecision',
@@ -67,6 +75,9 @@ const KEYS: Record<string, MessageKey> = {
 	job_unconfirmed: 'erpRefusal.jobUnconfirmed',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable'
 };
+
+/** The sentences that name Intuit's numeric fault code as `{code}`. */
+const NAMES_INTUIT_CODE = new Set(['reference_invalid', 'intuit_fault']);
 
 /** The codes this build states (pinned against the backend registry). */
 export const ERP_REFUSAL_CODES = Object.keys(KEYS);
@@ -104,6 +115,22 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 		}
 		if (accounts.length === 0) return t('erpRefusal.accountNotLinkedUncoded', { provider });
 		return t(key, { provider, accounts: formatList(accounts as string[]) });
+	}
+	if (refusal.code === 'account_inactive') {
+		const accounts = refusal.params.accounts;
+		if (
+			!Array.isArray(accounts) ||
+			accounts.length === 0 ||
+			!accounts.every((a) => typeof a === 'string' && a)
+		) {
+			return null;
+		}
+		return t(key, { provider, accounts: formatList(accounts as string[]) });
+	}
+	if (NAMES_INTUIT_CODE.has(refusal.code)) {
+		const code = refusal.params.intuit_code;
+		if (typeof code !== 'string' || !/^\d{1,8}$/.test(code)) return null;
+		return t(key, { provider, code });
 	}
 	return t(key, { provider });
 }

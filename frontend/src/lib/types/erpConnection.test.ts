@@ -13,6 +13,7 @@ import {
 	type ErpOAuthStatus,
 	OAUTH_ERROR_KEYS,
 	destinationChanged,
+	erpTestResultText,
 	readOAuthReturn,
 	secretIsSaved,
 	selectedProviderKey,
@@ -375,5 +376,74 @@ describe('optionLabelKey', () => {
 		}
 		expect(optionLabelKey('sap_s4hana')).toBeNull();
 		expect(optionLabelKey('toString')).toBeNull();
+	});
+});
+
+describe('erpTestResultText', () => {
+	const t = (key: string, params?: Record<string, string | number>) =>
+		`${key}${params ? ' ' + JSON.stringify(params) : ''}`;
+	const label = (p: ErpProvider) => p.label;
+	const merge: ErpProvider = { ...netsuite, key: 'merge_dev', label: 'Merge.dev' };
+
+	it('names a connected ERP by its display name, not its key', () => {
+		const result = {
+			success: true,
+			code: 'connected',
+			provider: 'quickbooks_online',
+			message: 'Connected to quickbooks_online successfully'
+		};
+		expect(erpTestResultText(result, qbo, label, t)).toBe(
+			'org.erp.test.connected {"erp":"QuickBooks Online"}'
+		);
+	});
+
+	it('tells an OAuth ERP to reconnect and a credentials ERP to check its details', () => {
+		const failed = (provider: string) => ({
+			success: false,
+			code: 'connection_failed',
+			provider,
+			message: 'Connection failed — check your credentials'
+		});
+		expect(erpTestResultText(failed('quickbooks_online'), qbo, label, t)).toBe(
+			'org.erp.test.failedOAuth {"erp":"QuickBooks Online"}'
+		);
+		expect(erpTestResultText(failed('netsuite'), netsuite, label, t)).toBe(
+			'org.erp.test.failed {"erp":"Oracle NetSuite"}'
+		);
+		// A Merge.dev connection reports the linked ERP's type as its provider.
+		expect(erpTestResultText(failed('sap_s4hana'), merge, label, t)).toBe(
+			'org.erp.test.failed {"erp":"Merge.dev"}'
+		);
+	});
+
+	it('states the provider-less codes', () => {
+		expect(
+			erpTestResultText(
+				{ success: false, code: 'credentials_unavailable', message: 'x' },
+				netsuite,
+				label,
+				t
+			)
+		).toBe('org.erp.test.credentialsUnavailable');
+		expect(
+			erpTestResultText(
+				{ success: false, code: 'unknown_adapter', adapter: 'quikbooks', message: 'x' },
+				netsuite,
+				label,
+				t
+			)
+		).toBe('org.erp.test.unknownAdapter {"adapter":"quikbooks"}');
+	});
+
+	it.each([
+		['no code (an older backend)', { success: true, message: 'server says' }],
+		['an unknown code', { success: true, code: 'brand_new', message: 'server says' }],
+		[
+			'a result for another ERP than the form shows',
+			{ success: true, code: 'connected', provider: 'xero', message: 'server says' }
+		],
+		['an unknown adapter with no key', { success: false, code: 'unknown_adapter', message: 'server says' }]
+	])('falls back to the server sentence for %s', (_label, result) => {
+		expect(erpTestResultText(result, qbo, label, t)).toBe('server says');
 	});
 });

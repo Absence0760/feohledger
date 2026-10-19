@@ -1394,3 +1394,61 @@ def test_every_oauth_adapter_api_client_refreshes_on_401():
         src = (root / name).read_text()
         assert len(re.findall(r"httpx\.AsyncClient\(", src)) == bare, name
         assert "self.oauth_client(" in src, name
+
+
+@pytest.mark.plan("free")
+async def test_test_erp_reaches_a_connected_oauth_erp_with_its_stored_tokens(
+    realdb, platform_app, provider, monkeypatch
+):
+    """The panel's "Test connection" on a connected OAuth ERP: the form's body
+    (`buildErpTestPayload`: type, method, the rendered non-secret fields) names
+    the saved provider, so the saved `oauth` block and the SEALED access token
+    join the test, and the adapter calls QuickBooks with that token. The answer
+    is coded so the panel states it with the ERP's display name."""
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+
+    block = _connected_block(realdb.info("a").org_id)
+    await _set_settings(realdb, {"erp": {**_config(block), "environment": "sandbox"}})
+    provider.handler = lambda url, data: pytest.fail("no refresh expected")
+    seen: list[tuple[str, str]] = []
+
+    async def fake_request(self, method, path, **_kw):
+        seen.append((path, await self.access_token()))
+        return httpx.Response(200, json={"CompanyInfo": {"Id": "1"}})
+
+    monkeypatch.setattr(QuickBooksOnlineAdapter, "_request", fake_request)
+    form = {
+        "type": PROVIDER,
+        "integration_method": "direct",
+        "client_id": "",
+        "environment": "sandbox",
+    }
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/test-erp", json=form)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "success": True,
+        "code": "connected",
+        "provider": PROVIDER,
+        "message": f"Connected to {PROVIDER} successfully",
+    }
+    assert seen == [(f"companyinfo/{REALM}", "ACCESS-SECRET-1")]
+
+
+@pytest.mark.plan("free")
+async def test_test_erp_on_a_disconnected_oauth_erp_is_a_coded_failure(
+    realdb, platform_app, provider
+):
+    await _set_settings(realdb, {"erp": {"type": PROVIDER, "integration_method": "direct"}})
+    provider.handler = lambda url, data: pytest.fail("no token call expected")
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            "/api/organization/test-erp", json={"type": PROVIDER, "integration_method": "direct"}
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert (body["success"], body["code"], body["provider"]) == (
+        False,
+        "connection_failed",
+        PROVIDER,
+    )
