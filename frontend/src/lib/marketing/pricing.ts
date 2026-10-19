@@ -25,6 +25,7 @@ import { PLAN_CURRENCY, PLANS, type CatalogPlan, type PlanFeature } from './plan
 export const FEATURE_LABEL_KEYS = {
 	public_api: 'marketing.pricing.feature.publicApi',
 	erp_integrations: 'marketing.pricing.feature.erpIntegrations',
+	erp_merge: 'marketing.pricing.feature.erpMerge',
 	sso: 'marketing.pricing.feature.sso',
 	scim: 'marketing.pricing.feature.scim',
 	sso_enforcement: 'marketing.pricing.feature.ssoEnforcement',
@@ -71,6 +72,10 @@ export interface PricingTier {
 	readonly buildsOn: string | null;
 	/** Features this tier adds over the one before, in catalogue order. */
 	readonly addedFeatures: readonly MessageKey[];
+	/** The card's bullet list: for the first tier the ungated core followed by
+	 *  whatever that tier itself grants (Free's direct ERP, decisions §281);
+	 *  for every later tier just what it adds, under "Everything in X, plus". */
+	readonly listedFeatures: readonly MessageKey[];
 	readonly featured: boolean;
 }
 
@@ -109,6 +114,9 @@ export function pricingTiers(
 	return plans.map((plan, i) => {
 		const previous = i > 0 ? plans[i - 1] : null;
 		const inherited = new Set<PlanFeature>(previous?.features ?? []);
+		const addedFeatures = plan.features
+			.filter((f) => !inherited.has(f))
+			.map((f) => FEATURE_LABEL_KEYS[f]);
 		return {
 			code: plan.code,
 			name: plan.name,
@@ -119,9 +127,8 @@ export function pricingTiers(
 			overage:
 				plan.overageUnitPrice === null ? null : formatOveragePrice(plan.overageUnitPrice, locale),
 			buildsOn: previous?.name ?? null,
-			addedFeatures: plan.features
-				.filter((f) => !inherited.has(f))
-				.map((f) => FEATURE_LABEL_KEYS[f]),
+			addedFeatures,
+			listedFeatures: previous ? addedFeatures : [...CORE_FEATURE_KEYS, ...addedFeatures],
 			featured: plan.code === FEATURED_PLAN_CODE,
 		};
 	});

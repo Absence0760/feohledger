@@ -519,7 +519,8 @@ def plan_feature_refusal(feature: str) -> HTTPException:
 
 
 async def org_has_feature(db: AsyncSession, organization_id, feature: str) -> bool:
-    """Does the org's live plan grant ``feature``? Fail-closed (no plan → no)."""
+    """Does the org's live plan grant ``feature``? Fail-closed: no live plan
+    reads as Free, so only what Free grants (``entitlements.get_entitlements``)."""
     # Local import keeps the billing service out of deps.py's import graph
     # for every consumer (mirrors the api_keys local import above).
     from app.services.billing.entitlements import get_entitlements, has_entitlement
@@ -539,18 +540,32 @@ async def ensure_entitlement(db: AsyncSession, organization_id, feature: str) ->
 
 
 async def ensure_live_erp_entitled(db: AsyncSession, organization_id, erp_config) -> None:
-    """``FEATURE_ERP_INTEGRATIONS`` gate for an action that would reach an ERP.
+    """Plan gate for an action that would reach an ERP (decisions §258, §281).
 
     Only a LIVE adapter is gated. The ``mock`` ERP is the local-first default
     (guard rail 7) and stays usable on every plan, and an org with no ERP
     configured at all has nothing to push to — the route's own "not configured"
     answer is the right one there, not a 402.
-    """
-    from app.services.billing.plan_catalog import FEATURE_ERP_INTEGRATIONS
-    from app.services.erp_adapters.dispatcher import erp_config_is_live
 
-    if erp_config_is_live(erp_config):
-        await ensure_entitlement(db, organization_id, FEATURE_ERP_INTEGRATIONS)
+    A live config needs ``FEATURE_ERP_INTEGRATIONS`` (every catalog plan, Free
+    included), and one that routes through Merge.dev needs ``FEATURE_ERP_MERGE``
+    as well (Scale only, §256 — each Merge connection is billed to us). The
+    route is read by ``resolve_adapter_key``, the dispatcher's own rule, so a
+    config naming only a ``type`` — which the dispatcher sends to Merge — is
+    gated as the Merge connection it is.
+    """
+    from app.services.billing.plan_catalog import FEATURE_ERP_INTEGRATIONS, FEATURE_ERP_MERGE
+    from app.services.erp_adapters.dispatcher import (
+        MERGE_DEV_ADAPTER_KEY,
+        erp_config_is_live,
+        resolve_adapter_key,
+    )
+
+    if not erp_config_is_live(erp_config):
+        return
+    await ensure_entitlement(db, organization_id, FEATURE_ERP_INTEGRATIONS)
+    if resolve_adapter_key(erp_config) == MERGE_DEV_ADAPTER_KEY:
+        await ensure_entitlement(db, organization_id, FEATURE_ERP_MERGE)
 
 
 def require_entitlement(feature: str):
@@ -558,7 +573,8 @@ def require_entitlement(feature: str):
 
     For the JWT (SPA) surface. Reads the org's live subscription → plan
     entitlements from the control plane; 402 when the plan doesn't include the
-    feature. Fail-closed: an org with no live subscription has no entitlements.
+    feature. Fail-closed: an org with no live subscription has only the Free
+    plan's grants (``entitlements.NO_PLAN_ENTITLEMENTS``).
     Compose alongside ``require_roles(...)`` on the same route. Pass a
     ``plan_catalog.FEATURE_*`` constant, never a string literal.
     """

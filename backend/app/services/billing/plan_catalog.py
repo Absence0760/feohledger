@@ -34,7 +34,8 @@ from app.services.billing.period import add_months
 # string literal, so a typo cannot silently fail a gate closed.
 # ---------------------------------------------------------------------------
 FEATURE_PUBLIC_API = "public_api"  # /api/v1 + API keys + outbound webhooks
-FEATURE_ERP_INTEGRATIONS = "erp_integrations"  # live ERP adapters (mock stays open)
+FEATURE_ERP_INTEGRATIONS = "erp_integrations"  # direct live ERP adapters (mock stays open)
+FEATURE_ERP_MERGE = "erp_merge"  # an ERP routed through Merge.dev (decisions §256)
 FEATURE_SSO = "sso"  # OIDC + SAML sign-in
 FEATURE_SCIM = "scim"  # SCIM 2.0 user provisioning
 FEATURE_SSO_ENFORCEMENT = "sso_enforcement"  # "require SSO" for every user
@@ -44,6 +45,7 @@ FEATURE_AUDIT_SIEM_EXPORT = "audit_siem_export"  # audit-log shipping to a SIEM
 ALL_FEATURES: tuple[str, ...] = (
     FEATURE_PUBLIC_API,
     FEATURE_ERP_INTEGRATIONS,
+    FEATURE_ERP_MERGE,
     FEATURE_SSO,
     FEATURE_SCIM,
     FEATURE_SSO_ENFORCEMENT,
@@ -77,12 +79,17 @@ CATALOG_CURRENCY = "USD"
 # the default every new tenant lands on. Enterprise is not a catalog plan: it is
 # a negotiated contract an operator sets up per customer, so the pricing page
 # shows it as "contact sales" rather than rendering it from here.
+#
+# Free carries the direct ERP adapters (decisions §281): they cost nothing per
+# connection, and a workspace holds one `settings.erp`, so Free is one direct
+# ERP that imports and pushes. Merge.dev (`FEATURE_ERP_MERGE`) stays on Scale,
+# because every Merge connection past the first three is billed to us (§256).
 DEFAULT_PLAN_CATALOG: tuple[dict, ...] = (
     {
         "code": "free",
         "name": "Free",
         "monthly_price": Decimal("0.00"),
-        "entitlements": {},
+        "entitlements": {FEATURE_ERP_INTEGRATIONS: True},
         "usage_components": {
             METER_AI_INVOICES: {"included": 100, "overage_unit_price": None},
         },

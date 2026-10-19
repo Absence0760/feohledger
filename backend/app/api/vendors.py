@@ -1656,7 +1656,8 @@ async def sync_vendors_from_erp_endpoint(
             status_code=400,
             detail="No ERP configured. Set up ERP integration in Organization Settings.",
         )
-    # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
+    # A sync reaches the live ERP — plan-gated, Merge.dev on Scale only; `mock`
+    # stays open (§258, §281).
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     # Use ERP adapter to fetch vendors

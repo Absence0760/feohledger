@@ -702,8 +702,9 @@ async def test_provision_tenant_org_can_upgrade_out_of_free(
     "no live subscription" for EVERY org, since none ever had a starting
     subscription to move from — an admin could never upgrade at all, and
     `public_api` (the only entitlement gated in the app) was permanently
-    unreachable. Prove a freshly provisioned org starts un-entitled (free
-    grants nothing) but CAN move to a paid plan and gain the entitlement.
+    unreachable. Prove a freshly provisioned org starts on Free's grants (the
+    direct ERP adapters only, decisions §281 — no public API) but CAN move to
+    a paid plan and gain the entitlement.
     """
     from app.models.billing import Plan, Subscription
     from app.services.billing.entitlements import get_entitlements
@@ -728,9 +729,9 @@ async def test_provision_tenant_org_can_upgrade_out_of_free(
                     )
                 ).scalar_one()
 
-                # Free grants nothing — the public API stays gated by default.
+                # Free grants the direct ERP alone — the public API stays gated.
                 entitlements = await get_entitlements(s, org.id)
-                assert entitlements == {}
+                assert entitlements == {"erp_integrations": True}
 
                 # The upgrade that used to 404 now succeeds.
                 change_result = await change_plan(
