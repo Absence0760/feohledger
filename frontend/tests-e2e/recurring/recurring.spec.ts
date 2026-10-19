@@ -202,7 +202,7 @@ test.describe('/recurring (admin)', () => {
 					r.url().includes(`/api/recurring/${id}/generate-now`) &&
 					r.request().method() === 'POST'
 			);
-			await dialog.getByRole('button', { name: `Generate invoice now for ${name}` }).click();
+			await dialog.getByRole('button', { name: `Generate now for ${name}` }).click();
 			const genResp = await genPromise;
 			expect(genResp.ok()).toBeTruthy();
 

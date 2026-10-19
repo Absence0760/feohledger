@@ -61,7 +61,7 @@ and the manual audit is the tracked outstanding work.
 | 2.4.4 Link Purpose (In Context) | A | Partially Supports | Row links carry row-specific `aria-label`s; a full audit of link text in context is part of the manual pass. |
 | 2.5.1 Pointer Gestures | A | Supports | Interactions are single taps/clicks. The one drag surface — the workflow-builder canvas — carries a per-node single-pointer alternative (Move ↑ / Move ↓ on every step), so no path-based or multipoint gesture is required anywhere. |
 | 2.5.2 Pointer Cancellation | A | Supports | Actions fire on the up-event; no down-event commits. |
-| 2.5.3 Label in Name | A | Supports | Visible labels are contained in each control's accessible name; verified by axe. |
+| 2.5.3 Label in Name | A | Supports | Visible labels are contained in each control's accessible name; verified by axe (`label-content-name-mismatch`, a default rule since axe-core 4.14). Row-action labels are composed from the visible string (`frontend/docs/ui-patterns.md`). |
 | 2.5.4 Motion Actuation | A | Not Applicable | No motion/device-orientation-actuated functions (mobile camera OCR is an explicit button, not motion-triggered). |
 | 3.1.1 Language of Page | A | Supports | `<html lang="en-US">` is set. |
 | 3.2.1 On Focus | A | Supports | Focusing a control does not trigger a context change. |

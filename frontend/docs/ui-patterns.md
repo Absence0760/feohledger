@@ -724,6 +724,19 @@ accessible:
    **Always pass a row-specific `ariaLabel`** (e.g. `Edit invoice INV-42`)
    — e2e specs select on it.
 
+   **The `ariaLabel` must contain the control's visible text, as one
+   unbroken run** (WCAG 2.5.3 Label in Name — axe's
+   `label-content-name-mismatch`, enforced by every axe spec since
+   axe-core 4.14). A row action reading "Compare routes" may be named
+   "Compare routes for invoice INV-42", never "Compare payment routes for
+   invoice INV-42": a voice-control user says what they see. Build the
+   label from the visible string rather than retyping it — the catalogue
+   template takes it as a parameter, so every locale keeps the match:
+   `m('payments.quotes.openAria', { action: m('payments.quotes.open'), invoice })`
+   with `'{action} for invoice {invoice}'`. Keep a badge or other extra
+   text *beside* the link, not inside it, or it becomes visible text the
+   label lacks (the `/workflows` "Default" badge).
+
 2. **Whole row** carries `class="clickable"` + an `onclick` that opens
    the same destination, gated by **`isRowOpenClick(e)`**
    (`#lib/utils/rowNav.ts`). The guard bails when the click lands on a

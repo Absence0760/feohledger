@@ -81,6 +81,7 @@ export const en = {
 	'shell.sectionMore': 'More',
 	'shell.sectionMoreAria': '{count} more sections',
 	'shell.profileMenu': 'Profile and account menu',
+	'shell.profileMenuNamed': '{name} — profile and account menu',
 	'shell.profile': 'Profile',
 	'shell.profileAndSecurity': 'Profile & Security',
 	'shell.legalAndPrivacy': 'Legal & privacy',
@@ -724,7 +725,7 @@ export const en = {
 
 	// Corridor quote comparison — advisory only (POST /api/payments/corridor-quotes)
 	'payments.quotes.open': 'Compare routes',
-	'payments.quotes.openAria': 'Compare payment routes for invoice {invoice}',
+	'payments.quotes.openAria': '{action} for invoice {invoice}',
 	'payments.quotes.title': 'Compare payment routes',
 	'payments.quotes.advisory':
 		'Advisory only. This prices the invoice across the processors your organization has configured. It does not choose a route, book a payment, or change how this invoice will be paid.',
@@ -1564,7 +1565,7 @@ export const en = {
 	'recurring.notFound': 'Template not found',
 	'recurring.row.open': 'Open template {name}',
 	'recurring.row.generateNow': 'Generate now',
-	'recurring.row.generateNowAria': 'Generate invoice now for {name}',
+	'recurring.row.generateNowAria': '{action} for {name}',
 	'recurring.row.pause': 'Pause',
 	'recurring.row.pauseAria': 'Pause template {name}',
 	'recurring.row.resume': 'Resume',
@@ -1634,7 +1635,7 @@ export const en = {
 	'recurring.modal.history.col.created': 'Created',
 	'recurring.modal.history.empty': 'No invoices generated yet.',
 	'recurring.modal.lifecycle.generateNow': 'Generate now',
-	'recurring.modal.lifecycle.generateNowAria': 'Generate invoice now for {name}',
+	'recurring.modal.lifecycle.generateNowAria': '{action} for {name}',
 	'recurring.modal.lifecycle.pause': 'Pause',
 	'recurring.modal.lifecycle.pauseAria': 'Pause template {name}',
 	'recurring.modal.lifecycle.resume': 'Resume',
@@ -4412,7 +4413,7 @@ export const en = {
 	'admin.webhooks.row.delete': 'Delete',
 	'admin.webhooks.row.confirm': 'Confirm',
 	'admin.webhooks.row.rotate': 'Rotate secret',
-	'admin.webhooks.rotateAria': 'Rotate signing secret for {name}',
+	'admin.webhooks.rotateAria': '{action} for {name}',
 	'admin.webhooks.overlapPill': 'Previous secret until {time}',
 	'admin.webhooks.overlapTitle':
 		'A rotation is in flight: the retiring secret still signs the X-Webhook-Signature-Previous header until this time.',
@@ -5869,7 +5870,6 @@ export const en = {
 	'invoices.modal.file.deleteConfirm': 'Confirm Delete',
 	'invoices.modal.file.replace': 'Replace',
 	'invoices.modal.file.upload': 'Upload File',
-	'invoices.modal.file.uploadAria': 'Upload invoice file',
 	'invoices.modal.fileLoadError': 'Failed to load file. Try refreshing.',
 	'invoices.modal.fullscreen': 'Fullscreen',
 	'invoices.modal.header': 'Edit Invoice — {number}',
