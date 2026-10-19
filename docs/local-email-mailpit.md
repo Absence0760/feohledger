@@ -1,6 +1,6 @@
 # Local email preview with Mailpit
 
-The app sends transactional email (signup verification, welcome + temp password,
+The app sends transactional email (signup verification, welcome + set-password link,
 scheduled CFO reports) through pluggable adapters in
 `backend/app/services/email_adapters/`:
 
