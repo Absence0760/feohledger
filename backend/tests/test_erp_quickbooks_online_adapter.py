@@ -915,3 +915,164 @@ def test_operator_override_wins(monkeypatch):
     monkeypatch.setattr(settings, "erp_qbo_api_base", "http://localhost:12112/qbo/")
     adapter = _adapter({**CONFIG, "environment": "sandbox"})
     assert adapter._company_url("bill") == f"http://localhost:12112/qbo/v3/company/{REALM}/bill"
+
+
+# ---------------------------------------------------------------------------
+# a create QuickBooks refuses — coded from Fault codes, never from the text
+# ---------------------------------------------------------------------------
+
+#: What Intuit's Detail looks like: it quotes the submitted bill back. None of
+#: it may reach the result (message, params), which lands on the audit row.
+_ECHO = "Vendor Acme 12-3456789, 1 Main St, TxnDate=2026-09-01, Amount 100.10"
+
+
+def _fault(*errors: dict, status: int = 400) -> MagicMock:
+    return _resp(
+        status,
+        {
+            "Fault": {
+                "Error": [{"Message": "m " + _ECHO, "Detail": _ECHO, **e} for e in errors],
+                "type": "ValidationFault",
+            }
+        },
+    )
+
+
+class _QboRefs(_Qbo):
+    """`_Qbo` that also answers reads of a vendor / account by id, each
+    `Active` unless named in ``inactive`` (or ``missing``: Fault 610)."""
+
+    def __init__(self, *, inactive=(), missing=(), **kw):
+        super().__init__(**kw)
+        self.inactive, self.missing = set(inactive), set(missing)
+
+    async def request(self, method, url, params=None, content=None, headers=None):
+        path = url.split(f"/v3/company/{REALM}/", 1)[1]
+        entity, _, entity_id = path.partition("/")
+        if method == "GET" and entity in ("vendor", "account"):
+            self.calls.append({"method": method, "url": url, "params": params})
+            key = f"{entity}/{entity_id}"
+            if key in self.missing:
+                return _object_not_found()
+            active = key not in self.inactive
+            return _resp(200, {entity.capitalize(): {"Id": entity_id, "Active": active}})
+        return await super().request(method, url, params, content, headers)
+
+
+def _refused(qbo, payload=None):
+    result = _run_with(qbo, lambda: _adapter().post_invoice(payload or _payload()))
+    assert result.success is False
+    assert result.retryable is False
+    assert _ECHO not in str(result.message) and "Acme" not in str(result.refusal_params)
+    return result
+
+
+@pytest.mark.parametrize("code", ["6200", "6210"])
+def test_a_closed_period_is_coded_and_never_retried(token, no_override, code):
+    result = _refused(_QboRefs(post=_fault({"code": code, "element": ""})))
+    assert (result.refusal_code, result.refusal_provider) == ("period_closed", "QuickBooks Online")
+    assert result.refusal_params == {"intuit_code": code}
+    assert result.message == f"QuickBooks Online post refused: period_closed (Intuit fault {code})"
+
+
+def test_a_duplicate_doc_number_is_coded(token, no_override):
+    result = _refused(_QboRefs(post=_fault({"code": "6140"})))
+    assert result.refusal_code == "duplicate_document_number"
+    assert result.refusal_params == {"intuit_code": "6140"}
+
+
+def test_an_ended_subscription_is_coded(token, no_override):
+    result = _refused(_QboRefs(post=_fault({"code": "6190"})))
+    assert result.refusal_code == "company_subscription_inactive"
+
+
+@pytest.mark.parametrize("code", ["2500", "610", "6000"])
+def test_an_inactive_vendor_is_found_by_reading_it_back(token, no_override, code):
+    qbo = _QboRefs(post=_fault({"code": code}), inactive={"vendor/56"})
+    result = _refused(qbo)
+    assert result.refusal_code == "vendor_inactive"
+    assert result.refusal_params == {"intuit_code": code}
+
+
+def test_a_deleted_vendor_reads_as_inactive(token, no_override):
+    qbo = _QboRefs(post=_fault({"code": "2500"}), missing={"vendor/56"})
+    assert _refused(qbo).refusal_code == "vendor_inactive"
+
+
+def test_an_inactive_account_is_named_by_our_gl_code(token, no_override):
+    payload = _payload(
+        gl_account="6100",
+        gl_account_erp_id="7",
+        line_items=[
+            LineItemPayload(
+                line_number=1, total=Decimal("60.10"), gl_account="6100", gl_account_erp_id="7"
+            ),
+            LineItemPayload(
+                line_number=2,
+                total=Decimal("40.00"),
+                gl_account="Job Expenses:Job Materials",
+                gl_account_erp_id="62",
+            ),
+        ],
+    )
+    qbo = _QboRefs(post=_fault({"code": "2500"}), inactive={"account/62"})
+    result = _refused(qbo, payload)
+    assert result.refusal_code == "account_inactive"
+    assert result.refusal_params == {
+        "intuit_code": "2500",
+        "accounts": ["Job Expenses:Job Materials"],
+    }
+    reads = [c["url"].rsplit("/", 2)[-2:] for c in qbo.calls if c["method"] == "GET"]
+    assert ["vendor", "56"] in reads and ["account", "7"] in reads and ["account", "62"] in reads
+
+
+def test_a_bad_reference_nothing_reads_inactive_is_reference_invalid(token, no_override):
+    result = _refused(_QboRefs(post=_fault({"code": "2500", "element": "VendorRef"})))
+    assert result.refusal_code == "reference_invalid"
+    assert result.refusal_params == {"intuit_code": "2500", "element": "VendorRef"}
+
+
+def test_an_unmapped_fault_carries_its_code(token, no_override):
+    result = _refused(_QboRefs(post=_fault({"code": "6000"})))
+    assert result.refusal_code == "intuit_fault"
+    assert result.refusal_params == {"intuit_code": "6000"}
+    assert result.message == "QuickBooks Online post refused: intuit_fault (Intuit fault 6000)"
+
+
+@pytest.mark.parametrize(
+    "element",
+    ["Acme Supplies", "12-3456789", "VendorRef Acme", "Line.Description.Acme", 7, None],
+)
+def test_an_element_that_is_not_a_bill_field_is_dropped(token, no_override, element):
+    result = _refused(_QboRefs(post=_fault({"code": "6000", "element": element})))
+    assert result.refusal_params == {"intuit_code": "6000"}
+
+
+def test_a_non_numeric_code_is_not_taken(token, no_override):
+    """No usable code: the plain HTTP failure — still non-retryable for a 400."""
+    result = _refused(_QboRefs(post=_fault({"code": "Acme 12-3456789"})))
+    assert result.refusal_code is None
+    assert result.message == "QuickBooks Online post failed: HTTP 400 (invalid_request)"
+
+
+@pytest.mark.parametrize("status", [500, 503, 429, 408])
+def test_a_status_that_can_change_stays_retryable_and_uncoded(token, no_override, status):
+    qbo = _QboRefs(post=_fault({"code": "6210"}, status=status))
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    assert result.success is False and result.retryable is True
+    assert result.refusal_code is None
+
+
+def test_a_failed_pre_check_query_400_is_not_retryable(token, no_override):
+    qbo = _Qbo()
+    original = qbo.request
+
+    async def bad_query(method, url, params=None, content=None, headers=None):
+        if url.endswith("/query"):
+            return _resp(400, {"Fault": {"Error": [{"code": "4000"}]}})
+        return await original(method, url, params, content, headers)
+
+    qbo.request = bad_query
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    assert result.retryable is False
+    assert result.message == "QuickBooks Online post failed: HTTP 400 (invalid_request)"

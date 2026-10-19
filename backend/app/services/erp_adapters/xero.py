@@ -49,7 +49,7 @@ from app.services.erp_adapters.base import (
     PoLinePayload,
     PoPayload,
     VendorPayload,
-    erp_failure_message,
+    erp_http_failure,
     erp_refusal,
 )
 from app.services.erp_adapters.bill_allocation import (
@@ -184,11 +184,7 @@ def _failure(resp) -> ErpPostResult:
         # Xero's per-tenant limits. Report `rate_limited` and let the caller's
         # retry backoff decide when to try again; never sleep-loop here.
         raw = {"retry_after": resp.headers.get("Retry-After")}
-    return ErpPostResult(
-        success=False,
-        message=erp_failure_message(PROVIDER, resp.status_code),
-        raw_response=raw or None,
-    )
+    return erp_http_failure(PROVIDER, resp.status_code, raw_response=raw or None)
 
 
 @register_adapter("xero")

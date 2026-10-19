@@ -34,6 +34,32 @@ this plan:
   `posted_total_mismatch`; a create with no `TotalAmt` fails non-retryable
   `posted_total_unconfirmed` (`erp_adapters/posted_total.py`). The idempotent
   re-find applies the same check before reporting an earlier bill as posted.
+- **A create QuickBooks refuses is a coded, non-retryable refusal**, not the
+  bare "HTTP 400 (invalid_request)" every business rule used to collapse into
+  (live sandbox, 2026-10-19: books closed, an inactive account and an inactive
+  vendor all read the same). `_fault_errors` reads ONLY each Fault error's
+  numeric `code` and an `element` that is a known Bill field name — never
+  `Message` / `Detail`, which quote the submitted bill back. Mapping (codes per
+  Intuit's error-code reference,
+  developer.intuit.com/app/developer/qbo/docs/develop/troubleshooting/error-codes):
+
+  | Intuit code | Refusal |
+  |---|---|
+  | 6200 Account Period Closed, 6210 … Required Password | `period_closed` |
+  | 6140 Duplicate Doc Num | `duplicate_document_number` |
+  | 6190 Invalid Company Status (subscription ended / billing) | `company_subscription_inactive` |
+  | 2500 Invalid Reference Id, 610 Object Not Found, 6000 Business Validation | the bill's vendor, then each account it sent, is read back by id; `Active: false` or a 610 → `vendor_inactive` / `account_inactive` (with our GL `accounts`) |
+  | 2500 / 610 with nothing inactive | `reference_invalid` |
+  | anything else (incl. a 6000 with nothing inactive) | `intuit_fault` |
+
+  Every one carries `intuit_code` in its params (and in the English message,
+  "… (Intuit fault 6210)"), so an unmapped code is diagnosable from the audit
+  row. A 5xx / 429 / 408 answer stays the retryable HTTP failure.
+  The closed-books case was seen with the closing set to "warning only" in the
+  QuickBooks UI: the API refuses anyway.
+- The panel's **Test connection** is offered on a connected QuickBooks
+  connection too; `POST /api/organization/test-erp` tests the saved connection
+  with its stored tokens and answers a coded result the panel names the ERP in.
 - The `x_refresh_token_expires_in` expiry is recorded and shown on `/status`,
   but nothing yet notifies an admin 30 days before it.
 

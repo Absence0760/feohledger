@@ -11899,3 +11899,37 @@ do. Two guards keep it complete: a backend scan that every reason constant under
 `base.py`. The code lives on the audit row rather than a new invoice column
 because that row is already where the panel reads the failure from, and it is
 append-only — the refusal a user saw is the refusal that was recorded.
+
+## 285. QuickBooks refusals are coded from Intuit's numeric Fault codes, and a deterministic 4xx is never retried (2026-10-19)
+
+**Context.** A live run against the Intuit sandbox (2026-10-19) posted three
+bills QuickBooks refused for three different reasons — dated into books closed
+through 2026-09-30 (closing set to "warning only" in the UI; the API refused
+anyway), coded to an account made inactive, and for a vendor made inactive. All
+three reached the AP user as the same "QuickBooks Online post failed: HTTP 400
+(invalid_request)", and each was sent three times over six seconds before
+failing. The adapter deliberately never read the body (`base.erp_failure_reason`: Intuit's
+`Fault` quotes the submitted bill back, and the message lands on an append-only,
+shipped audit row).
+
+**Decision.** Read the Fault, but only its numbers. `_fault_errors` keeps each
+error's numeric `code` and an `element` that is on a fixed allowlist of Bill
+field names — never `Message` / `Detail`. Known codes map to refusals
+(`period_closed`, `duplicate_document_number`, `company_subscription_inactive`);
+the codes that mean "a reference is bad" (2500, 610, and the catch-all 6000) are
+resolved by reading the bill's own vendor and accounts back by id, so the
+refusal says WHICH (`vendor_inactive`, or `account_inactive` naming our GL
+codes); anything else is `intuit_fault` with the number, so the next unknown is
+diagnosable from the row instead of needing another live run. All are
+non-retryable. Separately, `base.erp_http_failure` makes every adapter's HTTP
+failure retryable only when the status can change on a re-send (5xx, 401, 408,
+409, 423, 425, 429).
+
+**Rejected.** *Reading `Detail` and redacting it* — the redaction would have to
+know every field Intuit might echo, and a miss is permanent on a WORM row.
+*Guessing account vs vendor from the code alone* — 2500 covers both, and the
+read-back is two or three GETs on a path that has already failed. *Retrying
+409 / 423 as deterministic too* — Business Central's stale-etag answer is 409
+and succeeds on the re-read, so treating every 4xx alike would turn a
+concurrency race into a hard failure.
+

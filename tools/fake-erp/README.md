@@ -308,6 +308,19 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
 
 ## QuickBooks Online (`/qbo`)
 
+**Validation Faults** (off until a spec turns them on): `POST
+/__qbo/validation` with any of `{"closed_through": "YYYY-MM-DD",
+"inactive_vendors": ["57"], "inactive_accounts": ["63"],
+"duplicate_doc_check": true}` (keys left out keep their value; `/__reset`
+turns all off). A bill create is then refused with HTTP 400 and the Fault code
+Intuit documents: `2500` Invalid Reference Id for an inactive vendor or account,
+`6210` Account Period Closed for a `TxnDate` on or before `closed_through`,
+`6140` Duplicate Doc Num for a DocNumber another bill of the same vendor holds.
+Each Fault's `Detail` quotes the bill back, as Intuit's does, so a spec can
+prove the adapter never reads it. `GET /qbo/v3/company/{realm}/vendor/{id}` and
+`…/account/{id}` return the fixture with its `Active` flag (610 for an unknown
+id). State: `STATE["qbo_validation"]`.
+
 `GET /qbo/oauth2/authorize` 302s straight back to `redirect_uri` with a `code`
 and `realmId` — but only when `redirect_uri` exactly matches a registered URI,
 as Intuit requires; anything else is a 400 `invalid_request`, so the fake is

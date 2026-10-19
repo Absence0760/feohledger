@@ -38,6 +38,15 @@ when" note), so the line rules and their codes are the other adapters':
   is off. Never posted in the home currency instead. ``currency_unknown`` when
   the company's preferences name no home currency.
 
+When QuickBooks itself refuses the create, the refusal is coded from Intuit's
+``Fault`` (:func:`_fault_errors` reads only each error's numeric ``code`` and a
+known field name from ``element``, never ``Message`` / ``Detail``, which echo
+the submitted bill): ``period_closed``, ``duplicate_document_number``,
+``company_subscription_inactive``, ``vendor_inactive`` / ``account_inactive``
+(confirmed by reading the referenced vendor and accounts back by id), and
+``reference_invalid`` / ``intuit_fault`` carrying the numeric ``intuit_code``
+for anything else. All are non-retryable: a validation answer is deterministic.
+
 After the create, the bill is read back by id, and QuickBooks' own ``TotalAmt``
 on it must equal ``amount`` (``posted_total.check_posted_total``): a different
 total deletes the bill just created and fails ``posted_total_mismatch``; a
@@ -73,8 +82,12 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_failure_message,
+    erp_http_failure,
     erp_refusal,
+    erp_refusal_message,
+    erp_status_retryable,
 )
+from app.services.erp_adapters.bill_allocation import DUPLICATE_DOCUMENT_NUMBER
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
@@ -99,6 +112,14 @@ DOC_NUMBER_MAX = 21
 DOC_NUMBER_TOO_LONG = "doc_number_too_long"
 CURRENCY_UNKNOWN = "currency_unknown"
 CURRENCY_NOT_ENABLED = "currency_not_enabled"
+#: Refusals coded from the ``Fault`` QuickBooks answers a bill create with
+#: (``QuickBooksOnlineAdapter._create_refusal``).
+PERIOD_CLOSED = "period_closed"
+VENDOR_INACTIVE = "vendor_inactive"
+ACCOUNT_INACTIVE = "account_inactive"
+REFERENCE_INVALID = "reference_invalid"
+COMPANY_SUBSCRIPTION_INACTIVE = "company_subscription_inactive"
+INTUIT_FAULT = "intuit_fault"
 _PAGE_SIZE = 1000
 _MAX_PAGES = 50
 _PRODUCTION_BASE = "https://quickbooks.api.intuit.com"
@@ -156,6 +177,107 @@ def _object_not_found(resp: httpx.Response) -> bool:
     except ValueError:
         return False
     return any(isinstance(e, dict) and str(e.get("code")) == _OBJECT_NOT_FOUND for e in errors)
+
+
+# Intuit's Fault codes, from "Review QuickBooks Online Accounting API error
+# codes" (developer.intuit.com/app/developer/qbo/docs/develop/troubleshooting/
+# error-codes). Each comes back as a ValidationFault with HTTP 400.
+#: 6200 Account Period Closed Error / 6210 Account Period Closed Required
+#: Password Error: the user has "closed the books" through a date on or after
+#: the bill's. Seen live (2026-10-19) with the closing set to "warning only" in
+#: the QuickBooks UI: the API refuses anyway.
+_FAULT_PERIOD_CLOSED = frozenset({"6200", "6210"})
+#: 6140 Duplicate Doc Num: another bill already uses this DocNumber (our own
+#: earlier attempt is found first, by ``_find_existing``).
+_FAULT_DUPLICATE_DOC_NUM = "6140"
+#: 6190 Invalid Company Status Error: the company's subscription ended, was
+#: cancelled or has a billing problem.
+_FAULT_COMPANY_STATUS = "6190"
+#: 2500 Invalid Reference Id, 610 Object Not Found, 6000 Business Validation
+#: Error: what an inactive (QuickBooks "deleted") vendor or account on the bill
+#: is answered with. The code alone does not say which reference, so
+#: ``QuickBooksOnlineAdapter._inactive_reference`` reads each back by id.
+_FAULT_REFERENCE = frozenset({"610", "2500", "6000"})
+#: Of those, the ones that always mean a bad reference (6000 is any business rule).
+_FAULT_BAD_REFERENCE = frozenset({"610", "2500"})
+#: The Bill fields an ``element`` may name and be recorded. Anything else is
+#: dropped: ``element`` is documented as a field name, and an allowlist is what
+#: guarantees a submitted VALUE never reaches the append-only audit row.
+_BILL_FIELDS = frozenset(
+    {
+        "VendorRef",
+        "AccountRef",
+        "APAccountRef",
+        "DocNumber",
+        "TxnDate",
+        "DueDate",
+        "CurrencyRef",
+        "ExchangeRate",
+        "Line",
+        "Amount",
+        "DetailType",
+        "AccountBasedExpenseLineDetail",
+        "PrivateNote",
+        "SalesTermRef",
+        "DepartmentRef",
+        "ClassRef",
+        "TxnTaxDetail",
+        "GlobalTaxCalculation",
+    }
+)
+
+
+def _fault_errors(resp: httpx.Response) -> list[tuple[str, str | None]]:
+    """``(code, element)`` for each error in Intuit's ``Fault`` — nothing else.
+
+    ``Message`` and ``Detail`` are never read: Intuit's detail quotes the
+    submitted bill back (vendor names, amounts), and whatever this returns ends
+    up on the append-only ``invoice.erp_failed`` row. ``code`` is kept only when
+    numeric; ``element`` only when it is a Bill field this adapter knows
+    (:data:`_BILL_FIELDS`, compared by the last dotted segment).
+    """
+    try:
+        fault = _json(resp).get("Fault")
+    except ValueError:
+        return []
+    errors = fault.get("Error") if isinstance(fault, dict) else None
+    if not isinstance(errors, list):
+        return []
+    out: list[tuple[str, str | None]] = []
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        code = str(error.get("code") or "").strip()
+        if not (code.isascii() and code.isdigit()) or len(code) > 8:
+            continue
+        element = error.get("element")
+        if not (isinstance(element, str) and element.rsplit(".", 1)[-1] in _BILL_FIELDS):
+            element = None
+        out.append((code, element))
+    return out
+
+
+def _fault_refusal(reason: str, intuit_code: str, **params: Any) -> ErpPostResult:
+    """The non-retryable, coded result for a create QuickBooks refused.
+
+    ``intuit_code`` is in the message too, so the English on the audit row
+    still says which fault it was when the browser cannot state the code.
+    """
+    return ErpPostResult(
+        success=False,
+        message=f"{erp_refusal_message(PROVIDER, reason)} (Intuit fault {intuit_code})",
+        retryable=False,
+        refusal_code=reason,
+        refusal_provider=PROVIDER,
+        refusal_params={"intuit_code": intuit_code, **params},
+    )
+
+
+def _account_codes(payload: InvoicePayload) -> dict[str, str]:
+    """Our GL code for each QuickBooks account id the payload references."""
+    pairs = [(payload.gl_account_erp_id, payload.gl_account)]
+    pairs += [(li.gl_account_erp_id, li.gl_account) for li in payload.line_items]
+    return {str(erp_id): code for erp_id, code in pairs if erp_id and code}
 
 
 def _quote(value: str) -> str:
@@ -353,7 +475,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             # help, so the refusal is non-retryable.
             return erp_refusal(PROVIDER, NOT_CONNECTED)
         except QboRequestError as exc:
-            return ErpPostResult(success=False, message=str(exc))
+            return erp_http_failure(PROVIDER, exc.status_code)
         except httpx.HTTPError:
             return ErpPostResult(success=False, message=f"{PROVIDER} post failed: network_error")
 
@@ -371,9 +493,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             request_id = create_attempt_key(payload.correlation_id, attempt, REQUEST_ID_MAX)
             resp = await self._request("POST", "bill", params={"requestid": request_id}, body=body)
             if resp.status_code != 200:
-                return ErpPostResult(
-                    success=False, message=erp_failure_message(PROVIDER, resp.status_code)
-                )
+                return await self._create_refusal(resp, payload, body)
             created = _json(resp).get("Bill") or {}
             document_number = created.get("DocNumber") or payload.invoice_number
             if created.get("Id") is None:
@@ -413,6 +533,84 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                 raw_response=bill,
             )
         return previous_bill_removed(PROVIDER)
+
+    async def _create_refusal(
+        self, resp: httpx.Response, payload: InvoicePayload, body: dict[str, Any]
+    ) -> ErpPostResult:
+        """Why QuickBooks refused the create, as a coded non-retryable result.
+
+        A status a re-send could change (5xx, 429, ...) stays the plain,
+        retryable HTTP failure; a refusal with no readable ``Fault`` is the plain
+        (non-retryable) HTTP failure.
+        Everything else is coded from Intuit's numeric codes (the ``_FAULT_*``
+        sets); a code with no mapping still reaches the audit row as
+        ``intuit_fault`` with its number, so the next one is diagnosable.
+        """
+        status = resp.status_code
+        errors = [] if erp_status_retryable(status) else _fault_errors(resp)
+        if not errors:
+            return erp_http_failure(PROVIDER, status)
+        codes = [code for code, _ in errors]
+        for code in codes:
+            if code in _FAULT_PERIOD_CLOSED:
+                return _fault_refusal(PERIOD_CLOSED, code)
+        if _FAULT_DUPLICATE_DOC_NUM in codes:
+            return _fault_refusal(DUPLICATE_DOCUMENT_NUMBER, _FAULT_DUPLICATE_DOC_NUM)
+        if _FAULT_COMPANY_STATUS in codes:
+            return _fault_refusal(COMPANY_SUBSCRIPTION_INACTIVE, _FAULT_COMPANY_STATUS)
+        reference = next((c for c in codes if c in _FAULT_REFERENCE), None)
+        if reference:
+            inactive = await self._inactive_reference(payload, body, reference)
+            if inactive:
+                return inactive
+        code, element = next(
+            ((c, e) for c, e in errors if c == reference and c in _FAULT_BAD_REFERENCE),
+            errors[0],
+        )
+        extra = {"element": element} if element else {}
+        reason = REFERENCE_INVALID if code in _FAULT_BAD_REFERENCE else INTUIT_FAULT
+        return _fault_refusal(reason, code, **extra)
+
+    async def _inactive_reference(
+        self, payload: InvoicePayload, body: dict[str, Any], intuit_code: str
+    ) -> ErpPostResult | None:
+        """``vendor_inactive`` / ``account_inactive`` when reading the bill's
+        vendor or accounts back by id shows one inactive or gone; else None.
+
+        Only ids this bill sent are read, and only their ``Active`` flag is
+        looked at. An unreadable answer is "don't know", never "inactive".
+        """
+        if await self._reference_gone("vendor", str(payload.vendor_erp_id)):
+            return _fault_refusal(VENDOR_INACTIVE, intuit_code)
+        codes = _account_codes(payload)
+        sent = dict.fromkeys(
+            str(_line_account_id(line)) for line in body.get("Line") or [] if isinstance(line, dict)
+        )
+        inactive = sorted(
+            {codes[a] for a in sent if a in codes and await self._reference_gone("account", a)}
+        )
+        if inactive:
+            return _fault_refusal(ACCOUNT_INACTIVE, intuit_code, accounts=inactive)
+        return None
+
+    async def _reference_gone(self, entity: str, entity_id: str) -> bool:
+        """True only when QuickBooks positively says ``entity/{id}`` is inactive
+        (``Active: false``, which is what deleting a vendor or account does in
+        QuickBooks) or does not exist (Fault 610)."""
+        try:
+            resp = await self._request("GET", f"{entity}/{entity_id}", timeout=15)
+        except (httpx.HTTPError, erp_oauth.ErpNotConnectedError):
+            return False
+        if resp.status_code == 200:
+            try:
+                record = _json(resp).get(entity.capitalize())
+            except ValueError:
+                return False
+            return isinstance(record, dict) and (
+                record.get("Active") is False
+                or str(record.get("status") or "").lower() == "deleted"
+            )
+        return _object_not_found(resp)
 
     # -- status / void -----------------------------------------------------
 
@@ -545,6 +743,10 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                 if a.get("Id")
             }
         return [_po_payload(p, code_by_id) for p in raw_pos]
+
+
+def _line_account_id(line: dict) -> object:
+    return ((line.get("AccountBasedExpenseLineDetail") or {}).get("AccountRef") or {}).get("value")
 
 
 def _private_note(correlation_id: str) -> str:

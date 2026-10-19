@@ -2958,6 +2958,7 @@ async def qbo_create_bill(request: Request, realm: str) -> dict:
         return copy.deepcopy(st["requestids"][request_id])
     if not (body.get("VendorRef") or {}).get("value"):
         raise _qbo_fault(400, "2020", "Required param missing: VendorRef")
+    _qbo_validate_bill(body)
     st["counter"] += 1
     total = float(sum(Decimal(str(line.get("Amount") or 0)) for line in body.get("Line") or []))
     bill = {**body, "Id": str(500 + st["counter"]), "SyncToken": "0", "TotalAmt": total}
@@ -2990,6 +2991,135 @@ async def qbo_set_balance(body: dict) -> dict:
     bill["Balance"] = body.get("balance", 0)
     bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online — the validation Faults a real company answers a bill with
+# ---------------------------------------------------------------------------
+#
+# Off by default (every switch below starts empty), so the happy-path specs are
+# unaffected. POST /__qbo/validation turns them on:
+#
+#   {"closed_through": "2026-09-30",      # books closed through this date
+#    "inactive_vendors": ["57"],          # QuickBooks "deleted" = Active false
+#    "inactive_accounts": ["7"],
+#    "duplicate_doc_check": true}         # "warn if duplicate bill number"
+#
+# Each refusal is the Fault Intuit documents for it, at the HTTP status the
+# live sandbox answered with (400), its Detail quoting the submitted bill back
+# the way Intuit's does — which is what the adapter must never read. Codes per
+# developer.intuit.com/app/developer/qbo/docs/develop/troubleshooting/error-codes:
+# 6210 Account Period Closed, 2500 Invalid Reference Id, 6140 Duplicate Doc Num.
+# State lives under STATE["qbo_validation"], apart from STATE["qbo"].
+
+
+def _qbo_validation() -> dict[str, Any]:
+    if "qbo_validation" not in STATE:
+        STATE["qbo_validation"] = {
+            "closed_through": None,
+            "inactive_vendors": set(),
+            "inactive_accounts": set(),
+            "duplicate_doc_check": False,
+        }
+    return STATE["qbo_validation"]
+
+
+def _qbo_validation_fault(code: str, message: str, detail: str) -> ProviderError:
+    return ProviderError(
+        400,
+        {
+            "Fault": {
+                "Error": [{"Message": message, "Detail": detail, "code": code, "element": ""}],
+                "type": "ValidationFault",
+            },
+            "time": "2026-10-19T00:00:00.000-07:00",
+        },
+    )
+
+
+def _qbo_bill_accounts(body: dict) -> list[str]:
+    refs = [
+        (line.get("AccountBasedExpenseLineDetail") or {}).get("AccountRef") or {}
+        for line in body.get("Line") or []
+        if isinstance(line, dict)
+    ]
+    return [str(ref.get("value")) for ref in refs]
+
+
+def _qbo_validate_bill(body: dict) -> None:
+    """Refuse a bill the way a QuickBooks company configured by the hook would."""
+    rules = _qbo_validation()
+    inactive = "Invalid Reference Id : Something you're trying to use has been made inactive."
+    vendor = str((body.get("VendorRef") or {}).get("value"))
+    if vendor in rules["inactive_vendors"]:
+        raise _qbo_validation_fault(
+            "2500", "Invalid Reference Id", f"{inactive} Vendor {vendor} is inactive."
+        )
+    for account in _qbo_bill_accounts(body):
+        if account in rules["inactive_accounts"]:
+            raise _qbo_validation_fault(
+                "2500", "Invalid Reference Id", f"{inactive} Account {account} is inactive."
+            )
+    closed = rules["closed_through"]
+    txn_date = body.get("TxnDate")
+    if closed and txn_date and str(txn_date) <= closed:
+        raise _qbo_validation_fault(
+            "6210",
+            "Account Period Closed Required Password Error",
+            f"The account period has closed. TxnDate={txn_date} is on or before {closed}.",
+        )
+    if rules["duplicate_doc_check"]:
+        for bill in _qbo()["bills"].values():
+            if (
+                bill.get("DocNumber") == body.get("DocNumber")
+                and str((bill.get("VendorRef") or {}).get("value")) == vendor
+            ):
+                raise _qbo_validation_fault(
+                    "6140",
+                    "Duplicate Document Number Error",
+                    f"Duplicate Document Number Error : DocNumber={body.get('DocNumber')} "
+                    f"is assigned to TxnType=Bill with TxnId={bill['Id']}",
+                )
+
+
+def _qbo_named(entity: str, fixtures: list[dict], inactive_key: str, entity_id: str) -> dict:
+    row = next((r for r in fixtures if r["Id"] == entity_id), None)
+    if row is None:
+        raise _qbo_fault(400, "610", "Object Not Found")
+    active = entity_id not in _qbo_validation()[inactive_key]
+    return {entity: {**copy.deepcopy(row), "Active": active}}
+
+
+@qbo.get("/v3/company/{realm}/vendor/{vendor_id}")
+async def qbo_get_vendor(request: Request, realm: str, vendor_id: str) -> dict:
+    _require_qbo_auth(request, realm)
+    return _qbo_named("Vendor", QBO_VENDORS, "inactive_vendors", vendor_id)
+
+
+@qbo.get("/v3/company/{realm}/account/{account_id}")
+async def qbo_get_account(request: Request, realm: str, account_id: str) -> dict:
+    _require_qbo_auth(request, realm)
+    return _qbo_named("Account", QBO_ACCOUNTS, "inactive_accounts", account_id)
+
+
+@app.post("/__qbo/validation")
+async def qbo_set_validation(body: dict) -> dict:
+    """Test hook: configure the company's validation rules (see above). Keys
+    left out keep their value; POST /__reset turns every rule off."""
+    rules = _qbo_validation()
+    if "closed_through" in body:
+        rules["closed_through"] = body["closed_through"] or None
+    for key in ("inactive_vendors", "inactive_accounts"):
+        if key in body:
+            rules[key] = {str(v) for v in body[key] or []}
+    if "duplicate_doc_check" in body:
+        rules["duplicate_doc_check"] = bool(body["duplicate_doc_check"])
+    return {
+        "closed_through": rules["closed_through"],
+        "inactive_vendors": sorted(rules["inactive_vendors"]),
+        "inactive_accounts": sorted(rules["inactive_accounts"]),
+        "duplicate_doc_check": rules["duplicate_doc_check"],
+    }
 
 
 # The sandbox company's routes name its realm literally, so they must be
