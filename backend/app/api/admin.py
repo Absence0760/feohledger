@@ -25,6 +25,7 @@ from app.api.permissions import (
     permissions_for_role,
     sanitize_permissions,
 )
+from app.api.refusals import coded_refusal
 from app.database import get_control_db, get_tenant_engine
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
@@ -35,6 +36,7 @@ from app.schemas.admin import (
     CreateUserRequest,
     CreateUserResponse,
     PermissionCatalogEntry,
+    ResetUserPasswordResponse,
     RoleResponse,
     UpdateRoleRequest,
     UpdateUserRequest,
@@ -43,12 +45,7 @@ from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.email_adapters import EmailMessage, get_email_adapter
 from app.services.session_management import revoke_user_sessions
 from app.utils.emails import email_matches, normalize_email
-from app.utils.passwords import (
-    PasswordError,
-    generate_temp_password,
-    hash_password,
-    validate_password_complexity,
-)
+from app.utils.passwords import generate_temp_password, hash_password
 from app.utils.search import ilike_contains
 from app.utils.tenant_urls import tenant_base_url
 
@@ -462,14 +459,59 @@ async def _guard_against_last_admin_lockout(
             )
 
 
-def _validate_admin_set_password(password: str) -> None:
-    """Run an admin-set password through the same complexity policy as
-    self-service change-password (issue #158) — a ``user.manage`` actor must not
-    be able to reset an account to a trivial value and log in as it."""
+#: `PATCH /admin/users/{id}` no longer sets a password (issue #566,
+#: `docs/decisions.md` §277). The request that still carries one gets this coded
+#: 422 rather than having the field silently ignored — an old client must learn
+#: the reset did NOT happen, not believe it did.
+ADMIN_PASSWORD_FIELD_REMOVED = "admin_password_field_removed"
+
+#: `POST /admin/users/{id}/reset-password` on the caller's own account. A self
+#: reset would sign the caller out of the tab they made it from and hand them a
+#: temp credential for an account whose password they already know — the
+#: caller's own path is `POST /api/auth/change-password`.
+ADMIN_PASSWORD_RESET_SELF = "admin_password_reset_self"
+
+
+async def _send_credentials_email(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user: User,
+    temp_password: str,
+    *,
+    subject: str,
+    lead: str,
+) -> None:
+    """Best-effort mail of a generated temp credential to its owner.
+
+    Shared by "Invite User" and the admin password reset so the two cannot
+    drift. A failed send never fails the request: the temp password also rides
+    the API response, which is what local dev (the `console` adapter only logs)
+    and an admin relaying it out-of-band both rely on.
+    """
+    org_row = (
+        await db.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    if org_row is None:
+        return
+    tenant_url = tenant_base_url(org_row.slug, org_row.settings) or None
     try:
-        validate_password_complexity(password)
-    except PasswordError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        await get_email_adapter().send(
+            EmailMessage(
+                to=user.email,
+                subject=subject.format(org=org_row.name),
+                body_text=(
+                    f"Hi {user.full_name},\n\n"
+                    + lead.format(org=org_row.name)
+                    + "\n\n"
+                    + (f"  URL:      {tenant_url}\n" if tenant_url else "")
+                    + f"  Email:    {user.email}\n"
+                    f"  Password: {temp_password}\n\n"
+                    "You'll be asked to change your password on first sign-in.\n"
+                ),
+            )
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Credentials email failed for user %s (org=%s)", user.id, org_id)
 
 
 @router.post("/users", response_model=CreateUserResponse, status_code=status.HTTP_201_CREATED)
@@ -540,34 +582,16 @@ async def create_user(
 
     # Best-effort welcome email — same posture as the supplier-portal invite
     # (`vendors.py::invite_vendor_portal_user`) and the tenant-signup welcome
-    # email: a failed send never breaks user creation, and the temp password
-    # keeps riding the API response below so local dev (where email may be
-    # unconfigured — `console` adapter just logs) and an admin who'd rather
-    # relay it out-of-band both still work. This makes "Invite User" an actual
-    # email invite instead of only a shown-once password the admin must copy.
-    org_row = (
-        await db.execute(select(Organization).where(Organization.id == org_id))
-    ).scalar_one_or_none()
-    if org_row is not None:
-        tenant_url = tenant_base_url(org_row.slug, org_row.settings) or None
-        try:
-            await get_email_adapter().send(
-                EmailMessage(
-                    to=new_user.email,
-                    subject=f"You've been invited to {org_row.name} on FeohLedger",
-                    body_text=(
-                        f"Hi {new_user.full_name},\n\n"
-                        f"An administrator has created an account for you on "
-                        f"{org_row.name}'s FeohLedger workspace.\n\n"
-                        + (f"  URL:      {tenant_url}\n" if tenant_url else "")
-                        + f"  Email:    {new_user.email}\n"
-                        f"  Password: {temp_password}\n\n"
-                        "You'll be asked to change your password on first sign-in.\n"
-                    ),
-                )
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("Welcome email failed for new user %s (org=%s)", new_user.id, org_id)
+    # email. This makes "Invite User" an actual email invite instead of only a
+    # shown-once password the admin must copy.
+    await _send_credentials_email(
+        db,
+        org_id,
+        new_user,
+        temp_password,
+        subject="You've been invited to {org} on FeohLedger",
+        lead=("An administrator has created an account for you on {org}'s FeohLedger workspace."),
+    )
 
     resp = _user_to_response(new_user)
     return CreateUserResponse(**resp.model_dump(), temporary_password=temp_password)
@@ -581,6 +605,23 @@ async def update_user(
     current_user: User = Depends(require_permission(PERM_USER_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
 ):
+    # Refused before anything is read: setting a password here let the admin
+    # choose (and so permanently know) the value, never forced a change, and —
+    # because the Edit form carried the field — let a browser autofill the
+    # ADMIN's own saved password into it, so saving an unrelated rename
+    # silently reset the target's credential (#566). The reset is its own
+    # action now, `POST /admin/users/{id}/reset-password`.
+    if body.password is not None:
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                ADMIN_PASSWORD_FIELD_REMOVED,
+                "Setting a password through this endpoint is no longer supported. "
+                "Use POST /api/admin/users/{id}/reset-password to issue a temporary "
+                "password the user must change at next sign-in.",
+            ),
+        )
+
     result = await db.execute(
         select(User)
         .where(User.id == user_id, User.organization_id == org_id)
@@ -591,17 +632,14 @@ async def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     # Every branch below except `full_name` either seizes control of the target
-    # account (password / email), disables it (`is_active`), or changes what it
-    # can do (`role_names` — including *removing* a role, which the grant guard
-    # never sees because it only inspects the roles being granted). Gate them
-    # all on the caller out-ranking the target. A rename carries no authority,
-    # so it stays open to any `user.manage` holder.
-    if (
-        body.password is not None
-        or body.email is not None
-        or body.is_active is not None
-        or body.role_names is not None
-    ):
+    # account (email), disables it (`is_active`), or changes what it can do
+    # (`role_names` — including *removing* a role, which the grant guard never
+    # sees because it only inspects the roles being granted). Gate them all on
+    # the caller out-ranking the target. A rename carries no authority, so it
+    # stays open to any `user.manage` holder. Keyed on the field being PRESENT,
+    # not on it differing (unlike the apply below): stricter by construction,
+    # and no first-party client resends an unchanged sensitive field.
+    if body.email is not None or body.is_active is not None or body.role_names is not None:
         _authorize_target_mutation(current_user, target)
 
     # Snapshot pre-state so we can decide whether to force-logout the target.
@@ -626,27 +664,31 @@ async def update_user(
         new_role_names=new_role_names,
     )
 
+    # A field is applied — and named in the audit row — only when its value
+    # actually DIFFERS from the stored one. The Edit form sends every field on
+    # every save, and recording a field merely because the body carried it made
+    # the SOX trail claim changes that never happened (#566: one save was
+    # logged as changing name, email and password when name and email were
+    # untouched).
     changed_fields = []
-    if body.full_name is not None:
+    if body.full_name is not None and body.full_name != target.full_name:
         target.full_name = body.full_name
         changed_fields.append("full_name")
     if body.email is not None:
         new_email = normalize_email(body.email)
-        existing = await db.execute(
-            select(User.id).where(email_matches(User.email, new_email), User.id != user_id).limit(1)
-        )
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Email already in use")
-        target.email = new_email
-        changed_fields.append("email")
-    if body.is_active is not None:
+        if new_email != normalize_email(target.email):
+            existing = await db.execute(
+                select(User.id)
+                .where(email_matches(User.email, new_email), User.id != user_id)
+                .limit(1)
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="Email already in use")
+            target.email = new_email
+            changed_fields.append("email")
+    if body.is_active is not None and body.is_active != target.is_active:
         target.is_active = body.is_active
         changed_fields.append("is_active")
-    password_changed = body.password is not None
-    if password_changed:
-        _validate_admin_set_password(body.password)
-        target.hashed_password = await hash_password(body.password)
-        changed_fields.append("password")
 
     roles_changed = False
     if body.role_names is not None:
@@ -686,14 +728,13 @@ async def update_user(
     target = result.scalar_one()
     await db.commit()
 
-    # SOC 2: a role change (elevation or demotion), account deactivation, and
-    # an admin-initiated password reset must all drop the user's existing
-    # sessions. The previous JWT was signed before the change and would
-    # otherwise keep the old (or compromised) session alive until it expired
-    # (up to 30 min) — for a password reset that's the exact window the reset
-    # is meant to close (issue #160).
+    # SOC 2: a role change (elevation or demotion) and account deactivation
+    # must drop the user's existing sessions. The previous JWT was signed
+    # before the change and would otherwise keep the old session alive until it
+    # expired (up to 30 min). The admin password reset does the same in its own
+    # endpoint below (issue #160).
     deactivated = was_active and body.is_active is False
-    if roles_changed or deactivated or password_changed:
+    if roles_changed or deactivated:
         await revoke_user_sessions(user_id)
 
     if changed_fields:
@@ -710,6 +751,96 @@ async def update_user(
         )
 
     return _user_to_response(target)
+
+
+@router.post("/users/{user_id}/reset-password", response_model=ResetUserPasswordResponse)
+async def reset_user_password(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_control_db),
+    current_user: User = Depends(require_permission(PERM_USER_MANAGE)),
+    org_id: uuid.UUID = Depends(get_org_id),
+) -> ResetUserPasswordResponse:
+    """Reset a user's password to a generated temp they must change at sign-in.
+
+    The same credential shape "Invite User" issues: the shared generator (so the
+    temp satisfies `validate_password_complexity`), `must_change_password=True`,
+    shown once on the response and mailed best-effort. The admin never chooses
+    the value, so they never hold a working long-term credential for someone
+    else's account — the temp stops working the moment its owner replaces it
+    (#566, `docs/decisions.md` §277).
+
+    Org-scoped (a foreign user is the same 404 as a missing one), out-rank
+    guarded (resetting an admin's password is a takeover primitive), refused on
+    the caller's own account, revokes every session the target holds, and
+    audited `user.password_reset` with no credential in it.
+    """
+    target = (
+        await db.execute(
+            select(User)
+            .where(User.id == user_id, User.organization_id == org_id)
+            .options(selectinload(User.roles))
+        )
+    ).scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == current_user.id:
+        raise HTTPException(
+            status_code=400,
+            detail=coded_refusal(
+                ADMIN_PASSWORD_RESET_SELF,
+                "You cannot reset your own password here. Change it from your profile instead.",
+            ),
+        )
+    _authorize_target_mutation(current_user, target)
+
+    temp_password = generate_temp_password()
+    target.hashed_password = await hash_password(temp_password)
+    target.must_change_password = True
+    await db.commit()
+
+    # After the commit, like every other forced logout here: a token an
+    # attacker already holds is exactly what a reset exists to kill (#160).
+    # But a revoke failure (Redis down) must NOT turn into a 500 here: the
+    # password is already replaced, and this response is the only place the
+    # temp is ever shown — a 500 would lock the user out with no audit row and
+    # no email. So it is caught, recorded on the audit row, and reported on the
+    # response (`sessions_revoked: false`) so the admin knows to retry the
+    # standalone force-logout.
+    try:
+        revoked_count: int | None = len(await revoke_user_sessions(user_id))
+    except Exception:  # noqa: BLE001
+        logger.exception("Session revoke after password reset failed for user %s", user_id)
+        revoked_count = None
+    await dispatch_auth_audit(
+        organization_id=org_id,
+        actor_id=current_user.id,
+        action="user.password_reset",
+        entity_id=user_id,
+        details={
+            "changed_fields": ["password"],
+            "must_change_password": True,
+            "sessions_revoked": revoked_count,
+        },
+    )
+
+    await _send_credentials_email(
+        db,
+        org_id,
+        target,
+        temp_password,
+        subject="Your {org} FeohLedger password was reset",
+        lead=(
+            "An administrator has reset the password for your account on "
+            "{org}'s FeohLedger workspace. Sign in with this temporary password."
+        ),
+    )
+
+    resp = _user_to_response(target)
+    return ResetUserPasswordResponse(
+        **resp.model_dump(),
+        temporary_password=temp_password,
+        sessions_revoked=revoked_count is not None,
+    )
 
 
 class UserDeleteConflict(BaseModel):

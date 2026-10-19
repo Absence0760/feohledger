@@ -1,11 +1,13 @@
 """Unit tests for the admin user-management privilege-escalation guards
-(`app/api/admin.py::_authorize_role_grant` / `_validate_admin_set_password`).
+(`app/api/admin.py::_authorize_role_grant` / `_authorize_target_mutation`) and
+the admin password reset (`POST /api/admin/users/{id}/reset-password`).
 
 Regression coverage for issue #158: a `user.manage`-only actor must not be able
 to (a) grant a role carrying more authority than they hold — most importantly
-the system `admin` role — or (b) reset an account's password to a trivial value
-that skips the complexity policy. Pure, no DB — the helpers take lightweight
-stand-ins for the caller (`.roles` / `.effective_permissions`) and Role rows.
+the system `admin` role — or (b) set an account's password at all: since #566
+the reset only ever issues a generated temp the owner must change. The pure
+guard tests take lightweight stand-ins for the caller (`.roles` /
+`.effective_permissions`) and Role rows; the endpoint tests run on `realdb`.
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ from sqlalchemy import select
 from app.api.admin import (
     _authorize_role_grant,
     _authorize_target_mutation,
-    _validate_admin_set_password,
 )
 from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK
 from app.api.permissions import (
@@ -108,34 +109,46 @@ def test_grant_guard_falls_back_when_effective_permissions_missing():
 
 
 # --------------------------------------------------------------------------
-# _validate_admin_set_password
+# Issue #566 — the admin password reset is a dedicated action that issues a
+# GENERATED temp the user must change, never an admin-typed value via PATCH.
+# The typed path let the admin permanently know the password, never forced a
+# change, and — because the Edit form carried the field — let a browser
+# autofill the admin's own saved password into it, so saving an unrelated edit
+# silently reset the target's credential. Issue #160's forced logout rides
+# along on the new endpoint.
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("weak", ["short", "abc123", "alllowercase123", "NOLOWER123", "NoDigits"])
-def test_admin_set_password_rejects_weak(weak: str):
-    with pytest.raises(HTTPException) as exc:
-        _validate_admin_set_password(weak)
-    assert exc.value.status_code == 422
+async def _throwaway_clerk(client, headers: dict | None = None) -> str:
+    """A disposable ap_clerk — a password-mutating test must never touch one of
+    the seeded role users, whose control-plane rows persist across the slot."""
+    created = await client.post(
+        "/api/admin/users",
+        json={
+            "email": f"reset-{uuid.uuid4().hex[:8]}@acme.test",
+            "full_name": "Reset Target",
+            "role_names": ["ap_clerk"],
+        },
+        headers=headers or {},
+    )
+    assert created.status_code == 201, created.text
+    return created.json()["id"]
 
 
-def test_admin_set_password_accepts_complex():
-    _validate_admin_set_password("StrongPass123")  # ≥12, upper+lower+digit
+async def _stored_user(realdb, user_id):
+    from app.models.user import User
 
-
-# --------------------------------------------------------------------------
-# Issue #160 — admin password reset must revoke the target's active sessions,
-# matching the existing role-change/deactivation forced-logout guarantee.
-# Exercised end-to-end against the real `/api/admin/users/{id}` endpoint
-# (realdb), not just the pure helpers above.
-# --------------------------------------------------------------------------
+    async with realdb.control_sessionmaker()() as s:
+        return (
+            await s.execute(select(User).where(User.id == uuid.UUID(str(user_id))))
+        ).scalar_one()
 
 
 @pytest.mark.asyncio
-async def test_admin_password_reset_revokes_target_sessions(realdb, monkeypatch):
-    """A `body.password` PATCH must call revoke_user_sessions for the target —
-    without it, a token an attacker already holds survives the reset, which
-    defeats the whole point of resetting credentials believed compromised."""
+async def test_patch_with_a_password_is_refused_and_changes_nothing(realdb, monkeypatch):
+    """Removed, not ignored: a client still sending `password` must learn the
+    reset did not happen (coded 422), and nothing on the row may move — not the
+    hash, not the name riding in the same body, and no session is revoked."""
     calls: list = []
 
     async def _fake_revoke(user_id):
@@ -144,14 +157,291 @@ async def test_admin_password_reset_revokes_target_sessions(realdb, monkeypatch)
 
     monkeypatch.setattr("app.api.admin.revoke_user_sessions", _fake_revoke)
 
-    target_id = realdb.info("a").users["ap_clerk"]
     async with realdb.client(key="a", role="admin") as c:
-        resp = await c.patch(
-            f"/api/admin/users/{target_id}",
-            json={"password": "StrongPass123"},
+        target_id = await _throwaway_clerk(c)
+        try:
+            before = await _stored_user(realdb, target_id)
+            resp = await c.patch(
+                f"/api/admin/users/{target_id}",
+                json={"full_name": "Should Not Apply", "password": "AdminTyped123"},
+            )
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["detail"]["code"] == "admin_password_field_removed"
+            assert "AdminTyped123" not in resp.text
+
+            after = await _stored_user(realdb, target_id)
+            assert after.hashed_password == before.hashed_password
+            assert after.full_name == "Reset Target"
+            assert calls == []
+        finally:
+            await c.delete(f"/api/admin/users/{target_id}")
+
+
+def test_update_user_request_schema_no_longer_publishes_password():
+    """The field survives only so the handler can refuse it — it must not be
+    advertised as part of the request contract."""
+    from app.schemas.admin import UpdateUserRequest
+
+    assert "password" not in UpdateUserRequest.model_json_schema()["properties"]
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_issues_forced_change_temp_and_revokes_sessions(realdb, monkeypatch):
+    """The whole contract: a generated temp that satisfies the platform policy,
+    `must_change_password` set, every session of the target revoked, the temp
+    actually authenticating, and a PII-free audit row."""
+    from app.utils.passwords import validate_password_complexity, verify_password
+
+    calls: list = []
+
+    async def _fake_revoke(user_id):
+        calls.append(user_id)
+        return ["jti-1"]
+
+    monkeypatch.setattr("app.api.admin.revoke_user_sessions", _fake_revoke)
+
+    async with realdb.client(key="a", role="admin") as c:
+        target_id = await _throwaway_clerk(c)
+        try:
+            # Simulate the user having already replaced their invite temp.
+            from app.models.user import User
+
+            async with realdb.control_sessionmaker()() as s:
+                row = (
+                    await s.execute(select(User).where(User.id == uuid.UUID(target_id)))
+                ).scalar_one()
+                row.must_change_password = False
+                await s.commit()
+
+            resp = await c.post(f"/api/admin/users/{target_id}/reset-password")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            temp = body["temporary_password"]
+            assert body["id"] == target_id
+            validate_password_complexity(temp)  # same policy as every password
+
+            stored = await _stored_user(realdb, target_id)
+            assert stored.must_change_password is True
+            assert await verify_password(temp, stored.hashed_password)
+            assert calls == [uuid.UUID(target_id)]
+
+            async with realdb.sessionmaker("a")() as s:
+                row = (
+                    await s.execute(
+                        select(AuditLog).where(
+                            AuditLog.action == "user.password_reset",
+                            AuditLog.entity_id == uuid.UUID(target_id),
+                        )
+                    )
+                ).scalar_one()
+            assert row.actor_id == realdb.info("a").users["admin"]
+            assert row.details == {
+                "changed_fields": ["password"],
+                "must_change_password": True,
+                "sessions_revoked": 1,
+            }
+            assert temp not in str(row.details)
+        finally:
+            await c.delete(f"/api/admin/users/{target_id}")
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_temp_signs_in_and_is_forced_to_change(realdb, monkeypatch):
+    """End to end through the real login: the temp authenticates, the session
+    says the password must change, `/change-password` replaces it, and the temp
+    is dead afterwards."""
+    from tests.test_session_management import FakeRedis
+
+    fake = FakeRedis()
+
+    async def _get_redis():
+        return fake
+
+    monkeypatch.setattr("app.redis.get_redis", _get_redis)
+
+    async with realdb.client(key="a", role="admin") as c:
+        target_id = await _throwaway_clerk(c)
+        email = (await _stored_user(realdb, target_id)).email
+        reset = await c.post(f"/api/admin/users/{target_id}/reset-password")
+        assert reset.status_code == 200, reset.text
+        temp = reset.json()["temporary_password"]
+
+    try:
+        async with realdb.client(key="a", role=None) as anon:
+            login = await anon.post("/api/auth/login", json={"email": email, "password": temp})
+            assert login.status_code == 200, login.text
+            token = login.json()["access_token"]
+            auth = {"Authorization": f"Bearer {token}"}
+            me = await anon.get("/api/auth/me", headers=auth)
+            assert me.json()["must_change_password"] is True
+
+            changed = await anon.post(
+                "/api/auth/change-password",
+                json={"current_password": temp, "new_password": "OwnerChosen-Pass9"},
+                headers=auth,
+            )
+            assert changed.status_code == 200, changed.text
+            assert changed.json()["must_change_password"] is False
+
+            stale = await anon.post("/api/auth/login", json={"email": email, "password": temp})
+            assert stale.status_code == 401
+            fresh = await anon.post(
+                "/api/auth/login", json={"email": email, "password": "OwnerChosen-Pass9"}
+            )
+            assert fresh.status_code == 200, fresh.text
+    finally:
+        async with realdb.client(key="a", role="admin") as c:
+            await c.delete(f"/api/admin/users/{target_id}")
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_survives_a_failed_session_revoke(realdb, monkeypatch):
+    """The temp is shown only on this response, and the password is already
+    replaced when the revoke runs — so a Redis failure there must not become a
+    500 that locks the user out with no audit row. It is reported instead."""
+
+    async def _broken_revoke(user_id):
+        raise ConnectionError("redis unreachable")
+
+    monkeypatch.setattr("app.api.admin.revoke_user_sessions", _broken_revoke)
+
+    async with realdb.client(key="a", role="admin") as c:
+        target_id = await _throwaway_clerk(c)
+        try:
+            resp = await c.post(f"/api/admin/users/{target_id}/reset-password")
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["temporary_password"]
+            assert resp.json()["sessions_revoked"] is False
+
+            async with realdb.sessionmaker("a")() as s:
+                row = (
+                    await s.execute(
+                        select(AuditLog).where(
+                            AuditLog.action == "user.password_reset",
+                            AuditLog.entity_id == uuid.UUID(target_id),
+                        )
+                    )
+                ).scalar_one()
+            assert row.details["sessions_revoked"] is None
+        finally:
+            # DELETE revokes sessions too — give cleanup a working one. (Not
+            # `monkeypatch.undo()`: that would also undo the autouse Redis stub.)
+            async def _ok_revoke(user_id):
+                return []
+
+            monkeypatch.setattr("app.api.admin.revoke_user_sessions", _ok_revoke)
+            await c.delete(f"/api/admin/users/{target_id}")
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_refuses_own_account(realdb, monkeypatch):
+    calls: list = []
+
+    async def _fake_revoke(user_id):
+        calls.append(user_id)
+        return []
+
+    monkeypatch.setattr("app.api.admin.revoke_user_sessions", _fake_revoke)
+    admin_id = realdb.info("a").users["admin"]
+    before = (await _stored_user(realdb, admin_id)).hashed_password
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/admin/users/{admin_id}/reset-password")
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "admin_password_reset_self"
+    assert (await _stored_user(realdb, admin_id)).hashed_password == before
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_is_org_scoped_and_needs_user_manage(realdb, monkeypatch):
+    calls: list = []
+
+    async def _fake_revoke(user_id):
+        calls.append(user_id)
+        return []
+
+    monkeypatch.setattr("app.api.admin.revoke_user_sessions", _fake_revoke)
+    foreign_id = realdb.info("b").users["ap_clerk"]
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/admin/users/{foreign_id}/reset-password")
+        assert resp.status_code == 404, resp.text
+
+        clerk = {"Authorization": f"Bearer {realdb.token('a', 'ap_clerk')}"}
+        target = realdb.info("a").users["ap_manager"]
+        resp = await c.post(f"/api/admin/users/{target}/reset-password", headers=clerk)
+        assert resp.status_code == 403, resp.text
+    assert calls == []
+
+
+# --------------------------------------------------------------------------
+# #566 — the SOX trail must name only fields whose value actually changed.
+# The Edit form sends every field on every save; recording a field because the
+# body carried it logged changes that never happened.
+# --------------------------------------------------------------------------
+
+
+async def _user_updated_rows(realdb, target_id):
+    async with realdb.sessionmaker("a")() as s:
+        return (
+            (
+                await s.execute(
+                    select(AuditLog)
+                    .where(
+                        AuditLog.action == "user.updated",
+                        AuditLog.entity_id == uuid.UUID(str(target_id)),
+                    )
+                    .order_by(AuditLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
         )
-    assert resp.status_code == 200
-    assert calls == [target_id]
+
+
+@pytest.mark.asyncio
+async def test_resubmitting_unchanged_fields_records_no_change(realdb):
+    """The Edit modal's save with nothing edited: every field resent at its
+    current value is not a change and writes no audit row."""
+    async with realdb.client(key="a", role="admin") as c:
+        target_id = await _throwaway_clerk(c)
+        try:
+            current = await _stored_user(realdb, target_id)
+            resp = await c.patch(
+                f"/api/admin/users/{target_id}",
+                json={
+                    "full_name": current.full_name,
+                    "email": current.email.upper(),  # same identity, different case
+                    "is_active": True,
+                    "role_names": ["ap_clerk"],
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            assert await _user_updated_rows(realdb, target_id) == []
+        finally:
+            await c.delete(f"/api/admin/users/{target_id}")
+
+
+@pytest.mark.asyncio
+async def test_full_form_save_records_only_the_field_that_differs(realdb):
+    async with realdb.client(key="a", role="admin") as c:
+        target_id = await _throwaway_clerk(c)
+        try:
+            current = await _stored_user(realdb, target_id)
+            resp = await c.patch(
+                f"/api/admin/users/{target_id}",
+                json={
+                    "full_name": "Actually Renamed",
+                    "email": current.email,
+                    "is_active": True,
+                    "role_names": ["ap_clerk"],
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            rows = await _user_updated_rows(realdb, target_id)
+            assert len(rows) == 1
+            assert rows[0].details["changed_fields"] == ["full_name"]
+        finally:
+            await c.delete(f"/api/admin/users/{target_id}")
 
 
 @pytest.mark.asyncio
@@ -240,13 +530,17 @@ async def test_admin_create_user_audits_role_names(realdb):
 
 @pytest.mark.asyncio
 async def test_admin_update_user_audits_changed_fields(realdb):
-    """full_name/is_active are ordinary field changes — no forced logout, but
-    the change must still land as a PII-free audit row."""
+    """A rename is an ordinary field change — no forced logout, but it must
+    still land as a PII-free audit row. `is_active: true` on an already-active
+    account rides along unchanged and must NOT be named (#566)."""
     target_id = realdb.info("a").users["ap_clerk"]
+    # Unique per run: the seeded clerk's control-plane row persists across the
+    # slot, so a fixed name would be a no-op rename on the second run.
+    new_name = f"Renamed Clerk {uuid.uuid4().hex[:6]}"
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.patch(
             f"/api/admin/users/{target_id}",
-            json={"full_name": "Renamed Clerk 2", "is_active": True},
+            json={"full_name": new_name, "is_active": True},
         )
     assert resp.status_code == 200
 
@@ -265,10 +559,10 @@ async def test_admin_update_user_audits_changed_fields(realdb):
         )
     assert rows
     details = rows[-1].details
-    assert set(details["changed_fields"]) == {"full_name", "is_active"}
+    assert details["changed_fields"] == ["full_name"]
     # PII-free: no full_name value leaks into the audit trail.
-    assert "Renamed Clerk 2" not in str(details)
-    assert details["is_active"] is True
+    assert new_name not in str(details)
+    assert details["is_active"] is None
     assert details["role_names"] is None
 
 
@@ -521,9 +815,9 @@ async def _make_user_manage_principal(client, org_id):
 
 @pytest.mark.asyncio
 async def test_user_manage_only_caller_cannot_reset_an_admins_password(realdb):
-    """The headline takeover: reset the org admin's password to a value the
-    attacker chose, then sign in as them. Must be 403, and the admin's stored
-    hash must be untouched."""
+    """The headline takeover: reset the org admin's password and receive the
+    temp, then sign in as them. Must be 403, and the admin's stored hash must
+    be untouched."""
     from app.models.user import User
 
     info = realdb.info("a")
@@ -539,12 +833,12 @@ async def test_user_manage_only_caller_cannot_reset_an_admins_password(realdb):
                     .hashed_password
                 )
 
-            resp = await c.patch(
-                f"/api/admin/users/{admin_id}",
-                json={"password": "AttackerPass123"},
+            resp = await c.post(
+                f"/api/admin/users/{admin_id}/reset-password",
                 headers={"Authorization": f"Bearer {token}"},
             )
             assert resp.status_code == 403, resp.text
+            assert "temporary_password" not in resp.text
 
             async with ctrl() as s:
                 after = (
@@ -623,10 +917,9 @@ async def test_user_manage_only_caller_may_still_manage_a_lesser_user(realdb):
         assert created.status_code == 201, created.text
         clerk_id = created.json()["id"]
         try:
-            resp = await c.patch(
-                f"/api/admin/users/{clerk_id}", json={"password": "ClerkPass123"}, headers=auth
-            )
+            resp = await c.post(f"/api/admin/users/{clerk_id}/reset-password", headers=auth)
             assert resp.status_code == 200, resp.text
+            assert resp.json()["temporary_password"]
         finally:
             await c.delete(f"/api/admin/users/{clerk_id}")
             await c.delete(f"/api/admin/users/{actor_id}")

@@ -126,6 +126,35 @@ Backend API endpoints are role-gated via `Depends(require_roles(...))` in `backe
 
 The temporary password is shown **only once** — it is not stored or retrievable after the dialog is closed.
 
+## Resetting a user's password
+
+An admin never **chooses** another user's password — they reset it, and the
+server issues a temp exactly like an invite's (`docs/decisions.md` §277, #566):
+
+1. **Admin > Users**, open the user's **Edit** dialog
+2. Under **Password**, click **Reset password**, then **Confirm reset** (two
+   clicks — a reset signs the user out everywhere)
+3. `POST /api/admin/users/:id/reset-password` generates a temp with the shared
+   generator, sets `must_change_password`, revokes every session the user
+   holds, emails the temp best-effort, and returns it once
+4. The **Password Reset** dialog shows the temp (Copy to Clipboard); relay it
+5. On sign-in with the temp the user is sent to `/change-password` and must
+   choose their own before using the app
+
+Rules: `user.manage`; org-scoped (another tenant's user is a 404); the same
+out-rank guard as every other mutation (a `user.manage`-only role cannot reset
+an admin); not on your own account (`400 admin_password_reset_self` — use
+**Change password** in your profile). Audited `user.password_reset` with no
+credential in it.
+
+The Edit dialog has **no password input**. It used to have one ("Reset
+Password — leave blank to keep current"), and it set whatever the admin typed
+with no forced change, so the admin kept knowing the password; worse, browsers
+autofilled the admin's *own* saved password into it, so saving an unrelated
+rename silently reset the user. `PATCH /api/admin/users/:id` now refuses a
+`password` field with a coded `422 admin_password_field_removed` rather than
+ignoring it, so an old client learns the reset did not happen.
+
 ## User Lifecycle
 
 ```
@@ -145,7 +174,7 @@ Invited (active) --> Deactivated --> Reactivated --> ...
 Users can update their own profile via the sidebar profile popover:
 
 - **Name**: Change display name
-- **Password**: Change password (requires current password for verification)
+- **Password**: Change password (requires current password for verification). Every self-service change — this one, the forced first-login change at `/change-password`, and `PATCH /api/auth/me` — writes a PII-free `auth.password.changed` audit row (`{"via": "change_password" | "profile", "forced": bool}`; `forced` is true when it replaced an admin- or signup-issued temp)
 
 Users cannot change their own email or roles.
 
@@ -159,7 +188,8 @@ Users cannot change their own email or roles.
 | GET | `/api/admin/roles` | List all available roles — the picker `role_names` is chosen from (`user.manage`) |
 | GET | `/api/admin/permissions` | The granular-permission catalog, key + label (`user.manage`) |
 | POST | `/api/admin/users` | Create a user (returns temp password) (`user.manage`) |
-| PATCH | `/api/admin/users/:id` | Update user name, email, roles, active status, or reset password (`user.manage`) |
+| PATCH | `/api/admin/users/:id` | Update user name, email, roles or active status (`user.manage`). A field resent at its current value is not a change: it is not applied and not named in the `user.updated` audit row. A `password` field is refused (`422 admin_password_field_removed`) |
+| POST | `/api/admin/users/:id/reset-password` | Reset to a generated temp the user must change at next sign-in; revokes their sessions; returns the temp once (`user.manage`, org-scoped, out-rank guarded, not self, audited `user.password_reset`) |
 | POST | `/api/admin/users/:id/revoke-sessions` | Force-log-out a user without changing their account (`user.manage`, org-scoped, idempotent, audited) |
 | DELETE | `/api/admin/users/:id` | Permanently delete a user (cannot delete yourself) (`user.manage`) |
 
@@ -258,5 +288,4 @@ organizations
 ## Future Considerations
 
 - **Email invitations**: Send invite emails with a magic link or temp password via SMTP (admins currently hand temp passwords to invitees out-of-band)
-- **Password reset**: Self-service password reset via email (currently requires admin to reset)
 - **SCIM `/Groups`**: map IdP groups to our `Role` rows (`/Users` is shipped; group sync is not)

@@ -1911,19 +1911,45 @@ async def get_me(
 # ---------------------------------------------------------------------------
 
 
-async def _apply_new_password(user: User, new_password: str) -> None:
+async def _apply_new_password(user: User, new_password: str) -> bool:
     """Validate + set the caller's own password on the in-session User row.
 
     Clears `must_change_password` for the same reason `/change-password`
     always has: successfully setting a password means the temp credential the
     flag exists to force out is no longer in play.
+
+    Returns whether the change was a FORCED one (the flag was set going in) —
+    i.e. the owner replacing a temp an admin or signup issued — for the audit
+    row `_audit_password_changed` writes.
     """
     try:
         validate_password_complexity(new_password)
     except PasswordError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    was_forced = bool(user.must_change_password)
     user.hashed_password = await hash_password(new_password)
     user.must_change_password = False
+    return was_forced
+
+
+async def _audit_password_changed(user: User, *, via: str, forced: bool) -> None:
+    """Write the PII-free `auth.password.changed` row for a self-service change.
+
+    Before this, the only trace a password change left was the
+    `auth.session.revoked` row its forced logout writes — a side effect, not
+    the event — so the trail could not say when an account's owner set the
+    credential it now signs in with (#566: whether an approver had replaced an
+    admin-issued temp was unanswerable). Field names and fixed literals only,
+    never a password; written after the commit, and `dispatch_auth_audit`
+    swallows its own failures, so an audit blip never fails the change.
+    """
+    await dispatch_auth_audit(
+        organization_id=user.organization_id,
+        actor_id=user.id,
+        action="auth.password.changed",
+        entity_id=user.id,
+        details={"via": via, "forced": forced},
+    )
 
 
 async def _revoke_sessions_after_password_change(user: User) -> None:
@@ -1977,6 +2003,7 @@ async def update_me(
                 detail=f"Unsupported locale '{body.locale}'.",
             )
 
+    forced = False
     if body.password is not None:
         if not body.current_password:
             raise HTTPException(
@@ -1986,10 +2013,11 @@ async def update_me(
             body.current_password, user.hashed_password
         ):
             raise HTTPException(status_code=400, detail="Current password is incorrect")
-        await _apply_new_password(user, body.password)
+        forced = await _apply_new_password(user, body.password)
 
     await db.commit()
     if body.password is not None:
+        await _audit_password_changed(user, via="profile", forced=forced)
         await _revoke_sessions_after_password_change(user)
     org = await _load_user_org(db, user.organization_id)
     return await _user_response(db, user, org)
@@ -2013,8 +2041,9 @@ async def change_password(
     ):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    await _apply_new_password(user, body.new_password)
+    forced = await _apply_new_password(user, body.new_password)
     await db.commit()
+    await _audit_password_changed(user, via="change_password", forced=forced)
     await _revoke_sessions_after_password_change(user)
     org = await _load_user_org(db, user.organization_id)
     return await _user_response(db, user, org)

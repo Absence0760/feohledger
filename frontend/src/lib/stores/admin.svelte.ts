@@ -12,6 +12,13 @@ interface CreateUserResponse extends AdminUser {
 	temporary_password: string;
 }
 
+/** Same shape as an invite: the user plus the one-time temporary password —
+ *  and whether the forced logout went through (`false` when the server could
+ *  not revoke the user's sessions after the reset committed). */
+interface ResetUserPasswordResponse extends CreateUserResponse {
+	sessions_revoked: boolean;
+}
+
 interface FetchUsersOptions {
 	search?: string;
 	page?: number;
@@ -186,13 +193,31 @@ function createAdminStore() {
 			email: string;
 			is_active: boolean;
 			role_names: string[];
-			password: string;
 		}>
 	): Promise<AdminUser> {
 		const updated = await api.patch<AdminUser>(`/api/admin/users/${id}`, changes);
 		usersSequence.supersedeInFlight();
 		users = users.map((u) => (u.id === id ? updated : u));
 		return updated;
+	}
+
+	/**
+	 * Reset a user's password to a server-generated temporary one they must
+	 * change at next sign-in (`POST /api/admin/users/{id}/reset-password`).
+	 *
+	 * There is deliberately no way to SET a password from here: an admin-typed
+	 * value is one the admin keeps knowing, and a password input in the edit
+	 * form is one a browser autofills with the admin's own credential (#566).
+	 * The temp comes back once, on this response, for the caller to show.
+	 */
+	async function resetUserPassword(id: string): Promise<ResetUserPasswordResponse> {
+		const res = await api.post<ResetUserPasswordResponse>(
+			`/api/admin/users/${id}/reset-password`,
+			{}
+		);
+		usersSequence.supersedeInFlight();
+		users = users.map((u) => (u.id === id ? res : u));
+		return res;
 	}
 
 	async function deleteUser(id: string): Promise<void> {
@@ -275,6 +300,7 @@ function createAdminStore() {
 		fetchPermissionCatalog,
 		createUser,
 		updateUser,
+		resetUserPassword,
 		deleteUser,
 		bulkDeleteUsers,
 		createRole,
