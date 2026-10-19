@@ -95,7 +95,7 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     PoPayload,
     VendorPayload,
-    erp_failure_message,
+    erp_http_failure,
     erp_refusal,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
@@ -517,9 +517,7 @@ class SageAccountingZaAdapter(ErpAdapter):
             resp = await self._call(client, base, "POST", "SupplierInvoice/Save", "post", body=body)
 
         if resp.status_code not in (200, 201):
-            return ErpPostResult(
-                success=False, message=erp_failure_message(PROVIDER, resp.status_code)
-            )
+            return erp_http_failure(PROVIDER, resp.status_code)
         saved = _json(resp)
         saved = saved if isinstance(saved, dict) else {}
         doc_id = str(saved.get("ID")) if saved.get("ID") is not None else None

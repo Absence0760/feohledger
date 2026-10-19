@@ -354,6 +354,13 @@ webhooks, older spelling `webhook_secret`) — are **not** in
   form does not render), exactly as a save would. A test can therefore never
   send a sealed credential to a host that has been typed but not saved. When
   the store cannot be opened the test says so; it never runs without them.
+  An OAuth ERP is tested the same way: the panel offers Test connection once
+  connected, and the saved `oauth` block plus its sealed tokens reach the
+  adapter. The answer is coded — `{success, code, provider | adapter,
+  message}`, `code` one of `connected` / `connection_failed` /
+  `credentials_unavailable` / `unknown_adapter` — and the panel states it with
+  the ERP's display name in the reader's language
+  (`types/erpConnection.erpTestResultText`); `message` is the English fallback.
 - **A new destination drops them.** A `PATCH` that names a different ERP, clears
   the ERP, or changes a destination key of the same ERP removes the sealed
   secrets that belonged to the old connection (`catalog.secrets_to_drop`; the
@@ -1158,6 +1165,18 @@ re-entered push resumes rather than restarts. A **non-retryable** result
 `job_unconfirmed`) or an OAuth ERP with no usable connection fails the invoice
 on the first attempt. After the last attempt the invoice goes to `failed`, with
 `last_error` on the instance and an `invoice.erp_failed` audit row.
+
+**A deterministic 4xx is never retried** (decisions §285). Every adapter builds
+an HTTP failure with `base.erp_http_failure(provider, status)`, whose
+`retryable` is `base.erp_status_retryable(status)`: 5xx and network errors
+stay retryable, and so do the 4xx answers that can change on a re-send — 401
+(the adapter refreshes the token), 408 / 425 / 429 ("later"), 409 / 423 (a
+concurrent edit or a lock; Business Central answers a stale etag with 409).
+Every other 4xx (400, 403, 404, 422, …) is the ERP's answer to the bill itself,
+so the invoice fails on the first attempt with `retries: 1` instead of sending
+the same refused bill three times over six seconds. Blackbaud's SKY quota (403
+with `Retry-After`) stays retryable. A manual `POST /{id}/retry-erp` after the
+fix is unchanged.
 
 **A failure that left a bill in the ERP names it.** Examples are a
 `posted_total_mismatch` whose void failed ("could not be voided") and a

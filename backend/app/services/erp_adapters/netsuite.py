@@ -23,7 +23,7 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     PoPayload,
     VendorPayload,
-    erp_failure_message,
+    erp_http_failure,
     erp_refusal,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
@@ -184,9 +184,7 @@ class NetSuiteAdapter(ErpAdapter):
 
         lookup_status, existing_id = await self._find_by_external_id(payload.correlation_id)
         if lookup_status != 200:
-            return ErpPostResult(
-                success=False, message=erp_failure_message("NetSuite", lookup_status)
-            )
+            return erp_http_failure("NetSuite", lookup_status)
         if existing_id:
             # Our earlier attempt; it counts only if NetSuite booked the
             # approved total (an unconfirmed first attempt lands here too).
@@ -246,9 +244,9 @@ class NetSuiteAdapter(ErpAdapter):
                 raw_response=resp.json() if resp.content else None,
             )
         else:
-            return ErpPostResult(
-                success=False,
-                message=erp_failure_message("NetSuite", resp.status_code),
+            return erp_http_failure(
+                "NetSuite",
+                resp.status_code,
                 raw_response=resp.json()
                 if resp.headers.get("content-type", "").startswith("application/json")
                 else None,

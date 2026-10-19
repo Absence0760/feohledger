@@ -23,6 +23,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_failure_message,
+    erp_http_failure,
     erp_refusal,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
@@ -223,9 +224,7 @@ class BusinessCentralAdapter(ErpAdapter):
             token, payload.correlation_id
         )
         if lookup_status != 200:
-            return ErpPostResult(
-                success=False, message=erp_failure_message(_PROVIDER, lookup_status)
-            )
+            return erp_http_failure(_PROVIDER, lookup_status)
         if existing is not None:
             status = str(existing.get("status") or "").lower()
             if status not in ("open", "paid", "draft"):
@@ -266,9 +265,9 @@ class BusinessCentralAdapter(ErpAdapter):
             )
 
         if resp.status_code not in (200, 201):
-            return ErpPostResult(
-                success=False,
-                message=erp_failure_message(_PROVIDER, resp.status_code),
+            return erp_http_failure(
+                _PROVIDER,
+                resp.status_code,
                 raw_response=resp.json()
                 if resp.headers.get("content-type", "").startswith("application/json")
                 else None,
@@ -321,10 +320,7 @@ class BusinessCentralAdapter(ErpAdapter):
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                return ErpPostResult(
-                    success=False,
-                    message=erp_failure_message(_PROVIDER, resp.status_code),
-                )
+                return erp_http_failure(_PROVIDER, resp.status_code)
             try:
                 record = loads_exact_json(resp.content)
             except ValueError:
@@ -360,11 +356,7 @@ class BusinessCentralAdapter(ErpAdapter):
                 headers=headers,
             )
         if post_resp.status_code not in (200, 204):
-            return ErpPostResult(
-                success=False,
-                erp_document_id=doc_id,
-                message=erp_failure_message(_PROVIDER, post_resp.status_code),
-            )
+            return erp_http_failure(_PROVIDER, post_resp.status_code, erp_document_id=doc_id)
         # Posting a draft does not recompute its total, so the one checked
         # above is the one BC booked.
         return _bc_posted(doc_id, record, payload)

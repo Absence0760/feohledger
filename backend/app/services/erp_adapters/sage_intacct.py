@@ -59,7 +59,7 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     PoPayload,
     VendorPayload,
-    erp_failure_message,
+    erp_http_failure,
     erp_refusal,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
@@ -310,7 +310,7 @@ class SageIntacctAdapter(ErpAdapter):
                 message="Posted to Sage Intacct",
                 raw_response=result if isinstance(result, dict) else None,
             )
-        return ErpPostResult(success=False, message=erp_failure_message(PROVIDER, resp.status_code))
+        return erp_http_failure(PROVIDER, resp.status_code)
 
     async def _get_bill(self, client: httpx.AsyncClient, token: str, key: str) -> dict | None:
         resp = await client.get(

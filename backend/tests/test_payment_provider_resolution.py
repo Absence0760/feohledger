@@ -588,6 +588,7 @@ async def test_test_erp_endpoint_no_longer_confirms_a_typod_adapter(all_plan_fea
     )
 
     assert res["success"] is False
+    assert (res["code"], res["adapter"]) == ("unknown_adapter", BAD_ERP_TYPE)
     assert BAD_ERP_TYPE in res["message"]
     assert "SECRET" not in res["message"]
 

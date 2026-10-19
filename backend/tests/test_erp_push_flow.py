@@ -1311,3 +1311,108 @@ async def test_a_transient_failure_records_no_refusal():
         await send_to_erp_internal(AsyncMock(), inv)
     fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
     assert "refusal" not in fail_row["details"]
+
+
+# ---------------------------------------------------------------------------
+# A deterministic 4xx is never retried; an answer that can change still is
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("status", "retryable"),
+    [
+        (400, False),
+        (403, False),
+        (404, False),
+        (413, False),
+        (422, False),
+        (401, True),
+        (408, True),
+        (409, True),
+        (423, True),
+        (425, True),
+        (429, True),
+        (500, True),
+        (502, True),
+        (503, True),
+        (200, True),
+    ],
+)
+def test_erp_status_retryable(status, retryable):
+    from app.services.erp_adapters.base import erp_http_failure, erp_status_retryable
+
+    assert erp_status_retryable(status) is retryable
+    result = erp_http_failure("Xero", status)
+    assert (result.success, result.retryable) == (False, retryable)
+    assert result.message.startswith(f"Xero post failed: HTTP {status} (")
+
+
+def _merge_send(status: int):
+    """Run a whole send through the real `_call_erp` and the Merge.dev adapter,
+    whose create answers ``status`` every time: the invoice, the audit
+    recorder, the config and the response."""
+    resp = AsyncMock()
+    resp.status_code = status
+    resp.headers = {"content-type": "application/json"}
+    resp.json = lambda: {"errors": [{"detail": "Vendor Acme 12-3456789"}]}
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    recorder = _AuditRecorder()
+    cfg = {"integration_method": "merge_dev", "api_key": "k", "account_token": "t"}
+    return inv, recorder, cfg, resp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (422, 1), (503, 3), (429, 3)])
+async def test_send_to_erp_retries_only_an_answer_that_can_change(status, attempts):
+    inv, recorder, cfg, resp = _merge_send(status)
+    sleep_mock = AsyncMock()
+    with (
+        patch("httpx.AsyncClient") as cm,
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=_instance())),
+        patch("app.services.erp.asyncio.sleep", sleep_mock),
+    ):
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=resp)
+        await send_to_erp_internal(_line_items_db([]), inv, erp_config=cfg)
+
+    assert inv.status == InvoiceStatus.failed
+    assert client.post.await_count == attempts
+    assert sleep_mock.await_count == attempts - 1
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert fail_row["details"]["retries"] == attempts
+    assert fail_row["details"]["error"].startswith(f"Merge.dev post failed: HTTP {status}")
+
+
+@pytest.mark.asyncio
+async def test_a_coded_erp_refusal_records_its_params_on_the_audit_row():
+    """A QuickBooks Fault refusal (`refusal_params`: the Intuit code, the GL
+    codes) reaches `invoice.erp_failed.refusal` beside the provider."""
+    from app.services.erp_adapters.base import ErpPostResult
+
+    result = ErpPostResult(
+        success=False,
+        message="QuickBooks Online post refused: account_inactive (Intuit fault 2500)",
+        retryable=False,
+        refusal_code="account_inactive",
+        refusal_provider="QuickBooks Online",
+        refusal_params={"intuit_code": "2500", "accounts": ["6100"]},
+    )
+    adapter = SimpleNamespace(post_invoice=AsyncMock(return_value=result))
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    recorder = _AuditRecorder()
+    with (
+        patch("app.services.erp.get_erp_adapter", return_value=adapter),
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=_instance())),
+        patch("app.services.erp.asyncio.sleep", AsyncMock()),
+    ):
+        await send_to_erp_internal(_line_items_db([]), inv, erp_config={"type": "x"})
+
+    assert adapter.post_invoice.await_count == 1
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert fail_row["details"]["retries"] == 1
+    assert fail_row["details"]["refusal"] == {
+        "code": "account_inactive",
+        "params": {"intuit_code": "2500", "accounts": ["6100"], "provider": "QuickBooks Online"},
+    }

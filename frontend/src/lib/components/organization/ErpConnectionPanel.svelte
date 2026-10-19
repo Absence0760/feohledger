@@ -53,6 +53,7 @@
 		buildErpPayload,
 		buildErpSecretUpdate,
 		buildErpTestPayload,
+		erpTestResultText,
 		byoAppRequired,
 		groupProviders,
 		initialValues,
@@ -363,13 +364,12 @@
 
 	async function test() {
 		if (!provider) return;
+		const p = provider;
 		testing = true;
 		setStatus('', null);
 		try {
-			const result = await testErpConnection(
-				buildErpTestPayload(provider, values, mergeErpType, stored)
-			);
-			setStatus(result.message, result.success ? 'success' : 'failure');
+			const result = await testErpConnection(buildErpTestPayload(p, values, mergeErpType, stored));
+			setStatus(erpTestResultText(result, p, providerLabel, m), result.success ? 'success' : 'failure');
 		} catch (err) {
 			setStatus(err instanceof Error ? err.message : m('org.toast.testFailed'), 'failure');
 		} finally {
@@ -640,6 +640,17 @@
 									onclick={save}
 								>
 									{saving ? m('org.common.saving') : m('org.erp.save')}
+								</button>
+								<!-- Same handler and live region as a credentials ERP: the
+								     backend tests the saved connection with its stored
+								     tokens (`config_for_connection_test`). -->
+								<button
+									class="btn-test"
+									data-testid="erp-oauth-test"
+									disabled={testing || !provider.available}
+									onclick={test}
+								>
+									{testing ? m('org.common.testing') : m('org.common.testConnection')}
 								</button>
 							{:else}
 								<button

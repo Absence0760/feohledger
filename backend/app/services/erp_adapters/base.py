@@ -129,6 +129,55 @@ def erp_failure_message(provider: str, status_code: int) -> str:
     return f"{provider} post failed: HTTP {status_code} ({erp_failure_reason(status_code)})"
 
 
+#: The 4xx answers that can change on a re-send, and so stay retryable:
+#:
+#: * 401 — an expired or rotated token; each adapter refreshes and the next
+#:   attempt carries a fresh one.
+#: * 408 / 425 / 429 — timed out, too early, rate limited: the ERP said "later".
+#: * 409 / 423 — a concurrent edit or a lock (Business Central answers a stale
+#:   etag with 409); the next attempt re-reads.
+#:
+#: Every other 4xx is the ERP's answer to the bill itself (400 bad request,
+#: 403 forbidden, 404, 422 validation): sending the same bill again gets the
+#: same answer, only later and with another call against the ERP's quota.
+_RETRYABLE_CLIENT_STATUSES = frozenset({401, 408, 409, 423, 425, 429})
+
+
+def erp_status_retryable(status_code: int) -> bool:
+    """Whether a failed ERP call that answered ``status_code`` may succeed if
+    ``services/erp`` sends the same bill again (``ErpPostResult.retryable``).
+
+    5xx and anything that is not an HTTP error at all stay retryable; a 4xx
+    does only when it is one of :data:`_RETRYABLE_CLIENT_STATUSES`.
+    """
+    if 400 <= status_code < 500:
+        return status_code in _RETRYABLE_CLIENT_STATUSES
+    return True
+
+
+def erp_http_failure(
+    provider: str,
+    status_code: int,
+    *,
+    erp_document_id: str | None = None,
+    raw_response: dict | None = None,
+) -> ErpPostResult:
+    """The failed :class:`ErpPostResult` for an ERP call answered with
+    ``status_code``: the PII-free :func:`erp_failure_message`, retryable only
+    when :func:`erp_status_retryable` says a re-send could change the answer.
+
+    Every adapter's HTTP failure goes through here, so none of them spends
+    ``services/erp``'s backoff budget re-sending a bill the ERP refused.
+    """
+    return ErpPostResult(
+        success=False,
+        erp_document_id=erp_document_id,
+        message=erp_failure_message(provider, status_code),
+        raw_response=raw_response,
+        retryable=erp_status_retryable(status_code),
+    )
+
+
 #: Stable reason code: the payload has no ``vendor_erp_id`` — the invoice's
 #: vendor was never linked to a record in this ERP (run the vendor sync, or the
 #: invoice has no resolved ``vendor_id`` at all). Every direct adapter refuses
@@ -207,6 +256,13 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "doc_number_too_long",
         "currency_unknown",
         "currency_not_enabled",
+        # QuickBooks Online: coded from the Fault it answers a bill create with
+        "period_closed",
+        "vendor_inactive",
+        "account_inactive",
+        "reference_invalid",
+        "company_subscription_inactive",
+        "intuit_fault",
         # Sage Business Cloud Accounting
         "idempotency_lookup_incomplete",
         # Business Central
@@ -287,6 +343,10 @@ class ErpPostResult:
     #: HTTP failure, whose code lives in ``message`` (:func:`erp_failure_message`).
     refusal_code: str | None = None
     refusal_provider: str | None = None
+    #: Extra PII-free params of the refusal beyond ``provider`` — the numeric
+    #: code the ERP answered with (``intuit_code``), the GL ``accounts`` it
+    #: named. ``services/erp`` merges them into the recorded refusal's params.
+    refusal_params: dict | None = None
 
 
 @dataclass

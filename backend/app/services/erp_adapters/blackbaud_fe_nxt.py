@@ -140,6 +140,7 @@ from app.services.erp_adapters.base import (
     VendorPayload,
     erp_failure_reason,
     erp_refusal,
+    erp_status_retryable,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
@@ -534,9 +535,15 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                     None,
                 )
             if resp.status_code not in (200, 201, 202):
-                # FE NXT answered with a refusal: nothing was queued, so
-                # services/erp may retry.
-                return ErpPostResult(success=False, message=failure_message("post", resp))
+                # FE NXT answered with a refusal: nothing was queued, so a
+                # re-send is safe — but only worth it when the answer could
+                # change (an outage, a quota, a token); a 400 never does.
+                return ErpPostResult(
+                    success=False,
+                    message=failure_message("post", resp),
+                    retryable=failure_reason(resp) == "rate_limited"
+                    or erp_status_retryable(resp.status_code),
+                )
             process_id = _field(resp, "process_id")
             if process_id is None:
                 return _unconfirmed(

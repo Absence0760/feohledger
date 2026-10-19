@@ -193,7 +193,10 @@ def _result_refusal(
         return None
     accounts = _unlinked_accounts(invoice, line_items, refs) if code == ACCOUNT_NOT_LINKED else None
     return erp_refusal_record(
-        code, provider=getattr(result, "refusal_provider", None), accounts=accounts
+        code,
+        provider=getattr(result, "refusal_provider", None),
+        accounts=accounts,
+        extra=getattr(result, "refusal_params", None),
     )
 
 
@@ -307,7 +310,11 @@ class ErpPostRefusedError(ErpPostFailedError):
 
 
 def erp_refusal_record(
-    code: str, *, provider: str | None = None, accounts: list[str] | None = None
+    code: str,
+    *,
+    provider: str | None = None,
+    accounts: list[str] | None = None,
+    extra: dict | None = None,
 ) -> dict:
     """The coded form of a push refusal, as ``invoice.erp_failed`` records it.
 
@@ -318,7 +325,9 @@ def erp_refusal_record(
     code it does not know. PII-free like ``error``: ``provider`` is the adapter's
     fixed literal and ``accounts`` are GL codes, which are tenant configuration.
     """
-    params: dict = {}
+    # ``extra`` is the adapter's own PII-free params (``ErpPostResult.
+    # refusal_params``: an ERP's numeric fault code, the GL codes it named).
+    params: dict = dict(extra or {})
     if provider:
         params["provider"] = provider
     if accounts is not None:
