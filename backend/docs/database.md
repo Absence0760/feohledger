@@ -336,10 +336,15 @@ deploy's `migrate_all_tenants.py` replayed all ~114 revisions onto it from base.
 That replay is not a no-op — the multi-entity revisions add a second,
 differently named foreign key (`fk_<table>_entity`) beside each one `create_all`
 built — and CI's day-one job, which re-runs the deploy's migration step after
-provisioning and diffs every schema, is what found it (#575). A tenant that was
-provisioned before the fix had its chain replayed on its first deploy and now
-carries those redundant duplicate foreign keys; they enforce the same reference
-and are harmless. A database that already has a version row keeps it.
+provisioning and diffs every schema, is what found it (#575). A tenant provisioned
+before the fix had its chain replayed on its first deploy and carries 14
+duplicate foreign keys; migration `0113_schema_build_parity` drops them (it
+keeps the ORM's), and the three revisions that added them now recognise the
+ORM's name, so a replay no longer does. A database that already has a version
+row keeps it. One that has tables but no version row — provisioned before the
+stamp — is named in `migrate_all_tenants.py`'s log and **replayed, not stamped**:
+`create_all` built it at the head of its own release, and stamping today's head
+would skip every revision since (`docs/decisions.md` §283).
 
 `create_all` builds **exactly what the ORM declares**. So an index written into a
 migration and never declared on its model reaches migrated databases and
@@ -435,12 +440,13 @@ complete catalogue: every column's type, nullability, server default and
 identity; every constraint (PK / FK / UNIQUE / CHECK / EXCLUDE) by name and
 `pg_get_constraintdef`; every index by `pg_get_indexdef`; every trigger and the
 functions they call (`audit_log`'s immutability guard); sequences, enum types
-and extensions. Four builds are checked:
+and extensions. These builds are checked:
 
 | Case | Migrated side | Compared with |
 |------|---------------|---------------|
 | tenant | the pre-Alembic tenant schema + the whole chain | `_create_tenant_tables` |
-| tenant, first deploy | `_create_tenant_tables`, then the whole chain (a new tenant is not stamped, so its first `deploy.sh` replays every revision over it) | itself, before |
+| tenant, next deploy | `_create_tenant_tables` (recorded at head), then the real `migrate_all_tenants.py` — no revision may run | itself, before |
+| tenant provisioned before the stamp | `_create_tenant_tables` minus its version row, then `migrate_all_tenants.py`, which names it and replays the chain — no change, no duplicate FK | itself, before |
 | control plane, as seeded | the pre-Alembic control plane `seed.py` built (tenant-table copies included) + the chain | `control_plane_bootstrap.initialise` |
 | control plane, control tables only | the same, minus the tenant copies, so revisions that pick their branch by probing for `invoices` run their control DDL | `initialise` |
 
@@ -452,7 +458,7 @@ with its reason, and one that stops differing fails the test.
 **The ORM is the head schema.** When the two disagree, the revision that fixes
 it moves the migrated side to the model, not the other way round — a fresh
 control plane is built on exactly that claim (`docs/decisions.md` §274), and
-every production database was built by `create_all`. Migration
+every production database was built by `create_all` (`docs/decisions.md` §283). Migration
 **`0113_schema_build_parity`** closed the first sweep: 142 server defaults that
 revisions set and no model declares (the model's `default=` is Python-side),
 hand-named FKs where `create_all` uses `<table>_<column>_fkey`, ON DELETE actions

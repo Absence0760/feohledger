@@ -11641,7 +11641,7 @@ signup emails as the adapter would send them, including a phishing URL typed as
 the admin name. `backend/docs/notifications.md` § The HTML layout carries the
 working form.
 
-## 282. A migrated database converges on the ORM, and the whole schema is compared (#575, migration 0113, 2026-10-19)
+## 283. A migrated database converges on the ORM, and the whole schema is compared (#575, migration 0113, 2026-10-19)
 
 **Context.** `test_migration_model_index_parity.py` held the chain and the models
 to the same indexes, statically. Nothing compared the rest of the schema, so
@@ -11677,12 +11677,27 @@ deployed over since it was provisioned carries 14 duplicate foreign keys.
   schema is a committed snapshot (`tests/fixtures/pre_0001_schema/`) with the
   script that re-derives it from `f6d93ab1^`, because CI checkouts are shallow.
 
+- **A tenant provisioned before the head stamp is replayed, not stamped.**
+  `services/schema_version.record_head` now records a new tenant at head in
+  the transaction that builds it (#575's day-one work), so the deploy after
+  provisioning is a no-op. Tenants provisioned earlier carry no version row
+  (one in production today), and `migrate_all_tenants.py` names each such
+  tenant in its log, then replays the chain over it. Stamping it instead
+  would be wrong: `create_all` built it at the head of the release that
+  provisioned it, not today's head, so a stamp would skip every revision
+  since. With the three guards fixed, the replay changes nothing a revision
+  would not have changed and adds no duplicate FK
+  (`test_a_tenant_provisioned_before_the_stamp_is_replayed_safely`). Tenants
+  whose replay already ran (two in production, at 0111, each with the 14
+  duplicates) lose the duplicates to 0113 on their next deploy.
+
 **Rejected.**
+- *Leaving the duplicate FKs in place as harmless.* They enforce the same
+  reference, but each is checked again on every write to 11 business tables,
+  and a later revision that drops or alters one by name would leave its twin.
 - *Declaring the 142 defaults on the models instead.* The defensible
   direction for a fresh design, but it changes every production table to match
   development databases, where the other way changes none.
-- *Stamping a new tenant at head when it is provisioned*, so the chain never
-  replays over it. It would also have avoided the duplicates, but the replay is
-  what every existing production tenant has already been through, and the
-  first-deploy case now holds every revision's guards to the ORM's spelling —
-  the property a stamp would only have hidden.
+- *Stamping an unversioned existing tenant at today's head in
+  `migrate_all_tenants.py`.* See above: its schema is the head of its own
+  release, which the parity check cannot vouch for as today's.

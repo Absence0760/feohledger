@@ -3,7 +3,8 @@
 Why
 ---
 A database here is built one of two ways, and they must agree
-(`docs/decisions.md` §274, `backend/docs/database.md` § Whole-schema parity):
+(`docs/decisions.md` §274 / §283, `backend/docs/database.md`
+§ Whole-schema parity):
 
 * a database that predates a release runs the Alembic chain;
 * a NEW tenant (``tenant_provisioning._create_tenant_tables``) and a NEW control
@@ -15,13 +16,13 @@ migrated one from the pre-Alembic schema — and compares the whole catalogue.
 It found the two builds disagreeing in six ways. Production's control plane and
 tenants were built by ``create_all`` at v0.1.0, so they already have the ORM's
 shape — with one exception, which does reach production: a tenant ``create_all``
-built is not stamped, so the first ``deploy.sh`` after provisioning replays the
-whole chain over it, and 0029 / 0051 / 0082 guarded their foreign keys by their
-OWN names only. Each re-added an FK the tenant already had under
-``create_all``'s name, so a tenant deployed over since it was provisioned
-carries 14 duplicate foreign keys, each checked again on every write. Those
-guards now accept either name, and step 2 drops the duplicates where they
-landed. Everything else differs only on
+built was not recorded at head (it is now — ``services/schema_version``), so the
+first ``deploy.sh`` after provisioning replayed the whole chain over it, and
+0029 / 0051 / 0082 guarded their foreign keys by their OWN names only. Each
+re-added an FK the tenant already had under ``create_all``'s name, so a tenant
+deployed over since it was provisioned carries 14 duplicate foreign keys, each
+checked again on every write. Those guards now accept either name, and step 2
+drops the duplicates where they landed. Everything else differs only on
 databases that went through the chain — long-lived development databases, and
 any database restored from a pre-v0.1.0 backup — and is a no-op elsewhere.
 

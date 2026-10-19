@@ -356,16 +356,108 @@ def _drop_version_table(*snaps: dict) -> None:
             del snap[key]
 
 
-async def test_the_first_deploy_after_provisioning_leaves_a_fresh_tenant_alone(scratch):
-    """A new tenant is built by ``create_all`` and NOT stamped, so the next
-    ``deploy.sh`` (``migrate_all_tenants.py``) replays the WHOLE chain over it.
-    That is every production tenant's real history, so the replay must change
-    nothing: each revision's guards have to recognise the ORM's spelling of
-    what it would build, not only its own."""
-    name, dsn = await scratch("tr")
+async def _migrate_all_tenants(monkeypatch, db_name: str) -> tuple[int, list[str]]:
+    """Run the deploy's real ``migrate_all_tenants.main()`` over one tenant.
+
+    Only the control-plane listing is replaced (it would otherwise enumerate
+    the configured control plane's orgs); the per-tenant ``alembic upgrade
+    head`` subprocess is the real one, and its stderr — where Alembic logs every
+    ``Running upgrade`` it applies — is kept for the caller."""
+    import scripts.migrate_all_tenants as mat
+
+    class _Result:
+        def all(self):
+            return [(db_name,)]
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, _stmt):
+            return _Result()
+
+    class _Engine:
+        async def dispose(self):
+            return None
+
+    stderr: list[str] = []
+    real_run = subprocess.run
+
+    def run(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        stderr.append(result.stderr)
+        return result
+
+    monkeypatch.setattr(mat, "control_session_factory", lambda: _Session())
+    monkeypatch.setattr(mat, "control_engine", _Engine())
+    monkeypatch.setattr(mat.subprocess, "run", run)
+    return await mat.main(), stderr
+
+
+async def _duplicate_fks(dsn: dict) -> list[str]:
+    """Foreign keys sharing their table, columns and target with another."""
+    conn = await asyncpg.connect(**dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT conrelid::regclass::text AS tbl, array_agg(conname ORDER BY conname) AS names "
+            "FROM pg_constraint WHERE contype = 'f' "
+            "GROUP BY conrelid, conkey, confrelid, confkey HAVING count(*) > 1"
+        )
+    finally:
+        await conn.close()
+    return [f"{r['tbl']}: {', '.join(r['names'])}" for r in rows]
+
+
+async def test_a_provisioned_tenant_is_at_head_and_the_next_deploy_is_a_no_op(
+    scratch, monkeypatch, capsys
+):
+    """A new tenant is recorded at head when it is built, so the deploy that
+    follows provisioning applies nothing to it: no revision runs, the schema is
+    unchanged, the version stays at head."""
+    name, dsn = await scratch("tp")
     await _create_tenant_tables(name)
     before = await snapshot(dsn)
-    _alembic_upgrade({"FEOH_MIGRATE_TENANT": name})
+    conn = await asyncpg.connect(**dsn)
+    try:
+        assert await conn.fetchval("SELECT version_num FROM alembic_version") == _head()
+    finally:
+        await conn.close()
+
+    rc, stderr = await _migrate_all_tenants(monkeypatch, name)
+
+    assert rc == 0
+    assert "Running upgrade" not in stderr[0], stderr[0]
+    assert "no Alembic version" not in capsys.readouterr().out
+    assert diff(await snapshot(dsn), before) == {}
+
+
+async def test_a_tenant_provisioned_before_the_stamp_is_replayed_safely(
+    scratch, monkeypatch, capsys
+):
+    """The tenants that already exist without a version row (production has
+    one). migrate_all_tenants says so, loudly, and replays the chain rather than
+    stamping head: create_all built them at the head of THEIR release, and
+    stamping today's head would skip whatever came after. The replay is safe —
+    every revision's guard recognises the ORM's spelling of what it would build
+    — so it changes nothing and adds no duplicate foreign key."""
+    name, dsn = await scratch("tr")
+    await _create_tenant_tables(name)
+    conn = await asyncpg.connect(**dsn)
+    try:
+        await conn.execute("DROP TABLE alembic_version")
+    finally:
+        await conn.close()
+    before = await snapshot(dsn)
+
+    rc, stderr = await _migrate_all_tenants(monkeypatch, name)
+
+    assert rc == 0
+    assert f"{name} has tables but no Alembic version" in capsys.readouterr().out
+    assert "Running upgrade  -> 0001_signup" in stderr[0]
+    assert await _duplicate_fks(dsn) == []
     after = await snapshot(dsn)
     _drop_version_table(after)
     _check("tenant", diff(after, before))
@@ -395,8 +487,9 @@ async def _stamp_below_0113(dsn: dict) -> None:
 
 async def test_0113_removes_the_duplicate_fks_an_earlier_replay_left(scratch):
     """A tenant provisioned before 0029 / 0051 / 0082 learned the ORM's FK
-    names carries the duplicates its first deploy added — all 14 of them. 0113
-    drops them, keeping the ORM's, on a tenant stamped just below it."""
+    names carries the duplicates its first deploy added — all 14 of them (two
+    production tenants do, at 0111). 0113 drops them, keeping the ORM's, on a
+    tenant stamped just below it."""
     name, dsn = await scratch("td")
     await _create_tenant_tables(name)
     before = await snapshot(dsn)
@@ -421,8 +514,9 @@ async def test_0113_removes_the_duplicate_fks_an_earlier_replay_left(scratch):
     _alembic_upgrade({"FEOH_MIGRATE_TENANT": name})
 
     after = await snapshot(dsn)
-    _drop_version_table(after)
+    _drop_version_table(before, after)
     _check("tenant", diff(after, before))
+    assert await _duplicate_fks(dsn) == []
 
 
 async def test_0113_removes_the_duplicate_partner_fk_on_a_control_plane(scratch):
