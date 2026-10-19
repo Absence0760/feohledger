@@ -41,3 +41,10 @@ class GLAccountUpdate(BaseModel):
     parent_code: str | None = Field(default=None, max_length=GL_CODE_MAX_LENGTH)
     #: Retirement. There is no DELETE on this router — see the route docstring.
     is_active: bool | None = None
+
+
+class GLAccountErpLinkConfirm(BaseModel):
+    """``POST /api/gl-accounts/{id}/erp-link``: the ERP account a person chose
+    for the row, among the candidates the last sync named."""
+
+    erp_account_id: str = Field(..., min_length=1, max_length=255)

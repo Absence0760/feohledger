@@ -16,6 +16,11 @@ from app.services.erp_adapters import (
     get_erp_adapter,
 )
 from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, NOT_CONNECTED
+from app.services.erp_link_realm import (
+    connection_realm,
+    legacy_links_trusted,
+    live_link_clause,
+)
 from app.services.gl_chart import resolve_erp_account_ids
 from app.services.workflow_engine import (
     complete_workflow,
@@ -59,7 +64,10 @@ class ErpRefs:
 
 
 async def _resolve_erp_refs(
-    db: AsyncSession, invoice: Invoice, line_items: list[InvoiceLineItem]
+    db: AsyncSession,
+    invoice: Invoice,
+    line_items: list[InvoiceLineItem],
+    erp_config: dict | None = None,
 ) -> ErpRefs:
     """Resolve the ERP ids :func:`_build_payload` puts on the payload.
 
@@ -71,20 +79,33 @@ async def _resolve_erp_refs(
     against the invoice's own chart (shared ∪ its entity's —
     ``gl_chart.resolve_erp_account_ids``, the rule the extraction catalogue and
     the coding guards use).
+
+    Both resolve only links made in the ERP company ``erp_config`` connects to
+    (``services/erp_link_realm``, docs/decisions.md §284): QuickBooks numbers
+    vendors and accounts per company, so a link carried over from the sandbox
+    would otherwise post to whatever production calls the same id. A link from
+    another company is "not linked" here, and the push refuses it.
     """
+    realm = connection_realm(erp_config)
+    trust_legacy = legacy_links_trusted(erp_config, realm)
     vendor_erp_id: str | None = None
     if invoice.vendor_id is not None:
-        vendor_erp_id = (
-            await db.execute(
-                select(Vendor.erp_vendor_id).where(
-                    Vendor.id == invoice.vendor_id,
-                    Vendor.organization_id == invoice.organization_id,
-                )
-            )
-        ).scalar_one_or_none() or None
+        stmt = select(Vendor.erp_vendor_id).where(
+            Vendor.id == invoice.vendor_id,
+            Vendor.organization_id == invoice.organization_id,
+        )
+        live = live_link_clause(Vendor.erp_link_realm, realm, trust_legacy=trust_legacy)
+        if live is not None:
+            stmt = stmt.where(live)
+        vendor_erp_id = (await db.execute(stmt)).scalar_one_or_none() or None
     codes = [invoice.gl_account, *(li.gl_account for li in line_items)]
     account_erp_ids = await resolve_erp_account_ids(
-        db, invoice.organization_id, invoice.entity_id, codes
+        db,
+        invoice.organization_id,
+        invoice.entity_id,
+        codes,
+        realm=realm,
+        trust_legacy=trust_legacy,
     )
     return ErpRefs(vendor_erp_id=vendor_erp_id, account_erp_ids=account_erp_ids)
 
@@ -151,8 +172,15 @@ def _unlinked_accounts(
     What an ``account_not_linked`` refusal names, so the reader knows which
     account to sync or recode. Empty when the refusal was for a bill with no
     account at all (an uncoded line and no header account).
+
+    The header account only counts when some line falls back to it — a bill
+    with no lines, or a line with no account of its own (``bill_lines``). When
+    every line carries its own code the header is posted nowhere, and naming
+    it would send the reader to fix an account the bill never used.
     """
-    codes = [invoice.gl_account, *(li.gl_account for li in line_items)]
+    codes = [li.gl_account for li in line_items]
+    if not line_items or any(not li.gl_account for li in line_items):
+        codes.append(invoice.gl_account)
     return sorted({c for c in codes if c and c not in refs.account_erp_ids})
 
 
@@ -504,7 +532,7 @@ async def _call_erp(
 
     adapter = get_erp_adapter(config)
     line_items = await _fetch_line_items(db, invoice.id)
-    refs = await _resolve_erp_refs(db, invoice, line_items)
+    refs = await _resolve_erp_refs(db, invoice, line_items, config)
     payload = _build_payload(invoice, line_items, refs)
     state = (instance.state_data if instance is not None else None) or {}
     payload.pending_job_id = state.get(PENDING_JOB_KEY)

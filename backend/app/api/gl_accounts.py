@@ -1,6 +1,7 @@
 """GL Account (Chart of Accounts) endpoints."""
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -20,9 +21,10 @@ from app.models.entity import Entity
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
 from app.models.user import User
-from app.schemas.gl_account import GLAccountCreate, GLAccountUpdate
+from app.schemas.gl_account import GLAccountCreate, GLAccountErpLinkConfirm, GLAccountUpdate
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_link_realm import connection_realm
 from app.services.gl_account_sync import sync_chart_from_erp
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
@@ -92,6 +94,22 @@ def _serialize(a: GLAccount) -> dict:
         # whether an edit reaches one subsidiary or all of them. Additive: the
         # picker callers read `id` / `code` / `name` and ignore it.
         "entity_id": str(a.entity_id) if a.entity_id else None,
+        # "Needs a decision": the ERP accounts the last sync found this
+        # unlinked row could mean and would not choose between
+        # (`services/gl_account_sync`, docs/decisions.md §284). A person picks
+        # one through `POST /{id}/erp-link`. The connection realm stays
+        # server-side.
+        "erp_link_candidates": (
+            {
+                "reason": a.erp_link_candidates.get("reason"),
+                "accounts": a.erp_link_candidates.get("accounts") or [],
+            }
+            if a.erp_link_candidates and a.erp_account_id is None
+            else None
+        ),
+        "erp_link_confirmed_at": (
+            a.erp_link_confirmed_at.isoformat() if a.erp_link_confirmed_at else None
+        ),
     }
 
 
@@ -497,7 +515,13 @@ async def sync_gl_accounts_from_erp(
         ) from exc
 
     result = await sync_chart_from_erp(
-        db, organization_id=org_id, entity_id=entity_id, accounts=erp_accounts
+        db,
+        organization_id=org_id,
+        entity_id=entity_id,
+        accounts=erp_accounts,
+        # Which ERP company these ids belong to: a link from any other one is
+        # re-judged, never matched by a colliding id (§284).
+        realm=connection_realm(erp_config),
     )
     summary = result.summary()
 
@@ -528,3 +552,102 @@ async def sync_gl_accounts_from_erp(
         **summary,
         "adapter": adapter.erp_type,
     }
+
+
+@router.post("/{account_id}/erp-link")
+async def confirm_gl_account_erp_link(
+    account_id: uuid.UUID,
+    body: GLAccountErpLinkConfirm,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
+):
+    """Say which ERP account an unlinked row means, among the ones the last
+    sync named (``erp_link_candidates``).
+
+    The sync refuses to guess when a row's code is a key several ERP accounts
+    answer to — a pre-§284 QuickBooks row "Depreciation" may have meant the
+    top-level account or "Truck:Depreciation", and the invoices coded to it do
+    not say which (``services/gl_account_sync`` rules 3 and 4). Only a person
+    can, so this is the way out: it links the row to the chosen candidate,
+    marks the link confirmed so later syncs do not re-judge it by those rules,
+    and audits the choice (``gl_account.erp_link_confirmed``). It never accepts
+    an id the sync did not offer, never re-points a row that is already linked
+    (unlinking is the sync's job), and refuses candidates gathered under a
+    different ERP connection — ids are per company.
+
+    The same editor rule as ``PATCH /{id}``: with an entity selected only that
+    entity's own rows; a shared row from the consolidated view. Gate: admin |
+    ap_manager, like the sync that produced the candidates.
+    """
+    account = (
+        await db.execute(
+            select(GLAccount).where(
+                GLAccount.id == account_id,
+                GLAccount.organization_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail="GL account not found")
+    if entity_id is not None and account.entity_id != entity_id:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This account belongs to the shared chart or another entity. "
+                "Switch to the consolidated view to edit it."
+            ),
+        )
+    if account.erp_account_id is not None:
+        raise HTTPException(status_code=409, detail="This account is already linked to the ERP.")
+    pending = account.erp_link_candidates or {}
+    offered = {a.get("erp_account_id"): a for a in pending.get("accounts") or []}
+    if body.erp_account_id not in offered:
+        raise HTTPException(
+            status_code=422,
+            detail="Choose one of the ERP accounts the last sync named for this row.",
+        )
+
+    try:
+        erp_config = await provider_config(org, "erp", db=control_db)
+    except CredentialCryptoError:
+        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
+    if not erp_config:
+        raise HTTPException(status_code=400, detail="No ERP configured")
+    realm = connection_realm(erp_config)
+    if pending.get("realm") != realm:
+        raise HTTPException(
+            status_code=409,
+            detail="These candidates came from another ERP connection. Sync the chart again.",
+        )
+
+    chosen = offered[body.erp_account_id]
+    account.erp_account_id = body.erp_account_id
+    account.erp_link_realm = realm
+    account.erp_link_confirmed_at = datetime.now(UTC)
+    account.erp_link_confirmed_by = user.id
+    account.erp_link_candidates = None
+    await db.flush()
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org_id,
+        actor_id=user.id,
+        action="gl_account.erp_link_confirmed",
+        entity_type="gl_account",
+        entity_id=account.id,
+        details={
+            "code": account.code,
+            "erp_account_id": body.erp_account_id,
+            "erp_code": chosen.get("code"),
+            "reason": pending.get("reason"),
+            "candidates": sorted(offered),
+            "realm": realm,
+            "entity_id": str(account.entity_id) if account.entity_id else None,
+        },
+    )
+    await db.commit()
+    return _serialize(account)

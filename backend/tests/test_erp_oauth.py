@@ -562,6 +562,36 @@ async def test_callback_connects_and_redirects_home_without_secrets(realdb, plat
 
 
 @pytest.mark.plan("scale")
+@pytest.mark.parametrize("new_realm", [REALM, "realm-9130350000"])
+async def test_a_consent_to_another_company_is_audited_as_a_realm_change(
+    realdb, platform_app, provider, new_realm
+):
+    """ERP ids are per company (§284): every link made under the old one stops
+    resolving at the push, so the move is its own audit row. Reconnecting the
+    same company is not a change."""
+    await _set_settings(
+        realdb, {"erp": {"type": PROVIDER, "oauth": _connected_block(realdb.info("a").org_id)}}
+    )
+    provider.handler = lambda url, data: _resp(200, _token_body(2))
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": new_realm})
+    assert resp.headers["location"].endswith(f"erp_connected={PROVIDER}")
+
+    rows = {r.action: r.details for r in await _audit_actions(realdb)}
+    connected = rows["organization.erp_connected"]
+    assert connected["previous_realm"] == f"{PROVIDER}:{REALM}"
+    assert connected["realm"] == f"{PROVIDER}:{new_realm}"
+    if new_realm == REALM:
+        assert "organization.erp_realm_changed" not in rows
+    else:
+        assert rows["organization.erp_realm_changed"] == {
+            "provider": PROVIDER,
+            "previous_realm": f"{PROVIDER}:{REALM}",
+            "realm": f"{PROVIDER}:{new_realm}",
+        }
+
+
+@pytest.mark.plan("scale")
 async def test_callback_replay_is_refused(realdb, platform_app, provider):
     provider.handler = lambda url, data: _resp(200, _token_body())
     state = _state_of(await _authorize(realdb))

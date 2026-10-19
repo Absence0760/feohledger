@@ -85,6 +85,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_vendors_csv
 from app.services.email_adapters import EmailMessage, get_email_adapter
+from app.services.erp_link_realm import connection_realm
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
     provider_config,
@@ -1692,6 +1693,9 @@ async def sync_vendors_from_erp_endpoint(
         entity_id=entity_id,
         actor_id=user.id,
         org_settings=org.settings,
+        # Which ERP company these ids belong to (§284): a vendor linked under
+        # another one is re-judged, never matched by a colliding id.
+        realm=connection_realm(erp_config),
     )
     await db.commit()
 
@@ -1704,6 +1708,8 @@ async def sync_vendors_from_erp_endpoint(
         message += (
             f"; {len(result['conflicts'])} not linked (the name matches more than one vendor)"
         )
+    if result["unlinked"]:
+        message += f"; {len(result['unlinked'])} unlinked (linked under another ERP company)"
     return {"success": True, "message": message, **result}
 
 

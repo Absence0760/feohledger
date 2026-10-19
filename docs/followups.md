@@ -650,7 +650,8 @@ reliable part of it.
       *2026-10-19 (§284):* the ERP chart sync now meets renames — it matches by
       `erp_account_id` and keeps our code, reporting the drift (`code_drift`) — and
       repairs a pre-§284 QuickBooks row that merged two accounts by unlinking it, so
-      its invoices are refused and recoded by hand. Both are the string column's
+      its invoices are refused until they are recoded or a person confirms which
+      account the row meant (`POST /api/gl-accounts/{id}/erp-link`). Both are the string column's
       limits showing; neither needed the FK yet.
       **Trigger:** the first request to rename or merge a GL account, or any work on
       cross-entity coding.

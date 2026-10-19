@@ -11804,7 +11804,7 @@ deployed over since it was provisioned carries 14 duplicate foreign keys.
   `migrate_all_tenants.py`.* See above: its schema is the head of its own
   release, which the parity check cannot vouch for as today's.
 
-## 284. GL accounts and vendors link by the ERP's unique key; a push refusal is a code the reader can act on (migration 0114, 2026-10-19)
+## 284. GL accounts and vendors link by the ERP's unique key, within the ERP company that issued it; a push refusal is a code the reader can act on (migrations 0114, 0115, 2026-10-19)
 
 **Found live.** Against the real QuickBooks Online sandbox, a first chart sync
 into an empty chart reported 89 accounts as "81 new, 8 updated", and an invoice
@@ -11829,7 +11829,8 @@ ERP's unique key):
 - match by `erp_account_id` first (an ERP rename renames our row), then by
   code; a row linked to another live account keeps its link and the newcomer is
   refused (`code_taken`); a dead link (an id the pull no longer contains) is
-  re-pointed, which is the sandbox → production move;
+  re-pointed by code. That alone does NOT make a sandbox → production move
+  safe: QuickBooks ids collide across companies, which is the next section;
 - a code two pulled accounts resolve to is refused for **both**
   (`duplicate_code`) and an existing row with it loses its link — reported, never
   counted as updated;
@@ -11844,6 +11845,130 @@ ERP's unique key):
   linked or created. It used `scalar_one_or_none`, so two local vendors with one
   name was a 500 as well as a guess. QuickBooks `Vendor.AcctNum` stopped feeding
   our vendor `code`: it is the company's account number *at* the vendor.
+
+**An ERP id means something only in the company that issued it (migration
+0115).** Review of the first cut found that the matching above trusted an id
+across companies. QuickBooks numbers accounts and vendors per company with small
+integers, so a sandbox and a production company share most ids: our "Office
+Supplies", linked to sandbox "7", posted to production "7" (Advertising) after a
+reconnect, and the next sync matched the row by that colliding id, renamed it
+"Advertising", and recorded no link change. `vendor_sync` did the same and
+overwrote the vendor's name. So:
+
+- **every link records its connection realm** — `gl_accounts.erp_link_realm`,
+  `vendors.erp_link_realm` (`services/erp_link_realm`), `"<adapter>:<company>"`
+  built from NON-secret configuration only: the OAuth consent's company id
+  (QuickBooks `realmId`, Xero tenant, Sage business, Blackbaud environment), or a
+  direct adapter's company fields (NetSuite account; BC tenant + environment +
+  company; Intacct company; SYSPRO / Sage ZA host + company). Merge.dev's ids
+  are Merge-assigned UUIDs, unique across linked accounts, so its realm is the
+  adapter alone. `mock`, and an OAuth ERP with no consent, have none (`None`):
+  nothing can post there, so nothing is filtered. A secret is never fingerprinted
+  into a realm: it would land on every row and every audit row, and rotating it
+  would read as a company change.
+- **the push resolves only links of the current realm** (`services/erp
+  ._resolve_erp_refs`, `gl_chart.resolve_erp_account_ids`). A link from another
+  company is "not linked", and the bill is refused `vendor_not_linked` /
+  `account_not_linked` before any HTTP call.
+- **a sync re-judges every link of another realm by evidence, and records the
+  outcome** (rule 0 in `gl_account_sync`, the realm pass in `vendor_sync`). A
+  link is kept only when the pull shows the SAME id holding the row's own code
+  (GL: its current code or the legacy key an older adapter gave it) or, for a
+  vendor, the same supplier (same name ignoring case and spacing, or the same
+  non-blank tax id). Then the id names what the row meant in the new company too
+  — a production company copied from the sandbox keeps its links — and the move
+  is recorded (`link_changes` with `from_realm` / `to_realm`; `vendor.synced_from
+  _erp` `change: realm_changed`). Anything else is dead: dropped, never matched
+  by the colliding id, re-matched by code (GL) or by the unambiguous-name rule
+  (vendors), and every change written to `link_changes` / the per-vendor audit
+  row (`change: unlinked`). Rejected: re-matching purely by code and ignoring the
+  old id — it would churn every pre-§284 sub-account row a single-company tenant
+  has, whose code is the legacy key, not the current one.
+- **the connect callback audits a change of company**
+  (`organization.erp_realm_changed`, beside `organization.erp_connected`, both
+  naming the realms). Informational: the per-row realm is what keeps old links
+  from posting, so a reconnect after a disconnect — which leaves no previous
+  company to compare — needs no flag to be safe.
+
+**Links made before 0115 carry no realm (NULL), and nothing recorded which
+company they came from.** Two wrong answers: treat them all as dead (every
+existing tenant's pushes refused until someone syncs — an automatic
+approve-then-push flow strands every invoice), or adopt them into whatever the
+tenant is connected to at the first sync (a tenant that reconnected to another
+company first would have its colliding links blessed — the defect itself). The
+chosen rule: **the migration records, per organization, the realm its ERP
+config names at that moment** (`settings.erp.legacy_link_realm`, control-plane
+step of 0115; absent when no company is nameable). The push trusts a NULL link
+only while the org is still connected to that realm — so a tenant that never
+changed company keeps posting with no action, and one that connects anywhere
+else from then on has its unverified links refused until a sync re-judges them.
+The syncs never trust a NULL link on the snapshot alone: they apply the same
+evidence rule as for any other realm and stamp the realm (`realm_adopted` counts
+the silent confirmations). The snapshot is written only by the migration;
+`catalog.merge_erp_update` never takes it from a settings save and drops it with
+the block when the ERP changes. Residual, accepted: a tenant that switched
+company *before* 0115 and has not synced since is indistinguishable, at the push,
+from one that never switched; its first sync after 0115 sorts its links by
+evidence. Pre-0115 history is not recoverable from any record.
+
+**The repair passes cover the whole organization.** Rules 0, 3 and 4 are about
+which ERP account an id or a code names, not about which subsidiary holds the
+row, so they run over every chart row whichever entity the sync was run under
+(they used to run over shared ∪ the selected entity only, leaving a merged row
+in another subsidiary's chart posting until someone synced under it). Matching
+and creating stay scoped to the chart being synced into.
+
+**A person settles what the rules will not guess.** The live sandbox showed the
+hole in "unlink, never guess": the old row "Depreciation" was correctly unlinked
+(the top-level account 40 and "Truck:Depreciation" 39 were both keyed
+"Depreciation" before §284), but the top-level account's current code IS
+"Depreciation", so rule 2 found that same row, judged it legacy-ambiguous and
+refused — on every sync, forever. A bookkeeper could not code a bill to
+top-level Depreciation at all. Now a row left unlinked by rule 3 or 4 keeps the
+ERP accounts it could mean (`gl_accounts.erp_link_candidates`, with the realm
+they came from); `/gl-accounts` shows it as "Needs a decision"; and an admin or
+AP manager picks one (`POST /api/gl-accounts/{id}/erp-link`, audited
+`gl_account.erp_link_confirmed`). Only an offered id under the same connection
+is accepted, and only on an unlinked row. A confirmed link
+(`erp_link_confirmed_at` / `_by`) is exempt from rules 3 and 4 — it is the
+answer to the question they ask — but still dies with its realm or when its
+account leaves the ERP. Nothing auto-picks: the invoices coded to the row are
+the evidence, and only a person can read them. If the person picks
+"Truck:Depreciation" for the old row, the top-level account cannot also own the
+code "Depreciation" in the same chart and stays `code_taken`; that is the
+consequence of their answer, and the doc says so. Considered and rejected:
+persisting the whole last sync report (it goes stale with every edit; the
+per-row candidates are refreshed against each pull and cleared on link).
+
+**Inactive records are read, marked and never created.** `select * from
+Account` returns only active QuickBooks accounts, so an account made inactive
+vanished from the pull: a row linked to it looked like a dead link and our chart
+kept it active (live: Bank Charges, id 8). The adapter now queries `where Active
+IN (true, false)` for accounts and vendors (QuickBooks' documented form), and
+every adapter emits inactive records with `active=False` (NetSuite `isinactive`,
+BC `blocked`) instead of dropping them. Their ids count as live; a matched row
+is marked inactive in our chart (reported as `deactivated`), no row is created
+for one, and a sync never reactivates — a retirement here may be our own
+decision. A vendor linked to an inactive ERP record becomes `inactive` if it was
+`active` (live: Squeaky Kleen Car Wash, 57); no payee is created or linked for
+one. Whether the ERP accepts a bill against an account it made inactive stays
+the ERP's call, as for any retired account (`resolve_erp_account_ids`).
+
+**Smaller holes closed in the same pass.** An account the ERP sends with no id
+is refused (`missing_erp_id`) before the dedupe, which used to collapse two
+id-less accounts into one and count "linked" for writing a NULL. NetSuite and
+BC no longer drop over-long codes themselves: they emit them, the sync refuses
+them `code_too_long`, and their ids stay live for a row already linked to one.
+Vendors the pre-§284 QuickBooks mapping created still carried `Vendor.AcctNum`
+in `code`, which CSV import resolves vendors by: the sync clears `code` where it
+equals the record's AcctNum on a vendor it created (`source = erp_sync`; a
+manual vendor's code may be a person's choice), audited without the old value.
+An `account_not_linked` refusal no longer names the header code when every line
+carries its own (the header is posted nowhere then). And the QuickBooks PO sync
+stopped reading the whole chart to resolve PO-line accounts: `po_line_items`
+has no column for one and nothing reads `PoLinePayload.gl_account`, so the
+call bought discarded data. Lines carry no GL (never the `AccountRef` name);
+persist it by id when a consumer needs it.
 
 **The code is never rewritten on an id match.** The obvious way to repair a
 collapsed row is to re-key it to the account's real code. Rejected: invoices,
@@ -11883,9 +12008,9 @@ Patios" is 51). Considered:
 So `GL_CODE_MAX_LENGTH = 100` (migration `0114_gl_code_width`, tenant DBs,
 catalog-only `ALTER … TYPE varchar(100)`, downgrade refuses if a value would
 truncate), and the rare QuickBooks path past 100 keeps its head and ends
-`…#<Id>`, unique because the id is. NetSuite and BC skip at the new limit. The
-sync refuses anything longer (`code_too_long`) rather than let the database
-raise.
+`…#<Id>`, unique because the id is. NetSuite and BC emit an over-long code
+as it is (they first skipped it, which hid a live id from the sync). The sync
+refuses anything longer (`code_too_long`) rather than let the database raise.
 
 **Push refusals are coded end to end.** The live test also showed the AP user
 the raw "QuickBooks Online post refused: vendor_not_linked" in the invoice

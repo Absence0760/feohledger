@@ -1,9 +1,10 @@
 """Chart of Accounts — GL account codes synced from ERP or manually managed."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Index, String, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Index, String, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, EntityMixin, TimestampMixin
@@ -69,6 +70,22 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     parent_code: Mapped[str | None] = mapped_column(String(GL_CODE_MAX_LENGTH))
     is_active: Mapped[bool] = mapped_column(default=True)
     erp_account_id: Mapped[str | None] = mapped_column(String(255))
+    #: The ERP company ``erp_account_id`` was linked under
+    #: (``services/erp_link_realm``). An id only means something in the company
+    #: that issued it — QuickBooks numbers accounts per company — so a link from
+    #: another realm is never posted to. NULL: linked before migration 0115.
+    erp_link_realm: Mapped[str | None] = mapped_column(String(255))
+    #: Set when a person chose this row's ERP account among the candidates a
+    #: sync could not choose between (``POST /api/gl-accounts/{id}/erp-link``).
+    #: A confirmed link is not re-judged by the sync's ambiguity rules (3 and 4,
+    #: ``services/gl_account_sync``); it still dies with its realm.
+    erp_link_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    erp_link_confirmed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: ``{"realm", "reason", "accounts": [{"erp_account_id", "code", "name"}]}``
+    #: — the ERP accounts the last sync found this UNLINKED row could mean and
+    #: would not pick between. Non-NULL is "needs a decision"; cleared whenever
+    #: the row is linked.
+    erp_link_candidates: Mapped[dict | None] = mapped_column(JSONB)
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True

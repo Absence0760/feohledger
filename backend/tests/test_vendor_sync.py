@@ -16,6 +16,9 @@ from sqlalchemy import func, select
 from app.models.vendor import Vendor
 from app.services.vendor_sync import sync_vendors_from_erp
 
+#: What a pull with no realm and nothing to repair reports beside its counts.
+_QUIET = {"unlinked": [], "deactivated": 0, "codes_cleared": 0, "realm_adopted": 0, "realm": None}
+
 # ---------------------------------------------------------------------------
 # Service-layer (direct DB) cases
 # ---------------------------------------------------------------------------
@@ -35,7 +38,7 @@ async def test_sync_creates_new_vendors(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
+    assert result == _QUIET | {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
 
     async with mk() as s:
         vendors = (await s.execute(select(Vendor).order_by(Vendor.erp_vendor_id))).scalars().all()
@@ -62,7 +65,7 @@ async def test_sync_skips_rows_without_erp_id(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
+    assert result == _QUIET | {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         count = (await s.execute(select(func.count()).select_from(Vendor))).scalar_one()
     assert count == 1
@@ -92,7 +95,7 @@ async def test_sync_updates_changed_fields(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
+    assert result == _QUIET | {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         v = (await s.execute(select(Vendor).where(Vendor.erp_vendor_id == "ERP-7"))).scalar_one()
     assert v.name == "New Name"
@@ -123,7 +126,7 @@ async def test_sync_unchanged_when_no_diff(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
+    assert result == _QUIET | {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
 
 
 async def test_sync_does_not_null_out_existing_fields(realdb):
@@ -151,7 +154,7 @@ async def test_sync_does_not_null_out_existing_fields(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
+    assert result == _QUIET | {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
     async with mk() as s:
         v = (await s.execute(select(Vendor).where(Vendor.erp_vendor_id == "ERP-K"))).scalar_one()
     assert v.email == "keep@vendor.test"
@@ -181,7 +184,7 @@ async def test_sync_links_name_match_and_activates(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
+    assert result == _QUIET | {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         rows = (await s.execute(select(Vendor))).scalars().all()
     # No duplicate created — the existing row was linked, not a new insert.
@@ -231,7 +234,7 @@ async def test_sync_filters_name_match_by_org(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
+    assert result == _QUIET | {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         mine = (
             await s.execute(select(Vendor).where(Vendor.organization_id == org_id))
@@ -404,7 +407,7 @@ async def test_two_erp_vendors_sharing_a_local_name_link_neither(realdb):
             ],
         )
         await s.commit()
-    assert result == {
+    assert result == _QUIET | {
         "created": 0,
         "updated": 0,
         "unchanged": 0,
@@ -451,4 +454,4 @@ async def test_two_same_named_erp_vendors_with_no_local_are_both_created(realdb)
             ],
         )
         await s.commit()
-    assert result == {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
+    assert result == _QUIET | {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
