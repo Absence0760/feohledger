@@ -222,6 +222,18 @@ async def _create_tenant_tables(db_name: str, organization_id: uuid.UUID | None 
         table for name, table in Base.metadata.tables.items() if name not in CONTROL_TABLES
     ]
     async with engine.begin() as conn:
+        # Only a database with nothing in it yet becomes the head schema below.
+        # One that already holds tables (a half-built tenant an older release
+        # left behind) gets only the tables it lacks — `checkfirst` never adds
+        # a column — so it is NOT at head, and must be left for Alembic.
+        fresh = not (
+            await conn.execute(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public')"
+                )
+            )
+        ).scalar()
         # pgvector extension is required by the RAG embeddings table
         # (app.models.invoice_embedding). CREATE EXTENSION must run before
         # create_all, because the Vector column type resolves at DDL time.
@@ -231,12 +243,13 @@ async def _create_tenant_tables(db_name: str, organization_id: uuid.UUID | None 
                 sync_conn, tables=tenant_tables, checkfirst=True
             )
         )
-        # The ORM is the head schema, so record it as such in this same
+        # A fresh tenant IS the head schema, so record it as such in this same
         # transaction. Without the row the next deploy's migrate_all_tenants.py
-        # replays the whole chain onto this tenant from base, which is not a
-        # no-op (`services/schema_version.py`, #575). A tenant Alembic already
-        # tracks keeps its row.
-        await record_head(conn, head)
+        # replays the whole chain onto it from base, which is not a no-op
+        # (`services/schema_version.py`, #575). A tenant Alembic already tracks
+        # keeps its row; a pre-existing unstamped one stays unstamped, as above.
+        if fresh:
+            await record_head(conn, head)
         # SOX: install the DB-level append-only guard on audit_log. Migration
         # 0022 does the same across existing tenants; this keeps tenants created
         # outside Alembic (fresh provisioning + the test harness) consistent.

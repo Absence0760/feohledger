@@ -774,6 +774,44 @@ async def test_rebuilding_tenant_tables_keeps_the_revision_alembic_recorded(
         await _cleanup_org(slug)
 
 
+async def test_a_pre_existing_unstamped_tenant_is_not_recorded_at_head(
+    realdb, throwaway_slug, _provision_on_test_loop
+):
+    """`create_all(checkfirst=True)` adds missing TABLES, never a missing column,
+    so a tenant database that already held tables when it was (re)built is not
+    the head schema. Recording head on it would make Alembic skip the revisions
+    it still needs; it is left unstamped, for `alembic upgrade head` to bring
+    forward (review of #575)."""
+    import asyncpg
+
+    from app.services.tenant_provisioning import _create_tenant_tables, asyncpg_connect_kwargs
+
+    slug = throwaway_slug
+    db_name = f"{settings.tenant_db_prefix}{slug}"
+    try:
+        result = await provision_tenant(
+            company_name="Leftover Co",
+            slug=slug,
+            admin_email=f"admin@{slug}.test",
+            admin_name="Leftover Admin",
+            admin_password="Sup3rSecret!pw",
+        )
+        # What an older release left: the tables, and no version row.
+        conn = await asyncpg.connect(
+            **asyncpg_connect_kwargs(settings.database_url, database=db_name)
+        )
+        try:
+            await conn.execute("DROP TABLE alembic_version")
+        finally:
+            await conn.close()
+
+        await _create_tenant_tables(db_name, organization_id=result.organization_id)
+
+        assert await _tenant_version(db_name) is None
+    finally:
+        await _cleanup_org(slug)
+
+
 async def test_provision_tenant_duplicate_slug_raises_and_keeps_one_org(
     realdb, throwaway_slug, _provision_on_test_loop
 ):
