@@ -1072,3 +1072,57 @@ async def test_patch_clearing_an_optional_field_stores_null_and_audits(realdb):
     async with mk() as s:
         inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
     assert inv.po_number is None
+
+
+@pytest.mark.asyncio
+async def test_the_modals_untouched_save_payload_writes_no_edit(realdb):
+    """The exact body `InvoiceModal.invoiceFieldPayload()` sends for an
+    invoice nobody touched — Send to ERP saves it first. With the vendor
+    already linked and every optional field NULL, it changes nothing, so it
+    must audit nothing."""
+    from app.models.vendor import Vendor
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    vendor_id, inv_id = uuid.uuid4(), uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            Vendor(id=vendor_id, organization_id=info.org_id, name="Modal Save CP", status="active")
+        )
+        s.add(
+            Invoice(
+                id=inv_id,
+                organization_id=info.org_id,
+                invoice_number="CP-MODAL-SAVE",
+                vendor_name="Modal Save CP",
+                vendor_id=vendor_id,
+                amount=Decimal("77.10"),
+                currency="USD",
+                status=InvoiceStatus.new,
+            )
+        )
+        await s.commit()
+
+    body = {
+        "invoice_number": "CP-MODAL-SAVE",
+        "due_date": None,
+        "po_number": None,
+        "description": None,
+        "vendor_address": None,
+        "vendor_tax_id": None,
+        "ship_to_address": None,
+        "payment_method": None,
+        "reference_number": None,
+        "gl_account": None,
+        "cost_center": None,
+        "payment_terms": None,
+        "department": None,
+        "project": None,
+        "vendor": "Modal Save CP",
+        "amount": "77.10",
+        "tax_rate": None,
+    }
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.patch(f"/api/invoices/{inv_id}", json=body)
+    assert resp.status_code == 200, resp.text
+    assert [r.details for r in await _edited_rows(mk, inv_id)] == []
