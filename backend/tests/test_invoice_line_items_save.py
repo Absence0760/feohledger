@@ -380,3 +380,36 @@ async def test_resaving_identical_lines_writes_no_audit_row(realdb):
 
     rows = await _audit_rows(mk, inv_id, "invoice.line_items_edited")
     assert len(rows) == 1, rows
+
+
+@pytest.mark.asyncio
+async def test_line_items_read_back_a_zero_as_zero(realdb):
+    """A stored `0.00` tax (or price, or quantity) reads back as zero, not
+    null. The GET used to test truthiness, so the modal showed a zero-tax
+    line's tax as blank and the next line-items save wrote NULL over 0."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_invoice(mk, info.org_id, amount="100.00", number="LI-ZERO-1")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        put = await c.put(
+            f"/api/invoices/{inv_id}/line-items",
+            json=[
+                {
+                    "description": "Zero-rated",
+                    "quantity": "1",
+                    "unit_price": "100.00",
+                    "tax": "0.00",
+                    "total": "100.00",
+                },
+                {"description": "Free sample", "quantity": "0", "unit_price": "0", "total": "0"},
+            ],
+        )
+        assert put.status_code == 200, put.text
+        got = await c.get(f"/api/invoices/{inv_id}/line-items")
+    assert got.status_code == 200, got.text
+    first, second = got.json()
+    assert first["tax"] == 0
+    assert second["quantity"] == 0
+    assert second["unit_price"] == 0
+    assert second["total"] == 0

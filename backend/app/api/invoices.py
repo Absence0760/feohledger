@@ -1052,10 +1052,12 @@ async def get_invoice_line_items(
             "line_number": li.line_number,
             "item_code": li.item_code,
             "description": li.description,
-            "quantity": float(li.quantity) if li.quantity else None,
-            "unit_price": json_money(li.unit_price) if li.unit_price else None,
-            "tax": json_money(li.tax) if li.tax else None,
-            "total": json_money(li.total) if li.total else None,
+            # `is not None`, never truthiness: a zero-rated line's `0.00` tax is
+            # a value, and reading it back as null made the next save write NULL.
+            "quantity": float(li.quantity) if li.quantity is not None else None,
+            "unit_price": json_money(li.unit_price),
+            "tax": json_money(li.tax),
+            "total": json_money(li.total),
             "gl_account": li.gl_account,
         }
         for li in items

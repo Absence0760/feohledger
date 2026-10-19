@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	COMMON_CURRENCIES,
+	currencyMinorUnits,
 	currencyOptions,
 	formatMoney,
 	isNegativeAmount,
 	isPositiveAmount,
+	moneyInputText,
 	parseMoneyForLayout,
 	scaleMoney,
 	sumMoney
@@ -369,5 +371,57 @@ describe('scaleMoney', () => {
 
 	it('accepts a number amount without going through float arithmetic', () => {
 		expect(scaleMoney(19.99, 3)).toBe('59.97');
+	});
+});
+
+describe('currencyMinorUnits', () => {
+	it('reads the minor-unit count from Intl', () => {
+		expect(currencyMinorUnits('USD')).toBe(2);
+		expect(currencyMinorUnits('jpy')).toBe(0);
+		expect(currencyMinorUnits('BHD')).toBe(3);
+	});
+
+	it('is 2 when there is no usable code', () => {
+		expect(currencyMinorUnits(null)).toBe(2);
+		expect(currencyMinorUnits('')).toBe(2);
+		expect(currencyMinorUnits('dollars')).toBe(2);
+	});
+});
+
+// The live defect (2026-10-19): the invoice edit modal showed `77.1` for an
+// invoice of 77.10 USD, because the wire's JSON number has no trailing zeros.
+describe('moneyInputText', () => {
+	it('pads a wire number to the currency precision', () => {
+		expect(moneyInputText(77.1, 'USD')).toBe('77.10');
+		expect(moneyInputText(250, 'USD')).toBe('250.00');
+		expect(moneyInputText(0, 'USD')).toBe('0.00');
+		expect(moneyInputText(-12.5, 'EUR')).toBe('-12.50');
+		expect(moneyInputText(1.5, 'BHD')).toBe('1.500');
+	});
+
+	it('keeps a zero-decimal currency whole', () => {
+		expect(moneyInputText(250, 'JPY')).toBe('250');
+	});
+
+	it('pads an exact string without changing its digits', () => {
+		expect(moneyInputText('77.1', 'USD')).toBe('77.10');
+		expect(moneyInputText('77.10', 'USD')).toBe('77.10');
+		expect(moneyInputText('1234567890123.4', 'USD')).toBe('1234567890123.40');
+	});
+
+	it('never trims digits beyond the currency precision', () => {
+		// Cutting them would submit a different amount on the next save.
+		expect(moneyInputText('10.125', 'USD')).toBe('10.125');
+		expect(moneyInputText('250.50', 'JPY')).toBe('250.50');
+	});
+
+	it('defaults to two places when the currency is unknown', () => {
+		expect(moneyInputText(77.1, null)).toBe('77.10');
+	});
+
+	it('is empty for no amount and passes unreadable text through', () => {
+		expect(moneyInputText(null, 'USD')).toBe('');
+		expect(moneyInputText(undefined, 'USD')).toBe('');
+		expect(moneyInputText('abc', 'USD')).toBe('abc');
 	});
 });

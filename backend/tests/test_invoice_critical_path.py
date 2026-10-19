@@ -990,3 +990,139 @@ async def test_a_line_item_edit_moves_the_version_an_approval_is_bound_to(realdb
         )
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["code"] == "invoice_stale_approval"
+
+
+# ---------------------------------------------------------------------------
+# A blank optional field is NULL — and saving one back is no edit
+# ---------------------------------------------------------------------------
+
+
+async def _edited_rows(mk, inv_id):
+    async with mk() as s:
+        return (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_id == inv_id, AuditLog.action == "invoice.edited"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.asyncio
+async def test_patch_of_blank_optional_text_onto_null_writes_no_edit(realdb):
+    """The live defect (2026-10-19): the modal saves the form before Send to
+    ERP, an untouched empty input arrives as "", and the PATCH recorded
+    `po_number: null -> ""` (and description) as an `invoice.edited` row on the
+    SOX trail — an edit nobody made. Blank optional text is stored as NULL, and
+    NULL vs blank is no change."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_invoice(mk, info.org_id, status=InvoiceStatus.new, number="CP-BLANK")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.patch(
+            f"/api/invoices/{inv_id}",
+            json={
+                "po_number": "",
+                "description": "",
+                "reference_number": "   ",
+                "notes": "",
+                "ship_to_address": "",
+                "payment_terms": "",
+                "gl_account": "",
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    assert await _edited_rows(mk, inv_id) == []
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+    assert inv.po_number is None
+    assert inv.description is None
+    assert inv.reference_number is None
+    assert inv.notes is None
+
+
+@pytest.mark.asyncio
+async def test_patch_clearing_an_optional_field_stores_null_and_audits(realdb):
+    """A real change still audits: setting a value, then clearing it with "",
+    each write one `invoice.edited` row — and the clear lands as NULL."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_invoice(mk, info.org_id, status=InvoiceStatus.new, number="CP-CLEAR")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        set_resp = await c.patch(f"/api/invoices/{inv_id}", json={"po_number": "PO-9"})
+        assert set_resp.status_code == 200, set_resp.text
+        clear_resp = await c.patch(f"/api/invoices/{inv_id}", json={"po_number": ""})
+        assert clear_resp.status_code == 200, clear_resp.text
+
+    rows = await _edited_rows(mk, inv_id)
+    assert len(rows) == 2
+    changes = {
+        (r.details["changes"]["po_number"]["old"], r.details["changes"]["po_number"]["new"])
+        for r in rows
+    }
+    assert changes == {(None, "PO-9"), ("PO-9", None)}
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+    assert inv.po_number is None
+
+
+@pytest.mark.asyncio
+async def test_the_modals_untouched_save_payload_writes_no_edit(realdb):
+    """The exact body `InvoiceModal.invoiceFieldPayload()` sends for an
+    invoice nobody touched — Send to ERP saves it first. With the vendor
+    already linked and every optional field NULL, it changes nothing, so it
+    must audit nothing."""
+    from app.models.vendor import Vendor
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    vendor_id, inv_id = uuid.uuid4(), uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            Vendor(id=vendor_id, organization_id=info.org_id, name="Modal Save CP", status="active")
+        )
+        s.add(
+            Invoice(
+                id=inv_id,
+                organization_id=info.org_id,
+                invoice_number="CP-MODAL-SAVE",
+                vendor_name="Modal Save CP",
+                vendor_id=vendor_id,
+                amount=Decimal("77.10"),
+                currency="USD",
+                status=InvoiceStatus.new,
+            )
+        )
+        await s.commit()
+
+    body = {
+        "invoice_number": "CP-MODAL-SAVE",
+        "due_date": None,
+        "po_number": None,
+        "description": None,
+        "vendor_address": None,
+        "vendor_tax_id": None,
+        "ship_to_address": None,
+        "payment_method": None,
+        "reference_number": None,
+        "gl_account": None,
+        "cost_center": None,
+        "payment_terms": None,
+        "department": None,
+        "project": None,
+        "vendor": "Modal Save CP",
+        "amount": "77.10",
+        "tax_rate": None,
+    }
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.patch(f"/api/invoices/{inv_id}", json=body)
+    assert resp.status_code == 200, resp.text
+    assert [r.details for r in await _edited_rows(mk, inv_id)] == []
