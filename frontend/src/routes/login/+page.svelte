@@ -153,6 +153,22 @@
 		{/if}
 	</form>
 
+	<!-- Local development only: `import.meta.env.DEV` is a compile-time
+	     constant, so `pnpm build` drops this branch AND the dynamic import with
+	     it — no seeded address reaches the deployed bundle
+	     (`scripts/check_dev_accounts_stripped.mjs` checks the build). -->
+	{#if import.meta.env.DEV && !ssoOnly}
+		{#await import('#lib/dev/DevAccountsPanel.svelte') then { default: DevAccountsPanel }}
+			<DevAccountsPanel
+				slug={getTenantSlug()}
+				onpick={(account) => {
+					email = account.email;
+					password = account.password;
+				}}
+			/>
+		{/await}
+	{/if}
+
 	{#snippet panel()}
 		<p class="panel-line">{m('auth.login.panelBody')}</p>
 	{/snippet}

@@ -436,6 +436,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 - **API access** — always through `src/lib/api.ts`, never raw `fetch()`.
 - **BASE_PATH** — URL prefix for serving under a sub-path. Unset everywhere today (the deploy serves from the CDN root); kept as an escape hatch.
 - **No SSR** — static adapter only. Dynamic data comes from the backend API.
+- **Dev-only code stays behind `import.meta.env.DEV` with a dynamic import inside the branch** — the login page's "Dev accounts" panel (`src/lib/dev/`, seeded logins from `seed.py`) is the pattern; CI's `check_dev_accounts_stripped.mjs` fails if it reaches `frontend/build`.
 
 ### `networkidle` is not a readiness signal (tests-e2e/)
 
