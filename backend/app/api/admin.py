@@ -460,7 +460,7 @@ async def _guard_against_last_admin_lockout(
 
 
 #: `PATCH /admin/users/{id}` no longer sets a password (issue #566,
-#: `docs/decisions.md` §277). The request that still carries one gets this coded
+#: `docs/decisions.md` §276). The request that still carries one gets this coded
 #: 422 rather than having the field silently ignored — an old client must learn
 #: the reset did NOT happen, not believe it did.
 ADMIN_PASSWORD_FIELD_REMOVED = "admin_password_field_removed"
@@ -767,7 +767,7 @@ async def reset_user_password(
     shown once on the response and mailed best-effort. The admin never chooses
     the value, so they never hold a working long-term credential for someone
     else's account — the temp stops working the moment its owner replaces it
-    (#566, `docs/decisions.md` §277).
+    (#566, `docs/decisions.md` §276).
 
     Org-scoped (a foreign user is the same 404 as a missing one), out-rank
     guarded (resetting an admin's password is a takeover primitive), refused on

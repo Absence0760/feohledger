@@ -11267,9 +11267,7 @@ to every tenant too, and a revision that creates control tables must then probe
 which kind of database it is in — the same probe that misfired here. Running
 `seed.py` in production: it creates demo organizations and users.
 
-## 277. An admin resets a password to a forced-change temp, never to a value they type (#566, 2026-10-18)
-
-(§274–§276 are left to the open PRs that may claim them.)
+## 276. An admin resets a password to a forced-change temp, never to a value they type (#566, 2026-10-18)
 
 **Context.** `PATCH /api/admin/users/{id}` took a `password` and stored the
 admin-typed value with no `must_change_password`, so the admin went on knowing a

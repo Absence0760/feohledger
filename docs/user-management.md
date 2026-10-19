@@ -129,7 +129,7 @@ The temporary password is shown **only once** — it is not stored or retrievabl
 ## Resetting a user's password
 
 An admin never **chooses** another user's password — they reset it, and the
-server issues a temp exactly like an invite's (`docs/decisions.md` §277, #566):
+server issues a temp exactly like an invite's (`docs/decisions.md` §276, #566):
 
 1. **Admin > Users**, open the user's **Edit** dialog
 2. Under **Password**, click **Reset password**, then **Confirm reset** (two

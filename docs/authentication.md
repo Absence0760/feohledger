@@ -1095,7 +1095,7 @@ exactly as before.
     took the admin's OWN password from browser autofill, so saving a rename
     reset the target (#566). `PATCH` now refuses the field
     (`422 admin_password_field_removed`); the reset refuses the caller's own
-    account (`400 admin_password_reset_self`). See `docs/decisions.md` §277.
+    account (`400 admin_password_reset_self`). See `docs/decisions.md` §276.
   - **You cannot act on an account more privileged than your own.**
     Complexity alone never stopped the takeover it was once described as
     stopping — the actor *chooses* the password, so how strong it is is
