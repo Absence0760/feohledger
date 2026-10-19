@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # Provider-credential envelope encryption (`services/credential_crypto`).
     # The ERP / payment-rail / card-issuer secrets an admin enters are sealed
     # under a per-value data key that this KMS key wraps — set it to the app key
-    # (`terraform output app_kms_key_alias`, e.g. `alias/feohledger-app-production`).
+    # (`terraform output app_kms_key_alias`, e.g. `alias/feohledger-app-prod`).
     # Empty selects the LOCAL key provider (a key derived from FEOH_SECRET_KEY),
     # which is what makes a dev laptop work with no AWS account; a deployed
     # environment refuses to boot with it empty (see the validator below). Not a

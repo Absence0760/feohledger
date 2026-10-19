@@ -134,7 +134,7 @@ FEOH_SECRET_KEY=<generate via `openssl rand -hex 32`>
 # Seals tenant ERP / payment / card credentials — REQUIRED in production
 # (refuses to boot without it). The app KMS key; the task role needs
 # kms:GenerateDataKey + kms:Decrypt on it.
-FEOH_CREDENTIAL_KMS_KEY_ID=alias/feohledger-app-production
+FEOH_CREDENTIAL_KMS_KEY_ID=alias/feohledger-app-prod
 FEOH_MFA_ENABLED=true
 
 # S3 (use real S3, not MinIO)
