@@ -39,7 +39,11 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-19 — giving Free the direct ERP adapters
+**Last reconciled:** 2026-10-19 — refusing the ERP push for an open duplicate or
+fraud flag (decisions §286) opened three (c) entries (a flag raised after the
+bill is already in the ERP, human-cleared findings of the other types
+re-opening, and the push not checking the vendor's status), taking the file
+from 104 → 107. Before that, 2026-10-19 — giving Free the direct ERP adapters
 (decisions §281) built the Scale-only `erp_merge` gate, closing its (c) entry and
 taking the file from 106 → 105. Before that, 2026-10-19 — the first production deploy (#566) opened one
 (c) entry, the day-one test gap tracked in #575, taking the file from 103 → 104. Before that, 2026-10-12 — evaluating Baidu's Unlimited OCR opened
@@ -151,7 +155,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**104 open: 88 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**107 open: 91 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1642,6 +1646,49 @@ scope (§260) — do not fold them into any of these.
       types" stands; the link replaces the temp, not that rule. **Trigger:**
       the next change to any of those five endpoints or to their emails, and
       before a second customer onboards users or suppliers.
+
+### Surfaced by refusing the ERP push for an open duplicate or fraud flag (2026-10-19, decisions §286)
+
+- [ ] **(c) A duplicate or fraud flag raised after the bill is already in the
+      ERP leaves that bill payable there.** §286 refuses the push while an
+      `ERP_EXPORT_BLOCKING_EXCEPTION_TYPES` row is open, but a flag can arrive
+      later: a Positive Pay return, a fraud rule re-run on an edit, a duplicate
+      found when a third copy is entered. Our payment run still refuses the
+      invoice; the ERP's own Bill Pay does not know. Nothing tells the operator
+      the posted bill should be voided. **Durable fix:** when one of those types
+      opens on an invoice holding an ERP reference (`sent_to_erp` onward), raise
+      a notification and offer the existing ERP void
+      (`ErpAdapter.void_invoice`, `backend/docs/erp-integration.md`) from
+      the exception, gated and audited like a payment void; never void
+      automatically, since the flag may be false. **Trigger:** the first report
+      of a flagged bill paid from the ERP, or the next change to the ERP void
+      path.
+- [ ] **(c) A human-cleared finding of any other type is re-opened by the next
+      refresh.** §286 stops `refresh_warnings` re-opening a `duplicate` or
+      `fraud_flag` a person resolved or dismissed while the invoice is
+      unchanged (`exceptions.finding_fingerprint`, migration 0116). The other
+      types `_ensure_exception` raises still re-open, including the
+      payment-blocking `line_total_mismatch`, so a reviewer who accepts a line
+      variance sees the hold come back on the next refresh. **Durable fix:**
+      stamp the fingerprint for every type `_ensure_exception` raises, with
+      each type's own input fields (line items for the line-total check, the
+      PO and receipts for PO matching); `record_decision` already clears it on
+      a decision no person made. **Trigger:** the next change to
+      `_ensure_exception` or to the line-total reconciliation, or a reviewer
+      report of a hold that keeps coming back.
+- [ ] **(c) The ERP push does not check the vendor's status.** A payment run
+      refuses a vendor that is blocked, unverified or held for sanctions
+      screening, but `services/erp._call_erp` posts that vendor's approved
+      bill, and in the ERP it can be paid past our screening. The same
+      reasoning as §286, applied to the payee rather than the debt.
+      **Durable fix:** a second check beside `erp_export_gate`, reading the
+      payment path's own vendor-payability rule (`services/payment_runs`)
+      rather than a copy, with its own coded refusal in `ERP_REFUSAL_CODES`;
+      decide per status whether booking is still correct (an `unverified`
+      vendor's bill is a real debt; a sanctions hit or a block is not one to
+      put where it can be paid). **Trigger:** the next change to
+      `erp_export_gate`, or before the first tenant with live ERP pushes and
+      sanctions screening both enabled.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

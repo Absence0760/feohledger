@@ -977,6 +977,37 @@ inline literal), and `frontend/src/lib/api/erpRefusals.test.ts` reads the set
 out of `base.py` and fails on a code with no message, a message with no code,
 or a locale that leaves a placeholder unfilled.
 
+### An open duplicate or fraud exception refuses the push
+
+A bill in the ERP can be paid there (QuickBooks "Mark as paid", Bill Pay), past
+our payment-run gate. So the push refuses while the invoice has an open or
+escalated exception of a type in `api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`:
+`duplicate` and `fraud_flag`, the two payment-blocking types that say the
+liability itself is wrong. The other four payment-blocking types are holds on
+*paying* a real liability and do not refuse it (decisions §286 has the per-type
+reasoning).
+
+- **Chokepoint:** `services/erp._call_erp` asks
+  `services/erp_export_gate.erp_export_blocking_exception` before it builds an
+  adapter, on every attempt. A refusal is an `ErpPostRefusedError`: the invoice
+  goes to `failed` at once, with
+  `refusal = {code: "exception_blocks_erp_export", params: {exception_type}}`
+  on `invoice.erp_failed`.
+- **The HTTP doors answer first:** `POST /api/invoices/{id}/complete` (the
+  modal's "Send to ERP" on an approved invoice), `/send-to-erp` and
+  `/retry-erp` return **409** with that coded refusal before they move the
+  invoice, so it stays `approved` / `failed` and nothing is queued
+  (`erp_export_gate.refuse_blocked_erp_export`).
+- **What the user does:** resolve or dismiss the exception in Exceptions, then
+  send again. Clearing it goes through `exception_lifecycle.record_decision`,
+  so someone implicated in the invoice cannot clear it for themselves.
+- **Approval never pushes.** Approving advances the workflow's step pointer
+  only; the push is always one of the three requests above.
+
+The browser states the code from either place (`api/erpRefusals.ts`, also used
+by `codedRefusals.ts` for the 409). Tests:
+`tests/test_erp_export_blocking_exceptions.py`.
+
 ## GL accounts and vendors are linked by the ERP's unique key
 
 A bill posts on `gl_accounts.erp_account_id` (§ above), so which ERP account a
