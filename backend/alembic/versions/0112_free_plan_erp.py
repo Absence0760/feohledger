@@ -15,8 +15,10 @@ without `erp_merge` forever. This revision adds the two keys to the existing
 rows.
 
 Unlike `0107_plan_catalog_v2`, which rewrote the whole column, this one MERGES
-a single key into each row (`entitlements || {...}`): nothing else in the
-column changed, and an operator's other edits to a plan's grants are kept.
+a single key into each row (`entitlements || {...}`), and only when that key is
+absent: nothing else in the column changed, an operator's other edits to a
+plan's grants are kept, and an operator who already set the key — `false`
+included — keeps their answer. A missing ``free`` / ``scale`` row is a no-op.
 Growth is not touched — it never had `erp_merge`, and §256 keeps it so.
 
 Revision ID: 0112_free_plan_erp
@@ -25,7 +27,8 @@ Create Date: 2026-10-19
 
 CONTROL PLANE ONLY: gated on the ``plans`` table existing, which only the
 control DB has. Idempotent — merging a key that is already ``true`` writes the
-same value. The downgrade removes the two keys again.
+same value. The downgrade removes the two keys again (it cannot tell a key this
+revision added from one an operator set to ``true`` before it).
 """
 
 import json
@@ -65,13 +68,15 @@ def upgrade() -> None:
         return
     bind = op.get_bind()
     for code, feature in _GRANTS:
+        # Only a key that is ABSENT is added: an operator who set the key
+        # explicitly (``false`` included) on that row keeps their value.
         bind.execute(
             text(
                 "UPDATE plans SET entitlements = "
                 "COALESCE(entitlements, '{}'::jsonb) || CAST(:grant AS jsonb) "
-                "WHERE code = :code"
+                "WHERE code = :code AND NOT (COALESCE(entitlements, '{}'::jsonb) ? :feature)"
             ),
-            {"grant": json.dumps({feature: True}), "code": code},
+            {"grant": json.dumps({feature: True}), "code": code, "feature": feature},
         )
 
 
