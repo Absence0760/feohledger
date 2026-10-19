@@ -34,6 +34,16 @@
 		color: var(--text-muted);
 	}
 
+	/* WCAG 2.4.7: the input drops its own outline (it sits borderless inside
+	   the pill), so the pill carries the focus ring — the same 2px accent ring
+	   app.css gives every other control. Without this a keyboard user tabbing
+	   off the filter chips landed in the search box with nothing on screen
+	   saying so. */
+	.search-box:focus-within {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
 	.search-box input {
 		border: none;
 		background: none;

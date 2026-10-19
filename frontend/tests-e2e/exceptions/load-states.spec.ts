@@ -172,7 +172,7 @@ test.describe('/exceptions load states', () => {
 		const resolved = page.getByRole('button', { name: 'Resolved', exact: true });
 		await expect(resolved).toHaveAttribute('aria-pressed', 'true');
 		// The active type keeps a chip, and "All types" can clear it.
-		await expect(page.locator('.type-chip[aria-pressed="true"]')).toHaveCount(1);
+		await expect(page.getByTestId('exception-type-filters').locator('.filter-chip[aria-pressed="true"]')).toHaveCount(1);
 		const cleared = page.waitForResponse(
 			(r) => isList(r) && !new URL(r.url()).searchParams.has('type')
 		);

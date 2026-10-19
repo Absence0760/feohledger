@@ -851,6 +851,25 @@
 		return entries;
 	});
 
+	// The type row's "All types" key. `typeFilter` is `null` for "no type", and a
+	// chip key is a string; the empty string cannot collide with a wire type.
+	const ALL_TYPES = '';
+	// "All types" is label-only (no tally), as it always was. Rendered only when
+	// there is at least one type to choose between — `typeChips.length > 1`.
+	let typeChips = $derived([
+		{ key: ALL_TYPES, label: m('exceptions.filter.allTypes') },
+		...typeChipEntries.map(([type, count]) => ({ key: type, label: typeLabel(type), count }))
+	]);
+
+	/**
+	 * The type row's writer. Pressing the already-pressed type clears it — the
+	 * row's behaviour before it moved onto `<FilterChips>` (which only ever
+	 * selects), kept so a click on a pressed chip still undoes it.
+	 */
+	function selectType(key: string) {
+		typeFilter = key === ALL_TYPES || key === typeFilter ? null : key;
+	}
+
 	// Rendered with or without a summary, for the reason `severityChips` gives:
 	// when the tally request failed, hiding the row stranded the operator on
 	// whatever status the URL had applied (`?status=resolved`) with no control
@@ -910,49 +929,37 @@
 			<AgentDashboard />
 		</div>
 	{:else}
-	<div id="exc-panel-queue" role="tabpanel" aria-labelledby="exc-tab-queue">
-		<div class="help-row">
-			<FilterChips chips={statusChips} bind:active={statusFilter} />
-			<HelpTip term="exception" />
+	<!-- `queue-panel` gives the panel the shell's own vertical rhythm: the panel
+	     is ONE flex item of `.workspace`, so the workspace gap stopped at its
+	     edge and the chips, search box and table inside it sat flush against
+	     each other. -->
+	<div id="exc-panel-queue" class="queue-panel" role="tabpanel" aria-labelledby="exc-tab-queue">
+		<!-- Three faceted chip rows over one table (ui-patterns § Status filter
+		     chips), all three the same `<FilterChips>` control. The type row was
+		     a hand-rolled copy with its own smaller, square, dot-marked chips and
+		     an "All types" chip that pressed as an outline rather than a fill —
+		     the same control drawn three ways, one line apart. -->
+		<div class="queue-filters">
+			<div class="help-row">
+				<FilterChips chips={statusChips} bind:active={statusFilter} />
+				<HelpTip term="exception" />
+			</div>
+
+			{#if typeChips.length > 1}
+				<!-- `data-testid`: the e2e suite's handle on THIS row, since every
+				     row now renders the same `.filter-chip`. -->
+				<div class="help-row" data-testid="exception-type-filters">
+					<FilterChips chips={typeChips} bind:active={() => typeFilter ?? ALL_TYPES, selectType} />
+					<!-- Which of these types stop a payment run is the question the
+					     row of types raises; the tip answers it. -->
+					<HelpTip term="payment-blocking-exception" />
+				</div>
+			{/if}
+
+			<!-- The same `exceptions.severity.*` keys the row's Sev cell reads, so a
+			     chip and the rows it filters cannot name one severity two ways. -->
+			<FilterChips chips={severityChips} bind:active={severityFilter} />
 		</div>
-
-		{#if typeChipEntries.length > 0}
-			<!-- `aria-pressed` mirrors `ui/FilterChips`: the status row announces
-			     which chip is on, and this row — the same control, one line
-			     below — announced nothing, so a screen-reader user could not tell
-			     a narrowed queue from the whole one. -->
-			<nav class="type-filters">
-				<button
-					class="type-chip"
-					class:active={typeFilter === null}
-					type="button"
-					aria-pressed={typeFilter === null}
-					onclick={() => (typeFilter = null)}
-				>
-					{m('exceptions.filter.allTypes')}
-				</button>
-				{#each typeChipEntries as [type, count]}
-					<button
-						class="type-chip"
-						class:active={typeFilter === type}
-						type="button"
-						aria-pressed={typeFilter === type}
-						style="--type-color:{TYPE_COLORS[type] ?? '#888'}"
-						onclick={() => (typeFilter = typeFilter === type ? null : type)}
-					>
-						<span class="type-dot"></span>
-						{typeLabel(type)}{#if count !== undefined}{' '}<span class="count">{count}</span>{/if}
-					</button>
-				{/each}
-				<!-- Which of these types stop a payment run is the question the
-				     row of types raises; the tip answers it. -->
-				<HelpTip term="payment-blocking-exception" />
-			</nav>
-		{/if}
-
-		<!-- The same `exceptions.severity.*` keys the row's Sev cell reads, so a
-		     chip and the rows it filters cannot name one severity two ways. -->
-		<FilterChips chips={severityChips} bind:active={severityFilter} />
 
 	<SearchBox
 		bind:value={search}
@@ -983,7 +990,18 @@
 		{/snippet}
 	</BulkBar>
 
-	<DataTable columns={COLUMNS} isEmpty={exceptions.length === 0} empty={emptyMessage} colspan={11}>
+	<!-- `fixed` + per-column widths (ui-patterns § Data tables). Under the
+	     default auto layout the table's minimum width was the sum of every
+	     column's longest unbreakable run — an email in Assignee, an ERP
+	     invoice number, a nowrap badge, the 180px actions column — and the
+	     Type cell's `max-width` was a no-op (auto layout ignores it on a
+	     cell). So one long value pushed the table past the content area and
+	     the region scrolled Status and the Resolve / Invoice actions off its
+	     right edge. Fixed layout sizes the columns from the header row; the
+	     long single-line values clip with an ellipsis and keep the full text
+	     in `title`. -->
+	<div class="exc-table">
+	<DataTable columns={COLUMNS} isEmpty={exceptions.length === 0} empty={emptyMessage} colspan={11} fixed>
 		{#snippet header()}
 			<tr>
 				<!-- This page passes its own `header` snippet, so it owns `scope`
@@ -999,18 +1017,20 @@
 				</th>
 				<th scope="col">{m('exceptions.col.type')}</th>
 				<SortableHeader
+					class="col-sev"
 					field="severity"
 					label={m('exceptions.col.severity')}
 					active={sortField === 'severity'}
 					order={sortOrder}
 					onsort={handleSort} onclear={handleClearSort}
 				/>
-				<th scope="col">{m('exceptions.col.invoice')}</th>
-				<th scope="col">{m('exceptions.col.vendor')}</th>
-				<th class="right" scope="col">{m('exceptions.col.amount')}</th>
-				<th scope="col">{m('exceptions.col.assignee')}</th>
+				<th class="col-invoice" scope="col">{m('exceptions.col.invoice')}</th>
+				<th class="col-vendor" scope="col">{m('exceptions.col.vendor')}</th>
+				<th class="right col-amount" scope="col">{m('exceptions.col.amount')}</th>
+				<th class="col-assignee" scope="col">{m('exceptions.col.assignee')}</th>
 				<!-- Sorts `created_at`, reported in AGE order — see `handleAgeSort`. -->
 				<SortableHeader
+					class="col-age"
 					field={AGE_FIELD}
 					label={m('exceptions.col.age')}
 					active={sortField === AGE_FIELD}
@@ -1018,13 +1038,14 @@
 					onsort={handleAgeSort} onclear={handleClearSort}
 				/>
 				<SortableHeader
+					class="col-due"
 					field="due_at"
 					label={m('exceptions.col.due')}
 					active={sortField === 'due_at'}
 					order={sortOrder}
 					onsort={handleSort} onclear={handleClearSort}
 				/>
-				<th scope="col">{m('exceptions.col.status')}</th>
+				<th class="col-status" scope="col">{m('exceptions.col.status')}</th>
 				<th class="actions-col" scope="col"></th>
 			</tr>
 		{/snippet}
@@ -1074,10 +1095,10 @@
 							{severityLabel(exc.severity)}
 						</span>
 					</td>
-					<td class="mono">{exc.invoice_number ?? '—'}</td>
-					<td class="muted-cell">{exc.vendor_name ?? '—'}</td>
+					<td class="mono cell-clip" title={exc.invoice_number ?? undefined}>{exc.invoice_number ?? '—'}</td>
+					<td class="muted-cell cell-clip" title={exc.vendor_name ?? undefined}>{exc.vendor_name ?? '—'}</td>
 					<td class="mono right">{formatCurrency(exc.amount, exc.currency)}</td>
-					<td class="muted-cell">{exc.assigned_to ?? '—'}</td>
+					<td class="muted-cell cell-clip" title={exc.assigned_to ?? undefined}>{exc.assigned_to ?? '—'}</td>
 					<!-- The precise instant belongs in `title`, formatted — the raw
 					     ISO string was leaking into the tooltip of every row. -->
 					<td class="muted-cell" title={formatDate(exc.created_at, '', DATETIME_OPTS)}>
@@ -1090,7 +1111,7 @@
 					>
 						{dueLabel(exc)}
 					</td>
-					<td>
+					<td class="status-cell">
 						<Badge
 							tone={exceptionStatusTone(exc.status)}
 							variant="status-badge badge-{exc.status}"
@@ -1110,6 +1131,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 
 	{#if hasMore}
 		<div class="load-more-row">
@@ -1258,13 +1280,22 @@
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
 
-	/* --- Type filter chips --- */
+	/* --- Queue panel --- */
 
-	.type-filters {
+	/* The workspace's own column rhythm, continued inside the tab panel. */
+	.queue-panel {
 		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 6px;
+		flex-direction: column;
+		gap: 16px;
+		min-width: 0;
+	}
+
+	/* The three chip rows read as one filter block: tighter to each other than
+	   to the search box and table below them. */
+	.queue-filters {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
 	}
 
 	/* The resolve dialog's heading row (global `.help-row`) keeps the
@@ -1275,42 +1306,6 @@
 
 	.title-row h2 {
 		margin: 0;
-	}
-
-	.type-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 4px 10px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.78rem;
-		text-transform: capitalize;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.type-chip:hover {
-		color: var(--text);
-	}
-
-	.type-chip.active {
-		border-color: var(--type-color, var(--accent));
-		color: var(--text);
-	}
-
-	.type-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--type-color, var(--accent));
-	}
-
-	.type-chip .count {
-		font-size: 0.72rem;
-		color: var(--text-muted);
 	}
 
 	/* --- Bulk-bar action --- */
@@ -1353,9 +1348,64 @@
 		background: rgba(138, 143, 160, 0.05);
 	}
 
-	.checkbox-col {
-		width: 32px;
+	/* --- Queue table column widths ---
+	   `DataTable fixed`: the columns are sized from these header widths, never
+	   from the longest value in some row. The predictable columns are sized to
+	   their widest content in the six locales (fr "AVERTISSEMENT", a
+	   seven-figure amount, "Résoudre" + "Facture"). Invoice and Vendor take a
+	   share of the width, so they gain room on a wide window; Type carries no
+	   width and takes the rest — it is the column with the most to say.
+
+	   Eleven columns is one more than any other list here, so this table runs
+	   10px of horizontal cell padding instead of the global 14px: that 88px is
+	   what lets the whole row, actions included, sit inside the content area
+	   at a 1666px window with the sidebar open (a 1390px region). Below the
+	   min-width the table scrolls inside its focusable region (WCAG 1.4.10)
+	   rather than crushing Type and Vendor. Widths are under `.exc-table` and
+	   `:global` because `SortableHeader` renders its `<th>` from another
+	   component (the `/vendors` arrangement). */
+	.exc-table :global(table) {
+		min-width: 1380px;
+	}
+	.exc-table :global(th),
+	.exc-table :global(td) {
+		padding-left: 10px;
+		padding-right: 10px;
+	}
+	/* A header that outgrows its column (fr "ANCIENNETÉ" with the sort arrow
+	   and its ×) wraps inside it instead of running into the next one. */
+	.exc-table :global(th) {
+		white-space: normal;
+	}
+	.exc-table :global(th.checkbox-col) { width: 40px; }
+	.exc-table :global(th.col-sev) { width: 116px; }
+	.exc-table :global(th.col-invoice) { width: 10%; }
+	.exc-table :global(th.col-vendor) { width: 11%; }
+	.exc-table :global(th.col-amount) { width: 132px; }
+	.exc-table :global(th.col-assignee) { width: 116px; }
+	.exc-table :global(th.col-age) { width: 104px; }
+	.exc-table :global(th.col-due) { width: 100px; }
+	.exc-table :global(th.col-status) { width: 120px; }
+	.exc-table :global(th.actions-col) { width: 184px; }
+
+	/* A status longer than its column (ja "エスカレーション済み") wraps inside
+	   the pill rather than running under the row actions. */
+	.status-cell :global(.badge) {
+		white-space: normal;
+	}
+
+	/* The checkbox column hugs its box; the 24px target floor is untouched. */
+	.exc-table :global(.checkbox-col) {
 		padding-right: 0;
+	}
+
+	/* One line, clipped to the column: an ERP invoice number, a long vendor
+	   name or an email assignee ends in "…" (full value in `title`) instead of
+	   widening the table or running under the next column. */
+	.cell-clip {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.muted-cell {
@@ -1378,17 +1428,21 @@
 		font-size: 0.75rem;
 		font-weight: 600;
 		white-space: nowrap;
+		/* A fixed column never grows to fit, so a long translated type name
+		   clips inside the pill rather than spilling into Sev. */
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		vertical-align: top;
 	}
 
 	/* The type cell carries the badge plus the finding itself, so it is the
-	   one column allowed to wrap. The width cap keeps the rest of the row on
-	   its existing grid — a free-running description would push Amount and
-	   Status off the scan line the queue is read down. */
-	.type-cell {
-		max-width: 320px;
-	}
-
+	   one column allowed to wrap — within the width the fixed layout gives
+	   it. (It used to carry `max-width: 320px`, which auto table layout
+	   ignores on a cell.) `overflow-wrap` breaks an unbroken run in a
+	   finding — a URL, a PO reference — inside the column. */
 	.type-detail {
+		overflow-wrap: anywhere;
 		display: -webkit-box;
 		-webkit-box-orient: vertical;
 		-webkit-line-clamp: 2;
@@ -1404,10 +1458,6 @@
 		font-size: 0.72rem;
 		font-weight: 600;
 		text-transform: uppercase;
-	}
-
-	.actions-col {
-		width: 180px;
 	}
 
 	/* --- Modal extras --- */
