@@ -289,6 +289,11 @@
 		blocked?: boolean;
 		blocked_reason?: string | null;
 		required_method?: string | null;
+		// The coded refusal (`external_payment_*`) `POST
+		// /api/payments/record-outside` would give this row, or null when the
+		// "Record as paid" action may be offered. Independent of `blocked`:
+		// a run refuses an unverified vendor, recording does not.
+		record_outside_refusal?: string | null;
 	}
 
 	// Per-currency slice of the WHOLE queue (or of the whole selectable set, on
@@ -702,12 +707,18 @@
 
 	// --- Record a payment made outside FeohLedger ---------------------------
 	// Per queue row, for `payment.record_external`. Offered in BOTH modes — a
-	// processor tenant can still record a cheque. Hidden on a row the run
-	// builder would refuse on every rail (`isBlocked`) and on a rail-pinned row
-	// (a live virtual card claims it): the server refuses both
-	// (`external_payment_blocking_exception` / `_card_live`), and a control that
-	// can only 409 is worse than none. Every other refusal is the server's,
-	// localized by `api/codedRefusals.ts`.
+	// processor tenant can still record a cheque. Gated on the row's
+	// `record_outside_refusal`, which the backend computes from the very gates
+	// `POST /api/payments/record-outside` applies
+	// (`external_payment.record_outside_refusals`), and deliberately NOT on
+	// `blocked`: `blocked` is the RUN builder's verdict, and a run also refuses
+	// an unverified / inactive vendor, which recording does not (the money has
+	// already left the customer's bank). Reading `blocked` here left every
+	// invoice of a new vendor with no action at all (#566). A row the server
+	// would refuse whoever records it shows no control — one that can only 409
+	// is worse than none. Segregation of duties is not in that field (it
+	// depends on who records), so the server's 403 explains it, localized by
+	// `api/codedRefusals.ts` like every other refusal.
 	let recordTarget = $state<QueueItem | null>(null);
 	let recordMethod = $state<PaymentMethod>('ach');
 	let recordReference = $state('');
@@ -724,7 +735,7 @@
 	}
 
 	function canRecordRow(item: QueueItem): boolean {
-		return canRecordOutside() && !isBlocked(item) && !requiredMethod(item);
+		return canRecordOutside() && !item.record_outside_refusal;
 	}
 
 	function openRecordOutside(item: QueueItem) {

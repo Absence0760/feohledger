@@ -58,6 +58,7 @@ payable-status gate requires, already applied the CFO approval threshold.)
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -77,6 +78,7 @@ from app.services.payment_runs import (
     blocking_exception_types,
     card_claimed_invoice_ids,
     net_payable_amount,
+    net_payable_amounts,
     payable_amounts,
 )
 from app.services.workflow_engine import VALID_TRANSITIONS, transition_invoice
@@ -218,27 +220,90 @@ async def check_recordable(
     refusal = segregation_refusal(invoice, actor_id, org.settings)
     if refusal is not None:
         return refusal
-    blocking = await blocking_exception_types(db, [invoice.id])
-    if blocking:
-        return Refusal(
-            REFUSAL_BLOCKING_EXCEPTION,
-            f"This invoice has an unresolved {blocking[invoice.id]} exception. Resolve it "
-            "before recording the invoice as paid.",
-            params={"exception_type": blocking[invoice.id]},
-        )
-    if await card_claimed_invoice_ids(db, [(invoice.id, None)]):
-        return Refusal(
-            REFUSAL_CARD_LIVE,
-            "A live virtual card is issued against this invoice. Cancel the card before "
-            "recording a payment made another way.",
-        )
-    if invoice.id in await applied_credit_conflicts(db, [invoice]):
-        return Refusal(
-            REFUSAL_CREDIT_CONFLICT,
-            "An applied credit memo no longer matches this invoice's vendor or currency, "
-            "so the amount owed can't be stated. Correct the invoice first.",
-        )
-    return None
+    return (await _state_refusals(db, [invoice])).get(invoice.id)
+
+
+async def _state_refusals(db: AsyncSession, invoices: list[Invoice]) -> dict[uuid.UUID, Refusal]:
+    """The actor-independent invoice-level gates of :func:`check_recordable`, batched.
+
+    The ONE implementation of those gates: :func:`check_recordable` asks it about
+    one invoice, :func:`record_outside_refusals` (the payment queue) about a page.
+    """
+    if not invoices:
+        return {}
+    ids = [inv.id for inv in invoices]
+    blocking = await blocking_exception_types(db, ids)
+    # `None` method: a recorded payment takes no card leg, so it may never be
+    # booked against a card-claimed invoice — the fail-closed reading.
+    card_claimed = await card_claimed_invoice_ids(db, ((i, None) for i in ids))
+    credit_conflicts = await applied_credit_conflicts(db, invoices)
+    out: dict[uuid.UUID, Refusal] = {}
+    for inv in invoices:
+        if inv.id in blocking:
+            out[inv.id] = Refusal(
+                REFUSAL_BLOCKING_EXCEPTION,
+                f"This invoice has an unresolved {blocking[inv.id]} exception. Resolve it "
+                "before recording the invoice as paid.",
+                params={"exception_type": blocking[inv.id]},
+            )
+        elif inv.id in card_claimed:
+            out[inv.id] = Refusal(
+                REFUSAL_CARD_LIVE,
+                "A live virtual card is issued against this invoice. Cancel the card before "
+                "recording a payment made another way.",
+            )
+        elif inv.id in credit_conflicts:
+            out[inv.id] = Refusal(
+                REFUSAL_CREDIT_CONFLICT,
+                "An applied credit memo no longer matches this invoice's vendor or "
+                "currency, so the amount owed can't be stated. Correct the invoice first.",
+            )
+    return out
+
+
+_NOTHING_TO_PAY = Refusal(
+    REFUSAL_NOTHING_TO_PAY,
+    "This invoice is fully covered by applied credit memos — there is nothing to record as paid.",
+)
+
+
+async def record_outside_refusals(
+    db: AsyncSession, invoices: Iterable[Invoice]
+) -> dict[uuid.UUID, Refusal]:
+    """Would recording each of these PAYMENT-QUEUE rows as paid outside be refused?
+
+    The payment queue's answer to *"may this row offer 'Record as paid outside
+    FeohLedger'"*, from the same gates :func:`record_invoice_paid_outside`
+    applies — never from the run builder's verdict, which is a different
+    question: a run also refuses a vendor that is not ``active``, and recording
+    deliberately does not (see the module docstring). Reading the run's
+    ``blocked`` flag for this left an approved invoice from a new, unverified
+    vendor with no way to be recorded at all (#566).
+
+    Covers every gate that is a property of the invoice alone:
+
+    * the payment-blocking exception, live card and applied-credit gates
+      (:func:`_state_refusals`, shared with :func:`check_recordable`);
+    * nothing left to pay — the same net :func:`_amount_owed` refuses on.
+
+    Deliberately NOT covered, because they are not row properties:
+
+    * the payable-status and live-payment gates — the queue's own base filter
+      already IS both (a queue row is payable and holds no live payment), so
+      for a queue row they cannot fire;
+    * segregation of duties, which depends on WHO records. The server refuses
+      it with a coded 403 that tells the creator a different user must record
+      the payment (or the single-operator opt-out); hiding the action instead
+      would leave that user with no explanation at all;
+    * the amount / paid-on checks, which are about the submitted figures.
+    """
+    rows = list(invoices)
+    out = await _state_refusals(db, rows)
+    nets = await net_payable_amounts(db, [inv for inv in rows if inv.id not in out])
+    for inv_id, net in nets.items():
+        if net <= 0:
+            out[inv_id] = _NOTHING_TO_PAY
+    return out
 
 
 async def _amount_owed(
@@ -246,13 +311,7 @@ async def _amount_owed(
 ) -> tuple[Decimal, uuid.UUID | None, Decimal | None]:
     net = await net_payable_amount(db, invoice)
     if net <= 0:
-        raise ExternalPaymentRefused(
-            Refusal(
-                REFUSAL_NOTHING_TO_PAY,
-                "This invoice is fully covered by applied credit memos — there is nothing "
-                "to record as paid.",
-            )
-        )
+        raise ExternalPaymentRefused(_NOTHING_TO_PAY)
     payable = (
         await payable_amounts(db, [invoice], pay_date=paid_on, net_amounts={invoice.id: net})
     )[invoice.id]

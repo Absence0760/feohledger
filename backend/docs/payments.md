@@ -1976,6 +1976,23 @@ threshold. Both exist to stop FeohLedger *sending* money; here it already left
 the customer's bank, and refusing to record it would only leave the ledger
 wrong. (Approval already applied the CFO threshold.)
 
+**The queue says which rows may be recorded, separately from `blocked`.** Each
+`GET /api/payments/queue` row carries `record_outside_refusal`: the code this
+endpoint would refuse the row with whoever records it, or `null`. It comes from
+`external_payment.record_outside_refusals`, which runs the same gate functions
+as `check_recordable` (`_state_refusals` — blocking exception, live card,
+applied-credit conflict — shared by both) plus the nothing-to-pay net. It is
+**not** the run's `blocked` flag: a run refuses a vendor that is not `active`,
+recording does not, so an approved invoice from a brand-new, auto-created
+(`unverified`) vendor is `blocked` for a run yet recordable — and the page used
+to hide the action on every `blocked` row, leaving that invoice with no action
+at all (#566). Two gates are deliberately left out of the field: the
+payable-status and live-payment gates, which the queue's own base filter
+already is, and segregation of duties, which depends on who records — the
+endpoint's coded 403 is what tells the creator a colleague must record it.
+`tests/test_payment_queue_blocked.py` POSTs every kind of row and compares the
+endpoint's answer to the field.
+
 Audit: `payment.recorded_outside` (source `user` / `erp`, amount, currency,
 method, reference, paid-on date — never bank data) plus the invoice's
 `invoice.payment_scheduled` and `invoice.paid_outside` /
@@ -2478,6 +2495,7 @@ and clear.
 | `blocked` | a run refuses this invoice on **every** rail |
 | `blocked_reason` | the stable, PII-free reason code — set for a `required_method` row too, so the UI can say WHY the rail is pinned |
 | `required_method` | the one rail this invoice is still payable on, or `null` |
+| `record_outside_refusal` | a different question: the code `POST /api/payments/record-outside` would refuse this row with, or `null` — see § Recording a payment made outside FeohLedger |
 | `selectable_total` | rows "select all N matching" resolves (`/queue/ids`) — excludes blocked AND rail-pinned rows |
 | `blocked_total` | rows whose checkbox is disabled, i.e. exactly the `blocked` ones |
 
