@@ -240,7 +240,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.40.3@sha256:adca95a12c2b386a8f9a995e7fa0600e187e3323b5e5522f5a6c3b1ec73eff99
+    image: ollama/ollama:0.40.5@sha256:5d3a2f25f9825628daba94dc0b1d421c7d57d6c03ae5faa9ba050e058bab8241
     profiles: ["ai"]
     ports:
       - "11435:11434"
@@ -315,7 +315,7 @@ services:
   # instead of the real internet — view rendered HTML at http://localhost:8025.
   # Opt-in under the `mail` profile (`pnpm mail:up`). Captures only; never relays.
   mailpit:
-    image: axllent/mailpit:v1.31.5@sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea
+    image: axllent/mailpit:v1.31.6@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
     profiles: ["mail"]
     ports:
       - "1025:1025"   # SMTP — FEOH_SMTP_PORT
