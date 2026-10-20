@@ -12430,3 +12430,19 @@ different tenant without saying so hides which workspace they are in, and a
 token for one tenant handed to another tenant's origin is the confusion the
 refusal exists to stop. Detail: `docs/authentication.md` § Signing in on another
 workspace's page is refused.
+
+**Recovery, for a mismatched token that already exists:** `get_tenant`'s refusal
+is coded `token_tenant_mismatch` (still `403`), and the SPA ends the session on
+it as it does on a `401` — token cleared, `/login?reason=other_workspace` with a
+localized notice — instead of leaving the shell waiting on calls that will never
+succeed.
+
+**Why the suites missed it:** backend tests always send the matching
+`X-Tenant-Slug`, and the e2e isolation specs signed in on each tenant's own
+origin and hopped, where per-origin storage just leaves the other origin signed
+out. They asserted no data leaked, which held, not that the user lands somewhere
+usable. `tests-e2e/auth/tenant-isolation.spec.ts` now signs in on the wrong
+page. Two specs had encoded the defect: `login-security.spec.ts` pinned the old
+"header is advisory" login, and `discounts/bulk-negotiate.spec.ts` signed acme's
+CFO and clerk in on the worker tenant's page, so its role-refusal checks passed
+on the tenant-mismatch 403.

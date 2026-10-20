@@ -383,8 +383,8 @@ curl -sS https://acme.acmecorp.com/ | grep -i '<title'
    domain is *additive*, not a move, and it is your fallback when the
    customer's DNS breaks.
 9. **Cross-tenant negative check.** Log in to a *different* tenant and
-   point a request at the vanity host; expect `403 Token does not match
-   the requested tenant`. The `Host` only picks a candidate tenant; the
+   point a request at the vanity host; expect a `403` whose
+   `detail.code` is `token_tenant_mismatch`. The `Host` only picks a candidate tenant; the
    JWT `org` claim is the authority (`docs/white-label.md` § Trust
    model). Worth running once, on your first vanity domain, so you have
    seen the guard fire.
