@@ -21,7 +21,14 @@ import pytest
 from app.config import settings
 from app.services import erp_oauth
 from app.services.erp_adapters import bill_allocation
-from app.services.erp_adapters.base import ErpInvoiceStatus, InvoicePayload, LineItemPayload
+from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
+    ErpInvoiceStatus,
+    ErpListingIncomplete,
+    InvoicePayload,
+    LineItemPayload,
+    ListingGap,
+)
 from app.services.erp_adapters.dispatcher import get_erp_adapter
 from app.services.erp_adapters.xero import XeroAdapter
 from app.utils.json_money import dumps_exact_json
@@ -151,6 +158,8 @@ def test_refusals_send_nothing(token, overrides, reason):
         result = _run(_adapter().post_invoice(_payload(**overrides)))
     assert result.success is False
     assert result.message == f"Xero post refused: {reason}"
+    # Refused before any request: the attempt left nothing in the ERP.
+    assert result.not_posted is True
 
 
 # ---------------------------------------------------------------------------
@@ -711,20 +720,61 @@ def test_list_vendors_filters_suppliers_and_maps_fields(token):
         client = _client(cm)
         client.get = AsyncMock(return_value=_resp(200, {"Contacts": [contact]}))
         vendors = _run(_adapter().list_vendors())
-    assert client.get.await_args.kwargs["params"]["where"] == "IsSupplier==true"
+    params = client.get.await_args.kwargs["params"]
+    assert params["where"] == "IsSupplier==true"
+    # Archived contacts are asked for: Xero omits them otherwise, and a vendor
+    # linked to one would look like a dead link (§284).
+    assert params["includeArchived"] == "true"
     (v,) = vendors
     assert v.erp_vendor_id == VENDOR and v.name == "Acme Supplies" and v.code == "ACM01"
     assert v.phone == "27 215550100"
     assert v.payment_terms == "DAYSAFTERBILLDATE 30"
+    assert v.active is True
 
 
-def test_list_vendors_degrades_to_empty_on_rate_limit(token):
+def test_an_archived_supplier_is_emitted_inactive(token):
+    contact = {"ContactID": VENDOR, "Name": "Gone Ltd", "ContactStatus": "ARCHIVED"}
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(200, {"Contacts": [contact]}))
+        (v,) = _run(_adapter().list_vendors())
+    assert (v.erp_vendor_id, v.active) == (VENDOR, False)
+
+
+def test_list_vendors_raises_on_rate_limit_even_after_a_good_page(token):
+    """A 429 on page 2 used to end the walk with page 1, which the vendor sync
+    took for every vendor and unlinked the rest (§284)."""
+    full_page = {"Contacts": [{"ContactID": f"c{i}", "Name": f"V{i}"} for i in range(100)]}
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(side_effect=[_resp(200, full_page), _resp(429, {})])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_vendors())
+    assert exc.value.gap is ListingGap.fetch_failed
+
     with patch("httpx.AsyncClient") as cm:
         _client(cm).get = AsyncMock(return_value=_resp(429, {}))
-        assert _run(_adapter().list_vendors()) == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(_adapter().list_vendors())
 
 
-def test_list_gl_accounts_maps_class_and_skips_archived(token):
+def test_list_vendors_past_the_sync_bound_raises_truncated(token):
+    full_page = {"Contacts": [{"ContactID": f"c{i}", "Name": f"V{i}"} for i in range(100)]}
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(return_value=_resp(200, full_page))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_vendors())
+    assert exc.value.gap is ListingGap.truncated
+    assert client.get.await_count == SYNC_LISTING_MAX_ROWS // 100
+
+
+def test_list_gl_accounts_raises_on_a_failed_read(token):
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(503, {}))
+        with pytest.raises(ErpListingIncomplete):
+            _run(_adapter().list_gl_accounts())
+
+
+def test_list_gl_accounts_maps_class_and_emits_archived_inactive(token):
     accounts = {
         "Accounts": [
             {"AccountID": "a1", "Code": "6100", "Name": "Supplies", "Class": "EXPENSE"},
@@ -741,9 +791,11 @@ def test_list_gl_accounts_maps_class_and_skips_archived(token):
     with patch("httpx.AsyncClient") as cm:
         _client(cm).get = AsyncMock(return_value=_resp(200, accounts))
         rows = _run(_adapter().list_gl_accounts())
-    assert [(r.code, r.account_type, r.erp_account_id) for r in rows] == [
-        ("6100", "expense", "a1"),
-        ("800", "liability", "a2"),
+    # An archived account still exists: emitted inactive, not dropped (§284).
+    assert [(r.code, r.account_type, r.erp_account_id, r.active) for r in rows] == [
+        ("6100", "expense", "a1", True),
+        ("800", "liability", "a2", True),
+        ("999", "expense", "a3", False),
     ]
 
 

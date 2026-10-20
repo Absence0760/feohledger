@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -35,12 +35,13 @@ from app.api.permissions import (
     PERM_VENDOR_BLOCK,
     PERM_VENDOR_MANAGE,
 )
+from app.api.refusals import erp_pull_failure
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.contract import Contract
 from app.models.credit_memo import CreditMemo
 from app.models.discount import DiscountOffer
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_embedding import InvoiceEmbedding
 from app.models.organization import Organization
 from app.models.procurement import PurchaseOrder
@@ -85,6 +86,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_vendors_csv
 from app.services.email_adapters import EmailMessage, get_email_adapter
+from app.services.erp_link_realm import connection_realm
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
     provider_config,
@@ -98,6 +100,7 @@ from app.services.vendor_card_revocation import revoke_vendor_cards
 from app.services.vendor_screening import screen_best_effort, screen_vendor_record
 from app.services.vendor_sync import sync_vendors_from_erp
 from app.services.vendor_tax_id import rekey_tax_id
+from app.services.workflow_engine import VALID_TRANSITIONS
 from app.tenant import (
     apply_entity_scope,
     ensure_in_entity_scope,
@@ -275,21 +278,57 @@ async def _screen_best_effort(
     )
 
 
-# Invoices already cleared for payment (mirrors payments.PAYABLE_INVOICE_STATUSES).
-# Defined locally to avoid importing the payments router into vendors.
-_BANK_CHANGE_PAYABLE_STATUSES = (
-    "approved",
-    "posted_in_erp",
-    "payment_scheduled",
+# The statuses an invoice holds before its approval decision. An invoice in one
+# of these reaches money only through a fresh approval, so the bank-change flag
+# leaves it alone (`invoice_warnings._PRE_APPROVAL_STATUSES` names the same four).
+_PRE_APPROVAL_STATUSES = frozenset(
+    {
+        InvoiceStatus.new,
+        InvoiceStatus.pending,
+        InvoiceStatus.ready_for_review,
+        InvoiceStatus.rejected,
+    }
 )
+
+# Where money has already left: nothing for the flag to stop.
+_MONEY_MOVED_STATUSES = frozenset({InvoiceStatus.paid, InvoiceStatus.done})
+
+
+def _bank_change_flag_statuses() -> frozenset[InvoiceStatus]:
+    """Every status on a forward path from `approved` to `paid`, DERIVED from
+    `VALID_TRANSITIONS` (decisions §286).
+
+    These are the invoices that can still reach a payment run OR an ERP push
+    without a second approval. The hand-listed tuple this replaced mirrored
+    `payments.PAYABLE_INVOICE_STATUSES`, which is the payment-run question, and
+    so missed `failed` and `sending_to_erp`: an approved invoice whose push hit
+    503s sat at `failed` with no flag, and `/retry-erp` then posted the bill,
+    payable from the ERP to the new bank details. It missed `sent_to_erp` too,
+    which walks on to `posted_in_erp` and into our own payment queue unflagged.
+    """
+    reached: set[InvoiceStatus] = set()
+    frontier = [InvoiceStatus.approved]
+    while frontier:
+        current = frontier.pop()
+        if current in reached or current in _PRE_APPROVAL_STATUSES:
+            continue
+        reached.add(current)
+        if current not in _MONEY_MOVED_STATUSES:
+            frontier.extend(VALID_TRANSITIONS.get(current, set()))
+    return frozenset(reached - _MONEY_MOVED_STATUSES)
+
+
+_BANK_CHANGE_FLAG_STATUSES = _bank_change_flag_statuses()
 
 
 async def _flag_payable_invoices_for_bank_change(
     db: AsyncSession, *, vendor: Vendor, actor_id: uuid.UUID
 ) -> None:
-    """Raise a de-duped ``fraud_flag`` exception on every in-queue invoice for a
-    vendor whose bank details just changed, forcing a human second look before
-    the next payment run pays into the new account. Description is PII-free.
+    """Raise a de-duped ``fraud_flag`` exception on every approved, unpaid
+    invoice for a vendor whose bank details just changed
+    (``_BANK_CHANGE_FLAG_STATUSES``), forcing a human second look before the
+    next payment run pays into the new account or the ERP push posts a bill
+    that can be paid there (decisions §286). Description is PII-free.
 
     ``actor_id`` is the approver, stamped as the exception's
     ``raised_by_user_id``. This is the ONE raise site in the codebase where the
@@ -302,15 +341,20 @@ async def _flag_payable_invoices_for_bank_change(
     implicated-actor set cannot reach this case: the approver is not the
     uploader of the invoices the change re-points.
     """
-    from app.models.exception import Exception as APException
-    from app.services.exception_service import create_exception
-
     invoices = (
         (
             await db.execute(
                 select(Invoice).where(
                     Invoice.vendor_id == vendor.id,
-                    Invoice.status.in_(_BANK_CHANGE_PAYABLE_STATUSES),
+                    Invoice.status.in_(_BANK_CHANGE_FLAG_STATUSES),
+                    # `failed` is also where a failed EXTRACTION lands, before
+                    # any approval; only an approved invoice's failed push
+                    # counts. Same reading as `invoice_entry.was_ever_approved`.
+                    or_(
+                        Invoice.status != InvoiceStatus.failed,
+                        Invoice.approval_date.is_not(None),
+                        func.coalesce(Invoice.approved_by, "") != "",
+                    ),
                 )
             )
         )
@@ -318,28 +362,69 @@ async def _flag_payable_invoices_for_bank_change(
         .all()
     )
     for inv in invoices:
-        # De-dupe: don't pile a second open fraud_flag on the same invoice.
-        existing = (
-            await db.execute(
-                select(func.count()).where(
-                    APException.invoice_id == inv.id,
-                    APException.exception_type == "fraud_flag",
-                    APException.status.in_(["open", "escalated"]),
-                )
+        await flag_invoice_for_bank_change(db, invoice=inv, actor_id=actor_id)
+
+
+async def flag_invoice_for_bank_change(
+    db: AsyncSession, *, invoice: Invoice, actor_id: uuid.UUID | None
+) -> None:
+    """Open the bank-change ``fraud_flag`` on ONE invoice, unless an open or
+    escalated one is already there. ``actor_id`` is the bank change's approver
+    (``raised_by_user_id`` — see `_flag_payable_invoices_for_bank_change`)."""
+    from app.models.exception import Exception as APException
+    from app.services.exception_service import create_exception
+
+    existing = (
+        await db.execute(
+            select(func.count()).where(
+                APException.invoice_id == invoice.id,
+                APException.exception_type == "fraud_flag",
+                APException.status.in_(["open", "escalated"]),
             )
-        ).scalar() or 0
-        if existing:
-            continue
-        await create_exception(
-            db,
-            exception_type="fraud_flag",
-            severity="error",
-            description="Vendor bank details changed; verify before payment.",
-            status="open",
-            organization_id=inv.organization_id,
-            invoice=inv,
-            raised_by_user_id=actor_id,
         )
+    ).scalar() or 0
+    if existing:
+        return
+    await create_exception(
+        db,
+        exception_type="fraud_flag",
+        severity="error",
+        description="Vendor bank details changed; verify before payment.",
+        status="open",
+        organization_id=invoice.organization_id,
+        invoice=invoice,
+        raised_by_user_id=actor_id,
+    )
+
+
+async def reflag_voided_invoice_for_bank_change(
+    db: AsyncSession, *, invoice: Invoice, paid_since: datetime
+) -> None:
+    """A voided payment sends its invoice back to ``approved``. If the
+    vendor's bank details were changed (approved) after that payment was
+    made, the original payment went to the OLD account and the re-payment
+    would go to the new one — with no flag, because the change skipped the
+    invoice while it was ``paid`` / out of reach (`_MONEY_MOVED_STATUSES`).
+    Raise the same flag the change would have raised, stamped with that
+    change's approver (decisions §286)."""
+    if invoice.vendor_id is None:
+        return
+    change = (
+        await db.execute(
+            select(VendorChangeRequest)
+            .where(
+                VendorChangeRequest.vendor_id == invoice.vendor_id,
+                VendorChangeRequest.change_type == "bank_details",
+                VendorChangeRequest.status == "approved",
+                VendorChangeRequest.reviewed_at > paid_since,
+            )
+            .order_by(VendorChangeRequest.reviewed_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if change is None:
+        return
+    await flag_invoice_for_bank_change(db, invoice=invoice, actor_id=change.reviewed_by_user_id)
 
 
 # `sort=` allowlist for `GET /vendors` — see `api/sorting.py`. `.id` is
@@ -1678,10 +1763,8 @@ async def sync_vendors_from_erp_endpoint(
         erp_vendors = await adapter.list_vendors()
     except Exception as exc:
         logger.exception("ERP list_vendors failed for org %s", org_id)
-        raise HTTPException(
-            status_code=502,
-            detail=f"ERP request failed: {type(exc).__name__}",
-        ) from exc
+
+        raise erp_pull_failure(exc) from exc
 
     vendor_dicts = [dataclasses.asdict(v) for v in erp_vendors]
 
@@ -1692,18 +1775,24 @@ async def sync_vendors_from_erp_endpoint(
         entity_id=entity_id,
         actor_id=user.id,
         org_settings=org.settings,
+        # Which ERP company these ids belong to (§284): a vendor linked under
+        # another one is re-judged, never matched by a colliding id.
+        realm=connection_realm(erp_config),
     )
     await db.commit()
 
-    return {
-        "success": True,
-        "message": (
-            f"Synced {result['created']} new, "
-            f"{result['updated']} updated, "
-            f"{result['unchanged']} unchanged"
-        ),
-        **result,
-    }
+    message = (
+        f"Synced {result['created']} new, "
+        f"{result['updated']} updated, "
+        f"{result['unchanged']} unchanged"
+    )
+    if result["conflicts"]:
+        message += (
+            f"; {len(result['conflicts'])} not linked (the name matches more than one vendor)"
+        )
+    if result["unlinked"]:
+        message += f"; {len(result['unlinked'])} unlinked (linked under another ERP company)"
+    return {"success": True, "message": message, **result}
 
 
 @router.post("/import-csv", status_code=status.HTTP_200_OK)
@@ -2259,10 +2348,11 @@ async def approve_change_request(
 
     # BEC gate: a bank-detail change silently re-points where money goes. After
     # applying it, (a) re-screen the vendor against sanctions/KYC with the new
-    # coordinates, and (b) raise a fraud_flag exception on every invoice already
-    # in the payment queue for this vendor — so the next payment run gets a human
-    # second look before money leaves. Without this the queue shows nothing and a
-    # phished/insider approval lands the redirect with no operational signal.
+    # coordinates, and (b) raise a fraud_flag exception on every approved,
+    # unpaid invoice for this vendor — so the next payment run, and the next ERP
+    # push, get a human second look before money leaves. Without this the queue
+    # shows nothing and a phished/insider approval lands the redirect with no
+    # operational signal.
     if req.change_type == "bank_details":
         await _screen_best_effort(
             db,

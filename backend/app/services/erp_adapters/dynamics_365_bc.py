@@ -16,24 +16,29 @@ from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoLinePayload,
     PoPayload,
     VendorPayload,
     erp_failure_message,
+    erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.payment_adapters.base import exponent_for
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 
-#: List syncs page at 100 rows (``Prefer: odata.maxpagesize``) and stop after
-#: 10 pages — the 1000-row bound every other adapter's list sync keeps. BC's
-#: own server page is 20,000 rows, so without the preference one page could
-#: already be far past the bound.
+#: List syncs page at 100 rows (``Prefer: odata.maxpagesize``). The PO list
+#: stops after 10 pages; the chart and vendor listings read up to
+#: ``SYNC_LISTING_MAX_ROWS`` and raise past it. BC's own server page is 20,000
+#: rows, so without the preference one page could already be far past a bound.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
@@ -203,10 +208,10 @@ class BusinessCentralAdapter(ErpAdapter):
         # vendor's NUMBER (V00010) — the name we used to send there could only
         # fail, or match another vendor whose number happens to equal it.
         if not payload.vendor_erp_id:
-            return erp_refusal(_PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(_PROVIDER, VENDOR_NOT_LINKED)
         lines = _bc_invoice_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal(_PROVIDER, lines)
+            return erp_preflight_refusal(_PROVIDER, lines)
         if not settings.erp_d365_api_base:
             try:
                 self._admin_base_url()
@@ -223,9 +228,7 @@ class BusinessCentralAdapter(ErpAdapter):
             token, payload.correlation_id
         )
         if lookup_status != 200:
-            return ErpPostResult(
-                success=False, message=erp_failure_message(_PROVIDER, lookup_status)
-            )
+            return erp_http_failure(_PROVIDER, lookup_status)
         if existing is not None:
             status = str(existing.get("status") or "").lower()
             if status not in ("open", "paid", "draft"):
@@ -266,9 +269,9 @@ class BusinessCentralAdapter(ErpAdapter):
             )
 
         if resp.status_code not in (200, 201):
-            return ErpPostResult(
-                success=False,
-                message=erp_failure_message(_PROVIDER, resp.status_code),
+            return erp_http_failure(
+                _PROVIDER,
+                resp.status_code,
                 raw_response=resp.json()
                 if resp.headers.get("content-type", "").startswith("application/json")
                 else None,
@@ -321,10 +324,7 @@ class BusinessCentralAdapter(ErpAdapter):
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                return ErpPostResult(
-                    success=False,
-                    message=erp_failure_message(_PROVIDER, resp.status_code),
-                )
+                return erp_http_failure(_PROVIDER, resp.status_code)
             try:
                 record = loads_exact_json(resp.content)
             except ValueError:
@@ -351,6 +351,8 @@ class BusinessCentralAdapter(ErpAdapter):
                     message=f"{_PROVIDER} post refused: {POSTED_TOTAL_MISMATCH} "
                     f"(the draft was not deleted in {_PROVIDER})",
                     retryable=False,
+                    refusal_code=POSTED_TOTAL_MISMATCH,
+                    refusal_provider=_PROVIDER,
                 )
 
             post_resp = await client.post(
@@ -358,11 +360,7 @@ class BusinessCentralAdapter(ErpAdapter):
                 headers=headers,
             )
         if post_resp.status_code not in (200, 204):
-            return ErpPostResult(
-                success=False,
-                erp_document_id=doc_id,
-                message=erp_failure_message(_PROVIDER, post_resp.status_code),
-            )
+            return erp_http_failure(_PROVIDER, post_resp.status_code, erp_document_id=doc_id)
         # Posting a draft does not recompute its total, so the one checked
         # above is the one BC booked.
         return _bc_posted(doc_id, record, payload)
@@ -431,15 +429,20 @@ class BusinessCentralAdapter(ErpAdapter):
             resp = await client.delete(url, headers={**headers, "If-Match": etag})
         return resp.status_code in (200, 204)
 
-    async def _list_collection(self, path: str) -> list[dict]:
+    async def _list_collection(self, path: str, *, complete: str | None = None) -> list[dict]:
         """GET an API v2.0 collection, following ``@odata.nextLink``.
 
-        Best-effort like every adapter's list sync: a failed token exchange, a
-        non-200 or a network error ends the pull with what it has read (an
-        empty list when nothing was), so the sync endpoint reports a count
-        instead of 500ing. Bounded at ``_MAX_PAGES`` x ``_PAGE_SIZE`` rows.
-        Bodies are parsed with ``loads_exact_json`` so money is never a float.
+        Best-effort for the PO list: a failed token exchange, a non-200 or a
+        network error ends the pull with what it has read (an empty list when
+        nothing was), bounded at ``_MAX_PAGES`` x ``_PAGE_SIZE`` rows.
+        ``complete`` (the collection's name) asks for every row instead — the
+        chart and vendor listings, whose sync reads absence as evidence: any of
+        those failures, or more than ``SYNC_LISTING_MAX_ROWS`` rows, raises
+        :class:`ErpListingIncomplete`. Bodies are parsed with
+        ``loads_exact_json`` so money is never a float.
         """
+        if complete is not None:
+            return await self._list_complete(path, complete)
         try:
             token = await self._get_token()
         except Exception:
@@ -473,20 +476,56 @@ class BusinessCentralAdapter(ErpAdapter):
 
         return rows[:cap]
 
+    async def _list_complete(self, path: str, collection: str) -> list[dict]:
+        token = await self._get_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Prefer": f"odata.maxpagesize={_PAGE_SIZE}",
+        }
+        rows: list[dict] = []
+        url = await self._api_url(path)
+        async with httpx.AsyncClient(timeout=30) as client:
+            for _ in range(sync_listing_pages(_PAGE_SIZE)):
+                try:
+                    resp = await client.get(url, headers=headers)
+                except httpx.HTTPError:
+                    raise ErpListingIncomplete(
+                        _PROVIDER, collection, ListingGap.fetch_failed
+                    ) from None
+                if resp.status_code != 200:
+                    raise ErpListingIncomplete(_PROVIDER, collection, ListingGap.fetch_failed)
+                try:
+                    body = loads_exact_json(resp.content)
+                except ValueError:
+                    raise ErpListingIncomplete(
+                        _PROVIDER, collection, ListingGap.fetch_failed
+                    ) from None
+                rows.extend(r for r in body.get("value") or [] if isinstance(r, dict))
+                next_link = body.get("@odata.nextLink")
+                if not next_link:
+                    return rows
+                url = next_link
+        raise ErpListingIncomplete(_PROVIDER, collection, ListingGap.truncated)
+
     async def list_vendors(self) -> list[VendorPayload]:
-        """Pull vendors via BC's `vendors` entity (see `_list_collection`)."""
-        return [_d365_vendor_to_payload(raw) for raw in await self._list_collection("vendors")]
+        """Every vendor via BC's ``vendors`` entity, or :class:`ErpListingIncomplete`."""
+        out: list[VendorPayload] = []
+        for raw in await self._list_collection("vendors", complete="vendors"):
+            vendor = _d365_vendor_to_payload(raw)
+            if vendor is not None:
+                out.append(vendor)
+        return out
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """Pull the chart of accounts via BC's `accounts` entity.
 
         This sync is the only writer of ``gl_accounts.erp_account_id`` for BC,
         and that id (the account's GUID) is what ``post_invoice`` posts each
-        line against as ``accountId``. Heading / total accounts and blocked
-        accounts are skipped: BC refuses a line on either.
+        line against as ``accountId``. Heading / total accounts are skipped (BC
+        refuses a line on one); blocked accounts are emitted ``active=False``.
         """
         out: list[GLAccountPayload] = []
-        for raw in await self._list_collection("accounts"):
+        for raw in await self._list_collection("accounts", complete="accounts"):
             acct = _bc_account_to_payload(raw)
             if acct is not None:
                 out.append(acct)
@@ -540,6 +579,8 @@ def _bc_posted(
             message=f"{_PROVIDER} post refused: {reason} "
             f"(the invoice is posted in {_PROVIDER} and was not deleted)",
             retryable=False,
+            refusal_code=reason,
+            refusal_provider=_PROVIDER,
         )
     message = (
         "Already posted to Business Central (idempotent — found by externalDocumentNumber)"
@@ -555,9 +596,9 @@ def _bc_posted(
     )
 
 
-def _d365_vendor_to_payload(raw: dict) -> VendorPayload:
+def _d365_vendor_to_payload(raw: dict) -> VendorPayload | None:
     """Map a Dynamics 365 Business Central OData vendor record to our
-    normalized VendorPayload.
+    normalized VendorPayload, or None for a record with no ``id``.
 
     `displayName` is the vendor's name field (what `test_connection` and
     the fake-erp fixture both key on); `number` is BC's vendor code. Real
@@ -565,12 +606,21 @@ def _d365_vendor_to_payload(raw: dict) -> VendorPayload:
     `taxRegistrationNumber`, `paymentTermsId`. Anything absent maps to
     None — `sync_vendors_from_erp` never nulls out an existing local value
     for a missing field.
+
+    ``erp_vendor_id`` is the vendor's GUID ``id`` and nothing else: it is what
+    ``post_invoice`` posts as ``vendorId``. The vendor No. is another kind of
+    key (a stored No. would be posted as a GUID and refused), and a name is no
+    key at all — two same-named vendors would each relink one row past the
+    sync's ambiguous-name guard. A record with no id is skipped, as NetSuite's
+    mapping does.
     """
-    vendor_id = raw.get("id") or raw.get("number")
-    name = raw.get("displayName") or raw.get("number") or (str(vendor_id) if vendor_id else "")
+    vendor_id = raw.get("id")
+    if not vendor_id:
+        return None
+    name = raw.get("displayName") or raw.get("number") or str(vendor_id)
 
     return VendorPayload(
-        erp_vendor_id=str(vendor_id) if vendor_id is not None else name,
+        erp_vendor_id=str(vendor_id),
         name=name,
         code=raw.get("number"),
         email=raw.get("email"),
@@ -637,24 +687,26 @@ def _bc_account_to_payload(raw: dict) -> GLAccountPayload | None:
     ``code`` is the account No. (``number``), the code an AP clerk picks;
     ``erp_account_id`` is its ``id`` GUID, what a bill line is posted on.
     Only ``Posting`` accounts are kept (a Heading / Total / Begin-End Total
-    cannot carry an entry) and blocked ones are skipped, as NetSuite's chart
-    sync skips inactive accounts. A No. longer than the 50-character code
-    column is skipped rather than truncated, so two accounts never merge.
+    cannot carry an entry).
+
+    Emitted, not dropped: a blocked account as ``active=False`` and a No.
+    longer than ``gl_accounts.code`` as it is — the sync marks the first
+    inactive in our chart and refuses the second ``code_too_long`` (never
+    truncated, so two accounts never merge), and still knows both ids exist.
     """
     account_id = raw.get("id")
     number = str(raw.get("number") or "")
-    if not account_id or not number or len(number) > 50:
-        return None
-    if raw.get("blocked") is True:
+    if not account_id or not number:
         return None
     account_type = raw.get("accountType")
     if account_type is not None and str(account_type) != "Posting":
         return None
     return GLAccountPayload(
         code=number,
-        name=str(raw.get("displayName") or number),
+        name=str(raw.get("displayName") or number)[:255],
         account_type=_BC_ACCOUNT_CATEGORIES.get(str(raw.get("category") or "").strip().lower()),
         erp_account_id=str(account_id),
+        active=raw.get("blocked") is not True,
     )
 
 

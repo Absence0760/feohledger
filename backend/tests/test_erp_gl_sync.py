@@ -12,6 +12,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # Trigger @register_adapter side effects on these modules so tests
 # can resolve adapters by type via the dispatcher.
 import app.services.erp_adapters.dynamics_365_bc  # noqa: F401, E402
@@ -133,14 +135,18 @@ def test_bc_list_gl_accounts_maps_accounts_into_payloads(monkeypatch):
         client.get = AsyncMock(return_value=_mock_response(200, body))
         out = _run(_bc_adapter(monkeypatch).list_gl_accounts())
 
-    assert [(a.code, a.name, a.account_type, a.erp_account_id) for a in out] == [
-        ("6100", "Office Supplies", "expense", "g-6100"),
-        ("2100", "Accounts Payable", "liability", "g-2100"),
-        ("1000", "Cash", "asset", "g-1000"),
-        ("3000", "Capital", "equity", "g-3000"),
-        ("4000", "Sales", "revenue", "g-4000"),
-        ("5000", "COGS", "expense", "g-5000"),
-        ("9000", "Misc", None, "g-9000"),
+    # A blocked account is EMITTED as inactive (§284): its id still exists,
+    # so a row linked to it is not mistaken for a link to a deleted account,
+    # and the sync retires the row rather than leaving it codable.
+    assert [(a.code, a.name, a.account_type, a.erp_account_id, a.active) for a in out] == [
+        ("6100", "Office Supplies", "expense", "g-6100", True),
+        ("2100", "Accounts Payable", "liability", "g-2100", True),
+        ("1000", "Cash", "asset", "g-1000", True),
+        ("3000", "Capital", "equity", "g-3000", True),
+        ("4000", "Sales", "revenue", "g-4000", True),
+        ("5000", "COGS", "expense", "g-5000", True),
+        ("9000", "Misc", None, "g-9000", True),
+        ("6900", "Old", None, "g-6900", False),
     ]
     url = client.get.await_args.args[0]
     assert url == f"{_BC_API}/sandbox/api/v2.0/companies(co)/accounts"
@@ -149,30 +155,59 @@ def test_bc_list_gl_accounts_maps_accounts_into_payloads(monkeypatch):
     assert headers["Prefer"] == "odata.maxpagesize=100"
 
 
-def test_bc_list_gl_accounts_follows_next_link_and_caps_at_1000_rows(monkeypatch):
-    """`@odata.nextLink` is followed, but never past 1000 rows (10 pages of
-    100), however many pages BC says remain."""
-
+def _bc_pages(count: int, *, last_has_next: bool) -> list[MagicMock]:
     def page(n: int) -> MagicMock:
         rows = [
-            {"id": f"g-{n}-{i}", "number": f"{n:02d}{i:03d}", "displayName": "A"}
+            {"id": f"g-{n}-{i}", "number": f"{n:03d}{i:03d}", "displayName": "A"}
             for i in range(100)
         ]
-        return _mock_response(200, {"value": rows, "@odata.nextLink": f"{_BC_API}/next/{n + 1}"})
+        more = n < count - 1 or last_has_next
+        body = {"value": rows, **({"@odata.nextLink": f"{_BC_API}/next/{n + 1}"} if more else {})}
+        return _mock_response(200, body)
 
+    return [page(n) for n in range(count)]
+
+
+def test_bc_list_gl_accounts_follows_next_link_to_the_end(monkeypatch):
+    """`@odata.nextLink` is followed until BC stops sending one — past the
+    PO list's 1000-row bound, which a chart listing does not keep."""
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
-        client.get = AsyncMock(side_effect=[page(n) for n in range(12)])
+        client.get = AsyncMock(side_effect=_bc_pages(12, last_has_next=False))
         out = _run(_bc_adapter(monkeypatch).list_gl_accounts())
 
-    assert len(out) == 1000
-    assert client.get.await_count == 10
+    assert len(out) == 1200
+    assert client.get.await_count == 12
     assert client.get.await_args_list[1].args[0] == f"{_BC_API}/next/1"
 
 
-def test_bc_list_gl_accounts_degrades_on_error_keeping_what_it_read(monkeypatch):
+def test_bc_list_gl_accounts_past_the_sync_bound_raises_never_truncates(monkeypatch):
+    """The first N rows of a longer chart are not the chart: the sync would
+    unlink every link the unread pages held (decisions §284)."""
+    from app.services.erp_adapters.base import (
+        SYNC_LISTING_MAX_ROWS,
+        ErpListingIncomplete,
+        ListingGap,
+    )
+
+    pages = SYNC_LISTING_MAX_ROWS // 100
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(side_effect=_bc_pages(pages, last_has_next=True))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
+    assert exc.value.gap is ListingGap.truncated
+    assert client.get.await_count == pages
+
+
+def test_bc_list_gl_accounts_raises_on_any_failed_page_never_returns_part(monkeypatch):
+    """A failure after the first page used to return the rows already read,
+    which the sync took for the whole chart. Every failure now raises."""
     import httpx
+
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
 
     first = _mock_response(
         200,
@@ -185,16 +220,20 @@ def test_bc_list_gl_accounts_degrades_on_error_keeping_what_it_read(monkeypatch)
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
         client.get = AsyncMock(side_effect=[first, _mock_response(500, {"error": "x"})])
-        assert [a.code for a in _run(_bc_adapter(monkeypatch).list_gl_accounts())] == ["6100"]
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
+        assert exc.value.gap is ListingGap.fetch_failed
 
         client.get = AsyncMock(side_effect=httpx.ConnectError("dns"))
-        assert _run(_bc_adapter(monkeypatch).list_gl_accounts()) == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
 
         bad_token = _mock_response(401, {"error": "invalid_client"})
         bad_token.raise_for_status = MagicMock(side_effect=RuntimeError("401"))
         client.post = AsyncMock(return_value=bad_token)
         client.get = AsyncMock()
-        assert _run(_bc_adapter(monkeypatch).list_gl_accounts()) == []
+        with pytest.raises(RuntimeError):
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
         client.get.assert_not_awaited()
 
 
@@ -244,7 +283,8 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
                 "accttype": "OthExpense",
                 "isinactive": "F",
             },
-            # Inactive — nothing should be newly coded to it.
+            # Inactive — emitted as such: the sync retires a row linked to
+            # it and creates none, but its id still exists.
             {
                 "id": "140",
                 "acctnumber": "6900",
@@ -252,11 +292,13 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
                 "accttype": "Expense",
                 "isinactive": "T",
             },
-            # A name too long to be a code is skipped, never truncated.
+            # A name too long to be a code is emitted as it is, so the sync
+            # refuses it `code_too_long` (never truncated) and its id stays
+            # live for a row already linked to it.
             {
                 "id": "150",
                 "acctnumber": None,
-                "fullname": "x" * 51,
+                "fullname": "x" * 101,  # past GL_CODE_MAX_LENGTH (100)
                 "accttype": "Expense",
                 "isinactive": "F",
             },
@@ -268,10 +310,12 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
         client.post = AsyncMock(return_value=_mock_response(200, body))
         out = _run(_netsuite_adapter().list_gl_accounts())
 
-    assert [(a.code, a.erp_account_id, a.account_type) for a in out] == [
-        ("6100", "120", "expense"),
-        ("2000", "7", "liability"),
-        ("Travel", "130", "expense"),
+    assert [(a.code, a.erp_account_id, a.account_type, a.active) for a in out] == [
+        ("6100", "120", "expense", True),
+        ("2000", "7", "liability", True),
+        ("Travel", "130", "expense", True),
+        ("6900", "140", "expense", False),
+        ("x" * 101, "150", "expense", True),
     ]
     url = client.post.await_args.args[0]
     assert url.startswith(
@@ -283,7 +327,9 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
     assert "FROM account" in json.loads(client.post.await_args.kwargs["content"])["q"]
 
 
-def test_netsuite_list_gl_accounts_follows_has_more_and_degrades_on_error():
+def test_netsuite_list_gl_accounts_follows_has_more_and_raises_on_a_failed_page():
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
+
     page1 = {
         "items": [
             {
@@ -299,9 +345,11 @@ def test_netsuite_list_gl_accounts_follows_has_more_and_degrades_on_error():
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(side_effect=[_mock_response(200, page1), _mock_response(500, {})])
-        out = _run(_netsuite_adapter().list_gl_accounts())
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_netsuite_adapter().list_gl_accounts())
 
-    assert [a.code for a in out] == ["6100"]
+    # The first page is never handed on as the whole chart.
+    assert exc.value.gap is ListingGap.fetch_failed
     urls = [c.args[0] for c in client.post.await_args_list]
     assert "offset=0" in urls[0] and "offset=100" in urls[1]
 
@@ -379,7 +427,7 @@ def test_merge_dev_list_gl_accounts_classification_normalization():
     }
     for raw, expected in cases.items():
         body = {
-            "results": [{"name": "x", "account_number": "1", "classification": raw}],
+            "results": [{"id": "m-1", "name": "x", "account_number": "1", "classification": raw}],
             "next": None,
         }
         with patch("httpx.AsyncClient") as cm:
@@ -428,8 +476,8 @@ def test_merge_dev_list_gl_accounts_follows_pagination_cursor():
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
-    page1 = {"results": [{"name": "A", "account_number": "1"}], "next": "cursor-2"}
-    page2 = {"results": [{"name": "B", "account_number": "2"}], "next": None}
+    page1 = {"results": [{"id": "m-a", "name": "A", "account_number": "1"}], "next": "cursor-2"}
+    page2 = {"results": [{"id": "m-b", "name": "B", "account_number": "2"}], "next": None}
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=[_mock_response(200, page1), _mock_response(200, page2)])
@@ -439,26 +487,56 @@ def test_merge_dev_list_gl_accounts_follows_pagination_cursor():
     assert {a.code for a in out} == {"1", "2"}
 
 
-def test_merge_dev_list_gl_accounts_returns_empty_on_http_error():
+def test_merge_dev_list_gl_accounts_raises_on_http_error_after_a_good_page():
+    """An empty or partial chart is not a chart (decisions §284): a failed
+    page raises, even after one that succeeded."""
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    page1 = {"results": [{"id": "m-a", "name": "A", "account_number": "1"}], "next": "c2"}
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(500, {"detail": "boom"}))
-        assert _run(adapter.list_gl_accounts()) == []
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, page1), _mock_response(500, {"detail": "boom"})]
+        )
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_gl_accounts())
+    assert exc.value.gap is ListingGap.fetch_failed
+    assert "boom" not in str(exc.value)
 
 
-def test_merge_dev_list_gl_accounts_returns_empty_on_network_error():
+def test_merge_dev_list_gl_accounts_raises_on_network_error():
     import httpx
 
+    from app.services.erp_adapters.base import ErpListingIncomplete
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
-        assert _run(adapter.list_gl_accounts()) == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(adapter.list_gl_accounts())
+
+
+def test_merge_dev_list_gl_accounts_past_the_sync_bound_raises():
+    from app.services.erp_adapters.base import (
+        SYNC_LISTING_MAX_ROWS,
+        ErpListingIncomplete,
+        ListingGap,
+    )
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    page = {"results": [{"id": "m-a", "name": "A", "account_number": "1"}], "next": "more"}
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, page))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_gl_accounts())
+    assert exc.value.gap is ListingGap.truncated
+    assert client.get.await_count == SYNC_LISTING_MAX_ROWS // 100
 
 
 # ---------- API endpoint integration -------------------------------------
@@ -488,3 +566,29 @@ def test_base_adapter_list_gl_accounts_default_is_empty_not_raises():
         erp_type = "bare"
 
     assert _run(Bare({}).list_gl_accounts()) == []
+
+
+def test_merge_dev_never_keys_an_account_by_its_name():
+    """Two unnumbered accounts named alike (QuickBooks sub-accounts behind
+    Merge) are two codes — their Merge ids — never one shared name, and a
+    record with no Merge id is dropped: its bill line could not reference it
+    (docs/decisions.md §284)."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "m-1", "name": "Job Materials", "classification": "EXPENSE"},
+            {"id": "m-2", "name": "Job Materials", "classification": "EXPENSE"},
+            {"name": "No id", "account_number": "9000"},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, body))
+        out = _run(adapter.list_gl_accounts())
+    assert [(a.code, a.erp_account_id, a.name) for a in out] == [
+        ("m-1", "m-1", "Job Materials"),
+        ("m-2", "m-2", "Job Materials"),
+    ]

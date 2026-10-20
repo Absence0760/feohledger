@@ -354,6 +354,13 @@ webhooks, older spelling `webhook_secret`) — are **not** in
   form does not render), exactly as a save would. A test can therefore never
   send a sealed credential to a host that has been typed but not saved. When
   the store cannot be opened the test says so; it never runs without them.
+  An OAuth ERP is tested the same way: the panel offers Test connection once
+  connected, and the saved `oauth` block plus its sealed tokens reach the
+  adapter. The answer is coded — `{success, code, provider | adapter,
+  message}`, `code` one of `connected` / `connection_failed` /
+  `credentials_unavailable` / `unknown_adapter` — and the panel states it with
+  the ERP's display name in the reader's language
+  (`types/erpConnection.erpTestResultText`); `message` is the English fallback.
 - **A new destination drops them.** A `PATCH` that names a different ERP, clears
   the ERP, or changes a destination key of the same ERP removes the sealed
   secrets that belonged to the old connection (`catalog.secrets_to_drop`; the
@@ -896,7 +903,7 @@ ids**. The payload carries them (`InvoicePayload.vendor_erp_id`,
   the lines, resolved by `gl_chart.resolve_erp_account_ids` against the
   invoice's own chart: shared (`entity_id IS NULL`) ∪ the invoice entity's own,
   with the entity's row winning when both define the code (the override
-  precedence `_sync_match_query` applies). Another entity's account never
+  precedence `services/gl_account_sync._preference` applies). Another entity's account never
   resolves.
 - **Bounded** — two queries per push whatever the line count (one vendor read,
   one chart read for every distinct code). Only the vendor and chart syncs write
@@ -926,10 +933,15 @@ vendor whose number happened to equal it.
 **NetSuite chart sync.** `NetSuiteAdapter.list_gl_accounts` pulls the chart
 with one SuiteQL query (`POST …/services/rest/query/v1/suiteql`,
 `Prefer: transient`, `SELECT id, acctnumber, fullname, accttype, isinactive FROM
-account`), paged by `offset` / `hasMore` up to 1,000 rows. It skips inactive
-accounts, and skips an account whose name would have to stand in for a missing
-number but is longer than the 50-character code column, because truncating
-could merge two accounts onto one code. The REST record collection (`GET
+account`), paged by `offset` / `hasMore` up to `SYNC_LISTING_MAX_ROWS`
+(10,000); a failed page or a longer chart raises `ErpListingIncomplete` (§ GL
+accounts and vendors are linked by the ERP's unique key → Only a whole listing
+is evidence). Inactive accounts are emitted with `active=False`, and a code
+longer than the code column (`GL_CODE_MAX_LENGTH`, 100 since migration 0114) is
+emitted as it is, for the sync to refuse `code_too_long`; either way the id
+stays live. Only an account with no id, or with neither a number nor a name, is
+skipped. `fullname` is the hierarchical `Parent : Child` path, so it is unique where a
+bare name is not. The REST record collection (`GET
 /account`) returns only ids and links, so it would cost one request per
 account.
 
@@ -946,6 +958,313 @@ through `_call_erp`), `tests/test_erp_adapter_error_pii.py` (every refusal, for
 every adapter, before any HTTP call), `tests/test_erp_adapter_idempotency.py`
 (NetSuite / BC body shape), `tests/test_erp_adapter_money_exact.py`,
 `tests/test_erp_gl_sync.py` (SuiteQL mapping + paging).
+
+### A refusal is recorded as a code the reader is told how to fix
+
+The English `error` on `invoice.erp_failed` names a reason code to a person who
+cannot act on one ("QuickBooks Online post refused: vendor_not_linked"). So the
+same row also carries `refusal = {code, params}`
+(`services/erp.erp_refusal_record`): the code (`ErpPostResult.refusal_code`,
+set by `erp_refusal` and by the coded post-create outcomes in `posted_total`,
+NetSuite, Business Central and Blackbaud), `params.provider` (the adapter's
+fixed literal) and, for `account_not_linked`, `params.accounts` — the GL codes
+on the invoice that resolved to no ERP id, or `[]` when the bill had a line with
+no account at all. An `ErpNotConnectedError` records `not_connected`, the
+unopenable-credentials path `erp_credentials_unavailable`; an HTTP failure
+(`erp_failure_message`) records none, since its text is already the diagnosis.
+
+The invoice modal's ERP panel states the code in the reader's language with the
+fix (`frontend/src/lib/api/erpRefusals.ts`, e.g. *"This vendor isn't in
+QuickBooks Online yet. Sync vendors from QuickBooks Online, or add the vendor
+there, then retry."*), keeps the Retry button, and falls back to `error` for a
+code it does not know or a row written before refusals were coded.
+
+**The registry is `erp_adapters/base.py::ERP_REFUSAL_CODES`.** A new reason
+needs an entry there and a message in all six locales:
+`tests/test_erp_refusal_codes.py` fails on a lower-snake reason constant under
+`erp_adapters/` that is not registered (and on an `erp_refusal` call given an
+inline literal), and `frontend/src/lib/api/erpRefusals.test.ts` reads the set
+out of `base.py` and fails on a code with no message, a message with no code,
+or a locale that leaves a placeholder unfilled.
+
+### An open duplicate or fraud exception refuses the push
+
+A bill in the ERP can be paid there (QuickBooks "Mark as paid", Bill Pay), past
+our payment-run gate. So the push refuses while the invoice has an open or
+escalated exception of a type in `api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`:
+`duplicate` and `fraud_flag`, the two payment-blocking types that say the
+liability itself is wrong. The other four payment-blocking types are holds on
+*paying* a real liability and do not refuse it (decisions §286 has the per-type
+reasoning).
+
+- **Chokepoint:** `services/erp._call_erp` asks
+  `services/erp_export_gate.erp_export_blocking_exception` before it builds an
+  adapter, on every attempt. A refusal is an `ErpPostRefusedError`: the invoice
+  goes to `failed` at once, with
+  `refusal = {code: "exception_blocks_erp_export", params: {exception_type}}`
+  on `invoice.erp_failed`.
+- **It says when the bill may already be there.** `_call_erp` commits
+  `state_data.erp_outcome_unknown = true` before every adapter call and sets it
+  false only on a success, so a timeout, a 5xx, a worker that died mid-call or
+  any refusal leaves it true (a refusal made after the create went through
+  cannot be told from one made before) — except an attempt the adapter states
+  left nothing (`ErpPostResult.not_posted`: every adapter's refusals made
+  before its first network call go through `base.erp_preflight_refusal`, and
+  QuickBooks also sets it for any refusal before its bill create is sent and
+  when Intuit refused the create itself with a 4xx, e.g. closed books), and
+  even then an earlier attempt's unknown outcome is kept. A refusal after a
+  lookup stays unknown: the lookup may have found our own earlier bill. `erp.possibly_posted` reads that flag,
+  an unconfirmed ERP job, an orphan document or an `erp_reference`. When it is
+  true, the refusal's params, the 409 and the `invoice.erp_failed` row carry
+  `possibly_posted: true`, and the browser says to check the ERP before anyone
+  pays the bill. The gate does not look the bill up; once the flag is cleared
+  the next push's own idempotency lookup finds it instead of posting another.
+- **A bill due before it is dated never posts.** Right after the exception
+  gate, `_call_erp` refuses an invoice whose `due_date` is before its
+  `invoice_date` (`invoice_due_before_date`, no adapter built, so nothing was
+  sent). QuickBooks accepts such a bill over the API and then marks it invalid
+  in its own UI (live sandbox, 2026-10-20: moving only the invoice date out of
+  a closed period left bill 154 due five days early). `POST /api/invoices` and
+  `PATCH /api/invoices/{id}` refuse the pair at entry with the same code (422,
+  `api/refusals.refuse_due_before_invoice_date`); the push gate is what covers
+  extraction, CSV import and the recurring sweep.
+- **The HTTP doors answer first:** `POST /api/invoices/{id}/complete` (the
+  modal's "Send to ERP" on an approved invoice), `/send-to-erp` and
+  `/retry-erp` return **409** with that coded refusal before they move the
+  invoice, so it stays `approved` / `failed` and nothing is queued
+  (`erp_export_gate.refuse_blocked_erp_export`).
+- **What the user does:** resolve or dismiss the exception in Exceptions, then
+  send again. Clearing it goes through `exception_lifecycle.record_decision`,
+  so someone implicated in the invoice cannot clear it for themselves.
+- **Approval never pushes.** Approving advances the workflow's step pointer
+  only; the push is always one of the three requests above.
+
+The browser states the code from either place (`api/erpRefusals.ts`, also used
+by `codedRefusals.ts` for the 409). Tests:
+`tests/test_erp_export_blocking_exceptions.py`.
+
+## GL accounts and vendors are linked by the ERP's unique key
+
+A bill posts on `gl_accounts.erp_account_id` (§ above), so which ERP account a
+row is linked to *is* where the money is booked. `POST /api/gl-accounts/sync-erp`
+links each pulled account through `services/gl_account_sync.sync_chart_from_erp`
+(docs/decisions.md §284):
+
+0. **Only within the ERP company the link was made in.** An ERP id is scoped
+   to the company that issued it — QuickBooks numbers accounts and vendors per
+   company, so sandbox "7" and production "7" are different accounts. Every link
+   records its connection realm (`erp_link_realm`, `services/erp_link_realm`:
+   the OAuth company id, or a direct adapter's company fields; never a secret).
+   A link from another realm — or from before migration 0115 (NULL) — is kept
+   only when the pull shows the same id holding the row's own code; otherwise
+   it is dropped and the row is re-matched by code. Between two named realms
+   that means the **current** code: a legacy code (QuickBooks' bare `Name`,
+   which two sub-accounts can share) counts only for a pre-0115 link, and a
+   realm-to-realm row whose code is a legacy key is unlinked with the accounts
+   that key names offered as `erp_link_candidates`. Every change is in
+   `link_changes` (with `from_realm` / `to_realm` when only the company moved).
+1. **By ERP id first.** A row already holding the account's `erp_account_id`
+   is that account: its name, type and parent follow the ERP, so a rename in the
+   ERP renames the row instead of creating a second one. Its **code is kept**
+   — invoices record the code as a string — and the drift is reported
+   (`code_drift`).
+2. **Then by code.** An unlinked row with the code is linked; so is one whose
+   link rule 0 dropped, or one linked to an id the pull no longer contains. A
+   row with the code linked to *another* account in the pull is a collision
+   (`code_taken`), refused.
+3. **A code two pulled accounts resolve to is refused for both**
+   (`duplicate_code`): neither is created or linked, an existing row with that
+   code loses its link, and the response says so. Never "the later one wins".
+4. **A row keyed by a legacy code two accounts claim is unlinked**
+   (`GLAccountPayload.legacy_codes`). Before §284 QuickBooks sub-accounts were
+   keyed by their bare `Name`, which QuickBooks repeats across parents; such a
+   row may have merged two accounts and be linked to whichever the sync read
+   last. Its link is dropped, so invoices coded to it are refused
+   `account_not_linked` (naming the code) and get recoded; the row and the
+   invoices stay. Each real account gets its own row under its real code.
+
+Rules 0, 3 and 4 run over the organization's **whole** chart, whichever entity
+the sync runs under — they are about which ERP account a code names, not which
+subsidiary holds the row. Matching and creating stay scoped to the chart being
+synced into.
+
+**Only a whole listing is evidence** (decisions §287). Rule 0 and the dead-link
+handling read an id's absence from the pull as "that account is gone", and both
+syncs count codes and names across the pull. So every adapter's chart and
+vendor listing returns the whole collection or raises: up to
+`base.SYNC_LISTING_MAX_ROWS` (10,000 rows; QuickBooks reads 50 pages of 1000,
+50,000), and any failed page or a collection past the bound raises
+`ErpListingIncomplete` (`fetch_failed` / `truncated`; QuickBooks raises its own
+request error on a failed page). `POST /api/gl-accounts/sync-erp` and
+`POST /api/vendors/sync-erp` answer **502** and change nothing, with the coded
+detail `erp_listing_incomplete` (`params: {provider, gap}`) the browser states
+in the reader's language. Every sync (chart, vendors, POs) that finds the OAuth
+connection gone — revoked, never consented, expired — answers the coded **409**
+`erp_not_connected` ("reconnect it under Organization") rather than a 502
+naming the exception class; a token refresh that could not reach the provider
+stays a 502, since the connection is still good (`api/refusals.erp_pull_failure`,
+the one place all three routes turn an adapter failure into HTTP). An empty pull
+changes nothing either. PO listings keep their bounded best-effort reads, since
+nothing is unlinked by a PO's absence.
+
+**A sync with no realm never touches another company's rows.** `mock`, and an
+OAuth ERP with no consent, have no realm. A sync under one leaves alone every
+row linked, or offered candidates, under a named realm: no re-judging,
+unlinking, id matching, re-linking by code or candidate refresh, and a pulled
+account whose code such a row holds is refused `code_taken`. It works only on
+unlinked rows and NULL-realm links. (A pre-0115 link is NULL-realm too, so a
+mock sync still treats it as its own; the next sync under a named realm
+re-judges it by evidence.)
+
+**Needs a decision.** A row rule 3 or 4 left unlinked keeps the ERP accounts it
+could mean (`erp_link_candidates`, refreshed by every pull). `/gl-accounts`
+badges it "Needs a decision" and counts such rows above the table; an admin or
+AP manager picks one with **Choose ERP account**
+(`POST /api/gl-accounts/{id}/erp-link`, audited `gl_account.erp_link_confirmed`).
+Only an id the last sync offered, under the same connection, is accepted, and
+only on an unlinked row. A confirmed link is exempt from rules 3 and 4 (it still
+dies with its realm, or when the account leaves the ERP). The live case: an old
+row "Depreciation" when QuickBooks has a top-level "Depreciation" (40) and
+"Truck:Depreciation" (39). Picking 39 for the old row means the top-level
+account cannot also own the code "Depreciation" in that chart (it stays
+`code_taken`): pick the account the invoices coded to the row meant.
+
+**Inactive accounts** arrive with `active=False` (QuickBooks is queried `where
+Active IN (true, false)`; NetSuite `isinactive`, BC `blocked`). Their ids are
+live, a matched row is marked inactive (`deactivated`), none is created, and a
+sync never reactivates a row. QuickBooks renames an inactive record —
+`Bank Charges (deleted)`, `Automobile:Fuel (deleted)`, a vendor's `DisplayName`
+likewise — so its adapter strips that suffix from an inactive record's names
+(`quickbooks_online._undeleted`) before keying it; without that the record no
+longer answered to the name its row was linked by, and the live sandbox sync
+unlinked Bank Charges and Squeaky Kleen Car Wash with a false reason instead of
+retiring them (2026-10-20). An active record's name is left as it is. **An
+account with no id** is refused (`missing_erp_id`) and never linked or created.
+
+**Parents.** An adapter that knows the parent's id passes it
+(`parent_erp_account_id`), and the sync names the parent by **our** code for
+that account — the row linked to it — falling back to the ERP's code only for a
+parent we hold no row for. The ERP's code is wrong whenever a row kept a code
+the ERP has since changed: QuickBooks' numbered "Office Expenses" is `6020`
+there, so its Software sub-account read `6020` here. An adapter that sets
+`reports_parent` (QuickBooks) states parentage outright, so a top-level account
+**clears** a stale parent — the merged "Equipment Rental" row kept "Job
+Expenses" after the account turned out to be top-level. Without
+`reports_parent`, an absent parent leaves ours alone.
+
+A code longer than `GL_CODE_MAX_LENGTH` is refused by the sync
+(`code_too_long`), never truncated there. Adapters emit the code they have as it
+is (NetSuite and BC included, so the id stays live), with one exception:
+QuickBooks shortens an account path over 100 characters itself, to
+`path[:100 - len(tail)] + "…#<Id>"` (`quickbooks_online._account_code`), which
+stays unique because the id is. An account whose `parent_code` does not fit the
+column syncs without its parent and is reported (`parent_code_dropped`). The
+response and the `gl_account.synced_from_erp` audit row carry exact counts
+(`created`, `updated`, `unchanged`, `linked`, `conflict_count`,
+`unlinked_count`, `code_drift_count`, `deactivated_count`, `realm_adopted`,
+`parent_code_dropped_count`) and the codes, capped at 50 each in the response
+(the audit row is uncapped), plus the `realm` the pull came from; the
+`/gl-accounts` page shows refused, unlinked and deactivated codes as warnings
+apart from the summary. A collision is never counted as `updated`.
+
+**The code an adapter returns must be unique in that ERP.** Per adapter:
+
+| Adapter | `code` | Why it is unique |
+|---|---|---|
+| `quickbooks_online` | `AcctNum`, else `FullyQualifiedName`; a path over 100 characters keeps its head and ends `…#<Id>` | QuickBooks refuses a duplicate account number, and keeps a `Name` unique only among siblings, so the colon-joined path is the key. `name` is the path too. |
+| `merge_dev` | `account_number`, else the Merge `id` — never `name`; a record with no `id` is dropped | Account numbers are unique in every ERP behind Merge; a name is not (QuickBooks again). |
+| `netsuite` | `acctnumber`, else `fullname` | Numbers are unique; `fullname` is the hierarchical path. |
+| `dynamics_365_bc` | `number` (the No.) | The account table's primary key. |
+| `xero` | `Code` (accounts without one skipped) | Xero refuses a second account with the same code. |
+| `sage_accounting` | `nominal_code` | Unique per business ledger. |
+| `sage_accounting_za` | `ID` | The record id. |
+| `sage_intacct` | `id` (ACCOUNTNO) | The account's key. |
+| `syspro` | `GlCode` | The `GenMaster` key. |
+| `blackbaud_fe_nxt` | `account_number` | Unique in the FE NXT chart. |
+
+The sync's collision refusal is the backstop for an adapter that gets this
+wrong: a repeatable key leaves accounts unlinked, it never merges them.
+
+**Vendors** (`services/vendor_sync`) already matched by `erp_vendor_id` first.
+The name fallback — adopting a manually created, unlinked vendor of the same
+name — now applies only when exactly one pulled record has that name and
+exactly one unlinked local vendor does. Otherwise neither is linked nor created
+and the response reports it (`conflicts`, reason `ambiguous_name`): linking the
+wrong "Acme" posts its bills to another supplier's ERP record. QuickBooks'
+`Vendor.AcctNum` is no longer mapped to our vendor `code`: on a QuickBooks
+vendor it is the company's account number *at* the vendor, not an identifier
+for the vendor — and the sync clears it from the `code` of vendors the old
+mapping created (`source = erp_sync`, `codes_cleared`, audited without the old
+value), because CSV import resolves vendors by code.
+
+Vendor links carry a realm too. A vendor linked under another ERP company is
+kept only when the record with that id is the same supplier (same name ignoring
+case and spacing, or the same non-blank tax id); between two named realms that
+name or tax id must also be unique in the pull, while a pre-0115 link keeps the
+looser rule. Otherwise its link is dropped (`unlinked`, audited
+`change: unlinked`) and the record is matched like any other. A no-realm sync
+matches by id only within its own realm and never touches a vendor linked under
+a named one. An inactive ERP vendor is never created or linked as a payee, and a
+vendor linked to one becomes `inactive` (never the reverse). Business Central
+and Merge.dev vendors with no `id` are skipped, never keyed by the vendor No.,
+`remote_id` or name.
+
+**A vendor value too long for its column is dropped, not truncated.** An
+over-long `code`, email, phone, address, tax id or payment terms is not written
+(the vendor keeps its old value) and the vendor still syncs; the response lists
+each such record in `values_too_long` (`name`, `erp_vendor_id`, `fields`, field
+names only), and its audit row names the fields. Before, one NetSuite
+`entityid` over `vendors.code`'s 50 characters rolled back the whole sync.
+
+**The push resolves only current-realm links.** `services/erp._resolve_erp_refs`
+filters both the vendor and the accounts by the realm of the connection being
+posted to, so a link from another company is refused `vendor_not_linked` /
+`account_not_linked` rather than posted to a colliding id. A pre-0115 (NULL)
+link is trusted only while the org is still connected to the realm migration
+0115 recorded for it (`settings.erp.legacy_link_realm`); after any change of
+company it is refused until a sync re-judges it. A QuickBooks Online org gets no
+such snapshot, so its pre-0115 links are refused until the first syncs (next
+section). Reconnecting the OAuth consent
+to a different company also writes `organization.erp_realm_changed`.
+
+**Purchase orders link no ERP id the push resolves** (the bill carries
+`po_number` as text), so they need no realm. The QuickBooks PO sync also no
+longer reads the chart to resolve PO-line accounts: nothing persists or reads a
+PO line's GL account, so lines carry none — never the `AccountRef` name.
+
+**Repairing a chart synced before §284.** On a QuickBooks Online tenant, every
+invoice push is refused after migration 0115, with `account_not_linked` for the
+GL accounts and `vendor_not_linked` for the vendor, until the chart has been
+synced once (`POST /api/gl-accounts/sync-erp`) and the vendors have been synced
+once (`POST /api/vendors/sync-erp`). That is true even if the tenant never
+changed company. Those first syncs re-judge each pre-§284 link by evidence: a
+link the pull confirms is adopted silently (`realm_adopted`), and a merged one
+is unlinked and reported. Only then does the push resolve them. Run both syncs
+right after deploying 0115. Rows the sync will not guess about appear as "Needs
+a decision".
+
+On any tenant, run the chart sync again. Rule 1
+relinks every row by id; rule 4 unlinks each collapsed QuickBooks row and
+creates the accounts it had merged under their full paths; the response lists
+the unlinked codes. Recode the open invoices coded to those codes (their pushes
+are refused, naming the code, until you do), then retire the old rows from
+`/gl-accounts` once nothing open uses them. Nothing is deleted or recoded
+automatically: which of the merged accounts an invoice meant is a judgement the
+data cannot make. One case stays as it was: a collapsed row whose link happened
+to land on the account whose new code equals the old one (a top-level account
+sharing its name with sub-accounts) is indistinguishable from a correct row and
+keeps its link.
+
+Tests: `tests/test_erp_link_realm.py` (colliding ids "7" / "57" across a
+sandbox and a production realm, through both syncs, the push and the endpoints;
+pre-0115 links and the migration snapshot; whole-org repair; inactive and
+id-less accounts; the confirmed link for the live "Depreciation"),
+`tests/test_gl_account_sync.py` (the 89 → 89 regression from the live
+sandbox chart, rename, duplicate, collision, dead link, legacy repair),
+`tests/test_vendor_sync.py`, `tests/test_erp_quickbooks_online_adapter.py`
+(`_account_code`, the inactive-inclusive query, no PO chart read, vendor code), and
+`tests-e2e/erp/quickbooks-online.spec.ts` (same-named sub-accounts against the
+fake; the bill's `AccountRef` is the picked one).
 
 ## Idempotency (retry-safe pushes)
 
@@ -986,6 +1305,18 @@ re-entered push resumes rather than restarts. A **non-retryable** result
 `job_unconfirmed`) or an OAuth ERP with no usable connection fails the invoice
 on the first attempt. After the last attempt the invoice goes to `failed`, with
 `last_error` on the instance and an `invoice.erp_failed` audit row.
+
+**A deterministic 4xx is never retried** (decisions §285). Every adapter builds
+an HTTP failure with `base.erp_http_failure(provider, status)`, whose
+`retryable` is `base.erp_status_retryable(status)`: 5xx and network errors
+stay retryable, and so do the 4xx answers that can change on a re-send — 401
+(the adapter refreshes the token), 408 / 425 / 429 ("later"), 409 / 423 (a
+concurrent edit or a lock; Business Central answers a stale etag with 409).
+Every other 4xx (400, 403, 404, 422, …) is the ERP's answer to the bill itself,
+so the invoice fails on the first attempt with `retries: 1` instead of sending
+the same refused bill three times over six seconds. Blackbaud's SKY quota (403
+with `Retry-After`) stays retryable. A manual `POST /{id}/retry-erp` after the
+fix is unchanged.
 
 **A failure that left a bill in the ERP names it.** Examples are a
 `posted_total_mismatch` whose void failed ("could not be voided") and a
@@ -1260,7 +1591,7 @@ form. JSON throughout — no XML parser on this path.
 | `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`) or any GL account ERP id (`account_not_linked`) → `POST services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` |
 | `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` (+ `totalTxnAmountDue = 0` ⇒ paid) |
 | `void_invoice` | deletes a draft / posted-unpaid bill; a bill that is paid, partially paid, selected for payment or reversed returns `False` (reversal with its payment is an accountant's call) |
-| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows × 10 pages |
+| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors and accounts up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort |
 | `test_connection` | token + a one-row vendor query |
 
 Request rules worth knowing:
@@ -1380,8 +1711,8 @@ which apps created on or after 2026-03-02 must use.
 | Method | Xero call | Notes |
 |---|---|---|
 | `test_connection` | `GET Organisation` | |
-| `list_vendors` | `GET Contacts?where=IsSupplier==true` | paged, 100/page, 10-page cap |
-| `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived skipped |
+| `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False` |
+| `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
 | `list_pos` | `GET PurchaseOrders` | `BILLED` → closed, `DELETED` → cancelled |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
 | `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
@@ -1481,7 +1812,7 @@ complete its consent flow. A ZA Sage adapter is separate work.
 | Method | Sage call | Notes |
 |---|---|---|
 | `test_connection` | `GET business_settings` | |
-| `list_vendors` | `GET contacts?contact_type_id=VENDOR` | 200/page, 10-page cap; system contacts skipped |
+| `list_vendors` | `GET contacts?contact_type_id=VENDOR` | 200/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); system contacts skipped |
 | `list_gl_accounts` | `GET ledger_accounts` | `nominal_code` → code; `ledger_account_type` → account_type; out-of-chart skipped |
 | `list_pos` | — | base default `[]` (no v3.1 PO collection on every plan) |
 | `post_invoice` | `POST purchase_invoices` | below |
@@ -1540,8 +1871,11 @@ separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
 | `company_currency` | no (optional) | ISO code of the Sage company's own currency, default `ZAR` — the API reports currencies only as numeric ids and a symbol |
 
 Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
-HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows, 10
-pages) and filter with `$filter`.
+HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows a
+page) and filter with `$filter`. The supplier and account listings read up to
+`SYNC_LISTING_MAX_ROWS` and raise `ErpListingIncomplete` on a failed page or
+past it; an inactive account is emitted `active=False`. Other lists stop at 10
+pages.
 
 | Operation | Calls |
 |---|---|
@@ -1629,8 +1963,8 @@ tenant; the environment is burned into the token.
 | `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>` → `POST /accountspayable/v1/invoices/process` → `GET …/backgroundProcess/{id}/status` (≤ 10 reads, 1 s apart) → `…/result` |
 | `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (balance 0 ⇒ paid), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
 | `void_invoice` | not automated (`False`): the AP API has no invoice delete, and cancelling a posted payable is an adjustment in an open period |
-| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 × 10 pages; template and deleted POs skipped; PO `currency` stays NULL |
-| `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take); `prevent_data_entry` accounts skipped; `account_type` unclassified (FE NXT's `class` is a net-asset class) |
+| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort; template and deleted POs skipped; PO `currency` stays NULL |
+| `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take), up to `SYNC_LISTING_MAX_ROWS`; `prevent_data_entry` accounts emitted `active=False`; `account_type` unclassified (FE NXT's `class` is a net-asset class) |
 | `test_connection` | an `environment_id` was captured at consent + `GET /accountspayable/v1/vendors?limit=1` |
 
 Request rules worth knowing:
@@ -1698,7 +2032,7 @@ surface: `/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_
 | Operation | Call |
 |---|---|
 | `post_invoice` | refuse without `vendor_erp_id` / a line account id / a valid `base_url` → `GET purchaseInvoices?$filter=externalDocumentNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` (a draft) → `GET purchaseInvoices({id})` → total check → `POST purchaseInvoices({id})/Microsoft.NAV.post` |
-| `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts and blocked accounts are skipped. |
+| `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts are skipped (BC refuses a line on one); blocked accounts are emitted `active=False`. |
 | `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
 | `list_vendors` | `GET vendors` |
 | `void_invoice` | `GET purchaseInvoices({id})`; a `Draft` is deleted (`DELETE` with `If-Match` = the etag just read — never `*`; a read with no etag returns `False` unsent); anything else returns `False` |
@@ -1773,22 +2107,28 @@ posted invoice is reversed in BC by an accountant (corrective credit memo) and
 `void_invoice` returns `False` for it.
 
 **Paging.** Every list sync sends `Prefer: odata.maxpagesize=100` (BC's own
-server page is 20,000 rows), follows `@odata.nextLink`, and stops at 10 pages /
-1,000 rows. Bodies are parsed with `utils/json_money.loads_exact_json`, so a
-total is a `Decimal` from the wire, never a float. Best-effort like the other
-adapters: a token failure, non-200 or network error ends the pull with what it
-read. An admin `base_url` stays behind the SSRF guard on every call, and that
-refusal is raised, not swallowed.
+server page is 20,000 rows) and follows `@odata.nextLink`. Bodies are parsed
+with `utils/json_money.loads_exact_json`, so a total is a `Decimal` from the
+wire, never a float. The chart and vendor listings read up to
+`SYNC_LISTING_MAX_ROWS` and raise on any failure (a token failure as itself; a
+non-200, network error, unparseable page or longer collection as
+`ErpListingIncomplete`), since the syncs read absence as evidence. The PO
+listing stays best-effort: it stops at 10 pages / 1,000 rows, and a failure ends
+the pull with what it read. An admin `base_url` stays behind the SSRF guard on
+every call, and that refusal is raised, not swallowed.
 
 ## NetSuite: SuiteQL syncs and void
 
 `erp_adapters/netsuite.py`. Every list sync is one SuiteQL query
 (`POST …/services/rest/query/v1/suiteql`, `Prefer: transient`, `ORDER BY id`
-for stable `offset` paging, 10 pages × 100 rows), parsed exactly like BC's.
+for stable `offset` paging, 100 rows a page), parsed exactly like BC's. The
+chart and vendor queries read up to `SYNC_LISTING_MAX_ROWS` and raise
+`ErpListingIncomplete` on a failed page or past it; the PO query stops at 10
+pages, best-effort.
 
 | Sync | Query | Notes |
 |---|---|---|
-| `list_vendors` | `SELECT id, entityid, companyname, email, phone, BUILTIN.DF(terms) AS terms, isinactive FROM vendor` | The REST `/vendor` collection returns ids and links only — no names — so the old record-API sync could not have named a vendor. Name = `companyname`, else `entityid` (an individual); code = `entityid`; inactive vendors skipped. |
+| `list_vendors` | `SELECT id, entityid, companyname, email, phone, BUILTIN.DF(terms) AS terms, isinactive FROM vendor` | The REST `/vendor` collection returns ids and links only — no names — so the old record-API sync could not have named a vendor. Name = `companyname`, else `entityid` (an individual); code = `entityid` (an `entityid` longer than `vendors.code` is not written and is reported in `values_too_long`); inactive vendors emitted `active=False`; a row with no `id` skipped. |
 | `list_gl_accounts` | `SELECT id, acctnumber, fullname, accttype, isinactive FROM account` | unchanged (§ ERP references) |
 | `list_pos` | `transaction` where `type = 'PurchOrd'`, `foreigntotal`, `currency.symbol`, `TO_CHAR(duedate, 'YYYY-MM-DD')` | Headers only — the PO sync stores no ERP lines. Status letter C → cancelled, G / H → closed, else open. Dates go through `TO_CHAR` because SuiteQL formats them per the user's preference. |
 
@@ -1845,7 +2185,7 @@ Routed") is under approval routing, so its bills start Pending Approval. Both
 are fixed fixtures, not a shared toggle a parallel e2e worker could trip over.
 
 Tests: `test_erp_gl_sync.py`, `test_erp_po_sync.py`,
-`test_erp_vendor_sync_adapter.py` (mapping, 1000-row bound, degradation),
+`test_erp_vendor_sync_adapter.py` (mapping, the listing bound, incomplete listings),
 `test_erp_void_invoice.py` (both voids, NetSuite status shapes),
 `test_erp_adapter_idempotency.py` (BC lines, failed lookups, the draft total
 check, draft resumption, a failed post step; NetSuite lines as the shared
@@ -1931,7 +2271,10 @@ end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
 `OAuthErpAdapter.resolve_external_tenant_id` (Xero `GET /connections`, Sage's
 business lookup). `extra_token_headers(erp_settings)` adds headers to every
 token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
-or `body`. An empty `scopes` sends no `scope`. Operator URL overrides
+or `body`. `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
+which documents that) instead of RFC 7009's form body; sent a form, Intuit may
+refuse it, and Disconnect would then leave the grant live behind a
+`revoked: false` the user never sees. An empty `scopes` sends no `scope`. Operator URL overrides
 (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before

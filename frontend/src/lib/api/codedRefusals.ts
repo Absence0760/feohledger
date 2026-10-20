@@ -20,8 +20,10 @@
  *    application, the invoice stale-edit 409, a wrong authenticator code, and
  *    the no-rail pilot's refusals (a record-only tenant's dispatch refusal,
  *    recording a payment made outside FeohLedger, the NACHA bank file), and
- *    the plan-feature 402 every tier gate answers with, and recording or
- *    cancelling a goods receipt;
+ *    the plan-feature 402 every tier gate answers with, recording or
+ *    cancelling a goods receipt, an ERP send refused for an open duplicate
+ *    or fraud exception (stated by `api/erpRefusals.ts`), and an ERP sync
+ *    refused because the connection is gone or the listing is incomplete;
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -44,6 +46,7 @@ import { exceptionTypeFallback, exceptionTypeLabelKey } from '#lib/types/excepti
 import { nachaFieldLabelKey } from '#lib/types/paymentExecution.ts';
 import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRefusal.ts';
 import { authRefusalText } from '#lib/api/authRefusals.ts';
+import { EXCEPTION_BLOCKS_ERP_EXPORT, erpRefusalText } from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
@@ -310,6 +313,25 @@ const BUILDERS: Record<string, Builder> = {
 			INVOICE_FIELD_KEYS[f] ? t(INVOICE_FIELD_KEYS[f]) : f
 		);
 		return t('refusal.invoiceRequiredFieldsMissing', { fields: formatList(labels) });
+	},
+	// `api/workflow.py` — `/complete`, `/send-to-erp`, `/retry-erp` refused
+	// for an open duplicate / fraud exception. One sentence with the invoice
+	// modal's ERP panel, which states the same code off the audit row.
+	[EXCEPTION_BLOCKS_ERP_EXPORT]: (p, t) =>
+		erpRefusalText({ code: EXCEPTION_BLOCKS_ERP_EXPORT, params: p }, t),
+	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
+	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
+	// or whose listing could not be read whole, so nothing synced.
+	// `api/refusals.py::refuse_due_before_invoice_date` — create / edit.
+	invoice_due_before_date: fixed('refusal.invoiceDueBeforeDate'),
+	erp_not_connected: fixed('erpRefusal.notConnected'),
+	erp_listing_incomplete: (p, t) => {
+		const provider = str(p, 'provider');
+		if (provider === null) return null;
+		const gap = str(p, 'gap');
+		if (gap === 'fetch_failed') return t('erpSync.listingFetchFailed', { provider });
+		if (gap === 'truncated') return t('erpSync.listingTruncated', { provider });
+		return null;
 	},
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),

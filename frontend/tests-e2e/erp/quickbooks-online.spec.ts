@@ -19,6 +19,7 @@ import {
 	erpReferenceFromAudit,
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
+	syncAndListGlAccounts,
 	syncErpGlAccounts,
 	syncErpVendors,
 	testErpConnection
@@ -46,10 +47,15 @@ import {
  *      as a Bill. The bill read back FROM THE FAKE carries the exact approved
  *      amount, the synced vendor id and the synced account id — so the
  *      assertion is on what the ERP holds, not on what we sent.
- *   3. Fail closed — an invoice whose vendor never synced is refused before
- *      anything is posted, and so is an invoice number longer than QBO's
+ *   3. Same-named sub-accounts — the fake, like the real sandbox, has a
+ *      "Job Materials" under two parents. The chart sync keeps both, each
+ *      keyed by its FullyQualifiedName, and an invoice coded to one posts a
+ *      Bill on THAT account's id, never the other's (decisions §284).
+ *   4. Fail closed — an invoice whose vendor never synced is refused before
+ *      anything is posted, and the invoice modal says what to do about it in
+ *      the reader's language; so is an invoice number longer than QBO's
  *      21-character DocNumber (refused, never silently truncated).
- *   4. Disconnect — clears the connection, and a later send cannot post.
+ *   5. Disconnect — clears the connection, and a later send cannot post.
  */
 
 const PROVIDER = 'quickbooks_online';
@@ -181,6 +187,40 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 		}
 	});
 
+	test('same-named sub-accounts are two accounts, and the bill posts to the one picked', async ({
+		page
+	}) => {
+		await syncErpVendors(page);
+		const chart = await syncAndListGlAccounts(page);
+		const byCode = new Map(chart.map((a) => [a.code, a]));
+		// Keyed by the path QuickBooks keeps unique, never the shared Name.
+		expect(byCode.get('Job Expenses:Job Materials')?.name).toBe('Job Expenses:Job Materials');
+		expect(byCode.get('Landscaping Services:Job Materials')?.name).toBe(
+			'Landscaping Services:Job Materials'
+		);
+		expect(byCode.has('Job Materials')).toBe(false);
+
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-QBO-SUB',
+			invoiceNumber: `S${Date.now() % 1e9}-${Math.floor(Math.random() * 1e4)}`,
+			amount: '42.00',
+			vendor: 'Fake ERP Vendor A',
+			glAccount: 'Job Expenses:Job Materials'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			const bill = await billFromFake(page, await erpReferenceFromAudit(page, inv.id));
+			expect(
+				bill.Line.map(
+					(l: { AccountBasedExpenseLineDetail?: { AccountRef?: { value: string } } }) =>
+						l.AccountBasedExpenseLineDetail?.AccountRef?.value
+				)
+			).toEqual(['62']); // Job Expenses:Job Materials — not Landscaping's 63
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
 	test('an invoice whose vendor never synced is refused, not posted', async ({ page }) => {
 		await syncErpGlAccounts(page);
 		const inv = await createApprovedInvoice(page, {
@@ -191,6 +231,24 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 		try {
 			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
 			expect(await erpFailureFromAudit(page, inv.id)).toContain('vendor_not_linked');
+
+			// The modal states the refusal as something to act on — not the
+			// server's "QuickBooks Online post refused: vendor_not_linked" —
+			// and keeps the retry for after the fix.
+			await page.goto(`/invoices?id=${inv.id}`);
+			const error = page.getByTestId('erp-error');
+			await expect(error).toHaveText(
+				"This vendor isn't in QuickBooks Online yet. Sync vendors from QuickBooks Online, or add the vendor there, then retry."
+			);
+			await expect(page.getByRole('button', { name: 'Retry ERP Send' })).toBeVisible();
+
+			// ...in the reader's language.
+			await page.evaluate(() => localStorage.setItem('feoh_locale', 'de'));
+			await page.goto(`/invoices?id=${inv.id}`);
+			await expect(page.getByTestId('erp-error')).toHaveText(
+				'Dieser Lieferant ist noch nicht in QuickBooks Online. Synchronisieren Sie die Lieferanten aus QuickBooks Online oder legen Sie den Lieferanten dort an und versuchen Sie es dann erneut.'
+			);
+			await page.evaluate(() => localStorage.removeItem('feoh_locale'));
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}
@@ -231,4 +289,218 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 		const again = await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, { headers });
 		expect((await again.json()).disconnected).toBe(false);
 	});
+});
+
+/**
+ * What QuickBooks itself refuses a bill for, and the connection test on the
+ * connected panel (live sandbox findings, 2026-10-19).
+ *
+ *   6. The panel's "Test connection" on a connected OAuth ERP tests the saved
+ *      connection, and says so naming the ERP — not the backend's key.
+ *   7. A bill QuickBooks refuses — books closed through its date, an inactive
+ *      vendor, an inactive account, a DocNumber another bill already holds —
+ *      fails at once (`retries` 1: a validation answer is deterministic), is
+ *      recorded as a coded refusal carrying Intuit's numeric code, and the
+ *      invoice modal says what to do about it. The fake answers each with the
+ *      Fault code and HTTP 400 Intuit uses (`POST /__qbo/validation`), its
+ *      Detail quoting the bill back, which must reach neither the audit row
+ *      nor the page.
+ */
+
+/** Configure the fake company's validation rules; `{}` keys left out keep. */
+async function qboValidation(rules: Record<string, unknown>): Promise<void> {
+	const resp = await fetch(`${FAKE_ERP_BASE}/__qbo/validation`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(rules)
+	});
+	expect(resp.ok).toBe(true);
+}
+
+const NO_VALIDATION = {
+	closed_through: null,
+	inactive_vendors: [],
+	inactive_accounts: [],
+	duplicate_doc_check: false
+};
+
+/** The `invoice.erp_failed` row's details: the coded refusal and the count. */
+async function erpFailedRow(page: Page, invoiceId: string) {
+	const resp = await page.request.get(`${API_BASE}/api/invoices/${invoiceId}/audit-log`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status()).toBe(200);
+	const rows = (await resp.json()) as Array<{
+		action: string;
+		details: {
+			error?: string;
+			retries?: number;
+			refusal?: { code: string; params: Record<string, unknown> };
+		} | null;
+	}>;
+	const failed = rows.find((r) => r.action === 'invoice.erp_failed');
+	expect(failed, 'audit trail has an invoice.erp_failed row').toBeTruthy();
+	return failed!.details ?? {};
+}
+
+/** Post a bill straight into the fake, as someone working in QuickBooks would. */
+async function billInFake(page: Page, docNumber: string, vendorId: string): Promise<void> {
+	const qbo = `${FAKE_ERP_BASE}/qbo`;
+	const authorize = await page.request.get(`${qbo}/oauth2/authorize`, {
+		params: { redirect_uri: ERP_OAUTH_CALLBACK, state: 'spec', client_id: 'fake-qbo-client' },
+		maxRedirects: 0
+	});
+	const code = new URL(authorize.headers()['location']).searchParams.get('code') ?? '';
+	const token = await page.request.post(`${qbo}/oauth2/token`, {
+		headers: {
+			Authorization: `Basic ${Buffer.from('fake-qbo-client:fake-qbo-secret').toString('base64')}`,
+			'Content-Type': 'application/x-www-form-urlencoded'
+		},
+		data: `grant_type=authorization_code&code=${code}`
+	});
+	const created = await page.request.post(`${qbo}/v3/company/${REALM}/bill`, {
+		headers: { Authorization: `Bearer ${(await token.json()).access_token}` },
+		data: {
+			VendorRef: { value: vendorId },
+			DocNumber: docNumber,
+			Line: [
+				{
+					DetailType: 'AccountBasedExpenseLineDetail',
+					Amount: 5,
+					AccountBasedExpenseLineDetail: { AccountRef: { value: '7' } }
+				}
+			]
+		}
+	});
+	expect(created.ok()).toBe(true);
+}
+
+test.describe('/erp quickbooks_online: what QuickBooks refuses, and the panel test', () => {
+	test.beforeAll(async () => {
+		await resetFakeErp();
+	});
+
+	test.beforeEach(async ({ page }) => {
+		await skipUnlessReachable(SERVICES.fakeErp);
+		await connectQbo(page);
+		await qboValidation(NO_VALIDATION);
+	});
+
+	test.afterAll(async ({ browser }) => {
+		await qboValidation(NO_VALIDATION).catch(() => undefined);
+		const context = await browser.newContext({ baseURL: tenantBase(currentTenantSlug()) });
+		const page = await context.newPage();
+		await signInAndWait(page);
+		const headers = await authedTenantHeaders(page);
+		await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, { headers });
+		await page.request.patch(`${API_BASE}/api/organization`, {
+			headers: { ...headers, 'Content-Type': 'application/json' },
+			data: { settings: { erp: null } }
+		});
+		await context.close();
+	});
+
+	test('the connected panel tests the saved connection and names the ERP', async ({ page }) => {
+		await page.goto('/organization?section=erp');
+		await expect(page.getByTestId('erp-oauth-state')).toContainText('Connected to QuickBooks Online');
+		const status = page.getByTestId('erp-status');
+		await page.getByTestId('erp-oauth-test').click();
+		await expect(status).toHaveText('Connected to QuickBooks Online. The connection test succeeded.');
+		await expect(status).toHaveClass(/success/);
+
+		await page.evaluate(() => localStorage.setItem('feoh_locale', 'de'));
+		await page.goto('/organization?section=erp');
+		await page.getByTestId('erp-oauth-test').click();
+		await expect(page.getByTestId('erp-status')).toHaveText(
+			'Mit QuickBooks Online verbunden. Der Verbindungstest war erfolgreich.'
+		);
+		await page.evaluate(() => localStorage.removeItem('feoh_locale'));
+	});
+
+	const cases: Array<{
+		name: string;
+		rules: Record<string, unknown>;
+		vendor?: string;
+		glAccount?: string;
+		code: string;
+		params: Record<string, unknown>;
+		text: string;
+		/** Arrange anything else in QuickBooks before the send. */
+		before?: (page: Page, invoiceNumber: string) => Promise<void>;
+	}> = [
+		{
+			name: 'a bill dated into closed books',
+			rules: { closed_through: '2026-09-30' },
+			code: 'period_closed',
+			params: { intuit_code: '6210', provider: 'QuickBooks Online' },
+			text: 'QuickBooks Online refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in QuickBooks Online, then retry.'
+		},
+		{
+			name: 'a bill for a vendor made inactive in QuickBooks',
+			rules: { inactive_vendors: ['57'] },
+			vendor: 'Fake ERP Vendor B',
+			code: 'vendor_inactive',
+			params: { intuit_code: '2500', provider: 'QuickBooks Online' },
+			text: 'QuickBooks Online refused this bill because its vendor is inactive or deleted there. Make the vendor active in QuickBooks Online, then retry.'
+		},
+		{
+			name: 'a bill coded to an account made inactive in QuickBooks',
+			rules: { inactive_accounts: ['63'] },
+			glAccount: 'Landscaping Services:Job Materials',
+			code: 'account_inactive',
+			params: {
+				intuit_code: '2500',
+				accounts: ['Landscaping Services:Job Materials'],
+				provider: 'QuickBooks Online'
+			},
+			text: 'QuickBooks Online refused this bill because Landscaping Services:Job Materials is inactive or deleted there. Make the account active in QuickBooks Online, or recode the invoice to an active account, then retry.'
+		},
+		{
+			name: 'a bill whose number another QuickBooks bill already holds',
+			rules: { duplicate_doc_check: true },
+			code: 'duplicate_document_number',
+			params: { intuit_code: '6140', provider: 'QuickBooks Online' },
+			text: 'QuickBooks Online already has a bill with this invoice number. Check QuickBooks Online for a duplicate before you retry.',
+			before: (page, invoiceNumber) => billInFake(page, invoiceNumber, '56')
+		}
+	];
+
+	for (const c of cases) {
+		test(`${c.name} is refused once, coded, and explained`, async ({ page }) => {
+			await syncErpVendors(page);
+			await syncErpGlAccounts(page);
+			await qboValidation(c.rules);
+			const invoiceNumber = `R${Date.now() % 1e9}-${Math.floor(Math.random() * 1e4)}`;
+			await c.before?.(page, invoiceNumber);
+			const inv = await createApprovedInvoice(page, {
+				prefix: 'E2E-QBO-REFUSED',
+				invoiceNumber,
+				amount: '75.00',
+				vendor: c.vendor ?? 'Fake ERP Vendor A',
+				glAccount: c.glAccount ?? '6100',
+				invoiceDate: '2026-09-15',
+				dueDate: '2026-10-15'
+			});
+			try {
+				expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+				const row = await erpFailedRow(page, inv.id);
+				// Deterministic: one call, never the three-attempt backoff.
+				expect(row.retries).toBe(1);
+				expect(row.refusal).toEqual({ code: c.code, params: c.params });
+				expect(row.error).toBe(
+					`QuickBooks Online post refused: ${c.code} (Intuit fault ${c.params.intuit_code})`
+				);
+
+				await page.goto(`/invoices?id=${inv.id}`);
+				const error = page.getByTestId('erp-error');
+				await expect(error).toHaveText(c.text);
+				// Intuit's Detail quotes the bill back; none of it is shown.
+				await expect(error).not.toContainText('TxnDate');
+				await expect(error).not.toContainText('TxnType');
+			} finally {
+				await qboValidation(NO_VALIDATION);
+				await deleteInvoice(page, inv.id);
+			}
+		});
+	}
 });

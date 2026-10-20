@@ -1,12 +1,22 @@
 """Chart of Accounts — GL account codes synced from ERP or manually managed."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Index, String, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Index, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, EntityMixin, TimestampMixin
+
+#: How long a GL code may be: the width of every column that RECORDS one —
+#: ``invoices.gl_account``, ``invoice_line_items.gl_account``,
+#: ``recurring_invoice_templates.gl_account`` and ``contract_line_items
+#: .gl_account`` are all ``String(100)`` — so a chart code always fits where it is
+#: coded. Was 50 until migration 0114, which cut QuickBooks sub-account paths
+#: ("Landscaping Services:Job Materials:Decks and Patios" is 51) out of the
+#: chart (docs/decisions.md §284).
+GL_CODE_MAX_LENGTH = 100
 
 
 class GLAccount(Base, EntityMixin, TimestampMixin):
@@ -31,7 +41,7 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     # A shared "6000" and an entity's own "6000" therefore coexist by design —
     # that is an entity OVERRIDING the shared account, and the effective chart
     # `shared ∪ own` still resolves it to one row per entity because
-    # `api/gl_accounts._sync_match_query` prefers the entity's own.
+    # `services/gl_account_sync._preference` prefers the entity's own.
     # Migration 0088 installs both on existing tenants.
     __table_args__ = (
         Index(
@@ -52,14 +62,30 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    code: Mapped[str] = mapped_column(String(GL_CODE_MAX_LENGTH), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     account_type: Mapped[str | None] = mapped_column(
         String(50)
     )  # expense, asset, liability, revenue
-    parent_code: Mapped[str | None] = mapped_column(String(50))
+    parent_code: Mapped[str | None] = mapped_column(String(GL_CODE_MAX_LENGTH))
     is_active: Mapped[bool] = mapped_column(default=True)
     erp_account_id: Mapped[str | None] = mapped_column(String(255))
+    #: The ERP company ``erp_account_id`` was linked under
+    #: (``services/erp_link_realm``). An id only means something in the company
+    #: that issued it — QuickBooks numbers accounts per company — so a link from
+    #: another realm is never posted to. NULL: linked before migration 0115.
+    erp_link_realm: Mapped[str | None] = mapped_column(Text)
+    #: Set when a person chose this row's ERP account among the candidates a
+    #: sync could not choose between (``POST /api/gl-accounts/{id}/erp-link``).
+    #: A confirmed link is not re-judged by the sync's ambiguity rules (3 and 4,
+    #: ``services/gl_account_sync``); it still dies with its realm.
+    erp_link_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    erp_link_confirmed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: ``{"realm", "reason", "accounts": [{"erp_account_id", "code", "name"}]}``
+    #: — the ERP accounts the last sync found this UNLINKED row could mean and
+    #: would not pick between. Non-NULL is "needs a decision"; cleared whenever
+    #: the row is linked.
+    erp_link_candidates: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True

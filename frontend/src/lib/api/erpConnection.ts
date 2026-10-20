@@ -8,7 +8,7 @@
  * writer, and these helpers only start, read and end that flow.
  */
 import { api } from '#lib/api.ts';
-import type { ErpCatalog, ErpOAuthStatus } from '#lib/types/erpConnection.ts';
+import type { ErpCatalog, ErpOAuthStatus, ErpTestResult } from '#lib/types/erpConnection.ts';
 
 const BASE = '/api/organization/erp';
 
@@ -22,4 +22,4 @@ export const startErpOAuth = (provider: string) =>
 export const disconnectErpOAuth = () => api.post<unknown>(`${BASE}/oauth/disconnect`, {});
 
 export const testErpConnection = (erp: Record<string, unknown>) =>
-	api.post<{ success: boolean; message: string }>('/api/organization/test-erp', erp);
+	api.post<ErpTestResult>('/api/organization/test-erp', erp);

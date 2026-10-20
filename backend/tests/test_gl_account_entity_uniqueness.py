@@ -320,7 +320,7 @@ async def test_index_permits_a_shared_and_an_entity_row_with_one_code(realdb, en
     and one row per (entity, code). An override like this is not creatable
     through the API (the effective-chart 409 refuses it) but may exist in a
     tenant that predates the constraint, so the data layer must accept it —
-    and `_sync_match_query` resolves it deterministically to the entity's own.
+    and `services/gl_account_sync._preference` resolves it deterministically to the entity's own.
     """
     _default_id, sub_id = entities
     org_id = realdb.info(TENANT).org_id

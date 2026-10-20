@@ -50,6 +50,10 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
+              # The QuickBooks sandbox replay (tests/test_qbo_sandbox_replay.py)
+              # runs the fake's query parser over its recorded company.
+              - 'tools/fake-erp/qbo_sandbox.py'
+              - 'tools/fake-erp/fixtures/**'
               - 'pyproject.toml'
               - '.github/workflows/ci.yml'
             frontend:

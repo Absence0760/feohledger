@@ -3,8 +3,10 @@ import {
 	GL_ACCOUNT_TYPE_LABEL_KEYS,
 	GL_ACCOUNT_TYPES,
 	canEditGlAccount,
+	erpCandidateLabel,
 	glAccountOptionLabel,
 	glAccountTypeLabelKey,
+	needsErpDecision,
 	type GlAccountOption,
 	type GlAccountScope
 } from './glAccount';
@@ -34,6 +36,16 @@ describe('glAccountOptionLabel', () => {
 		expect(
 			glAccountOptionLabel(option(), SINGLE, { withName: true, unknownEntity: UNKNOWN })
 		).toBe('6000 — Office Supplies');
+	});
+
+	it('prints a code that is also the name once', () => {
+		const path = 'Job Expenses:Job Materials';
+		expect(
+			glAccountOptionLabel(option({ code: path, name: path }), SINGLE, {
+				withName: true,
+				unknownEntity: UNKNOWN
+			})
+		).toBe(path);
 	});
 
 	it('leaves a shared account bare — NULL entity_id means every chart', () => {
@@ -114,5 +126,35 @@ describe('canEditGlAccount — the PATCH follows the create rule, not the read r
 		// A shared row is in this entity's chart but belongs to every entity.
 		expect(canEditGlAccount({ entity_id: null }, 'ent-uk')).toBe(false);
 		expect(canEditGlAccount({ entity_id: 'ent-us' }, 'ent-uk')).toBe(false);
+	});
+});
+
+describe('needsErpDecision — an unlinked row the sync would not guess about (§284)', () => {
+	const candidates = {
+		reason: 'ambiguous_legacy',
+		accounts: [
+			{ erp_account_id: '39', code: 'Truck:Depreciation', name: 'Truck:Depreciation' },
+			{ erp_account_id: '40', code: 'Depreciation', name: 'Depreciation' }
+		]
+	};
+
+	it('is true only for an unlinked row with candidates', () => {
+		expect(needsErpDecision({ erp_account_id: null, erp_link_candidates: candidates })).toBe(true);
+		expect(needsErpDecision({ erp_account_id: '40', erp_link_candidates: candidates })).toBe(
+			false
+		);
+		expect(needsErpDecision({ erp_account_id: null, erp_link_candidates: null })).toBe(false);
+		// A response from before the field existed.
+		expect(needsErpDecision({ erp_account_id: null })).toBe(false);
+		expect(
+			needsErpDecision({ erp_account_id: null, erp_link_candidates: { reason: null, accounts: [] } })
+		).toBe(false);
+	});
+
+	it('labels a candidate by its code, adding the name only when it differs', () => {
+		expect(erpCandidateLabel(candidates.accounts[0])).toBe('Truck:Depreciation');
+		expect(erpCandidateLabel({ erp_account_id: '7', code: '6100', name: 'Office Supplies' })).toBe(
+			'6100 — Office Supplies'
+		);
 	});
 });

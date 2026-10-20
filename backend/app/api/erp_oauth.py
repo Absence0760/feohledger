@@ -48,6 +48,7 @@ from app.models.user import User
 from app.services import erp_oauth, provider_credentials
 from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_link_realm import connection_realm
 from app.tenant import get_tenant, lock_organization
 from app.utils.tenant_urls import tenant_base_url
 
@@ -493,10 +494,19 @@ async def _link(
     Keeps this provider's own saved fields (environment, bring-your-own app);
     a different ERP's configuration AND its sealed secrets are dropped rather
     than left under the new type.
+
+    **A consent to a different company is audited on its own**
+    (``organization.erp_realm_changed``): ERP ids are per company, so every
+    vendor and GL link made under the old one stops resolving at the push from
+    this moment (``services/erp_link_realm``) until a sync re-judges it. The
+    row names both realms (ERP company ids, not people). A reconnect after a
+    disconnect has no previous company left to compare, so it is not flagged —
+    the per-row realm, not this row, is what keeps those links from posting.
     """
     current = dict(org.settings or {})
     prior_erp = current.get("erp")
     prior_erp = dict(prior_erp) if isinstance(prior_erp, dict) else {}
+    previous_realm = connection_realm(prior_erp)
     same_type = prior_erp.get("type") == spec.key
     erp = {k: v for k, v in prior_erp.items() if k != "oauth"} if same_type else {}
     erp["type"] = spec.key
@@ -509,6 +519,7 @@ async def _link(
         client_source=source,
     )
     erp["oauth"] = block
+    new_realm = connection_realm(erp)
     current["erp"] = erp
     org.settings = current
     flag_modified(org, "settings")
@@ -529,8 +540,21 @@ async def _link(
                 "client_source": source,
                 "replaced_type": prior_erp.get("type") if not same_type else None,
                 "changed": changed,
+                "realm": new_realm,
+                "previous_realm": previous_realm,
             },
         )
+        if previous_realm is not None and previous_realm != new_realm:
+            await _record_or_503(
+                org.id,
+                user.id,
+                "organization.erp_realm_changed",
+                {
+                    "provider": spec.key,
+                    "previous_realm": previous_realm,
+                    "realm": new_realm,
+                },
+            )
 
     await provider_credentials.update_secrets(
         db, org.id, "erp", sealed, to_clear, before_write=_audit_first

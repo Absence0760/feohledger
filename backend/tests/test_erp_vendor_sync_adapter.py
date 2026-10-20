@@ -14,12 +14,19 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # Import the adapter modules so their @register_adapter decorators
 # populate the dispatcher registry.
 import app.services.erp_adapters.dynamics_365_bc  # noqa: F401, E402
 import app.services.erp_adapters.merge_dev  # noqa: F401, E402
 import app.services.erp_adapters.mock_adapter  # noqa: F401, E402
 import app.services.erp_adapters.netsuite  # noqa: F401, E402
+from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
+    ErpListingIncomplete,
+    ListingGap,
+)
 
 
 def _run(coro):
@@ -166,6 +173,31 @@ def test_merge_dev_list_vendors_handles_missing_optional_fields():
     assert v.payment_terms is None
 
 
+def test_merge_dev_skips_a_vendor_with_no_merge_id_never_keys_it_otherwise():
+    """The bill posts ``contact`` = the Merge id. A ``remote_id`` is the
+    underlying ERP's key, which Merge refuses there, and a name keyed two
+    same-named vendors to one id, each relinking one row past the sync's
+    ambiguous-name guard (§284). Neither is ever an ``erp_vendor_id``."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "merge-vendor-1", "name": "Acme"},
+            {"remote_id": "qbo-57", "name": "Acme"},  # no Merge id
+            {"name": "Acme"},  # no id at all
+            {"id": "", "remote_id": "qbo-58", "name": "Beta"},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        vendors = _run(adapter.list_vendors())
+
+    assert [(v.erp_vendor_id, v.name) for v in vendors] == [("merge-vendor-1", "Acme")]
+
+
 def test_merge_dev_list_vendors_follows_pagination_cursor():
     """A real Merge response splits big vendor lists across pages joined
     by a `next` cursor — same contract as `list_pos`."""
@@ -187,22 +219,29 @@ def test_merge_dev_list_vendors_follows_pagination_cursor():
     assert [v.erp_vendor_id for v in vendors] == ["v-1", "v-2"]
 
 
-def test_merge_dev_list_vendors_returns_empty_on_http_error():
-    """Adapter degrades gracefully — the sync endpoint shows "0 new
-    vendors" instead of bubbling a 502 to the operator clicking the
-    button."""
+def test_merge_dev_list_vendors_raises_on_http_error_after_a_good_page():
+    """An empty or partial vendor list is not the ERP's vendor list: the sync
+    would unlink every vendor the unread pages held (decisions §284). So a
+    failed page raises, and the endpoint answers 502 without syncing."""
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    page1 = {"results": [{"id": "v-1", "name": "Acme"}], "next": "c2"}
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_make_mock_response(500, {"detail": "boom"}))
-        vendors = _run(adapter.list_vendors())
-    assert vendors == []
+        client.get = AsyncMock(
+            side_effect=[
+                _make_mock_response(200, page1),
+                _make_mock_response(500, {"detail": "boom"}),
+            ]
+        )
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_vendors())
+    assert exc.value.gap is ListingGap.fetch_failed
+    assert "boom" not in str(exc.value)
 
 
-def test_merge_dev_list_vendors_returns_empty_on_network_error():
-    """Total network failure must not raise out of the adapter."""
+def test_merge_dev_list_vendors_raises_on_network_error():
     import httpx
 
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
@@ -211,8 +250,8 @@ def test_merge_dev_list_vendors_returns_empty_on_network_error():
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
-        vendors = _run(adapter.list_vendors())
-    assert vendors == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(adapter.list_vendors())
 
 
 # ---------- NetSuite adapter ----------------------------------------------
@@ -259,9 +298,13 @@ def test_netsuite_list_vendors_maps_suiteql_rows_into_vendor_payloads():
         client.post = AsyncMock(return_value=_make_mock_response(200, body))
         vendors = _run(adapter.list_vendors())
 
-    assert [(v.erp_vendor_id, v.name, v.code) for v in vendors] == [
-        ("25", "Acme Supplies Ltd", "ACME-01"),
-        ("26", "Jane Contractor", "Jane Contractor"),
+    # An inactive vendor is emitted as such (§284): the sync never creates a
+    # payee for it, but a vendor linked to it is not mistaken for a link to a
+    # deleted record.
+    assert [(v.erp_vendor_id, v.name, v.code, v.active) for v in vendors] == [
+        ("25", "Acme Supplies Ltd", "ACME-01", True),
+        ("26", "Jane Contractor", "Jane Contractor", True),
+        ("27", "Old Co", "Old Co", False),
     ]
     assert vendors[0].email == "a@vendor.test"
     assert vendors[0].phone == "555-0100"
@@ -279,27 +322,46 @@ def test_netsuite_list_vendors_maps_suiteql_rows_into_vendor_payloads():
     assert "FROM vendor" in query and "ORDER BY id" in query
 
 
-def test_netsuite_list_vendors_follows_has_more_and_caps_at_1000_rows():
+def _netsuite_vendor_pages(count: int, *, last_has_more: bool) -> list[MagicMock]:
+    def page(n: int) -> MagicMock:
+        rows = [{"id": f"{n}-{i}", "entityid": f"V{n}-{i}"} for i in range(100)]
+        more = n < count - 1 or last_has_more
+        return _make_mock_response(200, {"items": rows, "hasMore": more})
+
+    return [page(n) for n in range(count)]
+
+
+def test_netsuite_list_vendors_follows_has_more_to_the_end():
+    """Past the PO list's 1000-row bound: a vendor listing reads them all."""
     from app.services.erp_adapters.netsuite import NetSuiteAdapter
 
     adapter = NetSuiteAdapter(_netsuite_config())
-
-    def page(n: int) -> MagicMock:
-        rows = [{"id": f"{n}-{i}", "entityid": f"V{n}-{i}"} for i in range(100)]
-        return _make_mock_response(200, {"items": rows, "hasMore": True})
-
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
-        client.post = AsyncMock(side_effect=[page(n) for n in range(12)])
+        client.post = AsyncMock(side_effect=_netsuite_vendor_pages(12, last_has_more=False))
         vendors = _run(adapter.list_vendors())
 
-    assert len(vendors) == 1000
-    assert client.post.await_count == 10
+    assert len(vendors) == 1200
     urls = [c.args[0] for c in client.post.await_args_list]
-    assert "offset=0" in urls[0] and "offset=100" in urls[1] and "offset=900" in urls[9]
+    assert "offset=0" in urls[0] and "offset=100" in urls[1] and "offset=1100" in urls[11]
 
 
-def test_netsuite_list_vendors_returns_what_it_read_on_http_error():
+def test_netsuite_list_vendors_past_the_sync_bound_raises_never_truncates():
+    from app.services.erp_adapters.netsuite import NetSuiteAdapter
+
+    pages = SYNC_LISTING_MAX_ROWS // 100
+    adapter = NetSuiteAdapter(_netsuite_config())
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.post = AsyncMock(side_effect=_netsuite_vendor_pages(pages, last_has_more=True))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_vendors())
+    assert exc.value.gap is ListingGap.truncated
+    assert client.post.await_count == pages
+
+
+def test_netsuite_list_vendors_raises_on_any_failed_page():
+    """It used to return the first page as if it were every vendor."""
     from app.services.erp_adapters.netsuite import NetSuiteAdapter
 
     adapter = NetSuiteAdapter(_netsuite_config())
@@ -307,12 +369,15 @@ def test_netsuite_list_vendors_returns_what_it_read_on_http_error():
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_make_mock_response(401, {"detail": "no"}))
-        assert _run(adapter.list_vendors()) == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(adapter.list_vendors())
         client.post = AsyncMock(side_effect=[first, _make_mock_response(500, {})])
-        assert [v.erp_vendor_id for v in _run(adapter.list_vendors())] == ["1"]
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_vendors())
+    assert exc.value.gap is ListingGap.fetch_failed
 
 
-def test_netsuite_list_vendors_returns_empty_on_network_error():
+def test_netsuite_list_vendors_raises_on_network_error():
     import httpx
 
     from app.services.erp_adapters.netsuite import NetSuiteAdapter
@@ -321,8 +386,8 @@ def test_netsuite_list_vendors_returns_empty_on_network_error():
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
         client.post = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
-        vendors = _run(adapter.list_vendors())
-    assert vendors == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(adapter.list_vendors())
 
 
 # ---------- Dynamics 365 Business Central adapter -------------------------
@@ -379,6 +444,32 @@ def test_d365_list_vendors_maps_response_into_vendor_payloads():
     assert v.payment_terms == "NET30"
 
 
+def test_d365_skips_a_vendor_with_no_id_never_keys_it_by_number_or_name():
+    """The bill posts ``vendorId`` = the vendor's GUID ``id``. The vendor No.
+    would be posted as a GUID and refused, and a name keyed two same-named
+    vendors to one id past the sync's ambiguous-name guard (§284)."""
+    from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
+
+    adapter = BusinessCentralAdapter(_d365_config())
+    body = {
+        "value": [
+            {"id": "d365-vendor-1", "number": "V0001", "displayName": "Acme"},
+            {"number": "V0002", "displayName": "Acme"},  # no id
+            {"displayName": "Acme"},  # neither id nor No.
+            {"id": None, "number": "V0003", "displayName": "Beta"},
+        ]
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_D365_TOKEN_RESPONSE)
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        vendors = _run(adapter.list_vendors())
+
+    assert [(v.erp_vendor_id, v.code, v.name) for v in vendors] == [
+        ("d365-vendor-1", "V0001", "Acme")
+    ]
+
+
 def test_d365_list_vendors_follows_odata_next_link():
     from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
 
@@ -402,7 +493,7 @@ def test_d365_list_vendors_follows_odata_next_link():
     assert second_url == "https://api.businesscentral.dynamics.com/v2.0/next-page"
 
 
-def test_d365_list_vendors_returns_empty_on_http_error():
+def test_d365_list_vendors_raises_on_http_error():
     from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
 
     adapter = BusinessCentralAdapter(_d365_config())
@@ -410,13 +501,14 @@ def test_d365_list_vendors_returns_empty_on_http_error():
         client = client_cls.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_D365_TOKEN_RESPONSE)
         client.get = AsyncMock(return_value=_make_mock_response(500, {"detail": "boom"}))
-        vendors = _run(adapter.list_vendors())
-    assert vendors == []
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_vendors())
+    assert exc.value.gap is ListingGap.fetch_failed
 
 
-def test_d365_list_vendors_returns_empty_on_token_failure():
-    """A failed OAuth token exchange must degrade to an empty list, not
-    propagate — `_get_token()` calls `raise_for_status()` internally."""
+def test_d365_list_vendors_raises_on_token_failure():
+    """A failed OAuth token exchange is a failure, not "no vendors": it
+    propagates, and the endpoint answers 502 without syncing."""
     from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
 
     adapter = BusinessCentralAdapter(_d365_config())
@@ -425,11 +517,11 @@ def test_d365_list_vendors_returns_empty_on_token_failure():
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=bad_token_resp)
-        vendors = _run(adapter.list_vendors())
-    assert vendors == []
+        with pytest.raises(RuntimeError):
+            _run(adapter.list_vendors())
 
 
-def test_d365_list_vendors_returns_empty_on_network_error():
+def test_d365_list_vendors_raises_on_network_error():
     import httpx
 
     from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
@@ -439,8 +531,8 @@ def test_d365_list_vendors_returns_empty_on_network_error():
         client = client_cls.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_D365_TOKEN_RESPONSE)
         client.get = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
-        vendors = _run(adapter.list_vendors())
-    assert vendors == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(adapter.list_vendors())
 
 
 # ---------- API endpoint wiring --------------------------------------------

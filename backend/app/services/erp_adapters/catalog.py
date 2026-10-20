@@ -29,6 +29,9 @@ from typing import Any
 #: The OAuth consent metadata block. Its only writer is ``services/erp_oauth``;
 #: its tokens are sealed in ``provider_credentials``, not stored here.
 OAUTH_KEY = "oauth"
+#: ``settings.erp`` key: the ERP company every pre-0115 link is assumed to
+#: belong to (``services/erp_link_realm``). Written only by migration 0115.
+LEGACY_REALM_KEY = "legacy_link_realm"
 #: Token keys that must never sit in the JSONB OAuth block.
 _OAUTH_TOKEN_KEYS = frozenset({"access_token", "refresh_token"})
 
@@ -453,14 +456,24 @@ def merge_erp_update(stored: Any, incoming: dict) -> dict:
 
     * Non-secret keys come from ``incoming``. For the same ERP, a stored key
       the form does not render (and so never sends) is kept when omitted.
+    * ``legacy_link_realm`` (``services/erp_link_realm``) is never taken from
+      ``incoming``; the stored value is kept for the same ERP only.
     * ``oauth`` is never taken from ``incoming``; the stored block is kept, even
       when the ERP is cleared or switched — only the OAuth disconnect removes it,
       after revoking at the provider.
     """
     stored = stored if isinstance(stored, dict) else {}
     merged: dict[str, Any] = {
-        key: value for key, value in incoming.items() if key != OAUTH_KEY and key not in SECRET_KEYS
+        key: value
+        for key, value in incoming.items()
+        if key not in (OAUTH_KEY, LEGACY_REALM_KEY) and key not in SECRET_KEYS
     }
+    if same_erp(stored, incoming) and LEGACY_REALM_KEY in stored:
+        # Which company the pre-0115 ERP links belong to (services/
+        # erp_link_realm): written by that migration only. Kept for the same
+        # ERP, never taken from a save — and dropped with the block when the
+        # ERP changes, since the old links belong to neither.
+        merged[LEGACY_REALM_KEY] = stored[LEGACY_REALM_KEY]
     if same_erp(stored, incoming):
         # Keys the form never renders (an API-set Blackbaud
         # `transaction_code_values`, say) survive a save that omits them. A
@@ -469,7 +482,12 @@ def merge_erp_update(stored: Any, incoming: dict) -> dict:
         entry = provider(catalog_key(incoming))
         rendered = {f["name"] for f in entry["fields"]} if entry else set()
         for key, value in stored.items():
-            if key in incoming or key in rendered or key in SECRET_KEYS or key == OAUTH_KEY:
+            if (
+                key in incoming
+                or key in rendered
+                or key in SECRET_KEYS
+                or key in (OAUTH_KEY, LEGACY_REALM_KEY)
+            ):
                 continue
             merged[key] = value
     if OAUTH_KEY in stored:

@@ -618,6 +618,7 @@ async def test_test_erp_reports_an_unopenable_store_and_never_falls_back(realdb,
     assert resp.status_code == 200, resp.text
     assert resp.json() == {
         "success": False,
+        "code": "credentials_unavailable",
         "message": provider_credentials.CREDENTIALS_UNAVAILABLE_DETAIL,
     }
 

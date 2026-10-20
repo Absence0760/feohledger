@@ -1,0 +1,2896 @@
+{
+ "_about": [
+  "The QuickBooks Online sample company FeohLedger was tested against live on 2026-10-19 (Intuit public demo data), as tools/fake-erp/qbo_sandbox.py serves it.",
+  "accounts/vendors: QBO JSON rebuilt from our DB export after the live sync. Name is the leaf of FullyQualifiedName; ParentRef follows the path. Depreciation (40) and Maintenance and Repair (72) were refused live so are not in the export and were added by hand, as were AcctNum 6010/6020, Active=false on Bank Charges (8) and Squeaky Kleen Car Wash (57) with the \" (deleted)\" QuickBooks appends to an inactive record's names (seen live 2026-10-20: without it the sync unlinked both instead of retiring them), and Northwind's AcctNum. AccountType, CompanyName, TermRef ids and the realm are reconstructed, not recorded (the adapter reads none of them).",
+  "legacy_chart: our chart as the pre-section-284 adapter left it (code = bare Name; same-named accounts merged into one row, linked to the id the live sync found). legacy_vendors: our vendors before the live sync.",
+  "live_sync: the response bodies of POST /api/gl-accounts/sync-erp and /api/vendors/sync-erp on that chart, live. Never edit these to make a test pass."
+ ],
+ "realm": "fake-sandbox-realm",
+ "company_info": {
+  "Id": "1",
+  "CompanyName": "Sandbox Company_US_1",
+  "Country": "US"
+ },
+ "preferences": {
+  "CurrencyPrefs": {
+   "HomeCurrency": {
+    "value": "USD"
+   },
+   "MultiCurrencyEnabled": false
+  }
+ },
+ "accounts": [
+  {
+   "Id": "1",
+   "Name": "Services",
+   "SubAccount": false,
+   "FullyQualifiedName": "Services",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "2",
+   "Name": "Retained Earnings",
+   "SubAccount": false,
+   "FullyQualifiedName": "Retained Earnings",
+   "Active": true,
+   "Classification": "Equity",
+   "AccountType": "Equity",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "3",
+   "Name": "Prepaid Expenses",
+   "SubAccount": false,
+   "FullyQualifiedName": "Prepaid Expenses",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Other Current Asset",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "4",
+   "Name": "Undeposited Funds",
+   "SubAccount": false,
+   "FullyQualifiedName": "Undeposited Funds",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Other Current Asset",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "5",
+   "Name": "Fees Billed",
+   "SubAccount": false,
+   "FullyQualifiedName": "Fees Billed",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "6",
+   "Name": "Refunds-Allowances",
+   "SubAccount": false,
+   "FullyQualifiedName": "Refunds-Allowances",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "7",
+   "Name": "Advertising",
+   "SubAccount": false,
+   "FullyQualifiedName": "Advertising",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "AcctNum": "6010"
+  },
+  {
+   "Id": "8",
+   "Name": "Bank Charges (deleted)",
+   "SubAccount": false,
+   "FullyQualifiedName": "Bank Charges (deleted)",
+   "Active": false,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "9",
+   "Name": "Commissions & fees",
+   "SubAccount": false,
+   "FullyQualifiedName": "Commissions & fees",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "10",
+   "Name": "Dues & Subscriptions",
+   "SubAccount": false,
+   "FullyQualifiedName": "Dues & Subscriptions",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "11",
+   "Name": "Insurance",
+   "SubAccount": false,
+   "FullyQualifiedName": "Insurance",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "12",
+   "Name": "Legal & Professional Fees",
+   "SubAccount": false,
+   "FullyQualifiedName": "Legal & Professional Fees",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "13",
+   "Name": "Meals and Entertainment",
+   "SubAccount": false,
+   "FullyQualifiedName": "Meals and Entertainment",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "14",
+   "Name": "Miscellaneous",
+   "SubAccount": false,
+   "FullyQualifiedName": "Miscellaneous",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "15",
+   "Name": "Office Expenses",
+   "SubAccount": false,
+   "FullyQualifiedName": "Office Expenses",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "AcctNum": "6020"
+  },
+  {
+   "Id": "16",
+   "Name": "Promotional",
+   "SubAccount": false,
+   "FullyQualifiedName": "Promotional",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "17",
+   "Name": "Rent or Lease",
+   "SubAccount": false,
+   "FullyQualifiedName": "Rent or Lease",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "19",
+   "Name": "Stationery & Printing",
+   "SubAccount": false,
+   "FullyQualifiedName": "Stationery & Printing",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "20",
+   "Name": "Supplies",
+   "SubAccount": false,
+   "FullyQualifiedName": "Supplies",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "21",
+   "Name": "Taxes & Licenses",
+   "SubAccount": false,
+   "FullyQualifiedName": "Taxes & Licenses",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "22",
+   "Name": "Travel",
+   "SubAccount": false,
+   "FullyQualifiedName": "Travel",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "23",
+   "Name": "Travel Meals",
+   "SubAccount": false,
+   "FullyQualifiedName": "Travel Meals",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "24",
+   "Name": "Utilities",
+   "SubAccount": false,
+   "FullyQualifiedName": "Utilities",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "25",
+   "Name": "Interest Earned",
+   "SubAccount": false,
+   "FullyQualifiedName": "Interest Earned",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Other Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "26",
+   "Name": "Other Portfolio Income",
+   "SubAccount": false,
+   "FullyQualifiedName": "Other Portfolio Income",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Other Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "27",
+   "Name": "Penalties & Settlements",
+   "SubAccount": false,
+   "FullyQualifiedName": "Penalties & Settlements",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Other Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "28",
+   "Name": "Disposal Fees",
+   "SubAccount": false,
+   "FullyQualifiedName": "Disposal Fees",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "29",
+   "Name": "Equipment Rental",
+   "SubAccount": false,
+   "FullyQualifiedName": "Equipment Rental",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "30",
+   "Name": "Uncategorized Income",
+   "SubAccount": false,
+   "FullyQualifiedName": "Uncategorized Income",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "31",
+   "Name": "Uncategorized Expense",
+   "SubAccount": false,
+   "FullyQualifiedName": "Uncategorized Expense",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "32",
+   "Name": "Uncategorized Asset",
+   "SubAccount": false,
+   "FullyQualifiedName": "Uncategorized Asset",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Other Current Asset",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "33",
+   "Name": "Accounts Payable (A/P)",
+   "SubAccount": false,
+   "FullyQualifiedName": "Accounts Payable (A/P)",
+   "Active": true,
+   "Classification": "Liability",
+   "AccountType": "Accounts Payable",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "34",
+   "Name": "Opening Balance Equity",
+   "SubAccount": false,
+   "FullyQualifiedName": "Opening Balance Equity",
+   "Active": true,
+   "Classification": "Equity",
+   "AccountType": "Equity",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "35",
+   "Name": "Checking",
+   "SubAccount": false,
+   "FullyQualifiedName": "Checking",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Bank",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "36",
+   "Name": "Savings",
+   "SubAccount": false,
+   "FullyQualifiedName": "Savings",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Bank",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "37",
+   "Name": "Truck",
+   "SubAccount": false,
+   "FullyQualifiedName": "Truck",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Fixed Asset",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "38",
+   "Name": "Original Cost",
+   "SubAccount": true,
+   "FullyQualifiedName": "Truck:Original Cost",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Fixed Asset",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "37"
+   }
+  },
+  {
+   "Id": "39",
+   "Name": "Depreciation",
+   "SubAccount": true,
+   "FullyQualifiedName": "Truck:Depreciation",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Fixed Asset",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "37"
+   }
+  },
+  {
+   "Id": "40",
+   "Name": "Depreciation",
+   "SubAccount": false,
+   "FullyQualifiedName": "Depreciation",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "41",
+   "Name": "Mastercard",
+   "SubAccount": false,
+   "FullyQualifiedName": "Mastercard",
+   "Active": true,
+   "Classification": "Liability",
+   "AccountType": "Credit Card",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "42",
+   "Name": "Visa",
+   "SubAccount": false,
+   "FullyQualifiedName": "Visa",
+   "Active": true,
+   "Classification": "Liability",
+   "AccountType": "Credit Card",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "43",
+   "Name": "Loan Payable",
+   "SubAccount": false,
+   "FullyQualifiedName": "Loan Payable",
+   "Active": true,
+   "Classification": "Liability",
+   "AccountType": "Other Current Liability",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "44",
+   "Name": "Notes Payable",
+   "SubAccount": false,
+   "FullyQualifiedName": "Notes Payable",
+   "Active": true,
+   "Classification": "Liability",
+   "AccountType": "Long Term Liability",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "45",
+   "Name": "Landscaping Services",
+   "SubAccount": false,
+   "FullyQualifiedName": "Landscaping Services",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "46",
+   "Name": "Job Materials",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Job Materials",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "45"
+   }
+  },
+  {
+   "Id": "47",
+   "Name": "Decks and Patios",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Job Materials:Decks and Patios",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "46"
+   }
+  },
+  {
+   "Id": "48",
+   "Name": "Fountains and Garden Lighting",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Job Materials:Fountains and Garden Lighting",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "46"
+   }
+  },
+  {
+   "Id": "49",
+   "Name": "Plants and Soil",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Job Materials:Plants and Soil",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "46"
+   }
+  },
+  {
+   "Id": "50",
+   "Name": "Sprinklers and Drip Systems",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Job Materials:Sprinklers and Drip Systems",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "46"
+   }
+  },
+  {
+   "Id": "51",
+   "Name": "Labor",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Labor",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "45"
+   }
+  },
+  {
+   "Id": "52",
+   "Name": "Installation",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Labor:Installation",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "51"
+   }
+  },
+  {
+   "Id": "53",
+   "Name": "Maintenance and Repair",
+   "SubAccount": true,
+   "FullyQualifiedName": "Landscaping Services:Labor:Maintenance and Repair",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "51"
+   }
+  },
+  {
+   "Id": "54",
+   "Name": "Pest Control Services",
+   "SubAccount": false,
+   "FullyQualifiedName": "Pest Control Services",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "55",
+   "Name": "Automobile",
+   "SubAccount": false,
+   "FullyQualifiedName": "Automobile",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "56",
+   "Name": "Fuel",
+   "SubAccount": true,
+   "FullyQualifiedName": "Automobile:Fuel",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "55"
+   }
+  },
+  {
+   "Id": "57",
+   "Name": "Workers Compensation",
+   "SubAccount": true,
+   "FullyQualifiedName": "Insurance:Workers Compensation",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "11"
+   }
+  },
+  {
+   "Id": "58",
+   "Name": "Job Expenses",
+   "SubAccount": false,
+   "FullyQualifiedName": "Job Expenses",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "59",
+   "Name": "Cost of Labor",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Cost of Labor",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "58"
+   }
+  },
+  {
+   "Id": "60",
+   "Name": "Installation",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Cost of Labor:Installation",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "59"
+   }
+  },
+  {
+   "Id": "61",
+   "Name": "Maintenance and Repairs",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Cost of Labor:Maintenance and Repairs",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "59"
+   }
+  },
+  {
+   "Id": "62",
+   "Name": "Equipment Rental",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Equipment Rental",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "58"
+   }
+  },
+  {
+   "Id": "63",
+   "Name": "Job Materials",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Job Materials",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "58"
+   }
+  },
+  {
+   "Id": "64",
+   "Name": "Decks and Patios",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Job Materials:Decks and Patios",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "63"
+   }
+  },
+  {
+   "Id": "65",
+   "Name": "Fountain and Garden Lighting",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Job Materials:Fountain and Garden Lighting",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "63"
+   }
+  },
+  {
+   "Id": "66",
+   "Name": "Plants and Soil",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Job Materials:Plants and Soil",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "63"
+   }
+  },
+  {
+   "Id": "67",
+   "Name": "Sprinklers and Drip Systems",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Job Materials:Sprinklers and Drip Systems",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "63"
+   }
+  },
+  {
+   "Id": "68",
+   "Name": "Permits",
+   "SubAccount": true,
+   "FullyQualifiedName": "Job Expenses:Permits",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "58"
+   }
+  },
+  {
+   "Id": "69",
+   "Name": "Accounting",
+   "SubAccount": true,
+   "FullyQualifiedName": "Legal & Professional Fees:Accounting",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "12"
+   }
+  },
+  {
+   "Id": "70",
+   "Name": "Bookkeeper",
+   "SubAccount": true,
+   "FullyQualifiedName": "Legal & Professional Fees:Bookkeeper",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "12"
+   }
+  },
+  {
+   "Id": "71",
+   "Name": "Lawyer",
+   "SubAccount": true,
+   "FullyQualifiedName": "Legal & Professional Fees:Lawyer",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "12"
+   }
+  },
+  {
+   "Id": "72",
+   "Name": "Maintenance and Repair",
+   "SubAccount": false,
+   "FullyQualifiedName": "Maintenance and Repair",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "73",
+   "Name": "Building Repairs",
+   "SubAccount": true,
+   "FullyQualifiedName": "Maintenance and Repair:Building Repairs",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "72"
+   }
+  },
+  {
+   "Id": "74",
+   "Name": "Computer Repairs",
+   "SubAccount": true,
+   "FullyQualifiedName": "Maintenance and Repair:Computer Repairs",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "72"
+   }
+  },
+  {
+   "Id": "75",
+   "Name": "Equipment Repairs",
+   "SubAccount": true,
+   "FullyQualifiedName": "Maintenance and Repair:Equipment Repairs",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "72"
+   }
+  },
+  {
+   "Id": "76",
+   "Name": "Gas and Electric",
+   "SubAccount": true,
+   "FullyQualifiedName": "Utilities:Gas and Electric",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "24"
+   }
+  },
+  {
+   "Id": "77",
+   "Name": "Telephone",
+   "SubAccount": true,
+   "FullyQualifiedName": "Utilities:Telephone",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "24"
+   }
+  },
+  {
+   "Id": "78",
+   "Name": "Purchases",
+   "SubAccount": false,
+   "FullyQualifiedName": "Purchases",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "79",
+   "Name": "Sales of Product Income",
+   "SubAccount": false,
+   "FullyQualifiedName": "Sales of Product Income",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "80",
+   "Name": "Cost of Goods Sold",
+   "SubAccount": false,
+   "FullyQualifiedName": "Cost of Goods Sold",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Cost of Goods Sold",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "81",
+   "Name": "Inventory Asset",
+   "SubAccount": false,
+   "FullyQualifiedName": "Inventory Asset",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Other Current Asset",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "82",
+   "Name": "Design income",
+   "SubAccount": false,
+   "FullyQualifiedName": "Design income",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "83",
+   "Name": "Other Income",
+   "SubAccount": false,
+   "FullyQualifiedName": "Other Income",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "84",
+   "Name": "Accounts Receivable (A/R)",
+   "SubAccount": false,
+   "FullyQualifiedName": "Accounts Receivable (A/R)",
+   "Active": true,
+   "Classification": "Asset",
+   "AccountType": "Accounts Receivable",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "85",
+   "Name": "Billable Expense Income",
+   "SubAccount": false,
+   "FullyQualifiedName": "Billable Expense Income",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "86",
+   "Name": "Discounts given",
+   "SubAccount": false,
+   "FullyQualifiedName": "Discounts given",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "87",
+   "Name": "Unapplied Cash Payment Income",
+   "SubAccount": false,
+   "FullyQualifiedName": "Unapplied Cash Payment Income",
+   "Active": true,
+   "Classification": "Revenue",
+   "AccountType": "Income",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "88",
+   "Name": "Unapplied Cash Bill Payment Expense",
+   "SubAccount": false,
+   "FullyQualifiedName": "Unapplied Cash Bill Payment Expense",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "89",
+   "Name": "Arizona Dept. of Revenue Payable",
+   "SubAccount": false,
+   "FullyQualifiedName": "Arizona Dept. of Revenue Payable",
+   "Active": true,
+   "Classification": "Liability",
+   "AccountType": "Other Current Liability",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "90",
+   "Name": "Board of Equalization Payable",
+   "SubAccount": false,
+   "FullyQualifiedName": "Board of Equalization Payable",
+   "Active": true,
+   "Classification": "Liability",
+   "AccountType": "Other Current Liability",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "1150040000",
+   "Name": "Software",
+   "SubAccount": false,
+   "FullyQualifiedName": "Software",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "1150040001",
+   "Name": "Software",
+   "SubAccount": true,
+   "FullyQualifiedName": "Office Expenses:Software",
+   "Active": true,
+   "Classification": "Expense",
+   "AccountType": "Expense",
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "ParentRef": {
+    "value": "15"
+   }
+  }
+ ],
+ "vendors": [
+  {
+   "Id": "30",
+   "DisplayName": "Books by Bessie",
+   "PrintOnCheckName": "Books by Bessie",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Books by Bessie"
+  },
+  {
+   "Id": "31",
+   "DisplayName": "Brosnahan Insurance Agency",
+   "PrintOnCheckName": "Brosnahan Insurance Agency",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Brosnahan Insurance Agency"
+  },
+  {
+   "Id": "32",
+   "DisplayName": "Cal Telephone",
+   "PrintOnCheckName": "Cal Telephone",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Cal Telephone",
+   "TermRef": {
+    "value": "1",
+    "name": "Due on receipt"
+   }
+  },
+  {
+   "Id": "33",
+   "DisplayName": "Chin's Gas and Oil",
+   "PrintOnCheckName": "Chin's Gas and Oil",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Chin's Gas and Oil"
+  },
+  {
+   "Id": "34",
+   "DisplayName": "Cigna Health Care",
+   "PrintOnCheckName": "Cigna Health Care",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Cigna Health Care"
+  },
+  {
+   "Id": "35",
+   "DisplayName": "Computers by Jenni",
+   "PrintOnCheckName": "Computers by Jenni",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Computers by Jenni"
+  },
+  {
+   "Id": "36",
+   "DisplayName": "Diego's Road Warrior Bodyshop",
+   "PrintOnCheckName": "Diego's Road Warrior Bodyshop",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Diego's Road Warrior Bodyshop"
+  },
+  {
+   "Id": "37",
+   "DisplayName": "EDD",
+   "PrintOnCheckName": "EDD",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "EDD"
+  },
+  {
+   "Id": "38",
+   "DisplayName": "Ellis Equipment Rental",
+   "PrintOnCheckName": "Ellis Equipment Rental",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Ellis Equipment Rental"
+  },
+  {
+   "Id": "39",
+   "DisplayName": "Fidelity",
+   "PrintOnCheckName": "Fidelity",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Fidelity"
+  },
+  {
+   "Id": "40",
+   "DisplayName": "Hall Properties",
+   "PrintOnCheckName": "Hall Properties",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Hall Properties"
+  },
+  {
+   "Id": "41",
+   "DisplayName": "Hicks Hardware",
+   "PrintOnCheckName": "Hicks Hardware",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Hicks Hardware"
+  },
+  {
+   "Id": "42",
+   "DisplayName": "Lee Advertising",
+   "PrintOnCheckName": "Lee Advertising",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Lee Advertising"
+  },
+  {
+   "Id": "43",
+   "DisplayName": "Mahoney Mugs",
+   "PrintOnCheckName": "Mahoney Mugs",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Mahoney Mugs"
+  },
+  {
+   "Id": "44",
+   "DisplayName": "Met Life Dental",
+   "PrintOnCheckName": "Met Life Dental",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Met Life Dental"
+  },
+  {
+   "Id": "45",
+   "DisplayName": "National Eye Care",
+   "PrintOnCheckName": "National Eye Care",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "National Eye Care",
+   "TermRef": {
+    "value": "4",
+    "name": "Net 30"
+   }
+  },
+  {
+   "Id": "46",
+   "DisplayName": "Norton Lumber and Building Materials",
+   "PrintOnCheckName": "Norton Lumber and Building Materials",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Norton Lumber and Building Materials"
+  },
+  {
+   "Id": "47",
+   "DisplayName": "Pam Seitz",
+   "PrintOnCheckName": "Pam Seitz",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "TermRef": {
+    "value": "1",
+    "name": "Due on receipt"
+   }
+  },
+  {
+   "Id": "48",
+   "DisplayName": "PG&E",
+   "PrintOnCheckName": "PG&E",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "PG&E"
+  },
+  {
+   "Id": "49",
+   "DisplayName": "Robertson & Associates",
+   "PrintOnCheckName": "Robertson & Associates",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Robertson & Associates"
+  },
+  {
+   "Id": "50",
+   "DisplayName": "Tania's Nursery",
+   "PrintOnCheckName": "Tania's Nursery",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Tania's Nursery"
+  },
+  {
+   "Id": "51",
+   "DisplayName": "Tim Philip Masonry",
+   "PrintOnCheckName": "Tim Philip Masonry",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Tim Philip Masonry"
+  },
+  {
+   "Id": "52",
+   "DisplayName": "Tony Rondonuwu",
+   "PrintOnCheckName": "Tony Rondonuwu",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0"
+  },
+  {
+   "Id": "53",
+   "DisplayName": "United States Treasury",
+   "PrintOnCheckName": "United States Treasury",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "United States Treasury"
+  },
+  {
+   "Id": "56",
+   "DisplayName": "Bob's Burger Joint",
+   "PrintOnCheckName": "Bob's Burger Joint",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Bob's Burger Joint"
+  },
+  {
+   "Id": "57",
+   "DisplayName": "Squeaky Kleen Car Wash (deleted)",
+   "PrintOnCheckName": "Squeaky Kleen Car Wash",
+   "Active": false,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Squeaky Kleen Car Wash"
+  },
+  {
+   "Id": "58",
+   "DisplayName": "Brand New Supplies LLC",
+   "PrintOnCheckName": "Brand New Supplies LLC",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Brand New Supplies LLC"
+  },
+  {
+   "Id": "59",
+   "DisplayName": "Ærøskøbing Café & Søn ApS",
+   "PrintOnCheckName": "Ærøskøbing Café & Søn ApS",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Ærøskøbing Café & Søn ApS",
+   "TermRef": {
+    "value": "3",
+    "name": "Net 15"
+   }
+  },
+  {
+   "Id": "60",
+   "DisplayName": "Northwind Industrial Fasteners and Precision Components International Holdings Corporation",
+   "PrintOnCheckName": "Northwind Industrial Fasteners and Precision Components International Holdings Corporation",
+   "Active": true,
+   "Vendor1099": false,
+   "CurrencyRef": {
+    "value": "USD",
+    "name": "United States Dollar"
+   },
+   "domain": "QBO",
+   "sparse": false,
+   "SyncToken": "0",
+   "CompanyName": "Northwind Industrial Fasteners and Precision Components International Holdings Corporation",
+   "TermRef": {
+    "value": "5",
+    "name": "Net 60"
+   },
+   "AcctNum": "NW-778812"
+  }
+ ],
+ "legacy_chart": [
+  {
+   "code": "Services",
+   "name": "Services",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "1"
+  },
+  {
+   "code": "Retained Earnings",
+   "name": "Retained Earnings",
+   "account_type": "equity",
+   "parent_code": null,
+   "erp_account_id": "2"
+  },
+  {
+   "code": "Prepaid Expenses",
+   "name": "Prepaid Expenses",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "3"
+  },
+  {
+   "code": "Undeposited Funds",
+   "name": "Undeposited Funds",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "4"
+  },
+  {
+   "code": "Fees Billed",
+   "name": "Fees Billed",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "5"
+  },
+  {
+   "code": "Refunds-Allowances",
+   "name": "Refunds-Allowances",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "6"
+  },
+  {
+   "code": "Advertising",
+   "name": "Advertising",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "7"
+  },
+  {
+   "code": "Bank Charges",
+   "name": "Bank Charges",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "8"
+  },
+  {
+   "code": "Commissions & fees",
+   "name": "Commissions & fees",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "9"
+  },
+  {
+   "code": "Dues & Subscriptions",
+   "name": "Dues & Subscriptions",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "10"
+  },
+  {
+   "code": "Insurance",
+   "name": "Insurance",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "11"
+  },
+  {
+   "code": "Legal & Professional Fees",
+   "name": "Legal & Professional Fees",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "12"
+  },
+  {
+   "code": "Meals and Entertainment",
+   "name": "Meals and Entertainment",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "13"
+  },
+  {
+   "code": "Miscellaneous",
+   "name": "Miscellaneous",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "14"
+  },
+  {
+   "code": "Office Expenses",
+   "name": "Office Expenses",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "15"
+  },
+  {
+   "code": "Promotional",
+   "name": "Promotional",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "16"
+  },
+  {
+   "code": "Rent or Lease",
+   "name": "Rent or Lease",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "17"
+  },
+  {
+   "code": "Stationery & Printing",
+   "name": "Stationery & Printing",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "19"
+  },
+  {
+   "code": "Supplies",
+   "name": "Supplies",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "20"
+  },
+  {
+   "code": "Taxes & Licenses",
+   "name": "Taxes & Licenses",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "21"
+  },
+  {
+   "code": "Travel",
+   "name": "Travel",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "22"
+  },
+  {
+   "code": "Travel Meals",
+   "name": "Travel Meals",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "23"
+  },
+  {
+   "code": "Utilities",
+   "name": "Utilities",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "24"
+  },
+  {
+   "code": "Interest Earned",
+   "name": "Interest Earned",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "25"
+  },
+  {
+   "code": "Other Portfolio Income",
+   "name": "Other Portfolio Income",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "26"
+  },
+  {
+   "code": "Penalties & Settlements",
+   "name": "Penalties & Settlements",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "27"
+  },
+  {
+   "code": "Disposal Fees",
+   "name": "Disposal Fees",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "28"
+  },
+  {
+   "code": "Equipment Rental",
+   "name": "Equipment Rental",
+   "account_type": "expense",
+   "parent_code": "Job Expenses",
+   "erp_account_id": "29"
+  },
+  {
+   "code": "Uncategorized Income",
+   "name": "Uncategorized Income",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "30"
+  },
+  {
+   "code": "Uncategorized Expense",
+   "name": "Uncategorized Expense",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "31"
+  },
+  {
+   "code": "Uncategorized Asset",
+   "name": "Uncategorized Asset",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "32"
+  },
+  {
+   "code": "Accounts Payable (A/P)",
+   "name": "Accounts Payable (A/P)",
+   "account_type": "liability",
+   "parent_code": null,
+   "erp_account_id": "33"
+  },
+  {
+   "code": "Opening Balance Equity",
+   "name": "Opening Balance Equity",
+   "account_type": "equity",
+   "parent_code": null,
+   "erp_account_id": "34"
+  },
+  {
+   "code": "Checking",
+   "name": "Checking",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "35"
+  },
+  {
+   "code": "Savings",
+   "name": "Savings",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "36"
+  },
+  {
+   "code": "Truck",
+   "name": "Truck",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "37"
+  },
+  {
+   "code": "Original Cost",
+   "name": "Original Cost",
+   "account_type": "asset",
+   "parent_code": "Truck",
+   "erp_account_id": "38"
+  },
+  {
+   "code": "Mastercard",
+   "name": "Mastercard",
+   "account_type": "liability",
+   "parent_code": null,
+   "erp_account_id": "41"
+  },
+  {
+   "code": "Visa",
+   "name": "Visa",
+   "account_type": "liability",
+   "parent_code": null,
+   "erp_account_id": "42"
+  },
+  {
+   "code": "Loan Payable",
+   "name": "Loan Payable",
+   "account_type": "liability",
+   "parent_code": null,
+   "erp_account_id": "43"
+  },
+  {
+   "code": "Notes Payable",
+   "name": "Notes Payable",
+   "account_type": "liability",
+   "parent_code": null,
+   "erp_account_id": "44"
+  },
+  {
+   "code": "Landscaping Services",
+   "name": "Landscaping Services",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "45"
+  },
+  {
+   "code": "Fountains and Garden Lighting",
+   "name": "Fountains and Garden Lighting",
+   "account_type": "revenue",
+   "parent_code": "Job Materials",
+   "erp_account_id": "48"
+  },
+  {
+   "code": "Labor",
+   "name": "Labor",
+   "account_type": "revenue",
+   "parent_code": "Landscaping Services",
+   "erp_account_id": "51"
+  },
+  {
+   "code": "Pest Control Services",
+   "name": "Pest Control Services",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "54"
+  },
+  {
+   "code": "Automobile",
+   "name": "Automobile",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "55"
+  },
+  {
+   "code": "Fuel",
+   "name": "Fuel",
+   "account_type": "expense",
+   "parent_code": "Automobile",
+   "erp_account_id": "56"
+  },
+  {
+   "code": "Workers Compensation",
+   "name": "Workers Compensation",
+   "account_type": "expense",
+   "parent_code": "Insurance",
+   "erp_account_id": "57"
+  },
+  {
+   "code": "Job Expenses",
+   "name": "Job Expenses",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "58"
+  },
+  {
+   "code": "Cost of Labor",
+   "name": "Cost of Labor",
+   "account_type": "expense",
+   "parent_code": "Job Expenses",
+   "erp_account_id": "59"
+  },
+  {
+   "code": "Maintenance and Repairs",
+   "name": "Maintenance and Repairs",
+   "account_type": "expense",
+   "parent_code": "Cost of Labor",
+   "erp_account_id": "61"
+  },
+  {
+   "code": "Fountain and Garden Lighting",
+   "name": "Fountain and Garden Lighting",
+   "account_type": "expense",
+   "parent_code": "Job Materials",
+   "erp_account_id": "65"
+  },
+  {
+   "code": "Permits",
+   "name": "Permits",
+   "account_type": "expense",
+   "parent_code": "Job Expenses",
+   "erp_account_id": "68"
+  },
+  {
+   "code": "Accounting",
+   "name": "Accounting",
+   "account_type": "expense",
+   "parent_code": "Legal & Professional Fees",
+   "erp_account_id": "69"
+  },
+  {
+   "code": "Bookkeeper",
+   "name": "Bookkeeper",
+   "account_type": "expense",
+   "parent_code": "Legal & Professional Fees",
+   "erp_account_id": "70"
+  },
+  {
+   "code": "Lawyer",
+   "name": "Lawyer",
+   "account_type": "expense",
+   "parent_code": "Legal & Professional Fees",
+   "erp_account_id": "71"
+  },
+  {
+   "code": "Building Repairs",
+   "name": "Building Repairs",
+   "account_type": "expense",
+   "parent_code": "Maintenance and Repair",
+   "erp_account_id": "73"
+  },
+  {
+   "code": "Computer Repairs",
+   "name": "Computer Repairs",
+   "account_type": "expense",
+   "parent_code": "Maintenance and Repair",
+   "erp_account_id": "74"
+  },
+  {
+   "code": "Equipment Repairs",
+   "name": "Equipment Repairs",
+   "account_type": "expense",
+   "parent_code": "Maintenance and Repair",
+   "erp_account_id": "75"
+  },
+  {
+   "code": "Gas and Electric",
+   "name": "Gas and Electric",
+   "account_type": "expense",
+   "parent_code": "Utilities",
+   "erp_account_id": "76"
+  },
+  {
+   "code": "Telephone",
+   "name": "Telephone",
+   "account_type": "expense",
+   "parent_code": "Utilities",
+   "erp_account_id": "77"
+  },
+  {
+   "code": "Purchases",
+   "name": "Purchases",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "78"
+  },
+  {
+   "code": "Sales of Product Income",
+   "name": "Sales of Product Income",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "79"
+  },
+  {
+   "code": "Cost of Goods Sold",
+   "name": "Cost of Goods Sold",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "80"
+  },
+  {
+   "code": "Inventory Asset",
+   "name": "Inventory Asset",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "81"
+  },
+  {
+   "code": "Design income",
+   "name": "Design income",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "82"
+  },
+  {
+   "code": "Other Income",
+   "name": "Other Income",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "83"
+  },
+  {
+   "code": "Accounts Receivable (A/R)",
+   "name": "Accounts Receivable (A/R)",
+   "account_type": "asset",
+   "parent_code": null,
+   "erp_account_id": "84"
+  },
+  {
+   "code": "Billable Expense Income",
+   "name": "Billable Expense Income",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "85"
+  },
+  {
+   "code": "Discounts given",
+   "name": "Discounts given",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "86"
+  },
+  {
+   "code": "Unapplied Cash Payment Income",
+   "name": "Unapplied Cash Payment Income",
+   "account_type": "revenue",
+   "parent_code": null,
+   "erp_account_id": "87"
+  },
+  {
+   "code": "Unapplied Cash Bill Payment Expense",
+   "name": "Unapplied Cash Bill Payment Expense",
+   "account_type": "expense",
+   "parent_code": null,
+   "erp_account_id": "88"
+  },
+  {
+   "code": "Arizona Dept. of Revenue Payable",
+   "name": "Arizona Dept. of Revenue Payable",
+   "account_type": "liability",
+   "parent_code": null,
+   "erp_account_id": "89"
+  },
+  {
+   "code": "Board of Equalization Payable",
+   "name": "Board of Equalization Payable",
+   "account_type": "liability",
+   "parent_code": null,
+   "erp_account_id": "90"
+  },
+  {
+   "code": "Job Materials",
+   "name": "Job Materials",
+   "account_type": "revenue",
+   "parent_code": "Landscaping Services",
+   "erp_account_id": "46"
+  },
+  {
+   "code": "Decks and Patios",
+   "name": "Decks and Patios",
+   "account_type": "expense",
+   "parent_code": "Job Materials",
+   "erp_account_id": "64"
+  },
+  {
+   "code": "Plants and Soil",
+   "name": "Plants and Soil",
+   "account_type": "expense",
+   "parent_code": "Job Materials",
+   "erp_account_id": "66"
+  },
+  {
+   "code": "Sprinklers and Drip Systems",
+   "name": "Sprinklers and Drip Systems",
+   "account_type": "expense",
+   "parent_code": "Job Materials",
+   "erp_account_id": "67"
+  },
+  {
+   "code": "Installation",
+   "name": "Installation",
+   "account_type": "revenue",
+   "parent_code": "Labor",
+   "erp_account_id": "52"
+  },
+  {
+   "code": "Maintenance and Repair",
+   "name": "Maintenance and Repair",
+   "account_type": "revenue",
+   "parent_code": "Labor",
+   "erp_account_id": "53"
+  },
+  {
+   "code": "Depreciation",
+   "name": "Depreciation",
+   "account_type": "asset",
+   "parent_code": "Truck",
+   "erp_account_id": "39"
+  }
+ ],
+ "legacy_vendors": [
+  {
+   "erp_vendor_id": "30",
+   "name": "Books by Bessie",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "31",
+   "name": "Brosnahan Insurance Agency",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "32",
+   "name": "Cal Telephone",
+   "payment_terms": "Due on receipt"
+  },
+  {
+   "erp_vendor_id": "33",
+   "name": "Chin's Gas and Oil",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "34",
+   "name": "Cigna Health Care",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "35",
+   "name": "Computers by Jenni",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "36",
+   "name": "Diego's Road Warrior Bodyshop",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "37",
+   "name": "EDD",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "38",
+   "name": "Ellis Equipment Rental",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "39",
+   "name": "Fidelity",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "40",
+   "name": "Hall Properties",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "41",
+   "name": "Hicks Hardware",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "42",
+   "name": "Lee Advertising",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "43",
+   "name": "Mahoney Mugs",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "44",
+   "name": "Met Life Dental",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "45",
+   "name": "National Eye Care",
+   "payment_terms": "Net 30"
+  },
+  {
+   "erp_vendor_id": "46",
+   "name": "Norton Lumber and Building Materials",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "47",
+   "name": "Pam Seitz",
+   "payment_terms": "Due on receipt"
+  },
+  {
+   "erp_vendor_id": "48",
+   "name": "PG&E",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "49",
+   "name": "Robertson & Associates",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "50",
+   "name": "Tania's Nursery",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "51",
+   "name": "Tim Philip Masonry",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "52",
+   "name": "Tony Rondonuwu",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "53",
+   "name": "United States Treasury",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "56",
+   "name": "Bob's Burger Joint",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "57",
+   "name": "Squeaky Kleen Car Wash",
+   "payment_terms": null
+  },
+  {
+   "erp_vendor_id": "58",
+   "name": "Brand New Supplies LLC",
+   "payment_terms": null
+  }
+ ],
+ "live_sync": {
+  "gl_accounts": {
+   "created": 15,
+   "updated": 17,
+   "unchanged": 56,
+   "linked": 0,
+   "conflict_count": 2,
+   "conflicts": [
+    {
+     "code": "Depreciation",
+     "reason": "ambiguous_legacy",
+     "erp_account_ids": [
+      "39",
+      "40"
+     ]
+    },
+    {
+     "code": "Maintenance and Repair",
+     "reason": "ambiguous_legacy",
+     "erp_account_ids": [
+      "53",
+      "72"
+     ]
+    }
+   ],
+   "unlinked_count": 7,
+   "unlinked": [
+    "Decks and Patios",
+    "Depreciation",
+    "Installation",
+    "Job Materials",
+    "Maintenance and Repair",
+    "Plants and Soil",
+    "Sprinklers and Drip Systems"
+   ],
+   "code_drift_count": 19,
+   "code_drift": [
+    {
+     "code": "Advertising",
+     "erp_code": "6010"
+    },
+    {
+     "code": "Office Expenses",
+     "erp_code": "6020"
+    },
+    {
+     "code": "Fuel",
+     "erp_code": "Automobile:Fuel"
+    },
+    {
+     "code": "Workers Compensation",
+     "erp_code": "Insurance:Workers Compensation"
+    },
+    {
+     "code": "Cost of Labor",
+     "erp_code": "Job Expenses:Cost of Labor"
+    },
+    {
+     "code": "Maintenance and Repairs",
+     "erp_code": "Job Expenses:Cost of Labor:Maintenance and Repairs"
+    },
+    {
+     "code": "Fountain and Garden Lighting",
+     "erp_code": "Job Expenses:Job Materials:Fountain and Garden Lighting"
+    },
+    {
+     "code": "Permits",
+     "erp_code": "Job Expenses:Permits"
+    },
+    {
+     "code": "Fountains and Garden Lighting",
+     "erp_code": "Landscaping Services:Job Materials:Fountains and Garden Lighting"
+    },
+    {
+     "code": "Labor",
+     "erp_code": "Landscaping Services:Labor"
+    },
+    {
+     "code": "Accounting",
+     "erp_code": "Legal & Professional Fees:Accounting"
+    },
+    {
+     "code": "Bookkeeper",
+     "erp_code": "Legal & Professional Fees:Bookkeeper"
+    },
+    {
+     "code": "Lawyer",
+     "erp_code": "Legal & Professional Fees:Lawyer"
+    },
+    {
+     "code": "Building Repairs",
+     "erp_code": "Maintenance and Repair:Building Repairs"
+    },
+    {
+     "code": "Computer Repairs",
+     "erp_code": "Maintenance and Repair:Computer Repairs"
+    },
+    {
+     "code": "Equipment Repairs",
+     "erp_code": "Maintenance and Repair:Equipment Repairs"
+    },
+    {
+     "code": "Original Cost",
+     "erp_code": "Truck:Original Cost"
+    },
+    {
+     "code": "Gas and Electric",
+     "erp_code": "Utilities:Gas and Electric"
+    },
+    {
+     "code": "Telephone",
+     "erp_code": "Utilities:Telephone"
+    }
+   ],
+   "link_changes": [
+    {
+     "code": "Maintenance and Repair",
+     "from": "53",
+     "to": null
+    },
+    {
+     "code": "Depreciation",
+     "from": "39",
+     "to": null
+    },
+    {
+     "code": "Sprinklers and Drip Systems",
+     "from": "67",
+     "to": null
+    },
+    {
+     "code": "Decks and Patios",
+     "from": "64",
+     "to": null
+    },
+    {
+     "code": "Job Materials",
+     "from": "46",
+     "to": null
+    },
+    {
+     "code": "Plants and Soil",
+     "from": "66",
+     "to": null
+    },
+    {
+     "code": "Installation",
+     "from": "52",
+     "to": null
+    }
+   ]
+  },
+  "vendors": {
+   "created": 2,
+   "updated": 0,
+   "unchanged": 26,
+   "conflicts": []
+  }
+ }
+}

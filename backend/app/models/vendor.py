@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Index, Numeric, String, text
+from sqlalchemy import Date, DateTime, Index, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -55,6 +55,11 @@ class Vendor(Base, EntityMixin, TimestampMixin):
     # ERP sync
     erp_vendor_id: Mapped[str | None] = mapped_column(String(255))  # vendor ID in the external ERP
     erp_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The ERP company ``erp_vendor_id`` was linked under
+    #: (``services/erp_link_realm``) — QuickBooks numbers vendors per company,
+    #: so a link from another realm is never posted to. NULL: linked before
+    #: migration 0115.
+    erp_link_realm: Mapped[str | None] = mapped_column(Text)
 
     # 1099 / W-9 tax data. See backend/docs/tax-1099.md.
     # tax_classification: IRS entity type — individual, sole_proprietor,

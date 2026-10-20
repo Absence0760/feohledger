@@ -1,6 +1,7 @@
 """GL Account (Chart of Accounts) endpoints."""
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -15,14 +16,17 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.refusals import erp_pull_failure
 from app.database import get_control_db
 from app.models.entity import Entity
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
 from app.models.user import User
-from app.schemas.gl_account import GLAccountCreate, GLAccountUpdate
+from app.schemas.gl_account import GLAccountCreate, GLAccountErpLinkConfirm, GLAccountUpdate
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_link_realm import connection_realm
+from app.services.gl_account_sync import sync_chart_from_erp
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
     provider_config,
@@ -91,6 +95,22 @@ def _serialize(a: GLAccount) -> dict:
         # whether an edit reaches one subsidiary or all of them. Additive: the
         # picker callers read `id` / `code` / `name` and ignore it.
         "entity_id": str(a.entity_id) if a.entity_id else None,
+        # "Needs a decision": the ERP accounts the last sync found this
+        # unlinked row could mean and would not choose between
+        # (`services/gl_account_sync`, docs/decisions.md §284). A person picks
+        # one through `POST /{id}/erp-link`. The connection realm stays
+        # server-side.
+        "erp_link_candidates": (
+            {
+                "reason": a.erp_link_candidates.get("reason"),
+                "accounts": a.erp_link_candidates.get("accounts") or [],
+            }
+            if a.erp_link_candidates and a.erp_account_id is None
+            else None
+        ),
+        "erp_link_confirmed_at": (
+            a.erp_link_confirmed_at.isoformat() if a.erp_link_confirmed_at else None
+        ),
     }
 
 
@@ -98,38 +118,6 @@ def _duplicate_detail(code: str, entity_id: uuid.UUID | None) -> str:
     """409 body. Names the code (org configuration, not PII) and the chart."""
     where = "the selected entity's chart" if entity_id else "this tenant's chart of accounts"
     return f"GL account code '{code}' already exists in {where}."
-
-
-def _sync_match_query(code: str, org_id: uuid.UUID, entity_id: uuid.UUID | None):
-    """Find the account an ERP code should update, in the chart being synced.
-
-    Candidates are ``shared (NULL) ∪ the selected entity`` — the invoice-side
-    rule ``services/gl_recode._ActiveChart.is_valid_for`` already applies, so
-    the sync resolves a code exactly the way validation does. Matching on
-    ``(code, organization_id)`` alone (the pre-fix behaviour) meant a sync run
-    while subsidiary B was selected UPDATED subsidiary A's row instead of
-    creating B's, contradicting this route's own "same rule as manual create".
-
-    Ordering encodes which row wins when a code exists in both scopes:
-
-    * an entity is selected → **its own** row outranks the shared one (an
-      entity-specific account overrides the shared chart for that entity);
-    * consolidated → the **shared** row wins, because that is the chart a
-      consolidated sync creates into. Ties break oldest-first so the pick is
-      deterministic rather than whatever Postgres returns first.
-    """
-    is_shared = GLAccount.entity_id.is_(None)
-    query = apply_entity_scope(
-        select(GLAccount).where(
-            GLAccount.code == code,
-            GLAccount.organization_id == org_id,
-        ),
-        GLAccount,
-        entity_id,
-        include_shared=True,
-    )
-    preference = is_shared.desc() if entity_id is None else is_shared.asc()
-    return query.order_by(preference, GLAccount.created_at.asc(), GLAccount.id.asc())
 
 
 @router.get("")
@@ -297,7 +285,7 @@ async def _parent_chain_would_cycle(
     else:
         # Shared first, so that when a code exists in BOTH scopes the entity's
         # own row overwrites it in the mapping below — the same override
-        # precedence `_sync_match_query` applies.
+        # precedence `services/gl_account_sync._preference` applies.
         query = apply_entity_scope(
             query, GLAccount, account.entity_id, include_shared=True
         ).order_by(GLAccount.entity_id.is_(None).desc())
@@ -486,10 +474,13 @@ async def sync_gl_accounts_from_erp(
     New accounts land shared (NULL entity_id) in the consolidated view, or
     entity-specific when an entity is selected — same rule as manual create.
 
-    An ERP code is matched against the chart it is being synced INTO (shared ∪
-    the selected entity, via ``_sync_match_query``), not against every account
-    in the tenant: a sync run under subsidiary B used to update subsidiary A's
-    row rather than create B's, which is the opposite of the rule above.
+    An ERP account is matched against the chart it is being synced INTO (shared
+    ∪ the selected entity), by its ERP id first and then by code, and a code two
+    ERP accounts resolve to is refused rather than linked to either —
+    ``services/gl_account_sync`` holds the rules (docs/decisions.md §284). The
+    response reports what was refused (``conflicts``) and which existing rows
+    lost a link they could not be trusted with (``unlinked``), so the operator
+    can recode; the audit row carries the same summary.
     """
     try:
         erp_config = await provider_config(org, "erp", db=control_db)
@@ -519,55 +510,18 @@ async def sync_gl_accounts_from_erp(
     try:
         erp_accounts = await adapter.list_gl_accounts()
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"ERP request failed: {type(exc).__name__}",
-        ) from exc
+        raise erp_pull_failure(exc) from exc
 
-    created = 0
-    updated = 0
-    # Accounts created earlier in THIS run, keyed by code. They are not visible
-    # to the match query until flush, so without this an ERP catalogue that
-    # lists a code twice would insert two rows and trip the unique index at
-    # commit — a 500 after the audit row was already written.
-    pending: dict[str, GLAccount] = {}
-    for acct in erp_accounts:
-        existing = pending.get(acct.code)
-        if existing is None:
-            existing = (
-                (await db.execute(_sync_match_query(acct.code, org_id, entity_id)))
-                .scalars()
-                .first()
-            )
-
-        if existing:
-            # Only count as updated when something actually changes —
-            # otherwise re-running the sync would inflate the metric.
-            changed = False
-            if existing.name != acct.name:
-                existing.name = acct.name
-                changed = True
-            if acct.account_type and existing.account_type != acct.account_type:
-                existing.account_type = acct.account_type
-                changed = True
-            if acct.erp_account_id and existing.erp_account_id != acct.erp_account_id:
-                existing.erp_account_id = acct.erp_account_id
-                changed = True
-            if changed:
-                updated += 1
-        else:
-            account = GLAccount(
-                code=acct.code,
-                name=acct.name,
-                account_type=acct.account_type,
-                parent_code=acct.parent_code,
-                organization_id=org_id,
-                entity_id=entity_id,
-                erp_account_id=acct.erp_account_id or acct.code,
-            )
-            db.add(account)
-            pending[acct.code] = account
-            created += 1
+    result = await sync_chart_from_erp(
+        db,
+        organization_id=org_id,
+        entity_id=entity_id,
+        accounts=erp_accounts,
+        # Which ERP company these ids belong to: a link from any other one is
+        # re-judged, never matched by a colliding id (§284).
+        realm=connection_realm(erp_config),
+    )
+    summary = result.summary()
 
     # One PII-free summary row per sync, not one per account — the trail records
     # that a bulk chart change happened, who ran it and how much it moved.
@@ -580,17 +534,127 @@ async def sync_gl_accounts_from_erp(
         entity_type="gl_account",
         entity_id=org_id,
         details={
-            "created": created,
-            "updated": updated,
+            **result.summary(capped=False),
             "adapter": adapter.erp_type,
             "entity_id": str(entity_id) if entity_id else None,
         },
     )
     await db.commit()
+    message = f"Synced {result.created} new, {result.updated} updated GL accounts"
+    if result.conflicts or result.unlinked:
+        # The reasons differ per code (`conflicts[].reason`); say only the counts.
+        message += f"; {len(result.conflicts)} not linked, {len(result.unlinked)} unlinked"
     return {
         "success": True,
-        "message": f"Synced {created} new, {updated} updated GL accounts",
-        "created": created,
-        "updated": updated,
+        "message": message,
+        **summary,
         "adapter": adapter.erp_type,
     }
+
+
+@router.post("/{account_id}/erp-link")
+async def confirm_gl_account_erp_link(
+    account_id: uuid.UUID,
+    body: GLAccountErpLinkConfirm,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
+):
+    """Say which ERP account an unlinked row means, among the ones the last
+    sync named (``erp_link_candidates``).
+
+    The sync refuses to guess when a row's code is a key several ERP accounts
+    answer to — a pre-§284 QuickBooks row "Depreciation" may have meant the
+    top-level account or "Truck:Depreciation", and the invoices coded to it do
+    not say which (``services/gl_account_sync`` rules 3 and 4). Only a person
+    can, so this is the way out: it links the row to the chosen candidate,
+    marks the link confirmed so later syncs do not re-judge it by those rules,
+    and audits the choice (``gl_account.erp_link_confirmed``). It never accepts
+    an id the sync did not offer, never re-points a row that is already linked
+    (unlinking is the sync's job), and refuses candidates gathered under a
+    different ERP connection — ids are per company.
+
+    The same editor rule as ``PATCH /{id}``: with an entity selected only that
+    entity's own rows; a shared row from the consolidated view. Gate: admin |
+    ap_manager, like the sync that produced the candidates.
+
+    The row is read ``FOR UPDATE``: two people confirming different candidates
+    at once would otherwise both pass the "not linked yet" check and the last
+    write would win, with two audit rows naming different accounts. Locked, the
+    second waits, then sees the first link and is refused 409. The connection
+    is resolved first so the lock is never held across the credential decrypt.
+    """
+    try:
+        erp_config = await provider_config(org, "erp", db=control_db)
+    except CredentialCryptoError:
+        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
+    if not erp_config:
+        raise HTTPException(status_code=400, detail="No ERP configured")
+    realm = connection_realm(erp_config)
+
+    account = (
+        await db.execute(
+            select(GLAccount)
+            .where(
+                GLAccount.id == account_id,
+                GLAccount.organization_id == org_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail="GL account not found")
+    if entity_id is not None and account.entity_id != entity_id:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This account belongs to the shared chart or another entity. "
+                "Switch to the consolidated view to edit it."
+            ),
+        )
+    if account.erp_account_id is not None:
+        raise HTTPException(status_code=409, detail="This account is already linked to the ERP.")
+    pending = account.erp_link_candidates or {}
+    offered = {a.get("erp_account_id"): a for a in pending.get("accounts") or []}
+    if body.erp_account_id not in offered:
+        raise HTTPException(
+            status_code=422,
+            detail="Choose one of the ERP accounts the last sync named for this row.",
+        )
+
+    if pending.get("realm") != realm:
+        raise HTTPException(
+            status_code=409,
+            detail="These candidates came from another ERP connection. Sync the chart again.",
+        )
+
+    chosen = offered[body.erp_account_id]
+    account.erp_account_id = body.erp_account_id
+    account.erp_link_realm = realm
+    account.erp_link_confirmed_at = datetime.now(UTC)
+    account.erp_link_confirmed_by = user.id
+    account.erp_link_candidates = None
+    await db.flush()
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org_id,
+        actor_id=user.id,
+        action="gl_account.erp_link_confirmed",
+        entity_type="gl_account",
+        entity_id=account.id,
+        details={
+            "code": account.code,
+            "erp_account_id": body.erp_account_id,
+            "erp_code": chosen.get("code"),
+            "reason": pending.get("reason"),
+            "candidates": sorted(offered),
+            "realm": realm,
+            "entity_id": str(account.entity_id) if account.entity_id else None,
+        },
+    )
+    await db.commit()
+    return _serialize(account)

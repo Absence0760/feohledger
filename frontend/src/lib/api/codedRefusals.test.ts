@@ -94,9 +94,25 @@ describe('codedRefusalText', () => {
 		['credit_memo_currency_mismatch', 'refusal.creditMemoCurrencyMismatch'],
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
-		['mfa_code_invalid', 'refusal.mfaCodeInvalid']
+		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
+		['erp_not_connected', 'erpRefusal.notConnected'],
+		['invoice_due_before_date', 'refusal.invoiceDueBeforeDate']
 	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
+	});
+
+	it('states an incomplete ERP listing by why it stopped', () => {
+		const provider = 'QuickBooks Online';
+		expect(
+			codedRefusalText('erp_listing_incomplete', { provider, gap: 'fetch_failed' }, enT)
+		).toBe(
+			'QuickBooks Online could not be read in full, so nothing was synced. Try again in a few minutes.'
+		);
+		expect(codedRefusalText('erp_listing_incomplete', { provider, gap: 'truncated' }, enT)).toBe(
+			'QuickBooks Online has more records than one sync can read, so nothing was synced. Contact support.'
+		);
+		// A gap this build does not know → the server's sentence.
+		expect(codedRefusalText('erp_listing_incomplete', { provider, gap: 'other' }, enT)).toBeNull();
 	});
 
 	it('states the CFO gate with both figures in their own currencies', () => {
@@ -483,3 +499,32 @@ describe('the commerce refusals', () => {
 	});
 });
 
+describe('the ERP send refused for an open duplicate or fraud exception (§286)', () => {
+	it('states the 409 the send doors answer with, in the reader’s language', () => {
+		expect(
+			localizeApiDetail(
+				detail('exception_blocks_erp_export', { exception_type: 'duplicate' }),
+				enT
+			)
+		).toBe(
+			`This invoice has an open ${en['exceptions.type.duplicate']} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.`
+		);
+		expect(
+			codedRefusalText('exception_blocks_erp_export', { exception_type: 'fraud_flag' }, deT)
+		).toContain(`(${de['exceptions.type.fraudFlag']})`);
+	});
+
+	it('falls back to the server sentence when the type is missing', () => {
+		expect(codedRefusalText('exception_blocks_erp_export', {}, enT)).toBeNull();
+	});
+
+	it('says the bill may already be in the ERP on a retry after a timed-out push', () => {
+		expect(
+			codedRefusalText(
+				'exception_blocks_erp_export',
+				{ exception_type: 'duplicate', possibly_posted: true },
+				enT
+			)
+		).toContain('an earlier attempt may already have created the bill in the ERP');
+	});
+});

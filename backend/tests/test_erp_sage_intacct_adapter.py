@@ -20,9 +20,12 @@ import pytest
 
 from app.config import settings
 from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     InvoicePayload,
     LineItemPayload,
+    ListingGap,
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
@@ -52,6 +55,8 @@ class FakeIntacct:
         self.token_status = 200
         self.query_rows: dict[str, list[list[dict]]] = {}  # object -> pages
         self.query_status = 200
+        # A query page at this index (or later) answers 503.
+        self.query_fail_from_page: int | None = None
         self.create_status = 201
         self.create_body: dict = {"ia::result": {"key": "777", "id": "777"}}
         self.bill: dict | None = None
@@ -70,6 +75,8 @@ class FakeIntacct:
             body = json.loads(request.content)
             pages = self.query_rows.get(body["object"], [[]])
             idx = (body["start"] - 1) // body["size"]
+            if self.query_fail_from_page is not None and idx >= self.query_fail_from_page:
+                return httpx.Response(503, json={})
             page = pages[idx] if idx < len(pages) else []
             nxt = body["start"] + body["size"] if idx + 1 < len(pages) else None
             return httpx.Response(200, json={"ia::result": page, "ia::meta": {"next": nxt}})
@@ -264,6 +271,7 @@ def test_refuses_without_vendor_erp_id_before_any_http():
     )
     assert not result.success
     assert result.message == "Sage Intacct post refused: vendor_not_linked"
+    assert result.not_posted is True
     assert fake.requests == []
 
 
@@ -468,13 +476,39 @@ def test_list_pos_maps_total_exactly_and_state():
     ]
 
 
-def test_list_syncs_degrade_to_empty_on_failure():
+def test_chart_and_vendor_listings_raise_on_failure_the_po_list_degrades():
+    """The chart and vendor syncs read absence as evidence, so a failed listing
+    raises instead of returning [] (§284). The PO list keeps degrading."""
     fake = FakeIntacct()
     fake.query_status = 500
     adapter = SageIntacctAdapter(CONFIG)
-    assert _run(fake, adapter.list_vendors) == []
-    assert _run(fake, adapter.list_gl_accounts) == []
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(fake, listing)
+        assert exc.value.gap is ListingGap.fetch_failed
     assert _run(fake, adapter.list_pos) == []
+
+
+def test_a_later_page_failing_raises_never_returns_the_first_pages():
+    fake = FakeIntacct()
+    fake.query_rows["accounts-payable/vendor"] = [
+        [{"id": f"V{p}{i}", "name": "A"} for i in range(100)] for p in range(2)
+    ]
+    fake.query_fail_from_page = 1
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SageIntacctAdapter(CONFIG).list_vendors)
+    assert exc.value.gap is ListingGap.fetch_failed
+
+
+def test_a_chart_past_the_sync_bound_raises_truncated():
+    fake = FakeIntacct()
+    pages = SYNC_LISTING_MAX_ROWS // 100
+    fake.query_rows["general-ledger/account"] = [
+        [{"id": f"{p}-{i}", "name": "A"} for i in range(100)] for p in range(pages + 1)
+    ]
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SageIntacctAdapter(CONFIG).list_gl_accounts)
+    assert exc.value.gap is ListingGap.truncated
 
 
 def test_test_connection():

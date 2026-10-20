@@ -178,3 +178,20 @@ python scripts/seed.py
 If you see connection errors, wait a few seconds for PostgreSQL to finish starting, then retry.
 
 The seed script creates tenant databases (`feoh_acme`, `feoh_techflow`) automatically if they don't exist. If Docker was reset with `down -v`, the init SQL re-creates them on startup as well.
+
+## A QuickBooks Online tenant still posts on its pre-0115 links (local dev)
+
+Since decisions §284, migration `0115_erp_link_realm` never writes
+`settings.erp.legacy_link_realm` for a QuickBooks Online org, so its pre-0115
+links are refused until the first chart and vendor sync re-judge them. An
+earlier version of 0115 on the `fix/erp-qbo-live-test` branch did write it, and
+a re-run never removes a key already present. A local database that ran that
+version keeps trusting those links. Either downgrade to `0114_gl_code_width`
+and upgrade again (this drops every link's realm stamp too, so re-sync after),
+or delete the key:
+
+```sql
+UPDATE organizations SET settings = settings #- '{erp,legacy_link_realm}'
+WHERE settings->'erp'->>'type' = 'quickbooks_online'
+  AND coalesce(settings->'erp'->>'integration_method', 'merge_dev') <> 'merge_dev';
+```

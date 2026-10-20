@@ -76,9 +76,15 @@ class _ScriptedProvider:
             async def __aexit__(self, *exc):
                 return False
 
-            async def post(self, url, data=None, headers=None, auth=None):
+            async def post(self, url, data=None, headers=None, auth=None, json=None):
                 provider.calls.append(
-                    {"url": url, "data": dict(data or {}), "auth": auth, "headers": headers}
+                    {
+                        "url": url,
+                        "data": dict(data or {}),
+                        "json": json,
+                        "auth": auth,
+                        "headers": headers,
+                    }
                 )
                 if provider.delay:
                     await asyncio.sleep(provider.delay)
@@ -555,10 +561,51 @@ async def test_callback_connects_and_redirects_home_without_secrets(realdb, plat
     assert datetime.fromisoformat(oauth["expires_at"]) > datetime.now(UTC)
     assert "refresh_token_expires_at" in oauth
 
-    (row,) = await _audit_actions(realdb)
-    assert row.action == "organization.erp_connected"
+    # The block saved before had no `integration_method`, so it named
+    # Merge.dev: the consent moves the ERP, and that is audited too (§284).
+    rows = {r.action: r for r in await _audit_actions(realdb)}
+    assert set(rows) == {"organization.erp_connected", "organization.erp_realm_changed"}
+    row = rows["organization.erp_connected"]
     assert row.details["provider"] == PROVIDER
     assert "SECRET" not in json.dumps(row.details)
+    assert "SECRET" not in json.dumps(rows["organization.erp_realm_changed"].details)
+
+
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize("new_realm", [REALM, "realm-9130350000"])
+async def test_a_consent_to_another_company_is_audited_as_a_realm_change(
+    realdb, platform_app, provider, new_realm
+):
+    """ERP ids are per company (§284): every link made under the old one stops
+    resolving at the push, so the move is its own audit row. Reconnecting the
+    same company is not a change."""
+    await _set_settings(
+        realdb,
+        {
+            "erp": {
+                "type": PROVIDER,
+                "integration_method": "direct",
+                "oauth": _connected_block(realdb.info("a").org_id),
+            }
+        },
+    )
+    provider.handler = lambda url, data: _resp(200, _token_body(2))
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": new_realm})
+    assert resp.headers["location"].endswith(f"erp_connected={PROVIDER}")
+
+    rows = {r.action: r.details for r in await _audit_actions(realdb)}
+    connected = rows["organization.erp_connected"]
+    assert connected["previous_realm"] == f"{PROVIDER}:{REALM}"
+    assert connected["realm"] == f"{PROVIDER}:{new_realm}"
+    if new_realm == REALM:
+        assert "organization.erp_realm_changed" not in rows
+    else:
+        assert rows["organization.erp_realm_changed"] == {
+            "provider": PROVIDER,
+            "previous_realm": f"{PROVIDER}:{REALM}",
+            "realm": f"{PROVIDER}:{new_realm}",
+        }
 
 
 @pytest.mark.plan("scale")
@@ -849,7 +896,9 @@ async def test_disconnect_revokes_clears_and_audits(realdb, platform_app, provid
 
     (call,) = provider.calls
     assert call["url"] == QBO_OAUTH.revoke_url
-    assert call["data"] == {"token": "REFRESH-SECRET-1"}
+    # Intuit documents a JSON body for revoke; a form body may be refused,
+    # which would leave the grant live behind a "disconnected" answer.
+    assert (call["json"], call["data"]) == ({"token": "REFRESH-SECRET-1"}, {})
     erp = (await _org_settings(realdb))["erp"]
     assert "oauth" not in erp
     assert erp["environment"] == "sandbox"
@@ -1112,7 +1161,19 @@ async def test_disconnect_revokes_with_the_sealed_token(realdb, platform_app, pr
     assert resp.status_code == 200, resp.text
     assert resp.json()["revoked"] is True
     (call,) = provider.calls
-    assert call["data"] == {"token": "REFRESH-SECRET-1"}
+    assert call["json"] == {"token": "REFRESH-SECRET-1"}
+
+
+async def test_revoke_sends_a_form_body_unless_the_provider_takes_json(platform_app, provider):
+    """RFC 7009's form body is the default (Xero, Sage); only a provider
+    that documents JSON (Intuit) gets JSON."""
+    import dataclasses
+
+    provider.handler = lambda url, data: _resp(200)
+    form_spec = dataclasses.replace(QBO_OAUTH, revoke_json=False)
+    assert await erp_oauth.revoke(form_spec, {}, {"refresh_token": "R-1"}) is True
+    (call,) = provider.calls
+    assert (call["data"], call["json"]) == ({"token": "R-1"}, None)
 
 
 @pytest.mark.plan("scale")
@@ -1394,3 +1455,61 @@ def test_every_oauth_adapter_api_client_refreshes_on_401():
         src = (root / name).read_text()
         assert len(re.findall(r"httpx\.AsyncClient\(", src)) == bare, name
         assert "self.oauth_client(" in src, name
+
+
+@pytest.mark.plan("free")
+async def test_test_erp_reaches_a_connected_oauth_erp_with_its_stored_tokens(
+    realdb, platform_app, provider, monkeypatch
+):
+    """The panel's "Test connection" on a connected OAuth ERP: the form's body
+    (`buildErpTestPayload`: type, method, the rendered non-secret fields) names
+    the saved provider, so the saved `oauth` block and the SEALED access token
+    join the test, and the adapter calls QuickBooks with that token. The answer
+    is coded so the panel states it with the ERP's display name."""
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+
+    block = _connected_block(realdb.info("a").org_id)
+    await _set_settings(realdb, {"erp": {**_config(block), "environment": "sandbox"}})
+    provider.handler = lambda url, data: pytest.fail("no refresh expected")
+    seen: list[tuple[str, str]] = []
+
+    async def fake_request(self, method, path, **_kw):
+        seen.append((path, await self.access_token()))
+        return httpx.Response(200, json={"CompanyInfo": {"Id": "1"}})
+
+    monkeypatch.setattr(QuickBooksOnlineAdapter, "_request", fake_request)
+    form = {
+        "type": PROVIDER,
+        "integration_method": "direct",
+        "client_id": "",
+        "environment": "sandbox",
+    }
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/test-erp", json=form)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "success": True,
+        "code": "connected",
+        "provider": PROVIDER,
+        "message": f"Connected to {PROVIDER} successfully",
+    }
+    assert seen == [(f"companyinfo/{REALM}", "ACCESS-SECRET-1")]
+
+
+@pytest.mark.plan("free")
+async def test_test_erp_on_a_disconnected_oauth_erp_is_a_coded_failure(
+    realdb, platform_app, provider
+):
+    await _set_settings(realdb, {"erp": {"type": PROVIDER, "integration_method": "direct"}})
+    provider.handler = lambda url, data: pytest.fail("no token call expected")
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            "/api/organization/test-erp", json={"type": PROVIDER, "integration_method": "direct"}
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert (body["success"], body["code"], body["provider"]) == (
+        False,
+        "connection_failed",
+        PROVIDER,
+    )

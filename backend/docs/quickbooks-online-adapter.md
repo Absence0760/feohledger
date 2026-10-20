@@ -34,6 +34,32 @@ this plan:
   `posted_total_mismatch`; a create with no `TotalAmt` fails non-retryable
   `posted_total_unconfirmed` (`erp_adapters/posted_total.py`). The idempotent
   re-find applies the same check before reporting an earlier bill as posted.
+- **A create QuickBooks refuses is a coded, non-retryable refusal**, not the
+  bare "HTTP 400 (invalid_request)" every business rule used to collapse into
+  (live sandbox, 2026-10-19: books closed, an inactive account and an inactive
+  vendor all read the same). `_fault_errors` reads ONLY each Fault error's
+  numeric `code` and an `element` that is a known Bill field name — never
+  `Message` / `Detail`, which quote the submitted bill back. Mapping (codes per
+  Intuit's error-code reference,
+  developer.intuit.com/app/developer/qbo/docs/develop/troubleshooting/error-codes):
+
+  | Intuit code | Refusal |
+  |---|---|
+  | 6200 Account Period Closed, 6210 … Required Password | `period_closed` |
+  | 6140 Duplicate Doc Num | `duplicate_document_number` |
+  | 6190 Invalid Company Status (subscription ended / billing) | `company_subscription_inactive` |
+  | 2500 Invalid Reference Id, 610 Object Not Found, 6000 Business Validation | the bill's vendor, then each account it sent, is read back by id; `Active: false` or a 610 → `vendor_inactive` / `account_inactive` (with our GL `accounts`) |
+  | 2500 / 610 with nothing inactive | `reference_invalid` |
+  | anything else (incl. a 6000 with nothing inactive) | `intuit_fault` |
+
+  Every one carries `intuit_code` in its params (and in the English message,
+  "… (Intuit fault 6210)"), so an unmapped code is diagnosable from the audit
+  row. A 5xx / 429 / 408 answer stays the retryable HTTP failure.
+  The closed-books case was seen with the closing set to "warning only" in the
+  QuickBooks UI: the API refuses anyway.
+- The panel's **Test connection** is offered on a connected QuickBooks
+  connection too; `POST /api/organization/test-erp` tests the saved connection
+  with its stored tokens and answers a coded result the panel names the ERP in.
 - The `x_refresh_token_expires_in` expiry is recorded and shown on `/status`,
   but nothing yet notifies an admin 30 days before it.
 
@@ -102,7 +128,8 @@ the adapter.
     the SSO state.
   - `GET /api/organization/erp/quickbooks/callback` is public by design. It
     verifies `state`, exchanges the code, and stores the `realmId` + tokens.
-  - `POST …/disconnect` revokes the token at Intuit and clears local state.
+  - `POST …/disconnect` revokes the token at Intuit (JSON `{"token": …}`, as
+    Intuit documents — `revoke_json`) and clears local state.
   - Intuit **requires** a Disconnect URL and a Reconnect URL on the app
     listing, and both have to point at real pages.
   - Every connect/disconnect writes an audit row.
@@ -144,9 +171,9 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
 | Method | QuickBooks call | Notes |
 |---|---|---|
 | `test_connection` | `GET companyinfo/{realmId}` | Also records the company's country and home currency for the checks below |
-| `list_vendors` | `query: select * from Vendor` | `STARTPOSITION`/`MAXRESULTS 1000` paging; `Id` → `erp_vendor_id` |
-| `list_gl_accounts` | `query: select * from Account` | Map `Classification` to the asset/liability/equity/revenue/expense vocabulary |
-| `list_pos` | `query: select * from PurchaseOrder` | Plus/Advanced plans only; an empty list on Simple Start is correct |
+| `list_vendors` | `query: select * from Vendor where Active IN (true, false)` | Inactive vendors too (a plain select returns active ones only), emitted `active=False`, `DisplayName` without QuickBooks' ` (deleted)` suffix. `STARTPOSITION`/`MAXRESULTS 1000` paging; `Id` → `erp_vendor_id`. `code` is left unset: `Vendor.AcctNum` is the company's account number *at* the vendor, not an id for it — it rides as `legacy_code` so the sync clears it from vendors the pre-§284 mapping created (§284) |
+| `list_gl_accounts` | `query: select * from Account where Active IN (true, false)` | Inactive accounts too, emitted `active=False` (the sync retires a linked row and creates none), with the ` (deleted)` QuickBooks appends to an inactive record's `Name` / `FullyQualifiedName` stripped (`_undeleted`). `parent_erp_account_id` = `ParentRef`, and `reports_parent` is set, so the sync names the parent by our code and clears it for a top-level account. **`code` = `AcctNum`, else `FullyQualifiedName`** — never the bare `Name`, which QuickBooks repeats across parents (the sandbox has "Job Materials" under both "Job Expenses" and "Landscaping Services"). `name` is the path; a path over 100 characters ends `…#<Id>`. `legacy_codes` carries the old `Name` key so the sync can unlink a row a pre-§284 sync collapsed. Map `Classification` to the asset/liability/equity/revenue/expense vocabulary. See erp-integration.md § GL accounts and vendors are linked by the ERP's unique key |
+| `list_pos` | `query: select * from PurchaseOrder` | Plus/Advanced plans only; an empty list on Simple Start is correct. PO lines carry no GL account: nothing persists or reads one, so there is no chart read, and the `AccountRef` name is never taken as one (§284) |
 | `post_invoice` | `POST bill?requestid=<correlation_id>` | See below |
 | `get_invoice_status` | `GET bill/{id}` | `Balance == 0` → `paid`; `0 < Balance < TotalAmt` → `partially_paid`; else `open` |
 | `void_invoice` | `POST bill?operation=delete` | QuickBooks has no bill void, only delete. See open question 1 |
@@ -255,6 +282,15 @@ sandbox. Build and test against free Intuit sandbox companies throughout.
 - fake-erp: `/qbo/oauth2/token` and `/qbo/v3/company/{realm}/…` routes, plus a
   `quickbooks` spec in `frontend/tests-e2e/erp/` (connect → sync → post →
   webhook → paid).
+- The live sandbox, replayed (#598): the Intuit sample company tested live on
+  2026-10-19 is recorded in `tools/fake-erp/fixtures/qbo_sandbox_company.json`
+  with our pre-§284 chart and the live syncs' answers. The fake serves it as a
+  second company (`fake_company=sandbox` at authorize; `tools/fake-erp/README.md`)
+  to `frontend/tests-e2e/erp/quickbooks-online-sandbox.spec.ts` (repair replay,
+  pushes, vendors, token expiry / rotation / revocation, disconnect revoke), and
+  `backend/tests/test_qbo_sandbox_replay.py` replays the same file through the
+  adapter and both syncs in-process. A defect found against the real sandbox
+  goes into that fixture, so CI keeps it found.
 - A manual sandbox checklist per release: one bill end to end, a duplicate
   retry, a payment write-back, a token refresh.
 

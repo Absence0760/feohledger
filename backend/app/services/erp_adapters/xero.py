@@ -43,14 +43,18 @@ from app.config import settings
 from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoLinePayload,
     PoPayload,
     VendorPayload,
-    erp_failure_message,
+    erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_allocation import (
     DUPLICATE_DOCUMENT_NUMBER,
@@ -184,11 +188,7 @@ def _failure(resp) -> ErpPostResult:
         # Xero's per-tenant limits. Report `rate_limited` and let the caller's
         # retry backoff decide when to try again; never sleep-loop here.
         raw = {"retry_after": resp.headers.get("Retry-After")}
-    return ErpPostResult(
-        success=False,
-        message=erp_failure_message(PROVIDER, resp.status_code),
-        raw_response=raw or None,
-    )
+    return erp_http_failure(PROVIDER, resp.status_code, raw_response=raw or None)
 
 
 @register_adapter("xero")
@@ -306,13 +306,13 @@ class XeroAdapter(OAuthErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         if payload.invoice_date is None or payload.due_date is None:
-            return erp_refusal(PROVIDER, MISSING_DATES)
+            return erp_preflight_refusal(PROVIDER, MISSING_DATES)
         try:
             allocation = allocate_bill_lines(payload)
         except BillRefusal as refusal:
-            return erp_refusal(PROVIDER, refusal.reason)
+            return erp_preflight_refusal(PROVIDER, refusal.reason)
 
         status = str(self.config.get("bill_status") or "AUTHORISED").upper()
         if status not in _BILL_STATUSES:
@@ -527,7 +527,8 @@ class XeroAdapter(OAuthErpAdapter):
             return False
 
     async def _paged(self, path: str, params: dict, key: str) -> list[dict]:
-        """Best-effort paged GET (house style: an error ends the walk, never raises)."""
+        """Best-effort paged GET (an error ends the walk, never raises) — the
+        PO list only. The vendor listing uses :meth:`_paged_complete`."""
         try:
             headers = await self._headers()
         except Exception:
@@ -549,23 +550,53 @@ class XeroAdapter(OAuthErpAdapter):
                     break
         return out
 
+    async def _paged_complete(self, path: str, params: dict, key: str) -> list[dict]:
+        """Every row of a paged collection, or :class:`ErpListingIncomplete`.
+
+        A failed page (a 429 included) raises instead of ending the walk with
+        what was read: the vendor sync reads absence as evidence (base).
+        """
+        headers = await self._headers()
+        out: list[dict] = []
+        async with self.oauth_client(timeout=30) as client:
+            for page in range(1, sync_listing_pages(100) + 1):
+                resp = await client.get(
+                    f"{_api_base()}/{path}", params={**params, "page": page}, headers=headers
+                )
+                if resp.status_code != 200:
+                    raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed)
+                rows = _json(resp).get(key) or []
+                out.extend(rows)
+                if len(rows) < 100:
+                    return out
+        raise ErpListingIncomplete(PROVIDER, path, ListingGap.truncated)
+
     async def list_vendors(self) -> list[VendorPayload]:
-        rows = await self._paged("Contacts", {"where": "IsSupplier==true"}, "Contacts")
+        """Every supplier contact, archived ones included (``active=False``).
+
+        Xero leaves ARCHIVED contacts out unless ``includeArchived`` asks for
+        them, and a vendor linked to one would then look like a dead link.
+        """
+        rows = await self._paged_complete(
+            "Contacts", {"where": "IsSupplier==true", "includeArchived": "true"}, "Contacts"
+        )
         return [_contact_to_vendor(raw) for raw in rows if raw.get("ContactID")]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        try:
-            headers = await self._headers()
-            async with self.oauth_client(timeout=30) as client:
-                resp = await client.get(f"{_api_base()}/Accounts", headers=headers)
-        except Exception:
-            return []
+        """The whole chart (Xero returns it unpaged), or :class:`ErpListingIncomplete`.
+
+        An ARCHIVED account is emitted ``active=False``, not dropped: it still
+        exists, so a row linked to it is not a dead link (§284).
+        """
+        headers = await self._headers()
+        async with self.oauth_client(timeout=30) as client:
+            resp = await client.get(f"{_api_base()}/Accounts", headers=headers)
         if resp.status_code != 200:
-            return []
+            raise ErpListingIncomplete(PROVIDER, "Accounts", ListingGap.fetch_failed)
         out = []
         for raw in _json(resp).get("Accounts") or []:
             code = raw.get("Code")
-            if not code or raw.get("Status") == "ARCHIVED":
+            if not code:
                 continue
             out.append(
                 GLAccountPayload(
@@ -573,6 +604,7 @@ class XeroAdapter(OAuthErpAdapter):
                     name=raw.get("Name") or str(code),
                     account_type=_ACCOUNT_CLASS_MAP.get(str(raw.get("Class") or "").upper()),
                     erp_account_id=raw.get("AccountID"),
+                    active=raw.get("Status") != "ARCHIVED",
                 )
             )
         return out
@@ -617,6 +649,7 @@ def _contact_to_vendor(raw: dict) -> VendorPayload:
         address=address,
         tax_id=raw.get("TaxNumber") or None,
         payment_terms=terms,
+        active=raw.get("ContactStatus") != "ARCHIVED",
     )
 
 

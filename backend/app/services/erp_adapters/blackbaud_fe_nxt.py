@@ -133,13 +133,18 @@ from app.config import settings
 from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoPayload,
     VendorPayload,
     erp_failure_reason,
+    erp_preflight_refusal,
     erp_refusal,
+    erp_status_retryable,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
@@ -176,8 +181,9 @@ _JOB_ENDED_WITHOUT_RECORD = frozenset({6, 7})  # canceled, failed
 PROCESS_POLL_ATTEMPTS = 10
 PROCESS_POLL_INTERVAL_SECONDS = 1.0
 
-#: List page size and page cap — 10 × 100 = the 1000-row bound every other
-#: adapter's sync uses. The idempotency search walks at most 5 pages.
+#: List page size and the PO list's page cap (10 × 100 rows). The chart and
+#: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it
+#: (``_sync_rows``); the idempotency search walks at most 5 pages.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _LOOKUP_MAX_PAGES = 5
@@ -214,6 +220,9 @@ class _Pages(NamedTuple):
     rows: list[dict]
     complete: bool
     failed: httpx.Response | None = None
+    #: The walk stopped at the page cap with more to read (else, when not
+    #: ``complete``, a page failed).
+    capped: bool = False
 
 
 class BlackbaudConfigError(ValueError):
@@ -290,6 +299,8 @@ def _unconfirmed(detail: str, process_id: str | None) -> ErpPostResult:
         raw_response={"process_id": process_id} if process_id else None,
         retryable=False,
         pending_job_id=process_id,
+        refusal_code=JOB_UNCONFIRMED,
+        refusal_provider=PROVIDER,
     )
 
 
@@ -366,7 +377,8 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
 
         ``failed`` holds the first page's response when that page failed (so a
         caller can tell "no rows" from "couldn't ask"); ``complete`` is False
-        when the page cap or a later failing page stopped the walk early.
+        when the page cap (``capped``) or a later failing page stopped the walk
+        early.
         """
         rows: list[dict] = []
         for page in range(max_pages):
@@ -380,7 +392,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             count = body.get("count")
             if len(batch) < _PAGE_SIZE or (isinstance(count, int) and len(rows) >= count):
                 return _Pages(rows, complete=True)
-        return _Pages(rows, complete=False)
+        return _Pages(rows, complete=False, capped=True)
 
     # -- post_invoice -----------------------------------------------------------
 
@@ -487,10 +499,10 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         try:
             self.subscription_key()
         except BlackbaudConfigError:
-            return erp_refusal(PROVIDER, SUBSCRIPTION_KEY_MISSING)
+            return erp_preflight_refusal(PROVIDER, SUBSCRIPTION_KEY_MISSING)
         body = self._preflight(payload)
         if isinstance(body, str):
-            return erp_refusal(PROVIDER, body)
+            return erp_preflight_refusal(PROVIDER, body)
 
         headers = await self._headers()
         async with self.oauth_client(timeout=30) as client:
@@ -532,9 +544,15 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                     None,
                 )
             if resp.status_code not in (200, 201, 202):
-                # FE NXT answered with a refusal: nothing was queued, so
-                # services/erp may retry.
-                return ErpPostResult(success=False, message=failure_message("post", resp))
+                # FE NXT answered with a refusal: nothing was queued, so a
+                # re-send is safe — but only worth it when the answer could
+                # change (an outage, a quota, a token); a 400 never does.
+                return ErpPostResult(
+                    success=False,
+                    message=failure_message("post", resp),
+                    retryable=failure_reason(resp) == "rate_limited"
+                    or erp_status_retryable(resp.status_code),
+                )
             process_id = _field(resp, "process_id")
             if process_id is None:
                 return _unconfirmed(
@@ -624,16 +642,22 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         """
         return False
 
+    async def _sync_rows(self, path: str, collection: str) -> list[dict]:
+        """Every row of a collection, or :class:`ErpListingIncomplete` (base)."""
+        headers = await self._headers()
+        async with self.oauth_client(timeout=30) as client:
+            found = await self._pages(
+                client, headers, path, max_pages=sync_listing_pages(_PAGE_SIZE)
+            )
+        if not found.complete:
+            gap = ListingGap.truncated if found.capped else ListingGap.fetch_failed
+            raise ErpListingIncomplete(PROVIDER, collection, gap)
+        return found.rows
+
     async def list_vendors(self) -> list[VendorPayload]:
-        """Best-effort like the other adapters: any failure degrades to []."""
-        try:
-            headers = await self._headers()
-            async with self.oauth_client(timeout=30) as client:
-                rows = (await self._pages(client, headers, f"{AP}/vendors")).rows
-        except Exception:
-            return []
+        """Every vendor, or :class:`ErpListingIncomplete`; never a partial list."""
         vendors = []
-        for raw in rows:
+        for raw in await self._sync_rows(f"{AP}/vendors", "vendors"):
             vendor_id = raw.get("vendor_id")
             if vendor_id is None:
                 continue
@@ -653,24 +677,21 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
 
         FE NXT's account ``class`` is a net-asset class (``Unrestricted Net
         Assets``), not an account type, so ``account_type`` stays None rather
-        than guessed.
+        than guessed. An account closed to data entry (``prevent_data_entry``)
+        is emitted ``active=False``, not dropped: it still exists, so a row
+        linked to it is not a dead link (§284).
         """
-        try:
-            headers = await self._headers()
-            async with self.oauth_client(timeout=30) as client:
-                rows = (await self._pages(client, headers, f"{GL}/accounts")).rows
-        except Exception:
-            return []
         accounts = []
-        for raw in rows:
+        for raw in await self._sync_rows(f"{GL}/accounts", "accounts"):
             number = raw.get("account_number")
-            if not number or raw.get("prevent_data_entry"):
+            if not number:
                 continue
             accounts.append(
                 GLAccountPayload(
                     code=str(number),
                     name=str(raw.get("description") or number),
                     erp_account_id=str(number),
+                    active=not raw.get("prevent_data_entry"),
                 )
             )
         return accounts

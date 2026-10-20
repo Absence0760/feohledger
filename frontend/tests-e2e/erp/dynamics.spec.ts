@@ -160,14 +160,16 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 		page
 	}) => {
 		// fake-erp's `fake-vat-co` adds 20% VAT on top of the lines, as a real
-		// BC VAT company does: 1,200 approved would become a 1,440 bill. The
-		// adapter reads the draft's total, deletes the draft and refuses.
+		// BC VAT company does: 1,234.56 approved would become a 1,481.47 bill.
+		// The adapter reads the draft's total, deletes the draft and refuses.
+		// (Not a round figure: that would open a `fraud_flag`, which refuses
+		// the send before it reaches BC — decisions §286.)
 		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-co' });
 		await syncErpVendors(page);
 		await syncErpGlAccounts(page);
 		const inv = await createApprovedInvoice(page, {
 			prefix: 'E2E-D365-VAT',
-			amount: '1200.00',
+			amount: '1234.56',
 			vendor: 'Fake BC Vendor A',
 			glAccount: '6100'
 		});

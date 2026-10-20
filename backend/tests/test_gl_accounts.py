@@ -108,6 +108,8 @@ async def test_list_returns_ordered_by_code(realdb):
         "parent_code",
         "is_active",
         "erp_account_id",
+        "erp_link_candidates",
+        "erp_link_confirmed_at",
         # NULL here means SHARED across every entity, not "unstamped" — see
         # test_gl_account_entity_uniqueness.py for the multi-entity cases.
         "entity_id",

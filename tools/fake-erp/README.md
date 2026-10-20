@@ -308,6 +308,19 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
 
 ## QuickBooks Online (`/qbo`)
 
+**Validation Faults** (off until a spec turns them on): `POST
+/__qbo/validation` with any of `{"closed_through": "YYYY-MM-DD",
+"inactive_vendors": ["57"], "inactive_accounts": ["63"],
+"duplicate_doc_check": true}` (keys left out keep their value; `/__reset`
+turns all off). A bill create is then refused with HTTP 400 and the Fault code
+Intuit documents: `2500` Invalid Reference Id for an inactive vendor or account,
+`6210` Account Period Closed for a `TxnDate` on or before `closed_through`,
+`6140` Duplicate Doc Num for a DocNumber another bill of the same vendor holds.
+Each Fault's `Detail` quotes the bill back, as Intuit's does, so a spec can
+prove the adapter never reads it. `GET /qbo/v3/company/{realm}/vendor/{id}` and
+`…/account/{id}` return the fixture with its `Active` flag (610 for an unknown
+id). State: `STATE["qbo_validation"]`.
+
 `GET /qbo/oauth2/authorize` 302s straight back to `redirect_uri` with a `code`
 and `realmId` — but only when `redirect_uri` exactly matches a registered URI,
 as Intuit requires; anything else is a 400 `invalid_request`, so the fake is
@@ -316,3 +329,46 @@ never an open redirect. The registered set defaults to
 backend's ERP OAuth callback on the dev API port and the worktree offsets);
 set `FAKE_ERP_OAUTH_REDIRECT_URIS` (comma-separated) to replace it. The same
 registered set guards the Xero authorize route.
+
+## QuickBooks Online sandbox company (`/qbo`, `fake_company=sandbox`)
+
+The Intuit sample company FeohLedger was tested against live on 2026-10-19
+(#598), replayed: 91 accounts and 29 vendors recorded in
+`fixtures/qbo_sandbox_company.json`, served by `qbo_sandbox.py`. The same JSON
+feeds the backend's in-process replay (`backend/tests/test_qbo_sandbox_replay.py`)
+and `frontend/tests-e2e/erp/quickbooks-online-sandbox.spec.ts`. Never edit its
+`live_sync` block to make a test pass: it is what the live syncs answered.
+
+- **Selecting it**: append `fake_company=sandbox` to the authorize URL (the
+  company picker on Intuit's consent screen). The 302 carries realm
+  `fake-sandbox-realm`, and the tokens issued for it work on that realm only —
+  the default company (`fake-realm-1`) is untouched, so its specs and this one
+  never see each other's data. Any other `fake_company` value is a 400.
+- **Query semantics**: `select * from Account|Vendor` returns ACTIVE records
+  only, as QuickBooks does — `where Active IN (true,false)` or
+  `where Active = false` reaches the inactive ones (Bank Charges, Id 8; Squeaky
+  Kleen Car Wash, Id 57). `STARTPOSITION` / `MAXRESULTS` page (default 100, max
+  1000); an unknown clause is `QueryParserError`, never ignored. `PurchaseOrder`
+  is empty (the live POs were not recorded).
+- **Bills**: create (with `requestid` replay), read, `operation=delete`. The
+  vendor and every line account must be an existing, ACTIVE record of the
+  company, else 400 Fault `2500` "Invalid Reference Id".
+- **Tokens**: access tokens expire after their `expires_in` and are then
+  refused 401 Fault `3200`; refresh tokens rotate (a spent one is
+  `invalid_grant`); `POST /qbo/oauth2/revoke` (JSON or form `token`) ends the
+  grant and is recorded.
+
+Its state is its own: the global `POST /__reset` does not clear it. Test hooks,
+all under `/qbo/_admin/sandbox/`:
+
+- `POST reset` — clear connections, bills and counters.
+- `POST tokens {"access_ttl": seconds}` — the `expires_in` of every access
+  token issued from now on (under the backend's 120 s margin, each use refreshes
+  first).
+- `POST expire-access` — every access token issued so far is expired; the next
+  call is a 401 the backend must answer with a refresh. Refresh tokens stay good.
+- `POST revoke-consent` — the user removed the app on Intuit's side; the next
+  refresh is `invalid_grant`.
+- `GET stats` → `{"realm", "refreshes", "rejected", "refresh_tokens", "revocations"}`
+  (fake tokens only).
+- `GET bills/{id}` — a bill as the company holds it, with no bearer.

@@ -53,7 +53,7 @@ from app.api.pagination import (
     pagination_params,
 )
 from app.api.permissions import PERM_INVOICE_APPROVE, effective_permissions
-from app.api.refusals import coded_refusal
+from app.api.refusals import coded_refusal, refuse_due_before_invoice_date
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.agent_decision import AgentDecision
@@ -1312,6 +1312,7 @@ async def create_invoice(
     await refuse_gl_codes_outside_chart(
         db, organization_id=org.id, entity_id=entity_id, codes=[body.gl_account]
     )
+    refuse_due_before_invoice_date(body.invoice_date, body.due_date)
     invoice = Invoice(
         organization_id=org.id,
         entity_id=entity_id,
@@ -1671,6 +1672,14 @@ async def update_invoice(
 
     # Capture a per-field before/after diff for the audit trail (SOX change
     # history). Money fields serialise as string-Decimal inside the diff.
+    if update_data.keys() & {"invoice_date", "due_date"}:
+        # Judged on the pair as it will stand, so an edit that fixes one date
+        # while the other is still wrong is refused, and one that corrects
+        # either is not.
+        refuse_due_before_invoice_date(
+            update_data.get("invoice_date", invoice.invoice_date),
+            update_data.get("due_date", invoice.due_date),
+        )
     before = {field: getattr(invoice, field, None) for field in update_data}
     for field, value in update_data.items():
         setattr(invoice, field, value)

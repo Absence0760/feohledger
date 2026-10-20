@@ -22,13 +22,15 @@
 	 * pair with a "Showing all N" claim.
 	 */
 	import { listGlAccounts, syncGlAccountsFromErp, updateGlAccount } from '#lib/api/glAccounts.ts';
+	import { glSyncReportLines } from '#lib/utils/erpSyncReport.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { GlAccount } from '#lib/types/glAccount.ts';
 	import {
 		GL_ACCOUNT_TYPES,
 		GL_ACCOUNT_TYPE_LABEL_KEYS,
 		canEditGlAccount,
-		glAccountTypeLabelKey
+		glAccountTypeLabelKey,
+		needsErpDecision
 	} from '#lib/types/glAccount.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
@@ -40,6 +42,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import GlAccountModal from '#lib/components/modals/GlAccountModal.svelte';
+	import GlAccountErpLinkModal from '#lib/components/modals/GlAccountErpLinkModal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -74,6 +77,16 @@
 	let showCreate = $state(false);
 	/** The row whose Edit dialog is open. */
 	let editingAccount = $state<GlAccount | null>(null);
+	/** The row whose "which ERP account is this?" dialog is open. */
+	let linkingAccount = $state<GlAccount | null>(null);
+	/**
+	 * Rows the last ERP sync left unlinked because their code could mean more
+	 * than one ERP account (docs/decisions.md §284). Persisted on the row, so
+	 * the decision is visible here after the sync's toast is gone — before
+	 * this, the top-level QuickBooks "Depreciation" was refused on every sync
+	 * with no way out in the product.
+	 */
+	const pendingDecisions = $derived(accounts.filter(needsErpDecision).length);
 	/** Retire is armed two-click (the api-keys revoke shape): first click arms
 	 *  the row, the second commits, a click anywhere else disarms. */
 	let confirmRetireId = $state<string | null>(null);
@@ -263,7 +276,11 @@
 		syncing = true;
 		try {
 			const result = await syncGlAccountsFromErp();
-			toast(result.message, 'success');
+			// A refused or unlinked code is something to act on (recode its
+			// invoices), so it is its own warning, not a clause in the summary.
+			for (const line of glSyncReportLines(result, m)) {
+				toast(line.text, line.tone, line.tone === 'warning' ? 12_000 : undefined);
+			}
 			await load();
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('glAccounts.toast.syncFailed'), 'error');
@@ -383,6 +400,12 @@
 		</label>
 	</div>
 
+	{#if pendingDecisions > 0}
+		<p class="decision-notice" role="status" data-testid="gl-erp-decisions">
+			{m('glAccounts.erpLink.pending', { n: pendingDecisions })}
+		</p>
+	{/if}
+
 	{#if showOnboarding}
 		<EmptyState
 			icon="📒"
@@ -414,7 +437,15 @@
 								{/if}
 							</td>
 						{/if}
-						<td class="mono muted">{acct.erp_account_id ?? '—'}</td>
+						<td class="mono muted">
+							{#if needsErpDecision(acct)}
+								<Badge tone="warning" variant="needs-decision">
+									{m('glAccounts.erpLink.needsDecision')}
+								</Badge>
+							{:else}
+								{acct.erp_account_id ?? '—'}
+							{/if}
+						</td>
 						{#if showStatus}
 							<td>
 								{#if acct.is_active}
@@ -427,6 +458,15 @@
 						{#if canManage}
 							<td class="actions">
 								{#if editable(acct)}
+									{#if needsErpDecision(acct)}
+										<RowAction
+											ariaLabel={m('glAccounts.erpLink.chooseAria', { code: acct.code })}
+											disabled={busyId === acct.id}
+											onclick={() => (linkingAccount = acct)}
+										>
+											{m('glAccounts.erpLink.choose')}
+										</RowAction>
+									{/if}
 									<RowAction
 										ariaLabel={m('glAccounts.row.editAria', { code: acct.code })}
 										disabled={busyId === acct.id}
@@ -491,6 +531,16 @@
 	<GlAccountModal onclose={() => (showCreate = false)} onsaved={() => void load()} />
 {/if}
 
+{#if linkingAccount}
+	{#key linkingAccount.id}
+		<GlAccountErpLinkModal
+			account={linkingAccount}
+			onclose={() => (linkingAccount = null)}
+			onsaved={() => void load()}
+		/>
+	{/key}
+{/if}
+
 {#if editingAccount}
 	<!-- Keyed so a second Edit opens a fresh form seeded from THAT row. -->
 	{#key editingAccount.id}
@@ -516,6 +566,14 @@
 		font-size: 0.85rem;
 		color: var(--text-muted);
 		white-space: nowrap;
+	}
+	.decision-notice {
+		margin: 0;
+		padding: 8px 12px;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		background: var(--warning-tint);
+		color: var(--warning-on-tint);
 	}
 	.row-hint {
 		font-size: 0.8rem;

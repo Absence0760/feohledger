@@ -1034,6 +1034,18 @@ which has no settlement time to protect.
 
 **Tests:** `tests/test_payment_terminal_timestamps.py`.
 
+### A void re-flags the invoice if the vendor's bank details changed since
+
+A void that returns the invoice to `approved` also calls
+`api/vendors.reflag_voided_invoice_for_bank_change`: if a `bank_details`
+change for the vendor was approved after the voided payment was created, the
+invoice gets the same de-duped `fraud_flag` the change raises on unpaid
+invoices, stamped with that change's approver as its raiser. The change could
+not flag the invoice while it was `paid`, and without the flag the re-payment
+would go to the new account with no second look (decisions §286).
+
+**Tests:** `tests/test_erp_export_blocking_exceptions.py`.
+
 ### Payment processor adapters
 
 The actual money movement is handled by an adapter pattern in `backend/app/services/payment_adapters/` — same shape as ERP, extraction, and card adapters. Each adapter implements:

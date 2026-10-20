@@ -21,7 +21,8 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
-COPY app.py .
+COPY app.py qbo_sandbox.py .
+COPY fixtures fixtures
 
 EXPOSE 8080
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

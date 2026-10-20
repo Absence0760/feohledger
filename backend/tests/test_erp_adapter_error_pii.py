@@ -267,6 +267,7 @@ def test_unlinked_vendor_is_refused_before_any_http_call(adapter, provider):
     assert result.success is False
     assert result.message == f"{provider} post refused: vendor_not_linked"
     assert "Acme" not in result.message
+    assert result.not_posted is True
     cm.assert_not_called()
 
 
@@ -337,6 +338,7 @@ def test_unlinked_account_is_refused_before_any_http_call(adapter, provider, pay
 
     assert result.success is False
     assert result.message == f"{provider} post refused: account_not_linked"
+    assert result.not_posted is True
     cm.assert_not_called()
 
 

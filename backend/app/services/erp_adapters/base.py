@@ -129,6 +129,55 @@ def erp_failure_message(provider: str, status_code: int) -> str:
     return f"{provider} post failed: HTTP {status_code} ({erp_failure_reason(status_code)})"
 
 
+#: The 4xx answers that can change on a re-send, and so stay retryable:
+#:
+#: * 401 — an expired or rotated token; each adapter refreshes and the next
+#:   attempt carries a fresh one.
+#: * 408 / 425 / 429 — timed out, too early, rate limited: the ERP said "later".
+#: * 409 / 423 — a concurrent edit or a lock (Business Central answers a stale
+#:   etag with 409); the next attempt re-reads.
+#:
+#: Every other 4xx is the ERP's answer to the bill itself (400 bad request,
+#: 403 forbidden, 404, 422 validation): sending the same bill again gets the
+#: same answer, only later and with another call against the ERP's quota.
+_RETRYABLE_CLIENT_STATUSES = frozenset({401, 408, 409, 423, 425, 429})
+
+
+def erp_status_retryable(status_code: int) -> bool:
+    """Whether a failed ERP call that answered ``status_code`` may succeed if
+    ``services/erp`` sends the same bill again (``ErpPostResult.retryable``).
+
+    5xx and anything that is not an HTTP error at all stay retryable; a 4xx
+    does only when it is one of :data:`_RETRYABLE_CLIENT_STATUSES`.
+    """
+    if 400 <= status_code < 500:
+        return status_code in _RETRYABLE_CLIENT_STATUSES
+    return True
+
+
+def erp_http_failure(
+    provider: str,
+    status_code: int,
+    *,
+    erp_document_id: str | None = None,
+    raw_response: dict | None = None,
+) -> ErpPostResult:
+    """The failed :class:`ErpPostResult` for an ERP call answered with
+    ``status_code``: the PII-free :func:`erp_failure_message`, retryable only
+    when :func:`erp_status_retryable` says a re-send could change the answer.
+
+    Every adapter's HTTP failure goes through here, so none of them spends
+    ``services/erp``'s backoff budget re-sending a bill the ERP refused.
+    """
+    return ErpPostResult(
+        success=False,
+        erp_document_id=erp_document_id,
+        message=erp_failure_message(provider, status_code),
+        raw_response=raw_response,
+        retryable=erp_status_retryable(status_code),
+    )
+
+
 #: Stable reason code: the payload has no ``vendor_erp_id`` — the invoice's
 #: vendor was never linked to a record in this ERP (run the vendor sync, or the
 #: invoice has no resolved ``vendor_id`` at all). Every direct adapter refuses
@@ -179,11 +228,100 @@ def erp_refusal_message(provider: str, reason: str) -> str:
     return f"{provider} post refused: {reason}"
 
 
+#: Every reason code an adapter can refuse a push with (:func:`erp_refusal`),
+#: plus the two non-retryable post-create outcomes that carry a code too
+#: (``posted_total.posted_total_failure`` / ``previous_bill_removed``). The
+#: browser states each in the reader's language from this code
+#: (``frontend/src/lib/api/erpRefusals.ts``), so a code missing here — or one
+#: here with no message there — fails ``tests/test_erp_refusal_codes.py`` and
+#: ``erpRefusals.test.ts``. A literal set rather than an import of each
+#: adapter's constant: ``base`` is imported by every adapter, so it cannot
+#: import them back.
+ERP_REFUSAL_CODES: frozenset[str] = frozenset(
+    {
+        # shared (`base`, `bill_allocation`, `posted_total`)
+        "vendor_not_linked",
+        "account_not_linked",
+        "not_connected",
+        "amount_mismatch",
+        "line_amount_missing",
+        "posted_total_mismatch",
+        "posted_total_unconfirmed",
+        "previous_bill_removed",
+        "tax_not_itemised",
+        "tax_rate_unresolved",
+        "missing_dates",
+        "duplicate_document_number",
+        # QuickBooks Online
+        "doc_number_too_long",
+        "currency_unknown",
+        "currency_not_enabled",
+        # QuickBooks Online: coded from the Fault it answers a bill create with
+        "period_closed",
+        "vendor_inactive",
+        "account_inactive",
+        "reference_invalid",
+        "company_subscription_inactive",
+        "intuit_fault",
+        # Sage Business Cloud Accounting
+        "idempotency_lookup_incomplete",
+        # Business Central
+        "existing_invoice_not_open",
+        "line_amount_precision",
+        # SYSPRO / Sage Accounting ZA / Blackbaud FE NXT
+        "duplicate_invoice_number",
+        # Sage Accounting ZA
+        "currency_not_supported",
+        "foreign_currency_supplier",
+        "correlation_total_mismatch",
+        "tax_type_not_resolved",
+        "tax_mismatch",
+        "tax_not_stated",
+        # Blackbaud FE NXT
+        "subscription_key_missing",
+        "ap_account_not_configured",
+        "currency_not_configured",
+        "currency_mismatch",
+        "invoice_date_missing",
+        "due_date_missing",
+        "amount_not_positive",
+        "job_unconfirmed",
+        # `services/erp` itself: the sealed ERP credentials could not be opened
+        "erp_credentials_unavailable",
+        # `services/erp_export_gate`: an open duplicate / fraud exception (§286)
+        "exception_blocks_erp_export",
+        # `services/erp` itself: the invoice is due before it is dated
+        "invoice_due_before_date",
+    }
+)
+
+
 def erp_refusal(provider: str, reason: str) -> ErpPostResult:
-    """The non-retryable :class:`ErpPostResult` for a payload refused pre-flight."""
+    """The non-retryable :class:`ErpPostResult` for a payload refused pre-flight.
+
+    Carries ``reason`` and ``provider`` as data as well as in ``message``, so
+    ``services/erp`` can record the refusal as a code the browser localizes
+    rather than only as the English sentence.
+    """
     return ErpPostResult(
-        success=False, message=erp_refusal_message(provider, reason), retryable=False
+        success=False,
+        message=erp_refusal_message(provider, reason),
+        retryable=False,
+        refusal_code=reason,
+        refusal_provider=provider,
     )
+
+
+def erp_preflight_refusal(provider: str, reason: str) -> ErpPostResult:
+    """:func:`erp_refusal` for a refusal made before the adapter's first
+    network call, which therefore left nothing in the ERP
+    (``ErpPostResult.not_posted``). Use it ONLY there: a refusal after any
+    request — a lookup that found our own earlier bill, a lost read-back — may
+    stand beside a document, and must stay the fail-closed :func:`erp_refusal`.
+    """
+    result = erp_refusal(provider, reason)
+    result.not_posted = True
+    return result
 
 
 @dataclass
@@ -215,6 +353,23 @@ class ErpPostResult:
     #: finish. ``services/erp`` persists it and hands it back as
     #: :attr:`InvoicePayload.pending_job_id` on the next attempt; None clears it.
     pending_job_id: str | None = None
+    #: The stable reason code of a non-retryable refusal (one of
+    #: :data:`ERP_REFUSAL_CODES`) and the provider literal that refused it.
+    #: Set by :func:`erp_refusal` and the ``posted_total`` outcomes; None for an
+    #: HTTP failure, whose code lives in ``message`` (:func:`erp_failure_message`).
+    refusal_code: str | None = None
+    refusal_provider: str | None = None
+    #: Extra PII-free params of the refusal beyond ``provider`` — the numeric
+    #: code the ERP answered with (``intuit_code``), the GL ``accounts`` it
+    #: named. ``services/erp`` merges them into the recorded refusal's params.
+    refusal_params: dict | None = None
+    #: True only when the adapter KNOWS this attempt left no document in the
+    #: ERP — the ERP's own create answered a deterministic refusal (a 4xx that
+    #: names why: books closed, an inactive vendor). ``services/erp`` then does
+    #: not count the attempt as one whose outcome is unknown. Never set it on a
+    #: path that may have created something first (a failed read-back, a
+    #: timeout, a 5xx): the default False is the fail-closed answer.
+    not_posted: bool = False
 
 
 @dataclass
@@ -268,6 +423,18 @@ class GLAccountPayload:
     doesn't classify the account; the API endpoint accepts that.
     `erp_account_id` is the upstream's canonical identifier so future
     pulls can detect renames.
+
+    **`code` must be a key the ERP itself keeps unique** across the whole
+    chart — an account number, a fully-qualified path, the record id — never
+    a display name the ERP lets two accounts share. The sync refuses any code
+    two accounts in one pull resolve to rather than link either
+    (`services/gl_account_sync`, docs/decisions.md §284), so a repeatable key
+    leaves accounts unlinked; it never merges them.
+
+    `legacy_codes` are codes an earlier version of the adapter gave the same
+    account (QuickBooks' bare `Name`, before §284). Only the sync's ambiguity
+    check reads them: an existing row still keyed by one of them that two
+    accounts claim is unlinked rather than trusted.
     """
 
     code: str
@@ -275,6 +442,23 @@ class GLAccountPayload:
     account_type: str | None = None
     erp_account_id: str | None = None
     parent_code: str | None = None
+    #: The parent's ``erp_account_id``, for an adapter that knows it. The sync
+    #: then names the parent by OUR code for that account — the row linked to
+    #: it — rather than the ERP's, which differ whenever a row kept a code the
+    #: ERP has since changed (a numbered parent: ours "Office Expenses", the
+    #: ERP's "6020"). ``parent_code`` is the fallback for a parent we hold no
+    #: row for.
+    parent_erp_account_id: str | None = None
+    #: True when the adapter states this account's parentage outright, so a
+    #: None parent means "top-level" and the sync CLEARS a stale one. False
+    #: (the default) reads None as "not reported" and leaves ours alone.
+    reports_parent: bool = False
+    legacy_codes: tuple[str, ...] = ()
+    #: False for an account the ERP has made inactive. An adapter EMITS such
+    #: accounts rather than dropping them: their ids are still the ERP's, so a
+    #: row linked to one is not "dead", and the sync marks the row inactive in
+    #: our chart (it never creates a row for one).
+    active: bool = True
 
 
 @dataclass
@@ -296,6 +480,61 @@ class VendorPayload:
     address: str | None = None
     tax_id: str | None = None
     payment_terms: str | None = None
+    #: False for a vendor the ERP has made inactive — emitted, not dropped, for
+    #: the same reason as ``GLAccountPayload.active``. The sync never creates
+    #: or links a payee for one, and marks a linked vendor ``inactive``.
+    active: bool = True
+    #: A value an earlier version of the adapter wrote into ``code`` that was
+    #: never our identifier (QuickBooks' ``AcctNum``: our account number AT
+    #: the vendor). The sync clears it from an ERP-created vendor's ``code``.
+    legacy_code: str | None = None
+
+
+#: How many rows a chart or vendor listing reads before it gives up as
+#: incomplete (an adapter whose own page cap already reaches further, such as
+#: QuickBooks' 50 x 1000, keeps it). Generous on purpose: past it the listing
+#: RAISES (:class:`ErpListingIncomplete`) instead of returning the first N rows,
+#: so it has to sit above any chart or vendor master a sync can sensibly read
+#: in one request.
+SYNC_LISTING_MAX_ROWS = 10_000
+
+
+class ListingGap(enum.StrEnum):
+    """Why a listing could not be proven complete."""
+
+    #: A page (the first or a later one) could not be read.
+    fetch_failed = "fetch_failed"
+    #: The walk stopped at :data:`SYNC_LISTING_MAX_ROWS` with more to read.
+    truncated = "truncated"
+
+
+class ErpListingIncomplete(RuntimeError):
+    """``list_gl_accounts`` / ``list_vendors`` could not read the whole collection.
+
+    The chart and vendor syncs read ABSENCE as evidence — a link whose id is not
+    in the pull, or whose id now holds something else, is dropped
+    (``services/gl_account_sync``, ``services/vendor_sync``) — and they decide
+    whether a code or a name is unique by counting it in the pull. Both are
+    only true of the whole collection. A listing that returned what it had read
+    before a failure, or the first N rows of a longer one, would unlink every
+    good link the missing pages held and could link a name that is not unique
+    (docs/decisions.md §284). So a listing either returns everything or raises
+    this, and the sync endpoints answer 502 without syncing anything.
+
+    PII-free by construction: the provider literal, the collection and the
+    :class:`ListingGap` — never a response body, URL or credential.
+    """
+
+    def __init__(self, provider: str, collection: str, gap: ListingGap):
+        self.provider = provider
+        self.collection = collection
+        self.gap = gap
+        super().__init__(f"{provider} {collection} listing incomplete: {gap.value}")
+
+
+def sync_listing_pages(page_size: int) -> int:
+    """Pages a listing of ``page_size`` rows a page may read (rounded up)."""
+    return -(-SYNC_LISTING_MAX_ROWS // page_size)
 
 
 class ErpAdapter:
@@ -329,23 +568,29 @@ class ErpAdapter:
         return []
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        """Pull the chart of accounts from the ERP.
+        """Pull the WHOLE chart of accounts from the ERP, or raise.
 
-        Same contract as `list_pos`: default returns an empty list so
-        an adapter that doesn't expose a chart endpoint just leaves the
-        local chart untouched. The Auto GL Coding pipeline relies on
-        this — the prompt only constrains AI suggestions when the org
-        has synced a real chart.
+        An adapter that reads a chart returns every account (inactive ones
+        included, ``active=False``) or raises — :class:`ErpListingIncomplete`
+        for a page it could not read or a chart past
+        :data:`SYNC_LISTING_MAX_ROWS` — never what it had read so far: the
+        sync reads absence as evidence (see that class).
+
+        The default returns an empty list so an adapter that doesn't expose a
+        chart endpoint leaves the local chart untouched; the sync treats an
+        empty pull as proving nothing and changes no link on it.
         """
         return []
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Pull vendors from the ERP.
+        """Pull EVERY vendor from the ERP, or raise.
 
-        Same contract as `list_pos` / `list_gl_accounts`: default returns
-        an empty list so an adapter that doesn't yet support vendor sync
-        just reports "0 new" instead of 500ing the `/api/vendors/sync-erp`
-        endpoint. Adapters that *do* support it override this.
+        Same contract as :meth:`list_gl_accounts`: an adapter that reads
+        vendors returns all of them (inactive ones ``active=False``) or raises
+        :class:`ErpListingIncomplete`, and skips a record with no id of the
+        kind its ``post_invoice`` posts against — never substituting a number
+        or a name for it. The default returns an empty list, on which the sync
+        changes no link.
         """
         return []
 

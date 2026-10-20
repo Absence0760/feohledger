@@ -948,6 +948,16 @@ async def test_erp_connection(
     A live adapter is plan-gated like a save (``ensure_live_erp_entitled``,
     decisions §258 / §281) — a test reaches the real ERP with the tenant's
     credentials, and a Merge.dev one is a Merge connection. ``mock`` stays open.
+
+    Works the same for an OAuth ERP: the form's body names the saved provider,
+    so ``config_for_connection_test`` completes it with the saved ``oauth``
+    block and the stored tokens, and the adapter calls the ERP with them.
+
+    The answer is coded — ``code`` is ``connected`` / ``connection_failed`` /
+    ``credentials_unavailable`` / ``unknown_adapter``, with the ERP's catalogue
+    key as ``provider`` (or the bad key as ``adapter``) — so the panel states it
+    in the reader's language with the ERP's display name; ``message`` is the
+    English fallback for a client that does not know the code.
     """
     # Stored secrets join the test only while the form names the saved ERP at
     # the saved destination (`provider_credentials.config_for_connection_test`).
@@ -958,7 +968,11 @@ async def test_erp_connection(
     except CredentialCryptoError:
         # The sealed credentials could not be opened (KMS unreachable, a bad
         # envelope). Say so; name no value, and never test without them.
-        return {"success": False, "message": CREDENTIALS_UNAVAILABLE_DETAIL}
+        return {
+            "success": False,
+            "code": "credentials_unavailable",
+            "message": CREDENTIALS_UNAVAILABLE_DETAIL,
+        }
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configuration provided")
     await ensure_live_erp_entitled(db, org.id, erp_config)
@@ -974,24 +988,34 @@ async def test_erp_connection(
         # <typo> successfully". Name the bad value; echo no credential.
         return {
             "success": False,
+            "code": "unknown_adapter",
+            "adapter": exc.adapter_key,
             "message": (
                 f"'{exc.adapter_key}' is not a supported ERP adapter. "
                 "Pick one from the ERP list and re-test."
             ),
         }
 
+    provider = str(erp_config.get("type") or "")
+    failed = {
+        "success": False,
+        "code": "connection_failed",
+        "provider": provider,
+        "message": "Connection failed — check your credentials",
+    }
     try:
         success = await adapter.test_connection()
-        if success:
-            return {
-                "success": True,
-                "message": f"Connected to {erp_config.get('type', 'ERP')} successfully",
-            }
-        else:
-            return {"success": False, "message": "Connection failed — check your credentials"}
     except Exception:
         logger.exception("ERP test_connection failed")
-        return {"success": False, "message": "Connection failed — check your credentials"}
+        return failed
+    if not success:
+        return failed
+    return {
+        "success": True,
+        "code": "connected",
+        "provider": provider,
+        "message": f"Connected to {provider or 'ERP'} successfully",
+    }
 
 
 @router.post("/sso/scim-token", response_model=SCIMTokenResponse)

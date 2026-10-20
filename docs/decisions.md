@@ -11933,3 +11933,475 @@ failed check (429, outage) is retryable rather than "expired", set mode, the
 hidden username field and the prefilled sign-in link;
 `tests-e2e/auth/login.spec.ts` the prefill; `tests-e2e/signup/` and
 `tests-e2e/email/signup-email.spec.ts` the whole journey through Mailpit.
+
+## 284. GL accounts and vendors link by the ERP's unique key, within the ERP company that issued it; a push refusal is a code the reader can act on (migrations 0114, 0115, 2026-10-19)
+
+**Found live.** Against the real QuickBooks Online sandbox, a first chart sync
+into an empty chart reported 89 accounts as "81 new, 8 updated", and an invoice
+coded "Job Materials" — shown under "Job Expenses" in our picker — was posted as
+a Bill to "Landscaping Services:Job Materials". Two defects stacked:
+
+1. `quickbooks_online._account_code` keyed an account by `AcctNum or Name`.
+   QuickBooks keeps a `Name` unique only among its siblings; the sandbox repeats
+   eight sub-account names under two parents. Only `FullyQualifiedName` (the
+   colon-joined path) is unique, and `AcctNum` when numbering is on.
+2. `POST /api/gl-accounts/sync-erp` upserted by code, with a per-run `pending`
+   dict by code, so the second account with a code overwrote the first row's
+   `erp_account_id` and counted as "updated". The push resolves a code to that
+   id, so the bookkeeper's choice was silently replaced by whichever account the
+   sync read last.
+
+**The rule now: a row is linked to an ERP account only by a key the ERP keeps
+unique, and nothing ambiguous is linked at all** (`services/gl_account_sync`,
+backend/docs/erp-integration.md § GL accounts and vendors are linked by the
+ERP's unique key):
+
+- match by `erp_account_id` first (an ERP rename renames our row), then by
+  code; a row linked to another live account keeps its link and the newcomer is
+  refused (`code_taken`); a dead link (an id the pull no longer contains) is
+  re-pointed by code. That alone does NOT make a sandbox → production move
+  safe: QuickBooks ids collide across companies, which is the next section;
+- a code two pulled accounts resolve to is refused for **both**
+  (`duplicate_code`) and an existing row with it loses its link — reported, never
+  counted as updated;
+- every adapter's `code` was audited against its provider's uniqueness rule
+  (the table in the doc). QuickBooks now uses `AcctNum`, else the path; Merge.dev
+  falls back to the Merge `id`, never the `name`. The others already used a
+  unique key (Xero `Code`, BC No., NetSuite `acctnumber`/`fullname`, Sage nominal
+  code / ID, Intacct ACCOUNTNO, SYSPRO `GlCode`, FE NXT account number).
+- **Vendors**: the name fallback in `vendor_sync` links a manually created
+  vendor only when the name is unique among the pulled records *and* among the
+  unlinked locals; otherwise it is reported (`ambiguous_name`) and nothing is
+  linked or created. It used `scalar_one_or_none`, so two local vendors with one
+  name was a 500 as well as a guess. QuickBooks `Vendor.AcctNum` stopped feeding
+  our vendor `code`: it is the company's account number *at* the vendor.
+
+**An ERP id means something only in the company that issued it (migration
+0115).** Review of the first cut found that the matching above trusted an id
+across companies. QuickBooks numbers accounts and vendors per company with small
+integers, so a sandbox and a production company share most ids: our "Office
+Supplies", linked to sandbox "7", posted to production "7" (Advertising) after a
+reconnect, and the next sync matched the row by that colliding id, renamed it
+"Advertising", and recorded no link change. `vendor_sync` did the same and
+overwrote the vendor's name. So:
+
+- **every link records its connection realm** — `gl_accounts.erp_link_realm`,
+  `vendors.erp_link_realm` (`services/erp_link_realm`), `"<adapter>:<company>"`
+  built from NON-secret configuration only: the OAuth consent's company id
+  (QuickBooks `realmId`, Xero tenant, Sage business, Blackbaud environment), or a
+  direct adapter's company fields (NetSuite account; BC tenant + environment +
+  company; Intacct company; SYSPRO / Sage ZA host + company). Merge.dev's ids
+  are Merge-assigned UUIDs, unique across linked accounts, so its realm is the
+  adapter alone. `mock`, and an OAuth ERP with no consent, have none (`None`):
+  nothing can post there, so nothing is filtered. A secret is never fingerprinted
+  into a realm: it would land on every row and every audit row, and rotating it
+  would read as a company change.
+- **the push resolves only links of the current realm** (`services/erp
+  ._resolve_erp_refs`, `gl_chart.resolve_erp_account_ids`). A link from another
+  company is "not linked", and the bill is refused `vendor_not_linked` /
+  `account_not_linked` before any HTTP call.
+- **a sync re-judges every link of another realm by evidence, and records the
+  outcome** (rule 0 in `gl_account_sync`, the realm pass in `vendor_sync`). A
+  link is kept only when the pull shows the SAME id holding the row's own code
+  (GL: its current code or the legacy key an older adapter gave it) or, for a
+  vendor, the same supplier (same name ignoring case and spacing, or the same
+  non-blank tax id). Then the id names what the row meant in the new company too
+  — a production company copied from the sandbox keeps its links — and the move
+  is recorded (`link_changes` with `from_realm` / `to_realm`; `vendor.synced_from
+  _erp` `change: realm_changed`). Anything else is dead: dropped, never matched
+  by the colliding id, re-matched by code (GL) or by the unambiguous-name rule
+  (vendors), and every change written to `link_changes` / the per-vendor audit
+  row (`change: unlinked`). Rejected: re-matching purely by code and ignoring the
+  old id — it would churn every pre-§284 sub-account row a single-company tenant
+  has, whose code is the legacy key, not the current one.
+- **the connect callback audits a change of company**
+  (`organization.erp_realm_changed`, beside `organization.erp_connected`, both
+  naming the realms). Informational: the per-row realm is what keeps old links
+  from posting, so a reconnect after a disconnect — which leaves no previous
+  company to compare — needs no flag to be safe.
+
+**Links made before 0115 carry no realm (NULL), and nothing recorded which
+company they came from.** Two wrong answers: treat them all as dead (every
+existing tenant's pushes refused until someone syncs — an automatic
+approve-then-push flow strands every invoice), or adopt them into whatever the
+tenant is connected to at the first sync (a tenant that reconnected to another
+company first would have its colliding links blessed — the defect itself). The
+chosen rule: **the migration records, per organization, the realm its ERP
+config names at that moment** (`settings.erp.legacy_link_realm`, control-plane
+step of 0115; absent when no company is nameable, **and never written for a
+QuickBooks Online org**). A QuickBooks org's NULL links are exactly the ones
+the old name-keyed chart sync made, and a sub-account name repeated under two
+parents was merged into one row linked to whichever account the sync read last
+(eight rows in the sandbox). Trusting them on the snapshot would keep those
+rows posting to the wrong account until someone re-ran the sync. So for
+QuickBooks the push refuses every pre-0115 link (`account_not_linked` /
+`vendor_not_linked`) until the first chart sync and vendor sync adopt it by
+evidence and stamp its realm. That holds even on the company the tenant never
+left: refusing the push is the cost of not posting a bill to the wrong account.
+Merge.dev orgs are still stamped: their links were always keyed by the Merge
+record `id` (the name was only a fallback for an id-less record, which Merge
+does not send). The push trusts a NULL link only while the org is still
+connected to that realm — so a tenant **on any other ERP** that never changed
+company keeps posting with no action, and one that connects anywhere else from
+then on has its unverified links refused until a sync re-judges them. The syncs
+never trust a NULL link on the snapshot alone: they apply the same evidence
+rule as for any other realm and stamp the realm (`realm_adopted` counts the
+silent confirmations). The snapshot is written only by the migration;
+`catalog.merge_erp_update` never takes it from a settings save and drops it with
+the block when the ERP changes. Residual, accepted: a tenant that switched
+company *before* 0115 and has not synced since is indistinguishable, at the push,
+from one that never switched; its first sync after 0115 sorts its links by
+evidence. Pre-0115 history is not recoverable from any record. The migration
+computes the realm with a frozen copy of `connection_realm`, not by importing
+it: a revision must write the same thing on every replay (§282).
+`tests/test_migration_0115_erp_link_realm.py` pins the copy to the live
+function, and a failure there after 0115 has shipped means the realm format
+changed and needs its own revision.
+
+**The repair passes cover the whole organization.** Rules 0, 3 and 4 are about
+which ERP account an id or a code names, not about which subsidiary holds the
+row, so they run over every chart row whichever entity the sync was run under
+(they used to run over shared ∪ the selected entity only, leaving a merged row
+in another subsidiary's chart posting until someone synced under it). Matching
+and creating stay scoped to the chart being synced into.
+
+**A person settles what the rules will not guess.** The live sandbox showed the
+hole in "unlink, never guess": the old row "Depreciation" was correctly unlinked
+(the top-level account 40 and "Truck:Depreciation" 39 were both keyed
+"Depreciation" before §284), but the top-level account's current code IS
+"Depreciation", so rule 2 found that same row, judged it legacy-ambiguous and
+refused — on every sync, forever. A bookkeeper could not code a bill to
+top-level Depreciation at all. Now a row left unlinked by rule 3 or 4 keeps the
+ERP accounts it could mean (`gl_accounts.erp_link_candidates`, with the realm
+they came from); `/gl-accounts` shows it as "Needs a decision"; and an admin or
+AP manager picks one (`POST /api/gl-accounts/{id}/erp-link`, audited
+`gl_account.erp_link_confirmed`). Only an offered id under the same connection
+is accepted, and only on an unlinked row. A confirmed link
+(`erp_link_confirmed_at` / `_by`) is exempt from rules 3 and 4 — it is the
+answer to the question they ask — but still dies with its realm or when its
+account leaves the ERP. Nothing auto-picks: the invoices coded to the row are
+the evidence, and only a person can read them. If the person picks
+"Truck:Depreciation" for the old row, the top-level account cannot also own the
+code "Depreciation" in the same chart and stays `code_taken`; that is the
+consequence of their answer, and the doc says so. Considered and rejected:
+persisting the whole last sync report (it goes stale with every edit; the
+per-row candidates are refreshed against each pull and cleared on link).
+
+**Inactive records are read, marked and never created.** `select * from
+Account` returns only active QuickBooks accounts, so an account made inactive
+vanished from the pull: a row linked to it looked like a dead link and our chart
+kept it active (live: Bank Charges, id 8). The adapter now queries `where Active
+IN (true, false)` for accounts and vendors (QuickBooks' documented form), and
+every adapter emits inactive records with `active=False` (NetSuite `isinactive`,
+BC `blocked`) instead of dropping them. Their ids count as live; a matched row
+is marked inactive in our chart (reported as `deactivated`), no row is created
+for one, and a sync never reactivates — a retirement here may be our own
+decision. A vendor linked to an inactive ERP record becomes `inactive` if it was
+`active` (live: Squeaky Kleen Car Wash, 57); no payee is created or linked for
+one. Whether the ERP accepts a bill against an account it made inactive stays
+the ERP's call, as for any retired account (`resolve_erp_account_ids`).
+
+**Smaller holes closed in the same pass.** An account the ERP sends with no id
+is refused (`missing_erp_id`) before the dedupe, which used to collapse two
+id-less accounts into one and count "linked" for writing a NULL. NetSuite and
+BC no longer drop over-long codes themselves: they emit them, the sync refuses
+them `code_too_long`, and their ids stay live for a row already linked to one.
+Vendors the pre-§284 QuickBooks mapping created still carried `Vendor.AcctNum`
+in `code`, which CSV import resolves vendors by: the sync clears `code` where it
+equals the record's AcctNum on a vendor it created (`source = erp_sync`; a
+manual vendor's code may be a person's choice), audited without the old value.
+An `account_not_linked` refusal no longer names the header code when every line
+carries its own (the header is posted nowhere then). And the QuickBooks PO sync
+stopped reading the whole chart to resolve PO-line accounts: `po_line_items`
+has no column for one and nothing reads `PoLinePayload.gl_account`, so the
+call bought discarded data. Lines carry no GL (never the `AccountRef` name);
+persist it by id when a consumer needs it.
+
+**The code is never rewritten on an id match.** The obvious way to repair a
+collapsed row is to re-key it to the account's real code. Rejected: invoices,
+lines, recurring templates and contract lines record the GL as a **string**
+(`schemas/gl_account.GLAccountUpdate` makes `code` immutable for exactly this
+reason, and followups (c) tracks the FK that would lift it), so re-keying
+silently detaches every line coded to it. A drifted code is kept, stays
+correctly linked by id, and is reported (`code_drift`).
+
+**Repair of collapsed rows is an unlink, not a guess.** A pre-fix row "Job
+Materials" linked to Landscaping's id cannot say which account its invoices
+meant (our picker showed it under Job Expenses). `GLAccountPayload.legacy_codes`
+carries the key an older adapter used (QuickBooks' bare `Name`); a row whose
+code is the legacy key of more than one pulled account, and which no longer
+matches its linked account's current code, loses its link. Its invoices are then
+refused `account_not_linked`, naming the code, before any HTTP call, and each
+real account gets its own row. Only legacy keys count as evidence of a merge: a
+current code another account holds is a rename (rule 2's `code_taken`), and
+unlinking there would have re-pointed the old row's invoices at the newcomer.
+Residual, accepted: a collapsed row whose link landed on the account whose new
+code equals the old one (a top-level account named like the sub-accounts) looks
+exactly like a correct row and keeps its link.
+
+**Code length: widen to 100, the width that records a code.** QuickBooks paths
+pass 50 in the sandbox itself ("Landscaping Services:Job Materials:Decks and
+Patios" is 51). Considered:
+
+- *a short stable form within 50* (truncate + id): unreadable for ordinary
+  sub-accounts, in the one field a line picker shows;
+- *skip over-long accounts*, as NetSuite and BC did: a bookkeeper cannot code to
+  a real account at all;
+- *widen past 100*: every column that records a code (`invoices.gl_account`,
+  `invoice_line_items.gl_account`, recurring template and contract lines) is
+  `String(100)`, so a longer chart code could not be coded anywhere, and widening
+  those means touching the eight services that parse them.
+
+So `GL_CODE_MAX_LENGTH = 100` (migration `0114_gl_code_width`, tenant DBs,
+catalog-only `ALTER … TYPE varchar(100)`, downgrade refuses if a value would
+truncate), and the rare QuickBooks path past 100 keeps its head and ends
+`…#<Id>`, unique because the id is. NetSuite and BC emit an over-long code
+as it is (they first skipped it, which hid a live id from the sync). The sync
+refuses anything longer (`code_too_long`) rather than let the database raise.
+
+**Push refusals are coded end to end.** The live test also showed the AP user
+the raw "QuickBooks Online post refused: vendor_not_linked" in the invoice
+modal: English-only, and a reason code is not an instruction. `ErpPostResult`
+now carries `refusal_code` / `refusal_provider`; `services/erp` records
+`refusal = {code, params}` beside `error` on `invoice.erp_failed` (`provider`,
+plus `accounts` for `account_not_linked`); and `api/erpRefusals.ts` states each
+of the registry's codes (`base.ERP_REFUSAL_CODES`) in six locales with what to
+do. Two guards keep it complete: a backend scan that every reason constant under
+`erp_adapters/` is registered, and a vitest that reads the registry out of
+`base.py`. The code lives on the audit row rather than a new invoice column
+because that row is already where the panel reads the failure from, and it is
+append-only — the refusal a user saw is the refusal that was recorded.
+
+## 285. QuickBooks refusals are coded from Intuit's numeric Fault codes, and a deterministic 4xx is never retried (2026-10-19)
+
+**Context.** A live run against the Intuit sandbox (2026-10-19) posted three
+bills QuickBooks refused for three different reasons — dated into books closed
+through 2026-09-30 (closing set to "warning only" in the UI; the API refused
+anyway), coded to an account made inactive, and for a vendor made inactive. All
+three reached the AP user as the same "QuickBooks Online post failed: HTTP 400
+(invalid_request)", and each was sent three times over six seconds before
+failing. The adapter deliberately never read the body (`base.erp_failure_reason`: Intuit's
+`Fault` quotes the submitted bill back, and the message lands on an append-only,
+shipped audit row).
+
+**Decision.** Read the Fault, but only its numbers. `_fault_errors` keeps each
+error's numeric `code` and an `element` that is on a fixed allowlist of Bill
+field names — never `Message` / `Detail`. Known codes map to refusals
+(`period_closed`, `duplicate_document_number`, `company_subscription_inactive`);
+the codes that mean "a reference is bad" (2500, 610, and the catch-all 6000) are
+resolved by reading the bill's own vendor and accounts back by id, so the
+refusal says WHICH (`vendor_inactive`, or `account_inactive` naming our GL
+codes); anything else is `intuit_fault` with the number, so the next unknown is
+diagnosable from the row instead of needing another live run. All are
+non-retryable. Separately, `base.erp_http_failure` makes every adapter's HTTP
+failure retryable only when the status can change on a re-send (5xx, 401, 408,
+409, 423, 425, 429).
+
+That includes Fault 6140 (`duplicate_document_number`, another bill already
+carries the DocNumber). `_find_existing` looks for our own earlier bill before
+every create, so a 6140 is normally someone else's bill; but if QuickBooks'
+query lags and the lookup misses our own, the invoice lands at `failed` instead
+of finding it on a later attempt. That is the safe direction (nothing is posted
+twice), and a manual retry recovers once the query catches up.
+
+**Rejected.** *Reading `Detail` and redacting it* — the redaction would have to
+know every field Intuit might echo, and a miss is permanent on a WORM row.
+*Guessing account vs vendor from the code alone* — 2500 covers both, and the
+read-back is two or three GETs on a path that has already failed. *Retrying
+409 / 423 as deterministic too* — Business Central's stale-etag answer is 409
+and succeeds on the re-read, so treating every 4xx alike would turn a
+concurrency race into a hard failure.
+
+## 286. An open duplicate or fraud exception refuses the ERP push, not only the payment run (migration 0116, 2026-10-19)
+
+**Found live.** In a QuickBooks Online test a clerk entered a second invoice
+with the vendor and number of one already posted. The app raised the
+`duplicate_invoice_number` warning and an open `duplicate` exception, a member
+of `PAYMENT_BLOCKING_EXCEPTION_TYPES`, so our payment runs would not pay it.
+Approval gates on none of those types (§169), so an admin approved it, and
+"Send to ERP" posted it as a second Bill. A posted bill can be paid from inside
+the ERP (QuickBooks "Mark as paid", Bill Pay), so the duplicate liability now
+sat where our payment-run control does not reach.
+
+**The rule:** the push refuses while the invoice has an open or escalated
+exception of a type that says the liability itself is wrong.
+`api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`, defined once beside the
+payment set and asserted to be a subset of it:
+
+| Type | Refuses the push? | Why |
+|---|---|---|
+| `duplicate` | yes | the obligation is already booked; a second bill is a second liability for one debt |
+| `fraud_flag` | yes | the obligation may not exist, or not be owed to this payee |
+| `line_total_mismatch` | no | the approver signed the header amount, which is never recomputed from lines and is the total the bill is posted and read back at (`posted_total`). The hold is on paying until the lines are reconciled |
+| `payment_reconciliation` | no | raised on a payment, after the bill exists; the liability is real and the question is whether a rail already holds an order |
+| `quality_hold` | no | goods received and awaiting inspection are still owed; ERP practice is to book the bill, hold payment, and credit any return |
+| `po_mismatch` | no | billing over the PO or ahead of receipt is the ERP's own 3-way-match hold; the vendor's claim is still recorded |
+
+For the four "no" types a bookkeeper paying from the ERP pays a real debt,
+perhaps early; for the two "yes" types they pay money that is not owed. A
+`fraud_flag` at `info` severity (a round amount) refuses too, because it is the
+same row that blocks the payment run: one row, one meaning, and a person clears
+it. So does the `fraud_flag` an approved vendor bank change opens on every
+approved, unpaid invoice for that vendor (`api/vendors._BANK_CHANGE_FLAG_STATUSES`,
+derived from `VALID_TRANSITIONS`: every status on a forward path from
+`approved` to `paid` — `approved`, `sending_to_erp`, `sent_to_erp`, `failed`,
+`posted_in_erp`, `payment_scheduled` — with `failed` counted only for an
+invoice that was ever approved), although it is about the payment destination
+rather than the debt: the change may itself be the BEC, and a bill in the ERP
+is paid against the ERP's own vendor record, which the same request may have
+changed too. Every approved bill for that vendor waits for a second person, and
+the fail-closed cost is that wait. A `paid` invoice is out of reach when the change lands, so voiding its
+payment re-raises the flag if a bank change was approved after that payment
+was made (`api/vendors.reflag_voided_invoice_for_bank_change`, called from
+`POST /api/payments/{id}/void`), stamped with that change's approver; the
+re-payment would otherwise go to the new account unreviewed.
+
+**One chokepoint, plus a synchronous answer.** `services/erp._call_erp` asks
+`services/erp_export_gate.erp_export_blocking_exception` before it builds an
+adapter. Every push reaches it: `POST /complete` (the modal's "Send to ERP"),
+`/send-to-erp`, `/retry-erp`, the local dispatcher and the Lambda worker, all
+through `send_to_erp_internal`. It re-reads on each attempt, so a flag raised
+after the push was queued still stops it, and it raises `ErpPostRefusedError`,
+so the invoice lands at `failed` on the first attempt with
+`refusal = {code: "exception_blocks_erp_export", params: {exception_type}}` on
+`invoice.erp_failed`. The predicate is `payment_runs.blocking_exception_types`
+narrowed with `types=`, so "which flags are live" (anything but resolved or
+dismissed) stays one query. The three HTTP doors also ask, before their
+transition, and answer 409 with the same coded refusal: the push runs in the
+background, and a 202 that fails a second later would leave the user reading
+the audit trail to find out why. The invoice stays `approved` (or `failed`) and
+nothing is queued. The 409 commits first: `/complete` runs `refresh_warnings`,
+which may open the very duplicate the refusal names, and the rollback a raised
+`HTTPException` causes would otherwise send the user to an empty queue.
+
+**A refusal says when the bill may already be in the ERP.** `_call_erp`
+commits `state_data.erp_outcome_unknown = true` before every adapter call and
+sets it false only on a success, so a timeout, a 5xx, a worker that died
+mid-call, or any refusal leaves it true. Every non-success counts because a
+refusal made after the create went through (a QuickBooks read-back that lost
+its connection, a Xero read-back raising `ErpNotConnectedError`) cannot be told
+from one made before anything was sent. `erp.possibly_posted` also reads an
+unconfirmed ERP job, an orphan document, or an `erp_reference`; a row from
+before the key is read fail-closed from `last_error` / `erp_retries`, once.
+When the gate refuses such a retry, the refusal params, the 409 and the
+`invoice.erp_failed` row carry `possibly_posted: true`. The gate does not look
+the bill up: it refuses before any adapter is built, and once the flag is
+cleared the next push's own idempotency lookup finds the bill instead of
+posting another.
+
+**Clearing the flag is the segregated sign-off already in place.** Both types
+are payment-blocking, so `exception_lifecycle.record_decision` refuses anyone
+implicated in the invoice (§169–§170). The invoice's uploader cannot dismiss
+the duplicate and then post it; someone else can, and then the push goes
+through. Nothing in the gate writes to an exception.
+
+**A finding a person cleared stays cleared, while the invoice is unchanged.**
+`_ensure_exception` deduped only against open and escalated rows, so the next
+`refresh_warnings` re-opened a `duplicate` a reviewer had dismissed. With the
+gate, that made a legitimate invoice that shares a number (a vendor who reuses
+numbers yearly) unpostable, because `/complete` refreshes on every send. For
+these two types each detector row now carries `finding_fingerprint` (migration
+0116): a SHA-256 of the finding's code and the invoice fields those rules read
+(`invoice_warnings.finding_fingerprint`), stamped once when the row is raised.
+A row a person resolved or dismissed whose fingerprint equals the invoice's
+current one suppresses the re-raise; an edit to any of those fields raises it
+again. The one input a rule reads from outside the invoice row, the vendor
+email domain of `personal_email_domain`, is hashed from the finding's params.
+
+Matching on the finding's display params was the first version and the review
+rejected it both ways. Three findings have no params (`duplicate_invoice_number`,
+`remit_to_changed`, `future_invoice_date`), so one dismissal exempted the
+invoice from the same finding after an edit re-pointed it at another, already
+paid bill, or at an attacker's remit address: the warning showed but nothing
+blocked, weakening the payment-run gate as well as this one. Other params drift
+with no edit (a new vendor's age in days, a vendor mean, an LLM's wording), so
+a dismissal came back the next day. The fingerprint is over what the person
+judged, the invoice, not over what the sentence displays; it is hashed so the
+column holds no address.
+
+"A person, about this invoice" is enforced, not assumed.
+`exception_lifecycle.record_decision`, the one path that closes an exception,
+keeps the fingerprint on a resolve or dismiss only when a person decided (an
+`actor_id` and no `via`: not a PO-match refresh, not an agent) AND the invoice
+still hashes as it did when the finding was raised. The second condition is
+what the second review asked for: restamping the open row on each refresh let
+an implicated clerk re-point the invoice while a manager had the queue open,
+and the manager's dismissal then recorded a state they never saw. With the
+stamp fixed at raise time, that dismissal binds nothing, the next refresh
+raises the finding again, and a person sees the re-pointed invoice. The same
+holds for writers that change these fields without a refresh (vendor merge,
+the amount-mismatch and multi-PO agent resolvers). The third review closed the
+timed variant, an edit reverted just before the click (S1 to a clean-looking S2
+and back): every `refresh_warnings` voids the stamp of an open row the invoice
+no longer hashes to, whether or not the rule still fires, so once the invoice
+has diverged that row's verdict can never bind (`_void_stale_finding_stamps`).
+The cost of all three is one extra review round, never a dead end: the next
+refresh raises a fresh row stamped with the current state, and its dismissal
+holds. Escalation, including an agent's, leaves the stamp alone. Today no detector or agent closes either type
+anyway. A row closed before 0116 has no fingerprint and never suppresses, which
+is how it behaved. Other types keep re-opening after a person closes them,
+which is a follow-up.
+
+**Not done here** (`docs/followups.md`): a flag raised after the bill is
+already in the ERP leaves that bill payable there, and nothing yet offers the
+existing ERP void from the exception. Voiding automatically was rejected, since
+a flag can be false.
+
+## 287. Absence is evidence only in a whole listing, and only a named company can judge a link (2026-10-19)
+
+**Absence is evidence only in a whole listing, and only a named company can
+judge a link.** Review of §284 found three holes in the rules it added.
+
+1. **A partial pull read as a complete one.** Rule 0 and the dead-link
+   handling read "this id is not in the pull" as "that record is gone", and
+   both syncs count codes and names across the pull to decide uniqueness. But
+   most adapters' chart and vendor listings returned `[]` on any error, the
+   rows read before a later page failed, or the first 1000 rows. So a
+   transient failure, or a large chart, on the first sync after 0115 unlinked
+   every NULL-realm and cross-realm link the pull lacked. A listing now
+   returns everything or raises `ErpListingIncomplete` (`fetch_failed` /
+   `truncated`; QuickBooks raises its own request error on a failed page),
+   which the sync endpoints answer 502 without syncing. The bound is
+   `base.SYNC_LISTING_MAX_ROWS` (10,000; QuickBooks keeps its 50 × 1000 =
+   50,000), and reaching it raises. A truncation marker on a partial result
+   was rejected: the syncs also count codes and names across the pull to
+   decide uniqueness, which a partial pull gets wrong whatever it is marked.
+   An empty pull changes nothing. Locked, inactive and archived records
+   (Blackbaud accounts closed to data entry, inactive Sage ZA accounts,
+   archived Xero accounts and contacts) are emitted `active=False`, not
+   dropped, since a dropped record also reads as a dead link. PO listings keep their bounded best-effort
+   reads: nothing judges a link by a PO's absence.
+2. **A pull with no realm judged real links.** `mock`, or an OAuth ERP with no
+   consent, has no realm, and a sync under one re-judged every link stamped
+   with a named realm against fixture data: real links were dropped, matched
+   by a fixture's colliding id and renamed, re-linked by code, and pending
+   link decisions wiped. Such a pull now leaves every row tied to a named
+   realm alone (a link stamped with one, or candidates offered under one), and
+   a pulled code such a row holds is `code_taken`. It works only on unlinked
+   rows and NULL-realm links.
+3. **A legacy code proved nothing between two named realms.** Rule 0 kept a
+   link moving from one named realm to another (sandbox to production) when
+   the colliding id held the row's legacy code, which for QuickBooks is the
+   bare account `Name` two sub-accounts can share. The current code is now
+   required, or the row is unlinked and the accounts its legacy key names
+   become its `erp_link_candidates` for a person to choose from. A legacy key
+   is still evidence for a NULL-realm (pre-0115) link, overwhelmingly into the
+   same company. Likewise a vendor link between named realms is kept only on
+   a name or tax id that is unique in the pull.
+
+**Smaller holes closed in the same pass.** Business Central and Merge.dev
+vendors with no proper id are skipped, as NetSuite's mapping already did, and
+never keyed by the vendor No., `remote_id` or name: a name used as an id let
+two same-named vendors each relink one row past the ambiguous-name guard, and
+the other fallbacks are a different kind of key from the one the push posts. An
+ERP value too long for its column is dropped and reported, never truncated, and
+never aborts the sync: a vendor's over-long optional field (`code`, email,
+phone, address, tax id, payment terms) is not written and the vendor still
+syncs (`values_too_long`, field names only, also on its audit row); an
+account whose `parent_code` does not fit syncs without one
+(`parent_code_dropped`). Before, one NetSuite `entityid` over 50 characters
+failed the flush and rolled back the whole vendor sync.
+
+**Not done here** (`docs/followups.md`): a resumable sync for listings over the
+bound, the sync UI's reporting of the new keys, over-long names, and the
+adapters that still drop or mislabel records.

@@ -18,20 +18,23 @@ from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoPayload,
     VendorPayload,
-    erp_failure_message,
-    erp_refusal,
+    erp_http_failure,
+    erp_preflight_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 
-#: SuiteQL list syncs page at 100 rows and stop after 10 pages — the 1000-row
-#: bound every adapter's list sync keeps.
+#: SuiteQL pages at 100 rows. The PO list stops after 10 pages; the chart and
+#: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
@@ -172,10 +175,10 @@ class NetSuiteAdapter(ErpAdapter):
         # never a stand-in (a name picks the wrong "Acme" the first time two
         # vendors share one).
         if not payload.vendor_erp_id:
-            return erp_refusal("NetSuite", VENDOR_NOT_LINKED)
+            return erp_preflight_refusal("NetSuite", VENDOR_NOT_LINKED)
         expense_lines = _netsuite_expense_lines(payload)
         if isinstance(expense_lines, str):
-            return erp_refusal("NetSuite", expense_lines)
+            return erp_preflight_refusal("NetSuite", expense_lines)
         try:
             self._account_id()
         except NetSuiteConfigError as exc:
@@ -184,9 +187,7 @@ class NetSuiteAdapter(ErpAdapter):
 
         lookup_status, existing_id = await self._find_by_external_id(payload.correlation_id)
         if lookup_status != 200:
-            return ErpPostResult(
-                success=False, message=erp_failure_message("NetSuite", lookup_status)
-            )
+            return erp_http_failure("NetSuite", lookup_status)
         if existing_id:
             # Our earlier attempt; it counts only if NetSuite booked the
             # approved total (an unconfirmed first attempt lands here too).
@@ -246,9 +247,9 @@ class NetSuiteAdapter(ErpAdapter):
                 raw_response=resp.json() if resp.content else None,
             )
         else:
-            return ErpPostResult(
-                success=False,
-                message=erp_failure_message("NetSuite", resp.status_code),
+            return erp_http_failure(
+                "NetSuite",
+                resp.status_code,
                 raw_response=resp.json()
                 if resp.headers.get("content-type", "").startswith("application/json")
                 else None,
@@ -300,6 +301,8 @@ class NetSuiteAdapter(ErpAdapter):
                 message=f"NetSuite post unconfirmed: {POSTED_TOTAL_UNCONFIRMED} "
                 "(the bill was created but NetSuite reported no total)",
                 retryable=False,
+                refusal_code=POSTED_TOTAL_UNCONFIRMED,
+                refusal_provider="NetSuite",
             )
         try:
             deleted = await self.void_invoice(doc_id)
@@ -318,6 +321,8 @@ class NetSuiteAdapter(ErpAdapter):
             erp_document_number=payload.invoice_number,
             message=f"NetSuite post failed: {POSTED_TOTAL_MISMATCH} ({outcome})",
             retryable=False,
+            refusal_code=POSTED_TOTAL_MISMATCH,
+            refusal_provider="NetSuite",
         )
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
@@ -379,20 +384,30 @@ class NetSuiteAdapter(ErpAdapter):
             base = base[: -len("/record/v1")]
         return f"{base}/query/v1/suiteql"
 
-    async def _suiteql(self, query: str) -> list[dict]:
+    async def _suiteql(self, query: str, *, complete: str | None = None) -> list[dict]:
         """Run one SuiteQL query, paged by ``offset`` + ``hasMore``.
 
-        Best-effort like every adapter's list sync: a non-200, a network error
-        or an unparseable page ends the pull with what it has, so the sync
-        endpoint reports a count instead of 500ing. Bounded at ``_MAX_PAGES`` x
-        ``_PAGE_SIZE`` rows. Bodies are parsed with ``loads_exact_json`` so a
-        money column is never a float.
+        Best-effort for the PO list: a non-200, a network error or an
+        unparseable page ends the pull with what it has, bounded at
+        ``_MAX_PAGES`` x ``_PAGE_SIZE`` rows. ``complete`` (the collection's
+        name) asks for every row instead — the chart and vendor listings, whose
+        sync reads absence as evidence: any of those failures, or more rows
+        than ``SYNC_LISTING_MAX_ROWS``, raises :class:`ErpListingIncomplete`.
+        Bodies are parsed with ``loads_exact_json`` so a money column is never
+        a float.
         """
+
+        def incomplete(gap: ListingGap) -> list[dict]:
+            if complete is not None:
+                raise ErpListingIncomplete("NetSuite", complete, gap)
+            return rows
+
         rows: list[dict] = []
         offset = 0
         body_text = dumps_exact_json({"q": query})
+        max_pages = _MAX_PAGES if complete is None else sync_listing_pages(_PAGE_SIZE)
         async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(_MAX_PAGES):
+            for _ in range(max_pages):
                 url = f"{self._suiteql_url()}?limit={_PAGE_SIZE}&offset={offset}"
                 headers = {
                     "Authorization": self._auth_header("POST", url),
@@ -402,27 +417,29 @@ class NetSuiteAdapter(ErpAdapter):
                 try:
                     resp = await client.post(url, content=body_text, headers=headers)
                 except httpx.HTTPError:
-                    break
+                    return incomplete(ListingGap.fetch_failed)
                 if resp.status_code != 200:
-                    break
+                    return incomplete(ListingGap.fetch_failed)
                 try:
                     body = loads_exact_json(resp.content)
                 except ValueError:
-                    break
+                    return incomplete(ListingGap.fetch_failed)
                 rows.extend(r for r in body.get("items") or [] if isinstance(r, dict))
                 if not body.get("hasMore"):
-                    break
+                    return rows
                 offset += _PAGE_SIZE
-        return rows
+        return incomplete(ListingGap.truncated)
 
     async def list_vendors(self) -> list[VendorPayload]:
         """Pull vendors through SuiteQL (``_VENDOR_QUERY``).
 
         The ``id`` is what ``post_invoice`` posts a bill's ``entity`` against.
-        Inactive vendors are skipped: NetSuite will not take a bill for one.
+        Inactive vendors are emitted ``active=False``: NetSuite will not take a
+        bill for one, so the sync never creates a payee for it, but its id
+        still exists.
         """
         out: list[VendorPayload] = []
-        for raw in await self._suiteql(_VENDOR_QUERY):
+        for raw in await self._suiteql(_VENDOR_QUERY, complete="vendors"):
             vendor = _netsuite_vendor_to_payload(raw)
             if vendor is not None:
                 out.append(vendor)
@@ -438,7 +455,7 @@ class NetSuiteAdapter(ErpAdapter):
         columns we need.
         """
         out: list[GLAccountPayload] = []
-        for raw in await self._suiteql(_ACCOUNT_QUERY):
+        for raw in await self._suiteql(_ACCOUNT_QUERY, complete="accounts"):
             acct = _netsuite_account_to_payload(raw)
             if acct is not None:
                 out.append(acct)
@@ -488,12 +505,13 @@ def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload | None:
 
     The name is ``companyname``, falling back to ``entityid`` (an individual
     vendor has no company name); ``entityid`` is also the vendor's code. An
-    inactive vendor (``isinactive`` "T") or a row with no id is skipped.
-    Anything absent maps to None — ``sync_vendors_from_erp`` never nulls out an
-    existing local value for a missing field.
+    inactive vendor (``isinactive`` "T") is emitted with ``active=False`` (the
+    sync never creates a payee for one, and its id still exists); a row with no
+    id is skipped. Anything absent maps to None — ``sync_vendors_from_erp``
+    never nulls out an existing local value for a missing field.
     """
     vendor_id = raw.get("id")
-    if vendor_id is None or str(raw.get("isinactive", "F")).upper() == "T":
+    if vendor_id is None:
         return None
     entity_id = raw.get("entityid") or None
     name = raw.get("companyname") or entity_id or str(vendor_id)
@@ -504,6 +522,7 @@ def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload | None:
         email=raw.get("email") or None,
         phone=raw.get("phone") or None,
         payment_terms=raw.get("terms") or None,
+        active=str(raw.get("isinactive", "F")).upper() != "T",
     )
 
 
@@ -612,25 +631,29 @@ _NETSUITE_ACCOUNT_TYPES: dict[str, str] = {
 def _netsuite_account_to_payload(raw: dict) -> GLAccountPayload | None:
     """Map a SuiteQL ``account`` row to a GLAccountPayload.
 
-    SuiteQL returns lower-case column names. Inactive accounts (``isinactive``
-    "T") are skipped: nothing should be newly coded to them. An account with no
-    number (the "Use Account Numbers" preference off) is keyed by its name,
-    since the code is what an AP clerk picks; its internal id is what the bill
-    is posted against either way.
+    SuiteQL returns lower-case column names. An account with no number (the
+    "Use Account Numbers" preference off) is keyed by its name, since the code
+    is what an AP clerk picks; its internal id is what the bill is posted
+    against either way.
+
+    Emitted, not dropped: an inactive account (``isinactive`` "T") as
+    ``active=False``, and a code longer than ``gl_accounts.code`` as it is.
+    The sync then marks the first inactive in our chart and refuses the second
+    ``code_too_long`` — never truncated, which would let two long names share
+    a code — and either way still knows the account's id exists, so a row
+    linked to it is not mistaken for a link to a deleted account.
     """
     account_id = raw.get("id")
-    if account_id is None or str(raw.get("isinactive", "F")).upper() == "T":
+    if account_id is None:
         return None
     name = raw.get("fullname") or ""
     code = str(raw.get("acctnumber") or name)
-    # `gl_accounts.code` is 50 characters. Truncating would let two long names
-    # collapse into one code — the sync would then write the second account's
-    # id onto the first — so an over-long name is skipped instead.
-    if not code or len(code) > 50:
+    if not code:
         return None
     return GLAccountPayload(
         code=code,
-        name=str(name or code),
+        name=str(name or code)[:255],
         account_type=_NETSUITE_ACCOUNT_TYPES.get(str(raw.get("accttype") or "")),
         erp_account_id=str(account_id),
+        active=str(raw.get("isinactive", "F")).upper() != "T",
     )

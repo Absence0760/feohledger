@@ -49,6 +49,7 @@
 		exportVendorsCsv,
 		rejectVendor as rejectVendorRequest
 	} from '#lib/api/vendors.ts';
+	import { vendorSyncReportLines, type VendorSyncReport } from '#lib/utils/erpSyncReport.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 
 	type BankDetails = VendorBankDetails;
@@ -530,11 +531,15 @@
 	async function syncFromErp() {
 		syncing = true;
 		try {
-			const result = await api.post<{ message: string }>('/api/vendors/sync-erp', {});
+			const result = await api.post<VendorSyncReport>('/api/vendors/sync-erp', {});
 			await fetchVendors();
-			toast(result.message, 'success');
+			// A name that matches more than one vendor is never linked on a
+			// guess; say which, so they can be linked by hand.
+			for (const line of vendorSyncReportLines(result, m)) {
+				toast(line.text, line.tone, line.tone === 'warning' ? 12_000 : undefined);
+			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Sync failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.toast.syncFailed'), 'error');
 		} finally {
 			syncing = false;
 		}

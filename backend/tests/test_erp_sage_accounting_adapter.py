@@ -19,7 +19,14 @@ import pytest
 
 from app.config import settings
 from app.services import erp_oauth
-from app.services.erp_adapters.base import ErpInvoiceStatus, InvoicePayload, LineItemPayload
+from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
+    ErpInvoiceStatus,
+    ErpListingIncomplete,
+    InvoicePayload,
+    LineItemPayload,
+    ListingGap,
+)
 from app.services.erp_adapters.dispatcher import get_erp_adapter
 from app.services.erp_adapters.sage_accounting import SageAccountingAdapter
 
@@ -155,6 +162,8 @@ def test_refusals_send_nothing(token, overrides, reason):
         result = _run(_adapter().post_invoice(_payload(**overrides)))
     assert result.success is False
     assert result.message == f"Sage Accounting post refused: {reason}"
+    # Refused before any request: the attempt left nothing in the ERP.
+    assert result.not_posted is True
 
 
 def test_posts_purchase_invoice_with_exact_explicit_amounts_and_business_header(token):
@@ -501,7 +510,9 @@ def test_list_vendors_filters_to_suppliers_and_maps_fields(token):
     assert v.payment_terms == "Net 30"
 
 
-def test_list_vendors_follows_next_and_degrades_on_rate_limit(token):
+def test_list_vendors_follows_next_and_raises_on_rate_limit(token):
+    """A 429 on page 2 used to end the walk with page 1, which the vendor sync
+    took for every vendor and unlinked the rest (§284). It raises now."""
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = AsyncMock(
@@ -510,9 +521,22 @@ def test_list_vendors_follows_next_and_degrades_on_rate_limit(token):
                 _resp(429, {}),
             ]
         )
-        vendors = _run(_adapter().list_vendors())
-    assert [v.erp_vendor_id for v in vendors] == ["c1"]
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_vendors())
+    assert exc.value.gap is ListingGap.fetch_failed
     assert [c.kwargs["params"]["page"] for c in client.get.await_args_list] == [1, 2]
+
+
+def test_list_gl_accounts_past_the_sync_bound_raises(token):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(
+            return_value=_resp(200, _page([{"id": "l1", "nominal_code": 1}], next_url="https://n"))
+        )
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_gl_accounts())
+    assert exc.value.gap is ListingGap.truncated
+    assert client.get.await_count == -(-SYNC_LISTING_MAX_ROWS // 200)
 
 
 def test_list_gl_accounts_maps_type_and_skips_out_of_chart(token):

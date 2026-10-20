@@ -16,6 +16,16 @@ from sqlalchemy import func, select
 from app.models.vendor import Vendor
 from app.services.vendor_sync import sync_vendors_from_erp
 
+#: What a pull with no realm and nothing to repair reports beside its counts.
+_QUIET = {
+    "unlinked": [],
+    "deactivated": 0,
+    "codes_cleared": 0,
+    "realm_adopted": 0,
+    "values_too_long": [],
+    "realm": None,
+}
+
 # ---------------------------------------------------------------------------
 # Service-layer (direct DB) cases
 # ---------------------------------------------------------------------------
@@ -35,7 +45,7 @@ async def test_sync_creates_new_vendors(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 2, "updated": 0, "unchanged": 0}
+    assert result == _QUIET | {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
 
     async with mk() as s:
         vendors = (await s.execute(select(Vendor).order_by(Vendor.erp_vendor_id))).scalars().all()
@@ -62,7 +72,7 @@ async def test_sync_skips_rows_without_erp_id(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 1, "updated": 0, "unchanged": 0}
+    assert result == _QUIET | {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         count = (await s.execute(select(func.count()).select_from(Vendor))).scalar_one()
     assert count == 1
@@ -92,7 +102,7 @@ async def test_sync_updates_changed_fields(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 1, "unchanged": 0}
+    assert result == _QUIET | {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         v = (await s.execute(select(Vendor).where(Vendor.erp_vendor_id == "ERP-7"))).scalar_one()
     assert v.name == "New Name"
@@ -123,7 +133,7 @@ async def test_sync_unchanged_when_no_diff(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 0, "unchanged": 1}
+    assert result == _QUIET | {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
 
 
 async def test_sync_does_not_null_out_existing_fields(realdb):
@@ -151,10 +161,80 @@ async def test_sync_does_not_null_out_existing_fields(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 0, "unchanged": 1}
+    assert result == _QUIET | {"created": 0, "updated": 0, "unchanged": 1, "conflicts": []}
     async with mk() as s:
         v = (await s.execute(select(Vendor).where(Vendor.erp_vendor_id == "ERP-K"))).scalar_one()
     assert v.email == "keep@vendor.test"
+
+
+async def test_a_value_too_long_for_its_column_is_dropped_never_aborts_the_sync(realdb):
+    """A NetSuite `entityid` is up to 83 characters and `Vendor.code` is 50:
+    writing it failed the flush and rolled back the WHOLE sync. The vendor
+    syncs, the over-long field is not written (an existing value is kept, never
+    truncated), and the run says which fields."""
+    from app.models.workflow import AuditLog
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with mk() as s:
+        s.add(
+            Vendor(
+                name="Has Code",
+                code="OLD-CODE",
+                erp_vendor_id="ERP-L1",
+                organization_id=org_id,
+                status="active",
+                source="erp_sync",
+            )
+        )
+        await s.commit()
+
+    long_code = "V" * 51
+    async with mk() as s:
+        result = await sync_vendors_from_erp(
+            s,
+            org_id,
+            [
+                {"erp_vendor_id": "ERP-L1", "name": "Has Code", "code": long_code},
+                {
+                    "erp_vendor_id": "ERP-L2",
+                    "name": "Long Fields Ltd",
+                    "code": long_code,
+                    "phone": "1" * 51,
+                    "tax_id": "9" * 51,
+                    "email": "ap@long.test",
+                },
+                {"erp_vendor_id": "ERP-L3", "name": "Fine Co", "code": "FINE"},
+            ],
+        )
+        await s.commit()
+
+    assert result["created"] == 2
+    assert result["values_too_long"] == [
+        {"name": "Has Code", "erp_vendor_id": "ERP-L1", "fields": ["code"]},
+        {
+            "name": "Long Fields Ltd",
+            "erp_vendor_id": "ERP-L2",
+            "fields": ["code", "phone", "tax_id"],
+        },
+    ]
+    async with mk() as s:
+        rows = {v.erp_vendor_id: v for v in (await s.execute(select(Vendor))).scalars().all()}
+        audit = (
+            await s.execute(
+                select(AuditLog)
+                .where(AuditLog.action == "vendor.synced_from_erp")
+                .where(AuditLog.entity_id == rows["ERP-L2"].id)
+            )
+        ).scalar_one()
+    assert rows["ERP-L1"].code == "OLD-CODE"
+    long_fields = rows["ERP-L2"]
+    assert (long_fields.code, long_fields.phone, long_fields.tax_id) == (None, None, None)
+    assert long_fields.email == "ap@long.test"
+    assert rows["ERP-L3"].code == "FINE"
+    # Field NAMES only on the append-only row, never the values.
+    assert audit.details["values_too_long"] == ["code", "phone", "tax_id"]
+    assert long_code not in str(audit.details)
 
 
 async def test_sync_links_name_match_and_activates(realdb):
@@ -181,7 +261,7 @@ async def test_sync_links_name_match_and_activates(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 0, "updated": 1, "unchanged": 0}
+    assert result == _QUIET | {"created": 0, "updated": 1, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         rows = (await s.execute(select(Vendor))).scalars().all()
     # No duplicate created — the existing row was linked, not a new insert.
@@ -231,7 +311,7 @@ async def test_sync_filters_name_match_by_org(realdb):
         )
         await s.commit()
 
-    assert result == {"created": 1, "updated": 0, "unchanged": 0}
+    assert result == _QUIET | {"created": 1, "updated": 0, "unchanged": 0, "conflicts": []}
     async with mk() as s:
         mine = (
             await s.execute(select(Vendor).where(Vendor.organization_id == org_id))
@@ -370,3 +450,85 @@ async def test_sync_erp_endpoint_tenant_isolation(realdb):
     async with mk_b() as s:
         count = (await s.execute(select(func.count()).select_from(Vendor))).scalar_one()
     assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# A name links a vendor only when it is unambiguous on both sides (§284)
+# ---------------------------------------------------------------------------
+
+
+async def _manual_vendor(realdb, name: str) -> uuid.UUID:
+    async with realdb.sessionmaker("a")() as s:
+        v = Vendor(
+            name=name,
+            organization_id=realdb.info("a").org_id,
+            status="unverified",
+            source="manual",
+        )
+        s.add(v)
+        await s.commit()
+        return v.id
+
+
+async def test_two_erp_vendors_sharing_a_local_name_link_neither(realdb):
+    """Linking whichever "Acme" came first would post one supplier's bills to
+    the other's ERP record. Neither is linked, neither is created."""
+    local = await _manual_vendor(realdb, "Acme")
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s,
+            realdb.info("a").org_id,
+            [
+                {"erp_vendor_id": "ERP-A1", "name": "Acme"},
+                {"erp_vendor_id": "ERP-A2", "name": "Acme"},
+            ],
+        )
+        await s.commit()
+    assert result == _QUIET | {
+        "created": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "conflicts": [
+            {"name": "Acme", "reason": "ambiguous_name", "erp_vendor_ids": ["ERP-A1", "ERP-A2"]}
+        ],
+    }
+    async with realdb.sessionmaker("a")() as s:
+        rows = (await s.execute(select(Vendor))).scalars().all()
+    assert [(r.id, r.erp_vendor_id) for r in rows] == [(local, None)]
+
+
+async def test_one_erp_vendor_matching_two_local_names_links_neither(realdb):
+    await _manual_vendor(realdb, "Globex")
+    await _manual_vendor(realdb, "Globex")
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s, realdb.info("a").org_id, [{"erp_vendor_id": "ERP-G", "name": "Globex"}]
+        )
+        await s.commit()
+    assert result["conflicts"] == [
+        {"name": "Globex", "reason": "ambiguous_name", "erp_vendor_ids": ["ERP-G"]}
+    ]
+    assert (result["created"], result["updated"]) == (0, 0)
+    async with realdb.sessionmaker("a")() as s:
+        linked = (
+            await s.execute(
+                select(func.count()).select_from(Vendor).where(Vendor.erp_vendor_id.is_not(None))
+            )
+        ).scalar_one()
+    assert linked == 0
+
+
+async def test_two_same_named_erp_vendors_with_no_local_are_both_created(realdb):
+    """No local candidate means no guess: each ERP record gets its own row,
+    linked by its own id."""
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s,
+            realdb.info("a").org_id,
+            [
+                {"erp_vendor_id": "ERP-I1", "name": "Initech"},
+                {"erp_vendor_id": "ERP-I2", "name": "Initech"},
+            ],
+        )
+        await s.commit()
+    assert result == _QUIET | {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}

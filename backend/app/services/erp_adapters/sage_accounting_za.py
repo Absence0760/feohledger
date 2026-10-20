@@ -90,13 +90,17 @@ from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoPayload,
     VendorPayload,
-    erp_failure_message,
+    erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
@@ -123,8 +127,9 @@ TAX_TYPE_NOT_RESOLVED = "tax_type_not_resolved"
 TAX_MISMATCH = "tax_mismatch"
 TAX_NOT_STATED = "tax_not_stated"
 
-#: Sage returns at most 100 rows per request; 10 pages = the 1000-row bound
-#: every other adapter's list sync uses.
+#: Sage returns at most 100 rows per request; the PO list stops at 10 pages.
+#: The chart and vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise
+#: past it.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
@@ -343,11 +348,14 @@ class SageAccountingZaAdapter(ErpAdapter):
         max_pages: int = _MAX_PAGES,
         page_size: int = _PAGE_SIZE,
         company: bool = True,
+        complete: bool = False,
     ) -> list[dict] | None:
         """``<resource>/Get`` paged with ``$top`` / ``$skip``.
 
         None when the first page fails (so a caller can tell "no rows" from
         "couldn't ask"); a later page failing ends the walk with what was read.
+        With ``complete`` any failing page, or more rows than ``max_pages``
+        reach, raises :class:`ErpListingIncomplete` instead.
         """
         rows: list[dict] = []
         for page in range(max_pages):
@@ -358,11 +366,16 @@ class SageAccountingZaAdapter(ErpAdapter):
             payload = _json(resp) if resp.status_code == 200 else None
             batch = _results(payload)
             if batch is None:
+                if complete:
+                    raise ErpListingIncomplete(PROVIDER, resource, ListingGap.fetch_failed)
                 return None if page == 0 else rows
             rows.extend(batch)
             total = _decimal(payload.get("TotalResults"))  # type: ignore[union-attr]
             if len(batch) < page_size or (total is not None and len(rows) >= total):
                 break
+        else:
+            if complete:
+                raise ErpListingIncomplete(PROVIDER, resource, ListingGap.truncated)
         return rows
 
     async def _get_one(
@@ -444,15 +457,15 @@ class SageAccountingZaAdapter(ErpAdapter):
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         supplier_id = _int_id(payload.vendor_erp_id)
         if supplier_id is None:
-            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         lines = bill_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal(PROVIDER, lines)
+            return erp_preflight_refusal(PROVIDER, lines)
         account_lines = [(_int_id(gl), amount, memo) for gl, amount, memo in lines]
         if any(account is None for account, _, _ in account_lines):
-            return erp_refusal(PROVIDER, ACCOUNT_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, ACCOUNT_NOT_LINKED)
         if (payload.currency or "").upper() != self._company_currency():
-            return erp_refusal(PROVIDER, CURRENCY_NOT_SUPPORTED)
+            return erp_preflight_refusal(PROVIDER, CURRENCY_NOT_SUPPORTED)
 
         base = await self._base()
         async with self._client(30) as client:
@@ -517,9 +530,7 @@ class SageAccountingZaAdapter(ErpAdapter):
             resp = await self._call(client, base, "POST", "SupplierInvoice/Save", "post", body=body)
 
         if resp.status_code not in (200, 201):
-            return ErpPostResult(
-                success=False, message=erp_failure_message(PROVIDER, resp.status_code)
-            )
+            return erp_http_failure(PROVIDER, resp.status_code)
         saved = _json(resp)
         saved = saved if isinstance(saved, dict) else {}
         doc_id = str(saved.get("ID")) if saved.get("ID") is not None else None
@@ -639,17 +650,26 @@ class SageAccountingZaAdapter(ErpAdapter):
 
     # -- syncs ----------------------------------------------------------------
 
-    async def _list(self, resource: str, params: dict[str, str] | None = None):
+    async def _list(
+        self, resource: str, params: dict[str, str] | None = None, *, complete: bool = False
+    ):
         base = await self._base()
         async with self._client(30) as client:
+            if complete:
+                return await self._get_list(
+                    client,
+                    base,
+                    resource,
+                    f"{resource} sync",
+                    params,
+                    max_pages=sync_listing_pages(_PAGE_SIZE),
+                    complete=True,
+                )
             return await self._get_list(client, base, resource, f"{resource} sync", params)
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Best-effort like the other adapters: any failure degrades to []."""
-        try:
-            rows = await self._list("Supplier")
-        except Exception:
-            return []
+        """Every supplier, or :class:`ErpListingIncomplete`; never a partial list."""
+        rows = await self._list("Supplier", complete=True)
         vendors = []
         for row in rows or []:
             supplier_id = _int_id(row.get("ID"))
@@ -667,19 +687,19 @@ class SageAccountingZaAdapter(ErpAdapter):
         return vendors
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        """Active accounts only: Sage refuses a line against an inactive one.
+        """The whole chart, or :class:`ErpListingIncomplete`.
 
         The SA API gives an account a numeric ID and a name, no separate
-        account code, so the ID is both ``code`` and ``erp_account_id``.
+        account code, so the ID is both ``code`` and ``erp_account_id``. An
+        inactive account is emitted ``active=False``, not dropped: Sage refuses
+        a line against one, so the sync never creates a row for it, but it
+        still exists and a row linked to it is not a dead link (§284).
         """
-        try:
-            rows = await self._list("Account")
-        except Exception:
-            return []
+        rows = await self._list("Account", complete=True)
         accounts = []
         for row in rows or []:
             account_id = _int_id(row.get("ID"))
-            if account_id is None or row.get("Active") is False:
+            if account_id is None:
                 continue
             accounts.append(
                 GLAccountPayload(
@@ -687,6 +707,7 @@ class SageAccountingZaAdapter(ErpAdapter):
                     name=str(row.get("Name") or account_id),
                     account_type=gl_account_type(row.get("Category")),
                     erp_account_id=str(account_id),
+                    active=row.get("Active") is not False,
                 )
             )
         return accounts

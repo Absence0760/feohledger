@@ -38,9 +38,18 @@ def _invoice():
 
 def _capture_db():
     """An AsyncMock session that captures `db.add(...)` calls so tests
-    can inspect what got persisted."""
+    can inspect what got persisted.
+
+    Answers both read shapes `_ensure_exception` makes: a count (no open or
+    person-cleared row) and, for a `duplicate` / `fraud_flag`, the open rows
+    themselves (none) — decisions §286."""
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=0)))
+    no_rows = MagicMock(all=MagicMock(return_value=[]))
+    db.execute = AsyncMock(
+        return_value=MagicMock(
+            scalar=MagicMock(return_value=0), scalars=MagicMock(return_value=no_rows)
+        )
+    )
     db.add = MagicMock()
     return db
 

@@ -47,12 +47,16 @@ from app.config import settings
 from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     VendorPayload,
-    erp_failure_message,
+    erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_allocation import (
     DUPLICATE_DOCUMENT_NUMBER,
@@ -154,15 +158,16 @@ def _failure(resp) -> ErpPostResult:
         # Report `rate_limited` and let the caller's retry backoff decide when
         # to try again; never sleep-loop here.
         raw = {"retry_after": resp.headers.get("Retry-After")}
-    return ErpPostResult(
-        success=False,
-        message=erp_failure_message(PROVIDER, resp.status_code),
-        raw_response=raw or None,
-    )
+    return erp_http_failure(PROVIDER, resp.status_code, raw_response=raw or None)
 
 
 def _refused(reason: str) -> ErpPostResult:
     return erp_refusal(PROVIDER, reason)
+
+
+def _preflight_refused(reason: str) -> ErpPostResult:
+    """Before the first request: nothing was sent (``erp_preflight_refusal``)."""
+    return erp_preflight_refusal(PROVIDER, reason)
 
 
 class _HttpFailure(Exception):
@@ -288,16 +293,16 @@ class SageAccountingAdapter(OAuthErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return _refused(VENDOR_NOT_LINKED)
+            return _preflight_refused(VENDOR_NOT_LINKED)
         if payload.invoice_date is None or payload.due_date is None:
-            return _refused(MISSING_DATES)
+            return _preflight_refused(MISSING_DATES)
         try:
             allocation = allocate_bill_lines(payload)
         except BillRefusal as refusal:
-            return _refused(refusal.reason)
+            return _preflight_refused(refusal.reason)
         if allocation.inclusive_unsplit:
             # v3.1 needs every line's tax amount and never derives it.
-            return _refused(TAX_NOT_ITEMISED)
+            return _preflight_refused(TAX_NOT_ITEMISED)
 
         headers = await self._headers()
         async with self.oauth_client(timeout=30) as client:
@@ -448,29 +453,29 @@ class SageAccountingAdapter(OAuthErpAdapter):
             return False
 
     async def _paged(self, path: str, params: dict) -> list[dict]:
-        """Best-effort paged GET (house style: an error ends the walk, never raises)."""
-        try:
-            headers = await self._headers()
-        except Exception:
-            return []
+        """Every row of a paged collection, or :class:`ErpListingIncomplete`.
+
+        The chart and vendor listings are its only callers, and their sync reads
+        absence as evidence (base), so a failed page (a 429 included) or a
+        collection past ``SYNC_LISTING_MAX_ROWS`` raises rather than ending the
+        walk with what was read.
+        """
+        headers = await self._headers()
         out: list[dict] = []
         async with self.oauth_client(timeout=30) as client:
-            for page in range(1, _PAGE_CAP + 1):
-                try:
-                    resp = await client.get(
-                        f"{_api_base()}/{path}",
-                        params={**params, "items_per_page": _PAGE_SIZE, "page": page},
-                        headers=headers,
-                    )
-                except httpx.HTTPError:
-                    break
+            for page in range(1, sync_listing_pages(_PAGE_SIZE) + 1):
+                resp = await client.get(
+                    f"{_api_base()}/{path}",
+                    params={**params, "items_per_page": _PAGE_SIZE, "page": page},
+                    headers=headers,
+                )
                 if resp.status_code != 200:
-                    break
+                    raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed)
                 body = _json(resp)
                 out.extend(body.get("$items") or [])
                 if not body.get("$next"):
-                    break
-        return out
+                    return out
+        raise ErpListingIncomplete(PROVIDER, path, ListingGap.truncated)
 
     async def list_vendors(self) -> list[VendorPayload]:
         rows = await self._paged(
