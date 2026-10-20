@@ -204,7 +204,7 @@ async def test_signing_in_on_another_workspaces_page_is_refused(
 ):
     """Production, 2026-10-20: an account of one workspace signed in on
     another's page, got its own org's token, and then every call on that page
-    was refused ("Token does not match the requested tenant") behind a
+    was refused (403 ``token_tenant_mismatch``) behind a
     signed-in screen. The sign-in itself is refused instead, after the password
     verifies, with the account's own sign-in link; on its own page it works."""
     _user_id, email = await mixed_case_user()
@@ -221,7 +221,9 @@ async def test_signing_in_on_another_workspaces_page_is_refused(
     # A wrong password on the other page is the ordinary 401: the workspace is
     # named only to someone who proved the password.
     async with realdb.client(key="b", role=None) as c:
-        wrong = await c.post("/api/auth/login", json={"email": email, "password": "Nope-12345678"})
+        wrong = await c.post(
+            "/api/auth/login", json={"email": email, "password": f"{_PASSWORD}-wrong"}
+        )
     assert wrong.status_code == 401
 
     async with realdb.client(key="a", role=None) as c:
