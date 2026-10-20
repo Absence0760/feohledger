@@ -197,9 +197,41 @@ describe('theme across workspaces — the shared cookie', () => {
 		expect(sharedCookieDomainForHost('evilfeohledger.com', PLATFORM)).toBeNull();
 	});
 
-	it('follows the legacy host rule when no platform domains are configured', () => {
-		expect(sharedCookieDomainForHost('acme.feohledger.com', [])).toBe('feohledger.com');
-		expect(sharedCookieDomainForHost('feohledger.com', [])).toBe('feohledger.com');
+	it('with no PUBLIC_PLATFORM_DOMAINS, shares only under the PUBLIC_SITE_URL host', () => {
+		// Today's production shape: the platform domain list is unset, and the
+		// site URL (from APP_URL) is the apex.
+		const SITE = 'https://feohledger.com';
+		expect(sharedCookieDomainForHost('feohledger.com', [], SITE)).toBe('feohledger.com');
+		expect(sharedCookieDomainForHost('acme.feohledger.com', [], SITE)).toBe('feohledger.com');
+		expect(sharedCookieDomainForHost('acme.feohledger.com', [], `${SITE}/`)).toBe('feohledger.com');
+		// Both declared: either names our domain.
+		expect(sharedCookieDomainForHost('acme.feohledger.com', ['localhost'], SITE)).toBe(
+			'feohledger.com'
+		);
+	});
+
+	it('never puts a Domain cookie on a custom domain’s foreign parent when only the legacy host rule is in play', () => {
+		// The legacy rule reads `ap.customer.example` as workspace `ap` of
+		// `customer.example`. That must never become our cookie's domain.
+		for (const site of [null, undefined, '', 'https://feohledger.com', 'not a url', 'ftp://customer.example']) {
+			for (const host of [
+				'ap.customer.example',
+				'customer.example',
+				'ap.billing.customer.example',
+				'ap.customer.co.uk',
+				'feohledger.com.customer.example'
+			]) {
+				expect(sharedCookieDomainForHost(host, [], site), `${host} with site ${site}`).toBeNull();
+			}
+		}
+		// A build that declares nothing shares nothing, even on our own hosts.
+		expect(sharedCookieDomainForHost('acme.feohledger.com', [], null)).toBeNull();
+		expect(sharedCookieDomainForHost('feohledger.com', [], '')).toBeNull();
+	});
+
+	it('the dev site URL (localhost) shares nothing', () => {
+		expect(sharedCookieDomainForHost('acme.localhost', [], 'http://localhost:7777')).toBeNull();
+		expect(sharedCookieDomainForHost('localhost', ['localhost'], 'http://localhost:7777')).toBeNull();
 	});
 
 	it('builds a Domain-scoped, year-long, SameSite=Lax cookie, Secure on https only', () => {

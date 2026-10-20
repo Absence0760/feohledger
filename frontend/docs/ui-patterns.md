@@ -1136,10 +1136,14 @@ script only decides which one the page asks for.
   **`feoh_theme` cookie on the platform's registrable domain**
   (`Domain=feohledger.com`, `SameSite=Lax`, a year, `Secure` on https), which
   every workspace and the signup page read alike. System is written to it as
-  `system`, so it overrides a stale per-origin Light. The domain is derived from
-  the host and `PUBLIC_PLATFORM_DOMAINS` (`hostRouting.ts::sharedCookieDomainForHost`,
-  via `tenant.ts::sharedCookieDomain()`), never hardcoded. On localhost, an IP
-  literal or a customer's vanity host there is none, and the choice falls back
+  `system`, so it overrides a stale per-origin Light. The domain is only ever
+  one the build declares as ours: a `PUBLIC_PLATFORM_DOMAINS` entry or the
+  host of `PUBLIC_SITE_URL` (the apex every deploy sets), which the current
+  host must equal or sit beneath (`hostRouting.ts::sharedCookieDomainForHost`,
+  via `tenant.ts::sharedCookieDomain()`). It is never hardcoded, and never
+  taken from the legacy host rule, which would read a customer's
+  `ap.customer.example` as ours. On localhost, an IP literal, a customer's
+  vanity host, or a build that declares nothing there is none, and the choice falls back
   to `localStorage` per origin (System = no entry) — as it does when the
   browser drops the cookie, which the write detects by reading it back. A
   cookie, when present, wins over `localStorage`.

@@ -12567,15 +12567,30 @@ Only (d) is per browser in fact, so it is what shipped.
 
 **How.** On a platform host the choice is written to `feoh_theme` with
 `Domain=<platform domain>; Path=/; Max-Age=1 year; SameSite=Lax` (+ `Secure`
-on https). The domain is derived from the host by
-`hostRouting.ts::sharedCookieDomainForHost`, against the same
-`PUBLIC_PLATFORM_DOMAINS` the tenant routing reads (unset, the legacy rule's
-idea of a workspace's parent stands in) — never a hardcoded name. There is no
-shared domain on localhost (browsers refuse `Domain=localhost`), on an IP
-literal, or on a customer's vanity host (a platform cookie does not belong on
-the customer's registrable domain, and no other workspace could read it
-there); those keep the §289 `localStorage` behaviour, per origin, which on a
-vanity host loses nothing because it serves one workspace. The pre-paint
+on https). The domain is never hardcoded. It is never inferred from the
+host's shape either: it is only ever one the build positively declares as
+ours. `hostRouting.ts::sharedCookieDomainForHost` matches the host against
+`PUBLIC_PLATFORM_DOMAINS`, when set, and against the host of
+`PUBLIC_SITE_URL`, the platform's apex origin, which every deployed build
+already sets (`vm-deploy.yml` from `APP_URL`, `deploy/deploy.sh` from
+`APP_DOMAIN`) and which switches no routing on. Production builds leave
+`PUBLIC_PLATFORM_DOMAINS` unset, because setting it turns on vanity-domain
+routing. So the site URL is what makes the cookie work there.
+
+**The legacy host rule is deliberately not an input.** A first cut used it
+when `PUBLIC_PLATFORM_DOMAINS` was unset: a 3+-label host shared at its
+parent. That rule reads a customer's `ap.customer.example` as workspace `ap` of
+`customer.example`, so it would have put our cookie on the customer's own
+parent domain. That is wrong technically, and it would also make the "one
+cookie, on our domain" sentence in the Cookie Notice false. A host that is not
+equal to, or beneath, a declared domain gets no shared cookie, and a build
+that declares nothing shares nothing.
+
+There is no shared domain on localhost (browsers refuse `Domain=localhost`),
+on an IP literal, or on a customer's vanity host (a platform cookie does not
+belong on the customer's domain, and no other workspace could read it there).
+Those keep the §289 `localStorage` behaviour, per origin. On a vanity host
+that loses nothing, because it serves one workspace. The pre-paint
 script reads the cookie first and `localStorage` second, so a choice made on
 another workspace beats an older one remembered here. Two consequences of that
 order, both deliberate: System is written to the cookie as `system` rather
@@ -12612,7 +12627,9 @@ cosmetic reason. A solved widget is redrawn in the current palette once its
 token is gone (expired, or spent on a submit).
 
 Guards: `src/lib/theme.test.ts` (the domain derivation — apex, workspace,
-localhost, IP, vanity, legacy; cookie read/write incl. System, a blocked and a
+localhost, IP, vanity, the site-URL-only production shape, and a custom
+domain under a foreign parent never getting a `Domain=` with only the legacy
+rule in play; cookie read/write incl. System, a blocked and a
 throwing jar; the pre-paint script against every cookie × stored value),
 `src/lib/legal/storageInventory.test.ts` (one cookie writer, and the notice
 says so), `tests-e2e/a11y/light-theme.spec.ts` (the cookie beats a stored

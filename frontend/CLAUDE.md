@@ -334,9 +334,10 @@ simply stay unreachable until an operator opts in.
 - `getTenantStorageKey()` — per-tenant browser-storage key (`#lib/entity.ts`):
   the slug on a platform host, the hostname on a vanity one.
 - `sharedCookieDomain()` — the `Domain` for a cookie every host of the
-  platform reads (apex + every workspace), `null` on localhost / IP / vanity
-  hosts. Only the theme uses it (decisions §290); per-workspace state must
-  never go through it.
+  platform reads (apex + every workspace): only a build-declared domain
+  (`PUBLIC_PLATFORM_DOMAINS` or `PUBLIC_SITE_URL`'s host), never the legacy
+  host rule; `null` on localhost / IP / vanity hosts. Only the theme uses it
+  (decisions §290); per-workspace state must never go through it.
 
 `tenantSlugUsage.test.ts` ratchets both invariants: nothing re-derives the slug
 by hand, and the list of files still reading `PUBLIC_API_URL` directly may only
