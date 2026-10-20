@@ -199,6 +199,62 @@ export function tenantStorageKeyForHost(
 	return null;
 }
 
+/** `localhost` and its subdomains, IP literals and single-label hosts: places a
+ *  `Domain` cookie attribute either cannot reach (browsers refuse
+ *  `Domain=localhost`) or must not point at. */
+function isCookieShareableDomain(domain: string): boolean {
+	if (!domain.includes('.')) return false;
+	if (domain === 'localhost' || domain.endsWith('.localhost')) return false;
+	if (domain.includes(':') || domain.includes('[')) return false;
+	if (/^\d{1,3}(\.\d{1,3}){3}$/.test(domain)) return false;
+	return true;
+}
+
+/**
+ * The `Domain` a cookie needs to reach every host of THIS platform — the apex
+ * (marketing / signup) and every `<slug>.` workspace beneath it — or `null`
+ * when it must stay per-origin.
+ *
+ * It is the platform domain the host sits under, derived from the host and the
+ * same configuration {@link classifyHost} reads, never a hardcoded name:
+ *
+ *   - `acme.feohledger.com`, `feohledger.com` → `feohledger.com`
+ *   - a customer's vanity host → `null`. It is one tenant's own site: a
+ *     platform cookie has no business on the customer's registrable domain,
+ *     and no other workspace could read it there anyway.
+ *   - `localhost`, `acme.localhost`, an IP literal → `null`.
+ *
+ * With `PUBLIC_PLATFORM_DOMAINS` unset, the legacy rule decides what a
+ * workspace is, so this follows it: a host it reads as a workspace shares at
+ * its parent, an apex at itself. That rule cannot tell a vanity host from a
+ * workspace — the same limitation the tenant header has under it — which is
+ * one more reason a deployment serving vanity domains sets the variable.
+ *
+ * Used for the colour theme (`#lib/theme.ts`, docs/decisions.md §290), the one
+ * preference that should follow a visitor from the signup page into the
+ * workspace it creates.
+ */
+export function sharedCookieDomainForHost(
+	hostname: string | null | undefined,
+	platformDomains: string[]
+): string | null {
+	const host = normalizeHost(hostname);
+	if (!host) return null;
+	let domain: string | null = null;
+	if (platformDomains.length === 0) {
+		domain =
+			legacyClassify(host).kind === 'platform-tenant' ? host.split('.').slice(1).join('.') : host;
+	} else {
+		for (const candidate of [...platformDomains].sort((a, b) => b.length - a.length)) {
+			if (host === candidate || host.endsWith(`.${candidate}`)) {
+				domain = candidate;
+				break;
+			}
+		}
+	}
+	return domain && isCookieShareableDomain(domain) ? domain : null;
+}
+
 /**
  * The current browser hostname, or `null` when there is no `window` (SSR /
  * prerender — the build prerenders every route, so this path is live).

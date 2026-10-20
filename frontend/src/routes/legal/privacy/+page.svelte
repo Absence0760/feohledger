@@ -897,11 +897,12 @@
 	<h2 id="cookies">15. Cookies and browser storage</h2>
 
 	<p>
-		The application sets <strong>no cookies</strong>. It uses your browser's local and session
-		storage for a small number of things it cannot work without — your sign-in token, the supplier
-		portal's separate token, which legal entity you have selected, your language, a short-lived
-		multi-factor challenge, and the record of the storage choice you made in the consent banner
-		itself. There is no analytics script, no tracking pixel and no advertising technology anywhere
+		The application sets <strong>one cookie</strong>, and only to remember the colour theme you
+		picked, so that it applies on every workspace you use; it holds that one word and identifies no
+		one. It uses your browser's local and session storage for a small number of things it cannot
+		work without — your sign-in token, the supplier portal's separate token, which legal entity you
+		have selected, your language, a short-lived multi-factor challenge, and the record of the
+		storage choice you made in the consent banner itself. There is no analytics script, no tracking pixel and no advertising technology anywhere
 		in the application; we do not measure you.
 	</p>
 

@@ -20,6 +20,7 @@ import {
 	currentHostname,
 	parsePlatformDomains,
 	resolveApiBase,
+	sharedCookieDomainForHost,
 	tenantSlugForHost,
 	tenantStorageKeyForHost,
 } from '#lib/hostRouting.ts';
@@ -70,4 +71,12 @@ export function hasTenantContext(): boolean {
  *  on a vanity host. */
 export function getTenantStorageKey(): string | null {
 	return tenantStorageKeyForHost(currentHostname(), PLATFORM_DOMAINS);
+}
+
+/** The `Domain` for a cookie every host of this platform should see (the apex
+ *  and every workspace), or `null` where it must stay per-origin — localhost,
+ *  an IP literal, a customer's vanity host. See
+ *  `#lib/hostRouting.ts::sharedCookieDomainForHost`. */
+export function sharedCookieDomain(): string | null {
+	return sharedCookieDomainForHost(currentHostname(), PLATFORM_DOMAINS);
 }
