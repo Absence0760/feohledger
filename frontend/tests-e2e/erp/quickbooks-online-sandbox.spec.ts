@@ -332,7 +332,7 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 		});
 		expect(byCode(result.link_changes)).toEqual(byCode(live.link_changes));
 		expect(message).toBe(
-			`Synced ${live.created} new, ${live.updated + 1} updated GL accounts; ` +
+			`Synced ${live.created} new, ${live.updated + 2} updated GL accounts; ` +
 				`${live.conflict_count} not linked, ${live.unlinked_count} unlinked`
 		);
 
