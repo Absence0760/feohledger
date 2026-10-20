@@ -1126,20 +1126,37 @@ script only decides which one the page asks for.
 - **`src/app.html`** carries a tiny inline script that reads the stored choice
   and sets `data-theme` **before first paint**, so a Light user never sees a
   dark frame (the SPA's own CSS and JS arrive later). It cannot import the
-  module below, so it repeats three facts from it — the storage key, the three
-  values, the two `theme-color`s — and `src/lib/theme.test.ts` *executes* the
-  script against every stored value × OS preference to hold it to them.
+  module below, so it repeats its facts — the key, the three values, the
+  cookie-first read order, the two `theme-color`s — and `src/lib/theme.test.ts`
+  *executes* the script against every cookie × stored value × OS preference to
+  hold it to them.
+- **Where the choice lives** (decisions §290). Every workspace is its own
+  origin (`<slug>.feohledger.com`, plus the apex for signup), and
+  `localStorage` is per origin — so on a platform host the choice is a
+  **`feoh_theme` cookie on the platform's registrable domain**
+  (`Domain=feohledger.com`, `SameSite=Lax`, a year, `Secure` on https), which
+  every workspace and the signup page read alike. System is written to it as
+  `system`, so it overrides a stale per-origin Light. The domain is derived from
+  the host and `PUBLIC_PLATFORM_DOMAINS` (`hostRouting.ts::sharedCookieDomainForHost`,
+  via `tenant.ts::sharedCookieDomain()`), never hardcoded. On localhost, an IP
+  literal or a customer's vanity host there is none, and the choice falls back
+  to `localStorage` per origin (System = no entry) — as it does when the
+  browser drops the cookie, which the write detects by reading it back. A
+  cookie, when present, wins over `localStorage`.
 - **`src/lib/theme.ts`** (pure) + **`stores/theme.svelte.ts`** (rune wrapper)
-  own the choice: read / write `localStorage` key `feoh_theme` (System is
-  stored as no entry), resolve the palette that is showing, set
-  `<meta name="theme-color">`. **Every storage access is wrapped** — storage
-  throws in some private modes and with blocked site data, and the page falls
-  back to System rather than failing. Only non-CSS consumers need
-  `theme.resolved` (the hCaptcha widget on `/signup`, which is an iframe and
-  cannot see our palette).
-- **The control** is `/profile?section=appearance` — `ui/SegmentedControl` (a
-  fieldset of native radios). It is per browser, like the display language,
-  and listed on the Cookie Notice (`feoh_theme`).
+  own the choice: read / write the cookie and the `localStorage` fallback,
+  resolve the palette that is showing, set `<meta name="theme-color">`.
+  **Every cookie and storage access is wrapped** — both throw in some private
+  modes and with blocked site data, and the page falls back to System rather
+  than failing. Only non-CSS consumers need `theme.resolved` (the hCaptcha
+  widget on `/signup`, an iframe that cannot see our palette: it is rendered
+  explicitly and redrawn when `theme.resolved` changes — unless already solved,
+  so a theme change never costs the visitor their token).
+- **The control** is `ui/ThemePicker` (a `SegmentedControl` — a fieldset of
+  native radios) on `/profile?section=appearance` and under the form on every
+  `AuthShell` page. It is listed on the Cookie Notice (`feoh_theme`), which
+  with the Privacy Policy says it is the only cookie the app sets —
+  `storageInventory.test.ts` fails if a second `document.cookie =` appears.
 - **What follows the theme:** the signed-in app, the auth shell (`AuthShell`,
   signup, MFA, reset), the supplier portal, the help centre and the legal
   pages. **What does not:** the marketing landing page (`Landing` and the

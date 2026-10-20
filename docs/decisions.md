@@ -12544,3 +12544,79 @@ Cookie Notice), and `tests-e2e/a11y/light-theme.spec.ts` (choose → reload →
 through CSS alone, the keyboard model of the picker, and axe in light mode on
 a cross-section of the signed-in app, the portal, the auth shell, the help
 centre and the legal pages).
+
+## 290. The theme choice is a cookie on the platform domain, so it follows the visitor across workspaces (2026-10-20)
+
+**§289 said "per browser", and built per origin.** The choice lived in
+`localStorage`, which is scoped to an origin, and every workspace is its own
+origin: `acme.feohledger.com`, `globex.feohledger.com`, and the apex
+`feohledger.com` where signup lives. So Light picked on one workspace did not
+reach another, and — the case a new customer meets first — a theme picked
+while signing up was gone the moment the verification link landed them in
+their new workspace. The copy ("Choose the colour theme for this browser")
+was the intent; the storage was the bug.
+
+**Options weighed.** (a) Keep per-origin and reword everything to say "this
+workspace" — honest, but it makes a screen preference behave like workspace
+data, and the signup → workspace hop would still drop it. (b) Store it on the
+account — §289 already rejected that (a preference about this screen, not the
+person), and signup and sign-in come before any account. (c) Hand it over in
+the post-signup redirect URL — fixes one hop, not workspace → workspace. (d) A
+cookie on the platform's registrable domain, read by the pre-paint script.
+Only (d) is per browser in fact, so it is what shipped.
+
+**How.** On a platform host the choice is written to `feoh_theme` with
+`Domain=<platform domain>; Path=/; Max-Age=1 year; SameSite=Lax` (+ `Secure`
+on https). The domain is derived from the host by
+`hostRouting.ts::sharedCookieDomainForHost`, against the same
+`PUBLIC_PLATFORM_DOMAINS` the tenant routing reads (unset, the legacy rule's
+idea of a workspace's parent stands in) — never a hardcoded name. There is no
+shared domain on localhost (browsers refuse `Domain=localhost`), on an IP
+literal, or on a customer's vanity host (a platform cookie does not belong on
+the customer's registrable domain, and no other workspace could read it
+there); those keep the §289 `localStorage` behaviour, per origin, which on a
+vanity host loses nothing because it serves one workspace. The pre-paint
+script reads the cookie first and `localStorage` second, so a choice made on
+another workspace beats an older one remembered here. Two consequences of that
+order, both deliberate: System is written to the cookie as `system` rather
+than by deleting it — deleting would let a stale per-origin Light resurface —
+and a write reads the cookie back before removing this origin's copy, because
+a browser blocking cookies drops the write silently; then the choice falls
+back to `localStorage` and still survives a reload.
+
+**It is a cookie, and the legal pages said there were none.** The Cookie
+Notice and the Privacy Policy both stated the app sets no cookies. They now
+say it sets exactly one, `feoh_theme`: the one word, set only when the visitor
+picks a theme, identifying no one, classified like the language preference as
+functional storage the visitor explicitly asked for (ePrivacy's
+user-interface-customisation exemption). It is sent with navigations to the
+platform's hosts but not with API calls (the API client never sends
+credentials cross-origin). `storageInventory.test.ts` now fails if a second
+`document.cookie =` appears anywhere in `src/`, so "exactly one" cannot go
+stale silently the way "none" would have.
+
+**A picker on the auth pages.** A cross-workspace theme is most useful before
+there is a workspace, and signed-out visitors have no `/profile`. Every
+`AuthShell` page (sign-in, MFA, signup, verify, change-password) now carries
+the same picker under the form — `ui/ThemePicker`, extracted because it was
+about to be wired twice — outside `.form-wrap` so the shell's field styles
+never reach it.
+
+**hCaptcha follows the theme after first render.** It was told the palette
+once, at render, so changing the theme (or the OS, on System) left a dark
+captcha on a light form. hCaptcha has no call to restyle a live widget, so the
+page now loads it in explicit-render mode and an effect redraws it (remove +
+render) whenever `theme.resolved` changes — except when the visitor has
+already solved it: redrawing would discard a token they earned, for a
+cosmetic reason. A solved widget is redrawn in the current palette once its
+token is gone (expired, or spent on a submit).
+
+Guards: `src/lib/theme.test.ts` (the domain derivation — apex, workspace,
+localhost, IP, vanity, legacy; cookie read/write incl. System, a blocked and a
+throwing jar; the pre-paint script against every cookie × stored value),
+`src/lib/legal/storageInventory.test.ts` (one cookie writer, and the notice
+says so), `tests-e2e/a11y/light-theme.spec.ts` (the cookie beats a stored
+choice at the first frame; localhost writes no cookie; the auth-shell picker
+persists and passes axe) and `tests-e2e/signup/flow.spec.ts` (the captcha
+redraws on a picker change and on an OS change, keeps a solved widget, and
+redraws after expiry).
