@@ -35,6 +35,13 @@ class SignupCompleteResponse(BaseModel):
     # (decisions §283). None when the token
     # could not be stored; the admin then uses Forgot password.
     set_password_url: str | None = None
+    # The workspace's sign-in page, with the address prefilled.
+    sign_in_url: str | None = None
+    # True when this link had already been used and its workspace exists: the
+    # page is being re-opened (a reload, a second tab, a mail scanner that ran
+    # it first). Nothing is re-issued, so `set_password_url` is None — the
+    # welcome email holds the one link (decisions §290).
+    already_verified: bool = False
 
 
 class SlugCheckResponse(BaseModel):
