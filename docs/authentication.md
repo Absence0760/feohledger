@@ -192,8 +192,12 @@ issued. The check runs **after** the password verifies, so a wrong password
 there is still the plain `401` and the link reveals nothing the caller could not
 learn by signing in. A request naming no workspace (an API client) is
 unaffected. The login page localizes the refusal (`refusal.wrongWorkspace`,
-with the link, or `refusal.wrongWorkspaceNoLink`) and links the account's own
-sign-in page. Reasoning: [decisions.md](decisions.md) §288. Test:
+which names the account's workspace by its **host** only, or
+`refusal.wrongWorkspaceNoLink` when there is no usable URL) and puts the link to
+the account's own sign-in page on its own line under the sentence. The sentence
+never repeats the URL: it carries the address as a percent-encoded `?email=`,
+which is unreadable in prose; the server's English fallback follows the same
+rule. Reasoning: [decisions.md](decisions.md) §288. Test:
 `backend/tests/test_email_identity_case.py::test_signing_in_on_another_workspaces_page_is_refused`.
 
 **Recovery for a token that is already there.** A token for another workspace
@@ -203,7 +207,10 @@ workspace). `get_tenant`'s refusal is coded — `403` `token_tenant_mismatch`
 expired session: `api.ts::endSessionIfRejected` (shared by `request()`, the blob
 downloads, the assistant stream and `api/expenses.ts`'s submit) clears the token
 and sends the user to `/login?reason=other_workspace`, which says "You were
-signed in to a different workspace. Sign in again here." It keys on the code,
+signed out because your session belonged to a different workspace. Sign in
+here, or on your own workspace's page." — worded so it never claims this page is
+theirs, and shown as a neutral notice (AuthShell's `.info`, in a polite
+`role="status"` region) rather than the red error alert. It keys on the code,
 never the English (`api/sessionRejection.ts`). Before clearing it, the SPA also
 **revokes** that token on the server, best-effort
 (`sessionRejection.revokeRejectedSession`): the token is still a live session in
