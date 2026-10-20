@@ -2252,7 +2252,10 @@ end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
 `OAuthErpAdapter.resolve_external_tenant_id` (Xero `GET /connections`, Sage's
 business lookup). `extra_token_headers(erp_settings)` adds headers to every
 token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
-or `body`. An empty `scopes` sends no `scope`. Operator URL overrides
+or `body`. `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
+which documents that) instead of RFC 7009's form body; sent a form, Intuit may
+refuse it, and Disconnect would then leave the grant live behind a
+`revoked: false` the user never sees. An empty `scopes` sends no `scope`. Operator URL overrides
 (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before

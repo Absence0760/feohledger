@@ -137,6 +137,7 @@ QBO_OAUTH = erp_oauth.register_oauth_provider(
         client_id_setting="erp_qbo_client_id",
         client_secret_setting="erp_qbo_client_secret",
         revoke_url="https://developer.api.intuit.com/v2/oauth2/tokens/revoke",
+        revoke_json=True,
         token_auth="basic",
         external_tenant_id_param="realmId",
         authorize_url_setting="erp_qbo_authorize_url",

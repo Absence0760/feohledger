@@ -61,6 +61,11 @@ class OAuthProviderSpec:
     #: The provider's token-revocation endpoint, or None when it has none.
     #: Disconnect calls it best-effort before clearing local state.
     revoke_url: str | None = None
+    #: How the revoke endpoint takes the token: a form body (``token=…``,
+    #: RFC 7009 — Xero, Sage) or, when True, a JSON object
+    #: (``{"token": …}``), which is what Intuit documents. A provider sent the
+    #: wrong one can answer 4xx, and Disconnect then leaves the grant live.
+    revoke_json: bool = False
     #: How the token endpoint takes the client credentials: ``"basic"`` (HTTP
     #: Basic auth — Intuit, Xero) or ``"body"`` (form fields — Sage).
     token_auth: str = "basic"

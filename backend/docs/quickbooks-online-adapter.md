@@ -128,7 +128,8 @@ the adapter.
     the SSO state.
   - `GET /api/organization/erp/quickbooks/callback` is public by design. It
     verifies `state`, exchanges the code, and stores the `realmId` + tokens.
-  - `POST …/disconnect` revokes the token at Intuit and clears local state.
+  - `POST …/disconnect` revokes the token at Intuit (JSON `{"token": …}`, as
+    Intuit documents — `revoke_json`) and clears local state.
   - Intuit **requires** a Disconnect URL and a Reconnect URL on the app
     listing, and both have to point at real pages.
   - Every connect/disconnect writes an audit row.

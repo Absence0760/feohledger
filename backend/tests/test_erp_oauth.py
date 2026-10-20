@@ -76,9 +76,15 @@ class _ScriptedProvider:
             async def __aexit__(self, *exc):
                 return False
 
-            async def post(self, url, data=None, headers=None, auth=None):
+            async def post(self, url, data=None, headers=None, auth=None, json=None):
                 provider.calls.append(
-                    {"url": url, "data": dict(data or {}), "auth": auth, "headers": headers}
+                    {
+                        "url": url,
+                        "data": dict(data or {}),
+                        "json": json,
+                        "auth": auth,
+                        "headers": headers,
+                    }
                 )
                 if provider.delay:
                     await asyncio.sleep(provider.delay)
@@ -890,7 +896,10 @@ async def test_disconnect_revokes_clears_and_audits(realdb, platform_app, provid
 
     (call,) = provider.calls
     assert call["url"] == QBO_OAUTH.revoke_url
-    assert call["data"] == {"token": "REFRESH-SECRET-1"}
+    # Intuit documents a JSON body for revoke; a form body may be refused,
+    # which would leave the grant live behind a "disconnected" answer.
+    assert (call["json"], call["data"]) == ({"token": "REFRESH-SECRET-1"}, {})
+    assert call["headers"]["Accept"] == "application/json"
     erp = (await _org_settings(realdb))["erp"]
     assert "oauth" not in erp
     assert erp["environment"] == "sandbox"
@@ -1153,7 +1162,19 @@ async def test_disconnect_revokes_with_the_sealed_token(realdb, platform_app, pr
     assert resp.status_code == 200, resp.text
     assert resp.json()["revoked"] is True
     (call,) = provider.calls
-    assert call["data"] == {"token": "REFRESH-SECRET-1"}
+    assert call["json"] == {"token": "REFRESH-SECRET-1"}
+
+
+async def test_revoke_sends_a_form_body_unless_the_provider_takes_json(platform_app, provider):
+    """RFC 7009's form body is the default (Xero, Sage); only a provider
+    that documents JSON (Intuit) gets JSON."""
+    import dataclasses
+
+    provider.handler = lambda url, data: _resp(200)
+    form_spec = dataclasses.replace(QBO_OAUTH, revoke_json=False)
+    assert await erp_oauth.revoke(form_spec, {}, {"refresh_token": "R-1"}) is True
+    (call,) = provider.calls
+    assert (call["data"], call["json"]) == ({"token": "R-1"}, None)
 
 
 @pytest.mark.plan("scale")
