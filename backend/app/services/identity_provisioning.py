@@ -15,6 +15,7 @@ import logging
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -55,6 +56,46 @@ class DeactivatedAccount(ValueError):
     def __init__(self, user_id: uuid.UUID) -> None:
         self.user_id = user_id
         super().__init__("This account has been deactivated.")
+
+
+class EmailInOtherWorkspace(ValueError):
+    """Raised when the IdP asserted an address that already names an account in
+    ANOTHER workspace.
+
+    `users.email` is globally unique — one address is one account in one
+    workspace (`models/user.py`) — so branch 3 of `jit_provision` cannot create
+    a second account for it. Before this was detected, the insert tripped the
+    UNIQUE constraint at flush and both SSO callbacks answered a bare 500 with
+    no audit row, so neither the person signing in nor this workspace's admin
+    could tell what had happened (`docs/decisions.md` §291).
+
+    Carries nothing: not the other account's id, not its workspace. The caller
+    audits into the workspace the IdP belongs to, whose admin must not learn
+    more about another tenant's account than that the address is taken — which
+    `POST /api/admin/users` already tells them.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This email address already has an account in another workspace.")
+
+
+async def email_holder_org_id(
+    db: AsyncSession, email: str, *, exclude_user_id: uuid.UUID | None = None
+) -> uuid.UUID | None:
+    """The organization whose account holds ``email``, or ``None`` when free.
+
+    Platform-wide and case-insensitive, matching what the global UNIQUE on
+    `users.email` (plus `utils/emails` normalization) actually enforces. Every
+    path that creates or renames an account asks this before writing, so a
+    collision becomes a stated refusal rather than an IntegrityError at flush:
+    SSO/SAML JIT (here), `POST`/`PATCH /api/admin/users`, and SCIM's
+    `_email_taken`. The org id lets a caller tell "already in this workspace"
+    from "belongs to another workspace" without ever naming the other one.
+    """
+    stmt = select(User.organization_id).where(email_matches(User.email, email))
+    if exclude_user_id is not None:
+        stmt = stmt.where(User.id != exclude_user_id)
+    return (await db.execute(stmt.limit(1))).scalar_one_or_none()
 
 
 class UnsafeEmailAddress(ValueError):
@@ -111,6 +152,24 @@ def extract_and_check_email(email_raw: str, allowed_email_domains: list[str]) ->
     return email
 
 
+async def _active_user_in_org_by_email(
+    db: AsyncSession, org: Organization, email: str
+) -> User | None:
+    """This workspace's account for ``email`` (case-insensitive), refusing a
+    deactivated one with `DeactivatedAccount`."""
+    user = (
+        await db.execute(
+            select(User)
+            .where(email_matches(User.email, email), User.organization_id == org.id)
+            .order_by(exact_email_first(User.email, email).desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if user is not None and not user.is_active:
+        raise DeactivatedAccount(user.id)
+    return user
+
+
 async def jit_provision(
     db: AsyncSession,
     org: Organization,
@@ -123,7 +182,9 @@ async def jit_provision(
     1. (sso_provider, sso_provider_id) — durable across email changes
     2. (organization_id, email) — links SSO to an existing password user
     3. New user with JIT-provisioned admin role if org has no users yet,
-       otherwise ap_clerk (least-privilege default).
+       otherwise ap_clerk (least-privilege default) — unless the address
+       already names an account in ANOTHER workspace, which raises
+       `EmailInOtherWorkspace` (branches 1 and 2 searched only this org).
 
     A matched-but-DEACTIVATED account raises `DeactivatedAccount` rather than
     being returned, so neither SSO callback can mint a session for someone who
@@ -173,6 +234,15 @@ async def jit_provision(
 
     # 3. Create new
     if user is None:
+        # Branches 1 and 2 searched this org only, so any account holding the
+        # address now belongs to another workspace. Refuse before the insert,
+        # rather than let the global UNIQUE on `users.email` raise at flush.
+        # Compared with `org.id` rather than "any holder", like the race path
+        # below, so a future change to branch 2's matching cannot turn an
+        # address in THIS workspace into an "other workspace" refusal.
+        holder = await email_holder_org_id(db, email)
+        if holder is not None and holder != org.id:
+            raise EmailInOtherWorkspace()
         full_name = (
             claims.get("name")
             or f"{claims.get('given_name', '')} {claims.get('family_name', '')}".strip()
@@ -190,8 +260,27 @@ async def jit_provision(
             organization_id=org.id,
             must_change_password=False,
         )
-        db.add(user)
-        await db.flush()
+        # A savepoint, so a concurrent writer that took the address between the
+        # check above and this flush (another workspace's admin, SCIM, or a
+        # parallel first sign-in) is still a stated refusal, not a 500 — and
+        # leaves the caller's session usable for its audit row.
+        try:
+            async with db.begin_nested():
+                db.add(user)
+                await db.flush()
+        except IntegrityError:
+            holder = await email_holder_org_id(db, email)
+            if holder is not None and holder != org.id:
+                raise EmailInOtherWorkspace() from None
+            # Taken in THIS workspace meanwhile — a parallel first sign-in of
+            # the same person (two tabs). Their row is the one to use.
+            raced = await _active_user_in_org_by_email(db, org, email)
+            if raced is None:
+                raise
+            await db.execute(
+                select(User).where(User.id == raced.id).options(selectinload(User.roles))
+            )
+            return raced
 
         # Assign least-privilege role by default. Admins can elevate via
         # the admin UI after first login. If this is the very first user

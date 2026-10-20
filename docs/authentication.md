@@ -176,8 +176,18 @@ workspace — the `X-Tenant-Slug` header, or a registered custom domain in `Host
 (`tenant.resolve_tenant_slug_by_custom_domain`, as `get_tenant_slug` reads it) —
 and it is not the account's own, the answer is `403` with the coded refusal
 `wrong_workspace` (`api/auth._refuse_other_workspace`), whose
-`params.sign_in_url` is the account's own sign-in page (`tenant_urls.sign_in_url`),
-plus an `auth.login.failure` / `reason=wrong_workspace` audit row. No token is
+`params.sign_in_url` is the account's own sign-in page (`tenant_urls.sign_in_url`
+with `prefer_custom_domain=True`: the org's own `tenant_url_template` when set,
+else its first registered custom domain, else the platform `<slug>` URL — a
+vanity-host tenant signs in on its vanity origin, where its stored token and its
+passkeys live), plus an `auth.login.failure` / `reason=wrong_workspace` audit
+row in the **account's** workspace carrying `attempted_workspace` (the slug the
+page named, capped at 63 characters) and `password_verified: true`, so an
+auditor can tell a confused user from someone who already holds the password
+and is trying it on another host. The attempted workspace gets **no** row: it
+holds no account, and since an unknown address leaves no row anywhere, a row
+there only when the password was right would make its audit log an oracle for
+"this address has an account" ([decisions.md](decisions.md) §291). No token is
 issued. The check runs **after** the password verifies, so a wrong password
 there is still the plain `401` and the link reveals nothing the caller could not
 learn by signing in. A request naming no workspace (an API client) is
@@ -201,7 +211,16 @@ signed out because your session belonged to a different workspace. Sign in
 here, or on your own workspace's page." — worded so it never claims this page is
 theirs, and shown as a neutral notice (AuthShell's `.info`, in a polite
 `role="status"` region) rather than the red error alert. It keys on the code,
-never the English (`api/sessionRejection.ts`). Tests:
+never the English (`api/sessionRejection.ts`). Before clearing it, the SPA also
+**revokes** that token on the server, best-effort
+(`sessionRejection.revokeRejectedSession`): the token is still a live session in
+its own workspace until it expires, and clearing it from this origin's storage
+alone left a usable credential behind on a shared machine. `POST /api/auth/logout`
+needs no workspace — it reads the token's own `jti`/`sub`/`org`, blocklists it and
+audits `auth.logout` in the token's own workspace — so the call carries the token
+and deliberately not this page's `X-Tenant-Slug`, with `keepalive` because the
+page navigates away immediately, and every failure swallowed. An expired session
+(`401`) is not revoked; the server already refuses it. Tests:
 `frontend/src/lib/api/sessionRejection.test.ts`, and the journey end to end in
 `frontend/tests-e2e/auth/tenant-isolation.spec.ts` § signing in on another
 workspace's page.
@@ -1857,6 +1876,44 @@ First SSO login provisions the user. Three match paths:
 | Create new | No match → new row with `hashed_password=NULL` (SSO-only), `must_change_password=false` |
 
 New users get `ap_clerk` role by default (least privilege). The first user ever in an org gets `admin`.
+
+**An address that already has an account in another workspace is refused, not
+created.** The first two matches search only this org, and `users.email` is
+globally unique — one address is one account in one workspace — so "create new"
+used to trip the UNIQUE constraint at flush and both callbacks answered a bare
+`500` with no audit row. `jit_provision` now asks
+`identity_provisioning.email_holder_org_id` (platform-wide, case-insensitive)
+first and raises `EmailInOtherWorkspace`; the insert also runs in a savepoint, so
+an address taken by a concurrent writer between the check and the flush is the
+same refusal. The callbacks turn it into:
+
+- **OIDC** — `POST /api/auth/sso/callback` answers `403` coded
+  `sso_email_in_other_workspace` (`api/refusals.SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL`)
+  and writes `auth.sso.login.failure` / `reason=sso_email_in_other_workspace`
+  (with the email, as OIDC failure rows do) in **this** workspace.
+- **SAML** — the ACS writes `auth.saml.login.failure` with the same reason and the
+  usual PII-free details, then 303s to the SPA bridge with a one-time code
+  (`sso.create_saml_refusal_handoff`, same store, TTL and single use as a token
+  handoff), and `POST /api/auth/saml/exchange` answers that code with the same
+  coded `403` and no token — so the browser lands on the callback page rather
+  than on raw JSON at the ACS.
+
+Both callback pages state it in the reader's language
+(`refusal.ssoEmailInOtherWorkspace`, through `api/codedRefusals.ts`): the
+address belongs to another workspace, sign in on your own workspace's page or
+ask this workspace's admin to have the IdP send a different address. It carries
+**no link** to the account's own sign-in page, unlike the password path's
+`wrong_workspace`. That link is safe there because only someone who proved the
+password sees it; here the proof is an assertion from this workspace's IdP,
+which this workspace's admin controls and can make say any address — a link
+would name another tenant's workspace for any address they typed. The bare
+"this address is taken" it does reveal is what `POST /api/admin/users` already
+tells the same admin. Nothing is written to the other workspace's audit log,
+which this IdP's admin must not be able to write into. Reasoning:
+[decisions.md](decisions.md) §291. Tests:
+`backend/tests/test_email_identity_case.py` (JIT, the race, the OIDC callback)
+and `backend/tests/test_saml_acs_integration.py` (the ACS → bridge → exchange
+round trip).
 
 A match that lands on a **deactivated** account (`users.is_active = false`) raises
 `DeactivatedAccount` instead of returning the row, so neither SSO callback can

@@ -39,7 +39,10 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — the light theme (decisions §289) opened one
+**Last reconciled:** 2026-10-20 — the cross-workspace identity fixes (decisions
+§291) opened two (c) entries, multi-workspace membership and the SAML ACS's
+other refusals still landing as raw JSON, taking the file from 115 → 117.
+Before that, 2026-10-20 — the light theme (decisions §289) opened one
 (c) entry, a white-label accent left unchecked as text on the light surfaces,
 taking the file from 114 → 115. Before that, 2026-10-20 — the live QuickBooks re-test (#598) reached
 the sync screens' entry, which landed (coded `erp_listing_incomplete` /
@@ -168,7 +171,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**115 open: 99 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**117 open: 101 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1811,6 +1814,42 @@ scope (§260) — do not fold them into any of these.
       `stores/brandTheme.ts` to report the accent against both themes'
       surfaces. **Trigger:** the first tenant that sets a brand accent, or any
       white-label sale.
+
+### Surfaced by the cross-workspace identity fixes (2026-10-20, decisions §291)
+
+- [ ] **(c) Multi-workspace membership: one person cannot belong to two
+      workspaces.** `users.email` is globally unique and `User.organization_id`
+      is one column, so an auditor, a bookkeeper serving several clients or a
+      contractor in two customers' IdPs needs a separate address per workspace.
+      §291 made every collision a stated, coded refusal (admin create/rename,
+      SCIM, SSO/SAML JIT) and budgeted the admin path's existence signal, but
+      the signal itself remains for as long as the address is global, and the
+      person's only way forward is another address. **Durable fix:** split
+      identity from membership — a `memberships(user_id, organization_id,
+      roles, is_active)` table, login resolving the account by address and then
+      the membership by the page's workspace (which also retires the
+      `wrong_workspace` refusal into a workspace picker), per-membership
+      sessions/JWT `org`, and admin "invite" adding a membership to an existing
+      account (with the invitee's consent) instead of creating one. Large: it
+      touches login, every `organization_id`-keyed user query, SCIM, JIT,
+      access reviews, DSAR/erasure and the per-user audit trail. **Trigger:** a
+      customer or partner asks for one person in two workspaces, or the
+      partner/reseller programme onboards an accountant serving several
+      tenants. Full plan, security risks and the
+      cross-tenant test matrix: #614.
+- [ ] **(c) The SAML ACS still answers its other refusals as raw JSON at the
+      API origin.** Only the address-in-another-workspace refusal is routed to
+      the SPA bridge (`sso.create_saml_refusal_handoff`); `inactive`,
+      `domain_blocked`, `unsafe_email`, a replay or a bad assertion still leave
+      the browser on `{"detail": "SAML login could not be verified."}` from the
+      ACS URL, in English, with no way back — the OIDC callback page states its
+      refusals because the SPA posts the callback itself. **Durable fix:** send
+      every ACS refusal through the same refusal handoff, keeping the one
+      generic sentence (and its PII-free audit reasons) for the verification
+      failures so the bridge says no more than the ACS does today, and coded
+      `inactive` / `domain_blocked` the OIDC path already states. **Trigger:**
+      the first SAML tenant in production, or a support report of a blank JSON
+      page after an IdP sign-in.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

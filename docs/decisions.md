@@ -12637,3 +12637,88 @@ choice at the first frame; localhost writes no cookie; the auth-shell picker
 persists and passes axe) and `tests-e2e/signup/flow.spec.ts` (the captcha
 redraws on a picker change and on an OS change, keeps a solved widget, and
 redraws after expiry).
+
+## 291. One address is one account in one workspace, and every collision says so (2026-10-20)
+
+**Found by the admin persona review.** `users.email` is globally unique, so an
+address names one account in one workspace and there is no multi-workspace
+membership. Three paths had not caught up with that:
+
+- **SSO/SAML JIT** searched only the signing-in workspace, then inserted, and the
+  UNIQUE constraint raised at flush: a bare `500` on the callback, no audit row.
+  A contractor in two customers' IdPs hit it on first sign-in and nobody could
+  see why. SCIM already answered the same collision with a `409`.
+- **Admin create/rename** answered a bare "Email already in use" — a dead end
+  for the inviter, and a platform-wide existence oracle for anyone holding
+  `user.manage`, including the admin of a free self-signup tenant.
+- **The `wrong_workspace` row** (§288) recorded neither the workspace whose page
+  it was nor that the password had verified.
+
+**The rules:**
+
+1. `identity_provisioning.email_holder_org_id` is the one platform-wide,
+   case-insensitive "who holds this address" lookup; JIT, admin and SCIM all ask
+   it before writing. JIT raises `EmailInOtherWorkspace` before the insert, and
+   the insert runs in a savepoint so a concurrent writer is the same refusal.
+2. **SSO refuses with a coded `403` `sso_email_in_other_workspace`, and no link.**
+   The password path links the account's own sign-in page because only someone
+   who proved the password sees it. Here the proof is an assertion from the
+   signing-in workspace's IdP, which that workspace's admin controls and can
+   make assert any address; a link would name another tenant's workspace (slug
+   or vanity host) for any address typed. The real user knows their own
+   workspace; the sentence tells them to sign in there or ask for a different
+   address. The row goes in the IdP's workspace (its admin is the one who can
+   act) and **not** in the account's: that admin must not be able to write
+   rows into another tenant's log by typing addresses. SAML routes the refusal
+   through a refusal-only handoff code so the browser lands on the SPA bridge,
+   not raw JSON at the ACS.
+3. **Admin and SCIM say which case it is** — `email_in_this_workspace` (edit the
+   existing user) or `email_in_other_workspace` (use a different address) —
+   naming no workspace and no account.
+4. **The remaining existence signal is bounded, not hidden.** While the address
+   is global, any refusal confirms it is taken. Hiding it would mean answering a
+   collision as if it succeeded (inventing a user that does not exist) or
+   refusing without a reason (the dead end again), so the admin path spends a
+   per-workspace budget of 20 other-workspace refusals an hour, checked before
+   the lookup so a throttled sweep learns nothing. Per workspace rather than per
+   user, so minting extra user-managers does not widen it. Once spent, EVERY
+   create and email rename in that workspace waits out the window — a free
+   address included, with its own coded 429 `email_check_throttled` saying so
+   — because refusing only the taken addresses would make the 429 the oracle.
+   That can pause a real onboarding for up to an hour after twenty
+   other-workspace hits, which is the accepted price. SCIM and SSO are **not**
+   budgeted, and their signal is accepted: an IdP re-sends a doomed SCIM write
+   every reconcile cycle, so a throttle would turn a stated 409 into a stuck
+   provisioning job, and a budget on SSO refusals would lock a whole
+   workspace's sign-ins; both also need the plan-gated SSO/SCIM feature and a
+   configured IdP, each SSO probe is a full browser round trip that leaves a
+   row in the prober's own audit log, and the same admin can already ask the
+   budgeted admin path.
+5. **`wrong_workspace` audits `attempted_workspace` and `password_verified:
+   true` in the account's workspace, and nothing in the attempted one.** An
+   unknown address leaves no row anywhere, so a row in the attempted workspace
+   only when the password was right would make its log an oracle; the event is
+   the account's.
+6. **The wrong-workspace link prefers a registered custom domain** when the org
+   sets no `tenant_url_template` (an explicit template still wins). The runbook
+   registers a host only once DNS and TLS are live, and the slug subdomain is a
+   different origin: another stored token, and no passkeys bound to the vanity
+   host. Other outbound links are unchanged.
+7. **A token refused as `token_tenant_mismatch` is also revoked**, best-effort,
+   by the SPA calling `POST /api/auth/logout` with it and without the page's
+   `X-Tenant-Slug` (logout reads the token's own claims and needs no
+   workspace). Clearing it locally left a live session in its own workspace.
+
+**Rejected:** silently linking or migrating the person into the second
+workspace (an IdP is not entitled to move an account between tenants), and
+true multi-workspace membership now — the right long-term model, but it
+reaches login, sessions, every `organization_id`-keyed user query, SCIM, JIT,
+access reviews and DSAR; tracked in `docs/followups.md` § Surfaced by the
+cross-workspace identity fixes.
+
+Tests: `backend/tests/test_email_identity_case.py` (JIT, the race, the OIDC
+callback, admin create/rename, the budget, SCIM, the wrong-workspace audit
+row), `backend/tests/test_saml_acs_integration.py` (ACS → bridge → exchange),
+`backend/tests/test_tenant_url_resolver.py` (the custom-domain link),
+`frontend/src/lib/api/sessionRejection.test.ts` (revocation) and
+`frontend/src/lib/api/codedRefusals.test.ts` (the three sentences).

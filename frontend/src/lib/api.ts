@@ -2,7 +2,11 @@ import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import { apiErrorCode, formatApiDetail } from '#lib/utils/apiError.ts';
 import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
-import { loginPathFor, sessionRejection } from '#lib/api/sessionRejection.ts';
+import {
+	loginPathFor,
+	revokeRejectedSession,
+	sessionRejection
+} from '#lib/api/sessionRejection.ts';
 import { m } from '#lib/i18n/store.svelte.ts';
 
 // Re-exported so callers that already import from `#lib/api` (e.g. the
@@ -94,7 +98,9 @@ export function hasToken(): boolean {
  * End the signed-in session when a refused response says it is over: a 401,
  * or a 403 coded `token_tenant_mismatch` (a token for another workspace than
  * this page's — `api/sessionRejection.ts`). Clears the token and sends the user
- * to this host's `/login`, with the reason in the URL for the second. Returns
+ * to this host's `/login`, with the reason in the URL for the second — whose
+ * token is also revoked on the server first, best-effort, since it is still
+ * live in its own workspace (`revokeRejectedSession`). Returns
  * whether it did. Every client of the backend calls this on a refused response
  * — `request()`, the blob downloads, the SSE stream and `api/expenses.ts`'s
  * hand-rolled submit — so none of them can leave a dead session behind a
@@ -103,6 +109,9 @@ export function hasToken(): boolean {
 export function endSessionIfRejected(status: number, detail: unknown): boolean {
 	const rejection = sessionRejection(status, apiErrorCode(detail).code);
 	if (!rejection) return false;
+	// A token for another workspace is still live there — revoke it on the
+	// server too, best-effort, before forgetting it here.
+	revokeRejectedSession(rejection, getToken(), getApiBase(), (url, init) => fetch(url, init));
 	clearToken();
 	window.location.href = loginPathFor(rejection);
 	return true;
