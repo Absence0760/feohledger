@@ -354,7 +354,7 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	// `api/signup.py::_refuse_if_email_has_account` — a verified signup for an
 	// address that already has an account; the link is that account's own
-	// sign-in page (decisions §290).
+	// sign-in page (decisions §292).
 	[SIGNUP_EMAIL_HAS_WORKSPACE]: (p, t) => {
 		const url = str(p, 'sign_in_url');
 		return url

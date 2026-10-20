@@ -1074,7 +1074,7 @@ async def test_signup_complete_token_too_short_422(realdb):
 
 
 # ---------------------------------------------------------------------------
-# An address that already has an account (decisions §290)
+# An address that already has an account (decisions §292)
 #
 # `users.email` is unique across every organization, so such an address can
 # never be provisioned. It used to reach `provision_tenant`, hit the unique
@@ -1218,7 +1218,7 @@ async def test_an_account_created_mid_provisioning_leaves_no_database_and_a_code
 
 
 # ---------------------------------------------------------------------------
-# Re-opening a used verification link (decisions §290)
+# Re-opening a used verification link (decisions §292)
 #
 # /verify redeems on page load, so a reload or a second tab used to get the 410
 # "invalid, sign up again" — and signing up again then failed on the slug the

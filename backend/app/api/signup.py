@@ -34,11 +34,11 @@ The split protects against:
     addresses have accounts), and /complete — where the visitor has proven
     they read the mailbox — refuses it, coded ``signup_email_has_workspace``,
     with the existing workspace's sign-in link, and spends the token
-    (decisions §290).
+    (decisions §292).
   - Re-opening the link: a reload, a second tab, or a mail scanner that ran
     the page first. /complete re-answers a spent token whose workspace exists
     with that workspace (``already_verified: true``) instead of a 410, and
-    issues nothing new — no second set-password link (decisions §290).
+    issues nothing new — no second set-password link (decisions §292).
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ router = APIRouter(
 
 VERIFICATION_TTL = timedelta(hours=24)
 
-#: /complete for an address that already has an account (decisions §290).
+#: /complete for an address that already has an account (decisions §292).
 SIGNUP_EMAIL_HAS_WORKSPACE = "signup_email_has_workspace"
 
 _INVALID_LINK = "This verification link is invalid or has expired. Please sign up again."
@@ -341,7 +341,7 @@ async def signup_complete(
     if verification is None or verification.expires_at < datetime.now(UTC):
         raise HTTPException(status_code=410, detail=_INVALID_LINK)
 
-    # 1b. A spent link is re-answered, never re-run (decisions §290): the page
+    # 1b. A spent link is re-answered, never re-run (decisions §292): the page
     #     redeems on load, so a reload, a second tab or a mail scanner that ran
     #     it first used to meet "invalid, sign up again" — and signing up again
     #     then failed on the slug this very link had just claimed.
@@ -352,7 +352,7 @@ async def signup_complete(
     #    `users.email` is unique across every organization. Refused HERE, not
     #    at /start — the visitor has now proven they read this mailbox, so
     #    naming the workspace tells nobody anything new; /start is public and
-    #    must answer every address alike (decisions §290). Checked before the
+    #    must answer every address alike (decisions §292). Checked before the
     #    slug, so someone signing up again for their own workspace is pointed
     #    at it rather than told the name is taken.
     await _refuse_if_email_has_account(db, verification)

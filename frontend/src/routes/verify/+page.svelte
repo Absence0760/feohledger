@@ -22,7 +22,7 @@
 		// The link had already been used (a reload, a second tab, a mail scanner
 		// that ran it first): the workspace exists, nothing was re-issued, and
 		// `set_password_url` is null — the welcome email holds the one link
-		// (decisions §290).
+		// (decisions §292).
 		already_verified?: boolean;
 	}
 

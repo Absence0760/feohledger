@@ -391,7 +391,7 @@ test.describe('/verify — outcomes', () => {
 	test('a re-opened link shows the workspace and a way to sign in, with nothing re-issued', async ({
 		page
 	}) => {
-		// decisions §290: a reload or a second tab used to get "invalid, sign up
+		// decisions §292: a reload or a second tab used to get "invalid, sign up
 		// again". The server now re-answers a spent link with its workspace.
 		const signInUrl = `${tenantBase('stubco')}/login?email=admin%40stubco.example`;
 		await page.route(
@@ -508,7 +508,7 @@ test.describe('signup happy path (UI + Mailpit)', () => {
 
 		// 3b. Opening the same link again — a second tab here — is re-answered
 		//     with the workspace, not "invalid, sign up again", and issues no
-		//     second set-password link (decisions §290).
+		//     second set-password link (decisions §292).
 		const secondTab = await page.context().newPage();
 		await secondTab.goto(verifyLink![0]);
 		await expect(
@@ -558,7 +558,7 @@ test.describe('signup happy path (UI + Mailpit)', () => {
 		page
 	}) => {
 		// `users.email` is unique across workspaces, so this used to end in a 500
-		// "contact support" on every open of the link (decisions §290). /start
+		// "contact support" on every open of the link (decisions §292). /start
 		// still answers it like any other address — it is public.
 		const slug = `e2edup${Date.now().toString().slice(-9)}`;
 		const email = ACME_ADMIN.email;

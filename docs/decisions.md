@@ -12545,7 +12545,7 @@ through CSS alone, the keyboard model of the picker, and axe in light mode on
 a cross-section of the signed-in app, the portal, the auth shell, the help
 centre and the legal pages).
 
-## 290. Signup refuses an address that already has an account at /complete, and a used verification link is re-answered (2026-10-20)
+## 292. Signup refuses an address that already has an account at /complete, and a used verification link is re-answered (2026-10-20)
 
 **Two dead ends in self-service signup.**
 

@@ -40,7 +40,7 @@ class SignupCompleteResponse(BaseModel):
     # True when this link had already been used and its workspace exists: the
     # page is being re-opened (a reload, a second tab, a mail scanner that ran
     # it first). Nothing is re-issued, so `set_password_url` is None — the
-    # welcome email holds the one link (decisions §290).
+    # welcome email holds the one link (decisions §292).
     already_verified: bool = False
 
 
