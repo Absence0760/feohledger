@@ -199,6 +199,78 @@ export function tenantStorageKeyForHost(
 	return null;
 }
 
+/** `localhost` and its subdomains, IP literals and single-label hosts: places a
+ *  `Domain` cookie attribute either cannot reach (browsers refuse
+ *  `Domain=localhost`) or must not point at. */
+function isCookieShareableDomain(domain: string): boolean {
+	if (!domain.includes('.')) return false;
+	if (domain === 'localhost' || domain.endsWith('.localhost')) return false;
+	if (domain.includes(':') || domain.includes('[')) return false;
+	if (/^\d{1,3}(\.\d{1,3}){3}$/.test(domain)) return false;
+	return true;
+}
+
+/**
+ * The `Domain` a cookie needs to reach every host of THIS platform — the apex
+ * (marketing / signup) and every `<slug>.` workspace beneath it — or `null`
+ * when it must stay per-origin.
+ *
+ * It is only ever a domain the BUILD positively declares as the platform's
+ * own — never one inferred from the host's shape:
+ *
+ *   - each `PUBLIC_PLATFORM_DOMAINS` entry, when the operator set it, and
+ *   - the host of `PUBLIC_SITE_URL`, the platform's apex origin, which every
+ *     deployed build sets (`vm-deploy.yml` from `APP_URL`, `deploy/deploy.sh`
+ *     from `APP_DOMAIN`) and which turns no routing on.
+ *
+ * The host must equal one of them or sit beneath it; the longest match wins.
+ *
+ *   - `acme.feohledger.com`, `feohledger.com` → `feohledger.com`
+ *   - a customer's vanity host (`ap.customer.example`) → `null`. It is one
+ *     tenant's own site: a platform cookie has no business on the customer's
+ *     parent domain, and no other workspace could read it there anyway.
+ *   - `localhost`, `acme.localhost`, an IP literal → `null`.
+ *
+ * The legacy host rule ("first label of any 3+-label host") is deliberately
+ * NOT an input. It reads `ap.customer.example` as a workspace of
+ * `customer.example`, which would put our cookie on the customer's domain.
+ * A build that declares nothing therefore shares nothing, and the theme stays
+ * per site.
+ *
+ * Used for the colour theme (`#lib/theme.ts`, docs/decisions.md §290), the one
+ * preference that should follow a visitor from the signup page into the
+ * workspace it creates.
+ */
+export function sharedCookieDomainForHost(
+	hostname: string | null | undefined,
+	platformDomains: string[],
+	siteUrl: string | null | undefined = null
+): string | null {
+	const host = normalizeHost(hostname);
+	if (!host) return null;
+	const known = new Set(platformDomains);
+	const siteHost = siteUrlHost(siteUrl);
+	if (siteHost) known.add(siteHost);
+	for (const candidate of [...known].sort((a, b) => b.length - a.length)) {
+		if (host === candidate || host.endsWith(`.${candidate}`)) {
+			return isCookieShareableDomain(candidate) ? candidate : null;
+		}
+	}
+	return null;
+}
+
+/** The normalised host of an absolute `http(s)` URL, or `null`. */
+function siteUrlHost(siteUrl: string | null | undefined): string | null {
+	if (!siteUrl) return null;
+	try {
+		const url = new URL(siteUrl);
+		if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+		return normalizeHost(url.hostname) || null;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * The current browser hostname, or `null` when there is no `window` (SSR /
  * prerender — the build prerenders every route, so this path is live).

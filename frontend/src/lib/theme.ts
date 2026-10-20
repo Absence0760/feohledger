@@ -20,10 +20,20 @@
  *     few consumers outside CSS — the `<meta name="theme-color">` and a
  *     third-party widget that takes a theme argument (hCaptcha).
  *
- * The choice is per browser, in `localStorage`, like the display language: a
- * preference about this screen, not about the account. Every storage access is
- * wrapped, because `localStorage` throws in some private modes and when site
- * data is blocked — and the page must render correctly when it does.
+ * Where the choice lives (docs/decisions.md §290). It is a preference about
+ * this screen, not about the account, so it stays in the browser — but every
+ * workspace is its own origin (`<slug>.feohledger.com`, and the apex for
+ * signup), and `localStorage` is per origin. So on a platform host the choice
+ * is a cookie on the platform's registrable domain (`Domain=feohledger.com`,
+ * derived from the host by `#lib/hostRouting.ts::sharedCookieDomainForHost`),
+ * which every workspace and the signup page read alike. Where no such domain
+ * exists — localhost, an IP literal, a customer's vanity host — or the browser
+ * refuses the cookie, it falls back to `localStorage`, per origin. A cookie,
+ * when present, wins: it is the newest choice made anywhere on the platform.
+ *
+ * Every cookie and storage access is wrapped, because both throw in some
+ * private modes and when site data is blocked — and the page must render
+ * correctly when they do.
  */
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
@@ -32,8 +42,19 @@ export type ResolvedTheme = 'light' | 'dark';
 /** In the order the picker shows them. */
 export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark'];
 
-/** Repeated in `src/app.html`'s inline script — `theme.test.ts` holds them equal. */
+/**
+ * The `localStorage` key AND the cookie name. Repeated in `src/app.html`'s
+ * inline script — `theme.test.ts` holds them equal.
+ */
 export const THEME_STORAGE_KEY = 'feoh_theme';
+
+/** How long the shared cookie lives: a year, renewed by every choice. */
+export const THEME_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+/** The slice of `Document` the cookie helpers need, so tests can fake it. */
+export interface CookieJar {
+	cookie: string;
+}
 
 /**
  * `<meta name="theme-color">` per palette — the mobile browser's address bar.
@@ -64,8 +85,41 @@ export function browserStorage(): Storage | null {
 	}
 }
 
-/** The stored choice, or System when there is none, it is garbage, or storage throws. */
-export function readThemeChoice(storage: Pick<Storage, 'getItem'> | null): ThemeChoice {
+/** `document.cookie`, or `''` where reading it throws (sandboxed frames, blocked site data). */
+export function browserCookies(): string {
+	try {
+		return typeof document === 'undefined' ? '' : document.cookie;
+	} catch {
+		return '';
+	}
+}
+
+/**
+ * The theme carried by a `document.cookie` string, or `null` when it carries
+ * none. The first VALID `feoh_theme` wins, so a malformed one never hides a
+ * good one. `src/app.html` repeats this parse.
+ */
+export function readThemeCookie(cookies: string | null | undefined): ThemeChoice | null {
+	if (!cookies) return null;
+	for (const part of cookies.split(';')) {
+		const eq = part.indexOf('=');
+		if (eq < 0 || part.slice(0, eq).trim() !== THEME_STORAGE_KEY) continue;
+		const value = part.slice(eq + 1).trim();
+		if (isThemeChoice(value)) return value;
+	}
+	return null;
+}
+
+/**
+ * The choice to show: the shared cookie when there is one, else the per-origin
+ * stored choice, else System — also when the value is garbage or storage throws.
+ */
+export function readThemeChoice(
+	storage: Pick<Storage, 'getItem'> | null,
+	cookies: string | null = null
+): ThemeChoice {
+	const shared = readThemeCookie(cookies);
+	if (shared) return shared;
 	if (!storage) return 'system';
 	try {
 		const stored = storage.getItem(THEME_STORAGE_KEY);
@@ -75,16 +129,57 @@ export function readThemeChoice(storage: Pick<Storage, 'getItem'> | null): Theme
 	}
 }
 
+/** The `document.cookie` assignment that shares `choice` across `domain`. */
+export function themeCookie(choice: ThemeChoice, domain: string, secure: boolean): string {
+	return (
+		`${THEME_STORAGE_KEY}=${choice}; Domain=${domain}; Path=/; ` +
+		`Max-Age=${THEME_COOKIE_MAX_AGE}; SameSite=Lax${secure ? '; Secure' : ''}`
+	);
+}
+
+/** Where a shared choice goes: the cookie jar, the platform domain (or `null`
+ *  where there is none) and whether the page is on https. */
+export interface SharedThemeTarget {
+	jar: CookieJar;
+	domain: string | null;
+	secure: boolean;
+}
+
 /**
- * Persist a choice. System is stored as the ABSENCE of a choice, so a browser
- * that never touched the picker and one that went back to System behave
- * identically. Returns whether it was saved; a failure is not an error — the
- * theme still applies for this page view, it just won't survive a reload.
+ * Persist a choice. Returns whether it was saved; a failure is not an error —
+ * the theme still applies for this page view, it just won't survive a reload.
+ *
+ * With a platform domain, the choice goes into the shared cookie, System
+ * included: System is a choice there, written as `system`, so it overrides a
+ * stale Light another workspace remembers per origin. The write is read back,
+ * because a browser blocking cookies drops it silently; only once it has
+ * landed is the per-origin copy removed, so it can never resurface over a
+ * newer choice made on another workspace.
+ *
+ * Without one (or when the cookie did not land), `localStorage` holds it, and
+ * System is stored as the ABSENCE of a choice, so a browser that never touched
+ * the picker and one that went back to System behave identically.
  */
 export function writeThemeChoice(
 	storage: Pick<Storage, 'setItem' | 'removeItem'> | null,
-	choice: ThemeChoice
+	choice: ThemeChoice,
+	shared: SharedThemeTarget | null = null
 ): boolean {
+	if (shared?.domain) {
+		try {
+			shared.jar.cookie = themeCookie(choice, shared.domain, shared.secure);
+			if (readThemeCookie(shared.jar.cookie) === choice) {
+				try {
+					storage?.removeItem(THEME_STORAGE_KEY);
+				} catch {
+					/* the cookie wins on read anyway */
+				}
+				return true;
+			}
+		} catch {
+			/* cookies refused — fall back to this origin's storage */
+		}
+	}
 	if (!storage) return false;
 	try {
 		if (choice === 'system') storage.removeItem(THEME_STORAGE_KEY);

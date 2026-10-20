@@ -3,6 +3,7 @@
 	import { asset } from '$app/paths';
 	import Atmosphere from '#lib/components/marketing/Atmosphere.svelte';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import ThemePicker from '#lib/components/ui/ThemePicker.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
 	/**
@@ -61,6 +62,13 @@
 		<div class="form-wrap">
 			{@render children()}
 		</div>
+		<!-- Outside .form-wrap so the shell's input and label styles never reach
+		     it. Here because these pages come before any account, and signup is
+		     on the apex: a theme picked now carries into the workspace it creates
+		     (docs/decisions.md §290). Last in DOM order, after the form. -->
+		<div class="theme-pick">
+			<ThemePicker name="auth-theme" />
+		</div>
 	</div>
 
 	<aside class="panel" aria-labelledby={panelHeadingId}>
@@ -105,11 +113,16 @@
 	/* ----------------------------- form column ---------------------------- */
 	.form-col {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
 		justify-content: center;
+		gap: 36px;
 		padding: 48px 32px;
 	}
 	.form-wrap {
+		width: min(420px, 100%);
+	}
+	.theme-pick {
 		width: min(420px, 100%);
 	}
 

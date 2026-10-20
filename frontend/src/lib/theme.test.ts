@@ -4,14 +4,18 @@ import {
 	applyTheme,
 	isThemeChoice,
 	readThemeChoice,
+	readThemeCookie,
 	resolveTheme,
 	systemPrefersLight,
 	THEME_CHOICES,
 	THEME_COLORS,
+	THEME_COOKIE_MAX_AGE,
 	THEME_STORAGE_KEY,
+	themeCookie,
 	writeThemeChoice,
 	type ThemeChoice
 } from './theme';
+import { sharedCookieDomainForHost } from './hostRouting';
 
 /**
  * The theme helper (docs/decisions.md §289) and the pre-paint script in
@@ -40,13 +44,49 @@ function memoryStorage(initial: Record<string, string> = {}, throws = false) {
 	};
 }
 
+/**
+ * A `document.cookie` with a browser's shape: assigning one `name=value; attrs`
+ * string sets (or, at `Max-Age=0`, deletes) that one cookie, and reading
+ * returns `name=value; name=value`. `blocked` drops writes silently, as a
+ * browser refusing cookies does; `throws` throws on every access.
+ */
+function cookieJar(initial = '', opts: { blocked?: boolean; throws?: boolean } = {}) {
+	const jar = new Map<string, string>();
+	const written: string[] = [];
+	for (const part of initial.split(';')) {
+		const eq = part.indexOf('=');
+		if (eq > 0) jar.set(part.slice(0, eq).trim(), part.slice(eq + 1).trim());
+	}
+	return {
+		written,
+		get cookie() {
+			if (opts.throws) throw new DOMException('denied', 'SecurityError');
+			return [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
+		},
+		set cookie(raw: string) {
+			if (opts.throws) throw new DOMException('denied', 'SecurityError');
+			written.push(raw);
+			if (opts.blocked) return;
+			const [pair, ...attrs] = raw.split(';');
+			const eq = pair.indexOf('=');
+			const name = pair.slice(0, eq).trim();
+			if (attrs.some((a) => a.trim().toLowerCase() === 'max-age=0')) jar.delete(name);
+			else jar.set(name, pair.slice(eq + 1).trim());
+		}
+	};
+}
+
 /** Just enough of a Document for `applyTheme` and the inline script. */
-function fakeDocument() {
+function fakeDocument(cookies = '', cookiesThrow = false) {
 	const attrs = new Map<string, string>();
 	const meta = { content: '#000000', setAttribute: (_: string, v: string) => (meta.content = v) };
+	const jar = cookieJar(cookies, { throws: cookiesThrow });
 	return {
 		attrs,
 		meta,
+		get cookie() {
+			return jar.cookie;
+		},
 		documentElement: { setAttribute: (k: string, v: string) => void attrs.set(k, v) },
 		querySelector: (sel: string) => (sel === 'meta[name="theme-color"]' ? meta : null)
 	};
@@ -121,6 +161,150 @@ describe('theme choice', () => {
 });
 
 /**
+ * The shared cookie (docs/decisions.md §290): every workspace is its own
+ * origin, so the choice made on one reaches the others — and the apex signup
+ * page reaches the workspace it creates — only through a cookie on the
+ * platform's registrable domain.
+ */
+describe('theme across workspaces — the shared cookie', () => {
+	const PLATFORM = ['feohledger.com'];
+
+	it('shares at the platform domain from the apex and from every workspace', () => {
+		expect(sharedCookieDomainForHost('feohledger.com', PLATFORM)).toBe('feohledger.com');
+		expect(sharedCookieDomainForHost('acme.feohledger.com', PLATFORM)).toBe('feohledger.com');
+		expect(sharedCookieDomainForHost('ACME.feohledger.com.', PLATFORM)).toBe('feohledger.com');
+		// The longest matching platform domain, as host classification uses.
+		expect(sharedCookieDomainForHost('acme.app.example.com', ['example.com', 'app.example.com'])).toBe(
+			'app.example.com'
+		);
+	});
+
+	it('never shares on localhost, its subdomains, or an IP literal — those stay per origin', () => {
+		for (const host of ['localhost', 'acme.localhost', 'acme.localhost:7777']) {
+			expect(sharedCookieDomainForHost(host, ['localhost'])).toBeNull();
+			expect(sharedCookieDomainForHost(host, [])).toBeNull();
+		}
+		expect(sharedCookieDomainForHost('127.0.0.1', ['127.0.0.1'])).toBeNull();
+		expect(sharedCookieDomainForHost('[::1]', [])).toBeNull();
+		expect(sharedCookieDomainForHost(null, PLATFORM)).toBeNull();
+		expect(sharedCookieDomainForHost('', PLATFORM)).toBeNull();
+	});
+
+	it('never shares on a customer vanity domain — a platform cookie does not belong on their site', () => {
+		expect(sharedCookieDomainForHost('ap.acmecorp.com', PLATFORM)).toBeNull();
+		expect(sharedCookieDomainForHost('acmecorp.com', PLATFORM)).toBeNull();
+		// A look-alike suffix is not a subdomain.
+		expect(sharedCookieDomainForHost('evilfeohledger.com', PLATFORM)).toBeNull();
+	});
+
+	it('with no PUBLIC_PLATFORM_DOMAINS, shares only under the PUBLIC_SITE_URL host', () => {
+		// Today's production shape: the platform domain list is unset, and the
+		// site URL (from APP_URL) is the apex.
+		const SITE = 'https://feohledger.com';
+		expect(sharedCookieDomainForHost('feohledger.com', [], SITE)).toBe('feohledger.com');
+		expect(sharedCookieDomainForHost('acme.feohledger.com', [], SITE)).toBe('feohledger.com');
+		expect(sharedCookieDomainForHost('acme.feohledger.com', [], `${SITE}/`)).toBe('feohledger.com');
+		// Both declared: either names our domain.
+		expect(sharedCookieDomainForHost('acme.feohledger.com', ['localhost'], SITE)).toBe(
+			'feohledger.com'
+		);
+	});
+
+	it('never puts a Domain cookie on a custom domain’s foreign parent when only the legacy host rule is in play', () => {
+		// The legacy rule reads `ap.customer.example` as workspace `ap` of
+		// `customer.example`. That must never become our cookie's domain.
+		for (const site of [null, undefined, '', 'https://feohledger.com', 'not a url', 'ftp://customer.example']) {
+			for (const host of [
+				'ap.customer.example',
+				'customer.example',
+				'ap.billing.customer.example',
+				'ap.customer.co.uk',
+				'feohledger.com.customer.example'
+			]) {
+				expect(sharedCookieDomainForHost(host, [], site), `${host} with site ${site}`).toBeNull();
+			}
+		}
+		// A build that declares nothing shares nothing, even on our own hosts.
+		expect(sharedCookieDomainForHost('acme.feohledger.com', [], null)).toBeNull();
+		expect(sharedCookieDomainForHost('feohledger.com', [], '')).toBeNull();
+	});
+
+	it('the dev site URL (localhost) shares nothing', () => {
+		expect(sharedCookieDomainForHost('acme.localhost', [], 'http://localhost:7777')).toBeNull();
+		expect(sharedCookieDomainForHost('localhost', ['localhost'], 'http://localhost:7777')).toBeNull();
+	});
+
+	it('builds a Domain-scoped, year-long, SameSite=Lax cookie, Secure on https only', () => {
+		expect(themeCookie('light', 'feohledger.com', true)).toBe(
+			`feoh_theme=light; Domain=feohledger.com; Path=/; Max-Age=${THEME_COOKIE_MAX_AGE}; SameSite=Lax; Secure`
+		);
+		expect(themeCookie('dark', 'feohledger.com', false)).not.toContain('Secure');
+		expect(THEME_COOKIE_MAX_AGE).toBe(31_536_000);
+	});
+
+	it('parses the first valid feoh_theme out of a cookie string', () => {
+		expect(readThemeCookie('feoh_theme=light')).toBe('light');
+		expect(readThemeCookie('a=1; feoh_theme=dark; b=2')).toBe('dark');
+		expect(readThemeCookie('feoh_theme=system')).toBe('system');
+		expect(readThemeCookie('feoh_theme=purple; feoh_theme=light')).toBe('light');
+		expect(readThemeCookie('xfeoh_theme=light')).toBeNull();
+		expect(readThemeCookie('')).toBeNull();
+		expect(readThemeCookie(null)).toBeNull();
+	});
+
+	it('reads the cookie ahead of this origin’s storage — it is the newest choice made anywhere', () => {
+		const store = memoryStorage({ [THEME_STORAGE_KEY]: 'light' });
+		expect(readThemeChoice(store, 'feoh_theme=dark')).toBe('dark');
+		// System written to the cookie on another workspace beats a stale Light here.
+		expect(readThemeChoice(store, 'feoh_theme=system')).toBe('system');
+		expect(readThemeChoice(store, 'feoh_theme=purple')).toBe('light');
+		expect(readThemeChoice(store, '')).toBe('light');
+	});
+
+	it('writes a platform-domain cookie — System included — and drops the per-origin copy', () => {
+		const store = memoryStorage({ [THEME_STORAGE_KEY]: 'dark' });
+		const jar = cookieJar();
+		const target = { jar, domain: 'feohledger.com', secure: true };
+
+		expect(writeThemeChoice(store, 'light', target)).toBe(true);
+		expect(jar.written.at(-1)).toBe(themeCookie('light', 'feohledger.com', true));
+		expect(readThemeCookie(jar.cookie)).toBe('light');
+		expect(store.data.has(THEME_STORAGE_KEY)).toBe(false);
+
+		expect(writeThemeChoice(store, 'system', target)).toBe(true);
+		expect(readThemeCookie(jar.cookie)).toBe('system');
+		expect(store.data.has(THEME_STORAGE_KEY)).toBe(false);
+	});
+
+	it('the choice made on one workspace is what the next one reads', () => {
+		const jar = cookieJar(); // one browser's cookies for *.feohledger.com
+		const acme = memoryStorage({ [THEME_STORAGE_KEY]: 'dark' }); // a #607-era per-origin value
+		const signup = memoryStorage();
+		writeThemeChoice(signup, 'light', { jar, domain: 'feohledger.com', secure: true });
+		expect(readThemeChoice(acme, jar.cookie)).toBe('light');
+	});
+
+	it('falls back to this origin’s storage where there is no platform domain', () => {
+		const store = memoryStorage();
+		const jar = cookieJar();
+		expect(writeThemeChoice(store, 'dark', { jar, domain: null, secure: false })).toBe(true);
+		expect(jar.written).toEqual([]);
+		expect(store.data.get(THEME_STORAGE_KEY)).toBe('dark');
+	});
+
+	it('falls back to storage when the browser drops the cookie silently, or throws', () => {
+		for (const opts of [{ blocked: true }, { throws: true }]) {
+			const store = memoryStorage();
+			const jar = cookieJar('', opts);
+			expect(writeThemeChoice(store, 'light', { jar, domain: 'feohledger.com', secure: true })).toBe(
+				true
+			);
+			expect(store.data.get(THEME_STORAGE_KEY)).toBe('light');
+		}
+	});
+});
+
+/**
  * The inline script runs before any bundle, so it cannot import the module
  * above; it repeats its facts instead. Execute it against fakes for every
  * branch, and compare what it does with what `theme.ts` would do — that is
@@ -142,8 +326,12 @@ describe('app.html pre-paint script', () => {
 		expect(appHtml.indexOf(script!)).toBeLessThan(appHtml.indexOf('%sveltekit.head%'));
 	});
 
-	function run(stored: string | null, prefersLight: boolean, opts: { storageThrows?: boolean; noMatchMedia?: boolean } = {}) {
-		const doc = fakeDocument();
+	function run(
+		stored: string | null,
+		prefersLight: boolean,
+		opts: { storageThrows?: boolean; noMatchMedia?: boolean; cookies?: string; cookiesThrow?: boolean } = {}
+	) {
+		const doc = fakeDocument(opts.cookies ?? '', opts.cookiesThrow);
 		const storage = memoryStorage(stored === null ? {} : { [THEME_STORAGE_KEY]: stored }, opts.storageThrows);
 		const win: Record<string, unknown> = {};
 		Object.defineProperty(win, 'localStorage', {
@@ -171,6 +359,27 @@ describe('app.html pre-paint script', () => {
 			expect(doc.meta.content).toBe(THEME_COLORS[resolveTheme(choice, prefersLight)]);
 		});
 	}
+
+	// The shared cookie against every stored value: the cookie wins when it is
+	// valid, and a missing or garbage cookie defers to this origin's storage.
+	for (const cookies of ['', 'feoh_theme=light', 'other=1; feoh_theme=dark', 'feoh_theme=system', 'feoh_theme=purple; feoh_theme=light', 'feoh_theme=purple', 'xfeoh_theme=light']) {
+		for (const stored of [null, 'light', 'dark']) {
+			it(`cookie="${cookies}" stored=${stored} matches theme.ts`, () => {
+				const doc = run(stored, true, { cookies });
+				const choice = readThemeChoice(
+					memoryStorage(stored === null ? {} : { [THEME_STORAGE_KEY]: stored }),
+					cookies
+				);
+				expect(doc.attrs.get('data-theme')).toBe(choice);
+				expect(doc.meta.content).toBe(THEME_COLORS[resolveTheme(choice, true)]);
+			});
+		}
+	}
+
+	it('still reads storage when reading the cookie throws', () => {
+		const doc = run('light', false, { cookiesThrow: true });
+		expect(doc.attrs.get('data-theme')).toBe('light');
+	});
 
 	it('follows the OS when storage throws — the page still gets a data-theme', () => {
 		const light = run('dark', true, { storageThrows: true });
