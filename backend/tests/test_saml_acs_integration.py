@@ -242,3 +242,40 @@ async def test_acs_unknown_relaystate_is_generic_400(saml_wired):
         acs = await _post_acs(client, _signed_response(saml_wired["keypair"]))
         assert acs.status_code == 400
     assert saml_wired["audits"] == []
+
+
+async def test_acs_address_in_another_workspace_lands_on_the_bridge_coded(saml_wired, monkeypatch):
+    """The asserted address names an account in another workspace (decisions
+    §290). Not raw JSON at the ACS and not a 500: a 303 to the bridge with a
+    one-time code, which `/exchange` answers with the coded 403 and no token,
+    plus one PII-free failure row in THIS workspace."""
+    from app.services.identity_provisioning import EmailInOtherWorkspace
+
+    async def _jit_refuses(db, org_, email, sub, provider, claims):
+        raise EmailInOtherWorkspace()
+
+    monkeypatch.setattr(auth_saml, "jit_provision", _jit_refuses)
+    await store_saml_relay_state("st-int-1", "acme", REQUEST_ID)
+    async with _client() as client:
+        acs = await _post_acs(client, _signed_response(saml_wired["keypair"]))
+        assert acs.status_code == 303
+        loc = acs.headers["location"]
+        assert loc.startswith("http://acme.localhost:7777/login/saml-callback?code=")
+        code = loc.split("code=", 1)[1]
+
+        ex = await client.post("/api/auth/saml/exchange", json={"code": code})
+        assert ex.status_code == 403
+        detail = ex.json()["detail"]
+        assert detail["code"] == "sso_email_in_other_workspace"
+        assert detail["params"] == {}
+        assert "access_token" not in ex.json()
+
+        # Single-use, like a token handoff.
+        again = await client.post("/api/auth/saml/exchange", json={"code": code})
+        assert again.status_code == 400
+
+    assert not [a for a in saml_wired["audits"] if a["action"] == "auth.saml.login.success"]
+    failures = [a for a in saml_wired["audits"] if a["action"] == "auth.saml.login.failure"]
+    assert len(failures) == 1
+    assert failures[0]["details"]["reason"] == "sso_email_in_other_workspace"
+    assert set(failures[0]["details"]) <= {"tenant", "ip", "reason"}

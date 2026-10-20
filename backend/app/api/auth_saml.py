@@ -48,6 +48,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_access_token_with_jti
+from app.api.refusals import SSO_EMAIL_IN_OTHER_WORKSPACE, SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -55,6 +56,7 @@ from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.identity_provisioning import (
     DeactivatedAccount,
     EmailDomainNotAllowed,
+    EmailInOtherWorkspace,
     UnsafeEmailAddress,
     extract_and_check_email,
     jit_provision,
@@ -68,6 +70,7 @@ from app.services.sso import (
     consume_saml_handoff,
     consume_saml_relay_state,
     create_saml_handoff,
+    create_saml_refusal_handoff,
     is_sso_only,
     resolve_saml_config,
     resolve_sso_tenant_slug,
@@ -482,6 +485,23 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
         # subsequent call. `_fail` keeps the PII-free audit + the one generic
         # error this endpoint returns for every rejection.
         raise await _fail("inactive") from exc
+    except EmailInOtherWorkspace:
+        # The address names an account in another workspace (decisions §290).
+        # Audited in THIS workspace — the one whose IdP asserted it — with the
+        # same PII-free details as every other SAML failure row. Unlike the
+        # generic rejections above, this one is the user's to act on, so it is
+        # not answered here as raw JSON at the ACS: the browser is sent to the
+        # SPA bridge with a one-time code that `/exchange` answers with the
+        # coded refusal, so the callback page states it in the reader's language.
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=None,
+            action="auth.saml.login.failure",
+            details={"tenant": tenant_slug, "ip": ip, "reason": SSO_EMAIL_IN_OTHER_WORKSPACE},
+        )
+        code = await create_saml_refusal_handoff(SSO_EMAIL_IN_OTHER_WORKSPACE, tenant_slug)
+        bridge = saml_bridge_url(tenant_slug, org.settings)
+        return RedirectResponse(f"{bridge}?{urlencode({'code': code})}", status_code=303)
 
     token, jti = create_access_token_with_jti(user.id, user.organization_id)
     await register_session(
@@ -513,6 +533,10 @@ async def saml_exchange(body: SAMLExchangeRequest):
         data = await consume_saml_handoff(body.code)
     except SSOValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if data.get("refusal") == SSO_EMAIL_IN_OTHER_WORKSPACE:
+        # The ACS refused the sign-in and parked the refusal behind this code
+        # (`create_saml_refusal_handoff`); there is no token to hand over.
+        raise HTTPException(status_code=403, detail=SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL)
     return SAMLExchangeResponse(
         access_token=data["access_token"],
         must_change_password=data["must_change_password"],
