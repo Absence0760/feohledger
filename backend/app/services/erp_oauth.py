@@ -565,7 +565,7 @@ async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bo
             resp = await client.post(
                 url,
                 **({"json": body} if spec.revoke_json else {"data": body}),
-                headers={**headers, "Accept": "application/json"} if spec.revoke_json else headers,
+                headers=headers,
                 auth=httpx.BasicAuth(creds.client_id, creds.client_secret),
             )
         return resp.status_code in (200, 204)

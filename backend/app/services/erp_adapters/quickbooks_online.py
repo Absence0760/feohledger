@@ -63,6 +63,7 @@ any other read failure fails the push without creating anything.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -722,8 +723,12 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         return resp.status_code == 200
 
     async def list_vendors(self) -> list[VendorPayload]:
-        rows = await self._query_all("Vendor", include_inactive=True, complete=True)
-        return [_vendor_payload(_undeleted(v)) for v in rows if v.get("Id")]
+        rows = [
+            v
+            for v in await self._query_all("Vendor", include_inactive=True, complete=True)
+            if v.get("Id")
+        ]
+        return [_vendor_payload(v) for v in _undeleted_all(rows, _vendor_name_key)]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """The chart, keyed by what is UNIQUE in QuickBooks (:func:`_account_code`).
@@ -734,11 +739,14 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         ``Name`` this adapter keyed sub-accounts by before §284, which is how
         the sync recognises a row that collapsed two accounts into one.
         """
-        rows = [
-            _undeleted(a)
-            for a in await self._query_all("Account", include_inactive=True, complete=True)
-            if a.get("Id")
-        ]
+        rows = _undeleted_all(
+            [
+                a
+                for a in await self._query_all("Account", include_inactive=True, complete=True)
+                if a.get("Id")
+            ],
+            _account_code,
+        )
         code_by_id = {str(a["Id"]): _account_code(a) for a in rows}
         out = []
         for a in rows:
@@ -826,17 +834,41 @@ _DELETED_SUFFIX = " (deleted)"
 _NAME_FIELDS = ("Name", "FullyQualifiedName", "DisplayName", "CompanyName")
 
 
+def _undeleted_all(rows: list[dict], key: Callable[[dict], str]) -> list[dict]:
+    """``rows`` with each INACTIVE record's names stripped of the suffix
+    QuickBooks adds (:func:`_undeleted`) — unless an ACTIVE record in the same
+    listing already holds the stripped ``key`` (code, or vendor name).
+
+    Without the strip an inactive account or vendor no longer answers to its
+    own name, so the sync cannot recognise the row it is linked to: it
+    unlinked the row (reporting a reason that was not true) and left it active,
+    instead of marking it inactive here. But QuickBooks frees the name when it
+    renames the record, and a company can then create a NEW record under it;
+    stripping that inactive one too would make the two share a code or name,
+    which the syncs refuse for both. The active record keeps the name.
+    """
+    taken = {key(r) for r in rows if _is_active(r)}
+    out = []
+    for raw in rows:
+        stripped = _undeleted(raw)
+        out.append(raw if stripped is not raw and key(stripped) in taken else stripped)
+    return out
+
+
+def _vendor_name_key(raw: dict) -> str:
+    """A vendor's name as the vendor sync compares names (``vendor_sync._norm_name``)."""
+    return " ".join(str(raw.get("DisplayName") or raw.get("CompanyName") or "").split()).casefold()
+
+
 def _undeleted(raw: dict) -> dict:
     """``raw`` with the suffix QuickBooks puts on an INACTIVE record's names
-    removed, from every segment of a path.
-
-    Without this an inactive account or vendor no longer answers to its own
-    name, so the sync cannot recognise the row it is linked to: it unlinked
-    the row (reporting a reason that was not true) and left it active, instead
-    of marking it inactive here. An active record is returned as it came — a
-    name that genuinely ends in "(deleted)" is the company's own choice.
+    removed, from every segment of a path; ``raw`` itself when there is none
+    to remove. An active record is returned as it came — a name that genuinely
+    ends in "(deleted)" is the company's own choice.
     """
-    if _is_active(raw):
+    if _is_active(raw) or not any(
+        isinstance(raw.get(k), str) and _DELETED_SUFFIX in raw[k] for k in _NAME_FIELDS
+    ):
         return raw
     out = dict(raw)
     for key in _NAME_FIELDS:

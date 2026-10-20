@@ -899,7 +899,6 @@ async def test_disconnect_revokes_clears_and_audits(realdb, platform_app, provid
     # Intuit documents a JSON body for revoke; a form body may be refused,
     # which would leave the grant live behind a "disconnected" answer.
     assert (call["json"], call["data"]) == ({"token": "REFRESH-SECRET-1"}, {})
-    assert call["headers"]["Accept"] == "application/json"
     erp = (await _org_settings(realdb))["erp"]
     assert "oauth" not in erp
     assert erp["environment"] == "sandbox"

@@ -272,6 +272,35 @@ def test_only_an_inactive_records_deleted_suffix_is_removed():
     assert undeleted(active) is active
 
 
+def test_a_deleted_name_a_new_active_record_reuses_keeps_its_suffix():
+    """QuickBooks frees the name when it renames an inactive record, so a new
+    active "Bank Charges" can follow the old one. Both stripped would share a
+    code, which the sync refuses for both; the active one keeps the name."""
+    old = {"Id": "8", "Active": False, "Name": "Bank Charges (deleted)"}
+    old["FullyQualifiedName"] = old["Name"]
+    new = {"Id": "99", "Active": True, "Name": "Bank Charges", "FullyQualifiedName": "Bank Charges"}
+    gone = {
+        "Id": "9",
+        "Active": False,
+        "Name": "Fuel (deleted)",
+        "FullyQualifiedName": "Fuel (deleted)",
+    }
+    rows = quickbooks_online._undeleted_all([old, new, gone], quickbooks_online._account_code)
+    assert [quickbooks_online._account_code(r) for r in rows] == [
+        "Bank Charges (deleted)",
+        "Bank Charges",
+        "Fuel",
+    ]
+    vendors = quickbooks_online._undeleted_all(
+        [
+            {"Id": "57", "Active": False, "DisplayName": "Squeaky Kleen (deleted)"},
+            {"Id": "70", "Active": True, "DisplayName": "squeaky  kleen"},
+        ],
+        quickbooks_online._vendor_name_key,
+    )
+    assert vendors[0]["DisplayName"] == "Squeaky Kleen (deleted)"
+
+
 async def test_paging_walks_the_whole_chart(sandbox, monkeypatch):
     monkeypatch.setattr(quickbooks_online, "_PAGE_SIZE", 25)
     accounts = await _adapter().list_gl_accounts()
