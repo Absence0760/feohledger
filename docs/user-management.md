@@ -126,6 +126,36 @@ Backend API endpoints are role-gated via `Depends(require_roles(...))` in `backe
 
 The temporary password is shown **only once** — it is not stored or retrievable after the dialog is closed.
 
+### An address can belong to only one workspace
+
+`users.email` is globally unique: one address is one account in one workspace,
+and there is no multi-workspace membership yet (tracked in
+[`followups.md`](followups.md) § Multi-workspace membership). So inviting, or
+renaming a user to, an address that is already taken is a `409` with one of two
+coded refusals, each stated in the reader's language
+(`frontend/src/lib/api/codedRefusals.ts`):
+
+| Code | When | What it tells the admin |
+|---|---|---|
+| `email_in_this_workspace` | A user in **this** workspace already has the address | They already exist here — find and edit them |
+| `email_in_other_workspace` | An account in **another** workspace has it | Use a different address for this person (for example their address at your company) |
+
+The second used to be a bare "Email already in use", which gave no way forward.
+It names no workspace and no account — but it still tells anyone holding
+`user.manage` that the address is on the platform somewhere. That signal is
+unavoidable while the address is global (refusing without saying why, or
+pretending to succeed, would either strand the admin or quietly create nothing),
+so it is **bounded instead**: each workspace may get 20 other-workspace
+refusals per hour (`admin.EMAIL_COLLISION_LIMIT`), checked before the lookup, so
+a sweep is throttled with a `429` and learns nothing more; a same-workspace hit
+does not spend the budget. SCIM (`POST`/`PUT`/`PATCH /scim/v2/Users`) answers the
+same two cases as a SCIM `409 uniqueness` with the same distinction in its
+`detail`, without the budget — an IdP retries a doomed write on every reconcile
+cycle, and a throttle would turn that into a stuck provisioning job. An SSO
+sign-in whose IdP asserts such an address is refused the same way
+([`authentication.md`](authentication.md) § JIT user provisioning). Reasoning:
+[`decisions.md`](decisions.md) §290.
+
 ## Resetting a user's password
 
 An admin never **chooses** another user's password — they reset it, and the
