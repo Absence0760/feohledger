@@ -314,6 +314,24 @@ export const SETUP_GUIDES: Guide[] = [
 						text: 'Requiring SSO closes password sign-in for everyone, so it only saves once your identity-provider settings are complete. Test a real SSO sign-in before you turn it on.'
 					}
 				]
+			},
+			{
+				heading: 'Closing a workspace you no longer need',
+				blocks: [
+					{
+						type: 'p',
+						text: '{ui:org.section.close} permanently deletes the workspace: its invoices, vendors, documents and settings, and every user account in it. It is meant for a workspace that was never really used, such as an abandoned trial. Because one email address can belong to only one workspace, closing it is also how its people free their addresses to be added somewhere else.'
+					},
+					{
+						type: 'p',
+						text: 'The section first checks whether the workspace can be closed here. It cannot while other people have active accounts in it, or once it holds anything that must be kept: approved invoices, payments, payment runs, virtual cards, applied credit memos, approved expense reports, card transactions, bank statements, tax records, Positive Pay files, e-invoices, goods receipts, contracts that have been in force, or accepted discounts. It also cannot while it has a paid subscription, a partner relationship or a custom domain. In those cases the section lists the reasons, and support closes the workspace instead.'
+					},
+					{
+						type: 'note',
+						tone: 'caution',
+						text: 'Closing cannot be undone. You type the workspace’s address to confirm, and where two-factor sign-in is on you also confirm a code or a passkey. Export anything you want to keep first.'
+					}
+				]
 			}
 		],
 		terms: ['organization', 'email-intake', 'cfo-gate', 'reporting-currency', 'payment-run', 'data-residency'],

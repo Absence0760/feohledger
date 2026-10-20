@@ -306,6 +306,12 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 
 ### `organization/`
 
+- `CloseWorkspacePanel.svelte` — the Organization → Close workspace panel (decisions §294). Props:
+  `readOnly`, `userLoaded`. Reads the preflight once the user resolves as admin; a workspace with
+  blockers shows each one's sentence (`#lib/types/workspaceClosure.ts`) and no control. Otherwise a
+  type-the-slug confirmation enables the destructive button, `ui/StepUpPrompt` collects a second
+  factor when the server asks, and success clears the token and navigates to
+  `/login?reason=workspace_closed`. Admin-only hint for everyone else.
 - `ErpConnectionPanel.svelte` — the Organization → ERP panel, rendered entirely from the backend ERP
   catalogue (`GET /api/organization/erp/providers`). Props: `stored` (`settings.erp` as
   `GET /api/organization` serves it — configuration only), `readOnly`, `userLoaded`, `entitled` (the

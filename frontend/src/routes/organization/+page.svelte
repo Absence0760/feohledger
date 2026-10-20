@@ -45,6 +45,7 @@
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import ErpConnectionPanel from '#lib/components/organization/ErpConnectionPanel.svelte';
 	import CommerceConnectionPanel from '#lib/components/organization/CommerceConnectionPanel.svelte';
+	import CloseWorkspacePanel from '#lib/components/organization/CloseWorkspacePanel.svelte';
 	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
 	import {
 		FEATURE_ERP_INTEGRATIONS,
@@ -335,7 +336,12 @@
 		},
 		{
 			labelKey: 'org.rail.group.account',
-			items: [{ slug: 'plan', labelKey: 'org.section.plan' }]
+			items: [
+				{ slug: 'plan', labelKey: 'org.section.plan' },
+				// Deleting an unused workspace, which frees its addresses
+				// (decisions §294). Last: the one irreversible panel.
+				{ slug: 'close', labelKey: 'org.section.close' }
+			]
 		}
 	];
 
@@ -3198,6 +3204,10 @@
 							<span class="plan-date">{m('org.plan.created', { date: formatDate(org.created_at, '—', { month: 'long', day: 'numeric', year: 'numeric' }) })}</span>
 						</div>
 					</section>
+				{/if}
+
+				{#if section === 'close'}
+					<CloseWorkspacePanel {readOnly} {userLoaded} />
 				{/if}
 			</fieldset>
 		</div>
