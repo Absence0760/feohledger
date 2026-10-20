@@ -39,9 +39,11 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — the light theme (decisions §289) opened one
-(c) entry, a white-label accent left unchecked as text on the light surfaces,
-taking the file from 114 → 115. Before that, 2026-10-20 — the live QuickBooks re-test (#598) reached
+**Last reconciled:** 2026-10-20 — fixing signup's dead ends (decisions §290)
+opened one (c) entry, the missing self-service "find my workspace" recovery,
+taking the file from 115 → 116. Before that, 2026-10-20 — the light theme
+(decisions §289) opened one (c) entry, a white-label accent left unchecked as
+text on the light surfaces, taking the file from 114 → 115. Before that, 2026-10-20 — the live QuickBooks re-test (#598) reached
 the sync screens' entry, which landed (coded `erp_listing_incomplete` /
 `erp_not_connected` answers, parent and too-long values reported), and narrowed
 the posted-bill entry to the other adapters' pre-flight refusals, taking the
@@ -168,7 +170,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**115 open: 99 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**116 open: 100 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1811,6 +1813,26 @@ scope (§260) — do not fold them into any of these.
       `stores/brandTheme.ts` to report the accent against both themes'
       surfaces. **Trigger:** the first tenant that sets a brand accent, or any
       white-label sale.
+
+### Surfaced by fixing signup's dead ends (2026-10-20, decisions §290)
+
+- [ ] **(c) There is no self-service "find my workspace" recovery.** A user
+      who forgets which workspace their account is in has no way back without
+      support: forgot-password only works on a workspace host (it needs the
+      tenant to build the reset link), and the apex has no sign-in page at
+      all. Signup now points an address that already has an account at its
+      workspace (§290), but only after the visitor has filled the form and
+      clicked a verification link — that is not a recovery path, and nobody
+      should have to start a signup to find a sign-in page. **Durable fix:**
+      an apex "Email me my workspace address" form — `POST
+      /api/workspace-lookup {email}`, public, captcha'd and rate-limited per
+      IP and per address like `/signup/start`, answering every address with
+      the same "if that address has an account, we've emailed it" response,
+      and emailing the account's own `tenant_urls.sign_in_url` (address
+      prefilled) only when one exists — linked from the apex landing page and
+      from the login page's error states. **Trigger:** the first support
+      request from someone who cannot find their workspace, or before signup
+      is advertised beyond the pilot.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
