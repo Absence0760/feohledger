@@ -45,6 +45,7 @@ from app.services.erp_link_realm import (
 )
 from app.services.gl_account_sync import (
     AMBIGUOUS_LEGACY,
+    CODE_TAKEN,
     MISSING_ERP_ID,
     sync_chart_from_erp,
 )
@@ -655,6 +656,68 @@ async def test_an_empty_vendor_pull_changes_no_link(realdb):
     assert "Gamma" not in vendors
     for r in (result, id_less):
         assert (r["unlinked"], r["created"], r["updated"], r["realm_adopted"]) == ([], 0, 0, 0)
+
+
+async def test_a_pull_with_no_realm_leaves_every_named_company_link_alone(realdb):
+    """A chart sync with the `mock` adapter (realm None) used to re-judge every
+    real link against fixture data: our production "Office Supplies" (7) was
+    dropped, or matched by a fixture's colliding "7" and renamed, and a
+    pending decision was wiped. A pull that names no company judges none."""
+    pending = {"realm": PROD, "reason": AMBIGUOUS_LEGACY, "accounts": [{"erp_account_id": "40"}]}
+    await _add(
+        realdb,
+        code="Office Supplies",
+        name="Office Supplies",
+        erp_account_id="7",
+        erp_link_realm=PROD,
+    )
+    await _add(realdb, code="Depreciation", name="Depreciation", erp_link_candidates=pending)
+
+    result = await _sync(
+        realdb,
+        [
+            _acct("Advertising", "7"),  # the fixture's colliding id
+            _acct("Office Supplies", "99"),  # and a colliding code
+            _acct("Depreciation", "40"),
+            _acct("Brand New", "500"),
+        ],
+        realm=None,
+    )
+
+    chart = await _chart(realdb)
+    office = chart["Office Supplies"]
+    assert (office.name, office.erp_account_id, office.erp_link_realm) == (
+        "Office Supplies",
+        "7",
+        PROD,
+    )
+    depreciation = chart["Depreciation"]
+    assert (depreciation.erp_account_id, depreciation.erp_link_candidates) == (None, pending)
+    # The fixture's own accounts land beside them, under no realm.
+    assert (chart["Brand New"].erp_account_id, chart["Brand New"].erp_link_realm) == ("500", None)
+    assert chart["Advertising"].erp_link_realm is None
+    assert (result.unlinked, result.link_changes, result.code_drift) == ([], [], [])
+    assert {(c["code"], c["reason"]) for c in result.conflicts} == {
+        ("Office Supplies", CODE_TAKEN),
+        ("Depreciation", CODE_TAKEN),
+    }
+
+
+async def test_a_vendor_pull_with_no_realm_leaves_named_company_links_alone(realdb):
+    acme_id = await _add(
+        realdb, Vendor, name="Acme", erp_vendor_id="57", erp_link_realm=PROD, source="erp_sync"
+    )
+    result = await _vsync(realdb, [_vendor("57", "Squeaky Kleen Car Wash")], realm=None)
+
+    vendors = await _vendors(realdb)
+    acme = vendors["Acme"]
+    assert acme.id == acme_id
+    assert (acme.erp_vendor_id, acme.erp_link_realm) == ("57", PROD)
+    # The fixture's vendor is its own payee, not a rename of Acme.
+    squeaky = vendors["Squeaky Kleen Car Wash"]
+    assert squeaky.id != acme_id
+    assert (squeaky.erp_vendor_id, squeaky.erp_link_realm) == ("57", None)
+    assert (result["unlinked"], result["updated"], result["created"]) == ([], 0, 1)
 
 
 def _failing_adapter():

@@ -60,6 +60,17 @@ adapter returns the whole chart or raises (``ErpListingIncomplete``, which the
 endpoint answers 502 before anything here runs), and an EMPTY pull changes no
 link at all.
 
+**A pull with no realm speaks for no company.** The ``mock`` adapter (and an
+OAuth ERP with no consent) has no realm (``None``): its ids are fixtures, and a
+link it made posts nowhere. Such a pull leaves alone every row tied to a NAMED
+realm — a link stamped with one, or a pending decision offered under one: it
+never re-judges, unlinks, matches by id, re-links by code or refreshes them,
+and a pulled account whose code such a row holds is refused ``code_taken``. It
+works only on unlinked rows and NULL-realm links, which is all a no-realm pull
+can have written. (A pre-0115 link is NULL-realm too and indistinguishable from
+a ``mock`` one, so a mock sync still treats it as its own; the next sync under
+a named realm re-judges it by evidence.)
+
 Nothing here commits; the caller audits and commits.
 """
 
@@ -291,6 +302,14 @@ async def sync_chart_from_erp(
         """A person chose this row's account, and that account still exists."""
         return row.erp_link_confirmed_at is not None and row.erp_account_id in live_ids
 
+    def foreign(row: GLAccount) -> bool:
+        """Is ``row`` tied to a named company a no-realm pull cannot speak for
+        (module docstring)?"""
+        if realm is not None:
+            return False
+        pending_realm = (row.erp_link_candidates or {}).get("realm")
+        return row.erp_link_realm is not None or pending_realm is not None
+
     # -- rule 0: a link made under another connection is not trusted --------
     # Kept only when this pull shows the SAME id holding the row's own code
     # (its current one, or the legacy key an older adapter gave it): then the
@@ -299,7 +318,7 @@ async def sync_chart_from_erp(
     # every change recorded in `link_changes` (the audit row lists them all).
     dead: dict[uuid.UUID, str] = {}
     for row in all_rows:
-        if row.erp_account_id is None or row.erp_link_realm == realm:
+        if row.erp_account_id is None or row.erp_link_realm == realm or foreign(row):
             continue
         acct = by_id.get(row.erp_account_id)
         if acct is not None and _same_account(row.code, acct):
@@ -329,7 +348,7 @@ async def sync_chart_from_erp(
     # rules ask, so neither re-judges it.
     for row in all_rows:
         linked_to = row.erp_account_id
-        if linked_to is None or confirmed(row):
+        if linked_to is None or confirmed(row) or foreign(row):
             continue
         if row.code in refused:
             # Rule 3: two ERP accounts answer to the code this row shows.
@@ -349,7 +368,7 @@ async def sync_chart_from_erp(
     row_by_code: dict[str, GLAccount] = {}
     for row in rows:  # first one wins: the order IS the preference...
         erp_id = row.erp_account_id
-        if erp_id:
+        if erp_id and not foreign(row):
             held = row_by_id.get(erp_id)
             # ...except that a confirmed row may share its account with the row
             # holding that account's own code, and rule 1 updates the latter.
@@ -376,7 +395,7 @@ async def sync_chart_from_erp(
         # -- rule 2: by code ----------------------------------------------
         row = row_by_code.get(code)
         if row is not None:
-            if row.id in claimed_rows:
+            if row.id in claimed_rows or foreign(row):
                 refused.setdefault(code, CODE_TAKEN)
                 continue
             linked_to = row.erp_account_id
@@ -445,13 +464,18 @@ async def sync_chart_from_erp(
     # stops asking.
     for code, reason in refused.items():
         row = row_by_code.get(code)
-        if reason == DUPLICATE_CODE and row is not None and row.erp_account_id is None:
+        if (
+            reason == DUPLICATE_CODE
+            and row is not None
+            and row.erp_account_id is None
+            and not foreign(row)
+        ):
             row.erp_link_candidates = candidates_for(
                 reason, {a.erp_account_id for a in by_code[code]}
             )
     for row in all_rows:
         pending = row.erp_link_candidates
-        if not pending:
+        if not pending or foreign(row):
             continue
         if row.erp_account_id is not None or pending.get("realm") != realm:
             row.erp_link_candidates = None

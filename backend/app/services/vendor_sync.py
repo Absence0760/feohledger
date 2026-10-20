@@ -22,6 +22,13 @@ with this id" as "not this company's vendor", and the name rule counts a name
 across the pull. So the adapter returns every vendor or raises
 (``ErpListingIncomplete``, answered 502 before anything here runs), and an EMPTY
 pull changes nothing.
+
+**A pull with no realm speaks for no company** (the ``mock`` adapter, or an
+OAuth ERP with no consent): it leaves every vendor linked under a NAMED realm
+exactly as it is — never re-judged, unlinked, matched by its id or updated —
+and works only on unlinked vendors and NULL-realm links. A pre-0115 link is
+NULL-realm too, so a mock sync still treats it as its own; the next sync under
+a named realm re-judges it by evidence.
 """
 
 import uuid
@@ -147,7 +154,9 @@ async def sync_vendors_from_erp(
         .all()
     )
     for vendor in linked:
-        if vendor.erp_link_realm == realm:
+        if vendor.erp_link_realm == realm or realm is None:
+            # Same company, or a pull that names none and so cannot judge a
+            # link made under one (module docstring).
             continue
         record = by_id.get(vendor.erp_vendor_id)
         if record is not None and _same_vendor(vendor, record):
@@ -202,12 +211,16 @@ async def sync_vendors_from_erp(
 
         active = erp_v.get("active", True) is not False
 
-        # Check if vendor already exists by ERP ID — in this realm only; the
-        # pass above left no link from another one.
+        # Check if vendor already exists by ERP ID — in this realm only. Under
+        # a named realm the pass above left no link from another one; under
+        # none, a vendor linked to a named company's "57" is not this "57".
         result = await db.execute(
             select(Vendor).where(
                 Vendor.erp_vendor_id == erp_id,
                 Vendor.organization_id == organization_id,
+                Vendor.erp_link_realm.is_(None)
+                if realm is None
+                else Vendor.erp_link_realm == realm,
             )
         )
         existing = result.scalar_one_or_none()
