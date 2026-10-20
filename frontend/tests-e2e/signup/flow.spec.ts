@@ -114,6 +114,73 @@ async function waitForEmailMentioning(
 	return text!;
 }
 
+/**
+ * Turn the captcha on and stub everything external about it. Local dev and CI
+ * run with no hCaptcha sitekey (the local-first default), so this path is
+ * otherwise never exercised. Stubbed: the sitekey, the submit endpoint (so a
+ * test can read what each attempt sent), and hCaptcha's script — faked with
+ * the explicit-render API the page uses: it renders nothing by itself, calls
+ * the `onload` named in its URL, and `render` / `remove` record what they were
+ * asked. Each widget's container carries its id and the theme it was drawn in.
+ */
+async function stubCaptcha(page: Page): Promise<Array<{ captcha_token: string | null }>> {
+	const submissions: Array<{ captcha_token: string | null }> = [];
+	await page.route('**/api/public-config', (route) =>
+		route.fulfill({
+			json: { hcaptcha_sitekey: 'e2e-sitekey', tenant_url_template: tenantBase('{slug}') }
+		})
+	);
+	await page.route('**/api/signup/slug-check**', (route) =>
+		route.fulfill({ json: { slug: 'x', available: true, reason: null } })
+	);
+	await page.route('**/api/signup/start', async (route) => {
+		submissions.push(route.request().postDataJSON());
+		await route.fulfill({ json: { status: 'pending', message: 'We sent a verification link.' } });
+	});
+	await page.route(
+		(url) => url.hostname === 'hcaptcha.com' && url.pathname === '/1/api.js',
+		(route) =>
+			route.fulfill({
+				contentType: 'application/javascript',
+				body: `(() => {
+					let widgets = 0;
+					window.__removedWidgets = [];
+					window.hcaptcha = {
+						render(el, opts) {
+							const id = 'w' + String(++widgets);
+							el.dataset.widget = String(widgets);
+							el.dataset.renderedTheme = opts.theme || 'light';
+							window.__solveCaptcha = opts.callback;
+							window.__expireCaptcha = opts['expired-callback'];
+							return id;
+						},
+						remove(id) {
+							window.__removedWidgets.push(id);
+						}
+					};
+					const onload = new URL(document.currentScript.src).searchParams.get('onload');
+					if (onload) window[onload]();
+				})();`
+			})
+	);
+	return submissions;
+}
+
+/** Call one of the fake hCaptcha's recorded callbacks, as a solve / expiry would. */
+async function captchaEvent(page: Page, event: 'solve' | 'expire', token = ''): Promise<void> {
+	await page.evaluate(
+		([e, t]) => {
+			const w = window as unknown as {
+				__solveCaptcha: (t: string) => void;
+				__expireCaptcha: () => void;
+			};
+			if (e === 'solve') w.__solveCaptcha(t);
+			else w.__expireCaptcha();
+		},
+		[event, token] as const
+	);
+}
+
 test.use({ storageState: { cookies: [], origins: [] } });
 
 // The consent banner is position:fixed at the bottom of the viewport with
@@ -218,43 +285,7 @@ test.describe('/signup — form', () => {
 		page
 	}) => {
 		await page.emulateMedia({ colorScheme: scheme });
-		// Local dev and CI run with no hCaptcha sitekey (local-first default), so
-		// this path is otherwise never exercised. Everything external is stubbed:
-		// the sitekey, the submit endpoint (so the test can read what each
-		// attempt sent), and hCaptcha's script — faked with the one behaviour
-		// that matters here, IMPLICIT rendering: it draws a widget into each
-		// `.h-captcha` present when it loads, and nothing added later. It also
-		// records the theme each widget got: implicit mode reads `data-theme`,
-		// an explicit render reads `opts.theme`.
-		const submissions: Array<{ captcha_token: string | null }> = [];
-		await page.route('**/api/public-config', (route) =>
-			route.fulfill({
-				json: { hcaptcha_sitekey: 'e2e-sitekey', tenant_url_template: tenantBase('{slug}') }
-			})
-		);
-		await page.route('**/api/signup/slug-check**', (route) =>
-			route.fulfill({ json: { slug: 'x', available: true, reason: null } })
-		);
-		await page.route('**/api/signup/start', async (route) => {
-			submissions.push(route.request().postDataJSON());
-			await route.fulfill({ json: { status: 'pending', message: 'We sent a verification link.' } });
-		});
-		await page.route('https://hcaptcha.com/1/api.js', (route) =>
-			route.fulfill({
-				contentType: 'application/javascript',
-				body: `(() => {
-					let widgets = 0;
-					window.hcaptcha = {
-						render(el, opts) {
-							el.dataset.widget = String(++widgets);
-							el.dataset.renderedTheme = (opts && opts.theme) || el.dataset.theme || 'light';
-							window.__solveCaptcha = opts && opts.callback;
-						}
-					};
-					document.querySelectorAll('.h-captcha').forEach((el) => window.hcaptcha.render(el, {}));
-				})();`
-			})
-		);
+		const submissions = await stubCaptcha(page);
 
 		await page.goto('/signup');
 		const widget = page.locator('.h-captcha');
@@ -273,17 +304,18 @@ test.describe('/signup — form', () => {
 			email: 'captcha@example.com'
 		});
 		await expect(page.locator('small.hint.ok')).toBeVisible();
-		// Implicit mode reports a solve through the named global callback.
-		await page.evaluate(() => (window as unknown as { hcaptchaCallback: (t: string) => void }).hcaptchaCallback('token-1'));
+		await captchaEvent(page, 'solve', 'token-1');
 		await page.getByRole('button', { name: 'Send verification email' }).click();
 		await expect(page.getByRole('heading', { name: 'Check your email' })).toBeFocused();
 		expect(submissions.map((b) => b.captcha_token)).toEqual(['token-1']);
 
 		await page.getByRole('button', { name: 'try again' }).click();
 
-		// A NEW container was mounted, long after the script loaded: only an
-		// explicit render puts a widget in it.
+		// A NEW container was mounted, long after the script loaded, and gets a
+		// widget of its own; the old one, whose container left with the form, is
+		// removed.
 		await expect(widget).toHaveAttribute('data-widget', '2');
+		expect(await page.evaluate(() => (window as unknown as { __removedWidgets: string[] }).__removedWidgets)).toEqual(['w1']);
 		await expect(widget).toHaveAttribute('data-rendered-theme', scheme);
 
 		// The spent token must not ride along: submitting unsolved is refused
@@ -293,10 +325,69 @@ test.describe('/signup — form', () => {
 		expect(submissions).toHaveLength(1);
 
 		// Solving the re-rendered widget is what the retry then carries.
-		await page.evaluate(() => (window as unknown as { __solveCaptcha: (t: string) => void }).__solveCaptcha('token-2'));
+		await captchaEvent(page, 'solve', 'token-2');
 		await page.getByRole('button', { name: 'Send verification email' }).click();
 		await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
 		expect(submissions.map((b) => b.captcha_token)).toEqual(['token-1', 'token-2']);
+	});
+
+	// The widget follows the theme AFTER first render too (docs/decisions.md
+	// §290): it was read once at render, so a theme picked on the shell — or the
+	// OS switching while on System — left a dark captcha on a light form. A
+	// solved widget is the exception: redrawing it would throw away the token.
+	test('with captcha enabled, the widget follows a theme change, but never at the cost of a solved token', async ({
+		page
+	}) => {
+		await page.emulateMedia({ colorScheme: 'dark' });
+		const submissions = await stubCaptcha(page);
+		await page.goto('/signup');
+		const widget = page.locator('.h-captcha');
+		await expect(widget).toHaveAttribute('data-widget', '1');
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'dark');
+
+		// Picked on the auth shell's own theme control: redrawn in light.
+		const picker = page.getByRole('group', { name: 'Theme' });
+		await picker.getByRole('radio', { name: 'Light' }).check();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+		await expect(widget).toHaveAttribute('data-widget', '2');
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'light');
+
+		// Back to System while the OS is dark, then the OS turns light: the
+		// widget follows the OS with no click at all.
+		await picker.getByRole('radio', { name: 'System' }).check();
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'dark');
+		await page.emulateMedia({ colorScheme: 'light' });
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'light');
+		await expect(widget).toHaveAttribute('data-widget', '4');
+		expect(
+			await page.evaluate(() => (window as unknown as { __removedWidgets: string[] }).__removedWidgets)
+		).toEqual(['w1', 'w2', 'w3']);
+
+		// Solved, then the theme changes: the widget — and its token — stay.
+		await fillForm(page, {
+			company: 'Theme Co',
+			slug: 'themeco',
+			name: 'Theme Admin',
+			email: 'theme@example.com'
+		});
+		await captchaEvent(page, 'solve', 'token-kept');
+		await picker.getByRole('radio', { name: 'Dark' }).check();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await expect(widget).toHaveAttribute('data-widget', '4');
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'light');
+
+		// Once the token expires it is worth nothing, so the widget is redrawn in
+		// the palette now showing...
+		await captchaEvent(page, 'expire');
+		await expect(widget).toHaveAttribute('data-widget', '5');
+		await expect(widget).toHaveAttribute('data-rendered-theme', 'dark');
+
+		// ...and a token solved before a theme change is the one submitted.
+		await captchaEvent(page, 'solve', 'token-final');
+		await picker.getByRole('radio', { name: 'Light' }).check();
+		await page.getByRole('button', { name: 'Send verification email' }).click();
+		await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+		expect(submissions.map((b) => b.captcha_token)).toEqual(['token-final']);
 	});
 
 	test('a taken slug blocks submission with an inline reason', async ({ page }) => {

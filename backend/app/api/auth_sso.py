@@ -35,12 +35,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_access_token_with_jti
+from app.api.refusals import SSO_EMAIL_IN_OTHER_WORKSPACE, SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.identity_provisioning import (
     DeactivatedAccount,
     EmailDomainNotAllowed,
+    EmailInOtherWorkspace,
     UnsafeEmailAddress,
     extract_and_check_email,
     jit_provision,
@@ -365,6 +367,25 @@ async def sso_callback(
             status_code=403,
             detail="This account has been deactivated. Contact your administrator.",
         ) from exc
+    except EmailInOtherWorkspace as exc:
+        # The address names an account in another workspace, and one address is
+        # one account. Audited HERE, in the workspace whose IdP asserted it —
+        # its admin is the one who can act (have the IdP send another address)
+        # — and never in the other workspace's log, which this IdP's admin must
+        # not be able to write into by typing addresses (decisions §291). The
+        # email rides along as on `domain_blocked`, the OIDC rows' convention.
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=None,
+            action="auth.sso.login.failure",
+            details={
+                "tenant": tenant_slug,
+                "ip": ip,
+                "email": email,
+                "reason": SSO_EMAIL_IN_OTHER_WORKSPACE,
+            },
+        )
+        raise HTTPException(status_code=403, detail=SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL) from exc
 
     token, jti = create_access_token_with_jti(user.id, user.organization_id)
     await register_session(

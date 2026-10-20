@@ -5,11 +5,12 @@
 	import IconMail from '~icons/material-symbols/mark-email-unread-outline';
 	import IconCheck from '~icons/material-symbols/check-circle';
 	import IconClose from '~icons/material-symbols/cancel';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { api } from '#lib/api.ts';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { theme } from '#lib/stores/theme.svelte.ts';
+	import type { ResolvedTheme } from '#lib/theme.ts';
 	import { legalTitle } from '#lib/legal/pages.ts';
 	import type { PublicConfig } from '#lib/types/publicConfig.ts';
 
@@ -30,6 +31,13 @@
 	let adminEmail = $state('');
 	let captchaToken = $state<string | null>(null);
 	let captchaSitekey = $state<string>('');
+	// hCaptcha's API has loaded (its explicit-mode onload fired).
+	let captchaApiReady = $state(false);
+	// The widget currently drawn: which container, and in which palette. Plain,
+	// not $state — only the captcha effect reads it, and it must not re-run
+	// that effect by being written there.
+	let captchaWidget: { id: string; el: HTMLDivElement; theme: ResolvedTheme } | null = null;
+	const HCAPTCHA_ONLOAD = 'feohHCaptchaOnLoad';
 	// Host/port suffix shown after the slug input, derived from the backend
 	// tenant_url_template (e.g. "http://{slug}.localhost:7777" → ".localhost:7777").
 	let tenantUrlSuffix = $state<string>('.localhost:7777');
@@ -79,19 +87,27 @@
 		}
 	});
 
+	/**
+	 * Load hCaptcha in EXPLICIT mode: it draws nothing by itself, and calls
+	 * `HCAPTCHA_ONLOAD` when its API is ready. Every widget is then drawn by the
+	 * effect below, which is the only way to give it a theme after the fact —
+	 * hCaptcha has no call to change a live widget's theme, so following the
+	 * page means removing the widget and drawing it again.
+	 */
 	function loadHCaptcha() {
+		const w = window as any;
+		w[HCAPTCHA_ONLOAD] = () => (captchaApiReady = true);
+		// Already loaded by an earlier visit to this page in the same session.
+		if (typeof w.hcaptcha?.render === 'function') {
+			captchaApiReady = true;
+			return;
+		}
 		if (document.querySelector('script[data-hcaptcha]')) return;
 		const s = document.createElement('script');
-		s.src = 'https://hcaptcha.com/1/api.js';
+		s.src = `https://hcaptcha.com/1/api.js?render=explicit&onload=${HCAPTCHA_ONLOAD}`;
 		s.async = true;
 		s.defer = true;
 		s.setAttribute('data-hcaptcha', 'true');
-		(window as any).hcaptchaCallback = (token: string) => {
-			captchaToken = token;
-		};
-		(window as any).hcaptchaExpired = () => {
-			captchaToken = null;
-		};
 		document.head.appendChild(s);
 	}
 
@@ -140,37 +156,58 @@
 		// Kept, it would satisfy the client-side "captcha required" check and
 		// ride along on the retry, which the backend then rejects with no widget
 		// in view to solve again.
+		// The form's fresh `.h-captcha` container gets its widget from the
+		// effect below, which sees the new element.
 		captchaToken = null;
 		await tick();
-		renderCaptcha();
 		emailInput?.focus();
 		emailInput?.select();
 	}
 
 	/**
-	 * Render the hCaptcha widget into the form's container, when there is one.
+	 * Keep exactly one hCaptcha widget in the form, drawn in the palette the
+	 * page is showing (docs/decisions.md §289, §290).
 	 *
-	 * hCaptcha's implicit mode renders the `.h-captcha` elements present when its
-	 * script LOADS. That covers first paint — the container exists before the
-	 * async script arrives — but not the form coming back from the confirmation
-	 * screen: that is a fresh `.h-captcha` element mounted long after the
-	 * script ran, and nothing would ever draw a widget into it. So a remount
-	 * renders explicitly. If the script has not loaded yet, implicit mode will
-	 * still find the element when it does.
+	 * The widget is an iframe and cannot see our palette, so it is told which
+	 * one is showing — a light widget on the dark form (or the reverse) is a
+	 * glaring box. It re-runs when the container is mounted (first paint, and
+	 * the form coming back from the confirmation screen), when the API finishes
+	 * loading, and when `theme.resolved` changes — a choice on the auth shell's
+	 * picker, or the OS switching scheme while System is chosen.
+	 *
+	 * A SOLVED widget is left alone on a theme change: redrawing it would
+	 * throw away a token the visitor already earned, for a cosmetic reason. It
+	 * is redrawn in the current palette once that token is gone — expired
+	 * (hCaptcha resets the widget then anyway) or spent on a submission.
 	 */
-	function renderCaptcha() {
+	$effect(() => {
+		const el = captchaEl;
+		const wanted = theme.resolved;
+		const solved = captchaToken !== null;
+		if (!captchaSitekey || !captchaApiReady || !el) return;
+		untrack(() => syncCaptcha(el, wanted, solved));
+	});
+
+	function syncCaptcha(el: HTMLDivElement, wanted: ResolvedTheme, solved: boolean) {
 		const hcaptcha = (window as any).hcaptcha;
-		if (!captchaSitekey || !captchaEl || typeof hcaptcha?.render !== 'function') return;
-		hcaptcha.render(captchaEl, {
+		if (typeof hcaptcha?.render !== 'function') return;
+		if (captchaWidget) {
+			const sameContainer = captchaWidget.el === el;
+			if (sameContainer && (captchaWidget.theme === wanted || solved)) return;
+			try {
+				hcaptcha.remove(captchaWidget.id);
+			} catch {
+				// Its container left the DOM with the form; nothing to remove.
+			}
+			captchaWidget = null;
+		}
+		const id = hcaptcha.render(el, {
 			sitekey: captchaSitekey,
-			// The widget is an iframe and cannot see our palette, so it is told
-			// which one is showing — a light widget on the dark form (or the
-			// reverse) is a glaring box. The markup's `data-theme` does the same
-			// for the implicit first render (docs/decisions.md §289).
-			theme: theme.resolved,
+			theme: wanted,
 			callback: (token: string) => (captchaToken = token),
 			'expired-callback': () => (captchaToken = null)
 		});
+		captchaWidget = { id, el, theme: wanted };
 	}
 
 	async function onSubmit(e: Event) {
@@ -349,14 +386,9 @@
 			</label>
 
 			{#if captchaSitekey}
-				<div
-					class="h-captcha"
-					bind:this={captchaEl}
-					data-sitekey={captchaSitekey}
-					data-theme={theme.resolved}
-					data-callback="hcaptchaCallback"
-					data-expired-callback="hcaptchaExpired"
-				></div>
+				<!-- Drawn into by the captcha effect (explicit render), never by
+				     hCaptcha scanning for the class. -->
+				<div class="h-captcha" bind:this={captchaEl}></div>
 			{/if}
 
 			<button type="submit" disabled={submitting || slugStatus === 'bad'}>

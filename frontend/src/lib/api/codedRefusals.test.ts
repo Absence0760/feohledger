@@ -97,7 +97,11 @@ describe('codedRefusalText', () => {
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
 		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
 		['erp_not_connected', 'erpRefusal.notConnected'],
-		['invoice_due_before_date', 'refusal.invoiceDueBeforeDate']
+		['invoice_due_before_date', 'refusal.invoiceDueBeforeDate'],
+		['sso_email_in_other_workspace', 'refusal.ssoEmailInOtherWorkspace'],
+		['email_in_this_workspace', 'refusal.emailInThisWorkspace'],
+		['email_in_other_workspace', 'refusal.emailInOtherWorkspace'],
+		['email_check_throttled', 'refusal.emailCheckThrottled']
 	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
