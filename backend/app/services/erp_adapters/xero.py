@@ -664,6 +664,7 @@ def _xero_po_to_payload(raw: dict) -> PoPayload:
     return PoPayload(
         po_number=str(raw["PurchaseOrderNumber"]),
         vendor_name=(raw.get("Contact") or {}).get("Name"),
+        vendor_erp_id=(raw.get("Contact") or {}).get("ContactID") or None,
         total=_decimal(raw.get("Total")) or Decimal("0"),
         status=_PO_STATUS_MAP.get(str(raw.get("Status") or "").upper(), "open"),
         expected_delivery_date=delivery,

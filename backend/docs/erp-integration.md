@@ -1228,7 +1228,14 @@ section). Reconnecting the OAuth consent
 to a different company also writes `organization.erp_realm_changed`.
 
 **Purchase orders link no ERP id the push resolves** (the bill carries
-`po_number` as text), so they need no realm. The QuickBooks PO sync also no
+`po_number` as text), so they need no realm. A synced PO is linked to its vendor
+by the ERP's supplier id (`PoPayload.vendor_erp_id`, matched against the
+`erp_vendor_id` the vendor sync stamps — Xero's `ContactID`, QuickBooks'
+`VendorRef`), falling back to the vendor name; an adapter that does not read
+the id uses the name alone. **Run the vendor sync before the PO sync** on a new
+connection. A PO synced first has no vendor, and the next PO sync fills that
+missing link once the vendor exists. It never re-points a PO that already has
+a vendor. The QuickBooks PO sync also no
 longer reads the chart to resolve PO-line accounts: nothing persists or reads a
 PO line's GL account, so lines carry none — never the `AccountRef` name.
 
@@ -1713,7 +1720,7 @@ which apps created on or after 2026-03-02 must use.
 | `test_connection` | `GET Organisation` | |
 | `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False` |
 | `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
-| `list_pos` | `GET PurchaseOrders` | `BILLED` → closed, `DELETED` → cancelled |
+| `list_pos` | `GET PurchaseOrders` | `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
 | `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
 | `void_invoice` | `POST Invoices/{id}` | DRAFT/SUBMITTED → `DELETED`; unpaid, uncredited AUTHORISED → `VOIDED`; anything with money applied → `False` |

@@ -396,6 +396,11 @@ class PoPayload:
 
     po_number: str
     vendor_name: str | None = None
+    # The supplier's id in the ERP — the same id `list_vendors` reports as
+    # `VendorPayload.erp_vendor_id`. The sync links the PO to the vendor
+    # holding it before falling back to `vendor_name`, which a rename on either
+    # side breaks. None when the adapter does not read it.
+    vendor_erp_id: str | None = None
     total: Decimal = Decimal("0")
     status: str = "open"
     # Promised / expected delivery date from the ERP, when the upstream PO

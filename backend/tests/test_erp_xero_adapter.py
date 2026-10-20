@@ -802,7 +802,7 @@ def test_list_gl_accounts_maps_class_and_emits_archived_inactive(token):
 def test_list_pos_maps_status_total_and_currency_exactly(token):
     po = {
         "PurchaseOrderNumber": "PO-0001",
-        "Contact": {"Name": "Acme Supplies"},
+        "Contact": {"ContactID": "c-123", "Name": "Acme Supplies"},
         "Total": 1250.10,
         "Status": "BILLED",
         "CurrencyCode": "ZAR",
@@ -815,6 +815,8 @@ def test_list_pos_maps_status_total_and_currency_exactly(token):
         _client(cm).get = AsyncMock(return_value=_resp(200, {"PurchaseOrders": [po]}))
         (row,) = _run(_adapter().list_pos())
     assert row.total == Decimal("1250.10")
+    # The supplier's ContactID — what the vendor sync stamps — links the PO.
+    assert (row.vendor_name, row.vendor_erp_id) == ("Acme Supplies", "c-123")
     assert row.status == "closed"
     assert row.currency == "ZAR"
     assert row.expected_delivery_date == date(2026, 11, 1)
