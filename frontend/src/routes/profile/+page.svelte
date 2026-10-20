@@ -8,9 +8,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
-	import SegmentedControl from '#lib/components/ui/SegmentedControl.svelte';
-	import { theme } from '#lib/stores/theme.svelte.ts';
-	import { THEME_CHOICES, type ThemeChoice } from '#lib/theme.ts';
+	import ThemePicker from '#lib/components/ui/ThemePicker.svelte';
 	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '#lib/i18n/locale.ts';
 	import { currentLocale, setLocale, m } from '#lib/i18n/store.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -558,18 +556,6 @@
 		const value = (e.currentTarget as HTMLSelectElement).value as Locale;
 		await setLocale(value);
 	}
-
-	// Colour theme. Device-scoped like the language above — a preference about
-	// this screen, saved in this browser, applied the moment it is picked
-	// (`stores/theme.svelte.ts`, docs/decisions.md §289).
-	const THEME_LABEL_KEYS: Record<ThemeChoice, MessageKey> = {
-		system: 'profile.appearance.system',
-		light: 'profile.appearance.light',
-		dark: 'profile.appearance.dark'
-	};
-	const themeOptions = $derived(
-		THEME_CHOICES.map((value) => ({ value, label: m(THEME_LABEL_KEYS[value]) }))
-	);
 </script>
 
 <!-- The one field a factor change asks the member to type. A snippet rather than
@@ -633,14 +619,9 @@
 				<section class="card">
 					<h2>{m('profile.appearance.heading')}</h2>
 					<p class="hint" id="appearance-hint">{m('profile.appearance.hint')}</p>
-					<SegmentedControl
-						legend={m('profile.appearance.legend')}
-						name="theme"
-						options={themeOptions}
-						value={theme.choice}
-						onchange={(choice) => theme.set(choice)}
-						describedBy="appearance-hint"
-					/>
+					<!-- A preference about this screen, not the account: saved in this
+					     browser for every workspace (decisions §289, §290). -->
+					<ThemePicker name="theme" describedBy="appearance-hint" />
 				</section>
 			{/if}
 
