@@ -2,6 +2,7 @@ import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import { apiErrorCode, formatApiDetail } from '#lib/utils/apiError.ts';
 import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
+import { loginPathFor, sessionRejection } from '#lib/api/sessionRejection.ts';
 import { m } from '#lib/i18n/store.svelte.ts';
 
 // Re-exported so callers that already import from `#lib/api` (e.g. the
@@ -89,6 +90,24 @@ export function hasToken(): boolean {
 	return !!getToken();
 }
 
+/**
+ * End the signed-in session when a refused response says it is over: a 401,
+ * or a 403 coded `token_tenant_mismatch` (a token for another workspace than
+ * this page's — `api/sessionRejection.ts`). Clears the token and sends the user
+ * to this host's `/login`, with the reason in the URL for the second. Returns
+ * whether it did. Every client of the backend calls this on a refused response
+ * — `request()`, the blob downloads, the SSE stream and `api/expenses.ts`'s
+ * hand-rolled submit — so none of them can leave a dead session behind a
+ * screen where every call fails.
+ */
+export function endSessionIfRejected(status: number, detail: unknown): boolean {
+	const rejection = sessionRejection(status, apiErrorCode(detail).code);
+	if (!rejection) return false;
+	clearToken();
+	window.location.href = loginPathFor(rejection);
+	return true;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	const token = getToken();
 	const inHeaders = (init?.headers ?? {}) as Record<string, string>;
@@ -111,23 +130,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 	const res = await fetch(`${getApiBase()}${path}`, { ...init, headers });
 
-	if (res.status === 401) {
-		// Auto-redirect only fires when an existing session went stale.
-		// For anonymous requests (e.g. /api/auth/login itself), 401
-		// means "wrong credentials" — let the caller's catch handle it
-		// so forms can render error banners instead of being torn down
-		// mid-render by a navigation.
-		if (token) {
-			clearToken();
-			window.location.href = '/login';
-		}
-		const body = await res.json().catch(() => ({}));
-		throw apiErrorFromBody(body, 'Unauthorized', res.status);
-	}
-
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw apiErrorFromBody(body, `API error ${res.status}`, res.status);
+		// Auto-redirect only fires when an existing session is over (expired,
+		// or minted for another workspace). For anonymous requests (e.g.
+		// /api/auth/login itself), a 401 means "wrong credentials" — let the
+		// caller's catch handle it so forms can render error banners instead
+		// of being torn down mid-render by a navigation.
+		if (token) endSessionIfRejected(res.status, body.detail);
+		throw apiErrorFromBody(
+			body,
+			res.status === 401 ? 'Unauthorized' : `API error ${res.status}`,
+			res.status
+		);
 	}
 
 	if (res.status === 204) return undefined as T;
@@ -142,17 +157,16 @@ async function fetchBlob(path: string): Promise<string> {
 	return URL.createObjectURL(blob);
 }
 
-/** Shared tail of every blob download: the 401 clear-and-bounce `request()`
- *  performs, the backend's own `detail` when it sent one, then the body as a
- *  Blob. One owner so the GET and POST helpers can't drift on either. */
+/** Shared tail of every blob download: the session-ending clear-and-bounce
+ *  `request()` performs (`endSessionIfRejected`), the backend's own `detail`
+ *  when it sent one, then the body as a Blob. One owner so the GET and POST
+ *  helpers can't drift on either. */
 async function blobFromResponse(res: Response): Promise<Blob> {
-	if (res.status === 401) {
-		clearToken();
-		window.location.href = '/login';
-		throw new ApiError('Unauthorized', 401);
-	}
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
+		if (endSessionIfRejected(res.status, body.detail) && res.status === 401) {
+			throw new ApiError('Unauthorized', 401);
+		}
 		throw apiErrorFromBody(body, `Failed to load file: ${res.status}`, res.status);
 	}
 	return res.blob();
@@ -292,9 +306,14 @@ async function streamChatTurn(
 	});
 
 	if (res.status === 401) {
-		clearToken();
-		window.location.href = '/login';
+		endSessionIfRejected(res.status, undefined);
 		throw new Error('Unauthorized');
+	}
+	if (res.status === 403) {
+		// A token for another workspace ends the session here too; any other
+		// 403 falls through to the plain stream error below.
+		const j = (await res.json().catch(() => ({}))) as { detail?: unknown };
+		if (endSessionIfRejected(res.status, j.detail)) throw new Error('Unauthorized');
 	}
 	if (res.status === 429) {
 		const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;

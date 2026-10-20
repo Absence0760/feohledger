@@ -69,7 +69,7 @@ async def test_get_tenant_refuses_mismatched_org_claim():
         )
 
     assert exc.value.status_code == 403
-    assert "tenant" in exc.value.detail.lower()
+    assert exc.value.detail["code"] == "token_tenant_mismatch"
 
 
 @pytest.mark.asyncio
@@ -297,7 +297,14 @@ async def test_end_to_end_swapped_tenant_header_is_refused(realdb):
     async with _real_path_client(realdb, token=realdb.token("a", "admin"), slug=other.slug) as c:
         resp = await c.get("/api/invoices")
     assert resp.status_code == 403, resp.text
-    assert "tenant" in resp.json()["detail"].lower()
+    # Coded, so the SPA can tell a token for another workspace from an
+    # ordinary permission refusal and sign the user out of it instead of
+    # leaving a screen where every call fails (decisions §288).
+    assert resp.json()["detail"] == {
+        "code": "token_tenant_mismatch",
+        "message": "Token does not match the requested tenant",
+        "params": {},
+    }
 
 
 @pytest.mark.asyncio
@@ -329,7 +336,7 @@ async def test_harness_client_enforces_the_org_claim(realdb):
     async with client as c:
         resp = await c.get("/api/invoices")
     assert resp.status_code == 403, resp.text
-    assert "tenant" in resp.json()["detail"].lower()
+    assert resp.json()["detail"]["code"] == "token_tenant_mismatch"
 
 
 @pytest.mark.asyncio

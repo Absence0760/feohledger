@@ -14,7 +14,8 @@ test.use({ storageState: { cookies: [], origins: [] } });
  *     attacker can't enumerate valid emails by response diff.
  *   - Successive failures don't accidentally unlock anything (no
  *     state machine that breaks at attempt N).
- *   - Login endpoint requires tenant context.
+ *   - Login endpoint requires tenant context, and refuses a sign-in that
+ *     names another tenant (decisions §288).
  *
  * What's intentionally NOT covered:
  *   - Rate-limiting / lockout — the seed deployment doesn't enforce
@@ -92,62 +93,64 @@ test.describe('login security', () => {
 		}
 	});
 
-	test('tenant header is advisory — JWT org claim follows user.organization_id, not the header', async ({
+	test('a sign-in naming another tenant is refused with no token, and the own tenant gets its own org', async ({
 		request,
 		tenantAdmin
 	}) => {
-		// Login is intentionally tenant-header-agnostic: emails are
-		// globally unique in the control plane, so the user → org
-		// mapping is unambiguous. The security property we DO need is
-		// "the JWT's org claim is the user's real org" — even when the
-		// caller passes a different X-Tenant-Slug. Otherwise an
-		// attacker could request a token scoped to a different tenant.
+		// The security property: a tenant header can never obtain a token for
+		// an org the account does not belong to. Login used to ignore the
+		// header and mint the account's own org's token whatever page the form
+		// was on, which left a user who signed in on another workspace's page
+		// on a screen where every call was refused. It now refuses that
+		// sign-in outright, after the password verifies, and names the
+		// account's own sign-in page instead (docs/decisions.md §288).
 		const slug = currentTenantSlug();
-		// Pick a different tenant slug for the spoof attempt — any
-		// other seeded tenant works since the header should be ignored.
 		const otherSlug = slug === 'acme' ? 'techflow' : 'acme';
-		const res = await request.post(`${API_BASE}/api/auth/login`, {
+
+		const refused = await request.post(`${API_BASE}/api/auth/login`, {
 			headers: { 'X-Tenant-Slug': otherSlug },
 			data: { email: tenantAdmin.email, password: tenantAdmin.password }
 		});
-		expect(res.status()).toBe(200);
-		const body = (await res.json()) as { access_token?: string };
-		expect(body.access_token).toBeTruthy();
-
-		const [, payloadB64] = body.access_token!.split('.');
-		const padded = payloadB64
-			.replace(/-/g, '+')
-			.replace(/_/g, '/')
-			.padEnd(payloadB64.length + ((4 - (payloadB64.length % 4)) % 4), '=');
-		const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8')) as {
-			org?: string;
+		expect(refused.status()).toBe(403);
+		const refusedBody = (await refused.json()) as {
+			access_token?: string;
+			detail?: { code?: string; params?: { sign_in_url?: string | null } };
 		};
+		expect(refusedBody.access_token, 'a refused sign-in must carry no token').toBeUndefined();
+		expect(refusedBody.detail?.code).toBe('wrong_workspace');
+		// The link is the account's OWN tenant's sign-in page, never the
+		// header's.
+		const signInUrl = refusedBody.detail?.params?.sign_in_url;
+		expect(signInUrl, 'the refusal names the account’s own sign-in page').toBeTruthy();
+		expect(new URL(signInUrl!).hostname.split('.')[0]).toBe(slug);
 
-		// Sign in on the real tenant directly to learn what the user's
-		// real org id looks like — then assert the spoofed-header
-		// attempt produced the same org claim (i.e., header didn't
-		// sway it).
-		const refRes = await request.post(`${API_BASE}/api/auth/login`, {
+		// With its own tenant's header the same account signs in, and the
+		// token's org claim is that tenant's real org id.
+		const ok = await request.post(`${API_BASE}/api/auth/login`, {
 			headers: { 'X-Tenant-Slug': slug },
 			data: { email: tenantAdmin.email, password: tenantAdmin.password }
 		});
-		const refBody = (await refRes.json()) as { access_token?: string };
-		const refPayload = JSON.parse(
+		expect(ok.status()).toBe(200);
+		const token = ((await ok.json()) as { access_token?: string }).access_token;
+		expect(token).toBeTruthy();
+		const payloadB64 = token!.split('.')[1];
+		const payload = JSON.parse(
 			Buffer.from(
-				refBody
-					.access_token!.split('.')[1]
+				payloadB64
 					.replace(/-/g, '+')
 					.replace(/_/g, '/')
-					.padEnd(
-						refBody.access_token!.split('.')[1].length +
-							((4 - (refBody.access_token!.split('.')[1].length % 4)) % 4),
-						'='
-					),
+					.padEnd(payloadB64.length + ((4 - (payloadB64.length % 4)) % 4), '='),
 				'base64'
 			).toString('utf-8')
 		) as { org?: string };
 
-		expect(payload.org, 'org claim must follow the user, not the header').toBe(refPayload.org);
+		const org = await request.get(`${API_BASE}/api/organization`, {
+			headers: { Authorization: `Bearer ${token}`, 'X-Tenant-Slug': slug }
+		});
+		expect(org.status()).toBe(200);
+		const orgBody = (await org.json()) as { id: string; slug: string };
+		expect(orgBody.slug).toBe(slug);
+		expect(payload.org, 'org claim must be the account’s own org').toBe(orgBody.id);
 	});
 
 	test('a token minted on the tenant is scoped to that tenant (org claim)', async ({

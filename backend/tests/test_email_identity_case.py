@@ -197,3 +197,35 @@ async def test_admin_create_stores_normalized_and_refuses_a_case_variant(realdb)
             assert dup.status_code == 409
         finally:
             await c.delete(f"/api/admin/users/{new_id}")
+
+
+async def test_signing_in_on_another_workspaces_page_is_refused(
+    realdb, mixed_case_user, session_redis
+):
+    """Production, 2026-10-20: an account of one workspace signed in on
+    another's page, got its own org's token, and then every call on that page
+    was refused (403 ``token_tenant_mismatch``) behind a
+    signed-in screen. The sign-in itself is refused instead, after the password
+    verifies, with the account's own sign-in link; on its own page it works."""
+    _user_id, email = await mixed_case_user()
+
+    async with realdb.client(key="b", role=None) as c:
+        resp = await c.post("/api/auth/login", json={"email": email, "password": _PASSWORD})
+    assert resp.status_code == 403, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "wrong_workspace"
+    assert "access_token" not in resp.json()
+    url = detail["params"]["sign_in_url"]
+    assert url is None or f"{realdb.info('a').slug}" in url
+
+    # A wrong password on the other page is the ordinary 401: the workspace is
+    # named only to someone who proved the password.
+    async with realdb.client(key="b", role=None) as c:
+        wrong = await c.post(
+            "/api/auth/login", json={"email": email, "password": f"{_PASSWORD}-wrong"}
+        )
+    assert wrong.status_code == 401
+
+    async with realdb.client(key="a", role=None) as c:
+        ok = await c.post("/api/auth/login", json={"email": email, "password": _PASSWORD})
+    assert ok.status_code == 200, ok.text

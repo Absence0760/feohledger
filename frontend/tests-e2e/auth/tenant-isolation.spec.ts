@@ -1,4 +1,4 @@
-import { ACME_ADMIN, ACME_BASE, API_BASE, escapeRegExp, expect, signInAndWait, TECHFLOW_ADMIN, TECHFLOW_BASE, test } from '../fixtures/helpers';
+import { acceptConsent, ACME_ADMIN, ACME_BASE, API_BASE, escapeRegExp, expect, signInAndWait, TECHFLOW_ADMIN, TECHFLOW_BASE, test } from '../fixtures/helpers';
 
 
 // Start unauthenticated — this spec drives its own ACME/TECHFLOW logins to assert
@@ -139,8 +139,11 @@ test.describe('tenant isolation — API', () => {
 		// Even after the SPA reads the planted token, the backend must
 		// refuse any data request — the JWT carries `org=techflow` and
 		// the host's X-Tenant-Slug header says `acme`.
-		await signInAndWait(page, TECHFLOW_ADMIN);
-		const techflowToken = await page.evaluate(() => localStorage.getItem('auth_token'));
+		//
+		// The token is obtained on techflow's OWN page: this describe runs on
+		// acme's origin, and signing techflow's account in on acme's page is
+		// refused since decisions §288.
+		const techflowToken = await tokenAfterLogin(page, TECHFLOW_BASE, TECHFLOW_ADMIN);
 		expect(techflowToken).toBeTruthy();
 
 		// Use a fresh context for the acme origin — sharing the page
@@ -169,5 +172,84 @@ test.describe('tenant isolation — API', () => {
 		} finally {
 			await acmeCtx.close();
 		}
+	});
+});
+
+/**
+ * The JOURNEY, not just the isolation property. Production, 2026-10-20: an
+ * account of one workspace signed in on another workspace's page, login handed
+ * it a token for its own org, and every call on that page was then refused
+ * (403 `token_tenant_mismatch`) behind a signed-in screen stuck on "Loading…".
+ * No data leaked — which is all the specs above assert — and that is exactly
+ * why they missed it: each signs in on a tenant's OWN origin and hops, where
+ * per-origin localStorage just leaves the other origin signed out. These sign
+ * in on the wrong page, and assert the user ends somewhere usable
+ * (docs/decisions.md §288).
+ */
+test.describe('signing in on another workspace’s page', () => {
+	const loginError = (page: import('@playwright/test').Page) => page.locator('.login-form .error');
+
+	async function submitLogin(
+		page: import('@playwright/test').Page,
+		creds: { email: string; password: string }
+	) {
+		await page.locator('input[type="email"]').fill(creds.email);
+		await page.locator('input[type="password"]').fill(creds.password);
+		const response = page.waitForResponse(
+			(r) => new URL(r.url()).pathname === '/api/auth/login' && r.request().method() === 'POST'
+		);
+		await page.locator('form button[type="submit"]').click();
+		return response;
+	}
+
+	test('a techflow account on acme’s page is sent to techflow, and acme’s own account then signs in', async ({
+		page
+	}) => {
+		await acceptConsent(page);
+		await page.goto(`${ACME_BASE}/login`);
+
+		const refused = await submitLogin(page, TECHFLOW_ADMIN);
+		expect(refused.status()).toBe(403);
+
+		// No session was created, and the page says where this account signs in.
+		const error = loginError(page);
+		await expect(error).toContainText('This account belongs to a different workspace.');
+		const ownPage = error.getByRole('link', { name: "Go to your workspace's sign-in page" });
+		await expect(ownPage).toHaveAttribute(
+			'href',
+			/^https?:\/\/techflow\.[^/]+\/login\?email=admin%40techflow\.com$/
+		);
+		expect(page.url()).toMatch(new RegExp(`^${escapeRegExp(ACME_BASE)}/login`));
+		expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
+
+		// The same page still works for acme's own account, end to end: the
+		// dashboard's figures load rather than the shell sitting on "Loading…".
+		const ok = await submitLogin(page, ACME_ADMIN);
+		expect(ok.status()).toBe(200);
+		await page.waitForURL(new RegExp(`^${escapeRegExp(ACME_BASE)}/?$`));
+		await expect(page.locator('.kpi-row .kpi[data-kpi-state="value"]')).toHaveCount(5);
+		await expect(page.getByText('Failed to load organization')).toHaveCount(0);
+	});
+
+	test('a token for another workspace already in storage signs the user out to this page’s sign-in', async ({
+		page
+	}) => {
+		// Defence in depth for a token that got there some other way (one issued
+		// before the sign-in refusal, a renamed workspace): every tenant-scoped
+		// call answers 403 `token_tenant_mismatch`, and the SPA must treat that
+		// like an expired session instead of hanging.
+		const techflowToken = await tokenAfterLogin(page, TECHFLOW_BASE, TECHFLOW_ADMIN);
+
+		await acceptConsent(page);
+		await page.goto(`${ACME_BASE}/login`);
+		await expect(page.locator('input[type="email"]')).toBeVisible();
+		await page.evaluate((t) => localStorage.setItem('auth_token', t), techflowToken);
+
+		await page.goto(`${ACME_BASE}/`);
+		await page.waitForURL(`${ACME_BASE}/login?reason=other_workspace`);
+		await expect(loginError(page)).toHaveText(
+			'You were signed in to a different workspace. Sign in again here.'
+		);
+		expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
 	});
 });
