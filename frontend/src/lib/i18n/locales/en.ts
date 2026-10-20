@@ -6339,6 +6339,11 @@ export const en = {
 	'refusal.commerceSyncNotFound': "Inventory sync not found.",
 	'refusal.commerceUnknownEntity': "A mapped subsidiary does not exist.",
 	'refusal.commerceUnknownProvider': "That commerce platform is not supported.",
+	// One address, one account, one workspace (decisions §290): an SSO sign-in
+	// and a user-manager's create / rename refused for an address held elsewhere.
+	'refusal.ssoEmailInOtherWorkspace': "This email address already belongs to an account in another workspace, so it can't sign in here. Sign in on your own workspace's page, or ask this workspace's administrator to have your identity provider use a different address.",
+	'refusal.emailInThisWorkspace': "A user with this email address already exists in this workspace.",
+	'refusal.emailInOtherWorkspace': "This email address already has an account in another workspace. An address can belong to only one workspace, so use a different address for this person.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "This vendor isn't in {provider} yet. Sync vendors from {provider}, or add the vendor there, then retry.",

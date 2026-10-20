@@ -3,6 +3,7 @@ import {
 	authToken,
 	authedTenantHeaders,
 	expect,
+	TECHFLOW_ADMIN,
 	test
 } from '../fixtures/helpers';
 
@@ -93,6 +94,41 @@ test.describe('/admin user lifecycle', () => {
 		} finally {
 			if (createdId) await deleteUser(page, createdId);
 		}
+	});
+
+	test('inviting an address another workspace holds says so, and creates nobody', async ({
+		page
+	}) => {
+		// One address is one account in one workspace (decisions §290). The
+		// techflow seed admin's address is held in techflow, never in this
+		// worker's tenant, so the invite is refused with a sentence that says
+		// what to do — not the old bare "Email already in use".
+		await page.getByRole('button', { name: '+ Invite User' }).click();
+		const modal = page.locator('div.modal[role="dialog"][aria-label="Invite user"]');
+		await expect(modal).toBeVisible();
+		await modal.locator('input[type="text"]').fill('Someone Elsewhere');
+		await modal.locator('input[type="email"]').fill(TECHFLOW_ADMIN.email);
+		await modal.locator('.check-label', { hasText: 'AP Clerk' }).locator('input').check();
+
+		const refused = page.waitForResponse(
+			(r) =>
+				new URL(r.url()).pathname === '/api/admin/users' && r.request().method() === 'POST'
+		);
+		await modal.getByRole('button', { name: /Create User/ }).click();
+		const resp = await refused;
+		expect(resp.status()).toBe(409);
+		expect(((await resp.json()) as { detail: { code: string } }).detail.code).toBe(
+			'email_in_other_workspace'
+		);
+
+		await expect(
+			page.locator('.toast.error .toast-text', {
+				hasText: 'This email address already has an account in another workspace.'
+			})
+		).toBeVisible();
+		await expect(
+			page.locator('div.modal[role="dialog"][aria-label="User created"]')
+		).toHaveCount(0);
 	});
 
 	test('Edit modal pre-fills the row and persists name change', async ({ page }) => {

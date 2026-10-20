@@ -6113,6 +6113,11 @@ export const messages = {
 	'refusal.commerceSyncNotFound': "Synchronisation de stock introuvable.",
 	'refusal.commerceUnknownEntity': "Une filiale associée n’existe pas.",
 	'refusal.commerceUnknownProvider': "Cette plateforme commerce n’est pas prise en charge.",
+	// One address, one account, one workspace (decisions §290): an SSO sign-in
+	// and a user-manager's create / rename refused for an address held elsewhere.
+	'refusal.ssoEmailInOtherWorkspace': "Cette adresse e-mail appartient déjà à un compte d’un autre espace de travail ; elle ne peut donc pas se connecter ici. Connectez-vous sur la page de votre propre espace de travail, ou demandez à l’administrateur de cet espace de travail que votre fournisseur d’identité utilise une autre adresse.",
+	'refusal.emailInThisWorkspace': "Un utilisateur avec cette adresse e-mail existe déjà dans cet espace de travail.",
+	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Ce fournisseur n'existe pas encore dans {provider}. Synchronisez les fournisseurs depuis {provider} ou créez-le là-bas, puis réessayez.",

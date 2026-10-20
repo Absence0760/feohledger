@@ -35,6 +35,47 @@ export function sessionRejection(status: number, code: string | null): SessionRe
 	return null;
 }
 
+/** The part of `fetch` {@link revokeRejectedSession} uses — injected so the
+ *  node vitest config can drive it without a network. */
+export type LogoutFetch = (url: string, init: RequestInit) => Promise<unknown>;
+
+/**
+ * Best-effort revocation, on the server, of a session this page is ending.
+ *
+ * Only for `other_workspace`. That token was refused HERE because it belongs to
+ * another workspace, but it is still a live session there until it expires,
+ * and still listed under that account's sessions — on a shared machine,
+ * clearing it from this origin's storage alone left a usable credential behind.
+ * `POST /api/auth/logout` needs no workspace: it reads the token's own `jti`,
+ * `sub` and `org`, blocklists it and audits `auth.logout` in the token's own
+ * workspace, so it is sent with the token and deliberately WITHOUT this page's
+ * `X-Tenant-Slug` — the header that caused the refusal. An expired session
+ * (`401`) is not revoked: the server already refuses it, and logout would 401.
+ *
+ * `keepalive`, because the caller navigates away on the next line; and every
+ * failure is swallowed, because the user is being signed out of this page
+ * either way and nothing they could do would change the outcome.
+ */
+export function revokeRejectedSession(
+	rejection: SessionRejection,
+	token: string | null,
+	apiBase: string,
+	fetchImpl: LogoutFetch
+): void {
+	if (rejection !== 'other_workspace' || !token) return;
+	try {
+		void Promise.resolve(
+			fetchImpl(`${apiBase}/api/auth/logout`, {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}` },
+				keepalive: true
+			})
+		).catch(() => undefined);
+	} catch {
+		// A fetch that throws synchronously (no network stack) — same as a failure.
+	}
+}
+
 /** Where to send the user once the session has been cleared. An expired
  *  session is the plain `/login` it always was. */
 export function loginPathFor(rejection: SessionRejection): string {

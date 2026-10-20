@@ -6113,6 +6113,11 @@ export const messages = {
 	'refusal.commerceSyncNotFound': "Bestandsabgleich nicht gefunden.",
 	'refusal.commerceUnknownEntity': "Eine zugeordnete Tochtergesellschaft existiert nicht.",
 	'refusal.commerceUnknownProvider': "Diese Commerce-Plattform wird nicht unterstützt.",
+	// One address, one account, one workspace (decisions §290): an SSO sign-in
+	// and a user-manager's create / rename refused for an address held elsewhere.
+	'refusal.ssoEmailInOtherWorkspace': "Diese E-Mail-Adresse gehört bereits zu einem Konto in einem anderen Workspace und kann sich hier nicht anmelden. Melden Sie sich auf der Seite Ihres eigenen Workspace an, oder bitten Sie die Administration dieses Workspace, Ihren Identitätsanbieter eine andere Adresse verwenden zu lassen.",
+	'refusal.emailInThisWorkspace': "In diesem Workspace gibt es bereits einen Benutzer mit dieser E-Mail-Adresse.",
+	'refusal.emailInOtherWorkspace': "Diese E-Mail-Adresse hat bereits ein Konto in einem anderen Workspace. Eine Adresse kann nur zu einem Workspace gehören; verwenden Sie für diese Person eine andere Adresse.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Dieser Lieferant ist noch nicht in {provider}. Synchronisieren Sie die Lieferanten aus {provider} oder legen Sie den Lieferanten dort an und versuchen Sie es dann erneut.",
