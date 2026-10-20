@@ -213,12 +213,44 @@ test.describe('signing in on another workspace’s page', () => {
 
 		// No session was created, and the page says where this account signs in.
 		const error = loginError(page);
-		await expect(error).toContainText('This account belongs to a different workspace.');
-		const ownPage = error.getByRole('link', { name: "Go to your workspace's sign-in page" });
+		// The sentence names the workspace by host only; the URL, with its
+		// percent-encoded address, is the link's and is never repeated in it.
+		const sentence = error.locator('span');
+		await expect(sentence).toHaveText(
+			/^This account belongs to another workspace, techflow\.[^\s/?]+\. Sign in there instead\.$/
+		);
+		await expect(error).not.toContainText('?email=');
+		await expect(error).not.toContainText('%40');
+		const ownPage = page
+			.locator('.login-form [role="alert"]')
+			.getByRole('link', { name: "Go to your workspace's sign-in page" });
+		await expect(ownPage).toBeVisible();
 		await expect(ownPage).toHaveAttribute(
 			'href',
 			/^https?:\/\/techflow\.[^/]+\/login\?email=admin%40techflow\.com$/
 		);
+		// The link sits on its own line under the sentence and inside the box,
+		// in both themes and at 320px. It used to be a narrow column beside the
+		// text that ran past the box's right edge.
+		for (const colorScheme of ['dark', 'light'] as const) {
+			await page.emulateMedia({ colorScheme });
+			for (const width of [1280, 320]) {
+				await page.setViewportSize({ width, height: 800 });
+				const where = `${colorScheme}, ${width}px`;
+				const box = (await error.boundingBox())!;
+				const text = (await sentence.boundingBox())!;
+				const link = (await ownPage.boundingBox())!;
+				expect(link.y, `link under the sentence (${where})`).toBeGreaterThanOrEqual(
+					text.y + text.height - 1
+				);
+				expect(link.x, `link inside the box (${where})`).toBeGreaterThanOrEqual(box.x);
+				expect(link.x + link.width, `link inside the box (${where})`).toBeLessThanOrEqual(
+					box.x + box.width + 0.5
+				);
+			}
+		}
+		await page.emulateMedia({ colorScheme: null });
+		await page.setViewportSize({ width: 1280, height: 800 });
 		expect(page.url()).toMatch(new RegExp(`^${escapeRegExp(ACME_BASE)}/login`));
 		expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
 
@@ -247,9 +279,14 @@ test.describe('signing in on another workspace’s page', () => {
 
 		await page.goto(`${ACME_BASE}/`);
 		await page.waitForURL(`${ACME_BASE}/login?reason=other_workspace`);
-		await expect(loginError(page)).toHaveText(
-			'You were signed in to a different workspace. Sign in again here.'
+		// Information, not a failure: a neutral notice in a polite live region,
+		// worded so it never claims this page is the user's own workspace.
+		const status = page.locator('.login-form [role="status"]');
+		await expect(status).toHaveAttribute('aria-live', 'polite');
+		await expect(status.locator('.info')).toHaveText(
+			"You were signed out because your session belonged to a different workspace. Sign in here, or on your own workspace's page."
 		);
+		await expect(loginError(page)).toHaveCount(0);
 		expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
 	});
 });

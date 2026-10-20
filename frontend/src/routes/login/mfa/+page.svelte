@@ -193,16 +193,6 @@
 		color: var(--text-muted);
 	}
 
-	.info {
-		padding: 11px 14px;
-		border-radius: 10px;
-		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-		background: var(--accent-tint);
-		color: var(--text);
-		font-size: 0.85rem;
-		line-height: 1.5;
-	}
-
 	/* A code, not prose: centred, spaced digits, tabular so they do not shift
 	   as they are typed. Overrides the shell's field default on specificity,
 	   which the shell leaves open by writing its rules under `:where()`. */
