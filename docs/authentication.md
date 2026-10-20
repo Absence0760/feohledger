@@ -817,9 +817,11 @@ access token does not carry it. An action whose *output* is the asset asks for
 more: `api/auth.require_sensitive_step_up` accepts only a current authenticator
 code or a passkey assertion (minted by `POST /auth/mfa/step-up/passkey` for that
 action's own operation), in every tenant — so the SSO-only case needs no special
-sentence, because the password is a proof here for nobody. Its one caller today
-is the unmasked-banking DSAR export (`POST /api/privacy/dsar` with
-`include_banking`, operation `dsar_unmasked_export`). Four coded refusals:
+sentence, because the password is a proof here for nobody. Its callers are the
+unmasked-banking DSAR export (`POST /api/privacy/dsar` with `include_banking`,
+operation `dsar_unmasked_export`) and closing a workspace (`POST
+/api/organization/close`, operation `workspace_close`, decisions §294). Four
+coded refusals:
 `sensitive_step_up_required` (`403`, no factor proof sent — the SPA's cue to
 collect one and resend; not throttled, not audited as a failure),
 `sensitive_step_up_failed` (`400`, a proof did not verify — throttled per account

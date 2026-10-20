@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — fixing signup's dead ends (decisions §292)
+**Last reconciled:** 2026-10-20 — self-service workspace closure (decisions
+§294) opened one (c) entry, abandoned workspaces kept forever unless someone
+closes them, taking the file from 118 → 119. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
@@ -173,7 +175,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**118 open: 102 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**119 open: 103 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1876,6 +1878,25 @@ scope (§260) — do not fold them into any of these.
       from the login page's error states. **Trigger:** the first support
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
+
+### Surfaced by self-service workspace closure (2026-10-20, decisions §294)
+
+- [ ] **(c) An abandoned workspace is kept forever unless someone closes it.**
+      §294 lets an administrator close an unused workspace (which releases its
+      addresses), and rejected an unattended sweep, because nothing in the code
+      records a trial as ended: signup binds the free plan as `active` with no
+      `trial_end`, and "idle" is not a customer's instruction. So a workspace
+      its owner simply walks away from — personal data of its users, uploaded
+      documents, a tenant database — is retained indefinitely, which a
+      storage-limitation review (GDPR Art. 5(1)(e)) will ask about. **Durable
+      fix:** an explicit end state, not a guess — a trial (or free-plan
+      inactivity) term the Terms state, recorded on the subscription; notice
+      emails to the workspace's administrators before it lapses; and only then
+      a sweep that runs the same fail-closed guards as
+      `services/workspace_closure` and deletes through `tenant_deletion`,
+      leaving the same control-plane record. **Trigger:** billing goes live
+      with a trial period, the Terms gain a free-plan inactivity clause, or
+      the first storage-limitation question from a customer or auditor.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

@@ -44,9 +44,16 @@ DO ANYTIME (parallel)
 ├── Custom domains            ← per-customer, only when one asks for a vanity host
 │     └── custom-domain-provisioning.md
 │
-└── SSO break-glass           ← per-incident, when an SSO-only tenant's IdP breaks
-      └── sso-break-glass.md
+├── SSO break-glass           ← per-incident, when an SSO-only tenant's IdP breaks
+│     └── sso-break-glass.md
+│
+└── Closed workspaces         ← recurring, the backup leg of a self-service closure
+      └── workspace-closure.md
 ```
+
+`workspace-closure.md` is recurring: an administrator can close an unused
+workspace themselves (decisions §294), but its backup dumps are yours to
+remove within the DPA's 60 days. Check the queue weekly.
 
 `sso-break-glass.md` is per-incident too: the verified, audited way to
 reopen password sign-in for a tenant whose required identity provider has
