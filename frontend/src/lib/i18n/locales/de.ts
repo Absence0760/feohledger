@@ -3806,6 +3806,8 @@ export const messages = {
 	'auth.login.or': 'oder',
 	'auth.login.signInWith': 'Anmelden mit {provider}',
 	'auth.login.forgotPassword': 'Passwort vergessen?',
+	'auth.login.signedOutOtherWorkspace': "Sie waren bei einem anderen Workspace angemeldet. Melden Sie sich hier erneut an.",
+	'auth.login.goToOwnWorkspace': "Zur Anmeldeseite Ihres Workspace",
 	'auth.login.devAccounts.heading': 'Entwicklungskonten',
 	'auth.login.devAccounts.hint': 'Nur für die lokale Entwicklung. Wählen Sie ein Seed-Konto, um das Formular auszufüllen.',
 	'auth.login.devAccounts.fill': 'Formular als {email} ausfüllen, {role}',

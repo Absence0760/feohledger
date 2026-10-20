@@ -182,7 +182,7 @@ async def test_custom_domain_path_still_enforces_jwt_org_cross_check():
             authorization=f"Bearer {token}",
         )
     assert exc.value.status_code == 403
-    assert "tenant" in exc.value.detail.lower()
+    assert exc.value.detail["code"] == "token_tenant_mismatch"
 
 
 @pytest.mark.asyncio

@@ -3833,6 +3833,8 @@ export const messages = {
 	'auth.login.or': 'o',
 	'auth.login.signInWith': 'Iniciar sesión con {provider}',
 	'auth.login.forgotPassword': '¿Olvidaste tu contraseña?',
+	'auth.login.signedOutOtherWorkspace': "Había iniciado sesión en otro espacio de trabajo. Vuelva a iniciar sesión aquí.",
+	'auth.login.goToOwnWorkspace': "Ir a la página de inicio de sesión de su espacio de trabajo",
 	'auth.login.devAccounts.heading': 'Cuentas de desarrollo',
 	'auth.login.devAccounts.hint': 'Solo para desarrollo local. Elija una cuenta de prueba para rellenar el formulario.',
 	'auth.login.devAccounts.fill': 'Rellenar el formulario como {email}, {role}',

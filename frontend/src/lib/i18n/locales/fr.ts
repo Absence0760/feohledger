@@ -3807,6 +3807,8 @@ export const messages = {
 	'auth.login.or': 'ou',
 	'auth.login.signInWith': 'Se connecter avec {provider}',
 	'auth.login.forgotPassword': 'Mot de passe oublié ?',
+	'auth.login.signedOutOtherWorkspace': "Vous étiez connecté à un autre espace de travail. Reconnectez-vous ici.",
+	'auth.login.goToOwnWorkspace': "Aller à la page de connexion de votre espace de travail",
 	'auth.login.devAccounts.heading': 'Comptes de développement',
 	'auth.login.devAccounts.hint': 'Développement local uniquement. Choisissez un compte de démonstration pour remplir le formulaire.',
 	'auth.login.devAccounts.fill': 'Remplir le formulaire avec {email}, {role}',

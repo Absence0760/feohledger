@@ -3836,6 +3836,8 @@ export const messages = {
 	'auth.login.or': 'ou',
 	'auth.login.signInWith': 'Entrar com {provider}',
 	'auth.login.forgotPassword': 'Esqueceu a senha?',
+	'auth.login.signedOutOtherWorkspace': "Você estava conectado a outro espaço de trabalho. Entre novamente aqui.",
+	'auth.login.goToOwnWorkspace': "Ir para a página de login do seu espaço de trabalho",
 	'auth.login.devAccounts.heading': 'Contas de desenvolvimento',
 	'auth.login.devAccounts.hint': 'Somente para desenvolvimento local. Escolha uma conta de teste para preencher o formulário.',
 	'auth.login.devAccounts.fill': 'Preencher o formulário como {email}, {role}',

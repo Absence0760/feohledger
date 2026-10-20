@@ -3764,6 +3764,8 @@ export const messages = {
 	'auth.login.or': 'または',
 	'auth.login.signInWith': '{provider}でサインイン',
 	'auth.login.forgotPassword': 'パスワードをお忘れですか？',
+	'auth.login.signedOutOtherWorkspace': "別のワークスペースにサインインしていました。ここで再度サインインしてください。",
+	'auth.login.goToOwnWorkspace': "ご自身のワークスペースのサインインページへ",
 	'auth.login.devAccounts.heading': '開発用アカウント',
 	'auth.login.devAccounts.hint': 'ローカル開発専用です。シード済みのアカウントを選ぶとフォームに入力されます。',
 	'auth.login.devAccounts.fill': '{email}（{role}）でフォームに入力',

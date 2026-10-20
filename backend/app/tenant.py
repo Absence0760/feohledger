@@ -17,6 +17,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql import Select
 
+from app.api.refusals import TOKEN_TENANT_MISMATCH_DETAIL
 from app.database import commit_before_response, get_control_db, get_tenant_engine
 from app.models.entity import Entity
 from app.models.organization import Organization
@@ -171,7 +172,7 @@ async def get_tenant(
             if token_org and str(org.id) != token_org:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Token does not match the requested tenant",
+                    detail=TOKEN_TENANT_MISMATCH_DETAIL,
                 )
 
     return org
