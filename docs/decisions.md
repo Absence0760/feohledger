@@ -12405,3 +12405,101 @@ failed the flush and rolled back the whole vendor sync.
 **Not done here** (`docs/followups.md`): a resumable sync for listings over the
 bound, the sync UI's reporting of the new keys, over-long names, and the
 adapters that still drop or mislabel records.
+
+## 289. The web app has a light theme, chosen by the OS or per browser, and the marketing page stays dark (2026-10-20)
+
+**The web app was dark-only, and now follows the reader.** `app.css` set
+`color-scheme: dark` on `:root` and carried one palette; nothing ever decided
+that the product should be dark-only — §28, §180 and §181 were all written
+against the only palette there was ("a base token for text on a dark
+surface"). This supersedes that assumption, not those decisions: the two-token
+contract (§28), the badge tint pairs (§30) and the shared visual layer (§181)
+hold unchanged in both themes. What a theme is: **System** by default (follow
+`prefers-color-scheme`; an OS that states no preference gets dark, the palette
+the app was designed in), or **Light** / **Dark** chosen on
+`/profile?section=appearance` and kept per browser in `localStorage`
+(`feoh_theme`), like the display language — a preference about this screen,
+not about the account.
+
+**The palette switch is all CSS; script only says which one is wanted.** The
+dark palette stays on `:root`, the light one sits on
+`:root[data-theme='light']`, and System is the same light block inside
+`@media (prefers-color-scheme: light) { :root:not([data-theme='dark']) {…} }`.
+The duplication is deliberate: CSS cannot share a declaration block between a
+selector and a media-gated selector, and the alternatives were worse.
+`light-dark()` would have put both values on every token in one place, but it
+changes what `getComputedStyle` returns for a token, needs the audit to model a
+per-element colour scheme, and a white-label override of `--accent` would have
+had to be written as a `light-dark()` pair too. Having the inline script
+resolve System into `light`/`dark` itself would have needed one block, but it
+puts the OS preference on a JavaScript listener rather than the cascade, and a
+page whose script fails would lose the OS's choice. So the copy exists, and
+`tokenPairing.test.ts` holds it: the two light blocks byte-identical, every
+dark colour token redeclared in light, `color-scheme` set in each.
+
+**No dark frame for a Light user.** `src/app.html` carries a short
+inline script that runs before any stylesheet or module and sets `data-theme`
+from storage. It repeats three facts from `src/lib/theme.ts` because it cannot
+import it, and `theme.test.ts` runs the script against every stored value ×
+OS preference — including storage that throws — and compares the result with
+what the module would do. The CloudFront policy sets no CSP (`infra/frontend.tf`
+notes SvelteKit's hydration needs inline script anyway), so the script costs no
+policy change; a future CSP needs its hash.
+
+**Both palettes are held to the same bars, and the audit runs per theme.**
+Every check in `tokenPairing.test.ts` now runs once for dark and once for
+light, never with a looser threshold. Running it the first time on the light
+palette found **~80 failing rules** and, behind them, ~300 colour literals in
+component `<style>` blocks: status red, green and amber typed as hex
+(`#f06464`, `#1fa86a`, `#d4940a`) and tinted backgrounds typed as `rgba()` of
+those hexes. Each was legible on navy and 2.2–2.9:1 on white. They are tokens
+now — a new `--warning` base token, a `--violet` tint pair for the ERP pill
+(two badges spelled it as a literal "rather than a token with one caller",
+which a second theme ends), chrome tokens for borders, scrollbars and the
+modal overlay, and `color-mix(in srgb, var(--tone) N%, transparent)` for every
+tone-tinted background. The audit learned to resolve that `color-mix()` form
+(and the opaque two-colour one): without it, converting a literal to a
+theme-following token would have *removed* its contrast check, which is the
+wrong way for a refactor to move a guard. The exceptions queue and the agent
+dashboard built badges as a literal hex plus a concatenated `1f` alpha in an
+inline `style`; they now name a palette tone and render its tint pair.
+
+**The light base tokens are darker than the bare-surface bar needs.** About
+forty rules put a base token as text on a 10–20% tint of its own hue (an armed
+delete, an inline error box). A first light palette that cleared 4.5:1 on
+white failed every one of them at 4.1–4.5:1; rather than convert forty rules to
+the `-on-tint` pair one by one, each light base token was darkened until it
+clears its own 20% tint, which is a property of the token and can be asserted
+there.
+
+**The marketing landing page stays dark.** It is the one surface designed as
+a picture rather than as UI: the Blender-rendered tally (§180), the grain, the
+glass panels and the hero card were all composed on navy, and a light version
+is a design job — a re-render and new panel treatments — not a token swap.
+Its root carries `data-theme-scope="dark"`, which `app.css` includes in the
+dark palette's selector list; custom properties inherit, so the subtree renders
+dark whatever the page's theme, with no third palette copy. The light audit
+skips the four components only it renders, and a test proves they are rendered
+nowhere else. **The legal pages follow the theme**: they are documents read at
+length, often arriving from outside the app, and a reader who asked for light
+text on a light ground is exactly who should get it; their chrome is tokens
+already. The auth shell, signup, the supplier portal and the help centre follow
+it too.
+
+**Two things this does not settle, tracked rather than half-done.** A
+white-label tenant's `--accent` is written inline on `<html>` and so applies in
+both themes; nothing measured it as text even in dark, and a blue chosen for
+navy is ~3:1 on white (`docs/followups.md`). And testing the storage-throwing
+path showed the app shell renders nothing at all when the browser blocks site
+storage — on `main`, independent of the theme, whose own storage access is
+wrapped (`docs/known-issues.md`).
+
+Guards: `src/lib/a11y/tokenPairing.test.ts` (both palettes, the light blocks'
+identity and coverage, the dark-pinned subtree), `src/lib/theme.test.ts` (the
+resolution rules, storage throwing, and the pre-paint script executed against
+the module), `src/lib/legal/storageInventory.test.ts` (`feoh_theme` is on the
+Cookie Notice), and `tests-e2e/a11y/light-theme.spec.ts` (choose → reload →
+`data-theme` present at the first animation frame, System following the OS
+through CSS alone, the keyboard model of the picker, and axe in light mode on
+a cross-section of the signed-in app, the portal, the auth shell, the help
+centre and the legal pages).

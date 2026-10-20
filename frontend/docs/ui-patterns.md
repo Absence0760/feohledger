@@ -893,8 +893,8 @@ the `ui/` primitive in the Source column.
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
 
-**Native form controls** are dark-themed globally in `src/app.css` so a
-bare `<input>` fits the theme without per-route CSS:
+**Native form controls** are themed globally in `src/app.css` so a
+bare `<input>` fits the theme — either theme — without per-route CSS:
 - **Checkbox / radio** — `appearance: none` + a drawn mark (white check
   / inset accent dot) so *both* states are themed — empty = subtle
   outline on `--bg`, on = `--accent` fill, plus
@@ -913,10 +913,11 @@ bare `<input>` fits the theme without per-route CSS:
   did, before the scoped rules were collapsed onto this recipe.)
 - **Range** — `accent-color: var(--accent)` (the modern cross-browser
   approach; no pseudo-element rebuild).
-- `:root { color-scheme: dark }` puts the remaining native controls
-  (date pickers, scrollbars) in dark mode; scrollbars are further
-  thinned + tinted, the date-picker indicator gets a hover, and
-  `::selection` is accent-tinted.
+- `color-scheme` is set **per palette** (`dark` on `:root`, `light` in the
+  light blocks — § Themes) so the remaining native controls (date pickers,
+  scrollbars) follow whichever theme is showing; scrollbars are further
+  thinned + tinted (`--scrollbar-thumb`), the date-picker indicator gets a
+  hover, and `::selection` is accent-tinted.
 
 Don't re-add per-route `accent-color` rules on checkboxes/radios — they
 only tint the *checked* state and are redundant no-ops under the global
@@ -1102,23 +1103,89 @@ inherit it for free. Reuse these; don't re-solve them per page.
   (axe, stubs the list so the faded row is actually on screen — the route
   scan passed for years because a fresh tenant has no paused row).
 
+### Themes — dark, light, and System (docs/decisions.md §289)
+
+The web app has **two palettes and three choices**. The palette is all CSS;
+script only decides which one the page asks for.
+
+| Choice | `<html data-theme>` | What renders |
+|---|---|---|
+| System (default) | `system` | dark, unless the OS says `prefers-color-scheme: light` |
+| Light | `light` | the light palette |
+| Dark | `dark` | the dark palette |
+
+- **`src/app.css`** declares the dark palette on `:root` (it is the default,
+  and what an OS with no preference gets), the light palette on
+  `:root[data-theme='light']`, and the **same light block again** inside
+  `@media (prefers-color-scheme: light) { :root:not([data-theme='dark']) {…} }`
+  for System. CSS cannot share one declaration block between a plain selector
+  and a media-gated one, so the copy is unavoidable — `tokenPairing.test.ts`
+  fails if the two drift, if the light block misses a colour token the dark one
+  declares, or if either loses `color-scheme`. An OS that changes theme while
+  the page is open switches it with no script at all.
+- **`src/app.html`** carries a tiny inline script that reads the stored choice
+  and sets `data-theme` **before first paint**, so a Light user never sees a
+  dark frame (the SPA's own CSS and JS arrive later). It cannot import the
+  module below, so it repeats three facts from it — the storage key, the three
+  values, the two `theme-color`s — and `src/lib/theme.test.ts` *executes* the
+  script against every stored value × OS preference to hold it to them.
+- **`src/lib/theme.ts`** (pure) + **`stores/theme.svelte.ts`** (rune wrapper)
+  own the choice: read / write `localStorage` key `feoh_theme` (System is
+  stored as no entry), resolve the palette that is showing, set
+  `<meta name="theme-color">`. **Every storage access is wrapped** — storage
+  throws in some private modes and with blocked site data, and the page falls
+  back to System rather than failing. Only non-CSS consumers need
+  `theme.resolved` (the hCaptcha widget on `/signup`, which is an iframe and
+  cannot see our palette).
+- **The control** is `/profile?section=appearance` — `ui/SegmentedControl` (a
+  fieldset of native radios). It is per browser, like the display language,
+  and listed on the Cookie Notice (`feoh_theme`).
+- **What follows the theme:** the signed-in app, the auth shell (`AuthShell`,
+  signup, MFA, reset), the supplier portal, the help centre and the legal
+  pages. **What does not:** the marketing landing page (`Landing` and the
+  components only it renders — `Pricing`, `HeroPipeline`, `AdapterRail`). Its
+  rendered ornament, grain and glass panels were designed on navy, so its root
+  carries `data-theme-scope="dark"`, which `app.css` includes in the dark
+  palette's selector list: custom properties inherit, so redeclaring the dark
+  tokens on that element pins the whole subtree. The light audit skips those
+  four files; `tokenPairing.test.ts` proves each is rendered only inside the
+  pinned root, so a component cannot be pinned and then reused elsewhere.
+- **A new colour token goes in both palettes**, measured in both. The light
+  base tokens are deliberately darker than the bare-surface bar needs: ~40
+  rules set a base token as text on a 10–20% tint of its own hue, and each base
+  token clears its own 20% tint.
+- **The one runtime hole is the white-label accent.** A tenant's brand
+  `--accent` is written inline on `<html>`, so it applies in both themes, and a
+  blue picked for navy is ~3:1 as text on white. Tracked in
+  `docs/followups.md`.
+
 ### Colour tokens and contrast (WCAG 1.4.3)
 
-The palette in `src/app.css` `:root` is small and every colour token has a
-**stated job**. They come in families, and picking the wrong member is the one
-mistake this codebase kept making:
+The palette in `src/app.css` is small and every colour token has a **stated
+job**. They come in families, and picking the wrong member is the one mistake
+this codebase kept making. Values below are dark / light (§ Themes):
 
-| Base token — text / icons / borders on a dark surface | `-strong` companion — the FILL behind white text | `-tint` / `-on-tint` pair — the status-badge recipe |
+| Base token — text / icons / borders on an app surface | `-strong` companion — the FILL behind white text | `-tint` / `-on-tint` pair — the status-badge recipe |
 |---|---|---|
-| `--accent` `#638cff` | `--accent-strong` `#3f5fd6` | `--accent-tint` + `--accent-on-tint` `#7d9bff` |
-| `--success` `#1fa86a` | `--success-strong` `#177a4d` | `--success-tint` + `--success-on-tint` `#26b977` |
-| `--danger` `#f87171` | `--danger-strong` `#c43535` | `--danger-tint` + `--danger-on-tint` `#f87171` |
-| — | — | `--warning-tint` + `--warning-on-tint` `#dca014` |
-| `--text-muted` `#8a8fa0` | — | `--muted-tint` + `--muted-on-tint` `#9aa0b2` |
+| `--accent` `#638cff` / `#2c4fc4` | `--accent-strong` `#3f5fd6` / `#2546b0` | `--accent-tint` + `--accent-on-tint` `#7d9bff` / `#2a47b0` |
+| `--success` `#1fa86a` / `#11663a` | `--success-strong` `#177a4d` / `#0f5e35` | `--success-tint` + `--success-on-tint` `#26b977` / `#0f5c34` |
+| `--danger` `#f87171` / `#a82622` | `--danger-strong` `#c43535` / `#9c221e` | `--danger-tint` + `--danger-on-tint` `#f87171` / `#a3221f` |
+| `--warning` `#d4940a` / `#7f5400` | — (nothing puts white text on amber) | `--warning-tint` + `--warning-on-tint` `#dca014` / `#7a4c00` |
+| `--text-muted` `#8a8fa0` / `#5a6072` | — | `--muted-tint` + `--muted-on-tint` `#9aa0b2` / `#454a59` |
+| — | — | `--violet-tint` + `--violet-on-tint` `#a585f5` / `#5a36b5` (the "with the ERP" pill) |
 
-- **Never put white text on a base token.** All three are mid-tones chosen to
-  be legible *as text on the dark surfaces*; white on them is 3.06–3.12:1,
-  well under the 4.5:1 bar. That is what the `-strong` half is for, and it is
+Chrome tokens with no text on them: `--border-strong` (a hover edge),
+`--border-soft` (a dialog's edge), `--overlay` (the dimmed page behind a
+modal), `--scrollbar-thumb` / `--scrollbar-thumb-hover`. A tone-tinted
+background is written `color-mix(in srgb, var(--<tone>) N%, transparent)`,
+never an `rgba()` of today's hex — the audit resolves that `color-mix()`
+spelling (and the opaque two-colour form) so it is measured like the literal it
+replaced.
+
+- **Never put white text on a base token.** In the dark theme all three are
+  mid-tones chosen to be legible *as text on the dark surfaces*; white on them
+  is 3.06–3.12:1, well under the 4.5:1 bar. In the light theme they happen to
+  carry white, but a stylesheet serves both themes, so the rule stands. That is what the `-strong` half is for, and it is
   the only thing it is for — `--danger-strong` as *text* on `--surface` would
   be unreadable in the other direction.
 - **A tinted badge takes the `-on-tint` text, never the base token.** A
@@ -1130,9 +1197,10 @@ mistake this codebase kept making:
   nothing else; the pair is calibrated together and carries ≥0.7 of margin on
   both `--bg` and `--surface`. `--danger-on-tint` equals `--danger` on purpose
   — red needs no lift — so that the rule has no exception to remember.
-- **`--surface-2` `#232b44` is the hostile surface.** Only `--text` clears
-  4.5:1 on it (11.0:1). `--text-muted` is 4.34:1 there — the failure the axe
-  guard originally caught. Muted text belongs on `--bg` or `--surface`.
+- **`--surface-2` `#232b44` is the hostile surface** (dark theme). Only `--text`
+  clears 4.5:1 on it (11.0:1). `--text-muted` is 4.34:1 there — the failure the
+  axe guard originally caught. Muted text belongs on `--bg` or `--surface`; the
+  light palette happens to admit it, but design to the dark refusal.
 - **Never write a `var(--token, fallback)` fallback.** Every token above is
   declared, so the fallback is dead code that becomes the *wrong colour* the
   day a token is renamed. `--surface-2` shipped for months as
@@ -1150,7 +1218,7 @@ mistake this codebase kept making:
 Two guards enforce it, and neither subsumes the other:
 
 - **`src/lib/a11y/tokenPairing.test.ts`** (vitest, no browser) scans **every**
-  stylesheet in `src/` — `app.css` plus every `<style>` block — for a rule that
+  stylesheet in `src/`, **once per theme** — `app.css` plus every `<style>` block — for a rule that
   sets both `color` and a `background`, resolves both through the palette, and
   fails below 4.5:1 (3:1 when the rule itself declares a large-text size). It
   also fails a bare literal `color:` that can't clear the bar on `--bg` or
@@ -1166,7 +1234,8 @@ Two guards enforce it, and neither subsumes the other:
   asserts each `-tint` / `-on-tint` pair directly, so a tone that drifts names
   one token instead of the dozen sites that spelled it. Pure scanners live in
   `a11y/cssAudit.ts`; the WCAG math in `a11y/contrast.ts`.
-- **`tests-e2e/a11y/axe.spec.ts`** covers what the scanner deliberately can't:
+- **`tests-e2e/a11y/axe.spec.ts`** (dark) and **`light-theme.spec.ts`** (light, a
+  cross-section of the same surfaces) cover what the scanner deliberately can't:
   a rule setting only `color` inherits its background through the cascade at
   runtime, and an **ancestor's** `opacity` fades a descendant the scan reads as
   fine (a revoked-row fade put `/admin/api-keys`' status pill at 2.44:1). Add a

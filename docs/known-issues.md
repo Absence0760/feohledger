@@ -5,8 +5,9 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Six entries are open**: the remove-tenant backup deletion the VM's IAM role
-refuses (found 2026-10-18, at the top),
+**Seven entries are open**: the app rendering nothing when browser storage is
+blocked (found 2026-10-20, at the top), the remove-tenant backup deletion the
+VM's IAM role refuses (found 2026-10-18),
 the expense-report Attach dead end found while
 writing the help centre, the `all`-mode approval-chain segregation deadlock,
 the legal-contents smooth-scroll race and the e2e cleanup race directly below,
@@ -25,7 +26,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Nineteen of the twenty-five `##`
+refuses to start against a stale database. Nineteen of the twenty-six `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included,
 and later "seventeen of the twenty-four" while nineteen were struck.)
@@ -48,6 +49,41 @@ is worse than one with an entry in it.)
 a credential, an operator step on merged code, or sized-but-unstarted work —
 goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
+
+---
+
+## The app renders nothing when the browser blocks site storage
+
+**Found 2026-10-20**, building the light theme (decisions §289), whose own
+storage access is wrapped and was being tested for exactly this case.
+
+**Symptom.** With `localStorage` unavailable — the property access throws a
+`SecurityError`, as it does when a browser blocks site data for the origin and
+in some sandboxed frames — `/login` never draws its form: the page stays on the
+empty shell and the console shows an uncaught `SecurityError`. Reproduced on
+`main` (a pre-existing defect, not introduced by the theme work) with a
+Playwright init script that redefines `window.localStorage` as a throwing
+getter. The theme itself still resolves correctly in that state: the
+`app.html` pre-paint script and `src/lib/theme.ts` both catch it and fall back
+to System.
+
+**Root cause.** Several boot-path storage reads are unguarded:
+`src/lib/api.ts` `getToken()` / `setToken()` / `clearToken()`,
+`src/lib/entity.ts` (the selected-entity read and write), and
+`src/lib/portalApi.ts`'s token helpers. Any of them reached during layout boot
+throws out of the effect that decides what to render. `i18n/store.svelte.ts`,
+`ConsentBanner.svelte` and the theme store already wrap theirs.
+
+**Blast radius.** A visitor whose browser blocks storage for the site cannot
+use the app at all, and gets no message saying why. It needs storage to hold a
+session, so it could never work fully — but it should say so rather than render
+a blank page.
+
+**Fix approach.** Route every storage access through one wrapped helper (the
+`browserStorage()` shape in `src/lib/theme.ts` is the model), treat "no
+storage" as "signed out", and have `/login` show a localized "this browser is
+blocking site storage, which signing in needs" notice. Guard with an e2e spec
+that installs the throwing getter and asserts the notice renders.
 
 ---
 
