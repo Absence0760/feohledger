@@ -1780,6 +1780,14 @@ async def void_payment(
             action_name="invoice.voided_return_to_approved",
             details={"void_reason": body.reason, "payment_id": str(payment.id)},
         )
+        # Back in the queue: a bank change approved since this payment was made
+        # re-points the re-payment, and that change could not flag the invoice
+        # while it was paid. Same flag, same SoD stamp (decisions §286).
+        from app.api.vendors import reflag_voided_invoice_for_bank_change
+
+        await reflag_voided_invoice_for_bank_change(
+            db, invoice=invoice, paid_since=payment.created_at
+        )
 
     from app.services.audit_dispatch import dispatch_audit
 

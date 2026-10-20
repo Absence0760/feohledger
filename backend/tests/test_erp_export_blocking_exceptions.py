@@ -1018,3 +1018,130 @@ async def test_a_bank_change_flags_sent_to_erp_but_not_paid_or_a_failed_extracti
     assert [r.status for r in await _rows(mk, sent, "fraud_flag")] == ["open"]
     assert await _rows(mk, paid, "fraud_flag") == []
     assert await _rows(mk, extraction_failed, "fraud_flag") == []
+
+
+async def _paid_invoice_with_payment(mk, org_id, *, creator_id):
+    """A `paid` invoice for its own vendor, and the completed payment that paid it."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.payment import Payment, PaymentRun
+    from app.models.vendor import Vendor
+
+    inv_id = await _seed(
+        mk, org_id, number=f"VOID-{uuid.uuid4().hex[:6]}", status=InvoiceStatus.paid
+    )
+    pay_id = uuid.uuid4()
+    async with mk() as s:
+        vendor = Vendor(id=uuid.uuid4(), organization_id=org_id, name="Void Bank Co")
+        s.add(vendor)
+        await s.flush()
+        inv = await s.get(Invoice, inv_id)
+        inv.vendor_id = vendor.id
+        run = PaymentRun(
+            organization_id=org_id,
+            status="completed",
+            total_amount=inv.amount,
+            initiated_by=creator_id,
+            requires_cfo_approval=False,
+        )
+        s.add(run)
+        await s.flush()
+        s.add(
+            Payment(
+                id=pay_id,
+                invoice_id=inv_id,
+                payment_run_id=run.id,
+                amount=inv.amount,
+                method="ach",
+                status="completed",
+                correlation_id=inv.correlation_id,
+                created_at=datetime.now(UTC) - timedelta(days=2),
+            )
+        )
+        await s.commit()
+    return inv_id, pay_id, vendor.id
+
+
+async def _approved_bank_change(mk, org_id, vendor_id, *, reviewer_id, days_ago: int) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.vendor_change_request import VendorChangeRequest
+
+    async with mk() as s:
+        s.add(
+            VendorChangeRequest(
+                vendor_id=vendor_id,
+                organization_id=org_id,
+                requested_by_user_id=uuid.uuid4(),
+                change_type="bank_details",
+                status="approved",
+                proposed_value={"bank_details": {}},
+                reviewed_by_user_id=reviewer_id,
+                reviewed_at=datetime.now(UTC) - timedelta(days=days_ago),
+            )
+        )
+        await s.commit()
+
+
+async def _void_payment(realdb, pay_id, org_id, actor_id):
+    from types import SimpleNamespace
+
+    from app.api.payments import VoidPaymentRequest, void_payment
+
+    async with realdb.sessionmaker(TENANT)() as db:
+        await void_payment(
+            payment_id=pay_id,
+            body=VoidPaymentRequest(reason="sent twice"),
+            db=db,
+            org=SimpleNamespace(
+                id=org_id,
+                name="PyTest",
+                slug="pytesta",
+                settings={"payments": {"provider": "mock"}},
+            ),
+            user=SimpleNamespace(id=actor_id, full_name="Void Tester", roles=["admin"]),
+            entity_id=None,
+        )
+
+
+async def test_voiding_a_payment_made_before_a_bank_change_reflags_the_invoice(realdb, dispatched):
+    """The change skipped the invoice while it was `paid` (nothing left to stop).
+    The void sends it back to `approved`, and the re-payment would go to the
+    NEW account — so the void raises the flag the change would have, stamped
+    with the change's approver so that person cannot clear it themselves."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id, pay_id, vendor_id = await _paid_invoice_with_payment(
+        mk, info.org_id, creator_id=info.users["admin"]
+    )
+    await _approved_bank_change(
+        mk, info.org_id, vendor_id, reviewer_id=info.users["ap_manager"], days_ago=1
+    )
+
+    await _void_payment(realdb, pay_id, info.org_id, info.users["admin"])
+
+    async with mk() as s:
+        assert (await s.get(Invoice, inv_id)).status == InvoiceStatus.approved
+    flags = await _rows(mk, inv_id, "fraud_flag")
+    assert [(f.status, f.raised_by_user_id) for f in flags] == [("open", info.users["ap_manager"])]
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    _assert_refusal(res, "fraud_flag")
+    assert dispatched == []
+
+
+async def test_voiding_a_payment_made_after_the_bank_change_raises_nothing(realdb):
+    """A change approved BEFORE the payment was already the destination that
+    payment used; voiding it re-pays the same account, so no flag."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id, pay_id, vendor_id = await _paid_invoice_with_payment(
+        mk, info.org_id, creator_id=info.users["admin"]
+    )
+    await _approved_bank_change(
+        mk, info.org_id, vendor_id, reviewer_id=info.users["ap_manager"], days_ago=5
+    )
+
+    await _void_payment(realdb, pay_id, info.org_id, info.users["admin"])
+
+    assert await _rows(mk, inv_id, "fraud_flag") == []

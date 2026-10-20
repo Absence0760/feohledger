@@ -20,7 +20,10 @@ from fastapi import HTTPException
 # These tests drive the payment money paths over a hand-built `AsyncMock`
 # session, which cannot model the invoice lock's SAVEPOINT-scoped bound — see
 # the `mock_session_lock_wait` fixture in conftest.py.
-pytestmark = pytest.mark.usefixtures("mock_session_lock_wait")
+# `provider_store_from_settings`: the void reads the payments block through the
+# sealed-credential store, which a mocked session cannot answer — without it the
+# read fell through to the real control engine, bound to an earlier test's loop.
+pytestmark = pytest.mark.usefixtures("mock_session_lock_wait", "provider_store_from_settings")
 
 
 def _db_returning_scalar(value):
@@ -207,6 +210,10 @@ async def test_void_payment_returns_invoice_to_approved_via_transition_invoice()
             new_callable=AsyncMock,
             return_value=[],
         ),
+        # The bank-change re-flag queries vendor change requests, which this
+        # mock session doesn't model either; it is pinned against a real DB in
+        # test_erp_export_blocking_exceptions.py.
+        patch("app.api.vendors.reflag_voided_invoice_for_bank_change", new_callable=AsyncMock),
     ):
         ti.return_value = invoice
         da.return_value = None
@@ -301,6 +308,10 @@ async def test_void_audit_records_real_previous_status_and_decimal_amount():
             new_callable=AsyncMock,
             return_value=[],
         ),
+        # The bank-change re-flag queries vendor change requests, which this
+        # mock session doesn't model either; it is pinned against a real DB in
+        # test_erp_export_blocking_exceptions.py.
+        patch("app.api.vendors.reflag_voided_invoice_for_bank_change", new_callable=AsyncMock),
     ):
         ti.return_value = invoice
         da.return_value = None

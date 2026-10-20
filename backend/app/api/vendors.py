@@ -340,9 +340,6 @@ async def _flag_payable_invoices_for_bank_change(
     implicated-actor set cannot reach this case: the approver is not the
     uploader of the invoices the change re-points.
     """
-    from app.models.exception import Exception as APException
-    from app.services.exception_service import create_exception
-
     invoices = (
         (
             await db.execute(
@@ -364,28 +361,69 @@ async def _flag_payable_invoices_for_bank_change(
         .all()
     )
     for inv in invoices:
-        # De-dupe: don't pile a second open fraud_flag on the same invoice.
-        existing = (
-            await db.execute(
-                select(func.count()).where(
-                    APException.invoice_id == inv.id,
-                    APException.exception_type == "fraud_flag",
-                    APException.status.in_(["open", "escalated"]),
-                )
+        await flag_invoice_for_bank_change(db, invoice=inv, actor_id=actor_id)
+
+
+async def flag_invoice_for_bank_change(
+    db: AsyncSession, *, invoice: Invoice, actor_id: uuid.UUID | None
+) -> None:
+    """Open the bank-change ``fraud_flag`` on ONE invoice, unless an open or
+    escalated one is already there. ``actor_id`` is the bank change's approver
+    (``raised_by_user_id`` — see `_flag_payable_invoices_for_bank_change`)."""
+    from app.models.exception import Exception as APException
+    from app.services.exception_service import create_exception
+
+    existing = (
+        await db.execute(
+            select(func.count()).where(
+                APException.invoice_id == invoice.id,
+                APException.exception_type == "fraud_flag",
+                APException.status.in_(["open", "escalated"]),
             )
-        ).scalar() or 0
-        if existing:
-            continue
-        await create_exception(
-            db,
-            exception_type="fraud_flag",
-            severity="error",
-            description="Vendor bank details changed; verify before payment.",
-            status="open",
-            organization_id=inv.organization_id,
-            invoice=inv,
-            raised_by_user_id=actor_id,
         )
+    ).scalar() or 0
+    if existing:
+        return
+    await create_exception(
+        db,
+        exception_type="fraud_flag",
+        severity="error",
+        description="Vendor bank details changed; verify before payment.",
+        status="open",
+        organization_id=invoice.organization_id,
+        invoice=invoice,
+        raised_by_user_id=actor_id,
+    )
+
+
+async def reflag_voided_invoice_for_bank_change(
+    db: AsyncSession, *, invoice: Invoice, paid_since: datetime
+) -> None:
+    """A voided payment sends its invoice back to ``approved``. If the
+    vendor's bank details were changed (approved) after that payment was
+    made, the original payment went to the OLD account and the re-payment
+    would go to the new one — with no flag, because the change skipped the
+    invoice while it was ``paid`` / out of reach (`_MONEY_MOVED_STATUSES`).
+    Raise the same flag the change would have raised, stamped with that
+    change's approver (decisions §286)."""
+    if invoice.vendor_id is None:
+        return
+    change = (
+        await db.execute(
+            select(VendorChangeRequest)
+            .where(
+                VendorChangeRequest.vendor_id == invoice.vendor_id,
+                VendorChangeRequest.change_type == "bank_details",
+                VendorChangeRequest.status == "approved",
+                VendorChangeRequest.reviewed_at > paid_since,
+            )
+            .order_by(VendorChangeRequest.reviewed_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if change is None:
+        return
+    await flag_invoice_for_bank_change(db, invoice=invoice, actor_id=change.reviewed_by_user_id)
 
 
 # `sort=` allowlist for `GET /vendors` — see `api/sorting.py`. `.id` is
