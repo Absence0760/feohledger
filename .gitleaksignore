@@ -77,3 +77,11 @@ d9dc86a970108d5a9ad1238e542c0e36438f9465:backend/tests/test_email_intake_process
 # commit still carries them.
 7884d678ae81f5f8470792d5385cfc69994dcfce:backend/app/services/erp_adapters/blackbaud_fe_nxt.py:generic-api-key:32
 7884d678ae81f5f8470792d5385cfc69994dcfce:backend/app/services/erp_adapters/blackbaud_fe_nxt.py:generic-api-key:33
+
+# A synthetic WRONG password in a test, not a credential. PR #606's
+# test_signing_in_on_another_workspaces_page_is_refused posted a literal wrong
+# password to prove a bad password on another workspace's page is still the
+# plain 401; generic-api-key fires on it by entropy. A later commit builds the
+# value from the test's own password instead, so only the introducing commit
+# still carries the literal.
+58aceec2f46c494c89894ea080176d8ed9b6ac1e:backend/tests/test_email_identity_case.py:generic-api-key:224

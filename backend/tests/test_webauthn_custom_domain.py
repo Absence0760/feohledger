@@ -55,7 +55,9 @@ def _org(custom_domains=None, *, brand_extra=None):
         brand["custom_domains"] = custom_domains
     if brand_extra:
         brand.update(brand_extra)
-    return SimpleNamespace(id=uuid.uuid4(), settings={"brand": brand})
+    # Every real Organization has a slug; login compares it with the workspace
+    # the page names (`auth._refuse_other_workspace`, decisions §288).
+    return SimpleNamespace(id=uuid.uuid4(), slug="acme", settings={"brand": brand})
 
 
 def _user(org_id=None):
@@ -131,7 +133,12 @@ class _AccountDB:
     async def execute(self, stmt, *_a, **_k):
         rendered = str(stmt)
         result = MagicMock()
-        if "organizations" in rendered:
+        if rendered.lstrip().startswith("SELECT organizations.slug"):
+            # `tenant.resolve_tenant_slug_by_custom_domain`, which login asks
+            # which workspace the page's host belongs to (decisions §288). The
+            # stand-in's one org owns every host these tests use.
+            result.scalars.return_value.first.return_value = self.org.slug if self.org else None
+        elif "organizations" in rendered:
             result.scalar_one_or_none.return_value = self.org
             result.scalars.return_value.all.return_value = [self.org] if self.org else []
         elif "webauthn_credentials" in rendered:

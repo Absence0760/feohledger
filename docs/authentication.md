@@ -150,13 +150,54 @@ surfaces, through the HTTP login route).
 8. All subsequent requests include both:
    - `Authorization: Bearer <token>` header
    - `X-Tenant-Slug: <slug>` header
-9. On 401 responses, the token is cleared and the user is redirected to `/login`
+9. On a 401, or a 403 coded `token_tenant_mismatch` (a token for another
+   workspace than the page's), the token is cleared and the user is redirected
+   to `/login` — with `?reason=other_workspace` for the second, which the page
+   states (§ Signing in on another workspace's page is refused)
 
 ## Backend Implementation
 
 ### Login endpoint
 
 `POST /api/auth/login` — accepts email and password, verifies against the hashed password in the **control-plane database**. Returns either a signed JWT (`{access_token, ...}`) or, when MFA is in play, a short-lived challenge token (`{mfa_required: true, mfa_challenge_token, methods, must_enroll}`). See the **MFA** section below for the full flow. This endpoint uses `get_control_db` (not the tenant DB).
+
+### Signing in on another workspace's page is refused
+
+An email names one account in one organization, so login used to mint that
+organization's token whatever workspace page the form was on. The SPA then sent
+that page's `X-Tenant-Slug` with a token for a different org, `tenant.get_tenant`
+refused every tenant-scoped call with `403` (now coded `token_tenant_mismatch`),
+and the user sat on a signed-in screen stuck on "Loading…" (seen in
+production on 2026-10-20: an account from another workspace signed in on
+`sandbox.feohledger.com`).
+
+`POST /api/auth/login` now refuses that sign-in: when the request names a
+workspace — the `X-Tenant-Slug` header, or a registered custom domain in `Host`
+(`tenant.resolve_tenant_slug_by_custom_domain`, as `get_tenant_slug` reads it) —
+and it is not the account's own, the answer is `403` with the coded refusal
+`wrong_workspace` (`api/auth._refuse_other_workspace`), whose
+`params.sign_in_url` is the account's own sign-in page (`tenant_urls.sign_in_url`),
+plus an `auth.login.failure` / `reason=wrong_workspace` audit row. No token is
+issued. The check runs **after** the password verifies, so a wrong password
+there is still the plain `401` and the link reveals nothing the caller could not
+learn by signing in. A request naming no workspace (an API client) is
+unaffected. The login page localizes the refusal (`refusal.wrongWorkspace`,
+with the link, or `refusal.wrongWorkspaceNoLink`) and links the account's own
+sign-in page. Reasoning: [decisions.md](decisions.md) §288. Test:
+`backend/tests/test_email_identity_case.py::test_signing_in_on_another_workspaces_page_is_refused`.
+
+**Recovery for a token that is already there.** A token for another workspace
+can still reach a page some other way (one issued before this refusal, a renamed
+workspace). `get_tenant`'s refusal is coded — `403` `token_tenant_mismatch`
+(`api/refusals.TOKEN_TENANT_MISMATCH_DETAIL`) — and the SPA treats it like an
+expired session: `api.ts::endSessionIfRejected` (shared by `request()`, the blob
+downloads, the assistant stream and `api/expenses.ts`'s submit) clears the token
+and sends the user to `/login?reason=other_workspace`, which says "You were
+signed in to a different workspace. Sign in again here." It keys on the code,
+never the English (`api/sessionRejection.ts`). Tests:
+`frontend/src/lib/api/sessionRejection.test.ts`, and the journey end to end in
+`frontend/tests-e2e/auth/tenant-isolation.spec.ts` § signing in on another
+workspace's page.
 
 ### An email address is matched without regard to case
 

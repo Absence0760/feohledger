@@ -1,6 +1,4 @@
 import {
-	ACME_CFO,
-	ACME_CLERK,
 	API_BASE,
 	authedTenantHeaders,
 	deleteVendorsWhere,
@@ -212,11 +210,21 @@ test.describe('/discounts — propose a vendor-wide offer', () => {
 		await expect(page.getByTestId('bulk-negotiate-no-horizon')).toHaveCount(0);
 	});
 
-	test('a clerk and a CFO read the page but get no proposal control', async ({ page }) => {
+	test('a clerk and a CFO read the page but get no proposal control', async ({
+		page,
+		tenantClerk,
+		tenantCfo
+	}) => {
 		// Both are allowed on `/discounts` (`_READ_ROLES`); neither is in
 		// `_WRITE_ROLES`, so neither may propose. A CFO is the interesting half:
 		// they MAY accept and decline, so the two gates genuinely differ.
-		for (const creds of [ACME_CLERK, ACME_CFO]) {
+		//
+		// The worker tenant's own clerk and CFO, signed in on its own page. This
+		// used to sign acme's accounts in on the worker tenant's page, which
+		// login allowed until decisions §288; every call on the page was then
+		// refused for the token's tenant, so "no proposal control" held for a
+		// page that had loaded nothing.
+		for (const creds of [tenantClerk, tenantCfo]) {
 			await page.goto('/');
 			await signOut(page);
 			await signInAndWait(page, creds);
@@ -226,11 +234,11 @@ test.describe('/discounts — propose a vendor-wide offer', () => {
 		}
 	});
 
-	test('the endpoint itself refuses a CFO, not just the button', async ({ page }) => {
+	test('the endpoint itself refuses a CFO, not just the button', async ({ page, tenantCfo }) => {
 		// A hidden button proves nothing about the gate.
 		await page.goto('/');
 		await signOut(page);
-		await signInAndWait(page, ACME_CFO);
+		await signInAndWait(page, tenantCfo);
 		const resp = await page.request.post(`${API_BASE}/api/discounts/bulk-negotiate`, {
 			headers: await authedTenantHeaders(page),
 			data: {
@@ -239,6 +247,13 @@ test.describe('/discounts — propose a vendor-wide offer', () => {
 			}
 		});
 		// 403 before the vendor lookup — never a 404 that would confirm the id.
+		// And the ROLE refusal: a 403 for a token from another workspace
+		// (`token_tenant_mismatch`) would pass a bare status check while proving
+		// nothing about the gate — which is what this test did while it signed
+		// in acme's CFO on the worker tenant's page.
 		expect(resp.status()).toBe(403);
+		expect(((await resp.json()) as { detail?: unknown }).detail).toBe(
+			'Your role does not permit this action.'
+		);
 	});
 });

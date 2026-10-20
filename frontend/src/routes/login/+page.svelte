@@ -6,7 +6,8 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { emailFromQuery } from '#lib/utils/prefillEmail.ts';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
+	import { loginNoticeKey, ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
 	import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { SSO_PROVIDER_LABELS } from '#lib/types/ssoSettings.ts';
@@ -20,6 +21,9 @@
 	let email = $state('');
 	let password = $state('');
 	let error = $state('');
+	// The account's own sign-in page, when the server refused a sign-in made
+	// on another workspace's page (`wrong_workspace`, decisions §288).
+	let ownWorkspaceUrl = $state<string | null>(null);
 	let loading = $state(false);
 	let ssoEnabled = $state(false);
 	let ssoProviderLabel = $state<string>('');
@@ -49,6 +53,10 @@
 		// A sign-in link we built (the signup welcome email, the reset page's
 		// "go to sign in") names the account; the field is still editable.
 		email = emailFromQuery(page.url.searchParams);
+		// `api.ts` sends a session it had to end here with the reason in the
+		// URL — a token for another workspace than this page's.
+		const notice = loginNoticeKey(page.url.searchParams);
+		if (notice) error = m(notice);
 		// A tenant is configured for at most one protocol; query both and render
 		// whichever is enabled. Both are non-fatal — password login still works.
 		// On the platform apex (marketing / signup host) there is neither a slug
@@ -91,6 +99,7 @@
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
+		ownWorkspaceUrl = null;
 		loading = true;
 		try {
 			const result = await auth.login(email, password);
@@ -105,6 +114,10 @@
 			goto('/');
 		} catch (err) {
 			error = err instanceof Error ? err.message : m('auth.login.failed');
+			ownWorkspaceUrl =
+				err instanceof ApiError && err.code === 'wrong_workspace'
+					? ownWorkspaceSignInUrl(err.params)
+					: null;
 		} finally {
 			loading = false;
 		}
@@ -121,7 +134,14 @@
 
 		<div role="alert" aria-live="assertive">
 			{#if error}
-				<div class="error">{error}</div>
+				<div class="error">
+					{error}
+					{#if ownWorkspaceUrl}
+						<a class="own-workspace-link" href={ownWorkspaceUrl}>
+							{m('auth.login.goToOwnWorkspace')}
+						</a>
+					{/if}
+				</div>
 			{/if}
 		</div>
 
@@ -217,6 +237,15 @@
 	}
 	.forgot-link:hover {
 		color: var(--text);
+	}
+
+	.own-workspace-link {
+		display: block;
+		margin-top: 6px;
+		color: inherit;
+		font-weight: 600;
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
 
 	.divider {

@@ -335,6 +335,12 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
+	// `api/auth.py::_refuse_other_workspace` — signing in on another
+	// workspace's page; the link is the account's own sign-in page.
+	wrong_workspace: (p, t) => {
+		const url = str(p, 'sign_in_url');
+		return url ? t('refusal.wrongWorkspace', { url }) : t('refusal.wrongWorkspaceNoLink');
+	},
 	// `api/payments.py::_refuse_record_only` — every dispatching endpoint on a
 	// tenant whose payments are recorded, never sent. `params.reason` says why
 	// the mode resolved so; the sentence is the same for every reason.

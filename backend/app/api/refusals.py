@@ -116,3 +116,15 @@ def refuse_due_before_invoice_date(invoice_date, due_date) -> None:
                 "The due date is before the invoice date. Correct one of them.",
             ),
         )
+
+
+#: An employee token presented on another workspace's page (``tenant.get_tenant``:
+#: the token's ``org`` claim is not the requested tenant). Still a 403 and still
+#: refused; coded so the SPA can tell this from an ordinary permission refusal
+#: and treat it like an expired session — clear the token and send the user to
+#: this workspace's sign-in page — instead of leaving a signed-in screen where
+#: every call fails (production, 2026-10-20; ``docs/decisions.md`` §288).
+TOKEN_TENANT_MISMATCH = "token_tenant_mismatch"
+TOKEN_TENANT_MISMATCH_DETAIL = coded_refusal(
+    TOKEN_TENANT_MISMATCH, "Token does not match the requested tenant"
+)

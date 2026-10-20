@@ -1,7 +1,7 @@
 // Typed helpers for the expense + expense-report endpoints. All requests route
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
 // 401-bounce). Mirrors the pattern of `src/lib/api/contracts.ts`.
-import { api, formatApiDetail } from '#lib/api.ts';
+import { api, endSessionIfRejected, formatApiDetail } from '#lib/api.ts';
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
@@ -358,13 +358,14 @@ export async function submitReport(id: string): Promise<SubmitReportResult> {
 		body: JSON.stringify({})
 	});
 
-	if (res.status === 401) {
-		// Mirror the api-client stale-session bounce.
-		if (token) {
-			localStorage.removeItem('auth_token');
-			window.location.href = '/login';
+	if (res.status === 401 || res.status === 403) {
+		// Mirror the api-client session-ending bounce (expired, or a token
+		// for another workspace — `endSessionIfRejected`).
+		const body = (await res.json().catch(() => ({}))) as { detail?: unknown };
+		if ((token && endSessionIfRejected(res.status, body.detail)) || res.status === 401) {
+			throw new Error('Unauthorized');
 		}
-		throw new Error('Unauthorized');
+		throw new Error(formatApiDetail(body.detail, `API error ${res.status}`));
 	}
 
 	if (res.status === 422) {

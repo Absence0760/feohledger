@@ -49,7 +49,7 @@ See [multi-tenancy.md](multi-tenancy.md) for full details.
 4. Token is stored in `localStorage` and attached as a `Bearer` header on all requests
 5. Every request also includes `X-Tenant-Slug: acme` header
 6. Backend resolves `acme` → `feoh_acme` database and routes the query there
-7. On 401 responses, the token is cleared and the user is redirected to `/login`
+7. On a 401, or a 403 coded `token_tenant_mismatch` (a token for another workspace), the token is cleared and the user is redirected to `/login` (decisions §288)
 
 All API calls go through `src/lib/api.ts` which handles auth headers, tenant headers, error responses, and token lifecycle.
 
