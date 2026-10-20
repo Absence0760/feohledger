@@ -477,6 +477,25 @@ def test_not_connected_is_a_non_retryable_refusal(no_override):
         result = _run_with(_Qbo(), lambda: _adapter().post_invoice(_payload()))
     assert result.message == "QuickBooks Online post refused: not_connected"
     assert result.retryable is False
+    # Lost before anything was sent: this attempt left no bill.
+    assert result.not_posted is True
+
+
+def test_a_connection_lost_after_the_create_is_not_reported_as_nothing_posted(token, no_override):
+    """The bill create went out; the read-back then found the connection gone.
+    QuickBooks may hold the bill, so the outcome stays unknown."""
+    qbo = _Qbo()
+    original = qbo.request
+
+    async def lose_it_after_create(method, url, params=None, content=None, headers=None):
+        if method == "GET" and "/bill/" in url:
+            raise erp_oauth.ErpNotConnectedError("quickbooks_online")
+        return await original(method, url, params, content, headers)
+
+    qbo.request = lose_it_after_create
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    assert result.message == "QuickBooks Online post refused: not_connected"
+    assert result.not_posted is False
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +544,7 @@ def test_payload_refusals_never_call_quickbooks(token, no_override, overrides, r
     assert not result.success
     assert result.message == f"QuickBooks Online post refused: {reason}"
     assert qbo.calls == []
+    assert result.not_posted is True
 
 
 def test_doc_number_at_the_limit_is_accepted(token, no_override):

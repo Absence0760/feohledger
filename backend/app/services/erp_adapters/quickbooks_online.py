@@ -436,18 +436,22 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         return None
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
+        # Whether this attempt has sent the bill create. Until it has, any
+        # refusal — a pre-flight check, the currency read, a lost connection —
+        # leaves nothing in QuickBooks (`ErpPostResult.not_posted`).
+        self._bill_create_sent = False
         if not payload.vendor_erp_id:
-            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
+            return _nothing_posted(erp_refusal(PROVIDER, VENDOR_NOT_LINKED))
         if len(payload.invoice_number or "") > DOC_NUMBER_MAX:
-            return erp_refusal(PROVIDER, DOC_NUMBER_TOO_LONG)
+            return _nothing_posted(erp_refusal(PROVIDER, DOC_NUMBER_TOO_LONG))
         lines = self._bill_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal(PROVIDER, lines)
+            return _nothing_posted(erp_refusal(PROVIDER, lines))
 
         try:
             currency_refusal, foreign = await self._currency_check(payload.currency or "")
             if currency_refusal:
-                return erp_refusal(PROVIDER, currency_refusal)
+                return _nothing_posted(erp_refusal(PROVIDER, currency_refusal))
 
             existing = await self._find_existing(payload)
             if existing:
@@ -494,8 +498,11 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             return ErpPostResult(success=False, message=str(exc))
         except erp_oauth.ErpNotConnectedError:
             # Never connected, revoked, or past its lifetime: retrying cannot
-            # help, so the refusal is non-retryable.
-            return erp_refusal(PROVIDER, NOT_CONNECTED)
+            # help, so the refusal is non-retryable. Raised before the create
+            # was sent, it left nothing; after it (a lost read-back), unknown.
+            refused = erp_refusal(PROVIDER, NOT_CONNECTED)
+            refused.not_posted = not self._bill_create_sent
+            return refused
         except QboRequestError as exc:
             return erp_http_failure(PROVIDER, exc.status_code)
         except httpx.HTTPError:
@@ -513,6 +520,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         """
         for attempt in range(1, MAX_CREATE_ATTEMPTS + 1):
             request_id = create_attempt_key(payload.correlation_id, attempt, REQUEST_ID_MAX)
+            self._bill_create_sent = True
             resp = await self._request("POST", "bill", params={"requestid": request_id}, body=body)
             if resp.status_code != 200:
                 refused = await self._create_refusal(resp, payload, body)
@@ -832,6 +840,12 @@ def _account_code(raw: dict) -> str:
 #: when made active again.
 _DELETED_SUFFIX = " (deleted)"
 _NAME_FIELDS = ("Name", "FullyQualifiedName", "DisplayName", "CompanyName")
+
+
+def _nothing_posted(result: ErpPostResult) -> ErpPostResult:
+    """``result``, marked as one that left no bill in QuickBooks."""
+    result.not_posted = True
+    return result
 
 
 def _undeleted_all(rows: list[dict], key: Callable[[dict], str]) -> list[dict]:
