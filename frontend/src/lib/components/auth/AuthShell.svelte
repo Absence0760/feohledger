@@ -353,9 +353,15 @@
 		box-shadow: none;
 	}
 
+	/* Stacked, not a row: a banner that carries an action under its sentence
+	   (login's "go to your workspace" link) put it in a narrow column beside
+	   the text, which overflowed the box at 320px. A long unbroken token
+	   wraps rather than pushing past the edge. */
 	.form-wrap :global(:where(.error)) {
 		display: flex;
-		gap: 8px;
+		flex-direction: column;
+		gap: 6px;
+		overflow-wrap: anywhere;
 		padding: 11px 14px;
 		border-radius: 10px;
 		border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
@@ -363,5 +369,19 @@
 		color: var(--danger-on-tint);
 		font-size: 0.86rem;
 		line-height: 1.45;
+	}
+
+	/* Information, not a failure: a notice the page shows on arrival (the MFA
+	   enrolment note, login's "you were signed out" reason). Accent tint, body
+	   text, announced politely by the page's `role="status"` region. */
+	.form-wrap :global(:where(.info)) {
+		padding: 11px 14px;
+		border-radius: 10px;
+		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+		background: var(--accent-tint);
+		color: var(--text);
+		font-size: 0.85rem;
+		line-height: 1.5;
+		overflow-wrap: anywhere;
 	}
 </style>

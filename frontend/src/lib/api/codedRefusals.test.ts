@@ -115,14 +115,29 @@ describe('codedRefusalText', () => {
 		expect(codedRefusalText('erp_listing_incomplete', { provider, gap: 'other' }, enT)).toBeNull();
 	});
 
-	it('points a sign-in on the wrong workspace at the account’s own page', () => {
-		const url = 'https://signuptest.feohledger.com/login?email=a%40b.c';
-		expect(codedRefusalText('wrong_workspace', { sign_in_url: url }, enT)).toBe(
-			`This account belongs to a different workspace. Sign in at ${url}.`
+	it('points a sign-in on the wrong workspace at the account’s own workspace by host only', () => {
+		const url = 'https://example.feohledger.com/login?email=a%40b.c';
+		const text = codedRefusalText('wrong_workspace', { sign_in_url: url }, enT);
+		expect(text).toBe(
+			'This account belongs to another workspace, example.feohledger.com. Sign in there instead.'
 		);
-		expect(codedRefusalText('wrong_workspace', { sign_in_url: null }, enT)).toBe(
-			"This account belongs to a different workspace. Sign in on that workspace's own page."
+		// The link is the page's button; the sentence never repeats the URL,
+		// its query string or the (percent-encoded) address in it.
+		expect(text).not.toContain('?email=');
+		expect(text).not.toContain('a%40b.c');
+		expect(text).not.toContain('https://');
+		// A port stays: on a laptop the workspace is `acme.localhost:7777`.
+		expect(
+			codedRefusalText('wrong_workspace', { sign_in_url: 'http://acme.localhost:7777/login' }, enT)
+		).toBe('This account belongs to another workspace, acme.localhost:7777. Sign in there instead.');
+		const noLink =
+			"This account belongs to a different workspace. Sign in on that workspace's own page.";
+		expect(codedRefusalText('wrong_workspace', { sign_in_url: null }, enT)).toBe(noLink);
+		// Not an http(s) URL → nothing from it is named.
+		expect(codedRefusalText('wrong_workspace', { sign_in_url: 'javascript:alert(1)' }, enT)).toBe(
+			noLink
 		);
+		expect(codedRefusalText('wrong_workspace', { sign_in_url: 'not a url' }, enT)).toBe(noLink);
 	});
 
 	it('states the CFO gate with both figures in their own currencies', () => {
