@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 import pytest_asyncio
@@ -217,6 +218,12 @@ async def test_signing_in_on_another_workspaces_page_is_refused(
     assert "access_token" not in resp.json()
     url = detail["params"]["sign_in_url"]
     assert url is None or f"{realdb.info('a').slug}" in url
+    # The English fallback names the workspace by host, never the raw link with
+    # its percent-encoded `?email=` — that is the link's job, not the sentence's.
+    assert "?email=" not in detail["message"]
+    assert "%40" not in detail["message"]
+    if url:
+        assert urlsplit(url).netloc in detail["message"]
 
     # A wrong password on the other page is the ordinary 401: the workspace is
     # named only to someone who proved the password.
