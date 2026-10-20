@@ -12545,7 +12545,7 @@ through CSS alone, the keyboard model of the picker, and axe in light mode on
 a cross-section of the signed-in app, the portal, the auth shell, the help
 centre and the legal pages).
 
-## 292. One address is one account in one workspace, and every collision says so (2026-10-20)
+## 291. One address is one account in one workspace, and every collision says so (2026-10-20)
 
 **Found by the admin persona review.** `users.email` is globally unique, so an
 address names one account in one workspace and there is no multi-workspace

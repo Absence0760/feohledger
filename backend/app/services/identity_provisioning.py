@@ -67,7 +67,7 @@ class EmailInOtherWorkspace(ValueError):
     a second account for it. Before this was detected, the insert tripped the
     UNIQUE constraint at flush and both SSO callbacks answered a bare 500 with
     no audit row, so neither the person signing in nor this workspace's admin
-    could tell what had happened (`docs/decisions.md` §292).
+    could tell what had happened (`docs/decisions.md` §291).
 
     Carries nothing: not the other account's id, not its workspace. The caller
     audits into the workspace the IdP belongs to, whose admin must not learn

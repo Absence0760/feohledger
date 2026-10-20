@@ -6113,7 +6113,7 @@ export const messages = {
 	'refusal.commerceSyncNotFound': "Bestandsabgleich nicht gefunden.",
 	'refusal.commerceUnknownEntity': "Eine zugeordnete Tochtergesellschaft existiert nicht.",
 	'refusal.commerceUnknownProvider': "Diese Commerce-Plattform wird nicht unterstützt.",
-	// One address, one account, one workspace (decisions §292): an SSO sign-in
+	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Diese E-Mail-Adresse gehört bereits zu einem Konto in einem anderen Workspace und kann sich hier nicht anmelden. Melden Sie sich auf der Seite Ihres eigenen Workspace an, oder bitten Sie die Administration dieses Workspace, Ihren Identitätsanbieter eine andere Adresse verwenden zu lassen.",
 	'refusal.emailInThisWorkspace': "In diesem Workspace gibt es bereits einen Benutzer mit dieser E-Mail-Adresse.",

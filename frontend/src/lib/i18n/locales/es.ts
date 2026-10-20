@@ -6136,7 +6136,7 @@ export const messages = {
 	'refusal.commerceSyncNotFound': "No se encontró la sincronización de inventario.",
 	'refusal.commerceUnknownEntity': "Una filial asignada no existe.",
 	'refusal.commerceUnknownProvider': "Esa plataforma de comercio no es compatible.",
-	// One address, one account, one workspace (decisions §292): an SSO sign-in
+	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Esta dirección de correo ya pertenece a una cuenta de otro espacio de trabajo, por lo que no puede iniciar sesión aquí. Inicie sesión en la página de su propio espacio de trabajo o pida al administrador de este espacio de trabajo que su proveedor de identidad use otra dirección.",
 	'refusal.emailInThisWorkspace': "Ya existe un usuario con esta dirección de correo en este espacio de trabajo.",

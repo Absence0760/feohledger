@@ -40,7 +40,7 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-20 — the cross-workspace identity fixes (decisions
-§292) opened two (c) entries, multi-workspace membership and the SAML ACS's
+§291) opened two (c) entries, multi-workspace membership and the SAML ACS's
 other refusals still landing as raw JSON, taking the file from 115 → 117.
 Before that, 2026-10-20 — the light theme (decisions §289) opened one
 (c) entry, a white-label accent left unchecked as text on the light surfaces,
@@ -1815,13 +1815,13 @@ scope (§260) — do not fold them into any of these.
       surfaces. **Trigger:** the first tenant that sets a brand accent, or any
       white-label sale.
 
-### Surfaced by the cross-workspace identity fixes (2026-10-20, decisions §292)
+### Surfaced by the cross-workspace identity fixes (2026-10-20, decisions §291)
 
 - [ ] **(c) Multi-workspace membership: one person cannot belong to two
       workspaces.** `users.email` is globally unique and `User.organization_id`
       is one column, so an auditor, a bookkeeper serving several clients or a
       contractor in two customers' IdPs needs a separate address per workspace.
-      §292 made every collision a stated, coded refusal (admin create/rename,
+      §291 made every collision a stated, coded refusal (admin create/rename,
       SCIM, SSO/SAML JIT) and budgeted the admin path's existence signal, but
       the signal itself remains for as long as the address is global, and the
       person's only way forward is another address. **Durable fix:** split

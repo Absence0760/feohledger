@@ -240,7 +240,7 @@ async def test_signing_in_on_another_workspaces_page_is_refused(
 
 # ---------------------------------------------------------------------------
 # One address, one account, one workspace — the cross-workspace collisions
-# (decisions §292). `users.email` is globally unique, so every path that would
+# (decisions §291). `users.email` is globally unique, so every path that would
 # create or rename an account onto an address held in ANOTHER workspace must
 # refuse in words, never trip the UNIQUE constraint into a 500.
 # ---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ async def test_oidc_callback_refuses_and_audits_in_the_idp_workspace(
     realdb, mixed_case_user, monkeypatch
 ):
     """End to end through `sso_callback` with the IdP legs stubbed and the real
-    `jit_provision` against Postgres: a coded 403 (no link — §292), one
+    `jit_provision` against Postgres: a coded 403 (no link — §291), one
     `auth.sso.login.failure` row in workspace B, none in A, no account."""
     from app.api import auth_sso
 
@@ -514,7 +514,7 @@ async def test_wrong_workspace_audit_names_the_page_and_the_verified_password(
 ):
     """The account's workspace gets the row, with the workspace whose page it
     was and the fact that the password verified; the attempted workspace gets
-    nothing (§292)."""
+    nothing (§291)."""
     from app.api import auth as auth_api
 
     _user_id, email = await mixed_case_user()  # held in A

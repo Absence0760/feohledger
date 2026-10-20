@@ -187,7 +187,7 @@ auditor can tell a confused user from someone who already holds the password
 and is trying it on another host. The attempted workspace gets **no** row: it
 holds no account, and since an unknown address leaves no row anywhere, a row
 there only when the password was right would make its audit log an oracle for
-"this address has an account" ([decisions.md](decisions.md) §292). No token is
+"this address has an account" ([decisions.md](decisions.md) §291). No token is
 issued. The check runs **after** the password verifies, so a wrong password
 there is still the plain `401` and the link reveals nothing the caller could not
 learn by signing in. A request naming no workspace (an API client) is
@@ -1910,7 +1910,7 @@ would name another tenant's workspace for any address they typed. The bare
 "this address is taken" it does reveal is what `POST /api/admin/users` already
 tells the same admin. Nothing is written to the other workspace's audit log,
 which this IdP's admin must not be able to write into. Reasoning:
-[decisions.md](decisions.md) §292. Tests:
+[decisions.md](decisions.md) §291. Tests:
 `backend/tests/test_email_identity_case.py` (JIT, the race, the OIDC callback)
 and `backend/tests/test_saml_acs_integration.py` (the ACS → bridge → exchange
 round trip).

@@ -486,7 +486,7 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
         # error this endpoint returns for every rejection.
         raise await _fail("inactive") from exc
     except EmailInOtherWorkspace:
-        # The address names an account in another workspace (decisions §292).
+        # The address names an account in another workspace (decisions §291).
         # Audited in THIS workspace — the one whose IdP asserted it — with the
         # same PII-free details as every other SAML failure row. Unlike the
         # generic rejections above, this one is the user's to act on, so it is

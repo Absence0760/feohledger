@@ -279,7 +279,7 @@ test.describe('signing in on another workspace’s page', () => {
 		await page.evaluate((t) => localStorage.setItem('auth_token', t), techflowToken);
 
 		// The token is still a live session in techflow; the SPA revokes it
-		// there on the way out (decisions §292), with the token alone — not
+		// there on the way out (decisions §291), with the token alone — not
 		// acme's slug, which is what caused the refusal.
 		const revocation = page.waitForRequest(
 			(r) => new URL(r.url()).pathname === '/api/auth/logout' && r.method() === 'POST'

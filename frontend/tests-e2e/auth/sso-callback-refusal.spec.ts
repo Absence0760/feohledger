@@ -5,7 +5,7 @@ test.use({ storageState: { cookies: [], origins: [] } });
 
 /**
  * An SSO sign-in whose IdP asserted an address that already has an account in
- * another workspace (docs/decisions.md §292). It used to be a bare 500 from the
+ * another workspace (docs/decisions.md §291). It used to be a bare 500 from the
  * UNIQUE on `users.email`; the backend now answers the OIDC callback, and the
  * SAML bridge's code exchange, with a coded 403 `sso_email_in_other_workspace`.
  *

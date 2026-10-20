@@ -423,7 +423,7 @@ def _authorize_target_mutation(caller: User, target: User) -> None:
 #: self-signup tenant. Generous for a real admin (inviting someone already on
 #: the platform is occasional), tight for a sweep. Per WORKSPACE rather than per
 #: user, so minting extra user-managers does not widen it. `docs/decisions.md`
-#: §292.
+#: §291.
 EMAIL_COLLISION_SCOPE = "admin_email_other_workspace"
 EMAIL_COLLISION_LIMIT = 20
 EMAIL_COLLISION_WINDOW_SECONDS = 3600

@@ -453,7 +453,7 @@ async def _refuse_other_workspace(
     # never reaches here — it is the ordinary `bad_password` row). The email is
     # the same field every `auth.login.failure` row already carries.
     #
-    # The attempted workspace gets no row of its own (decisions §292): it holds
+    # The attempted workspace gets no row of its own (decisions §291): it holds
     # no account here, the event is the account's, and an unknown address
     # leaves no row anywhere — so a row there ONLY when the password was right
     # would turn that workspace's audit log into an oracle for "this address

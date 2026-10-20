@@ -246,7 +246,7 @@ async def test_acs_unknown_relaystate_is_generic_400(saml_wired):
 
 async def test_acs_address_in_another_workspace_lands_on_the_bridge_coded(saml_wired, monkeypatch):
     """The asserted address names an account in another workspace (decisions
-    §292). Not raw JSON at the ACS and not a 500: a 303 to the bridge with a
+    §291). Not raw JSON at the ACS and not a 500: a 303 to the bridge with a
     one-time code, which `/exchange` answers with the coded 403 and no token,
     plus one PII-free failure row in THIS workspace."""
     from app.services.identity_provisioning import EmailInOtherWorkspace

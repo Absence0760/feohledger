@@ -6041,7 +6041,7 @@ export const messages = {
 	'refusal.commerceSyncNotFound': "在庫同期が見つかりません。",
 	'refusal.commerceUnknownEntity': "割り当てた子会社が存在しません。",
 	'refusal.commerceUnknownProvider': "そのコマースプラットフォームには対応していません。",
-	// One address, one account, one workspace (decisions §292): an SSO sign-in
+	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "このメールアドレスは別のワークスペースのアカウントで既に使用されているため、ここではサインインできません。ご自身のワークスペースのページでサインインするか、このワークスペースの管理者に、ID プロバイダーが別のアドレスを使うよう依頼してください。",
 	'refusal.emailInThisWorkspace': "このメールアドレスのユーザーは、このワークスペースに既に存在します。",
