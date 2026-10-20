@@ -6137,7 +6137,7 @@ export const messages = {
 	'refusal.commerceSyncNotFound': "Sincronização de estoque não encontrada.",
 	'refusal.commerceUnknownEntity': "Uma subsidiária mapeada não existe.",
 	'refusal.commerceUnknownProvider': "Essa plataforma de comércio não é compatível.",
-	// One address, one account, one workspace (decisions §290): an SSO sign-in
+	// One address, one account, one workspace (decisions §292): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Este endereço de e-mail já pertence a uma conta de outro espaço de trabalho, então não pode entrar aqui. Entre pela página do seu próprio espaço de trabalho ou peça ao administrador deste espaço de trabalho que seu provedor de identidade use outro endereço.",
 	'refusal.emailInThisWorkspace': "Já existe um usuário com este endereço de e-mail neste espaço de trabalho.",

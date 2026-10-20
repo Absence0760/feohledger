@@ -372,7 +372,7 @@ async def sso_callback(
         # one account. Audited HERE, in the workspace whose IdP asserted it —
         # its admin is the one who can act (have the IdP send another address)
         # — and never in the other workspace's log, which this IdP's admin must
-        # not be able to write into by typing addresses (decisions §290). The
+        # not be able to write into by typing addresses (decisions §292). The
         # email rides along as on `domain_blocked`, the OIDC rows' convention.
         await dispatch_auth_audit(
             organization_id=org.id,

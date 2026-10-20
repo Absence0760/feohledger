@@ -6339,7 +6339,7 @@ export const en = {
 	'refusal.commerceSyncNotFound': "Inventory sync not found.",
 	'refusal.commerceUnknownEntity': "A mapped subsidiary does not exist.",
 	'refusal.commerceUnknownProvider': "That commerce platform is not supported.",
-	// One address, one account, one workspace (decisions §290): an SSO sign-in
+	// One address, one account, one workspace (decisions §292): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "This email address already belongs to an account in another workspace, so it can't sign in here. Sign in on your own workspace's page, or ask this workspace's administrator to have your identity provider use a different address.",
 	'refusal.emailInThisWorkspace': "A user with this email address already exists in this workspace.",

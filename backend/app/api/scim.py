@@ -203,7 +203,7 @@ async def _refuse_taken_username(
     provisioning log needs different actions: a user already in this workspace
     is a matching problem, one in ANOTHER workspace is a dead end until the
     person is provisioned with a different address. Neither names the other
-    workspace or account (`docs/decisions.md` §290). Case-insensitive too: an
+    workspace or account (`docs/decisions.md` §292). Case-insensitive too: an
     IdP pushing `jane@acme.com` for an admin-created `Jane@Acme.com` is the same
     person, and missing that provisioned a duplicate whose later deprovision
     left the original active.

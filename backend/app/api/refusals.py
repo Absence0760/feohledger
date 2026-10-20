@@ -134,7 +134,7 @@ TOKEN_TENANT_MISMATCH_DETAIL = coded_refusal(
 #: an account in ANOTHER workspace (``identity_provisioning.EmailInOtherWorkspace``).
 #: ``users.email`` is globally unique, so this workspace cannot create a second
 #: account for it; before this was coded the insert raised at flush and both
-#: callbacks answered a bare 500 (``docs/decisions.md`` §290). A 403 with no
+#: callbacks answered a bare 500 (``docs/decisions.md`` §292). A 403 with no
 #: params: deliberately no link to the account's own sign-in page, because this
 #: workspace's IdP — which its own admin controls — can assert any address, so
 #: a link would hand that admin the name of another tenant's workspace for any
@@ -157,7 +157,7 @@ EMAIL_IN_THIS_WORKSPACE_DETAIL = coded_refusal(
 #: The same writes with an address an account in ANOTHER workspace holds. A 409
 #: that names no workspace and no account — only that the address is taken and
 #: what to do instead, since one address is one account in one workspace
-#: (``docs/decisions.md`` §290).
+#: (``docs/decisions.md`` §292).
 EMAIL_IN_OTHER_WORKSPACE = "email_in_other_workspace"
 EMAIL_IN_OTHER_WORKSPACE_DETAIL = coded_refusal(
     EMAIL_IN_OTHER_WORKSPACE,
@@ -168,7 +168,7 @@ EMAIL_IN_OTHER_WORKSPACE_DETAIL = coded_refusal(
 #: The admin path's other-workspace budget is spent (``admin.EMAIL_COLLISION_LIMIT``
 #: an hour per workspace). A 429 for every create / email rename, free addresses
 #: included, until the window rolls — refusing only taken ones would make the
-#: 429 itself the oracle the budget bounds (``docs/decisions.md`` §290).
+#: 429 itself the oracle the budget bounds (``docs/decisions.md`` §292).
 EMAIL_CHECK_THROTTLED = "email_check_throttled"
 EMAIL_CHECK_THROTTLED_DETAIL = coded_refusal(
     EMAIL_CHECK_THROTTLED,

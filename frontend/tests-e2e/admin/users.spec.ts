@@ -99,7 +99,7 @@ test.describe('/admin user lifecycle', () => {
 	test('inviting an address another workspace holds says so, and creates nobody', async ({
 		page
 	}) => {
-		// One address is one account in one workspace (decisions §290). The
+		// One address is one account in one workspace (decisions §292). The
 		// techflow seed admin's address is held in techflow, never in this
 		// worker's tenant, so the invite is refused with a sentence that says
 		// what to do — not the old bare "Email already in use".

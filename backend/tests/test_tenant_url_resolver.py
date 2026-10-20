@@ -474,7 +474,7 @@ def test_sign_in_link_prefers_a_registered_custom_domain(monkeypatch):
     """The wrong-workspace link sends a person where they actually sign in. A
     tenant on `ap.acmecorp.example` with no `tenant_url_template` used to be
     pointed at its slug subdomain — a different origin, so a different stored
-    token, and its passkeys not offered (decisions §290)."""
+    token, and its passkeys not offered (decisions §292)."""
     monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.app.example.com")
     domains = {"brand": {"custom_domains": ["AP.Acmecorp.Example:443", "pay.acmecorp.example"]}}
 

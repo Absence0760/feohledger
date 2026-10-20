@@ -157,7 +157,7 @@ same two cases as a SCIM `409 uniqueness` with the same distinction in its
 cycle, and a throttle would turn that into a stuck provisioning job. An SSO
 sign-in whose IdP asserts such an address is refused the same way
 ([`authentication.md`](authentication.md) § JIT user provisioning). Reasoning:
-[`decisions.md`](decisions.md) §290.
+[`decisions.md`](decisions.md) §292.
 
 ## Resetting a user's password
 
