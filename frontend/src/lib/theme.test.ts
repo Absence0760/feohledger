@@ -127,11 +127,16 @@ describe('theme choice', () => {
  * what keeps the repetition honest.
  */
 describe('app.html pre-paint script', () => {
-	const scripts = [...appHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
-	const script = scripts.find((s) => s.includes('data-theme'));
+	// Located by its exact, stable opening tag rather than by matching tags with
+	// a regex: the script is ours and carries an id for exactly this.
+	const OPEN = '<script id="theme-boot">';
+	const start = appHtml.indexOf(OPEN);
+	const end = start < 0 ? -1 : appHtml.indexOf('</script>', start + OPEN.length);
+	const script = start < 0 || end < 0 ? undefined : appHtml.slice(start + OPEN.length, end);
 
 	it('exists, and sits after the theme-color meta it writes to', () => {
-		expect(script, 'src/app.html must carry the inline theme script').toBeDefined();
+		expect(script, 'src/app.html must carry <script id="theme-boot">').toBeDefined();
+		expect(script).toContain('data-theme');
 		expect(appHtml.indexOf('name="theme-color"')).toBeLessThan(appHtml.indexOf(script!));
 		// Before %sveltekit.head%, so it runs ahead of every stylesheet and module.
 		expect(appHtml.indexOf(script!)).toBeLessThan(appHtml.indexOf('%sveltekit.head%'));

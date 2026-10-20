@@ -15,9 +15,10 @@
 			accepted values and the two theme-color values from there;
 			src/lib/theme.test.ts executes this script to hold them equal.
 			Storage can throw (private modes, blocked site data): the page then
-			follows the OS, exactly as if nothing had been chosen.
+			follows the OS, exactly as if nothing had been chosen. The id is how
+			the test finds it; keep it.
 		-->
-		<script>
+		<script id="theme-boot">
 			(function () {
 				var choice = 'system';
 				try {
