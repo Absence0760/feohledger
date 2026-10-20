@@ -1835,7 +1835,8 @@ scope (§260) — do not fold them into any of these.
       access reviews, DSAR/erasure and the per-user audit trail. **Trigger:** a
       customer or partner asks for one person in two workspaces, or the
       partner/reseller programme onboards an accountant serving several
-      tenants.
+      tenants. Full plan, security risks and the
+      cross-tenant test matrix: #614.
 - [ ] **(c) The SAML ACS still answers its other refusals as raw JSON at the
       API origin.** Only the address-in-another-workspace refusal is routed to
       the SPA bridge (`sso.create_saml_refusal_handoff`); `inactive`,
