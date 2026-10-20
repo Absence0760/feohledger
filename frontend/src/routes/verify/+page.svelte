@@ -2,7 +2,9 @@
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import IconCheck from '~icons/material-symbols/check-circle-outline';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
+	import { SIGNUP_EMAIL_HAS_WORKSPACE } from '#lib/api/codedRefusals.ts';
+	import { ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -15,11 +17,26 @@
 		// Single-use link to choose the admin's first password (decisions §283).
 		// Null when the server could not build one; Forgot password is the way in.
 		set_password_url: string | null;
+		// The workspace's sign-in page, address prefilled.
+		sign_in_url?: string | null;
+		// The link had already been used (a reload, a second tab, a mail scanner
+		// that ran it first): the workspace exists, nothing was re-issued, and
+		// `set_password_url` is null — the welcome email holds the one link
+		// (decisions §292).
+		already_verified?: boolean;
 	}
 
 	let phase = $state<'pending' | 'success' | 'error'>('pending');
 	let result = $state<CompleteResponse | null>(null);
 	let errorMessage = $state<string>('');
+	// The address already has an account (`signup_email_has_workspace`): the
+	// existing workspace's sign-in page, offered instead of starting over.
+	let existingWorkspaceUrl = $state<string | null>(null);
+	// Only an http(s) URL becomes an href (the same reader the login page's
+	// wrong-workspace link uses).
+	const signInUrl = $derived(
+		result ? ownWorkspaceSignInUrl({ sign_in_url: result.sign_in_url }) : null
+	);
 
 	onMount(async () => {
 		const token = page.url.searchParams.get('token');
@@ -34,6 +51,10 @@
 		} catch (err) {
 			phase = 'error';
 			errorMessage = err instanceof Error ? err.message : m('auth.verify.failed');
+			existingWorkspaceUrl =
+				err instanceof ApiError && err.code === SIGNUP_EMAIL_HAS_WORKSPACE
+					? ownWorkspaceSignInUrl(err.params)
+					: null;
 		}
 	});
 </script>
@@ -58,9 +79,15 @@
 				<p class="sub">{m('auth.verify.pendingSub')}</p>
 			{:else if phase === 'success' && result}
 				<h1>{m('auth.verify.successHeading')}</h1>
-				<p class="sub">
-					{m('auth.verify.successSubPre')}<strong>{result.admin_email}</strong>{m('auth.verify.successSubPost')}
-				</p>
+				{#if result.already_verified}
+					<p class="sub">{m('auth.verify.alreadyVerified')}</p>
+				{:else}
+					<p class="sub">
+						{m('auth.verify.successSubPre')}<strong>{result.admin_email}</strong>{m('auth.verify.successSubPost')}
+					</p>
+				{/if}
+			{:else if existingWorkspaceUrl}
+				<h1>{m('auth.verify.existingHeading')}</h1>
 			{:else}
 				<h1>{m('auth.verify.errorHeading')}</h1>
 			{/if}
@@ -68,6 +95,12 @@
 
 		{#if phase === 'pending'}
 			<div class="spinner" aria-hidden="true"></div>
+		{:else if phase === 'success' && result?.already_verified}
+			<!-- A re-opened link: the workspace exists and nothing was re-issued,
+			     so the way on is its sign-in page. -->
+			{#if signInUrl}
+				<a class="primary" href={signInUrl}>{m('auth.verify.goToSignIn')}</a>
+			{/if}
 		{:else if phase === 'success' && result}
 			<ol class="steps">
 				<li>{m('auth.verify.step1')}</li>
@@ -84,6 +117,9 @@
 			{/if}
 		{:else}
 			<p class="error">{errorMessage}</p>
+			{#if existingWorkspaceUrl}
+				<a class="primary" href={existingWorkspaceUrl}>{m('auth.login.goToOwnWorkspace')}</a>
+			{/if}
 			<a class="start-over" href="/signup">{m('auth.verify.startOver')}</a>
 		{/if}
 	</div>
