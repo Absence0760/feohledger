@@ -119,8 +119,12 @@
 		overflow: hidden;
 		margin: 14px 14px 14px 0;
 		border-radius: 24px;
-		border: 1px solid rgba(226, 228, 234, 0.07);
-		background: linear-gradient(160deg, #141a2e 0%, #0d101a 70%);
+		border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+		background: linear-gradient(
+			160deg,
+			color-mix(in srgb, var(--accent) 8%, var(--surface)) 0%,
+			var(--bg) 70%
+		);
 	}
 	.panel-inner {
 		position: relative;
@@ -284,7 +288,7 @@
 		transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 	}
 	.form-wrap :global(:where(input:not([type='checkbox']):not([type='radio']):hover)) {
-		border-color: #3a3e4f;
+		border-color: var(--border-strong);
 	}
 	/* A focus RING, not only a border colour change (WCAG 2.4.7 Focus
 	   Visible): a 1px border shifting from #2a2d3a to the accent is exactly
@@ -293,7 +297,7 @@
 	.form-wrap :global(:where(input:not([type='checkbox']):not([type='radio']):focus)) {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 4px rgba(99, 140, 255, 0.22);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
 	}
 	.form-wrap :global(:where(input[aria-invalid='true'])) {
 		border-color: var(--danger);
@@ -316,12 +320,12 @@
 		font-size: 0.95rem;
 		font-weight: 600;
 		cursor: pointer;
-		box-shadow: 0 14px 30px -14px rgba(99, 140, 255, 0.95);
+		box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--accent) 95%, transparent);
 		transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
 	}
 	.form-wrap :global(:where(button[type='submit']:hover:not(:disabled))) {
 		transform: translateY(-1px);
-		box-shadow: 0 18px 34px -14px rgba(99, 140, 255, 1);
+		box-shadow: 0 18px 34px -14px color-mix(in srgb, var(--accent) 100%, transparent);
 	}
 	.form-wrap :global(:where(button[type='submit']:active:not(:disabled))) {
 		transform: translateY(0);
@@ -341,7 +345,7 @@
 		gap: 8px;
 		padding: 11px 14px;
 		border-radius: 10px;
-		border: 1px solid rgba(248, 113, 113, 0.35);
+		border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
 		background: var(--danger-tint);
 		color: var(--danger-on-tint);
 		font-size: 0.86rem;

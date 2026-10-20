@@ -65,14 +65,14 @@
 		color: var(--danger-on-tint);
 	}
 
-	/* The one tone with no palette entry: purple carries no semantic meaning
-	   the other four share — it exists to make "handed to the ERP" scannable
-	   mid-pipeline — so naming it would add a token with one caller. Kept as
-	   a literal deliberately, and measured like any other: #a585f5 on the 15%
-	   tint composites to 5.59:1. */
+	/* Purple carries no semantic meaning the other four share — it exists to
+	   make "handed to the ERP" scannable mid-pipeline. It was a literal while
+	   there was one theme ("a token with one caller"); a second theme needs a
+	   second value, so it is the `--violet-*` pair now (decisions §289),
+	   asserted per theme like the other tones. */
 	.sent_to_erp {
-		background: rgba(140, 100, 240, 0.15);
-		color: #a585f5;
+		background: var(--violet-tint);
+		color: var(--violet-on-tint);
 	}
 
 	.done {

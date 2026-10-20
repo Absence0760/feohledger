@@ -418,11 +418,11 @@
 	}
 
 	.cf-bar.committed {
-		background: #638cff;
+		background: var(--accent);
 	}
 
 	.cf-bar.pending {
-		background: #b7c5f5;
+		background: color-mix(in srgb, var(--accent) 45%, var(--text));
 	}
 
 	.cf-bar-amount {
@@ -510,7 +510,7 @@
 	   cover every open foreign invoice. Same treatment as `/cfo`'s
 	   `.cf-skipped`, which carries the sibling outflow-side caveat. */
 	.cfm-skipped {
-		color: #d4940a;
+		color: var(--warning);
 		font-size: 0.85rem;
 		font-weight: 600;
 		margin: 0 0 12px;

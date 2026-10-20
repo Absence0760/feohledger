@@ -309,7 +309,7 @@
 		border-bottom: none;
 	}
 	.canonical-row td {
-		background: rgba(31, 168, 106, 0.05);
+		background: color-mix(in srgb, var(--success) 5%, transparent);
 	}
 	.m-name {
 		font-weight: 500;

@@ -770,14 +770,14 @@
 	.reason-input:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 	.btn-block {
 		padding: 8px 16px;
 		border-radius: 6px;
-		border: 1px solid #f06464;
-		background: rgba(224, 64, 64, 0.12);
-		color: #f06464;
+		border: 1px solid var(--danger);
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
+		color: var(--danger);
 		font-size: 0.85rem;
 		font-weight: 500;
 		cursor: pointer;
@@ -785,15 +785,15 @@
 		white-space: nowrap;
 	}
 	.btn-block:hover:not(:disabled) {
-		background: rgba(224, 64, 64, 0.2);
+		background: color-mix(in srgb, var(--danger) 20%, transparent);
 	}
 	.btn-block.unblock {
-		border-color: #1fa86a;
-		background: rgba(31, 168, 106, 0.12);
-		color: #1fa86a;
+		border-color: var(--success);
+		background: color-mix(in srgb, var(--success) 12%, transparent);
+		color: var(--success);
 	}
 	.btn-block.unblock:hover:not(:disabled) {
-		background: rgba(31, 168, 106, 0.2);
+		background: color-mix(in srgb, var(--success) 20%, transparent);
 	}
 	.btn-block:disabled {
 		opacity: 0.5;
@@ -864,16 +864,16 @@
 		white-space: nowrap;
 	}
 	.history-result.match {
-		background: rgba(224, 64, 64, 0.12);
-		color: #f06464;
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
+		color: var(--danger);
 	}
 	.history-result.review_required {
-		background: rgba(212, 148, 10, 0.12);
-		color: #d4940a;
+		background: color-mix(in srgb, var(--warning) 12%, transparent);
+		color: var(--warning);
 	}
 	.history-result.clear {
-		background: rgba(31, 168, 106, 0.12);
-		color: #1fa86a;
+		background: color-mix(in srgb, var(--success) 12%, transparent);
+		color: var(--success);
 	}
 	.history-meta {
 		font-size: 0.8rem;

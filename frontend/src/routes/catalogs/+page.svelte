@@ -424,7 +424,7 @@
 	}
 
 	.pref-dot {
-		color: #d4940a;
+		color: var(--warning);
 		margin-left: 4px;
 	}
 
@@ -496,8 +496,8 @@
 		border-radius: 10px;
 		font-size: 0.7rem;
 		font-weight: 600;
-		background: rgba(31, 168, 106, 0.15);
-		color: #1fa86a;
+		background: color-mix(in srgb, var(--success) 15%, transparent);
+		color: var(--success);
 	}
 
 	.sub {

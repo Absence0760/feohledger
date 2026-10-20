@@ -78,14 +78,14 @@
 		transition: width 0.3s ease;
 	}
 	.usage-meter.near .usage-fill {
-		background: #d4940a;
+		background: var(--warning);
 	}
 	.usage-meter.over .usage-fill {
-		background: #e04040;
+		background: var(--danger);
 	}
 	.usage-note {
 		font-size: 0.72rem;
-		color: #d4940a;
+		color: var(--warning);
 	}
 	.usage-meter.over .usage-note {
 		color: var(--danger);

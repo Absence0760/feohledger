@@ -688,11 +688,11 @@
 	}
 
 	.status-dot.active::before {
-		background: #1fa86a;
+		background: var(--success);
 	}
 
 	.status-dot.deactivated::before {
-		background: #e04040;
+		background: var(--danger);
 	}
 
 	/* --- Modal extras --- */
@@ -700,7 +700,7 @@
 	.modal input:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	fieldset {

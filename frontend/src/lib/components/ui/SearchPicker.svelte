@@ -653,7 +653,7 @@
 
 	.sp-option:hover,
 	.sp-option.active {
-		background: rgba(99, 140, 255, 0.12);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
 	}
 
 	.sp-option.selected {

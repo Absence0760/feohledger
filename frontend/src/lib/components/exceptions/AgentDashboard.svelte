@@ -58,11 +58,12 @@
 
 	let hasMore = $derived(decisions.length < total);
 
-	// Action-badge tones reuse the exceptions palette (WCAG-passing siblings).
-	const ACTION_COLORS: Record<string, string> = {
-		auto_resolved: '#1fa86a',
-		escalated: '#f06464',
-		no_action: '#8a8fa0'
+	// Action-badge tones: palette tone NAMES, rendered as the tone's calibrated
+	// `-tint` / `-on-tint` pair so they hold in both themes (decisions §289).
+	const ACTION_TONES: Record<string, 'success' | 'danger' | 'muted'> = {
+		auto_resolved: 'success',
+		escalated: 'danger',
+		no_action: 'muted'
 	};
 
 	function pct(rate: number): string {
@@ -448,7 +449,7 @@
 						<td>
 							<span
 								class="action-badge"
-								style="background:{ACTION_COLORS[d.action_taken] ?? '#888'}1f;color:{ACTION_COLORS[d.action_taken] ?? '#888'}"
+								style="background:var(--{ACTION_TONES[d.action_taken] ?? 'muted'}-tint);color:var(--{ACTION_TONES[d.action_taken] ?? 'muted'}-on-tint)"
 							>
 								{actionLabel(d.action_taken)}
 							</span>
@@ -504,7 +505,7 @@
 				<span
 					class="action-badge"
 					data-testid="agent-run-action"
-					style="background:{ACTION_COLORS[runOutcome.decision.action_taken] ?? '#888'}1f;color:{ACTION_COLORS[runOutcome.decision.action_taken] ?? '#888'}"
+					style="background:var(--{ACTION_TONES[runOutcome.decision.action_taken] ?? 'muted'}-tint);color:var(--{ACTION_TONES[runOutcome.decision.action_taken] ?? 'muted'}-on-tint)"
 				>
 					{actionLabel(runOutcome.decision.action_taken)}
 				</span>

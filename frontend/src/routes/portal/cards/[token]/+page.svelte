@@ -175,10 +175,10 @@
 
 	.warning {
 		padding: 10px 12px;
-		background: rgba(212, 148, 10, 0.1);
-		border: 1px solid rgba(212, 148, 10, 0.3);
+		background: color-mix(in srgb, var(--warning) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
 		border-radius: 6px;
-		color: #d4940a;
+		color: var(--warning);
 		font-size: 0.85rem;
 		margin: 0 0 16px;
 	}

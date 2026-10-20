@@ -392,7 +392,7 @@
 	}
 	.saved-delete.armed {
 		border-color: var(--danger);
-		background: rgba(240, 70, 70, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 	}
 </style>

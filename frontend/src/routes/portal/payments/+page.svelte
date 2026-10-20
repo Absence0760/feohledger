@@ -325,12 +325,12 @@
 		border: 1px solid var(--border);
 	}
 	.s-completed {
-		background: rgba(40, 160, 80, 0.15);
-		border-color: rgba(40, 160, 80, 0.4);
+		background: color-mix(in srgb, var(--success) 15%, transparent);
+		border-color: color-mix(in srgb, var(--success) 40%, transparent);
 	}
 	.s-failed {
-		background: rgba(224, 64, 64, 0.12);
-		border-color: rgba(224, 64, 64, 0.35);
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
+		border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 	}
 	.empty,
 	.loading {
@@ -356,8 +356,8 @@
 		text-decoration: underline;
 	}
 	.error {
-		background: rgba(224, 64, 64, 0.1);
-		border: 1px solid rgba(224, 64, 64, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		padding: 10px 14px;
 		border-radius: 4px;

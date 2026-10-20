@@ -878,7 +878,7 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.5);
+		background: var(--overlay);
 		display: grid;
 		place-items: center;
 		z-index: 100;
@@ -1096,7 +1096,7 @@
 		/* --danger-strong, not --danger: this is a fill carrying white text
 		   (5.37:1), the same call `app.css` records for every red fill. */
 		background: var(--danger-strong);
-		box-shadow: 0 0 0 2px rgba(196, 53, 53, 0.3);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 30%, transparent);
 	}
 
 	.footer-note.armed-note {
@@ -1122,7 +1122,7 @@
 
 	.btn-discard.armed {
 		border-color: var(--danger);
-		background: rgba(224, 64, 64, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 	}
 
@@ -1222,11 +1222,11 @@
 	}
 
 	.footer-note.pending {
-		color: #d4940a;
+		color: var(--warning);
 	}
 
 	.footer-note.approved {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	.btn-approve {

@@ -388,11 +388,11 @@
 		font-family: inherit;
 	}
 	.convo-item:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 	.convo-item.active {
 		border-color: var(--accent);
-		background: rgba(99, 140, 255, 0.1);
+		background: color-mix(in srgb, var(--accent) 10%, transparent);
 	}
 	.convo-title {
 		font-size: 0.84rem;
@@ -431,8 +431,8 @@
 		margin: 0 16px;
 		padding: 10px 14px;
 		border-radius: 8px;
-		background: rgba(240, 70, 70, 0.1);
-		border: 1px solid rgba(240, 70, 70, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		font-size: 0.85rem;
 	}

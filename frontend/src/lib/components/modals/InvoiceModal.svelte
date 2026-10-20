@@ -1710,10 +1710,11 @@
 		return m('invoices.modal.confidence.veryLow');
 	}
 
+	// Palette tokens, so the dot follows the theme (decisions §289).
 	function confidenceColor(score: number): string {
-		if (score >= 0.85) return '#1fa86a';
-		if (score >= 0.7) return '#d4940a';
-		return '#e04040';
+		if (score >= 0.85) return 'var(--success)';
+		if (score >= 0.7) return 'var(--warning)';
+		return 'var(--danger)';
 	}
 
 	function formatAuditDate(iso: string): string {
@@ -2838,7 +2839,7 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
+		background: var(--overlay);
 		display: grid;
 		place-items: center;
 		z-index: 100;
@@ -2927,7 +2928,7 @@
 	.pdf-pane {
 		flex: 1;
 		border-right: 1px solid var(--border);
-		background: #1a1a24;
+		background: var(--bg);
 		display: flex;
 		flex-direction: column;
 		contain: paint;
@@ -3070,7 +3071,7 @@
 	select:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	footer {
@@ -3143,7 +3144,7 @@
 
 	.btn-delete-outline.armed {
 		border-color: var(--danger);
-		background: rgba(224, 64, 64, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 	}
 
@@ -3267,7 +3268,7 @@
 		outline: none;
 		border-color: var(--accent);
 		background: var(--bg);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.1);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
 	}
 
 	.li-input:hover:not(:focus) {
@@ -3428,10 +3429,10 @@
 	.line-total-mismatch {
 		margin-top: 10px;
 		padding: 10px 12px;
-		border: 1px solid rgba(240, 70, 70, 0.45);
+		border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
 		border-left-width: 3px;
 		border-radius: 6px;
-		background: rgba(240, 70, 70, 0.07);
+		background: color-mix(in srgb, var(--danger) 7%, transparent);
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
@@ -3441,7 +3442,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	.ltm-title {
@@ -3558,15 +3559,15 @@
 		font-size: 0.85rem;
 		font-weight: 500;
 		cursor: pointer;
-		border: 1px solid #d4940a;
+		border: 1px solid var(--warning);
 		font-family: inherit;
 		white-space: nowrap;
 		background: var(--surface);
-		color: #d4940a;
+		color: var(--warning);
 	}
 
 	.btn-reset:hover:not(:disabled) {
-		background: rgba(212, 148, 10, 0.1);
+		background: color-mix(in srgb, var(--warning) 10%, transparent);
 	}
 
 	.btn-reset:disabled {
@@ -3674,7 +3675,7 @@
 		border: 1px solid var(--danger);
 		border-left-width: 3px;
 		border-radius: 5px;
-		background: rgba(224, 82, 82, 0.08);
+		background: color-mix(in srgb, var(--danger) 8%, transparent);
 	}
 
 	.einvoice-error-title {
@@ -3819,7 +3820,7 @@
 	}
 
 	.export-menu button:hover {
-		background: rgba(99, 140, 255, 0.1);
+		background: color-mix(in srgb, var(--accent) 10%, transparent);
 		color: var(--accent);
 	}
 
@@ -3840,18 +3841,18 @@
 	}
 
 	.warning-item.error {
-		background: rgba(224, 64, 64, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 	}
 
 	.warning-item.warning {
-		background: rgba(212, 148, 10, 0.1);
-		color: #d4940a;
+		background: color-mix(in srgb, var(--warning) 10%, transparent);
+		color: var(--warning);
 	}
 
 	.warning-item.info {
-		background: rgba(99, 140, 255, 0.1);
-		color: #638cff;
+		background: color-mix(in srgb, var(--accent) 10%, transparent);
+		color: var(--accent);
 	}
 
 	.coding-suggestions {
@@ -3927,7 +3928,7 @@
 		cursor: pointer;
 	}
 	.coding-suggestion-apply:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 	.coding-suggestion-applied {
 		margin: 10px 0 0;
@@ -4012,19 +4013,19 @@
 	}
 
 	.po-match.matched {
-		border-color: rgba(31, 168, 106, 0.4);
-		background: rgba(31, 168, 106, 0.06);
+		border-color: color-mix(in srgb, var(--success) 40%, transparent);
+		background: color-mix(in srgb, var(--success) 6%, transparent);
 	}
 
 	.po-match.mismatch,
 	.po-match.no_po {
-		border-color: rgba(224, 64, 64, 0.4);
-		background: rgba(224, 64, 64, 0.06);
+		border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+		background: color-mix(in srgb, var(--danger) 6%, transparent);
 	}
 
 	.po-match.partial {
-		border-color: rgba(212, 148, 10, 0.4);
-		background: rgba(212, 148, 10, 0.06);
+		border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+		background: color-mix(in srgb, var(--warning) 6%, transparent);
 	}
 
 	.po-match-header {
@@ -4073,19 +4074,19 @@
 	}
 
 	.po-match-status.matched {
-		background: rgba(31, 168, 106, 0.15);
-		color: #1fa86a;
+		background: color-mix(in srgb, var(--success) 15%, transparent);
+		color: var(--success);
 	}
 
 	.po-match-status.mismatch,
 	.po-match-status.no_po {
-		background: rgba(224, 64, 64, 0.15);
+		background: color-mix(in srgb, var(--danger) 15%, transparent);
 		color: var(--danger);
 	}
 
 	.po-match-status.partial {
-		background: rgba(212, 148, 10, 0.15);
-		color: #d4940a;
+		background: color-mix(in srgb, var(--warning) 15%, transparent);
+		color: var(--warning);
 	}
 
 	.po-match-type {
@@ -4133,7 +4134,7 @@
 	}
 
 	.po-match-value.variance-neg {
-		color: #d4940a;
+		color: var(--warning);
 	}
 
 	.po-match-note {
@@ -4178,7 +4179,7 @@
 
 	.validation-hint {
 		font-size: 0.8rem;
-		color: #d4940a;
+		color: var(--warning);
 		margin-top: 8px;
 	}
 
@@ -4213,7 +4214,7 @@
 	}
 
 	.meta-value.approved {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	.meta-value.rejected {
@@ -4400,7 +4401,7 @@
 	}
 
 	.btn-retry-erp:hover:not(:disabled) {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 
 	.btn-retry-erp:disabled {
@@ -4484,7 +4485,7 @@
 	}
 
 	.btn-reject-outline:hover:not(:disabled) {
-		background: rgba(224, 64, 64, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 	}
 
 	.btn-reject-outline:disabled {
@@ -4514,7 +4515,7 @@
 	.reject-input:focus {
 		outline: none;
 		border-color: var(--danger);
-		box-shadow: 0 0 0 2px rgba(224, 64, 64, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 15%, transparent);
 	}
 
 	.reject-actions {
@@ -4566,8 +4567,8 @@
 	}
 
 	.save-error {
-		background: rgba(224, 64, 64, 0.1);
-		border: 1px solid rgba(224, 64, 64, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		padding: 8px 12px;
 		border-radius: 4px;

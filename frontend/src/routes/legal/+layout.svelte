@@ -268,7 +268,7 @@
 		background: linear-gradient(
 			90deg,
 			transparent,
-			rgba(99, 140, 255, 0.45),
+			color-mix(in srgb, var(--accent) 45%, transparent),
 			rgba(231, 185, 94, 0.28),
 			transparent
 		);

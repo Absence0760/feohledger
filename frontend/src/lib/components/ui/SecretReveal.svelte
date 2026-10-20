@@ -129,9 +129,9 @@
 
 <style>
 	.reveal-warning {
-		background: rgba(255, 180, 50, 0.12);
-		border: 1px solid rgba(255, 180, 50, 0.35);
-		color: #d4940a;
+		background: color-mix(in srgb, var(--warning) 12%, transparent);
+		border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+		color: var(--warning);
 		border-radius: 8px;
 		padding: 0.75rem 1rem;
 		font-size: 0.85rem;

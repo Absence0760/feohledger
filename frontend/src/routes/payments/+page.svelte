@@ -3425,8 +3425,8 @@
 	}
 
 	.scard.rebate {
-		border-color: rgba(31, 168, 106, 0.3);
-		background: rgba(31, 168, 106, 0.04);
+		border-color: color-mix(in srgb, var(--success) 30%, transparent);
+		background: color-mix(in srgb, var(--success) 4%, transparent);
 	}
 
 	.scard-value {
@@ -3436,7 +3436,7 @@
 	}
 
 	.scard.rebate .scard-value {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	.scard-label {
@@ -3450,11 +3450,11 @@
 	/* --- Queue --- */
 
 	.overdue {
-		background: rgba(224, 64, 64, 0.04);
+		background: color-mix(in srgb, var(--danger) 4%, transparent);
 	}
 
 	.overdue-text {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	/* Date + its overdue pill. The gap used to be the pill's own
@@ -3590,7 +3590,7 @@
 	.fx-skipped {
 		font-size: 0.85rem;
 		margin: 0 0 12px;
-		color: #d4940a;
+		color: var(--warning);
 		font-weight: 600;
 	}
 
@@ -3599,7 +3599,7 @@
 		max-width: 56ch;
 		font-size: 0.8rem;
 		line-height: 1.35;
-		color: #d4940a;
+		color: var(--warning);
 	}
 
 	.pay-bar-count {
@@ -3610,7 +3610,7 @@
 	}
 
 	.pay-bar-savings {
-		color: #1fa86a;
+		color: var(--success);
 		font-weight: 600;
 	}
 
@@ -3654,8 +3654,8 @@
 		align-items: center;
 		gap: 10px;
 		padding: 10px 14px;
-		background: rgba(31, 168, 106, 0.08);
-		border: 1px solid rgba(31, 168, 106, 0.3);
+		background: color-mix(in srgb, var(--success) 8%, transparent);
+		border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
 		border-radius: 6px;
 		font-size: 0.85rem;
 		color: var(--text);
@@ -3666,11 +3666,11 @@
 	}
 
 	tbody tr.discount-eligible {
-		background: rgba(31, 168, 106, 0.04);
+		background: color-mix(in srgb, var(--success) 4%, transparent);
 	}
 
 	tbody tr.discount-eligible:hover {
-		background: rgba(31, 168, 106, 0.08);
+		background: color-mix(in srgb, var(--success) 8%, transparent);
 	}
 
 	/* NOT a `<Badge>`: two stacked lines, so it needs the metrics a shared
@@ -3961,8 +3961,8 @@
 		color: var(--text);
 		margin: 0 0 14px;
 		padding: 10px 12px;
-		background: rgba(224, 64, 64, 0.08);
-		border: 1px solid rgba(224, 64, 64, 0.3);
+		background: color-mix(in srgb, var(--danger) 8%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		border-radius: 4px;
 	}
 
@@ -4005,8 +4005,8 @@
 	}
 
 	.rebate-card.highlight {
-		border-color: rgba(31, 168, 106, 0.4);
-		background: rgba(31, 168, 106, 0.05);
+		border-color: color-mix(in srgb, var(--success) 40%, transparent);
+		background: color-mix(in srgb, var(--success) 5%, transparent);
 	}
 
 	.rebate-label {
@@ -4024,7 +4024,7 @@
 	}
 
 	.rebate-card.highlight .rebate-value {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	.rebate-sub {

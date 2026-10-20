@@ -199,7 +199,7 @@
 	}
 
 	.state.error {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	.kpi-row {
@@ -235,6 +235,6 @@
 	}
 
 	tr.dormant-row td {
-		background: rgba(248, 113, 113, 0.04);
+		background: color-mix(in srgb, var(--danger) 4%, transparent);
 	}
 </style>

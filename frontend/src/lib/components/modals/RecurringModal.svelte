@@ -625,6 +625,6 @@
 	}
 	.btn-lifecycle:hover { border-color: var(--accent); color: var(--accent); }
 	.btn-lifecycle:disabled { opacity: 0.6; cursor: not-allowed; }
-	.btn-lifecycle.activate:hover { border-color: #1fa86a; color: #1fa86a; }
+	.btn-lifecycle.activate:hover { border-color: var(--success); color: var(--success); }
 	.btn-lifecycle.end:hover { border-color: var(--danger); color: var(--danger); }
 </style>

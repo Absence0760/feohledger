@@ -515,7 +515,7 @@
 		   `SectionTabs.section-more-item:hover` — this is a nav row, so it
 		   matches the chrome it belongs to rather than inventing a token.
 		   `--surface-hover` does not exist. */
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 		color: var(--text);
 	}
 

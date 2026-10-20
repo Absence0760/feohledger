@@ -214,8 +214,8 @@
 		margin: 0 0 12px;
 		padding: 8px 12px;
 		border-radius: 6px;
-		background: rgba(255, 180, 50, 0.12);
-		color: #d4940a;
+		background: color-mix(in srgb, var(--warning) 12%, transparent);
+		color: var(--warning);
 		font-size: 0.82rem;
 		display: flex;
 		flex-direction: column;
@@ -302,7 +302,7 @@
 
 	.outcome-error,
 	.outcome-failed {
-		background: rgba(240, 70, 70, 0.15);
+		background: color-mix(in srgb, var(--danger) 15%, transparent);
 		color: var(--danger);
 	}
 

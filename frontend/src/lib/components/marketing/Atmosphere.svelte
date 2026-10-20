@@ -97,7 +97,7 @@
 		right: -8%;
 		width: 62%;
 		height: 68%;
-		background: radial-gradient(circle, rgba(99, 140, 255, 0.30), transparent 70%);
+		background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%);
 		animation: drift-a 4.2s ease-in-out 1 forwards;
 	}
 	.aurora-b {
@@ -156,8 +156,8 @@
 		position: absolute;
 		inset: 0;
 		background-image:
-			linear-gradient(to right, rgba(226, 228, 234, 0.028) 1px, transparent 1px),
-			linear-gradient(to bottom, rgba(226, 228, 234, 0.028) 1px, transparent 1px);
+			linear-gradient(to right, color-mix(in srgb, var(--text) 2.8%, transparent) 1px, transparent 1px),
+			linear-gradient(to bottom, color-mix(in srgb, var(--text) 2.8%, transparent) 1px, transparent 1px);
 		background-size: 68px 68px;
 		mask-image: radial-gradient(120% 78% at 50% 0%, #000 30%, transparent 78%);
 	}
@@ -179,6 +179,6 @@
 	.vignette {
 		position: absolute;
 		inset: 0;
-		background: radial-gradient(130% 90% at 50% 0%, transparent 42%, rgba(8, 9, 14, 0.62) 100%);
+		background: radial-gradient(130% 90% at 50% 0%, transparent 42%, color-mix(in srgb, var(--bg) 62%, transparent) 100%);
 	}
 </style>

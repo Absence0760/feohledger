@@ -399,7 +399,7 @@
 	}
 
 	.state.error {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	.mono {

@@ -327,8 +327,8 @@
 		margin: 0 0 10px;
 		padding: 8px 12px;
 		border-radius: 8px;
-		background: rgba(240, 70, 70, 0.1);
-		border: 1px solid rgba(240, 70, 70, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		font-size: 0.82rem;
 	}
@@ -445,7 +445,7 @@
 	}
 	.plan-capture-btn.armed {
 		border-color: var(--danger);
-		background: rgba(240, 70, 70, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 	}
 

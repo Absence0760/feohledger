@@ -202,8 +202,8 @@
 		margin: 0 0 10px;
 		padding: 8px 12px;
 		border-radius: 8px;
-		background: rgba(240, 70, 70, 0.1);
-		border: 1px solid rgba(240, 70, 70, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		font-size: 0.82rem;
 	}
@@ -227,27 +227,27 @@
 		vector-effect: non-scaling-stroke;
 	}
 	.threshold-line {
-		stroke: #e0a040;
+		stroke: var(--warning);
 		stroke-width: 1.5;
 		stroke-dasharray: 5 4;
 		vector-effect: non-scaling-stroke;
 	}
 	.area {
-		fill: rgba(99, 140, 255, 0.12);
+		fill: color-mix(in srgb, var(--accent) 12%, transparent);
 	}
 	.line {
 		fill: none;
-		stroke: #638cff;
+		stroke: var(--accent);
 		stroke-width: 2;
 		vector-effect: non-scaling-stroke;
 	}
 	.pt {
-		fill: #638cff;
+		fill: var(--accent);
 		stroke: var(--surface);
 		stroke-width: 1.5;
 	}
 	.pt.below {
-		fill: #e04040;
+		fill: var(--danger);
 	}
 	.chart-axis {
 		display: flex;
@@ -288,13 +288,13 @@
 		display: inline-block;
 	}
 	.line-swatch {
-		background: #638cff;
+		background: var(--accent);
 	}
 	.thr-swatch {
-		background: #e0a040;
+		background: var(--warning);
 	}
 	.breach-swatch {
-		background: #e04040;
+		background: var(--danger);
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;

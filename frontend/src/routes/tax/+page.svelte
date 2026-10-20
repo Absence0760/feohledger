@@ -786,7 +786,7 @@
 	}
 
 	.row-flag {
-		background: rgba(240, 70, 70, 0.04);
+		background: color-mix(in srgb, var(--danger) 4%, transparent);
 	}
 
 	.over {
@@ -810,7 +810,7 @@
 	}
 
 	.threshold-flag {
-		color: #d4940a;
+		color: var(--warning);
 		margin-left: 4px;
 		font-size: 0.7rem;
 	}
@@ -859,8 +859,8 @@
 		color: var(--text);
 		margin: 0 0 14px;
 		padding: 10px 12px;
-		background: rgba(224, 64, 64, 0.08);
-		border: 1px solid rgba(224, 64, 64, 0.3);
+		background: color-mix(in srgb, var(--danger) 8%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		border-radius: 4px;
 	}
 

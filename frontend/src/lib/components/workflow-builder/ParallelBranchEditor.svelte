@@ -159,7 +159,7 @@
 	.branch-name:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	.field-label {
@@ -269,7 +269,7 @@
 	.join-field input:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	.hint {

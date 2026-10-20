@@ -427,8 +427,8 @@
 		color: var(--accent);
 	}
 	.act.accept:hover:not(:disabled) {
-		border-color: rgba(40, 160, 80, 0.6);
-		color: #2aa050;
+		border-color: color-mix(in srgb, var(--success) 60%, transparent);
+		color: var(--success);
 	}
 	.act:disabled {
 		opacity: 0.5;
@@ -444,13 +444,13 @@
 	}
 	.s-accepted,
 	.s-captured {
-		background: rgba(40, 160, 80, 0.15);
-		border-color: rgba(40, 160, 80, 0.4);
+		background: color-mix(in srgb, var(--success) 15%, transparent);
+		border-color: color-mix(in srgb, var(--success) 40%, transparent);
 	}
 	.s-declined,
 	.s-expired {
-		background: rgba(224, 64, 64, 0.12);
-		border-color: rgba(224, 64, 64, 0.35);
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
+		border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 	}
 	.empty,
 	.loading {
@@ -465,8 +465,8 @@
 		font-size: 0.82rem;
 	}
 	.error {
-		background: rgba(224, 64, 64, 0.1);
-		border: 1px solid rgba(224, 64, 64, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		padding: 10px 14px;
 		border-radius: 4px;
@@ -478,7 +478,7 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.5);
+		background: var(--overlay);
 		display: grid;
 		place-items: center;
 		z-index: 50;

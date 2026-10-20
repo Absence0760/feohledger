@@ -98,7 +98,11 @@
 
 <svelte:window onscroll={() => (scrolled = window.scrollY > 12)} />
 
-<div class="landing">
+<!-- Pinned to the dark palette whatever the visitor's theme: the rendered
+     tally ornament, the grain and the glass panels were designed on navy, and a
+     light rendition is a design job, not a token swap (docs/decisions.md §289).
+     `data-theme-scope="dark"` redeclares the dark tokens on this subtree. -->
+<div class="landing" data-theme-scope="dark">
 	<Atmosphere fixed />
 
 	<header class="nav" class:scrolled>
@@ -347,6 +351,10 @@
 		   2.4.11 Focus Not Obscured. Per-section `scroll-margin-top` fixed only
 		   the two anchors it was written on. */
 		scroll-padding-top: 88px;
+		/* The page is pinned to the dark palette (`data-theme-scope="dark"` on
+		   `.landing`), but the document scroller belongs to <html>, which a
+		   light theme would otherwise give a light scrollbar. */
+		color-scheme: dark;
 	}
 
 	.landing {

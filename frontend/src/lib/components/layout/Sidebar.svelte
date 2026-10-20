@@ -235,7 +235,12 @@
 		   --surface (5.38:1), and a translucent rail would let whatever scrolls
 		   beneath it decide their contrast. The depth is a gradient within the
 		   surface's own range plus an edge highlight. */
-		background: linear-gradient(180deg, #1a1c26 0%, var(--surface) 38%, #15171f 100%);
+		background: linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--text) 2%, var(--surface)) 0%,
+			var(--surface) 38%,
+			color-mix(in srgb, var(--bg) 55%, var(--surface)) 100%
+		);
 		border-right: 1px solid var(--border);
 		box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
 		display: flex;
@@ -345,7 +350,7 @@
 		padding: 9px 0;
 	}
 	.help-link:hover {
-		background: rgba(226, 228, 234, 0.05);
+		background: color-mix(in srgb, var(--text) 5%, transparent);
 		color: var(--text);
 	}
 	/* The same "you are here" as `.nav-item.active` below: the tenant's own
@@ -398,7 +403,7 @@
 	}
 
 	.profile-btn:hover {
-		background: rgba(226, 228, 234, 0.05);
+		background: color-mix(in srgb, var(--text) 5%, transparent);
 		color: var(--text);
 	}
 
@@ -462,7 +467,7 @@
 		padding: 7px 12px;
 		border-radius: 5px;
 		border: 1px solid var(--danger);
-		background: rgba(224, 64, 64, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 		font-size: 0.82rem;
 		font-weight: 500;
@@ -472,7 +477,7 @@
 	}
 
 	.profile-logout:hover {
-		background: rgba(224, 64, 64, 0.2);
+		background: color-mix(in srgb, var(--danger) 20%, transparent);
 	}
 
 	.profile-action {
@@ -521,7 +526,7 @@
 	}
 
 	.nav-item:hover {
-		background: rgba(226, 228, 234, 0.05);
+		background: color-mix(in srgb, var(--text) 5%, transparent);
 		color: var(--text);
 	}
 
@@ -585,7 +590,7 @@
 	}
 
 	.collapse-btn:hover {
-		background: rgba(226, 228, 234, 0.05);
+		background: color-mix(in srgb, var(--text) 5%, transparent);
 		color: var(--text);
 	}
 

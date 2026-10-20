@@ -138,17 +138,125 @@ export function extractStyleBlocks(path: string, source: string): StyleSource[] 
 	return blocks;
 }
 
-/** The `--token: value` pairs declared in a `:root` block. */
-export function parsePalette(css: string): Record<string, string> {
+/** The two palettes `app.css` declares (docs/decisions.md §289). */
+export type PaletteTheme = 'dark' | 'light';
+export const PALETTE_THEMES: readonly PaletteTheme[] = ['dark', 'light'];
+
+/** The selector carrying the explicit Light choice's palette. */
+export const LIGHT_THEME_SELECTOR = ":root[data-theme='light']";
+
+/**
+ * The `--token: value` pairs a theme renders with.
+ *
+ * `dark` is the bare `:root` block(s) — the default palette. `light` is that
+ * base with the `:root[data-theme='light']` block laid over it, which is
+ * exactly what the cascade does in the browser: a token the light block
+ * forgot keeps its dark value, and the guard measures that dark value on the
+ * light surfaces rather than pretending the token is undefined.
+ *
+ * Only an exact `:root` / light selector counts. The old reader matched any
+ * selector STARTING with `:root`, which was harmless while there was one
+ * palette and would now have merged the light values over the dark ones —
+ * every dark-theme assertion silently measuring the light palette. The
+ * System copy inside `@media (prefers-color-scheme: light)` is deliberately
+ * not read here; `lightPaletteBlocks` exposes it so a test can hold it
+ * identical to this one.
+ */
+export function parsePalette(css: string, theme: PaletteTheme = 'dark'): Record<string, string> {
 	const palette: Record<string, string> = {};
-	const re = /:root[^{]*\{([^{}]*)\}/g;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(stripCssComments(css))) !== null) {
-		for (const [name, value] of parseDeclarations(m[1])) {
-			if (name.startsWith('--')) palette[name] = value;
+	const blocks = rootBlocks(css);
+	const light = normalizeSelector(LIGHT_THEME_SELECTOR);
+	// The base layer is any top-level block whose selector LIST includes a
+	// bare `:root` — `:root, [data-theme-scope='dark'] { … }` is the dark
+	// palette, shared with the subtree that pins it.
+	const isBase = (selector: string) => selector.split(',').some((part) => part.trim() === ':root');
+	const layers: ((selector: string) => boolean)[] =
+		theme === 'dark' ? [isBase] : [isBase, (selector) => selector === light];
+	for (const layer of layers) {
+		for (const block of blocks) {
+			if (!layer(block.selector)) continue;
+			for (const [name, value] of parseDeclarations(block.body)) {
+				if (name.startsWith('--')) palette[name] = value;
+			}
 		}
 	}
 	return palette;
+}
+
+function normalizeSelector(selector: string): string {
+	return selector.trim().replace(/\s+/g, ' ').replace(/"/g, "'");
+}
+
+/** Every top-level (non-media) `:root…{}` block, in source order. */
+function rootBlocks(css: string): { selector: string; body: string }[] {
+	const out: { selector: string; body: string }[] = [];
+	// Blank out at-rule blocks first so a `:root` nested in a media query (the
+	// System copy of the light palette) is not read as a top-level one.
+	const flat = stripAtRuleBlocks(stripCssComments(css));
+	const re = /([^{}]+)\{([^{}]*)\}/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(flat)) !== null) {
+		const selector = normalizeSelector(m[1]);
+		if (selector.split(',').some((part) => part.trim().startsWith(':root'))) {
+			out.push({ selector, body: m[2] });
+		}
+	}
+	return out;
+}
+
+/** Remove every `@… { … }` block, nested braces included. */
+function stripAtRuleBlocks(css: string): string {
+	let out = '';
+	let i = 0;
+	while (i < css.length) {
+		const at = css.indexOf('@', i);
+		if (at < 0) {
+			out += css.slice(i);
+			break;
+		}
+		out += css.slice(i, at);
+		const open = css.indexOf('{', at);
+		const semi = css.indexOf(';', at);
+		if (open < 0 || (semi >= 0 && semi < open)) {
+			// A statement at-rule (`@import …;`) — drop it and carry on.
+			i = semi < 0 ? css.length : semi + 1;
+			continue;
+		}
+		let depth = 0;
+		let j = open;
+		for (; j < css.length; j++) {
+			if (css[j] === '{') depth++;
+			else if (css[j] === '}' && --depth === 0) break;
+		}
+		i = j + 1;
+	}
+	return out;
+}
+
+/**
+ * The two copies of the light palette, as declaration lists: the explicit
+ * `:root[data-theme='light']` block, and the System copy inside
+ * `@media (prefers-color-scheme: light) { :root:not([data-theme='dark']) {…} }`.
+ * `null` for a copy that is missing. CSS cannot share one block between a
+ * selector and a media-gated selector, so the copy is unavoidable — this is
+ * what lets a test hold the two identical.
+ */
+export function lightPaletteBlocks(css: string): {
+	explicit: [string, string][] | null;
+	system: [string, string][] | null;
+} {
+	const clean = stripCssComments(css);
+	const explicit = rootBlocks(clean).find(
+		(b) => b.selector === normalizeSelector(LIGHT_THEME_SELECTOR)
+	);
+	const system =
+		/@media\s*\(\s*prefers-color-scheme\s*:\s*light\s*\)\s*\{\s*:root:not\(\[data-theme=['"]dark['"]\]\)\s*\{([^{}]*)\}\s*\}/.exec(
+			clean
+		);
+	return {
+		explicit: explicit ? parseDeclarations(explicit.body) : null,
+		system: system ? parseDeclarations(system[1]) : null
+	};
 }
 
 /**
@@ -332,6 +440,9 @@ function resolveColorLiteral(
 		return null;
 	}
 
+	const mixed = resolveColorMix(v, palette, depth);
+	if (mixed !== undefined) return mixed;
+
 	if (parseColorWithAlpha(v)) return v;
 
 	// A shorthand like `background: var(--surface) url(x) no-repeat` — the
@@ -344,6 +455,69 @@ function resolveColorLiteral(
 		}
 	}
 	return null;
+}
+
+/**
+ * `color-mix(in srgb, A p%, B)` — the spelling a token-derived tint takes
+ * (`color-mix(in srgb, var(--danger) 12%, transparent)`). Resolved rather than
+ * treated as unknowable, because the light theme turned ~150 literal tints
+ * into exactly this form: had the audit gone blind to it, converting a literal
+ * to a theme-following token would have *removed* its contrast check.
+ *
+ * Two shapes are exact and resolved: B is `transparent` (the result is A with
+ * its alpha scaled by p — premultiplied mixing with a fully transparent colour
+ * changes nothing else), and A and B both opaque (a straight per-channel
+ * interpolation in sRGB). Anything else — another colour space, a translucent
+ * B — returns `null` (known to be a colour, not known which). `undefined`
+ * means the value is not a `color-mix()` at all.
+ */
+function resolveColorMix(
+	value: string,
+	palette: Record<string, string>,
+	depth: number
+): string | null | undefined {
+	const m = /^color-mix\(\s*in\s+srgb\s*,([\s\S]*)\)$/i.exec(value);
+	if (!m) return undefined;
+	const args = splitTopLevelCommas(m[1]);
+	if (args.length !== 2) return null;
+	const parse = (arg: string): { parts: RgbaParts | 'transparent' | null; pct: number | null } => {
+		const pm = /^([\s\S]*?)\s+([\d.]+)%$/.exec(arg.trim());
+		const colour = (pm ? pm[1] : arg).trim();
+		const pct = pm ? parseFloat(pm[2]) / 100 : null;
+		if (colour.toLowerCase() === 'transparent') return { parts: 'transparent', pct };
+		const literal = resolveColorLiteral(colour, palette, depth + 1);
+		return { parts: literal === null ? null : parseColorWithAlpha(literal), pct };
+	};
+	const a = parse(args[0]);
+	const b = parse(args[1]);
+	if (!a.parts || !b.parts) return null;
+	// CSS: a missing percentage is the complement of the other; both missing is 50/50.
+	const pa = a.pct ?? (b.pct !== null ? 1 - b.pct : 0.5);
+	if (a.parts === 'transparent' || pa < 0 || pa > 1) return null;
+	if (b.parts === 'transparent') {
+		const { r, g, b: bl } = a.parts.color;
+		return `rgba(${r}, ${g}, ${bl}, ${+(a.parts.alpha * pa).toFixed(4)})`;
+	}
+	if (a.parts.alpha < 1 || b.parts.alpha < 1) return null;
+	const c = compositeOver(a.parts.color, b.parts.color, pa);
+	return toHex(c);
+}
+
+/** Split on top-level commas, keeping `rgba(1, 2, 3)` and `var(--x, y)` intact. */
+function splitTopLevelCommas(value: string): string[] {
+	const parts: string[] = [];
+	let depth = 0;
+	let current = '';
+	for (const ch of value) {
+		if (ch === '(') depth++;
+		else if (ch === ')') depth--;
+		if (ch === ',' && depth === 0) {
+			parts.push(current);
+			current = '';
+		} else current += ch;
+	}
+	parts.push(current);
+	return parts.map((p) => p.trim());
 }
 
 function toHex({ r, g, b }: { r: number; g: number; b: number }): string {

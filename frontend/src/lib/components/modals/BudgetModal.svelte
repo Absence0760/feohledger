@@ -299,9 +299,9 @@
 		border-radius: 4px;
 		transition: width 0.2s ease;
 	}
-	.util-fill.ok { background: #1fa86a; }
-	.util-fill.warn { background: #d4940a; }
-	.util-fill.over { background: #e04040; }
+	.util-fill.ok { background: var(--success); }
+	.util-fill.warn { background: var(--warning); }
+	.util-fill.over { background: var(--danger); }
 
 	.spend-detail {
 		display: flex;
