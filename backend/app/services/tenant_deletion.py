@@ -40,6 +40,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import control_session_factory
 from app.services import storage
@@ -125,6 +126,14 @@ CONTROL_TABLES_EXEMPT: dict[str, str] = {
         "organisation on the platform. Deleting a tenant's plan would delete it "
         "for everyone. The tenant's link to a plan is its `subscriptions` row, "
         "which IS swept."
+    ),
+    "workspace_closures": (
+        "The record that a tenant was closed by its own administrator "
+        "(services/workspace_closure.py, decisions §294). It exists to outlive "
+        "the deletion it describes: the tenant's own audit log goes with its "
+        "database, so this row is the evidence that the closure was asked for, "
+        "by whom and with which proof, and the operator's queue for the backup "
+        "leg the API cannot reach. It holds ids and the slug, no personal data."
     ),
 }
 
@@ -237,12 +246,24 @@ async def plan_tenant_deletion(slug: str) -> TenantDeletionPlan:
         return await _load_plan(session, slug)
 
 
-async def delete_tenant(slug: str, *, dry_run: bool = False) -> TenantDeletionResult:
+async def delete_tenant(
+    slug: str,
+    *,
+    dry_run: bool = False,
+    control_session: AsyncSession | None = None,
+) -> TenantDeletionResult:
     """Delete a tenant completely. See the module docstring for the ordering.
 
     Idempotent: re-running after a partial failure finishes the job rather than
     erroring, which is why the irreversible steps come before the row that
     identifies them.
+
+    ``control_session``: run step 3 on the caller's open transaction instead of
+    a fresh one, and leave the commit to the caller. A self-service closure
+    (`services/workspace_closure`) holds ``FOR UPDATE`` on the organisation row
+    for its whole run, so that no user, subscription or setting can be added
+    between its checks and the delete; deleting that row from any OTHER session
+    would wait on its own lock.
     """
     async with control_session_factory() as session:
         plan = await _load_plan(session, slug)
@@ -273,14 +294,12 @@ async def delete_tenant(slug: str, *, dry_run: bool = False) -> TenantDeletionRe
 
     # 3. The control plane, in one transaction: either the tenant is gone from
     #    it or nothing changed, never a half-deleted org.
-    deleted: dict[str, int] = {}
-    async with control_session_factory() as session:
-        async with session.begin():
-            for table, sql in CONTROL_DELETIONS:
-                result = await session.execute(
-                    text(sql), {"org": plan.organization_id, "slug": slug}
-                )
-                deleted[table] = result.rowcount or 0
+    if control_session is not None:
+        deleted = await _delete_control_rows(control_session, plan)
+    else:
+        async with control_session_factory() as session:
+            async with session.begin():
+                deleted = await _delete_control_rows(session, plan)
 
     logger.info(
         "[tenant-deletion] %s: removed %d control-plane row(s) across %d table(s)",
@@ -294,6 +313,15 @@ async def delete_tenant(slug: str, *, dry_run: bool = False) -> TenantDeletionRe
         database_dropped=database_dropped,
         control_rows_deleted=deleted,
     )
+
+
+async def _delete_control_rows(session: AsyncSession, plan: TenantDeletionPlan) -> dict[str, int]:
+    """Step 3's statements, on ``session``; the caller owns the transaction."""
+    deleted: dict[str, int] = {}
+    for table, sql in CONTROL_DELETIONS:
+        result = await session.execute(text(sql), {"org": plan.organization_id, "slug": plan.slug})
+        deleted[table] = result.rowcount or 0
+    return deleted
 
 
 def format_confirmation(result: TenantDeletionResult) -> str:

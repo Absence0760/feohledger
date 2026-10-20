@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
+from app.models.workspace_closure import WorkspaceClosure
 
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{2,29}$")
 
@@ -121,4 +122,15 @@ async def ensure_slug_available(slug: str, db: AsyncSession) -> None:
     validate_slug_format(slug)
     result = await db.execute(select(Organization.id).where(Organization.slug == slug))
     if result.scalar_one_or_none() is not None:
+        raise SlugError(f"'{slug}' is already taken.")
+    # A closed workspace holds its slug until an operator has removed its
+    # backups (decisions §294): a new workspace would reuse `feoh_<slug>`, and
+    # the two tenants' nightly dumps would share one name in the backup bucket,
+    # so removing the closed one's would delete the new one's too.
+    held = await db.execute(
+        select(WorkspaceClosure.id).where(
+            WorkspaceClosure.slug == slug, WorkspaceClosure.backups_cleared_at.is_(None)
+        )
+    )
+    if held.first() is not None:
         raise SlugError(f"'{slug}' is already taken.")
