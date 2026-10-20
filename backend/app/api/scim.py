@@ -45,6 +45,7 @@ from app.schemas.scim import (
     SCIMUserCreate,
 )
 from app.services import scim_groups
+from app.services.identity_provisioning import email_holder_org_id
 from app.services.sso import hash_scim_token
 from app.tenant import lock_organization
 from app.utils.emails import email_matches, normalize_email
@@ -176,10 +177,15 @@ def _scim_active(value: object) -> bool:
     raise _scim_http_error(400, "'active' must be a boolean.", "invalidValue")
 
 
-async def _email_taken(
-    db: AsyncSession, email: str, *, exclude_user_id: uuid.UUID | None = None
-) -> bool:
-    """Is this `userName` already a `users.email` ANYWHERE on the platform?
+async def _refuse_taken_username(
+    db: AsyncSession,
+    org: Organization,
+    email: str,
+    *,
+    exclude_user_id: uuid.UUID | None = None,
+) -> None:
+    """SCIM 409 ``uniqueness`` when this `userName` is already a `users.email`
+    ANYWHERE on the platform.
 
     Scoped platform-wide, not to the calling tenant, because `users.email`
     carries a global UNIQUE constraint — it is the login identifier, and
@@ -191,15 +197,30 @@ async def _email_taken(
     constraint on flush: an unhandled IntegrityError, i.e. a 500, where RFC 7644
     §3.3 requires a 409 `uniqueness`. Providers treat a 5xx as retryable, so the
     same doomed write came back on every reconcile cycle. `admin.create_user` /
-    `admin.update_user` have always checked globally; this brings SCIM in line.
+    `admin.update_user` check the same way, through the same lookup.
+
+    The detail says which case it is, because the IdP admin reading it in their
+    provisioning log needs different actions: a user already in this workspace
+    is a matching problem, one in ANOTHER workspace is a dead end until the
+    person is provisioned with a different address. Neither names the other
+    workspace or account (`docs/decisions.md` §290). Case-insensitive too: an
+    IdP pushing `jane@acme.com` for an admin-created `Jane@Acme.com` is the same
+    person, and missing that provisioned a duplicate whose later deprovision
+    left the original active.
     """
-    # Case-insensitive too: an IdP pushing `jane@acme.com` for an admin-created
-    # `Jane@Acme.com` is the same person, and missing that provisioned a
-    # duplicate whose later deprovision left the original active.
-    stmt = select(User.id).where(email_matches(User.email, email))
-    if exclude_user_id is not None:
-        stmt = stmt.where(User.id != exclude_user_id)
-    return (await db.execute(stmt.limit(1))).scalar_one_or_none() is not None
+    holder = await email_holder_org_id(db, email, exclude_user_id=exclude_user_id)
+    if holder is None:
+        return
+    if holder == org.id:
+        raise _scim_http_error(
+            409, f"A user with userName {email} already exists in this workspace.", "uniqueness"
+        )
+    raise _scim_http_error(
+        409,
+        f"userName {email} already has an account in another workspace. An address can "
+        "belong to only one workspace, so provision this person with a different address.",
+        "uniqueness",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -362,9 +383,8 @@ async def create_user(
     await require_scim_entitlement(db, org)
     email = normalize_email(_extract_primary_email(body.emails, body.userName))
 
-    # SCIM requires 409 on duplicate userName. Platform-wide — see `_email_taken`.
-    if await _email_taken(db, email):
-        raise _scim_http_error(409, f"User with userName {email} already exists.", "uniqueness")
+    # SCIM requires 409 on duplicate userName. Platform-wide — see `_refuse_taken_username`.
+    await _refuse_taken_username(db, org, email)
 
     sso = (org.settings or {}).get("sso") or {}
     provider = sso.get("provider") or "oidc"
@@ -419,9 +439,8 @@ async def replace_user(
 
     email = normalize_email(_extract_primary_email(body.emails, body.userName))
     # Uniqueness invariant: PUT must not rename this user onto another user's
-    # userName. Platform-wide — see `_email_taken`.
-    if await _email_taken(db, email, exclude_user_id=user.id):
-        raise _scim_http_error(409, f"User with userName {email} already exists.", "uniqueness")
+    # userName. Platform-wide — see `_refuse_taken_username`.
+    await _refuse_taken_username(db, org, email, exclude_user_id=user.id)
 
     user.email = email
     user.full_name = _extract_full_name(body.name, email)
@@ -501,10 +520,7 @@ async def patch_user(
             logger.debug("Ignoring unsupported SCIM PATCH op: %s %s", action, path)
 
     if new_email is not None and new_email != user.email:
-        if await _email_taken(db, new_email, exclude_user_id=user.id):
-            raise _scim_http_error(
-                409, f"User with userName {new_email} already exists.", "uniqueness"
-            )
+        await _refuse_taken_username(db, org, new_email, exclude_user_id=user.id)
         user.email = new_email
 
     await db.flush()
