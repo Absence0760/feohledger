@@ -38,6 +38,15 @@ no nameable company (no ERP, ``mock``, an OAuth ERP with no consent) gets no
 key, so its NULL links are never trusted by the push. Gated on
 ``organizations`` existing. Never overwrites a key already present.
 
+**QuickBooks Online orgs get no key either.** Their NULL links are exactly the
+ones the old name-keyed chart sync made, and a sub-account name QuickBooks
+repeats under two parents was merged into one row linked to whichever account
+the sync read last (eight such rows in the sandbox company). Trusting them
+would keep those rows posting to the wrong account until someone re-ran the
+sync. So a QuickBooks org's pushes refuse ``account_not_linked`` /
+``vendor_not_linked`` until its first chart and vendor sync adopt each link by
+evidence and stamp its realm.
+
 Revision ID: 0115_erp_link_realm
 Revises: 0114_gl_code_width
 Create Date: 2026-10-19
@@ -74,7 +83,13 @@ def _has_table(name: str) -> bool:
     )
 
 
+#: Adapters whose pre-0115 links are never trusted: the chart sync keyed
+#: QuickBooks accounts by their non-unique ``Name`` and merged namesakes.
+_UNTRUSTED_LEGACY_ADAPTERS = frozenset({"quickbooks_online"})
+
+
 def _snapshot_legacy_realms(bind) -> None:
+    from app.services.erp_adapters.dispatcher import resolve_adapter_key
     from app.services.erp_link_realm import LEGACY_REALM_KEY, connection_realm
 
     rows = bind.execute(
@@ -87,6 +102,8 @@ def _snapshot_legacy_realms(bind) -> None:
         if isinstance(erp, str):  # a driver without a jsonb codec
             erp = json.loads(erp)
         if not isinstance(erp, dict) or LEGACY_REALM_KEY in erp:
+            continue
+        if resolve_adapter_key(erp) in _UNTRUSTED_LEGACY_ADAPTERS:
             continue
         realm = connection_realm(erp)
         if realm is None:

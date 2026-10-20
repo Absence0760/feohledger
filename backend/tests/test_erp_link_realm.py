@@ -359,19 +359,53 @@ async def test_the_push_refuses_a_vendor_and_account_linked_in_the_sandbox(reald
         assert (same.vendor_erp_id, same.account_erp_ids) == ("57", {"Office Supplies": "7"})
 
 
+NS_CFG = {"type": "netsuite", "integration_method": "direct", "account_id": "TSTDRV1"}
+NS = "netsuite:tstdrv1"
+NS_OTHER_CFG = {**NS_CFG, "account_id": "TSTDRV2"}
+
+
 async def test_the_push_trusts_pre_migration_links_only_on_the_snapshotted_company(realdb):
+    """A non-QuickBooks org: 0115 snapshotted its company, so its NULL links keep
+    posting there and nowhere else."""
     from app.services.erp import _resolve_erp_refs
 
     org_id = realdb.info(TENANT).org_id
     vendor_id = await _add(realdb, Vendor, name="Acme", erp_vendor_id="57")
     await _add(realdb, code="Office Supplies", name="Office Supplies", erp_account_id="7")
-    migrated_on_sandbox = {**SANDBOX_CFG, LEGACY_REALM_KEY: SANDBOX}
-    moved_to_prod = {**PROD_CFG, LEGACY_REALM_KEY: SANDBOX}
+    migrated = {**NS_CFG, LEGACY_REALM_KEY: NS}
+    moved = {**NS_OTHER_CFG, LEGACY_REALM_KEY: NS}
     async with realdb.sessionmaker(TENANT)() as s:
-        kept = await _resolve_erp_refs(s, _invoice(org_id, vendor_id), [], migrated_on_sandbox)
+        kept = await _resolve_erp_refs(s, _invoice(org_id, vendor_id), [], migrated)
         assert (kept.vendor_erp_id, kept.account_erp_ids) == ("57", {"Office Supplies": "7"})
-        moved = await _resolve_erp_refs(s, _invoice(org_id, vendor_id), [], moved_to_prod)
-        assert (moved.vendor_erp_id, moved.account_erp_ids) == (None, {})
+        gone = await _resolve_erp_refs(s, _invoice(org_id, vendor_id), [], moved)
+        assert (gone.vendor_erp_id, gone.account_erp_ids) == (None, {})
+
+
+async def test_a_quickbooks_org_refuses_pre_migration_links_until_a_sync_adopts_them(
+    realdb, restore_settings
+):
+    """QuickBooks' pre-0115 links are the ones the name-keyed sync merged, so
+    0115 snapshots no company for a QuickBooks org: even on the company it never
+    left, a NULL link is refused until the chart and vendor syncs re-judge it."""
+    from app.services.erp import _resolve_erp_refs
+
+    await _set_erp(realdb, SANDBOX_CFG)
+    org_id = realdb.info(TENANT).org_id
+    vendor_id = await _add(realdb, Vendor, name="Acme", erp_vendor_id="57")
+    await _add(realdb, code="Office Supplies", name="Office Supplies", erp_account_id="7")
+    erp = await _run_migration_snapshot(realdb)
+    assert LEGACY_REALM_KEY not in erp
+    assert not legacy_links_trusted(erp, SANDBOX)
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        refs = await _resolve_erp_refs(s, _invoice(org_id, vendor_id), [], erp)
+    assert (refs.vendor_erp_id, refs.account_erp_ids) == (None, {})
+
+    await _sync(realdb, [_acct("Office Supplies", "7")], realm=SANDBOX)
+    await _vsync(realdb, [_vendor("57", "Acme")], realm=SANDBOX)
+    async with realdb.sessionmaker(TENANT)() as s:
+        refs = await _resolve_erp_refs(s, _invoice(org_id, vendor_id), [], erp)
+    assert (refs.vendor_erp_id, refs.account_erp_ids) == ("57", {"Office Supplies": "7"})
 
 
 def test_an_account_refusal_names_the_header_only_when_a_line_falls_back_to_it():
@@ -807,18 +841,8 @@ def _migration():
     return module
 
 
-@pytest.mark.parametrize(
-    ("erp", "expected"),
-    [
-        (SANDBOX_CFG, SANDBOX),
-        ({"type": "mock", "integration_method": "direct"}, None),
-        ({**PROD_CFG, LEGACY_REALM_KEY: "already"}, "already"),
-    ],
-)
-async def test_the_migration_snapshots_the_company_each_org_is_connected_to(
-    realdb, restore_settings, erp, expected
-):
-    await _set_erp(realdb, erp)
+async def _run_migration_snapshot(realdb) -> dict:
+    """Run 0115's control-plane step; return the org's ``settings.erp`` after."""
     module = _migration()
     mk = realdb.control_sessionmaker()
     async with mk() as s:
@@ -830,4 +854,22 @@ async def test_the_migration_snapshots_the_company_each_org_is_connected_to(
                 select(Organization).where(Organization.id == realdb.info(TENANT).org_id)
             )
         ).scalar_one()
-    assert (org.settings.get("erp") or {}).get(LEGACY_REALM_KEY) == expected
+    return org.settings.get("erp") or {}
+
+
+@pytest.mark.parametrize(
+    ("erp", "expected"),
+    [
+        (NS_CFG, NS),
+        ({"integration_method": "merge_dev", "type": "quickbooks_online"}, "merge_dev:"),
+        # QuickBooks' NULL links are the merged ones: never trusted, on any company.
+        (SANDBOX_CFG, None),
+        ({"type": "mock", "integration_method": "direct"}, None),
+        ({**PROD_CFG, LEGACY_REALM_KEY: "already"}, "already"),
+    ],
+)
+async def test_the_migration_snapshots_the_company_each_org_is_connected_to(
+    realdb, restore_settings, erp, expected
+):
+    await _set_erp(realdb, erp)
+    assert (await _run_migration_snapshot(realdb)).get(LEGACY_REALM_KEY) == expected
