@@ -4039,6 +4039,8 @@ export const messages = {
 	'admin.users.fail.self': 'você não pode excluir a si mesmo',
 	'admin.users.fail.notFound': 'usuário não encontrado',
 	'admin.users.fail.blocked': 'bloqueado',
+	'admin.users.fail.lastAdmin': 'último administrador ativo da organização',
+	'admin.users.fail.auditUnavailable': 'não registrado na trilha de auditoria, por isso não excluído',
 	'admin.users.fail.referenced': 'ainda referenciado por {parts}',
 	'admin.users.fail.openInvoices': '{n, plural, one {# fatura aberta} other {# faturas abertas}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# aprovação pendente} other {# aprovações pendentes}}',

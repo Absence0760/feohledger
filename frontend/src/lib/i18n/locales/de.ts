@@ -4012,6 +4012,8 @@ export const messages = {
 	'admin.users.fail.self': 'Sie können sich nicht selbst löschen',
 	'admin.users.fail.notFound': 'Benutzer nicht gefunden',
 	'admin.users.fail.blocked': 'blockiert',
+	'admin.users.fail.lastAdmin': 'letzter aktiver Administrator der Organisation',
+	'admin.users.fail.auditUnavailable': 'nicht im Prüfprotokoll erfasst, daher nicht gelöscht',
 	'admin.users.fail.referenced': 'noch referenziert durch {parts}',
 	'admin.users.fail.openInvoices': '{n, plural, one {# offene Rechnung} other {# offene Rechnungen}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# ausstehende Genehmigung} other {# ausstehende Genehmigungen}}',

@@ -4233,6 +4233,8 @@ export const en = {
 	'admin.users.fail.self': 'cannot delete yourself',
 	'admin.users.fail.notFound': 'user not found',
 	'admin.users.fail.blocked': 'blocked',
+	'admin.users.fail.lastAdmin': 'the organization’s last active admin',
+	'admin.users.fail.auditUnavailable': 'not recorded in the audit trail, so not deleted',
 	'admin.users.fail.referenced': 'still referenced by {parts}',
 	'admin.users.fail.openInvoices': '{n, plural, one {# open invoice} other {# open invoices}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# pending approval} other {# pending approvals}}',

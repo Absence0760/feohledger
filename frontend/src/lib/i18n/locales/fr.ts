@@ -4014,6 +4014,8 @@ export const messages = {
 	'admin.users.fail.self': 'vous ne pouvez pas vous supprimer vous-même',
 	'admin.users.fail.notFound': 'utilisateur introuvable',
 	'admin.users.fail.blocked': 'bloqué',
+	'admin.users.fail.lastAdmin': 'dernier administrateur actif de l’organisation',
+	'admin.users.fail.auditUnavailable': 'impossible à consigner dans le journal d’audit, donc non supprimé',
 	'admin.users.fail.referenced': 'encore référencé par {parts}',
 	'admin.users.fail.openInvoices': '{n, plural, one {# facture ouverte} other {# factures ouvertes}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# approbation en attente} other {# approbations en attente}}',

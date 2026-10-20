@@ -3963,6 +3963,8 @@ export const messages = {
 	'admin.users.fail.self': '自分自身は削除できません',
 	'admin.users.fail.notFound': 'ユーザーが見つかりません',
 	'admin.users.fail.blocked': 'ブロック中',
+	'admin.users.fail.lastAdmin': '組織で最後の有効な管理者です',
+	'admin.users.fail.auditUnavailable': '監査ログに記録できなかったため削除されていません',
 	'admin.users.fail.referenced': 'まだ {parts} から参照されています',
 	'admin.users.fail.openInvoices': '{n, plural, other {未処理の請求書 # 件}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, other {保留中の承認 # 件}}',
