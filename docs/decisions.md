@@ -12544,3 +12544,106 @@ Cookie Notice), and `tests-e2e/a11y/light-theme.spec.ts` (choose → reload →
 through CSS alone, the keyboard model of the picker, and axe in light mode on
 a cross-section of the signed-in app, the portal, the auth shell, the help
 centre and the legal pages).
+
+## 290. SCIM writes are audited and last-admin guarded, the guard is serialized, and a deleted user's row says who they were (2026-10-20)
+
+An admin persona review found four gaps in how user accounts change, all in the
+same family: the record of a change, and the one invariant user management
+exists to keep.
+
+**SCIM wrote no audit row and had no last-admin guard.** Create, rename and
+every spelling of a deprovision (`PATCH active:false`, `PUT active:false`,
+`DELETE`) changed the account with nothing on the trail, never revoked the
+deprovisioned user's sessions, and skipped the guard `PATCH /api/admin/users`
+has applied since the sole-admin lockout fix. "Who offboarded Jane, and when?"
+had no answer for IdP-driven leavers, and an IdP misconfiguration could leave
+the org with no admin and no way back short of a database fix. Each SCIM user
+write now commits, revokes sessions on a deactivation, and writes the same
+`user.created` / `user.updated` row the admin API writes, with `via: "scim"`
+and a null `actor_id` (the bearer token is not a user; the group-role rows
+already used null). A failed revoke is recorded (`sessions_revoked: null`)
+rather than failing the request: the deactivation has committed, and a 5xx
+would only make the IdP retry a change that already happened. The SCIM rows are
+deliberately best-effort (`dispatch_auth_audit`), not write-first like the admin
+delete below: refusing a deprovision because the trail is unavailable would keep
+a leaver's account active, which is worse than a deactivation without its row.
+
+*What SCIM gets for the last admin.* `400` with `scimType: "mutability"`.
+RFC 7644 §3.12 defines `mutability` as a modification "not compatible with the
+target attribute's … current state", which is exactly this, and IdPs surface a
+400 to their admin rather than retrying it. A `409` was rejected: the RFC
+reserves it for uniqueness and version conflicts, and this codebase already
+answers `409 uniqueness` on SCIM, so an IdP reading the two alike would be
+reading a different problem. The refusal is audited
+(`user.deactivation_refused`), because an IdP that keeps pushing it is itself
+something an admin must see. The same guard covers a `/Groups` write that would
+revoke an IdP-managed `admin` role from the last admin
+(`auth.scim.role_revoke_refused`) — the same lockout reached through a group,
+which the finding did not name but the invariant does. It is checked before any
+role is touched, so the group write is refused whole rather than half-applied.
+
+**The guard is shared, not copied.** The rule moved out of `api/admin.py` into
+`services/admin_lockout`, which raises a domain exception both surfaces map to
+their own shape. Duplicating it into `scim.py` would have produced two rules
+that drift, and the serialization below would have had to be fixed twice.
+
+**The guard is serialized on the organization row.** It counted the org's other
+active admins and then acted, holding nothing between. Two admins demoting (or
+deleting) each other at the same moment each counted the other, both passed,
+and the org was left with none. The earlier docs called the third-party case "a
+no-op — acting on an admin already required the caller to be one", which holds
+only one request at a time. The guard now locks the organization row before it
+counts, held to the commit, so the second removal waits and then counts what
+the first left. Alternatives:
+
+- *Lock the admin `user_roles` rows* (`SELECT … FOR UPDATE` over the org's admin
+  set, as the review suggested). It does not close the race: each request locks
+  the rows that exist, and a demotion deletes the row the other request would
+  need to see. A row lock protects rows; this invariant is about a set.
+- *A `pg_advisory_xact_lock` keyed on the org.* Correct, but a second
+  serialization mechanism beside the one the codebase already uses for
+  per-org writes (`tenant.lock_organization`).
+- *`SERIALIZABLE` isolation for these requests.* Correct too, but it turns the
+  loser into a serialization failure every caller would need a retry loop for.
+
+The lock is `FOR NO KEY UPDATE`, not `lock_organization`'s `FOR UPDATE`: it
+still conflicts with every settings writer, but not with the `FOR KEY SHARE` an
+insert of a `users` row takes through its foreign key, so inviting a user is not
+made to wait behind a demotion. It is taken only when the write would actually
+remove an active admin. The delete paths gained the guard too: a single delete
+could already never remove the caller, but under concurrency the caller is
+exactly who another request is removing. `tests/test_admin_lockout.py` drives
+the race against Postgres (two sessions, the first holding its demotion open,
+the second observed blocked in `pg_stat_activity`) and fails without the lock.
+
+**A deleted user's audit row says who they were, and is never lost.**
+`user.deleted` carried only the id of a row that no longer exists. It now
+carries the `email`, `role_names` and `was_active` the account held — the
+address recorded the way every `auth.*` row already records it; `full_name`
+stays out, the rule `user.updated` has always followed. The single delete
+wrote its row after the commit with the swallow-everything
+`dispatch_auth_audit`, and the bulk delete did the same after its one commit,
+so a failed write lost the record while the delete stood. The audit row lives
+in the tenant database and the user in the control plane, so one transaction
+cannot hold both; the nearest equivalent, which `PUT /api/organization/sso` and
+the SSO break-glass already use, is to write the row first with
+`record_auth_audit_or_raise` and refuse the change if that fails. A commit
+failing afterwards leaves a row for a delete that did not land — the safe
+direction to be wrong in. The bulk delete does this per row inside a savepoint,
+so one unrecordable row fails as `audit_unavailable` and the rest of the batch
+still lands.
+
+`user.updated` recorded only the new role list. It now records each changed
+role list, active flag and address before and after (`services/user_audit`,
+shared with SCIM).
+
+**The vendor reads admit the vendor permissions.** `GET /api/vendors` (and
+`/ids`, `/counts`, `/{id}`) were `require_roles(admin, ap_manager, cfo)`, so a
+custom role holding only `vendor.manage` or `vendor.block` saw the Vendors page
+in no nav and got a 403 on the list its permission acts on. The payment and
+admin lists were fixed by moving to `require_permission` because their default
+permission holders were exactly the roles they already admitted; here `cfo`
+reads vendors without any vendor permission, so the same move would have taken
+the page from the CFO. `deps.require_role_or_permission` admits either, so the
+system roles keep exactly what they had, and the nav row ORs the same two
+permissions.
