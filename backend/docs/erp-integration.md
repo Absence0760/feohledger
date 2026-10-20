@@ -1718,7 +1718,7 @@ which apps created on or after 2026-03-02 must use.
 | Method | Xero call | Notes |
 |---|---|---|
 | `test_connection` | `GET Organisation` | |
-| `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False` |
+| `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False`. Xero sets `IsSupplier` only once a contact has a bill, so a supplier you have only sent purchase orders to is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone |
 | `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
 | `list_pos` | `GET PurchaseOrders` | `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |

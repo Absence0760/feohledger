@@ -720,7 +720,7 @@ def test_list_vendors_filters_suppliers_and_maps_fields(token):
         client = _client(cm)
         client.get = AsyncMock(return_value=_resp(200, {"Contacts": [contact]}))
         vendors = _run(_adapter().list_vendors())
-    params = client.get.await_args.kwargs["params"]
+    params = client.get.await_args_list[0].kwargs["params"]
     assert params["where"] == "IsSupplier==true"
     # Archived contacts are asked for: Xero omits them otherwise, and a vendor
     # linked to one would look like a dead link (§284).
@@ -730,6 +730,63 @@ def test_list_vendors_filters_suppliers_and_maps_fields(token):
     assert v.phone == "27 215550100"
     assert v.payment_terms == "DAYSAFTERBILLDATE 30"
     assert v.active is True
+
+
+def _route_get(responses: dict):
+    """A `client.get` answering by (path, the one query value that varies)."""
+
+    async def get(url, params=None, headers=None):
+        path = url.rsplit("/", 1)[-1]
+        key = (path, (params or {}).get("Status") or (params or {}).get("IDs"))
+        return responses.get(key) or _resp(200, {path: []})
+
+    return AsyncMock(side_effect=get)
+
+
+def test_list_vendors_adds_contacts_only_ordered_from(token):
+    """Xero sets IsSupplier only once a contact has a bill, so a supplier
+    with only purchase orders so far is read from the unbilled POs."""
+    supplier = {"ContactID": "c-billed", "Name": "Billed Ltd"}
+    po_only = {"ContactID": "c-po", "Name": "Feoh Test Supplies Inc"}
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = _route_get(
+            {
+                ("Contacts", None): _resp(200, {"Contacts": [supplier]}),
+                ("PurchaseOrders", "AUTHORISED"): _resp(
+                    200,
+                    {
+                        "PurchaseOrders": [
+                            {"Contact": {"ContactID": "c-po"}},
+                            {"Contact": {"ContactID": "c-billed"}},
+                        ]
+                    },
+                ),
+                ("PurchaseOrders", "DRAFT"): _resp(
+                    200, {"PurchaseOrders": [{"Contact": {"ContactID": "c-po"}}]}
+                ),
+                ("Contacts", "c-po"): _resp(200, {"Contacts": [po_only]}),
+            }
+        )
+        vendors = _run(_adapter().list_vendors())
+    assert [v.erp_vendor_id for v in vendors] == ["c-billed", "c-po"]
+    statuses = [
+        c.kwargs["params"].get("Status")
+        for c in client.get.await_args_list
+        if c.args[0].endswith("/PurchaseOrders")
+    ]
+    # Only POs not yet billed: a billed PO's contact is already a supplier.
+    assert statuses == ["DRAFT", "SUBMITTED", "AUTHORISED"]
+
+
+def test_list_vendors_raises_when_the_po_contacts_cannot_be_read(token):
+    """The added contacts are evidence too: a failed PO read raises rather
+    than returning a pull the vendor sync would read as those vendors gone."""
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = _route_get({("PurchaseOrders", "SUBMITTED"): _resp(429, {})})
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_vendors())
+    assert exc.value.gap is ListingGap.fetch_failed
 
 
 def test_an_archived_supplier_is_emitted_inactive(token):

@@ -1512,6 +1512,9 @@ async def xero_contacts(request: Request, page: int = 1) -> JSONResponse:
     rows = XERO_CONTACTS
     if request.query_params.get("where", "").replace(" ", "") == "IsSupplier==true":
         rows = [c for c in rows if c.get("IsSupplier")]
+    ids = {i for i in request.query_params.get("IDs", "").split(",") if i}
+    if ids:
+        rows = [c for c in rows if c["ContactID"] in ids]
     return _xero_response({"Contacts": copy.deepcopy(rows) if page == 1 else []})
 
 
@@ -1524,8 +1527,9 @@ async def xero_accounts(request: Request) -> JSONResponse:
 @xero.get("/PurchaseOrders")
 async def xero_purchase_orders(request: Request, page: int = 1) -> JSONResponse:
     _require_xero_auth(request)
-    rows = copy.deepcopy(XERO_PURCHASE_ORDERS) if page == 1 else []
-    return _xero_response({"PurchaseOrders": rows})
+    status = request.query_params.get("Status")
+    rows = [po for po in XERO_PURCHASE_ORDERS if not status or po.get("Status") == status]
+    return _xero_response({"PurchaseOrders": copy.deepcopy(rows) if page == 1 else []})
 
 
 @xero.get("/Invoices")
