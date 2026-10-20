@@ -749,7 +749,7 @@
 	}
 
 	.state.error {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	.empty {
@@ -1052,11 +1052,11 @@
 	}
 
 	.card-setup.state-error {
-		border-color: #f06464;
+		border-color: var(--danger);
 	}
 
 	.card-setup.state-error p {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	.card-setup-placeholder {

@@ -96,7 +96,7 @@
 		margin: 0;
 		padding: 12px 14px;
 		border-radius: 10px;
-		border: 1px solid rgba(38, 185, 119, 0.35);
+		border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
 		background: var(--success-tint);
 		color: var(--success-on-tint);
 		font-size: 0.88rem;

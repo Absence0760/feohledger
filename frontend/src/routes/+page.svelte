@@ -917,7 +917,7 @@
 	}
 
 	.upcoming-row.overdue {
-		background: rgba(224, 64, 64, 0.04);
+		background: color-mix(in srgb, var(--danger) 4%, transparent);
 		margin: 0 -20px;
 		padding: 8px 20px;
 	}
@@ -961,7 +961,7 @@
 	}
 
 	.overdue-text {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	/* Colour + metrics come from `ui/Badge.svelte`; this keeps only the spacing

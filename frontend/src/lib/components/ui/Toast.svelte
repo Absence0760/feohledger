@@ -114,28 +114,33 @@
 		}
 	}
 
+	/* An OPAQUE tone-tinted card (the toast floats over arbitrary content, so
+	   a translucent tint would take on whatever is under it), with the tone's
+	   `-on-tint` text. Mixed from the palette rather than typed, so both themes
+	   get a card in their own register — these were four dark literals
+	   (#132a1e, …) and a toast was a navy slab on a light page. */
 	.toast.success {
-		background: #132a1e;
-		border: 1px solid #1fa86a;
-		color: #4ade80;
+		background: color-mix(in srgb, var(--success) 14%, var(--surface));
+		border: 1px solid var(--success);
+		color: var(--success-on-tint);
 	}
 
 	.toast.error {
-		background: #2a1313;
+		background: color-mix(in srgb, var(--danger) 14%, var(--surface));
 		border: 1px solid var(--danger);
-		color: #f87171;
+		color: var(--danger-on-tint);
 	}
 
 	.toast.warning {
-		background: #2a2213;
-		border: 1px solid #d4940a;
-		color: #fbbf24;
+		background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+		border: 1px solid var(--warning);
+		color: var(--warning-on-tint);
 	}
 
 	.toast.info {
-		background: #131a2a;
-		border: 1px solid #638cff;
-		color: #93b4ff;
+		background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+		border: 1px solid var(--accent);
+		color: var(--accent-on-tint);
 	}
 
 	.toast-icon {
@@ -167,7 +172,7 @@
 
 	.toast-dismiss:hover {
 		opacity: 1;
-		background: rgba(255, 255, 255, 0.1);
+		background: color-mix(in srgb, currentColor 12%, transparent);
 	}
 
 	/* WCAG 2.3.3 Animation from Interactions — kill the slide-in when the user

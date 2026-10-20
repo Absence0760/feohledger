@@ -503,19 +503,19 @@
 	}
 
 	.status-dot.active::before {
-		background: #1fa86a;
+		background: var(--success);
 	}
 
 	.status-dot.inactive::before {
-		background: #999;
+		background: var(--text-muted);
 	}
 
 	.status-dot.active {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	.status-dot.inactive {
-		color: #999;
+		color: var(--text-muted);
 	}
 
 	/* Create-workflow modal: custom h3 heading + labelled form fields. */
@@ -569,7 +569,7 @@
 	.form-group input:focus,
 	.form-group textarea:focus {
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	.form-group textarea {

@@ -892,8 +892,8 @@
 	}
 
 	.btn-toggle.active {
-		border-color: #1fa86a;
-		color: #1fa86a;
+		border-color: var(--success);
+		color: var(--success);
 	}
 
 	.btn-save {
@@ -1031,7 +1031,7 @@
 	.field input:focus,
 	.field select:focus {
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	.field select {
@@ -1046,7 +1046,7 @@
 	}
 
 	.field-hint.warning {
-		color: #d4940a;
+		color: var(--warning);
 	}
 
 	.field-divider {
@@ -1108,7 +1108,7 @@
 	   The pairing here is `--text` over the composite, not a tint/on-tint
 	   pair. */
 	.chip-remove:hover {
-		background: rgba(99, 140, 255, 0.2);
+		background: color-mix(in srgb, var(--accent) 20%, transparent);
 		color: var(--text);
 	}
 
@@ -1152,7 +1152,7 @@
 	}
 
 	.approver-option:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 
 	.approver-name {

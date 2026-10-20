@@ -5,11 +5,11 @@
  * `neutral` is a flat `--bg` chip for a "nothing happening" state
  * (cancelled / not-applicable) — deliberately NOT a tint, because a tint
  * reads as a signal and these states are the absence of one.
- * `erp` is the one measured literal: purple carries no semantic the five
- * tones share (it exists to make "handed to the ERP" scannable
- * mid-pipeline), so it stays a literal in the component rather than becoming
- * a palette token with a single caller. See `StatusBadge.svelte` and
- * decisions.md §30.
+ * `erp` is violet: purple carries no semantic the five tones share (it
+ * exists to make "handed to the ERP" scannable mid-pipeline). It was a
+ * literal while there was one theme; it is the `--violet-tint` /
+ * `--violet-on-tint` pair now, because the light theme needs its own value
+ * (decisions.md §30, §289).
  *
  * **Why this is a `.ts` module and not the component's `<script module>`.**
  * Every `#lib/types/*` status→tone map is typed with it, and those modules are

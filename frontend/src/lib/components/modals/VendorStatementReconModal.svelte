@@ -672,7 +672,7 @@
 	.prov-skipped {
 		margin: 0;
 		font-size: 0.76rem;
-		color: #d4940a;
+		color: var(--warning);
 	}
 	.prov-download {
 		margin-top: 4px;
@@ -828,7 +828,7 @@
 		color: var(--text-muted);
 	}
 	.res-state.resolved {
-		color: #1fa86a;
+		color: var(--success);
 	}
 	.res-state.ignored {
 		color: var(--text-muted);
@@ -1039,9 +1039,9 @@
 		gap: 3px;
 		margin-top: 14px;
 		padding: 10px 12px;
-		border: 1px solid rgba(224, 64, 64, 0.4);
+		border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
 		border-radius: 6px;
-		background: rgba(224, 64, 64, 0.08);
+		background: color-mix(in srgb, var(--danger) 8%, transparent);
 		font-size: 0.82rem;
 		color: var(--text);
 	}

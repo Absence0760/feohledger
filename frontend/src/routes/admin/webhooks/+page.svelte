@@ -889,7 +889,7 @@
 	}
 
 	.state.error {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	.mono {
@@ -936,9 +936,9 @@
 	/* Hard cutover is the destructive option — deliveries fail until the
 	   receiver holds the new secret — so it gets the red treatment, not amber. */
 	.cutover-warning {
-		background: rgba(240, 70, 70, 0.12);
-		border: 1px solid rgba(240, 70, 70, 0.35);
-		color: #f06464;
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+		color: var(--danger);
 		border-radius: 8px;
 		padding: 0.75rem 1rem;
 		font-size: 0.85rem;

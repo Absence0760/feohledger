@@ -339,7 +339,7 @@
 		   to rather than inventing a token. `--surface-hover` does not exist;
 		   using it with a fallback is a dead token and `a11y/tokenPairing` says
 		   so. */
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 		color: var(--text);
 	}
 

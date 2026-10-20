@@ -246,10 +246,12 @@ The current build implements:
 - **Live-region announcements** for toasts and async status (`aria-live`).
 - **Labelled form fields** — every input has an associated `<label>`;
   required fields are marked.
-- **Sufficient colour contrast** in the dark theme (text and UI components meet
-  the 4.5:1 / 3:1 AA thresholds), verified three ways: the contrast rules in the
-  axe guard on what a route renders, the stylesheet-wide colour-token scan on
-  every rule in the app whether a guarded route renders it or not, and the
+- **Sufficient colour contrast** in both the dark and the light theme (text and
+  UI components meet the 4.5:1 / 3:1 AA thresholds; the theme follows the OS or
+  a per-browser choice on `/profile`, decisions §289), verified three ways: the
+  contrast rules in the axe guard on what a route renders (`axe.spec.ts` dark,
+  `light-theme.spec.ts` light), the stylesheet-wide colour-token scan on every
+  rule in the app — once per theme — whether a guarded route renders it or not, and the
   opacity scan on the one thing neither can see — a fade applied to an
   ancestor, whose cost lands on descendants' colours.
 - **Reduced-motion support** — animations respect

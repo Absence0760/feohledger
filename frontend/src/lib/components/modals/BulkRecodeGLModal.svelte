@@ -233,7 +233,7 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.5);
+		background: var(--overlay);
 		display: grid;
 		place-items: center;
 		z-index: 100;
@@ -451,8 +451,8 @@
 	}
 
 	.src-vendor_prior {
-		background: rgba(31, 168, 106, 0.15);
-		color: #1fa86a;
+		background: color-mix(in srgb, var(--success) 15%, transparent);
+		color: var(--success);
 	}
 
 	.src-ai {

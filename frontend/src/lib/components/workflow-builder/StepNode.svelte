@@ -181,7 +181,7 @@
 
 	.node.selected {
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.2);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 	}
 
 	.node.disabled {
@@ -291,8 +291,8 @@
 	}
 
 	.icon-action.danger:hover {
-		border-color: #f06464;
-		color: #f06464;
+		border-color: var(--danger);
+		color: var(--danger);
 	}
 
 	.node-number {

@@ -642,12 +642,12 @@
 		border: 1px solid var(--border);
 	}
 	.s-paid {
-		background: rgba(40, 160, 80, 0.15);
-		border-color: rgba(40, 160, 80, 0.4);
+		background: color-mix(in srgb, var(--success) 15%, transparent);
+		border-color: color-mix(in srgb, var(--success) 40%, transparent);
 	}
 	.s-rejected {
-		background: rgba(224, 64, 64, 0.12);
-		border-color: rgba(224, 64, 64, 0.35);
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
+		border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 	}
 	.reject-reason {
 		margin-top: 6px;
@@ -733,16 +733,16 @@
 		font-size: 0.82rem;
 	}
 	.error {
-		background: rgba(224, 64, 64, 0.1);
-		border: 1px solid rgba(224, 64, 64, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		padding: 10px 14px;
 		border-radius: 4px;
 		margin-bottom: 12px;
 	}
 	.msg {
-		background: rgba(40, 160, 80, 0.12);
-		border: 1px solid rgba(40, 160, 80, 0.35);
+		background: color-mix(in srgb, var(--success) 12%, transparent);
+		border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
 		color: var(--success);
 		padding: 10px 14px;
 		border-radius: 4px;

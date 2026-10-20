@@ -2031,7 +2031,7 @@
 	/* Inline blocking-violation panel above the report detail. */
 	.violation-panel {
 		border: 1px solid var(--danger);
-		background: rgba(224, 64, 64, 0.06);
+		background: color-mix(in srgb, var(--danger) 6%, transparent);
 		border-radius: 8px;
 		padding: 12px 14px;
 		color: var(--text);
@@ -2049,8 +2049,8 @@
 	/* Partial-total notice: some lines lack an FX lock and were excluded. */
 	.unconverted-panel {
 		margin-top: 10px;
-		border: 1px solid #c98a00;
-		background: rgba(201, 138, 0, 0.08);
+		border: 1px solid var(--warning);
+		background: color-mix(in srgb, var(--warning) 8%, transparent);
 		border-radius: 8px;
 		padding: 10px 14px;
 		color: var(--text);

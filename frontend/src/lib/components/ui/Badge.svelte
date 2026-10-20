@@ -93,9 +93,10 @@
 		color: var(--text-muted);
 	}
 
-	/* The measured literal. #a585f5 on the 15% tint composites to 5.59:1. */
+	/* Violet — the palette's `--violet-*` pair (a literal until the light
+	   theme needed a second value; decisions §289). */
 	.erp {
-		background: rgba(140, 100, 240, 0.15);
-		color: #a585f5;
+		background: var(--violet-tint);
+		color: var(--violet-on-tint);
 	}
 </style>

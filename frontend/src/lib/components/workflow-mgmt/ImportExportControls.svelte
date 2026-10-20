@@ -229,7 +229,7 @@
 		margin: 0;
 		padding: 10px 12px;
 		border-radius: 6px;
-		background: rgba(240, 70, 70, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 		font-size: 0.82rem;
 		display: flex;

@@ -244,7 +244,7 @@
 	}
 
 	.entity-option:not(:disabled):hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 
 	/* De-emphasised with the muted TOKEN, never `opacity` — a fade composites
@@ -256,7 +256,7 @@
 	}
 
 	.entity-option.selected {
-		background: rgba(99, 140, 255, 0.12);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
 		color: var(--accent);
 	}
 

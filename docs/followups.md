@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — the live QuickBooks re-test (#598) reached
+**Last reconciled:** 2026-10-20 — the light theme (decisions §289) opened one
+(c) entry, a white-label accent left unchecked as text on the light surfaces,
+taking the file from 114 → 115. Before that, 2026-10-20 — the live QuickBooks re-test (#598) reached
 the sync screens' entry, which landed (coded `erp_listing_incomplete` /
 `erp_not_connected` answers, parent and too-long values reported), and narrowed
 the posted-bill entry to the other adapters' pre-flight refusals, taking the
@@ -166,7 +168,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**114 open: 98 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**115 open: 99 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1792,6 +1794,23 @@ scope (§260) — do not fold them into any of these.
       only pre-0115 and a no-realm pull can leave it alone too. **Trigger:**
       the next change to `services/erp_link_realm`, or a tenant that switches
       to `mock` after 0115.
+
+### Surfaced by building the light theme (2026-10-20, decisions §289)
+
+- [ ] **(c) A white-label accent is one colour for both themes, and nothing
+      checks it as text.** A tenant's `accent_color` / `accent_strong_color`
+      is written inline on `<html>` (`stores/brand.svelte.ts`), so it beats
+      both palettes. `--accent-strong` is held to white-on-it by the existing
+      `/organization` advisory, which is theme-independent and still right; but
+      `--accent` is also used as small TEXT (links, the active tab, armed row
+      actions), and a brand blue picked to read on navy — the platform's own
+      `#638cff` is 3.1:1 on white — fails 1.4.3 once a reader chooses Light.
+      Nothing measured `--accent` as text even in dark. **Durable fix:** let a
+      brand carry a per-theme `--accent` (or derive the light one by darkening
+      until it clears 4.5:1 on `--surface`), and extend the advisory in
+      `stores/brandTheme.ts` to report the accent against both themes'
+      surfaces. **Trigger:** the first tenant that sets a brand accent, or any
+      white-label sale.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

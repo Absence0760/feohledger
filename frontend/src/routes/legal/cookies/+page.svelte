@@ -35,9 +35,10 @@
 		{OPERATOR.serviceName} sets no cookies. Everything the app keeps in your browser is <strong
 			>Web Storage</strong
 		>
-		— <code>localStorage</code> or <code>sessionStorage</code> — never an HTTP cookie. There are six
-		such items in total, listed in full in the table below. Four of them exist only to keep you signed
-		in or to remember a choice you made (your language, which legal entity you're viewing); none of
+		— <code>localStorage</code> or <code>sessionStorage</code> — never an HTTP cookie. There are seven
+		such items in total, listed in full in the table below. Five of them exist only to keep you signed
+		in or to remember a choice you made (your language, your colour theme, which legal entity you're
+		viewing); none of
 		them exist for advertising, and none of them exist for analytics or tracking, because {OPERATOR.serviceName}
 		does not run any analytics or tracking code anywhere in the app today. The consent banner you may
 		see offers a category reserved for that kind of storage in case it is ever added — nothing is loaded
@@ -130,6 +131,16 @@
 					<td>Remembers the display language you picked for the interface.</td>
 					<td>Functional / necessary for the feature it supports</td>
 					<td>Until you change your language again. No automatic expiry.</td>
+				</tr>
+				<tr>
+					<td><code>feoh_theme</code></td>
+					<td>localStorage</td>
+					<td>
+						Remembers the colour theme you picked for the interface (Light or Dark). Choosing
+						System — follow your device's setting — removes it.
+					</td>
+					<td>Functional / necessary for the feature it supports</td>
+					<td>Until you change your theme again. No automatic expiry.</td>
 				</tr>
 				<tr>
 					<td><code>feoh_consent_choice</code></td>

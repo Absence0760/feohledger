@@ -264,12 +264,12 @@
 		   nav row, so it matches the chrome it belongs to. `--surface-hover` does
 		   not exist — a dead token with a fallback is what `a11y/tokenPairing`
 		   flags. */
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 		color: var(--text);
 	}
 
 	.rail-link.active {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 		border-left-color: var(--accent);
 		color: var(--text);
 		font-weight: 600;

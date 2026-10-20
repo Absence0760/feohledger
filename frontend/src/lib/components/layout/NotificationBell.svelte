@@ -140,7 +140,7 @@
 	}
 
 	.bell-btn:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 		color: var(--text);
 	}
 
@@ -263,11 +263,11 @@
 	}
 
 	.bell-item:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 
 	.bell-item.unread {
-		background: rgba(99, 140, 255, 0.05);
+		background: color-mix(in srgb, var(--accent) 5%, transparent);
 	}
 
 	.bell-dot {
@@ -325,6 +325,6 @@
 	}
 
 	.bell-viewall:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 </style>

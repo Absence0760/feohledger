@@ -81,6 +81,6 @@
 	.prompt-btn:hover {
 		border-color: var(--accent);
 		color: var(--accent);
-		background: rgba(99, 140, 255, 0.06);
+		background: color-mix(in srgb, var(--accent) 6%, transparent);
 	}
 </style>

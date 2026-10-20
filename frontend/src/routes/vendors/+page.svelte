@@ -1015,7 +1015,7 @@
 		border-bottom: none;
 	}
 	.unverified {
-		background: rgba(212, 148, 10, 0.04);
+		background: color-mix(in srgb, var(--warning) 4%, transparent);
 	}
 
 	/* De-emphasize rejected rows with a subtle tint rather than a blanket
@@ -1023,7 +1023,7 @@
 	   1.4.3 4.5:1 contrast floor). The red "Rejected" status badge carries
 	   the state signal. */
 	.rejected td {
-		background: rgba(224, 64, 64, 0.04);
+		background: color-mix(in srgb, var(--danger) 4%, transparent);
 	}
 	/* Column widths. The table is `table-layout: fixed`, so with no widths every
 	   column got an equal share: the checkbox column was as wide as Email, and
@@ -1078,7 +1078,7 @@
 	}
 
 	.erp-linked {
-		color: #1fa86a;
+		color: var(--success);
 		display: inline-flex;
 	}
 
@@ -1091,7 +1091,7 @@
 	.modal input:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 	.form-row {
 		display: grid;

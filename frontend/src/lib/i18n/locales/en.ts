@@ -198,6 +198,13 @@ export const en = {
 	'profile.language.hint':
 		'Choose the language used across the app. Your choice is saved on this device.',
 	'profile.language.label': 'Display language',
+	'profile.appearance.heading': 'Appearance',
+	'profile.appearance.hint':
+		'Choose the colour theme for this browser. System follows your device’s light or dark setting. Your choice is saved on this device.',
+	'profile.appearance.legend': 'Theme',
+	'profile.appearance.system': 'System',
+	'profile.appearance.light': 'Light',
+	'profile.appearance.dark': 'Dark',
 
 	// Profile → Notification preferences (profile/+page.svelte). The event
 	// roster mirrors backend/app/models/notification.py::NOTIFICATION_EVENT_TYPES

@@ -706,11 +706,11 @@
 	}
 
 	.cf-bar.committed {
-		background: #638cff;
+		background: var(--accent);
 	}
 
 	.cf-bar.pending {
-		background: #b7c5f5;
+		background: color-mix(in srgb, var(--accent) 45%, var(--text));
 	}
 
 	.cf-bar-amount {
@@ -738,11 +738,11 @@
 	}
 
 	.cf-dot.committed {
-		background: #638cff;
+		background: var(--accent);
 	}
 
 	.cf-dot.pending {
-		background: #b7c5f5;
+		background: color-mix(in srgb, var(--accent) 45%, var(--text));
 	}
 
 	.scenario-grid {
@@ -761,8 +761,8 @@
 	}
 
 	.scenario-card.best {
-		border-color: #2faa6a;
-		background: rgba(47, 170, 106, 0.06);
+		border-color: var(--success);
+		background: color-mix(in srgb, var(--success) 6%, transparent);
 	}
 
 	.scenario-title {
@@ -784,7 +784,7 @@
 
 	.scenario-discount {
 		font-size: 0.82rem;
-		color: #2faa6a;
+		color: var(--success);
 		font-weight: 600;
 	}
 
@@ -805,7 +805,7 @@
 	   the bank. Distinct from `.cf-hint` so "we declined your balance" can't be
 	   read as the ordinary "enter an opening balance" prompt. */
 	.cf-skipped {
-		color: #d4940a;
+		color: var(--warning);
 		font-weight: 600;
 	}
 

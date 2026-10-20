@@ -435,14 +435,14 @@
 	.prompt-btn:hover {
 		border-color: var(--accent);
 		color: var(--accent);
-		background: rgba(99, 140, 255, 0.06);
+		background: color-mix(in srgb, var(--accent) 6%, transparent);
 	}
 	.budget-notice {
 		margin: 0 16px;
 		padding: 10px 14px;
 		border-radius: 8px;
-		background: rgba(240, 70, 70, 0.1);
-		border: 1px solid rgba(240, 70, 70, 0.3);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
 		font-size: 0.85rem;
 	}

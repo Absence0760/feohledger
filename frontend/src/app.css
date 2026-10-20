@@ -1,8 +1,30 @@
-:root {
+:root,
+/* A subtree pinned to the dark palette whatever the page's theme: the
+   marketing landing page, whose rendered ornament, grain and glows were
+   designed on navy (docs/decisions.md §289). Custom properties inherit, so
+   redeclaring the palette on the element is all it takes — the derived
+   tokens (`--accent-glow`, …) are recomputed there too, because they live
+   in this same block. */
+[data-theme-scope='dark'] {
 	font-family: system-ui, -apple-system, sans-serif;
 	/* Tells the UA to render native form controls (checkboxes, selects,
 	   scrollbars, date pickers) in their dark variant instead of the default
-	   light styling that clashes with our dark surfaces. */
+	   light styling that clashes with our dark surfaces. The light theme
+	   below sets `color-scheme: light` beside its own palette, so the native
+	   controls always follow the theme that is actually showing.
+
+	   THIS block is the DARK palette, and the default: it is what renders
+	   when `data-theme="dark"` is chosen, and when the visitor's OS asks for
+	   dark (or states nothing) under `data-theme="system"`. The LIGHT palette
+	   is the `:root[data-theme='light']` block after this one, repeated
+	   verbatim inside `@media (prefers-color-scheme: light)` for System.
+	   Every colour token declared here MUST be redeclared there — a token
+	   missing from the light block would silently render its dark value on a
+	   light page. `src/lib/a11y/tokenPairing.test.ts` holds both: the two
+	   light blocks identical, the light block covering every colour token,
+	   and each palette through the same contrast contract. How the theme is
+	   chosen: `src/lib/theme.ts` + the inline script in `src/app.html`
+	   (docs/decisions.md §289). */
 	color-scheme: dark;
 	/* Canonical monospace stack. Three components referenced it as
 	   `var(--mono, …)` / `var(--font-mono, …)` under two different names
@@ -65,6 +87,13 @@
 	--success-strong: #177a4d;
 	--danger: #f87171;
 	--danger-strong: #c43535;
+	/* Amber, for TEXT and ICONS only (a caution line, a skipped count, a
+	   warning glyph) — 7.22:1 on --bg, 6.64:1 on --surface. It has no
+	   `-strong` companion because nothing puts white text on amber; a
+	   warning BADGE takes --warning-tint + --warning-on-tint below. Before
+	   it existed, ~30 rules typed this hex by hand, which is how the light
+	   theme found them: amber chosen for navy is 2.4:1 on white. */
+	--warning: #d4940a;
 
 	/* ---------------------------------------------------------------
 	   Badge tints — the THIRD role in the same family, for the status
@@ -109,6 +138,11 @@
 	   without hunting for the sites that spelled it the other way. */
 	--danger-tint: rgba(240, 70, 70, 0.15);
 	--danger-on-tint: #f87171;
+	/* Violet — the "with the ERP" status pill (an invoice sent to the ERP,
+	   an ERP-sourced badge). Text-on-tint 5.06 / 5.59. Two pills spelled it
+	   as literals before the light theme needed a second value. */
+	--violet-tint: rgba(140, 100, 240, 0.15);
+	--violet-on-tint: #a585f5;
 
 	/* ---------------------------------------------------------------
 	   Shape, depth and motion — the app-surface layer (decisions §181).
@@ -133,6 +167,131 @@
 	--accent-glow: color-mix(in srgb, var(--accent) 55%, transparent);
 	--accent-wash: color-mix(in srgb, var(--accent) 8%, transparent);
 	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+	/* ---------------------------------------------------------------
+	   Chrome tokens with no text on them — they used to be literals in the
+	   rules below, which was harmless while there was one theme and is a
+	   dark patch on a light page now there are two.
+	   --------------------------------------------------------------- */
+	/* A border one step louder than --border: the hover edge of a card or a
+	   secondary button. */
+	--border-strong: #3a3e4f;
+	/* The edge of a floating dialog, quieter than --border. */
+	--border-soft: rgba(226, 228, 234, 0.09);
+	/* The dimmed page behind a modal. */
+	--overlay: rgba(6, 8, 12, 0.62);
+	--scrollbar-thumb: #363a49;
+	--scrollbar-thumb-hover: #454a5c;
+}
+
+/* ===================================================================
+   LIGHT palette (docs/decisions.md §289)
+   -------------------------------------------------------------------
+   The same tokens, the same jobs, recalibrated for a light ground. The
+   contract is unchanged and so is the guard: every pair below clears
+   the same WCAG 1.4.3 bars as its dark twin, asserted per theme by
+   `src/lib/a11y/tokenPairing.test.ts`. Ratios, light theme
+   (on --bg / on --surface / on --surface-2):
+
+     --text        15.9 / 17.4 / 14.7
+     --text-muted   5.75 / 6.27 / 5.30  (muted IS legal on --surface-2 here;
+                    the dark theme's refusal is what authors design to)
+     --accent       6.37 / 6.95         --accent-strong   white-on 8.13
+     --success      6.45 / 7.03         --success-strong  white-on 7.86
+     --danger       6.50 / 7.08         --danger-strong   white-on 7.89
+     --warning      6.08 / 6.62
+     -on-tint over its -tint (on --surface / on --bg):
+       accent 6.72/6.19  success 6.94/6.39  warning 6.37/5.92
+       muted 7.47/6.89   danger 6.22/5.77  violet 6.78/6.24
+
+   The base tokens are darker than the bare-surface bar needs, on
+   purpose: about forty rules set a base token as text on a faint tint of
+   its own hue (an armed delete button, an inline error box) at 10–20%
+   alpha, and a base token that cleared 4.5:1 only on bare white failed
+   on its own wash. Each one clears its own 20% tint here.
+
+   The base tokens swap direction — dark mid-tones, legible as text on a
+   light ground — but the rule does not: white text still sits ONLY on a
+   `-strong` fill, and a tinted badge still takes its `-on-tint` text.
+
+   This block appears TWICE, byte-identical: once for an explicit Light
+   choice and once inside the media query for System. CSS has no way to
+   share one declaration block between a selector and a media-gated
+   selector; the test fails if the two drift apart.
+   =================================================================== */
+:root[data-theme='light'] {
+	color-scheme: light;
+	--bg: #f4f5f8;
+	--surface: #ffffff;
+	--surface-2: #e9ecf3;
+	--border: #d3d7e1;
+	--text: #171a24;
+	--text-muted: #5a6072;
+	--accent: #2c4fc4;
+	--accent-strong: #2546b0;
+	--success: #11663a;
+	--success-strong: #0f5e35;
+	--danger: #a82622;
+	--danger-strong: #9c221e;
+	--warning: #7f5400;
+	--accent-tint: rgba(51, 88, 212, 0.12);
+	--accent-on-tint: #2a47b0;
+	--success-tint: rgba(21, 140, 85, 0.12);
+	--success-on-tint: #0f5c34;
+	--warning-tint: rgba(214, 150, 20, 0.16);
+	--warning-on-tint: #7a4c00;
+	--muted-tint: rgba(90, 96, 114, 0.12);
+	--muted-on-tint: #454a59;
+	--danger-tint: rgba(200, 50, 50, 0.12);
+	--danger-on-tint: #a3221f;
+	--violet-tint: rgba(120, 80, 220, 0.12);
+	--violet-on-tint: #5a36b5;
+	--hairline: rgba(23, 26, 36, 0.08);
+	--shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 12px 30px -22px rgba(20, 24, 40, 0.28);
+	--shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 28px 70px -26px rgba(20, 24, 40, 0.38);
+	--border-strong: #b6bccb;
+	--border-soft: rgba(23, 26, 36, 0.1);
+	--overlay: rgba(23, 26, 36, 0.4);
+	--scrollbar-thumb: #c4c9d4;
+	--scrollbar-thumb-hover: #a9afbd;
+}
+@media (prefers-color-scheme: light) {
+	:root:not([data-theme='dark']) {
+		color-scheme: light;
+		--bg: #f4f5f8;
+		--surface: #ffffff;
+		--surface-2: #e9ecf3;
+		--border: #d3d7e1;
+		--text: #171a24;
+		--text-muted: #5a6072;
+		--accent: #2c4fc4;
+		--accent-strong: #2546b0;
+		--success: #11663a;
+		--success-strong: #0f5e35;
+		--danger: #a82622;
+		--danger-strong: #9c221e;
+		--warning: #7f5400;
+		--accent-tint: rgba(51, 88, 212, 0.12);
+		--accent-on-tint: #2a47b0;
+		--success-tint: rgba(21, 140, 85, 0.12);
+		--success-on-tint: #0f5c34;
+		--warning-tint: rgba(214, 150, 20, 0.16);
+		--warning-on-tint: #7a4c00;
+		--muted-tint: rgba(90, 96, 114, 0.12);
+		--muted-on-tint: #454a59;
+		--danger-tint: rgba(200, 50, 50, 0.12);
+		--danger-on-tint: #a3221f;
+		--violet-tint: rgba(120, 80, 220, 0.12);
+		--violet-on-tint: #5a36b5;
+		--hairline: rgba(23, 26, 36, 0.08);
+		--shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 12px 30px -22px rgba(20, 24, 40, 0.28);
+		--shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 28px 70px -26px rgba(20, 24, 40, 0.38);
+		--border-strong: #b6bccb;
+		--border-soft: rgba(23, 26, 36, 0.1);
+		--overlay: rgba(23, 26, 36, 0.4);
+		--scrollbar-thumb: #c4c9d4;
+		--scrollbar-thumb-hover: #a9afbd;
+	}
 }
 
 *,
@@ -411,10 +570,10 @@ input[type='radio']:checked {
 }
 input[type='radio']:focus-visible {
 	outline: none;
-	box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.35);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 input[type='radio']:checked:focus-visible {
-	box-shadow: inset 0 0 0 3px var(--bg), 0 0 0 2px rgba(99, 140, 255, 0.35);
+	box-shadow: inset 0 0 0 3px var(--bg), 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 input[type='radio']:disabled {
 	opacity: 0.45;
@@ -452,7 +611,7 @@ input[type='file']::file-selector-button:hover {
 
 /* Accent-tinted text selection instead of the UA's default highlight. */
 ::selection {
-	background: rgba(99, 140, 255, 0.3);
+	background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* ===================================================================
@@ -524,7 +683,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    =================================================================== */
 * {
 	scrollbar-width: thin;
-	scrollbar-color: #363a49 transparent;
+	scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 ::-webkit-scrollbar {
 	width: 10px;
@@ -534,11 +693,11 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-	background: #363a49;
+	background: var(--scrollbar-thumb);
 	border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-	background: #454a5c;
+	background: var(--scrollbar-thumb-hover);
 }
 ::-webkit-scrollbar-corner {
 	background: transparent;
@@ -636,7 +795,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 .btn-cancel:hover {
 	color: var(--text);
-	border-color: #3a3e4f;
+	border-color: var(--border-strong);
 }
 
 /* --- Filter chips (FilterChips) --- */
@@ -751,7 +910,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	box-shadow: inset 2px 0 0 var(--accent);
 }
 .grid-container tr.row-selected {
-	background: rgba(99, 140, 255, 0.08);
+	background: var(--accent-wash);
 }
 /* De-emphasised row: a subscription that is paused, an API key that was
  * revoked, a user who was deactivated. The row is still readable evidence —
@@ -858,7 +1017,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 .backdrop {
 	position: fixed;
 	inset: 0;
-	background: rgba(6, 8, 12, 0.62);
+	background: var(--overlay);
 	display: grid;
 	place-items: center;
 	z-index: 100;
@@ -872,7 +1031,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    frame, which is the dialog at rest. */
 .modal {
 	background: var(--surface);
-	border: 1px solid rgba(226, 228, 234, 0.09);
+	border: 1px solid var(--border-soft);
 	border-radius: var(--radius-lg);
 	width: min(480px, 92vw);
 	max-height: 90vh;
@@ -969,7 +1128,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	border-top: 1px solid var(--hairline);
 }
 .required {
-	color: #f06464;
+	color: var(--danger);
 	font-style: normal;
 }
 
@@ -1007,7 +1166,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	background: linear-gradient(90deg, transparent, var(--kpi-tone, var(--accent-glow)), transparent);
 }
 .kpi:hover {
-	border-color: #353949;
+	border-color: var(--border-strong);
 }
 .kpi-value {
 	font-size: 1.65rem;
@@ -1036,20 +1195,20 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	color: var(--text-muted);
 }
 .kpi.highlight-green {
-	--kpi-tone: rgba(31, 168, 106, 0.9);
-	border-color: rgba(31, 168, 106, 0.3);
-	background: rgba(31, 168, 106, 0.04);
+	--kpi-tone: color-mix(in srgb, var(--success) 90%, transparent);
+	border-color: color-mix(in srgb, var(--success) 30%, transparent);
+	background: color-mix(in srgb, var(--success) 4%, var(--surface));
 }
 .kpi.highlight-green .kpi-value {
-	color: #1fa86a;
+	color: var(--success);
 }
 .kpi.highlight-red {
-	--kpi-tone: rgba(240, 100, 100, 0.9);
-	border-color: rgba(224, 64, 64, 0.3);
-	background: rgba(224, 64, 64, 0.04);
+	--kpi-tone: color-mix(in srgb, var(--danger) 90%, transparent);
+	border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+	background: color-mix(in srgb, var(--danger) 4%, var(--surface));
 }
 .kpi.highlight-red .kpi-value {
-	color: #f06464;
+	color: var(--danger);
 }
 
 /* ===================================================================

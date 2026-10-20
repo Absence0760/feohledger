@@ -139,16 +139,16 @@
 	}
 	.tone-line {
 		fill: none;
-		stroke: #6b7082;
+		stroke: color-mix(in srgb, var(--text-muted) 80%, var(--bg));
 		stroke-width: 2;
 	}
 	.tone-paper {
-		fill: #1f2230;
-		stroke: #6b7082;
+		fill: var(--surface-2);
+		stroke: color-mix(in srgb, var(--text-muted) 80%, var(--bg));
 		stroke-width: 2;
 	}
 	.tone-soft {
-		fill: rgba(226, 228, 234, 0.05);
+		fill: color-mix(in srgb, var(--text) 5%, transparent);
 		stroke: none;
 	}
 	.tone-accent {

@@ -75,7 +75,7 @@
 	}
 	.bar-fill {
 		height: 100%;
-		background: #638cff;
+		background: var(--accent);
 		border-radius: 4px;
 		transition: width 0.25s ease;
 	}

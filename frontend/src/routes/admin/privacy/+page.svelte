@@ -478,7 +478,7 @@
 	}
 
 	.state.error {
-		color: #f06464;
+		color: var(--danger);
 	}
 
 	.request-card {
@@ -527,7 +527,7 @@
 	}
 
 	.btn-danger:hover:not(:disabled) {
-		background: rgba(248, 113, 113, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 	}
 
 	.btn-danger:disabled {
@@ -581,8 +581,8 @@
 	}
 
 	.erase-warning {
-		background: rgba(248, 113, 113, 0.1);
-		border: 1px solid rgba(248, 113, 113, 0.35);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
 		color: var(--danger);
 		border-radius: 8px;
 		padding: 0.75rem 1rem;
@@ -683,6 +683,6 @@
 	textarea:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 </style>

@@ -794,7 +794,7 @@
 	.disc-skipped {
 		font-size: 0.85rem;
 		margin: 0;
-		color: #d4940a;
+		color: var(--warning);
 		font-weight: 600;
 	}
 
@@ -879,7 +879,7 @@
 		color: var(--text);
 	}
 	.opt-summary strong.pos {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	/* --- Optimizer recommendation cards (cfo scenario-grid style) --- */
@@ -899,8 +899,8 @@
 	}
 
 	.scenario-card.best {
-		border-color: #2faa6a;
-		background: rgba(47, 170, 106, 0.06);
+		border-color: var(--success);
+		background: color-mix(in srgb, var(--success) 6%, transparent);
 	}
 
 	.scenario-title {
@@ -915,7 +915,7 @@
 	}
 
 	.scenario-roi.pos {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	.scenario-sub {
@@ -931,7 +931,7 @@
 	}
 
 	.scenario-flag.selected {
-		color: #1fa86a;
+		color: var(--success);
 	}
 
 	/* The unrankable block sits BELOW the ranked grid and is visibly its own
@@ -955,7 +955,7 @@
 	.scenario-warn {
 		font-size: 0.72rem;
 		font-weight: 600;
-		color: #d4940a;
+		color: var(--warning);
 	}
 
 	/* --- Offers table cells --- */
@@ -999,7 +999,7 @@
 
 	.best-pct {
 		font-size: 0.7rem;
-		color: #1fa86a;
+		color: var(--success);
 		font-weight: 600;
 	}
 
@@ -1046,7 +1046,7 @@
 
 	.tier-option-amt {
 		font-size: 0.78rem;
-		color: #1fa86a;
+		color: var(--success);
 		font-weight: 600;
 	}
 

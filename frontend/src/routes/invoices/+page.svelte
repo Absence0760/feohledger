@@ -1346,7 +1346,7 @@
 		display: inline-flex;
 		vertical-align: middle;
 		margin-left: 4px;
-		color: #d4940a;
+		color: var(--warning);
 		cursor: help;
 	}
 
@@ -1562,7 +1562,7 @@
 
 	.bulk-delete-btn.armed {
 		border-color: var(--danger);
-		background: rgba(224, 64, 64, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 	}
 

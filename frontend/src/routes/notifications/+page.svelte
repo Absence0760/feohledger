@@ -180,7 +180,7 @@
 	}
 
 	tbody tr.unread-row td {
-		background: rgba(99, 140, 255, 0.05);
+		background: color-mix(in srgb, var(--accent) 5%, transparent);
 	}
 
 	.notif-cell {

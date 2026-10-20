@@ -111,17 +111,17 @@
 	}
 
 	.row-action.variant-accent:hover:not(:disabled) {
-		background: rgba(99, 140, 255, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 	}
 
 	/* --- success: green border + text */
 	.row-action.variant-success {
-		border-color: #1fa86a;
-		color: #1fa86a;
+		border-color: var(--success);
+		color: var(--success);
 	}
 
 	.row-action.variant-success:hover:not(:disabled) {
-		background: rgba(31, 168, 106, 0.1);
+		background: color-mix(in srgb, var(--success) 10%, transparent);
 	}
 
 	/* --- danger: neutral by default, red on hover; armed = red filled */
@@ -132,7 +132,7 @@
 
 	.row-action.variant-danger.armed {
 		border-color: var(--danger);
-		background: rgba(224, 64, 64, 0.1);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		color: var(--danger);
 	}
 

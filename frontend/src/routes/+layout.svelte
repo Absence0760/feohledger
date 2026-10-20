@@ -15,6 +15,7 @@
 	import { hasTenantContext } from '#lib/tenant.ts';
 	import { browser } from '$app/env';
 	import { initLocale, m } from '#lib/i18n/store.svelte.ts';
+	import { theme } from '#lib/stores/theme.svelte.ts';
 
 	// Tri-state: `undefined` until the browser resolves it (render nothing, no
 	// flash), then true/false. This asks "does this host carry a tenant at all",
@@ -29,6 +30,13 @@
 	// <html lang/dir> attributes and the active Intl format locale.
 	$effect(() => {
 		if (browser) initLocale();
+	});
+
+	// Pick up the colour theme `app.html` already applied before first paint,
+	// and keep `theme.resolved` true to the OS while System is chosen
+	// (docs/decisions.md §289).
+	$effect(() => {
+		if (browser) theme.init();
 	});
 
 	// Routes that render without a tenant context (signup flow).
@@ -214,8 +222,8 @@
 		pointer-events: none;
 		background:
 			radial-gradient(1100px 480px at 72% -14%, var(--accent-wash), transparent 70%),
-			linear-gradient(to right, rgba(226, 228, 234, 0.02) 1px, transparent 1px) 0 0 / 64px 64px,
-			linear-gradient(to bottom, rgba(226, 228, 234, 0.02) 1px, transparent 1px) 0 0 / 64px 64px;
+			linear-gradient(to right, color-mix(in srgb, var(--text) 2%, transparent) 1px, transparent 1px) 0 0 / 64px 64px,
+			linear-gradient(to bottom, color-mix(in srgb, var(--text) 2%, transparent) 1px, transparent 1px) 0 0 / 64px 64px;
 		mask-image: linear-gradient(to bottom, #000 0, #000 360px, transparent 720px);
 	}
 

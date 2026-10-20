@@ -196,7 +196,7 @@
 	.info {
 		padding: 11px 14px;
 		border-radius: 10px;
-		border: 1px solid rgba(99, 140, 255, 0.28);
+		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
 		background: var(--accent-tint);
 		color: var(--text);
 		font-size: 0.85rem;
@@ -229,7 +229,7 @@
 		border: none;
 		background: var(--accent-strong);
 		color: #fff;
-		box-shadow: 0 14px 30px -14px rgba(99, 140, 255, 0.95);
+		box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--accent) 95%, transparent);
 	}
 	.primary:hover:not(:disabled) {
 		transform: translateY(-1px);

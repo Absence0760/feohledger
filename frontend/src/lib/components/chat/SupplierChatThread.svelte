@@ -478,8 +478,8 @@
 	}
 
 	.chat-msg.own .chat-bubble {
-		background: rgba(99, 140, 255, 0.12);
-		border-color: rgba(99, 140, 255, 0.3);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+		border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 	}
 
 	.chat-meta {
@@ -510,7 +510,7 @@
 	}
 
 	.chat-mention {
-		color: #638cff;
+		color: var(--accent);
 		font-weight: 600;
 	}
 
@@ -638,7 +638,7 @@
 	.chat-input:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	.chat-composer-row {

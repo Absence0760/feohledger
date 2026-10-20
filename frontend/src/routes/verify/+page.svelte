@@ -118,7 +118,7 @@
 		width: 56px;
 		height: 56px;
 		border-radius: 16px;
-		border: 1px solid rgba(38, 185, 119, 0.4);
+		border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
 		background: var(--success-tint);
 		color: var(--success-on-tint);
 		font-size: 30px;
@@ -149,7 +149,7 @@
 		color: #fff;
 		font-weight: 600;
 		text-decoration: none;
-		box-shadow: 0 14px 30px -14px rgba(99, 140, 255, 0.95);
+		box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--accent) 95%, transparent);
 		transition: transform 0.15s, box-shadow 0.15s;
 	}
 	.primary:hover {

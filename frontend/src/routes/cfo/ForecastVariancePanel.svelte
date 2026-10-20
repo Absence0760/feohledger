@@ -318,7 +318,7 @@
 	/* Amber, not red: the comparison is usable — it just isn't complete.
 	   Matches the cash-position card's own partial-figure notice. */
 	.cf-skipped {
-		color: #d4940a;
+		color: var(--warning);
 		font-weight: 600;
 		font-size: 0.85rem;
 		margin: 0 0 12px;

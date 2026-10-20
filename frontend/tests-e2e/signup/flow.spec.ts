@@ -4,6 +4,19 @@ import { API_BASE, expect, NO_TENANT_BASE, TENANT_ROOT_URL, tenantBase, test } f
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 
 /**
+ * The palette the page is actually showing, read the way the app resolves it
+ * (`src/lib/theme.ts::resolveTheme`): an explicit `data-theme` wins, and
+ * System follows `prefers-color-scheme: light`, else dark.
+ */
+async function resolvedPageTheme(page: Page): Promise<'light' | 'dark'> {
+	return page.evaluate(() => {
+		const choice = document.documentElement.dataset.theme;
+		if (choice === 'light' || choice === 'dark') return choice;
+		return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+	});
+}
+
+/**
  * Self-service signup — the full new-user journey, driven through the UI.
  *
  * Three regimes:
@@ -159,9 +172,13 @@ test.describe('/signup — form', () => {
 		await expect(emailField).toBeFocused();
 	});
 
-	test('with captcha enabled, "try again" re-renders the widget and demands a fresh token', async ({
+	// Run under each OS colour scheme: the page follows the system by default
+	// (docs/decisions.md §289), so the widget must take whichever palette the
+	// page resolved to — pinned per run rather than left to the runner's default.
+	for (const scheme of ['dark', 'light'] as const) test(`with captcha enabled, "try again" re-renders the widget and demands a fresh token (${scheme} OS)`, async ({
 		page
 	}) => {
+		await page.emulateMedia({ colorScheme: scheme });
 		// Local dev and CI run with no hCaptcha sitekey (local-first default), so
 		// this path is otherwise never exercised. Everything external is stubbed:
 		// the sitekey, the submit endpoint (so the test can read what each
@@ -203,8 +220,12 @@ test.describe('/signup — form', () => {
 		await page.goto('/signup');
 		const widget = page.locator('.h-captcha');
 		await expect(widget).toHaveAttribute('data-widget', '1');
-		// The app is dark-only, so a light widget is a white box on the form.
-		await expect(widget).toHaveAttribute('data-rendered-theme', 'dark');
+		// The widget is an iframe and cannot see our palette: it must be told the
+		// one the page is showing, or it is a white box on a dark form (or the
+		// reverse). No stored choice, so the page is on System → the OS scheme.
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'system');
+		expect(await resolvedPageTheme(page)).toBe(scheme);
+		await expect(widget).toHaveAttribute('data-rendered-theme', scheme);
 
 		await fillForm(page, {
 			company: 'Captcha Co',
@@ -224,7 +245,7 @@ test.describe('/signup — form', () => {
 		// A NEW container was mounted, long after the script loaded: only an
 		// explicit render puts a widget in it.
 		await expect(widget).toHaveAttribute('data-widget', '2');
-		await expect(widget).toHaveAttribute('data-rendered-theme', 'dark');
+		await expect(widget).toHaveAttribute('data-rendered-theme', scheme);
 
 		// The spent token must not ride along: submitting unsolved is refused
 		// client-side and never reaches the endpoint.

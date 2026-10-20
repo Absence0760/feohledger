@@ -211,43 +211,44 @@
 	let resolutionText = $state('');
 	let saving = $state(false);
 
-	// Badge text sits on a 12%-tint-of-itself background, so the tone must
-	// clear WCAG 1.4.3 (4.5:1) on that tint — #e04040 (3.68) and #8b5cf6
-	// (3.60) fail; their lighter siblings #f06464 (4.76) / #a78bfa (5.27)
-	// pass. Amber #d4940a (5.51) already passes.
+	// Each type names a palette TONE, never a hex: the badge renders the
+	// tone's calibrated `-tint` / `-on-tint` pair, which `tokenPairing.test.ts`
+	// asserts in BOTH themes. These were literal hexes (`#f06464`, …) with a
+	// `1f` alpha suffix concatenated on for the background — a pairing measured
+	// on navy, and 2.5:1 once the page is light (docs/decisions.md §289).
 	// Must cover the backend roster (`services/exception_lifecycle.EXCEPTION_TYPES`);
-	// a missing key falls back to grey, which reads as "unclassified" next to
+	// a missing key falls back to `muted`, which reads as "unclassified" next to
 	// every colour-coded sibling — worst on the types that BLOCK a payment run.
-	// Reuse a tone already in this map rather than introducing one: each was
-	// picked against the contrast rule above.
-	const TYPE_COLORS: Record<string, string> = {
-		duplicate: '#a78bfa',
-		po_mismatch: '#d4940a',
-		fraud_flag: '#f06464',
-		extraction_failed: '#f06464',
-		unverified_vendor: '#d4940a',
-		review_rejected: '#f06464',
-		amount_exceeded: '#f06464',
-		missing_data: '#d4940a',
-		quality_hold: '#f06464',
-		price_variance: '#d4940a',
-		erp_reconciliation: '#f06464',
-		contract_noncompliant: '#f06464',
-		line_total_mismatch: '#f06464',
-		payment_compliance_hold: '#f06464',
+	// Reuse a tone already in this map rather than introducing one.
+	type TypeTone = 'danger' | 'warning' | 'violet' | 'muted';
+	const TYPE_TONES: Record<string, TypeTone> = {
+		duplicate: 'violet',
+		po_mismatch: 'warning',
+		fraud_flag: 'danger',
+		extraction_failed: 'danger',
+		unverified_vendor: 'warning',
+		review_rejected: 'danger',
+		amount_exceeded: 'danger',
+		missing_data: 'warning',
+		quality_hold: 'danger',
+		price_variance: 'warning',
+		erp_reconciliation: 'danger',
+		contract_noncompliant: 'danger',
+		line_total_mismatch: 'danger',
+		payment_compliance_hold: 'danger',
 	};
 
 	// Total over `ExceptionSeverity`, the same pairing `EXCEPTION_STATUS_TONES`
 	// has with its label map: a severity that gains a colour without a label —
 	// a tinted cell printing a raw wire value — is a compile error. It stays
 	// HERE rather than moving next to the label keys because it is the sibling
-	// of `TYPE_COLORS` above, and the contrast reasoning written there governs
+	// of `TYPE_TONES` above, and the contrast reasoning written there governs
 	// both; `#lib/types/` carries vocabularies and tone NAMES
-	// (`EXCEPTION_STATUS_TONES` is `BadgeTone`), not measured hexes.
-	const SEVERITY_COLORS: Record<ExceptionSeverity, string> = {
-		error: '#f06464',
-		warning: '#d4940a',
-		info: '#638cff',
+	// (`EXCEPTION_STATUS_TONES` is `BadgeTone`).
+	const SEVERITY_TONES: Record<ExceptionSeverity, 'danger' | 'warning' | 'accent'> = {
+		error: 'danger',
+		warning: 'warning',
+		info: 'accent',
 	};
 
 	/**
@@ -1068,7 +1069,7 @@
 					<td class="type-cell">
 						<span
 							class="type-badge"
-							style="background:{TYPE_COLORS[exc.exception_type] ?? '#888'}1f;color:{TYPE_COLORS[exc.exception_type] ?? '#888'}"
+							style="background:var(--{TYPE_TONES[exc.exception_type] ?? 'muted'}-tint);color:var(--{TYPE_TONES[exc.exception_type] ?? 'muted'}-on-tint)"
 						>
 							{typeLabel(exc.exception_type, exc.type_label)}
 						</span>
@@ -1090,7 +1091,7 @@
 					<td>
 						<span
 							class="severity"
-							style="color:{SEVERITY_COLORS[exc.severity as ExceptionSeverity] ?? '#888'}"
+							style="color:var(--{SEVERITY_TONES[exc.severity as ExceptionSeverity] ?? 'text-muted'})"
 						>
 							{severityLabel(exc.severity)}
 						</span>
@@ -1345,7 +1346,7 @@
 	   4.5:1 contrast floor. The resolved/dismissed status badge carries the
 	   state signal. */
 	tbody tr.resolved td {
-		background: rgba(138, 143, 160, 0.05);
+		background: color-mix(in srgb, var(--text-muted) 5%, transparent);
 	}
 
 	/* --- Queue table column widths ---
@@ -1483,7 +1484,7 @@
 	.modal input:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	.btn-secondary {
@@ -1505,16 +1506,16 @@
 	.btn-warning {
 		padding: 8px 14px;
 		border-radius: 4px;
-		border: 1px solid #d4940a;
+		border: 1px solid var(--warning);
 		background: var(--surface);
-		color: #d4940a;
+		color: var(--warning);
 		font-size: 0.85rem;
 		cursor: pointer;
 		font-family: inherit;
 	}
 
 	.btn-warning:hover:not(:disabled) {
-		background: rgba(212, 148, 10, 0.1);
+		background: color-mix(in srgb, var(--warning) 10%, transparent);
 	}
 
 	.btn-secondary:disabled,
