@@ -29,8 +29,11 @@ push** while open or escalated: a bill in the ERP can be paid from inside the
 ERP, where the payment-run gate never sees it. Clearing one is then also what
 lets the invoice post ([erp-integration.md](erp-integration.md) § An open
 duplicate or fraud exception refuses the push; decisions §286). The
-`fraud_flag` a vendor bank-change approval opens on that vendor's approved
-invoices is included.
+`fraud_flag` a vendor bank-change approval opens on that vendor's approved,
+unpaid invoices is included. When an earlier push attempt may already have
+created the bill (a timeout or 5xx the ERP may have applied), the refusal, the
+409 and the `invoice.erp_failed` row carry `possibly_posted: true`: check the
+ERP for that bill before anyone pays it, then clear the exception.
 
 Once a person has resolved or dismissed one of these two, `refresh_warnings`
 does not raise the same finding again **while the invoice is unchanged**. Each

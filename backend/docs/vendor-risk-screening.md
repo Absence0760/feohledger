@@ -126,8 +126,13 @@ Call sites:
   staged `bank_details` change (the BEC / bank-redirect fraud tail); once the new
   coordinates are applied, the vendor is re-screened against them (so a redirect
   to a high-risk jurisdiction surfaces as `review`, and a name that has since
-  landed on a list hard-blocks) **and** every in-queue payable invoice for the
-  vendor gets a de-duped `fraud_flag` payment hold. Best-effort — a screening
+  landed on a list hard-blocks) **and** every approved, unpaid invoice for the
+  vendor (including a `failed` or mid-push ERP send of an approved invoice:
+  `api/vendors._BANK_CHANGE_FLAG_STATUSES`) gets a de-duped `fraud_flag`
+  payment hold, which also refuses its ERP push (decisions §286). A `paid`
+  invoice is out of reach when the change lands, so voiding its payment
+  re-raises the flag when the bank change was approved after that payment was
+  made. Best-effort — a screening
   failure never blocks applying the approved change. Gated by
   `FEOH_VENDOR_SCREENING_ENABLED`.
 

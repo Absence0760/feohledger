@@ -39,7 +39,13 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-19 — refusing the ERP push for an open duplicate or
+**Last reconciled:** 2026-10-19 — reviewing the QuickBooks live-test fixes
+(decisions §284–§287) opened eight (c) entries (listings over the sync bound,
+the collapsed row §284 accepts, the sync UI's reporting, over-long names, the
+exact-name ambiguity rule, adapters that still drop or mislabel records, vendor
+linking gaps, and mock syncs judging pre-0115 links), and extended the
+posted-bill entry with `possibly_posted`, taking the file from 107 → 115.
+Before that, 2026-10-19 — refusing the ERP push for an open duplicate or
 fraud flag (decisions §286) opened three (c) entries (a flag raised after the
 bill is already in the ERP, human-cleared findings of the other types
 re-opening, and the push not checking the vendor's status), taking the file
@@ -155,7 +161,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**107 open: 91 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**115 open: 99 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1663,6 +1669,19 @@ scope (§260) — do not fold them into any of these.
       automatically, since the flag may be false. **Trigger:** the first report
       of a flagged bill paid from the ERP, or the next change to the ERP void
       path.
+
+      The bill can also already be in the ERP when the push was refused: an
+      attempt that timed out or got a 5xx may have created it, and the gate's
+      refusal of the retry now says `possibly_posted: true` (decisions §286),
+      but nothing finds or voids that bill. **Durable fix:** from the exception
+      or the failed invoice, run the adapter's read-only idempotency lookup to
+      name the orphan, and offer the existing ERP void. Separately,
+      `state_data.erp_outcome_unknown` is fail-closed because `ErpPostResult`
+      cannot say whether the adapter sent anything; adding `request_sent: bool`
+      (False from the pre-flight `erp_refusal` calls and from a 4xx on the
+      create itself) would remove the false "check the ERP" after, say, a
+      `vendor_not_linked` refusal. **Trigger:** the first false positive
+      reported, or the next adapter refactor.
 - [ ] **(c) A human-cleared finding of any other type is re-opened by the next
       refresh.** §286 stops `refresh_warnings` re-opening a `duplicate` or
       `fraud_flag` a person resolved or dismissed while the invoice is
@@ -1689,6 +1708,99 @@ scope (§260) — do not fold them into any of these.
       put where it can be paid). **Trigger:** the next change to
       `erp_export_gate`, or before the first tenant with live ERP pushes and
       sanctions screening both enabled.
+
+### Surfaced by reviewing the QuickBooks live-test fixes (2026-10-19, decisions §284–§287)
+
+- [ ] **(c) A chart or vendor listing over `SYNC_LISTING_MAX_ROWS` cannot sync
+      at all.** Since decisions §287 a listing past the bound (10,000 rows;
+      QuickBooks 50,000) raises `ErpListingIncomplete` and the sync endpoints
+      answer 502, rather than syncing a partial pull that would unlink every
+      link the missing pages held. A tenant that large gets no sync.
+      **Durable fix:** a resumable, streamed sync that walks the listing in
+      pages, records completeness per run, and applies the absence-based rules
+      (dead links, uniqueness counts) only once a run has read the whole
+      collection. **Trigger:** the first tenant over the bound.
+- [ ] **(c) A collapsed QuickBooks row whose link landed on the right-sounding
+      account keeps it.** decisions §284's accepted residual: a pre-§284 row
+      that merged several accounts under one bare `Name`, and whose link landed
+      on the account whose current code equals that name (a top-level account
+      named like the sub-accounts, e.g. "Depreciation" over
+      "Truck:Depreciation"), looks exactly like a correct row, so rule 4 keeps
+      its link and invoices meant for a sub-account keep posting to the
+      top-level one. **Durable fix:** when a row's code is the legacy key of
+      more than one pulled account, keep its link but record the other
+      accounts as `erp_link_candidates` and badge the row "Needs a decision"
+      until a person confirms (`POST /api/gl-accounts/{id}/erp-link`), rather
+      than trusting it silently. **Trigger:** the next change to rule 4 in
+      `services/gl_account_sync`, or a report of a bill posted to a parent
+      account that meant a sub-account.
+- [ ] **(c) The ERP sync screens do not explain what the new keys report.**
+      (1) A 502 from `POST /api/gl-accounts/sync-erp` or
+      `POST /api/vendors/sync-erp` reads "ERP request failed:
+      ErpListingIncomplete", a class name; it should be a message built from
+      `exc.gap` (`fetch_failed` / `truncated`) and the collection. (2) The
+      sync success messages do not surface `values_too_long` (vendors) or
+      `parent_code_dropped` (GL), so a dropped value is visible only in the
+      response body and the audit row. (3) `frontend/src/lib/api/glAccounts.ts`
+      does not type `parent_code_dropped` / `parent_code_dropped_count`.
+      **Durable fix:** catch `ErpListingIncomplete` in both endpoints
+      (`api/gl_accounts.py`, `api/vendors.py`) and answer a coded detail;
+      type the keys and state them in the frontend sync result, in all six
+      locales. **Trigger:** the next change to either sync endpoint or to the
+      sync result UI.
+- [ ] **(c) An ERP `name` over 255 characters still aborts a sync.** decisions
+      §287 drops an over-long optional vendor field and an over-long GL
+      `parent_code` instead of failing the flush, but `vendors.name` and
+      `gl_accounts.name` are `String(255)` and are written unchecked.
+      QuickBooks `DisplayName` allows 500; the QuickBooks GL adapter truncates
+      the account name to 255 itself, the vendor mapping does not. **Durable
+      fix:** a per-record reason code in the shared syncs (refuse the record,
+      or store a marked shortened display name, decided once for both), with
+      a frontend message, and the adapters' own truncation removed.
+      **Trigger:** the first sync that fails on a long name, or the next
+      change to `services/vendor_sync` / `gl_account_sync`.
+- [ ] **(c) The vendor ambiguous-name rule compares names exactly.**
+      `services/vendor_sync` counts names across the pull and the unlinked
+      locals with `==`, while the realm evidence (`_same_vendor`) ignores case
+      and spacing. So "Acme" and "ACME" in one pull do not trip the
+      `ambiguous_name` guard: a manual "Acme" is linked to the record with its
+      exact spelling and "ACME" is created as a second vendor, although the
+      rule the realm pass applies would call them one supplier. **Durable fix:** count on the same normalised key
+      `_identity_keys` builds, in both the pull and the local query.
+      **Trigger:** the next change to `vendor_sync`'s name fallback.
+- [ ] **(c) Three adapters still drop or mislabel records the syncs read as
+      evidence.** (1) Sage Accounting (UK) skips ledgers with
+      `included_in_chart: false`, so a row linked to one reads as a dead link.
+      (2) Merge.dev's account `status` and Business Central's vendor `blocked`
+      are not mapped to `active=False`, so an inactive record can be linked
+      or created as a payee. (3) Merge.dev's GL `parent_code` holds the
+      parent's Merge id, not its code. **Durable fix:** emit the out-of-chart
+      ledger with `active=False`, map both inactive flags, and resolve the
+      Merge parent id to its code within the pull. **Trigger:** the next
+      change to any of those three adapters' listings.
+- [ ] **(c) Vendor linking has three gaps of its own.** (1)
+      `vendors.erp_vendor_id` has no unique index, so two rows sharing an id
+      make `scalar_one_or_none` in `services/vendor_sync` raise and abort the
+      sync. (2) CSV import resolves vendors by `Vendor.code`
+      (`services/csv_import`), which an ERP-written code can collide with.
+      (3) Sage Intacct, SYSPRO and Blackbaud FE NXT link GL accounts by the
+      business account number, not a surrogate key, so a renumbering in the
+      ERP follows the number. **Durable fix:** a partial unique index on
+      `(erp_link_realm, erp_vendor_id)` with a migration that reports existing
+      duplicates first; CSV import resolving by a code namespace that ERP
+      codes cannot enter; and each of the three adapters keyed by the ERP's
+      own record id where its API exposes one. **Trigger:** the next migration
+      touching `vendors`, the next change to `csv_import`'s vendor resolution,
+      or the next change to one of those three adapters' chart listings.
+- [ ] **(c) A mock sync still treats pre-0115 links as its own.** A no-realm
+      pull (`mock`, or an OAuth ERP with no consent) leaves rows tied to a
+      named realm alone (decisions §287), but a pre-0115 link is NULL-realm,
+      indistinguishable from a link the mock itself made, so a mock sync still
+      re-judges it against fixtures. **Durable fix:** stamp the links a no-realm
+      sync makes with an explicit sentinel realm (e.g. `"mock"`), so NULL means
+      only pre-0115 and a no-realm pull can leave it alone too. **Trigger:**
+      the next change to `services/erp_link_realm`, or a tenant that switches
+      to `mock` after 0115.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
