@@ -542,9 +542,11 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 
 	test('a consent revoked at Intuit asks for a reconnect, not a 500', async ({ page }) => {
 		await sandbox('revoke-consent', {});
+		// A coded 409 the browser states as "reconnect it under Organization",
+		// never a 502 naming the exception class (seen live, #598).
 		const vendors = await post(page, '/api/vendors/sync-erp');
-		expect(vendors.status()).toBe(502);
-		expect((await vendors.json()).detail).toBe('ERP request failed: ErpNotConnectedError');
+		expect(vendors.status()).toBe(409);
+		expect((await vendors.json()).detail.code).toBe('erp_not_connected');
 
 		const status = await oauthStatus(page);
 		expect(status.needs_reconnect).toBe(true);
@@ -552,8 +554,8 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 
 		// Marked once; later calls fail the same way without asking Intuit again.
 		const glSync = await post(page, '/api/gl-accounts/sync-erp');
-		expect(glSync.status()).toBe(502);
-		expect((await glSync.json()).detail).toBe('ERP request failed: ErpNotConnectedError');
+		expect(glSync.status()).toBe(409);
+		expect((await glSync.json()).detail.code).toBe('erp_not_connected');
 		expect((await testErpConnection(page)).success).toBe(false);
 		expect((await stats()).refreshes).toBe(0);
 	});
