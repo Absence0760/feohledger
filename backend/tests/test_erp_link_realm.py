@@ -30,7 +30,12 @@ from app.models.gl_account import GLAccount
 from app.models.organization import Organization
 from app.models.vendor import Vendor
 from app.models.workflow import AuditLog
-from app.services.erp_adapters.base import GLAccountPayload, VendorPayload
+from app.services.erp_adapters.base import (
+    ErpListingIncomplete,
+    GLAccountPayload,
+    ListingGap,
+    VendorPayload,
+)
 from app.services.erp_adapters.catalog import merge_erp_update
 from app.services.erp_link_realm import (
     LEGACY_REALM_KEY,
@@ -587,6 +592,108 @@ async def test_vendor_endpoint_stamps_the_connection_realm(realdb, restore_setti
     vendors_now = await _vendors(realdb)
     assert vendors_now["Acme"].erp_vendor_id == "60"
     assert vendors_now["Squeaky Kleen Car Wash"].erp_link_realm == PROD
+
+
+# ---------------------------------------------------------------------------
+# An empty or incomplete pull proves nothing
+# ---------------------------------------------------------------------------
+
+
+async def _links_of_every_kind(realdb):
+    """A pre-0115 (NULL-realm) link, a sandbox link, and a row waiting for a
+    decision — every link state an absence-based pass could wrongly drop."""
+    await _add(realdb, code="6100", name="Office", erp_account_id="7")
+    await _add(
+        realdb,
+        code="Office Supplies",
+        name="Office Supplies",
+        erp_account_id="15",
+        erp_link_realm=SANDBOX,
+    )
+    pending = {"realm": PROD, "reason": AMBIGUOUS_LEGACY, "accounts": [{"erp_account_id": "40"}]}
+    await _add(realdb, code="Depreciation", name="Depreciation", erp_link_candidates=pending)
+    return pending
+
+
+async def test_an_empty_chart_pull_changes_no_link(realdb):
+    """Before, rule 0 read every id's absence from an empty pull as "dead" and
+    unlinked the whole chart; a transient adapter failure that degraded to []
+    did exactly that on the first sync after migration 0115."""
+    pending = await _links_of_every_kind(realdb)
+    before = {
+        c: (r.erp_account_id, r.erp_link_realm, r.erp_link_candidates)
+        for c, r in (await _chart(realdb)).items()
+    }
+
+    result = await _sync(realdb, [], realm=PROD)
+    # A pull of nothing but id-less accounts proves nothing either; it is
+    # reported, never linked.
+    id_less = await _sync(realdb, [_acct("9999", None)], realm=PROD)
+
+    after = {
+        c: (r.erp_account_id, r.erp_link_realm, r.erp_link_candidates)
+        for c, r in (await _chart(realdb)).items()
+    }
+    assert after == before
+    assert after["Depreciation"][2] == pending
+    assert (result.unlinked, result.link_changes, result.conflicts) == ([], [], [])
+    assert (id_less.unlinked, id_less.link_changes) == ([], [])
+    assert id_less.conflicts == [{"code": "9999", "reason": MISSING_ERP_ID, "erp_account_ids": []}]
+
+
+async def test_an_empty_vendor_pull_changes_no_link(realdb):
+    await _add(realdb, Vendor, name="Acme", erp_vendor_id="57", source="erp_sync")
+    await _add(
+        realdb, Vendor, name="Beta", erp_vendor_id="58", erp_link_realm=SANDBOX, source="erp_sync"
+    )
+    result = await _vsync(realdb, [], realm=PROD)
+    id_less = await _vsync(realdb, [_vendor(None, "Gamma")], realm=PROD)
+
+    vendors = await _vendors(realdb)
+    assert (vendors["Acme"].erp_vendor_id, vendors["Acme"].erp_link_realm) == ("57", None)
+    assert (vendors["Beta"].erp_vendor_id, vendors["Beta"].erp_link_realm) == ("58", SANDBOX)
+    assert "Gamma" not in vendors
+    for r in (result, id_less):
+        assert (r["unlinked"], r["created"], r["updated"], r["realm_adopted"]) == ([], 0, 0, 0)
+
+
+def _failing_adapter():
+    class _Adapter:
+        erp_type = "quickbooks_online"
+
+        async def list_gl_accounts(self):
+            raise ErpListingIncomplete("QuickBooks Online", "Account", ListingGap.fetch_failed)
+
+        async def list_vendors(self):
+            raise ErpListingIncomplete("QuickBooks Online", "Vendor", ListingGap.truncated)
+
+    return patch("app.services.erp_adapters.get_erp_adapter", return_value=_Adapter())
+
+
+@pytest.mark.parametrize("path", ["/api/gl-accounts/sync-erp", "/api/vendors/sync-erp"])
+async def test_a_listing_that_cannot_prove_itself_whole_syncs_nothing(
+    realdb, restore_settings, path
+):
+    """The adapter raises rather than hand over part of a list; the endpoint
+    answers 502 and every link stays exactly as it was."""
+    await _set_erp(realdb, PROD_CFG)
+    await _links_of_every_kind(realdb)
+    await _add(realdb, Vendor, name="Acme", erp_vendor_id="57", source="erp_sync")
+    chart_before = {
+        c: (r.erp_account_id, r.erp_link_realm) for c, r in (await _chart(realdb)).items()
+    }
+
+    with _failing_adapter():
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            resp = await c.post(path)
+
+    assert resp.status_code == 502, resp.text
+    assert "ErpListingIncomplete" in resp.json()["detail"]
+    chart_after = {
+        c: (r.erp_account_id, r.erp_link_realm) for c, r in (await _chart(realdb)).items()
+    }
+    assert chart_after == chart_before
+    assert (await _vendors(realdb))["Acme"].erp_vendor_id == "57"
 
 
 # ---------------------------------------------------------------------------

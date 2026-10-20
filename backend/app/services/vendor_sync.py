@@ -16,6 +16,12 @@ overwrite its name. A link from another realm — or from before realms were
 recorded — is kept only when the pulled record with that id is recognisably the
 same supplier (same name, or the same tax id); otherwise it is dropped, audited
 (``change: "unlinked"``), and the record is matched afresh like any other.
+
+**Absence is evidence only in a whole listing.** That pass reads "no record
+with this id" as "not this company's vendor", and the name rule counts a name
+across the pull. So the adapter returns every vendor or raises
+(``ErpListingIncomplete``, answered 502 before anything here runs), and an EMPTY
+pull changes nothing.
 """
 
 import uuid
@@ -124,6 +130,10 @@ async def sync_vendors_from_erp(
     for erp_v in erp_vendors:
         if erp_v.get("erp_vendor_id"):
             by_id.setdefault(str(erp_v["erp_vendor_id"]), erp_v)
+    if not by_id:
+        # An empty pull proves nothing (module docstring): the pass below would
+        # read every link's absence from it as "another company's vendor".
+        return _summary(realm=realm)
     linked = (
         (
             await db.execute(
@@ -329,15 +339,40 @@ async def sync_vendors_from_erp(
             actor_id=actor_id,
         )
 
+    return _summary(
+        realm=realm,
+        created=created,
+        updated=updated,
+        unchanged=unchanged,
+        conflicts=[
+            {"name": name, "reason": "ambiguous_name", "erp_vendor_ids": sorted(ids)}
+            for name, ids in sorted(conflicts.items())
+        ],
+        unlinked=sorted(unlinked),
+        deactivated=deactivated,
+        codes_cleared=codes_cleared,
+        realm_adopted=realm_adopted,
+    )
+
+
+def _summary(
+    *,
+    realm: str | None,
+    created: int = 0,
+    updated: int = 0,
+    unchanged: int = 0,
+    conflicts: list[dict] | None = None,
+    unlinked: list[str] | None = None,
+    deactivated: int = 0,
+    codes_cleared: int = 0,
+    realm_adopted: int = 0,
+) -> dict:
     return {
         "created": created,
         "updated": updated,
         "unchanged": unchanged,
-        "conflicts": [
-            {"name": name, "reason": "ambiguous_name", "erp_vendor_ids": sorted(ids)}
-            for name, ids in sorted(conflicts.items())
-        ],
-        "unlinked": sorted(unlinked),
+        "conflicts": conflicts or [],
+        "unlinked": unlinked or [],
         "deactivated": deactivated,
         "codes_cleared": codes_cleared,
         "realm_adopted": realm_adopted,

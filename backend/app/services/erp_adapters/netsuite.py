@@ -18,20 +18,23 @@ from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoPayload,
     VendorPayload,
     erp_http_failure,
     erp_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 
-#: SuiteQL list syncs page at 100 rows and stop after 10 pages — the 1000-row
-#: bound every adapter's list sync keeps.
+#: SuiteQL pages at 100 rows. The PO list stops after 10 pages; the chart and
+#: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
@@ -381,20 +384,30 @@ class NetSuiteAdapter(ErpAdapter):
             base = base[: -len("/record/v1")]
         return f"{base}/query/v1/suiteql"
 
-    async def _suiteql(self, query: str) -> list[dict]:
+    async def _suiteql(self, query: str, *, complete: str | None = None) -> list[dict]:
         """Run one SuiteQL query, paged by ``offset`` + ``hasMore``.
 
-        Best-effort like every adapter's list sync: a non-200, a network error
-        or an unparseable page ends the pull with what it has, so the sync
-        endpoint reports a count instead of 500ing. Bounded at ``_MAX_PAGES`` x
-        ``_PAGE_SIZE`` rows. Bodies are parsed with ``loads_exact_json`` so a
-        money column is never a float.
+        Best-effort for the PO list: a non-200, a network error or an
+        unparseable page ends the pull with what it has, bounded at
+        ``_MAX_PAGES`` x ``_PAGE_SIZE`` rows. ``complete`` (the collection's
+        name) asks for every row instead — the chart and vendor listings, whose
+        sync reads absence as evidence: any of those failures, or more rows
+        than ``SYNC_LISTING_MAX_ROWS``, raises :class:`ErpListingIncomplete`.
+        Bodies are parsed with ``loads_exact_json`` so a money column is never
+        a float.
         """
+
+        def incomplete(gap: ListingGap) -> list[dict]:
+            if complete is not None:
+                raise ErpListingIncomplete("NetSuite", complete, gap)
+            return rows
+
         rows: list[dict] = []
         offset = 0
         body_text = dumps_exact_json({"q": query})
+        max_pages = _MAX_PAGES if complete is None else sync_listing_pages(_PAGE_SIZE)
         async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(_MAX_PAGES):
+            for _ in range(max_pages):
                 url = f"{self._suiteql_url()}?limit={_PAGE_SIZE}&offset={offset}"
                 headers = {
                     "Authorization": self._auth_header("POST", url),
@@ -404,18 +417,18 @@ class NetSuiteAdapter(ErpAdapter):
                 try:
                     resp = await client.post(url, content=body_text, headers=headers)
                 except httpx.HTTPError:
-                    break
+                    return incomplete(ListingGap.fetch_failed)
                 if resp.status_code != 200:
-                    break
+                    return incomplete(ListingGap.fetch_failed)
                 try:
                     body = loads_exact_json(resp.content)
                 except ValueError:
-                    break
+                    return incomplete(ListingGap.fetch_failed)
                 rows.extend(r for r in body.get("items") or [] if isinstance(r, dict))
                 if not body.get("hasMore"):
-                    break
+                    return rows
                 offset += _PAGE_SIZE
-        return rows
+        return incomplete(ListingGap.truncated)
 
     async def list_vendors(self) -> list[VendorPayload]:
         """Pull vendors through SuiteQL (``_VENDOR_QUERY``).
@@ -426,7 +439,7 @@ class NetSuiteAdapter(ErpAdapter):
         still exists.
         """
         out: list[VendorPayload] = []
-        for raw in await self._suiteql(_VENDOR_QUERY):
+        for raw in await self._suiteql(_VENDOR_QUERY, complete="vendors"):
             vendor = _netsuite_vendor_to_payload(raw)
             if vendor is not None:
                 out.append(vendor)
@@ -442,7 +455,7 @@ class NetSuiteAdapter(ErpAdapter):
         columns we need.
         """
         out: list[GLAccountPayload] = []
-        for raw in await self._suiteql(_ACCOUNT_QUERY):
+        for raw in await self._suiteql(_ACCOUNT_QUERY, complete="accounts"):
             acct = _netsuite_account_to_payload(raw)
             if acct is not None:
                 out.append(acct)

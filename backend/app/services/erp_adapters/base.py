@@ -458,6 +458,53 @@ class VendorPayload:
     legacy_code: str | None = None
 
 
+#: How many rows a chart or vendor listing reads before it gives up as
+#: incomplete (an adapter whose own page cap already reaches further, such as
+#: QuickBooks' 50 x 1000, keeps it). Generous on purpose: past it the listing
+#: RAISES (:class:`ErpListingIncomplete`) instead of returning the first N rows,
+#: so it has to sit above any chart or vendor master a sync can sensibly read
+#: in one request.
+SYNC_LISTING_MAX_ROWS = 10_000
+
+
+class ListingGap(enum.StrEnum):
+    """Why a listing could not be proven complete."""
+
+    #: A page (the first or a later one) could not be read.
+    fetch_failed = "fetch_failed"
+    #: The walk stopped at :data:`SYNC_LISTING_MAX_ROWS` with more to read.
+    truncated = "truncated"
+
+
+class ErpListingIncomplete(RuntimeError):
+    """``list_gl_accounts`` / ``list_vendors`` could not read the whole collection.
+
+    The chart and vendor syncs read ABSENCE as evidence — a link whose id is not
+    in the pull, or whose id now holds something else, is dropped
+    (``services/gl_account_sync``, ``services/vendor_sync``) — and they decide
+    whether a code or a name is unique by counting it in the pull. Both are
+    only true of the whole collection. A listing that returned what it had read
+    before a failure, or the first N rows of a longer one, would unlink every
+    good link the missing pages held and could link a name that is not unique
+    (docs/decisions.md §284). So a listing either returns everything or raises
+    this, and the sync endpoints answer 502 without syncing anything.
+
+    PII-free by construction: the provider literal, the collection and the
+    :class:`ListingGap` — never a response body, URL or credential.
+    """
+
+    def __init__(self, provider: str, collection: str, gap: ListingGap):
+        self.provider = provider
+        self.collection = collection
+        self.gap = gap
+        super().__init__(f"{provider} {collection} listing incomplete: {gap.value}")
+
+
+def sync_listing_pages(page_size: int) -> int:
+    """Pages a listing of ``page_size`` rows a page may read (rounded up)."""
+    return -(-SYNC_LISTING_MAX_ROWS // page_size)
+
+
 class ErpAdapter:
     """Base class for ERP integrations. Subclass and implement all methods."""
 
@@ -489,23 +536,29 @@ class ErpAdapter:
         return []
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        """Pull the chart of accounts from the ERP.
+        """Pull the WHOLE chart of accounts from the ERP, or raise.
 
-        Same contract as `list_pos`: default returns an empty list so
-        an adapter that doesn't expose a chart endpoint just leaves the
-        local chart untouched. The Auto GL Coding pipeline relies on
-        this — the prompt only constrains AI suggestions when the org
-        has synced a real chart.
+        An adapter that reads a chart returns every account (inactive ones
+        included, ``active=False``) or raises — :class:`ErpListingIncomplete`
+        for a page it could not read or a chart past
+        :data:`SYNC_LISTING_MAX_ROWS` — never what it had read so far: the
+        sync reads absence as evidence (see that class).
+
+        The default returns an empty list so an adapter that doesn't expose a
+        chart endpoint leaves the local chart untouched; the sync treats an
+        empty pull as proving nothing and changes no link on it.
         """
         return []
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Pull vendors from the ERP.
+        """Pull EVERY vendor from the ERP, or raise.
 
-        Same contract as `list_pos` / `list_gl_accounts`: default returns
-        an empty list so an adapter that doesn't yet support vendor sync
-        just reports "0 new" instead of 500ing the `/api/vendors/sync-erp`
-        endpoint. Adapters that *do* support it override this.
+        Same contract as :meth:`list_gl_accounts`: an adapter that reads
+        vendors returns all of them (inactive ones ``active=False``) or raises
+        :class:`ErpListingIncomplete`, and skips a record with no id of the
+        kind its ``post_invoice`` posts against — never substituting a number
+        or a name for it. The default returns an empty list, on which the sync
+        changes no link.
         """
         return []
 

@@ -74,12 +74,15 @@ from lxml import etree
 from app.config import settings
 from app.services.e_invoice._xml import local_name, parse_secure
 from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoPayload,
     VendorPayload,
     erp_http_failure,
@@ -96,7 +99,9 @@ REST_SUFFIX = "/SYSPROWCFService/Rest"
 
 DUPLICATE_INVOICE_NUMBER = "duplicate_invoice_number"
 
-#: COMFND row cap per list sync — the same 1000-row bound the other adapters use.
+#: COMFND row cap for the PO list. COMFND does not page, so the chart and
+#: vendor listings ask for one row past ``SYNC_LISTING_MAX_ROWS`` and raise when
+#: it comes back (``_list_complete``).
 _LIST_ROWS = 1000
 _PO_DETAIL_ROWS = 5000
 
@@ -541,26 +546,31 @@ class SysproAdapter(ErpAdapter):
                     client, base, session, build_comfnd_query(table, columns, return_rows=rows)
                 )
 
+    async def _list_complete(self, table: str, columns: list[str]) -> list[dict[str, str]]:
+        """Every row of ``table``, or :class:`ErpListingIncomplete`: a failed
+        query, or more than ``SYNC_LISTING_MAX_ROWS`` rows, never reaches the
+        sync as if it were the whole table (base)."""
+        rows = await self._list(table, columns, rows=SYNC_LISTING_MAX_ROWS + 1)
+        if rows is None:
+            raise ErpListingIncomplete(PROVIDER, table, ListingGap.fetch_failed)
+        if len(rows) > SYNC_LISTING_MAX_ROWS:
+            raise ErpListingIncomplete(PROVIDER, table, ListingGap.truncated)
+        return rows
+
     async def list_vendors(self) -> list[VendorPayload]:
-        try:
-            rows = await self._list("ApSupplier", ["Supplier", "SupplierName"])
-        except Exception:
-            return []
+        rows = await self._list_complete("ApSupplier", ["Supplier", "SupplierName"])
         return [
             VendorPayload(
                 erp_vendor_id=row["Supplier"],
                 name=row.get("SupplierName") or row["Supplier"],
                 code=row["Supplier"],
             )
-            for row in rows or []
+            for row in rows
             if row.get("Supplier")
         ]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        try:
-            rows = await self._list("GenMaster", ["GlCode", "Description", "AccountType"])
-        except Exception:
-            return []
+        rows = await self._list_complete("GenMaster", ["GlCode", "Description", "AccountType"])
         return [
             GLAccountPayload(
                 code=row["GlCode"],
@@ -568,7 +578,7 @@ class SysproAdapter(ErpAdapter):
                 account_type=_GL_TYPES.get(row.get("AccountType", "").upper()),
                 erp_account_id=row["GlCode"],
             )
-            for row in rows or []
+            for row in rows
             if row.get("GlCode")
         ]
 

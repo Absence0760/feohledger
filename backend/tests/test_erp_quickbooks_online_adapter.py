@@ -896,6 +896,31 @@ def test_read_failure_raises_instead_of_an_empty_sync(token, no_override):
     assert "LEAKY" not in str(exc.value)
 
 
+@pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts"])
+def test_a_listing_past_the_page_cap_raises_never_truncates(no_override, listing):
+    """The first 50 pages of a longer list are not the list: the chart and
+    vendor syncs read absence as evidence (decisions §284)."""
+    import asyncio
+
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
+
+    calls = []
+
+    async def full_page(self, statement):
+        calls.append(statement)
+        entity = statement.split()[3]
+        return {entity: [{"Id": str(i), "Name": f"N{i}"} for i in range(1000)]}
+
+    with patch.object(QuickBooksOnlineAdapter, "_query", full_page):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            asyncio.run(getattr(_adapter(), listing)())
+        assert exc.value.gap is ListingGap.truncated
+        assert len(calls) == 50
+        # The PO list keeps its bounded, best-effort read.
+        calls.clear()
+        assert len(asyncio.run(_adapter().list_pos())) == 50_000
+
+
 def test_test_connection_reads_company_info(token, no_override):
     qbo = _Qbo()
     assert _run_with(qbo, lambda: _adapter().test_connection()) is True

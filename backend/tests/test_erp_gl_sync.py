@@ -12,6 +12,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # Trigger @register_adapter side effects on these modules so tests
 # can resolve adapters by type via the dispatcher.
 import app.services.erp_adapters.dynamics_365_bc  # noqa: F401, E402
@@ -153,30 +155,59 @@ def test_bc_list_gl_accounts_maps_accounts_into_payloads(monkeypatch):
     assert headers["Prefer"] == "odata.maxpagesize=100"
 
 
-def test_bc_list_gl_accounts_follows_next_link_and_caps_at_1000_rows(monkeypatch):
-    """`@odata.nextLink` is followed, but never past 1000 rows (10 pages of
-    100), however many pages BC says remain."""
-
+def _bc_pages(count: int, *, last_has_next: bool) -> list[MagicMock]:
     def page(n: int) -> MagicMock:
         rows = [
-            {"id": f"g-{n}-{i}", "number": f"{n:02d}{i:03d}", "displayName": "A"}
+            {"id": f"g-{n}-{i}", "number": f"{n:03d}{i:03d}", "displayName": "A"}
             for i in range(100)
         ]
-        return _mock_response(200, {"value": rows, "@odata.nextLink": f"{_BC_API}/next/{n + 1}"})
+        more = n < count - 1 or last_has_next
+        body = {"value": rows, **({"@odata.nextLink": f"{_BC_API}/next/{n + 1}"} if more else {})}
+        return _mock_response(200, body)
 
+    return [page(n) for n in range(count)]
+
+
+def test_bc_list_gl_accounts_follows_next_link_to_the_end(monkeypatch):
+    """`@odata.nextLink` is followed until BC stops sending one — past the
+    PO list's 1000-row bound, which a chart listing does not keep."""
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
-        client.get = AsyncMock(side_effect=[page(n) for n in range(12)])
+        client.get = AsyncMock(side_effect=_bc_pages(12, last_has_next=False))
         out = _run(_bc_adapter(monkeypatch).list_gl_accounts())
 
-    assert len(out) == 1000
-    assert client.get.await_count == 10
+    assert len(out) == 1200
+    assert client.get.await_count == 12
     assert client.get.await_args_list[1].args[0] == f"{_BC_API}/next/1"
 
 
-def test_bc_list_gl_accounts_degrades_on_error_keeping_what_it_read(monkeypatch):
+def test_bc_list_gl_accounts_past_the_sync_bound_raises_never_truncates(monkeypatch):
+    """The first N rows of a longer chart are not the chart: the sync would
+    unlink every link the unread pages held (decisions §284)."""
+    from app.services.erp_adapters.base import (
+        SYNC_LISTING_MAX_ROWS,
+        ErpListingIncomplete,
+        ListingGap,
+    )
+
+    pages = SYNC_LISTING_MAX_ROWS // 100
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(side_effect=_bc_pages(pages, last_has_next=True))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
+    assert exc.value.gap is ListingGap.truncated
+    assert client.get.await_count == pages
+
+
+def test_bc_list_gl_accounts_raises_on_any_failed_page_never_returns_part(monkeypatch):
+    """A failure after the first page used to return the rows already read,
+    which the sync took for the whole chart. Every failure now raises."""
     import httpx
+
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
 
     first = _mock_response(
         200,
@@ -189,16 +220,20 @@ def test_bc_list_gl_accounts_degrades_on_error_keeping_what_it_read(monkeypatch)
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
         client.get = AsyncMock(side_effect=[first, _mock_response(500, {"error": "x"})])
-        assert [a.code for a in _run(_bc_adapter(monkeypatch).list_gl_accounts())] == ["6100"]
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
+        assert exc.value.gap is ListingGap.fetch_failed
 
         client.get = AsyncMock(side_effect=httpx.ConnectError("dns"))
-        assert _run(_bc_adapter(monkeypatch).list_gl_accounts()) == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
 
         bad_token = _mock_response(401, {"error": "invalid_client"})
         bad_token.raise_for_status = MagicMock(side_effect=RuntimeError("401"))
         client.post = AsyncMock(return_value=bad_token)
         client.get = AsyncMock()
-        assert _run(_bc_adapter(monkeypatch).list_gl_accounts()) == []
+        with pytest.raises(RuntimeError):
+            _run(_bc_adapter(monkeypatch).list_gl_accounts())
         client.get.assert_not_awaited()
 
 
@@ -292,7 +327,9 @@ def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
     assert "FROM account" in json.loads(client.post.await_args.kwargs["content"])["q"]
 
 
-def test_netsuite_list_gl_accounts_follows_has_more_and_degrades_on_error():
+def test_netsuite_list_gl_accounts_follows_has_more_and_raises_on_a_failed_page():
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
+
     page1 = {
         "items": [
             {
@@ -308,9 +345,11 @@ def test_netsuite_list_gl_accounts_follows_has_more_and_degrades_on_error():
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(side_effect=[_mock_response(200, page1), _mock_response(500, {})])
-        out = _run(_netsuite_adapter().list_gl_accounts())
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_netsuite_adapter().list_gl_accounts())
 
-    assert [a.code for a in out] == ["6100"]
+    # The first page is never handed on as the whole chart.
+    assert exc.value.gap is ListingGap.fetch_failed
     urls = [c.args[0] for c in client.post.await_args_list]
     assert "offset=0" in urls[0] and "offset=100" in urls[1]
 
@@ -448,26 +487,56 @@ def test_merge_dev_list_gl_accounts_follows_pagination_cursor():
     assert {a.code for a in out} == {"1", "2"}
 
 
-def test_merge_dev_list_gl_accounts_returns_empty_on_http_error():
+def test_merge_dev_list_gl_accounts_raises_on_http_error_after_a_good_page():
+    """An empty or partial chart is not a chart (decisions §284): a failed
+    page raises, even after one that succeeded."""
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    page1 = {"results": [{"id": "m-a", "name": "A", "account_number": "1"}], "next": "c2"}
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(500, {"detail": "boom"}))
-        assert _run(adapter.list_gl_accounts()) == []
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, page1), _mock_response(500, {"detail": "boom"})]
+        )
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_gl_accounts())
+    assert exc.value.gap is ListingGap.fetch_failed
+    assert "boom" not in str(exc.value)
 
 
-def test_merge_dev_list_gl_accounts_returns_empty_on_network_error():
+def test_merge_dev_list_gl_accounts_raises_on_network_error():
     import httpx
 
+    from app.services.erp_adapters.base import ErpListingIncomplete
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
-        assert _run(adapter.list_gl_accounts()) == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(adapter.list_gl_accounts())
+
+
+def test_merge_dev_list_gl_accounts_past_the_sync_bound_raises():
+    from app.services.erp_adapters.base import (
+        SYNC_LISTING_MAX_ROWS,
+        ErpListingIncomplete,
+        ListingGap,
+    )
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    page = {"results": [{"id": "m-a", "name": "A", "account_number": "1"}], "next": "more"}
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, page))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_gl_accounts())
+    assert exc.value.gap is ListingGap.truncated
+    assert client.get.await_count == SYNC_LISTING_MAX_ROWS // 100
 
 
 # ---------- API endpoint integration -------------------------------------

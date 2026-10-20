@@ -22,7 +22,14 @@ import pytest
 from app.config import settings
 from app.services import erp_oauth
 from app.services.erp_adapters import blackbaud_fe_nxt as bb
-from app.services.erp_adapters.base import ErpInvoiceStatus, InvoicePayload, LineItemPayload
+from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
+    ErpInvoiceStatus,
+    ErpListingIncomplete,
+    InvoicePayload,
+    LineItemPayload,
+    ListingGap,
+)
 from app.services.erp_adapters.blackbaud_fe_nxt import (
     DEFAULT_API_BASE,
     BlackbaudFeNxtAdapter,
@@ -71,6 +78,8 @@ class FakeSky:
         self.record_id = 4975
         self.invoice: dict | None = None
         self.collections: dict[str, list[dict]] = {}
+        # A collection page at this offset (or later) answers 503.
+        self.collection_fail_offset: int | None = None
         # A transport error class raised instead of answering (timeout, reset).
         self.process_exc: type[httpx.TransportError] | None = None
         self.status_exc: type[httpx.TransportError] | None = None
@@ -112,6 +121,8 @@ class FakeSky:
         if rows is not None:
             offset = int(request.url.params.get("offset", "0"))
             limit = int(request.url.params.get("limit", "100"))
+            if self.collection_fail_offset is not None and offset >= self.collection_fail_offset:
+                return httpx.Response(503, json={})
             return httpx.Response(
                 200, json={"count": len(rows), "value": rows[offset : offset + limit]}
             )
@@ -218,7 +229,9 @@ def test_missing_subscription_key_fails_closed_before_any_call(monkeypatch):
     assert result.message == "Blackbaud FE NXT post refused: subscription_key_missing"
     assert fake.requests == []
     assert _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).test_connection()) is False
-    assert _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_vendors()) == []
+    # A listing that cannot ask is a failure, never "no vendors" (§284).
+    with pytest.raises(bb.BlackbaudConfigError, match="subscription key"):
+        _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_vendors())
     with pytest.raises(bb.BlackbaudConfigError, match="subscription key"):
         _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).get_invoice_status("1"))
     assert fake.requests == []
@@ -660,16 +673,55 @@ def test_list_vendors_pages_and_maps():
     assert [r.url.params["offset"] for r in fake.requests] == ["0", "100"]
 
 
-def test_list_gl_accounts_keys_by_number_and_skips_locked_accounts():
+def test_list_gl_accounts_keys_by_number_and_emits_locked_accounts_inactive():
+    """A locked account still exists: dropping it made a row linked to it look
+    like a dead link, which a sync re-judging links unlinks (§284)."""
     fake = FakeSky()
     fake.collections["/generalledger/v1/accounts"] = [
         {"account_id": 1, "account_number": "01-5000-00", "description": "Supplies"},
         {"account_id": 2, "account_number": "01-1000-00", "prevent_data_entry": True},
     ]
     accounts = _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_gl_accounts())
-    assert [(a.code, a.erp_account_id, a.name, a.account_type) for a in accounts] == [
-        ("01-5000-00", "01-5000-00", "Supplies", None)
+    assert [(a.code, a.erp_account_id, a.name, a.account_type, a.active) for a in accounts] == [
+        ("01-5000-00", "01-5000-00", "Supplies", None, True),
+        ("01-1000-00", "01-1000-00", "01-1000-00", None, False),
     ]
+
+
+@pytest.mark.parametrize(
+    "collection, listing",
+    [
+        ("/generalledger/v1/accounts", "list_gl_accounts"),
+        ("/accountspayable/v1/vendors", "list_vendors"),
+    ],
+)
+def test_chart_and_vendor_listings_raise_rather_than_return_part(collection, listing):
+    """A failed later page used to end the walk with the rows already read,
+    and the first page failing returned []. The sync took either for the
+    whole collection and unlinked every link it did not contain (§284)."""
+    fake = FakeSky()
+    fake.collections[collection] = [
+        {"account_number": f"01-{i:04d}", "vendor_id": i, "vendor_name": f"V{i}"}
+        for i in range(150)
+    ]
+    fake.collection_fail_offset = 100
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, lambda: getattr(BlackbaudFeNxtAdapter(CONFIG), listing)())
+    assert exc.value.gap is ListingGap.fetch_failed
+
+    fake.collection_fail_offset = 0
+    with pytest.raises(ErpListingIncomplete):
+        _run(fake, lambda: getattr(BlackbaudFeNxtAdapter(CONFIG), listing)())
+
+    # Past the sync bound: truncated, never the first N rows.
+    fake.collection_fail_offset = None
+    fake.collections[collection] = [
+        {"account_number": f"01-{i:05d}", "vendor_id": i, "vendor_name": f"V{i}"}
+        for i in range(SYNC_LISTING_MAX_ROWS + 1)
+    ]
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, lambda: getattr(BlackbaudFeNxtAdapter(CONFIG), listing)())
+    assert exc.value.gap is ListingGap.truncated
 
 
 def test_list_pos_maps_status_and_never_labels_currency():

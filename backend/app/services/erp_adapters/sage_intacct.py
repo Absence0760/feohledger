@@ -54,13 +54,16 @@ from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoPayload,
     VendorPayload,
     erp_http_failure,
     erp_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
@@ -72,8 +75,8 @@ BILL_OBJECT = "accounts-payable/bill"
 VENDOR_OBJECT = "accounts-payable/vendor"
 GL_ACCOUNT_OBJECT = "general-ledger/account"
 
-#: Query page size and page cap — 10 × 100 = the 1000-row bound every other
-#: adapter's list sync uses.
+#: Query page size and the PO list's page cap (10 × 100 rows). The chart and
+#: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
@@ -195,12 +198,17 @@ class SageIntacctAdapter(ErpAdapter):
         *,
         max_pages: int = _MAX_PAGES,
         size: int = _PAGE_SIZE,
+        complete: str | None = None,
     ) -> list[dict] | None:
         """POST ``services/core/query``, following ``ia::meta.next``.
 
         Returns None when the first page fails (so callers can tell "no rows"
         from "couldn't ask"); a later page failing ends the walk with what was
         read so far.
+
+        ``complete`` (the collection's name) asks for the whole collection
+        instead: any failing page, or more rows than ``max_pages`` reach,
+        raises :class:`ErpListingIncomplete` rather than returning part of it.
         """
         rows: list[dict] = []
         start = 1
@@ -214,6 +222,8 @@ class SageIntacctAdapter(ErpAdapter):
                 headers=self._headers(token),
             )
             if resp.status_code != 200:
+                if complete is not None:
+                    raise ErpListingIncomplete(PROVIDER, complete, ListingGap.fetch_failed)
                 return None if page == 0 else rows
             data = resp.json() or {}
             rows.extend(r for r in data.get("ia::result") or [] if isinstance(r, dict))
@@ -221,6 +231,9 @@ class SageIntacctAdapter(ErpAdapter):
             if not nxt:
                 break
             start = int(nxt)
+        else:
+            if complete is not None:
+                raise ErpListingIncomplete(PROVIDER, complete, ListingGap.truncated)
         return rows
 
     async def _find_bill_key(
@@ -353,13 +366,17 @@ class SageIntacctAdapter(ErpAdapter):
         return resp.status_code in (200, 202, 204)
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Best-effort like the other adapters: any failure degrades to []."""
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                token = await self._token(client)
-                rows = await self._query(client, token, VENDOR_OBJECT, ["key", "id", "name"])
-        except Exception:
-            return []
+        """Every vendor, or :class:`ErpListingIncomplete`; never a partial list."""
+        async with httpx.AsyncClient(timeout=30) as client:
+            token = await self._token(client)
+            rows = await self._query(
+                client,
+                token,
+                VENDOR_OBJECT,
+                ["key", "id", "name"],
+                max_pages=sync_listing_pages(_PAGE_SIZE),
+                complete="vendors",
+            )
         vendors = []
         for raw in rows or []:
             vendor_id = raw.get("id")
@@ -375,17 +392,17 @@ class SageIntacctAdapter(ErpAdapter):
         return vendors
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                token = await self._token(client)
-                rows = await self._query(
-                    client,
-                    token,
-                    GL_ACCOUNT_OBJECT,
-                    ["key", "id", "name", "accountType", "normalBalance"],
-                )
-        except Exception:
-            return []
+        """The whole chart, or :class:`ErpListingIncomplete`."""
+        async with httpx.AsyncClient(timeout=30) as client:
+            token = await self._token(client)
+            rows = await self._query(
+                client,
+                token,
+                GL_ACCOUNT_OBJECT,
+                ["key", "id", "name", "accountType", "normalBalance"],
+                max_pages=sync_listing_pages(_PAGE_SIZE),
+                complete="accounts",
+            )
         accounts = []
         for raw in rows or []:
             account_id = raw.get("id")

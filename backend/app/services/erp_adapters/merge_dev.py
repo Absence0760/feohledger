@@ -11,14 +11,17 @@ from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoLinePayload,
     PoPayload,
     VendorPayload,
     erp_http_failure,
     erp_refusal,
+    sync_listing_pages,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
@@ -263,86 +266,49 @@ class MergeDevAdapter(ErpAdapter):
 
         return items
 
-    async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        """Pull the chart of accounts via Merge's unified `/accounts`.
+    async def _list_complete(self, path: str, params: dict[str, str]) -> list[dict]:
+        """Every record of a Merge collection, following ``next`` cursors.
 
-        Best-effort with the same degradation policy as `list_pos`:
-        non-2xx → empty list, network error → empty list. The endpoint
-        runs as part of an admin sync flow that already shows
-        ERP-failure toasts, and silently no-op'ing here is friendlier
-        than 502'ing the click.
+        Any non-2xx or network error raises :class:`ErpListingIncomplete`, as
+        does a collection longer than ``SYNC_LISTING_MAX_ROWS``: the chart and
+        vendor syncs read absence as evidence (base), so they never get the
+        pages read before a failure as if they were the whole collection.
         """
-        items: list[GLAccountPayload] = []
-        cursor: str | None = None
-        params = {"page_size": "100"}
-
+        records: list[dict] = []
+        params = dict(params)
         async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(20):  # 20 × 100 = 2000-account cap
-                if cursor:
-                    params["cursor"] = cursor
+            for _ in range(sync_listing_pages(100)):
                 try:
                     resp = await client.get(
-                        f"{_api_base()}/accounts",
-                        params=params,
-                        headers=self._headers(),
+                        f"{_api_base()}/{path}", params=params, headers=self._headers()
                     )
                 except httpx.HTTPError:
-                    break
-
+                    raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed) from None
                 if resp.status_code != 200:
-                    break
-
+                    raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed)
                 body = resp.json() if resp.content else {}
-                for raw in body.get("results", []) or []:
-                    payload = _merge_account_to_payload(raw)
-                    if payload is not None:
-                        items.append(payload)
-
+                records.extend(r for r in body.get("results") or [] if isinstance(r, dict))
                 cursor = body.get("next")
                 if not cursor:
-                    break
+                    return records
+                params["cursor"] = cursor
+        raise ErpListingIncomplete("Merge.dev", path, ListingGap.truncated)
 
+    async def list_gl_accounts(self) -> list[GLAccountPayload]:
+        """The whole chart via Merge's unified ``/accounts``, or
+        :class:`ErpListingIncomplete` — never the pages read before a failure."""
+        items: list[GLAccountPayload] = []
+        for raw in await self._list_complete("accounts", {"page_size": "100"}):
+            payload = _merge_account_to_payload(raw)
+            if payload is not None:
+                items.append(payload)
         return items
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Pull vendors via Merge's unified `/vendors`.
-
-        Best-effort with the same degradation policy as `list_pos` /
-        `list_gl_accounts`: non-2xx or network error → empty list, never
-        raises — the `/api/vendors/sync-erp` endpoint should show "0 new
-        vendors" rather than 500 when the ERP is unreachable. Paginated via
-        Merge's cursor scheme, capped at 1000 vendors (10 pages × 100) to
-        bound memory.
-        """
-        items: list[VendorPayload] = []
-        cursor: str | None = None
-        params = {"page_size": "100", "expand": "addresses"}
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(10):  # 10 pages × 100 = 1000 vendor cap
-                if cursor:
-                    params["cursor"] = cursor
-                try:
-                    resp = await client.get(
-                        f"{_api_base()}/vendors",
-                        params=params,
-                        headers=self._headers(),
-                    )
-                except httpx.HTTPError:
-                    break
-
-                if resp.status_code != 200:
-                    break
-
-                body = resp.json() if resp.content else {}
-                for raw in body.get("results", []) or []:
-                    items.append(_merge_vendor_to_payload(raw))
-
-                cursor = body.get("next")
-                if not cursor:
-                    break
-
-        return items
+        """Every vendor via Merge's unified ``/vendors``, or
+        :class:`ErpListingIncomplete` — never the pages read before a failure."""
+        records = await self._list_complete("vendors", {"page_size": "100", "expand": "addresses"})
+        return [_merge_vendor_to_payload(raw) for raw in records]
 
     async def test_connection(self) -> bool:
         try:

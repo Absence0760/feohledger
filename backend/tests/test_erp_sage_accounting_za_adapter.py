@@ -22,8 +22,10 @@ import pytest
 from app.config import settings
 from app.services.erp_adapters.base import (
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     InvoicePayload,
     LineItemPayload,
+    ListingGap,
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
@@ -669,11 +671,14 @@ def test_list_vendors_gl_accounts_and_pos():
     ]
     assert fake.requests[0].url.params["$top"] == "100"
     accounts = _run(fake, adapter.list_gl_accounts)
-    assert [(a.erp_account_id, a.account_type) for a in accounts] == [
-        ("6100", "expense"),
-        ("6200", "expense"),
-        ("6300", "expense"),
-    ]  # 6400 is inactive
+    # 6400 is inactive: emitted as such, not dropped — it still exists, so a
+    # row linked to it is not a dead link (§284), and the sync creates none.
+    assert [(a.erp_account_id, a.account_type, a.active) for a in accounts] == [
+        ("6100", "expense", True),
+        ("6200", "expense", True),
+        ("6300", "expense", True),
+        ("6400", "expense", False),
+    ]
     pos = _run(fake, adapter.list_pos)
     assert [(p.po_number, p.total, p.status, p.currency) for p in pos] == [
         ("PO0001", Decimal("1150.00"), "open", None),
@@ -701,14 +706,54 @@ def test_list_paging_walks_skip_until_the_total():
     assert [r.url.params["$skip"] for r in fake.requests] == ["0", "100", "200"]
 
 
-def test_syncs_degrade_to_empty_on_failure():
+def test_chart_and_vendor_listings_raise_on_failure_the_po_list_degrades():
+    """The chart and vendor syncs read absence as evidence, so a failed listing
+    raises instead of returning [] (§284). The PO list keeps degrading."""
     fake = FakeSage()
     for resource in ("Supplier", "Account", "PurchaseOrder"):
         fake.status[resource] = 500
     adapter = SageAccountingZaAdapter(CONFIG)
-    assert _run(fake, adapter.list_vendors) == []
-    assert _run(fake, adapter.list_gl_accounts) == []
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(fake, listing)
+        assert exc.value.gap is ListingGap.fetch_failed
     assert _run(fake, adapter.list_pos) == []
+
+
+def test_a_later_page_failing_raises_never_returns_the_first_pages():
+    fake = FakeSage()
+    many = [{"ID": i, "Name": f"S{i}"} for i in range(1, 251)]
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/Supplier/Get"):
+            skip, top = int(request.url.params["$skip"]), int(request.url.params["$top"])
+            if skip >= 100:
+                return httpx.Response(503, json={})
+            return httpx.Response(
+                200, json={"TotalResults": 250, "Results": many[skip : skip + top]}
+            )
+        return _orig(request)
+
+    fake.handler = handler
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SageAccountingZaAdapter(CONFIG).list_vendors)
+    assert exc.value.gap is ListingGap.fetch_failed
+
+
+def test_a_listing_past_the_sync_bound_raises_truncated():
+    fake = FakeSage()
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/Account/Get"):
+            skip = int(request.url.params["$skip"])
+            page = [{"ID": skip + i + 1, "Name": "A"} for i in range(100)]
+            return httpx.Response(200, json={"TotalResults": 10**6, "Results": page})
+        return _orig(request)
+
+    fake.handler = handler
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SageAccountingZaAdapter(CONFIG).list_gl_accounts)
+    assert exc.value.gap is ListingGap.truncated
 
 
 def test_test_connection_requires_the_configured_company():

@@ -54,6 +54,12 @@ or when its account leaves the ERP). Nothing here ever picks a candidate.
 linked to one is not dead), a matched row is marked inactive in our chart, and
 no row is created for one.
 
+**Absence is evidence only in a whole chart.** Rule 0 and the dead-link
+handling read "this id is not in the pull" as "that account is gone". So the
+adapter returns the whole chart or raises (``ErpListingIncomplete``, which the
+endpoint answers 502 before anything here runs), and an EMPTY pull changes no
+link at all.
+
 Nothing here commits; the caller audits and commits.
 """
 
@@ -201,6 +207,19 @@ async def sync_chart_from_erp(
         # The same account listed twice (a provider paging overlap) is one.
         if not any(seen.erp_account_id == acct.erp_account_id for seen in by_code[code]):
             by_code[code].append(acct)
+
+    if not by_id:
+        # An empty pull proves nothing. Rule 0 and the dead-link handling read
+        # an id's ABSENCE as "that account is gone", which is only true of a
+        # whole chart; an adapter that could not read one raises
+        # (`ErpListingIncomplete`), but an empty list — the base adapter's
+        # default, or a pull of nothing but id-less accounts — must not unlink
+        # every link the organization has either.
+        result.conflicts = [
+            {"code": code, "reason": MISSING_ERP_ID, "erp_account_ids": []}
+            for code in sorted(missing_id)
+        ]
+        return result
 
     refused: dict[str, str] = {}  # code -> reason
     for code, group in by_code.items():

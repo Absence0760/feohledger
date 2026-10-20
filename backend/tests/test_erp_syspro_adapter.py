@@ -21,9 +21,12 @@ import pytest
 from app.config import settings
 from app.services.e_invoice._xml import local_name, parse_secure
 from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     InvoicePayload,
     LineItemPayload,
+    ListingGap,
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
@@ -531,13 +534,32 @@ def test_list_pos_sums_lines_joins_names_and_skips_line_less_pos():
     assert fake.calls().count("Logon") == 1 and fake.open_sessions == set()
 
 
-def test_list_syncs_degrade_to_empty_and_still_log_off():
+def test_chart_and_vendor_listings_raise_on_failure_and_still_log_off():
+    """A failed listing is not an empty one: the chart and vendor syncs read
+    absence as evidence (§284). The PO list keeps degrading."""
     fake = FakeSyspro()
     fake.query_status = 500
     adapter = SysproAdapter(CONFIG)
-    assert _run(fake, adapter.list_vendors) == []
-    assert _run(fake, adapter.list_gl_accounts) == []
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(fake, listing)
+        assert exc.value.gap is ListingGap.fetch_failed
     assert _run(fake, adapter.list_pos) == []
+    assert fake.open_sessions == set()
+
+
+def test_a_table_past_the_sync_bound_raises_truncated():
+    """COMFND does not page: the listing asks for one row past the bound, and
+    getting it means the table is longer than any sync reads."""
+    fake = FakeSyspro()
+    fake.query_tables["ApSupplier"] = [
+        {"Supplier": f"{i:07d}", "SupplierName": "S"} for i in range(SYNC_LISTING_MAX_ROWS + 1)
+    ]
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SysproAdapter(CONFIG).list_vendors)
+    assert exc.value.gap is ListingGap.truncated
+    query = parse_secure(fake.of("/Query/Query")[0].url.params["XmlIn"].encode())
+    assert query.findtext("ReturnRows") == str(SYNC_LISTING_MAX_ROWS + 1)
     assert fake.open_sessions == set()
 
 

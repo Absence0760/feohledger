@@ -75,9 +75,11 @@ from app.services.erp_adapters.base import (
     NOT_CONNECTED,
     VENDOR_NOT_LINKED,
     ErpInvoiceStatus,
+    ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    ListingGap,
     PoLinePayload,
     PoPayload,
     VendorPayload,
@@ -343,14 +345,21 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             raise QboRequestError(resp.status_code)
         return _json(resp).get("QueryResponse") or {}
 
-    async def _query_all(self, entity: str, *, include_inactive: bool = False) -> list[dict]:
-        """Every row of ``entity``, paged.
+    async def _query_all(
+        self, entity: str, *, include_inactive: bool = False, complete: bool = False
+    ) -> list[dict]:
+        """Every row of ``entity``, paged. A failed page raises
+        (``QboRequestError``).
 
         ``include_inactive``: a plain ``select`` returns only ACTIVE accounts and
         vendors, so an account the company made inactive simply vanished from
         the pull — and a row still linked to it looked like a link to a deleted
         account. ``where Active IN (true, false)`` is QuickBooks' documented way
         to read both.
+
+        ``complete``: an entity longer than ``_MAX_PAGES`` pages raises
+        :class:`ErpListingIncomplete` instead of returning the first pages —
+        the chart and vendor syncs read absence as evidence (base).
         """
         where = " where Active IN (true, false)" if include_inactive else ""
         rows: list[dict] = []
@@ -363,8 +372,10 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             ).get(entity) or []
             rows.extend(r for r in page if isinstance(r, dict))
             if len(page) < _PAGE_SIZE:
-                break
+                return rows
             start += _PAGE_SIZE
+        if complete:
+            raise ErpListingIncomplete(PROVIDER, entity, ListingGap.truncated)
         return rows
 
     # -- post --------------------------------------------------------------
@@ -706,7 +717,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         return resp.status_code == 200
 
     async def list_vendors(self) -> list[VendorPayload]:
-        rows = await self._query_all("Vendor", include_inactive=True)
+        rows = await self._query_all("Vendor", include_inactive=True, complete=True)
         return [_vendor_payload(v) for v in rows if v.get("Id")]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
@@ -718,7 +729,11 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         ``Name`` this adapter keyed sub-accounts by before §284, which is how
         the sync recognises a row that collapsed two accounts into one.
         """
-        rows = [a for a in await self._query_all("Account", include_inactive=True) if a.get("Id")]
+        rows = [
+            a
+            for a in await self._query_all("Account", include_inactive=True, complete=True)
+            if a.get("Id")
+        ]
         code_by_id = {str(a["Id"]): _account_code(a) for a in rows}
         out = []
         for a in rows:
