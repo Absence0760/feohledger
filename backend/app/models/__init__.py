@@ -79,6 +79,7 @@ from app.models.webauthn_credential import WebAuthnCredential
 from app.models.webhook import WebhookDelivery, WebhookSubscription
 from app.models.workflow import AuditLog, WorkflowDefinition, WorkflowInstance, WorkflowStep
 from app.models.workflow_experiment import WorkflowExperiment
+from app.models.workspace_closure import WorkspaceClosure
 
 __all__ = [
     "Base",
@@ -95,6 +96,7 @@ __all__ = [
     "WebAuthnCredential",
     "WebhookSubscription",
     "WebhookDelivery",
+    "WorkspaceClosure",
     # Tenant-scoped models
     "AgentDecision",
     "AuditLog",

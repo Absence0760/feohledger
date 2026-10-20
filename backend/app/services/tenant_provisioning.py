@@ -92,6 +92,10 @@ CONTROL_TABLES: frozenset[str] = frozenset(
         # provider_credential.py for why they sit beside `organizations`).
         # Control-plane only, never fanned to tenant DBs.
         "provider_credentials",
+        # The record of a workspace an administrator closed (see app/models/
+        # workspace_closure.py). It outlives the tenant it describes, so it
+        # cannot live in that tenant's DB. Control-plane only.
+        "workspace_closures",
     }
 )
 

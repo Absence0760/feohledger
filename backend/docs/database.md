@@ -101,6 +101,7 @@ decimal comparison rather than binary drift.
 - `roles` — role definitions (admin, ap_manager, ap_clerk, cfo)
 - `user_roles` — many-to-many join table
 - `email_verifications` — pending self-service signups (token, email, slug, admin_name, expires_at, consumed_at). Created by `POST /api/signup/start`, consumed by `POST /api/signup/complete`.
+- `workspace_closures` — the record of a workspace its administrator closed (`POST /api/organization/close`, decisions §294): ids, slug, step-up proof, what was removed, and whether the operator has removed its backups yet. Kept when the tenant it describes is deleted.
 - `extraction_usage` — billing rows: invoice_id, provider, program_type, period (used for tracking platform-extraction usage), plus the provider's token usage — input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, model (all nullable, migration 0108; `backend/docs/ai-extraction.md` § Token tracking)
 - `card_rebates` — billing rows: virtual_card_id, amount, rate, status, period
 
@@ -518,6 +519,7 @@ gate fails if a model is added without being classified.
    - `UserRole` — junction table
    - `WebAuthnCredential` — registered passkey (credential_id, public_key, sign_count, transports) per `user_id`; the WebAuthn second factor (migration 0063)
    - `ProviderCredential` — `provider_credentials`: one row per (organization, settings block `erp` / `payments` / `cards`) holding that block's secrets as ONE envelope-encrypted JSON map (`ciphertext`, `wrapped_key`, `key_provider` `kms`/`local`, `key_id`) plus the stored path NAMES (`secret_fields`, so "is it set?" needs no decrypt); unique `(organization_id, block)`, plain FK to `organizations` (swept by `tenant_deletion`). Control-plane, beside the `Organization.settings` it was moved out of, so migration 0110 could copy-and-strip in one transaction. See `services/provider_credentials.py` and `erp-integration.md` § Where the credentials live
+   - `WorkspaceClosure` — `workspace_closures`: one row per workspace an administrator closed (`services/workspace_closure.py`, migration 0117): `organization_id` (UNIQUE, no FK — the org is deleted), `slug`, `requested_by_user_id` (no FK), `step_up_proof`, `status` `started`/`completed`, counts of what the deletion removed, and `backups_cleared_at` (the operator's backup leg). The one control-plane table a tenant deletion deliberately keeps (`tenant_deletion.CONTROL_TABLES_EXEMPT`): it is the record that outlives the tenant. No address or name
    - `AssistantUsage` — billing: per-org/month assistant token meter. The
      *only* usage meter that is control-plane; `ExtractionUsage` and
      `CardRebate` read like control-plane data but are tenant-local (see
