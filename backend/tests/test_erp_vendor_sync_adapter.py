@@ -173,6 +173,31 @@ def test_merge_dev_list_vendors_handles_missing_optional_fields():
     assert v.payment_terms is None
 
 
+def test_merge_dev_skips_a_vendor_with_no_merge_id_never_keys_it_otherwise():
+    """The bill posts ``contact`` = the Merge id. A ``remote_id`` is the
+    underlying ERP's key, which Merge refuses there, and a name keyed two
+    same-named vendors to one id, each relinking one row past the sync's
+    ambiguous-name guard (§284). Neither is ever an ``erp_vendor_id``."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "merge-vendor-1", "name": "Acme"},
+            {"remote_id": "qbo-57", "name": "Acme"},  # no Merge id
+            {"name": "Acme"},  # no id at all
+            {"id": "", "remote_id": "qbo-58", "name": "Beta"},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        vendors = _run(adapter.list_vendors())
+
+    assert [(v.erp_vendor_id, v.name) for v in vendors] == [("merge-vendor-1", "Acme")]
+
+
 def test_merge_dev_list_vendors_follows_pagination_cursor():
     """A real Merge response splits big vendor lists across pages joined
     by a `next` cursor — same contract as `list_pos`."""
@@ -417,6 +442,32 @@ def test_d365_list_vendors_maps_response_into_vendor_payloads():
     assert v.phone == "555-0200"
     assert v.tax_id == "TAX-1"
     assert v.payment_terms == "NET30"
+
+
+def test_d365_skips_a_vendor_with_no_id_never_keys_it_by_number_or_name():
+    """The bill posts ``vendorId`` = the vendor's GUID ``id``. The vendor No.
+    would be posted as a GUID and refused, and a name keyed two same-named
+    vendors to one id past the sync's ambiguous-name guard (§284)."""
+    from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
+
+    adapter = BusinessCentralAdapter(_d365_config())
+    body = {
+        "value": [
+            {"id": "d365-vendor-1", "number": "V0001", "displayName": "Acme"},
+            {"number": "V0002", "displayName": "Acme"},  # no id
+            {"displayName": "Acme"},  # neither id nor No.
+            {"id": None, "number": "V0003", "displayName": "Beta"},
+        ]
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_D365_TOKEN_RESPONSE)
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        vendors = _run(adapter.list_vendors())
+
+    assert [(v.erp_vendor_id, v.code, v.name) for v in vendors] == [
+        ("d365-vendor-1", "V0001", "Acme")
+    ]
 
 
 def test_d365_list_vendors_follows_odata_next_link():

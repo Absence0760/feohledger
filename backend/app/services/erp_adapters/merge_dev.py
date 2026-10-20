@@ -308,7 +308,7 @@ class MergeDevAdapter(ErpAdapter):
         """Every vendor via Merge's unified ``/vendors``, or
         :class:`ErpListingIncomplete` — never the pages read before a failure."""
         records = await self._list_complete("vendors", {"page_size": "100", "expand": "addresses"})
-        return [_merge_vendor_to_payload(raw) for raw in records]
+        return [v for v in map(_merge_vendor_to_payload, records) if v is not None]
 
     async def test_connection(self) -> bool:
         try:
@@ -415,8 +415,16 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
     )
 
 
-def _merge_vendor_to_payload(raw: dict) -> VendorPayload:
-    """Map a Merge.dev unified Vendor record to our normalized VendorPayload.
+def _merge_vendor_to_payload(raw: dict) -> VendorPayload | None:
+    """Map a Merge.dev unified Vendor record to our normalized VendorPayload,
+    or None for a record with no Merge ``id``.
+
+    ``erp_vendor_id`` is the Merge ``id`` and nothing else: it is what
+    ``post_invoice`` posts as the bill's ``contact``. ``remote_id`` is the
+    underlying ERP's own id (a different kind of key Merge would refuse as a
+    contact), and a name is no key at all — two same-named vendors would each
+    relink one row past the sync's ambiguous-name guard (docs/decisions.md
+    §284). A record with no id is skipped, as NetSuite's mapping does.
 
     Follows Merge's Accounting API Vendor model: `name`, `email_address`,
     `phone_number`, an `addresses` list (first entry used, if any), and a
@@ -424,8 +432,10 @@ def _merge_vendor_to_payload(raw: dict) -> VendorPayload:
     string on some ERPs). Anything absent maps to None — `sync_vendors_from_erp`
     never nulls out an existing local value for a missing field.
     """
-    vendor_id = raw.get("id") or raw.get("remote_id")
-    name = raw.get("name") or (str(vendor_id) if vendor_id else "")
+    vendor_id = raw.get("id")
+    if not vendor_id:
+        return None
+    name = raw.get("name") or str(vendor_id)
 
     address: str | None = None
     addresses = raw.get("addresses")
@@ -449,7 +459,7 @@ def _merge_vendor_to_payload(raw: dict) -> VendorPayload:
         payment_terms = pt
 
     return VendorPayload(
-        erp_vendor_id=str(vendor_id) if vendor_id is not None else name,
+        erp_vendor_id=str(vendor_id),
         name=name,
         email=raw.get("email_address") or raw.get("email"),
         phone=raw.get("phone_number") or raw.get("phone"),

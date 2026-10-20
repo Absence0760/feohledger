@@ -508,10 +508,12 @@ class BusinessCentralAdapter(ErpAdapter):
 
     async def list_vendors(self) -> list[VendorPayload]:
         """Every vendor via BC's ``vendors`` entity, or :class:`ErpListingIncomplete`."""
-        return [
-            _d365_vendor_to_payload(raw)
-            for raw in await self._list_collection("vendors", complete="vendors")
-        ]
+        out: list[VendorPayload] = []
+        for raw in await self._list_collection("vendors", complete="vendors"):
+            vendor = _d365_vendor_to_payload(raw)
+            if vendor is not None:
+                out.append(vendor)
+        return out
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """Pull the chart of accounts via BC's `accounts` entity.
@@ -593,9 +595,9 @@ def _bc_posted(
     )
 
 
-def _d365_vendor_to_payload(raw: dict) -> VendorPayload:
+def _d365_vendor_to_payload(raw: dict) -> VendorPayload | None:
     """Map a Dynamics 365 Business Central OData vendor record to our
-    normalized VendorPayload.
+    normalized VendorPayload, or None for a record with no ``id``.
 
     `displayName` is the vendor's name field (what `test_connection` and
     the fake-erp fixture both key on); `number` is BC's vendor code. Real
@@ -603,12 +605,21 @@ def _d365_vendor_to_payload(raw: dict) -> VendorPayload:
     `taxRegistrationNumber`, `paymentTermsId`. Anything absent maps to
     None — `sync_vendors_from_erp` never nulls out an existing local value
     for a missing field.
+
+    ``erp_vendor_id`` is the vendor's GUID ``id`` and nothing else: it is what
+    ``post_invoice`` posts as ``vendorId``. The vendor No. is another kind of
+    key (a stored No. would be posted as a GUID and refused), and a name is no
+    key at all — two same-named vendors would each relink one row past the
+    sync's ambiguous-name guard. A record with no id is skipped, as NetSuite's
+    mapping does.
     """
-    vendor_id = raw.get("id") or raw.get("number")
-    name = raw.get("displayName") or raw.get("number") or (str(vendor_id) if vendor_id else "")
+    vendor_id = raw.get("id")
+    if not vendor_id:
+        return None
+    name = raw.get("displayName") or raw.get("number") or str(vendor_id)
 
     return VendorPayload(
-        erp_vendor_id=str(vendor_id) if vendor_id is not None else name,
+        erp_vendor_id=str(vendor_id),
         name=name,
         code=raw.get("number"),
         email=raw.get("email"),
