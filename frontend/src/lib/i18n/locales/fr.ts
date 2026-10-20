@@ -6118,6 +6118,7 @@ export const messages = {
 	'refusal.ssoEmailInOtherWorkspace': "Cette adresse e-mail appartient déjà à un compte d’un autre espace de travail ; elle ne peut donc pas se connecter ici. Connectez-vous sur la page de votre propre espace de travail, ou demandez à l’administrateur de cet espace de travail que votre fournisseur d’identité utilise une autre adresse.",
 	'refusal.emailInThisWorkspace': "Un utilisateur avec cette adresse e-mail existe déjà dans cet espace de travail.",
 	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne.",
+	'refusal.emailCheckThrottled': "Trop d’adresses saisies récemment dans cet espace de travail appartenaient déjà à d’autres espaces de travail : l’ajout d’utilisateurs et la modification de leur e-mail sont suspendus pendant une heure au plus. Réessayez plus tard.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Ce fournisseur n'existe pas encore dans {provider}. Synchronisez les fournisseurs depuis {provider} ou créez-le là-bas, puis réessayez.",

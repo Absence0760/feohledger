@@ -6344,6 +6344,7 @@ export const en = {
 	'refusal.ssoEmailInOtherWorkspace': "This email address already belongs to an account in another workspace, so it can't sign in here. Sign in on your own workspace's page, or ask this workspace's administrator to have your identity provider use a different address.",
 	'refusal.emailInThisWorkspace': "A user with this email address already exists in this workspace.",
 	'refusal.emailInOtherWorkspace': "This email address already has an account in another workspace. An address can belong to only one workspace, so use a different address for this person.",
+	'refusal.emailCheckThrottled': "Too many addresses entered in this workspace recently already belonged to other workspaces, so adding users or changing their email is paused for up to an hour. Try again later.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "This vendor isn't in {provider} yet. Sync vendors from {provider}, or add the vendor there, then retry.",

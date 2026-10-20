@@ -152,6 +152,24 @@ def extract_and_check_email(email_raw: str, allowed_email_domains: list[str]) ->
     return email
 
 
+async def _active_user_in_org_by_email(
+    db: AsyncSession, org: Organization, email: str
+) -> User | None:
+    """This workspace's account for ``email`` (case-insensitive), refusing a
+    deactivated one with `DeactivatedAccount`."""
+    user = (
+        await db.execute(
+            select(User)
+            .where(email_matches(User.email, email), User.organization_id == org.id)
+            .order_by(exact_email_first(User.email, email).desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if user is not None and not user.is_active:
+        raise DeactivatedAccount(user.id)
+    return user
+
+
 async def jit_provision(
     db: AsyncSession,
     org: Organization,
@@ -219,7 +237,11 @@ async def jit_provision(
         # Branches 1 and 2 searched this org only, so any account holding the
         # address now belongs to another workspace. Refuse before the insert,
         # rather than let the global UNIQUE on `users.email` raise at flush.
-        if await email_holder_org_id(db, email) is not None:
+        # Compared with `org.id` rather than "any holder", like the race path
+        # below, so a future change to branch 2's matching cannot turn an
+        # address in THIS workspace into an "other workspace" refusal.
+        holder = await email_holder_org_id(db, email)
+        if holder is not None and holder != org.id:
             raise EmailInOtherWorkspace()
         full_name = (
             claims.get("name")
@@ -250,7 +272,15 @@ async def jit_provision(
             holder = await email_holder_org_id(db, email)
             if holder is not None and holder != org.id:
                 raise EmailInOtherWorkspace() from None
-            raise
+            # Taken in THIS workspace meanwhile — a parallel first sign-in of
+            # the same person (two tabs). Their row is the one to use.
+            raced = await _active_user_in_org_by_email(db, org, email)
+            if raced is None:
+                raise
+            await db.execute(
+                select(User).where(User.id == raced.id).options(selectinload(User.roles))
+            )
+            return raced
 
         # Assign least-privilege role by default. Admins can elevate via
         # the admin UI after first login. If this is the very first user

@@ -6046,6 +6046,7 @@ export const messages = {
 	'refusal.ssoEmailInOtherWorkspace': "このメールアドレスは別のワークスペースのアカウントで既に使用されているため、ここではサインインできません。ご自身のワークスペースのページでサインインするか、このワークスペースの管理者に、ID プロバイダーが別のアドレスを使うよう依頼してください。",
 	'refusal.emailInThisWorkspace': "このメールアドレスのユーザーは、このワークスペースに既に存在します。",
 	'refusal.emailInOtherWorkspace': "このメールアドレスには別のワークスペースのアカウントが既にあります。1 つのアドレスは 1 つのワークスペースにしか所属できないため、この方には別のアドレスを使用してください。",
+	'refusal.emailCheckThrottled': "このワークスペースで最近入力されたアドレスのうち、別のワークスペースに既に属していたものが多すぎるため、ユーザーの追加とメールアドレスの変更を最大 1 時間停止しています。しばらくしてからもう一度お試しください。",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "この取引先はまだ {provider} にありません。{provider} から取引先を同期するか、そちらで取引先を登録してから再試行してください。",

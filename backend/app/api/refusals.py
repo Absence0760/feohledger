@@ -164,3 +164,15 @@ EMAIL_IN_OTHER_WORKSPACE_DETAIL = coded_refusal(
     "This email address already has an account in another workspace. An address "
     "can belong to only one workspace, so use a different address for this person.",
 )
+
+#: The admin path's other-workspace budget is spent (``admin.EMAIL_COLLISION_LIMIT``
+#: an hour per workspace). A 429 for every create / email rename, free addresses
+#: included, until the window rolls — refusing only taken ones would make the
+#: 429 itself the oracle the budget bounds (``docs/decisions.md`` §290).
+EMAIL_CHECK_THROTTLED = "email_check_throttled"
+EMAIL_CHECK_THROTTLED_DETAIL = coded_refusal(
+    EMAIL_CHECK_THROTTLED,
+    "Too many addresses entered in this workspace recently already belonged to other "
+    "workspaces, so adding users or changing their email is paused for up to an hour. "
+    "Try again later.",
+)

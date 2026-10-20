@@ -148,7 +148,10 @@ pretending to succeed, would either strand the admin or quietly create nothing),
 so it is **bounded instead**: each workspace may get 20 other-workspace
 refusals per hour (`admin.EMAIL_COLLISION_LIMIT`), checked before the lookup, so
 a sweep is throttled with a `429` and learns nothing more; a same-workspace hit
-does not spend the budget. SCIM (`POST`/`PUT`/`PATCH /scim/v2/Users`) answers the
+does not spend the budget. While it is spent, **every** create and email rename
+in the workspace gets the coded `429` `email_check_throttled` (free addresses
+too — otherwise the 429 would be the oracle), with `Retry-After`; it lifts on
+its own within the hour. SCIM (`POST`/`PUT`/`PATCH /scim/v2/Users`) answers the
 same two cases as a SCIM `409 uniqueness` with the same distinction in its
 `detail`, without the budget — an IdP retries a doomed write on every reconcile
 cycle, and a throttle would turn that into a stuck provisioning job. An SSO

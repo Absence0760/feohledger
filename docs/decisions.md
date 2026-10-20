@@ -12588,10 +12588,19 @@ membership. Three paths had not caught up with that:
    refusing without a reason (the dead end again), so the admin path spends a
    per-workspace budget of 20 other-workspace refusals an hour, checked before
    the lookup so a throttled sweep learns nothing. Per workspace rather than per
-   user, so minting extra user-managers does not widen it. SCIM is not
-   budgeted: an IdP re-sends a doomed write every reconcile cycle, and a
-   throttle would turn a stated 409 into a stuck job; a SCIM token is also an
-   IdP integration, not an interactive seat.
+   user, so minting extra user-managers does not widen it. Once spent, EVERY
+   create and email rename in that workspace waits out the window — a free
+   address included, with its own coded 429 `email_check_throttled` saying so
+   — because refusing only the taken addresses would make the 429 the oracle.
+   That can pause a real onboarding for up to an hour after twenty
+   other-workspace hits, which is the accepted price. SCIM and SSO are **not**
+   budgeted, and their signal is accepted: an IdP re-sends a doomed SCIM write
+   every reconcile cycle, so a throttle would turn a stated 409 into a stuck
+   provisioning job, and a budget on SSO refusals would lock a whole
+   workspace's sign-ins; both also need the plan-gated SSO/SCIM feature and a
+   configured IdP, each SSO probe is a full browser round trip that leaves a
+   row in the prober's own audit log, and the same admin can already ask the
+   budgeted admin path.
 5. **`wrong_workspace` audits `attempted_workspace` and `password_verified:
    true` in the account's workspace, and nothing in the attempted one.** An
    unknown address leaves no row anywhere, so a row in the attempted workspace

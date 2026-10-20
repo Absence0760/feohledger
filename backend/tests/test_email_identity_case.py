@@ -261,6 +261,54 @@ async def test_sso_jit_refuses_an_address_held_in_another_workspace(realdb, mixe
     assert await _accounts_for(realdb, email) == [user_id]
 
 
+async def test_sso_jit_parallel_first_sign_in_in_the_same_workspace_uses_that_row(
+    realdb, monkeypatch
+):
+    """Two tabs, one person, one workspace: the other tab's insert lands between
+    the pre-check and this flush. That is the same account, not a 500 and not
+    an "other workspace" refusal."""
+    from app.services import identity_provisioning
+
+    org_a = await _org_a(realdb)
+    email = f"tabs.{uuid.uuid4().hex[:10]}@example.test"
+    other_tab_id = uuid.uuid4()
+    real_lookup = identity_provisioning.email_holder_org_id
+    calls = {"n": 0}
+
+    async def _other_tab_wins(db, address, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            async with realdb.control_sessionmaker()() as other:
+                other.add(
+                    User(
+                        id=other_tab_id,
+                        email=email,
+                        full_name="Other Tab",
+                        sso_provider="oidc",
+                        sso_provider_id="sub-tabs",
+                        organization_id=org_a.id,
+                        is_active=True,
+                        must_change_password=False,
+                    )
+                )
+                await other.commit()
+            return None  # the pre-check ran before that commit
+        return await real_lookup(db, address, **kw)
+
+    monkeypatch.setattr(identity_provisioning, "email_holder_org_id", _other_tab_wins)
+    try:
+        async with realdb.control_sessionmaker()() as s:
+            user = await jit_provision(s, org_a, email, "sub-tabs", "oidc", {})
+            await s.commit()
+        assert user.id == other_tab_id
+        assert await _accounts_for(realdb, email) == [other_tab_id]
+    finally:
+        async with realdb.control_sessionmaker()() as s:
+            await s.execute(delete(UserRole).where(UserRole.user_id == other_tab_id))
+            await s.execute(delete(User).where(User.id == other_tab_id))
+            await s.commit()
+
+
 async def test_sso_jit_concurrent_insert_is_still_a_refusal(realdb, mixed_case_user, monkeypatch):
     """The pre-check lost a race: another workspace took the address between
     it and the flush. The savepoint turns the IntegrityError into the same
@@ -434,6 +482,9 @@ async def test_other_workspace_refusals_are_budgeted_per_workspace(
     assert [first.status_code, second.status_code] == [409, 409]
     assert third.status_code == 429
     assert fourth.status_code == 429
+    # Stated, so an admin onboarding people knows why and that it lifts.
+    assert fourth.json()["detail"]["code"] == "email_check_throttled"
+    assert fourth.headers.get("retry-after")
 
 
 @pytest.mark.plan("scale")

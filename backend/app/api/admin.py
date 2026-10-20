@@ -26,6 +26,7 @@ from app.api.permissions import (
     sanitize_permissions,
 )
 from app.api.refusals import (
+    EMAIL_CHECK_THROTTLED_DETAIL,
     EMAIL_IN_OTHER_WORKSPACE_DETAIL,
     EMAIL_IN_THIS_WORKSPACE_DETAIL,
     coded_refusal,
@@ -48,7 +49,12 @@ from app.schemas.admin import (
 from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.email_adapters import EmailMessage, get_email_adapter
 from app.services.identity_provisioning import email_holder_org_id
-from app.services.rate_limit import auth_identity_key, check_auth_failures, record_auth_failure
+from app.services.rate_limit import (
+    RateLimitExceeded,
+    auth_identity_key,
+    check_auth_failures,
+    record_auth_failure,
+)
 from app.services.session_management import revoke_user_sessions
 from app.utils.emails import normalize_email
 from app.utils.passwords import generate_temp_password, hash_password
@@ -442,12 +448,23 @@ async def _refuse_taken_email(
     more, and only an other-workspace hit spends it.
     """
     budget_key = auth_identity_key(str(org_id))
-    await check_auth_failures(
-        EMAIL_COLLISION_SCOPE,
-        budget_key,
-        limit=EMAIL_COLLISION_LIMIT,
-        window_seconds=EMAIL_COLLISION_WINDOW_SECONDS,
-    )
+    try:
+        await check_auth_failures(
+            EMAIL_COLLISION_SCOPE,
+            budget_key,
+            limit=EMAIL_COLLISION_LIMIT,
+            window_seconds=EMAIL_COLLISION_WINDOW_SECONDS,
+        )
+    except RateLimitExceeded as exc:
+        # Spent: EVERY create / email rename in this workspace waits, a free
+        # address included — refusing only the taken ones would make the 429
+        # itself the oracle. Said in words, so an admin onboarding people
+        # knows why and that it lifts on its own.
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=EMAIL_CHECK_THROTTLED_DETAIL,
+            headers=exc.headers,
+        ) from exc
     holder = await email_holder_org_id(db, email, exclude_user_id=exclude_user_id)
     if holder is None:
         return
