@@ -470,6 +470,41 @@ def test_sign_in_url_shapes(monkeypatch):
     assert sign_in_url("acme", email="a@x.com") is None
 
 
+def test_sign_in_link_prefers_a_registered_custom_domain(monkeypatch):
+    """The wrong-workspace link sends a person where they actually sign in. A
+    tenant on `ap.acmecorp.example` with no `tenant_url_template` used to be
+    pointed at its slug subdomain — a different origin, so a different stored
+    token, and its passkeys not offered (decisions §290)."""
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.app.example.com")
+    domains = {"brand": {"custom_domains": ["AP.Acmecorp.Example:443", "pay.acmecorp.example"]}}
+
+    # Only when asked: every other link keeps following `tenant_url_template`.
+    assert sign_in_url("acme", domains) == "https://acme.app.example.com/login"
+    assert sign_in_url("acme", domains, email="a@x.com", prefer_custom_domain=True) == (
+        "https://ap.acmecorp.example/login?email=a%40x.com"
+    )
+    # An explicit per-org template is the tenant's own choice of link base; it wins.
+    both = {"brand": {**domains["brand"], **_VANITY["brand"]}}
+    both["brand"]["tenant_url_template"] = "https://links.acmecorp.example"
+    assert sign_in_url("acme", both, prefer_custom_domain=True) == (
+        "https://links.acmecorp.example/login"
+    )
+    # A host under the platform's own domain, or junk, is skipped — straight
+    # to the slug template when nothing usable is left.
+    junk = {"brand": {"custom_domains": ["x.app.example.com", 7, "bad host", "[::1]"]}}
+    assert sign_in_url("acme", junk, prefer_custom_domain=True) == (
+        "https://acme.app.example.com/login"
+    )
+    assert sign_in_url(
+        "acme", {"brand": {"custom_domains": "nope"}}, prefer_custom_domain=True
+    ) == ("https://acme.app.example.com/login")
+    # The scheme follows the platform's, so a local http stack stays http.
+    monkeypatch.setattr(settings, "tenant_url_template", "http://{slug}.localhost:7777")
+    assert sign_in_url("acme", domains, prefer_custom_domain=True) == (
+        "http://ap.acmecorp.example/login"
+    )
+
+
 def test_scanners_flag_a_violation_planted_in_real_app_source():
     """The scans must still bite when pointed at real code, not just snippets."""
     real = (APP_DIR / "api" / "signup.py").read_text(encoding="utf-8")
