@@ -819,3 +819,99 @@ async def test_a_vendor_bank_change_flag_refuses_the_push_of_its_approved_invoic
         res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
     _assert_refusal(res, "fraud_flag")
     assert dispatched == []
+
+
+async def _bank_change(mk, org_id, inv_ids, *, actor_id) -> None:
+    """Point the invoices at one vendor and approve that vendor's bank change."""
+    from app.api.vendors import _flag_payable_invoices_for_bank_change
+    from app.models.vendor import Vendor
+
+    async with mk() as s:
+        vendor = Vendor(id=uuid.uuid4(), organization_id=org_id, name="Bank Change Co")
+        s.add(vendor)
+        await s.flush()
+        await s.execute(update(Invoice).where(Invoice.id.in_(inv_ids)).values(vendor_id=vendor.id))
+        await _flag_payable_invoices_for_bank_change(s, vendor=vendor, actor_id=actor_id)
+        await s.commit()
+
+
+def test_the_bank_change_flag_covers_every_status_still_short_of_payment():
+    """Derived from `VALID_TRANSITIONS`, so it is every status an approved
+    invoice passes through on the way to `paid` — the ERP push's states
+    included, not only the payment queue's."""
+    from app.api.vendors import _BANK_CHANGE_FLAG_STATUSES
+
+    assert _BANK_CHANGE_FLAG_STATUSES == {
+        InvoiceStatus.approved,
+        InvoiceStatus.sending_to_erp,
+        InvoiceStatus.sent_to_erp,
+        InvoiceStatus.failed,
+        InvoiceStatus.posted_in_erp,
+        InvoiceStatus.payment_scheduled,
+    }
+
+
+async def test_a_bank_change_flags_a_failed_push_and_retry_erp_is_refused(realdb, dispatched):
+    """The gap the hand-listed set left: the push hit 503s and landed at
+    `failed`, the vendor's bank change was then approved, and `/retry-erp`
+    posted the bill, payable from the ERP to the new bank details."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="BANK-FAILED", status=InvoiceStatus.failed)
+    await _bank_change(mk, info.org_id, [inv_id], actor_id=info.users["admin"])
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/retry-erp")
+
+    _assert_refusal(res, "fraud_flag")
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    assert dispatched == []
+    assert await _audit(mk, inv_id, "invoice.erp_retried") == []
+
+
+async def test_a_bank_change_flags_an_invoice_mid_push_and_its_next_attempt_is_refused(realdb):
+    """`sending_to_erp`: the queued attempt re-reads the gate, so the flag
+    raised while it waited stops it before any adapter is built."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(
+        mk, info.org_id, number="BANK-SENDING", status=InvoiceStatus.sending_to_erp
+    )
+    await _bank_change(mk, info.org_id, [inv_id], actor_id=info.users["admin"])
+
+    spy = _SpyAdapter()
+    await _push(mk, inv_id, adapter=spy)
+
+    assert spy.posted == 0
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    [row] = await _audit(mk, inv_id, "invoice.erp_failed")
+    assert row.details["refusal"]["code"] == CODE
+
+
+async def test_a_bank_change_flags_sent_to_erp_but_not_paid_or_a_failed_extraction(realdb):
+    """`sent_to_erp` walks on to `posted_in_erp` and into the payment queue, so
+    it is flagged. `paid` has nothing left to stop, and a `failed` invoice that
+    was never approved is a failed extraction, which reaches money only through
+    an approval made after the change."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    sent = await _seed(mk, info.org_id, number="BANK-SENT", status=InvoiceStatus.sent_to_erp)
+    paid = await _seed(mk, info.org_id, number="BANK-PAID", status=InvoiceStatus.paid)
+    extraction_failed = await _seed(
+        mk, info.org_id, number="BANK-XFAIL", status=InvoiceStatus.failed
+    )
+    async with mk() as s:
+        await s.execute(
+            update(Invoice)
+            .where(Invoice.id == extraction_failed)
+            .values(approved_by=None, approval_date=None)
+        )
+        await s.commit()
+
+    await _bank_change(
+        mk, info.org_id, [sent, paid, extraction_failed], actor_id=info.users["admin"]
+    )
+
+    assert [r.status for r in await _rows(mk, sent, "fraud_flag")] == ["open"]
+    assert await _rows(mk, paid, "fraud_flag") == []
+    assert await _rows(mk, extraction_failed, "fraud_flag") == []
