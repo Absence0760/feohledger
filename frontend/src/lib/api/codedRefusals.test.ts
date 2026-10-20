@@ -115,6 +115,16 @@ describe('codedRefusalText', () => {
 		expect(codedRefusalText('erp_listing_incomplete', { provider, gap: 'other' }, enT)).toBeNull();
 	});
 
+	it('points a sign-in on the wrong workspace at the account’s own page', () => {
+		const url = 'https://signuptest.feohledger.com/login?email=a%40b.c';
+		expect(codedRefusalText('wrong_workspace', { sign_in_url: url }, enT)).toBe(
+			`This account belongs to a different workspace. Sign in at ${url}.`
+		);
+		expect(codedRefusalText('wrong_workspace', { sign_in_url: null }, enT)).toBe(
+			"This account belongs to a different workspace. Sign in on that workspace's own page."
+		);
+	});
+
 	it('states the CFO gate with both figures in their own currencies', () => {
 		setActiveFormatLocale('en-US');
 		const out = codedRefusalText(

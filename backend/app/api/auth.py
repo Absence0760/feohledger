@@ -87,6 +87,7 @@ from app.services.session_management import (
 )
 from app.services.sso import is_sso_only, sso_only_requested
 from app.services.sso_plan import plan_scoped_settings
+from app.tenant import resolve_tenant_slug_by_custom_domain
 from app.utils.emails import email_matches, exact_email_first, normalize_email
 from app.utils.passwords import (
     PasswordError,
@@ -95,7 +96,7 @@ from app.utils.passwords import (
     validate_password_complexity,
     verify_password,
 )
-from app.utils.tenant_urls import password_reset_url
+from app.utils.tenant_urls import password_reset_url, sign_in_url
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +407,57 @@ async def _reject_login(
     return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
 
+#: Signing in on one workspace's page with an account that belongs to another.
+WRONG_WORKSPACE = "wrong_workspace"
+
+
+async def _refuse_other_workspace(
+    db: AsyncSession,
+    org,
+    *,
+    x_tenant_slug: str | None,
+    host: str | None,
+    email: str,
+    ip: str | None,
+) -> None:
+    """403 when the page the sign-in came from belongs to another workspace.
+
+    An email names one account in one organization, and login used to mint that
+    organization's token whichever workspace's page the form was on. The SPA
+    then sent this page's `X-Tenant-Slug` with a token for another org, and
+    `tenant.get_tenant` refused every call — a signed-in screen where nothing
+    loads (seen in production, 2026-10-20: a test-workspace account signed in
+    on `sandbox.feohledger.com`). The page names its workspace by the header,
+    or on a vanity domain by its Host, exactly as `get_tenant_slug` reads it; a
+    request naming none (an API client) is unaffected.
+
+    Checked only after the password verified, so the account's own sign-in
+    link it returns tells nobody anything they could not already learn by
+    signing in.
+    """
+    if org is None:
+        return
+    requested = x_tenant_slug or await resolve_tenant_slug_by_custom_domain(db, host)
+    if not requested or requested == org.slug:
+        return
+    await dispatch_auth_audit(
+        organization_id=org.id,
+        actor_id=None,
+        action="auth.login.failure",
+        details={"email": email, "ip": ip, "reason": WRONG_WORKSPACE},
+    )
+    url = sign_in_url(org.slug, org.settings, email=email)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=coded_refusal(
+            WRONG_WORKSPACE,
+            "This account belongs to a different workspace."
+            + (f" Sign in at {url}." if url else ""),
+            sign_in_url=url,
+        ),
+    )
+
+
 @router.post("/login")
 async def login(
     body: LoginRequest,
@@ -417,6 +469,9 @@ async def login(
     # inserted before `db` silently rebinds it. FastAPI ignores order. The same
     # rule applies to every other `host` parameter in this file.
     host: Annotated[str | None, Header()] = None,
+    # The workspace the sign-in page is on (`_refuse_other_workspace`). Last
+    # for the same positional-call reason as `host`.
+    x_tenant_slug: Annotated[str | None, Header()] = None,
 ):
     """Password login. Returns either a final access token or — if MFA is in
     play — a short-lived challenge token the browser trades for one."""
@@ -478,6 +533,9 @@ async def login(
     await clear_auth_failures("auth_login", identity)
 
     org = await _load_user_org(db, user.organization_id)
+    await _refuse_other_workspace(
+        db, org, x_tenant_slug=x_tenant_slug, host=host, email=normalize_email(body.email), ip=ip
+    )
 
     # SSO-only enforcement. When the tenant requires SSO, password login is
     # closed even for users who still carry a password hash — checked after the

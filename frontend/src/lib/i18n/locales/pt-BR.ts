@@ -5127,6 +5127,8 @@ export const messages = {
 	'refusal.invoiceStaleApproval': "Esta fatura foi alterada depois que você a carregou. Recarregue-a e revise a versão atual antes de aprová-la.",
 	'refusal.invoiceRequiredFieldsMissing': "Campos obrigatórios ausentes: {fields}",
 	'refusal.mfaCodeInvalid': "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
+	'refusal.wrongWorkspace': "Esta conta pertence a outro espaço de trabalho. Entre em {url}.",
+	'refusal.wrongWorkspaceNoLink': "Esta conta pertence a outro espaço de trabalho. Entre pela página desse espaço de trabalho.",
 	'csvImport.result.summary': '{imported} importados, {skipped} ignorados',
 	'csvImport.toast.failed': 'Falha na importação',
 	'csvImport.toast.partial': '{imported} importados, {skipped} ignorados — veja os detalhes abaixo',

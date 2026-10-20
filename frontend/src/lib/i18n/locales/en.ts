@@ -5323,6 +5323,8 @@ export const en = {
 	'refusal.invoiceStaleApproval': "This invoice was changed after you loaded it. Reload it and review the current version before approving.",
 	'refusal.invoiceRequiredFieldsMissing': "Required fields missing: {fields}",
 	'refusal.mfaCodeInvalid': "That code is not valid. Check your authenticator app and try again.",
+	'refusal.wrongWorkspace': "This account belongs to a different workspace. Sign in at {url}.",
+	'refusal.wrongWorkspaceNoLink': "This account belongs to a different workspace. Sign in on that workspace's own page.",
 	'csvImport.result.summary': '{imported} imported, {skipped} skipped',
 	'csvImport.toast.failed': 'Import failed',
 	'csvImport.toast.partial': 'Imported {imported}, skipped {skipped} — see the details below',

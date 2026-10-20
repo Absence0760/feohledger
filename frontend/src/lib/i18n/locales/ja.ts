@@ -5051,6 +5051,8 @@ export const messages = {
 	'refusal.invoiceStaleApproval': "この請求書は読み込み後に変更されています。再読み込みし、最新の内容を確認してから承認してください。",
 	'refusal.invoiceRequiredFieldsMissing': "必須項目が入力されていません：{fields}",
 	'refusal.mfaCodeInvalid': "このコードは無効です。認証アプリを確認して、もう一度お試しください。",
+	'refusal.wrongWorkspace': "このアカウントは別のワークスペースのものです。{url} でサインインしてください。",
+	'refusal.wrongWorkspaceNoLink': "このアカウントは別のワークスペースのものです。そのワークスペースのページでサインインしてください。",
 	'csvImport.result.summary': '{imported}件をインポート、{skipped}件をスキップ',
 	'csvImport.toast.failed': 'インポートに失敗しました',
 	'csvImport.toast.partial': '{imported}件をインポート、{skipped}件をスキップしました。詳細は下記をご覧ください',

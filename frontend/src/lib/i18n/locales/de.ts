@@ -5100,6 +5100,8 @@ export const messages = {
 	'refusal.invoiceStaleApproval': "Diese Rechnung wurde geändert, nachdem Sie sie geladen haben. Laden Sie sie neu und prüfen Sie die aktuelle Fassung, bevor Sie sie genehmigen.",
 	'refusal.invoiceRequiredFieldsMissing': "Pflichtfelder fehlen: {fields}",
 	'refusal.mfaCodeInvalid': "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
+	'refusal.wrongWorkspace': "Dieses Konto gehört zu einem anderen Workspace. Melden Sie sich unter {url} an.",
+	'refusal.wrongWorkspaceNoLink': "Dieses Konto gehört zu einem anderen Workspace. Melden Sie sich auf der Seite dieses Workspace an.",
 	'csvImport.result.summary': '{imported} importiert, {skipped} übersprungen',
 	'csvImport.toast.failed': 'Import fehlgeschlagen',
 	'csvImport.toast.partial': '{imported} importiert, {skipped} übersprungen — Details siehe unten',
