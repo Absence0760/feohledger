@@ -1,7 +1,7 @@
 {
  "_about": [
   "The QuickBooks Online sample company FeohLedger was tested against live on 2026-10-19 (Intuit public demo data), as tools/fake-erp/qbo_sandbox.py serves it.",
-  "accounts/vendors: QBO JSON rebuilt from our DB export after the live sync. Name is the leaf of FullyQualifiedName; ParentRef follows the path. Depreciation (40) and Maintenance and Repair (72) were refused live so are not in the export and were added by hand, as were AcctNum 6010/6020, Active=false on Bank Charges (8) and Squeaky Kleen Car Wash (57), and Northwind's AcctNum. AccountType, CompanyName, TermRef ids and the realm are reconstructed, not recorded (the adapter reads none of them).",
+  "accounts/vendors: QBO JSON rebuilt from our DB export after the live sync. Name is the leaf of FullyQualifiedName; ParentRef follows the path. Depreciation (40) and Maintenance and Repair (72) were refused live so are not in the export and were added by hand, as were AcctNum 6010/6020, Active=false on Bank Charges (8) and Squeaky Kleen Car Wash (57) with the \" (deleted)\" QuickBooks appends to an inactive record's names (seen live 2026-10-20: without it the sync unlinked both instead of retiring them), and Northwind's AcctNum. AccountType, CompanyName, TermRef ids and the realm are reconstructed, not recorded (the adapter reads none of them).",
   "legacy_chart: our chart as the pre-section-284 adapter left it (code = bare Name; same-named accounts merged into one row, linked to the id the live sync found). legacy_vendors: our vendors before the live sync.",
   "live_sync: the response bodies of POST /api/gl-accounts/sync-erp and /api/vendors/sync-erp on that chart, live. Never edit these to make a test pass."
  ],
@@ -135,9 +135,9 @@
   },
   {
    "Id": "8",
-   "Name": "Bank Charges",
+   "Name": "Bank Charges (deleted)",
    "SubAccount": false,
-   "FullyQualifiedName": "Bank Charges",
+   "FullyQualifiedName": "Bank Charges (deleted)",
    "Active": false,
    "Classification": "Expense",
    "AccountType": "Expense",
@@ -1960,7 +1960,7 @@
   },
   {
    "Id": "57",
-   "DisplayName": "Squeaky Kleen Car Wash",
+   "DisplayName": "Squeaky Kleen Car Wash (deleted)",
    "PrintOnCheckName": "Squeaky Kleen Car Wash",
    "Active": false,
    "Vendor1099": false,

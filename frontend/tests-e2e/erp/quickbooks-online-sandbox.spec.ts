@@ -298,9 +298,11 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 			success: boolean;
 			adapter: string;
 		};
-		// The live answer, plus what the inactive-inclusive query adds (§284):
-		// Bank Charges (8), inactive in QuickBooks, is retired here — one more
-		// "updated" — where live it was never read. Every pre-0115 link holds
+		// The live answer, plus one "updated" for each of two later fixes: Bank
+		// Charges (8), inactive in QuickBooks (and renamed "Bank Charges
+		// (deleted)" there), is retired here where live it was never read; and
+		// Equipment Rental (29), top-level in QuickBooks, loses the "Job
+		// Expenses" parent its merged row carried. Every pre-0115 link holds
 		// its own code in this company, so the realm pass adopts them all and
 		// moves none.
 		const legacyLinks = COMPANY.legacy_chart.filter((r) => r.erp_account_id).length;
@@ -315,7 +317,8 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 		).toEqual([]);
 		expect(summary).toEqual({
 			...live,
-			updated: live.updated + 1,
+			updated: live.updated + 2,
+			unchanged: live.unchanged - 1,
 			deactivated: ['Bank Charges'],
 			deactivated_count: 1,
 			realm: `${PROVIDER}:${COMPANY.realm}`,

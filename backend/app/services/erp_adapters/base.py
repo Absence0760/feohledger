@@ -421,6 +421,17 @@ class GLAccountPayload:
     account_type: str | None = None
     erp_account_id: str | None = None
     parent_code: str | None = None
+    #: The parent's ``erp_account_id``, for an adapter that knows it. The sync
+    #: then names the parent by OUR code for that account — the row linked to
+    #: it — rather than the ERP's, which differ whenever a row kept a code the
+    #: ERP has since changed (a numbered parent: ours "Office Expenses", the
+    #: ERP's "6020"). ``parent_code`` is the fallback for a parent we hold no
+    #: row for.
+    parent_erp_account_id: str | None = None
+    #: True when the adapter states this account's parentage outright, so a
+    #: None parent means "top-level" and the sync CLEARS a stale one. False
+    #: (the default) reads None as "not reported" and leaves ours alone.
+    reports_parent: bool = False
     legacy_codes: tuple[str, ...] = ()
     #: False for an account the ERP has made inactive. An adapter EMITS such
     #: accounts rather than dropping them: their ids are still the ERP's, so a

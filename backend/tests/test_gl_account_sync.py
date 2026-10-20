@@ -293,6 +293,44 @@ async def test_an_over_long_parent_code_is_dropped_never_aborts_the_sync(realdb)
     assert result.summary()["parent_code_dropped_count"] == 2
 
 
+async def test_a_reported_parent_is_named_by_our_code_and_a_top_level_one_clears_it(realdb):
+    """Seen live against QuickBooks: a parent was recorded under the ERP's code
+    ("6020") while our row for that account kept its own ("Office Expenses"),
+    and an account the ERP files at top level kept the parent a merged row had
+    carried. An adapter that reports parentage settles both; one that does not
+    leaves our parent alone."""
+    await _add(realdb, code="Office Expenses", name="Office Expenses", erp_account_id="15")
+    await _add(
+        realdb, code="Rental", name="Rental", parent_code="Job Expenses", erp_account_id="29"
+    )
+    await _add(realdb, code="Fees", name="Fees", parent_code="Overheads", erp_account_id="30")
+    await _sync(
+        realdb,
+        [
+            _acct("6020", "15"),
+            _acct(
+                "Office Expenses:Software",
+                "16",
+                parent_code="6020",
+                parent_erp_account_id="15",
+                reports_parent=True,
+            ),
+            _acct("Rental", "29", reports_parent=True),
+            _acct("Fees", "30"),  # parentage not reported
+            # A parent we hold no row for is named by the ERP's code.
+            _acct(
+                "Child", "40", parent_code="Unheld", parent_erp_account_id="99", reports_parent=True
+            ),
+        ],
+    )
+
+    chart = await _rows(realdb)
+    assert chart["Office Expenses:Software"].parent_code == "Office Expenses"
+    assert chart["Rental"].parent_code is None
+    assert chart["Fees"].parent_code == "Overheads"
+    assert chart["Child"].parent_code == "Unheld"
+
+
 # ---------------------------------------------------------------------------
 # Repair of a chart a pre-§284 sync collapsed
 # ---------------------------------------------------------------------------

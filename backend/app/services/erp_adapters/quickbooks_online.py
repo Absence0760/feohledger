@@ -718,7 +718,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
 
     async def list_vendors(self) -> list[VendorPayload]:
         rows = await self._query_all("Vendor", include_inactive=True, complete=True)
-        return [_vendor_payload(v) for v in rows if v.get("Id")]
+        return [_vendor_payload(_undeleted(v)) for v in rows if v.get("Id")]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """The chart, keyed by what is UNIQUE in QuickBooks (:func:`_account_code`).
@@ -730,7 +730,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         the sync recognises a row that collapsed two accounts into one.
         """
         rows = [
-            a
+            _undeleted(a)
             for a in await self._query_all("Account", include_inactive=True, complete=True)
             if a.get("Id")
         ]
@@ -738,13 +738,18 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         out = []
         for a in rows:
             code = _account_code(a)
+            parent_id = str((a.get("ParentRef") or {}).get("value") or "") or None
             out.append(
                 GLAccountPayload(
                     code=code,
                     name=_account_display_name(a)[:255],
                     account_type=_CLASSIFICATION.get(str(a.get("Classification") or "").lower()),
                     erp_account_id=str(a["Id"]),
-                    parent_code=code_by_id.get(str((a.get("ParentRef") or {}).get("value"))),
+                    parent_code=code_by_id.get(parent_id) if parent_id else None,
+                    parent_erp_account_id=parent_id,
+                    # QuickBooks states every account's parent (``SubAccount``
+                    # / ``ParentRef``), so no ParentRef means top-level.
+                    reports_parent=True,
                     legacy_codes=_legacy_account_codes(a),
                     active=_is_active(a),
                 )
@@ -806,6 +811,34 @@ def _account_code(raw: dict) -> str:
         return path
     tail = f"…#{raw.get('Id')}"
     return path[: GL_CODE_MAX_LENGTH - len(tail)] + tail
+
+
+#: What QuickBooks appends to every name of a record it makes inactive (its UI
+#: calls that "deleted"): ``Bank Charges (deleted)``, and for a sub-account
+#: ``Parent:Child (deleted)``. The record keeps its id and comes back as it was
+#: when made active again.
+_DELETED_SUFFIX = " (deleted)"
+_NAME_FIELDS = ("Name", "FullyQualifiedName", "DisplayName", "CompanyName")
+
+
+def _undeleted(raw: dict) -> dict:
+    """``raw`` with the suffix QuickBooks puts on an INACTIVE record's names
+    removed, from every segment of a path.
+
+    Without this an inactive account or vendor no longer answers to its own
+    name, so the sync cannot recognise the row it is linked to: it unlinked
+    the row (reporting a reason that was not true) and left it active, instead
+    of marking it inactive here. An active record is returned as it came — a
+    name that genuinely ends in "(deleted)" is the company's own choice.
+    """
+    if _is_active(raw):
+        return raw
+    out = dict(raw)
+    for key in _NAME_FIELDS:
+        value = out.get(key)
+        if isinstance(value, str) and _DELETED_SUFFIX in value:
+            out[key] = ":".join(part.removesuffix(_DELETED_SUFFIX) for part in value.split(":"))
+    return out
 
 
 def _is_active(raw: dict) -> bool:

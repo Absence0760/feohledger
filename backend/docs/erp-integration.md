@@ -1110,8 +1110,25 @@ account cannot also own the code "Depreciation" in that chart (it stays
 **Inactive accounts** arrive with `active=False` (QuickBooks is queried `where
 Active IN (true, false)`; NetSuite `isinactive`, BC `blocked`). Their ids are
 live, a matched row is marked inactive (`deactivated`), none is created, and a
-sync never reactivates a row. **An account with no id** is refused
-(`missing_erp_id`) and never linked or created.
+sync never reactivates a row. QuickBooks renames an inactive record —
+`Bank Charges (deleted)`, `Automobile:Fuel (deleted)`, a vendor's `DisplayName`
+likewise — so its adapter strips that suffix from an inactive record's names
+(`quickbooks_online._undeleted`) before keying it; without that the record no
+longer answered to the name its row was linked by, and the live sandbox sync
+unlinked Bank Charges and Squeaky Kleen Car Wash with a false reason instead of
+retiring them (2026-10-20). An active record's name is left as it is. **An
+account with no id** is refused (`missing_erp_id`) and never linked or created.
+
+**Parents.** An adapter that knows the parent's id passes it
+(`parent_erp_account_id`), and the sync names the parent by **our** code for
+that account — the row linked to it — falling back to the ERP's code only for a
+parent we hold no row for. The ERP's code is wrong whenever a row kept a code
+the ERP has since changed: QuickBooks' numbered "Office Expenses" is `6020`
+there, so its Software sub-account read `6020` here. An adapter that sets
+`reports_parent` (QuickBooks) states parentage outright, so a top-level account
+**clears** a stale parent — the merged "Equipment Rental" row kept "Job
+Expenses" after the account turned out to be top-level. Without
+`reports_parent`, an absent parent leaves ours alone.
 
 A code longer than `GL_CODE_MAX_LENGTH` is refused by the sync
 (`code_too_long`), never truncated there. Adapters emit the code they have as it

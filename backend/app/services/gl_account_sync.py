@@ -398,6 +398,10 @@ async def sync_chart_from_erp(
 
     claimed_rows: set[uuid.UUID] = set()
     relinked: set[uuid.UUID] = set()
+    # Our code for each ERP account a row is linked to: how a reported parent
+    # is named (`_parent_code`). A rule-2 match or a new row takes the ERP's
+    # own code, which is exactly the fallback.
+    our_code_of_id = {erp_id: row.code for erp_id, row in row_by_id.items()}
 
     for code in sorted(candidates):
         acct = candidates[code]
@@ -409,7 +413,7 @@ async def sync_chart_from_erp(
             claimed_rows.add(row.id)
             if row.code != code:
                 result.code_drift.append({"code": row.code, "erp_code": code})
-            _apply(row, acct, result)
+            _apply(row, acct, result, our_code_of_id)
             continue
 
         # -- rule 2: by code ----------------------------------------------
@@ -440,9 +444,9 @@ async def sync_chart_from_erp(
                 row.erp_link_candidates = None
                 relinked.add(row.id)
                 result.linked += 1
-                _apply(row, acct, result, count=False)
+                _apply(row, acct, result, our_code_of_id, count=False)
             else:
-                _apply(row, acct, result)
+                _apply(row, acct, result, our_code_of_id)
             continue
 
         # -- new -----------------------------------------------------------
@@ -454,7 +458,7 @@ async def sync_chart_from_erp(
                 code=code,
                 name=acct.name,
                 account_type=acct.account_type,
-                parent_code=_parent_code(code, acct, result),
+                parent_code=_parent_code(code, acct, result, our_code_of_id),
                 organization_id=organization_id,
                 entity_id=entity_id,
                 erp_account_id=erp_id,
@@ -529,12 +533,18 @@ def _same_account(code: str, acct: GLAccountPayload, *, legacy_ok: bool) -> bool
     return legacy_ok and code in acct.legacy_codes
 
 
-def _parent_code(code: str, acct: GLAccountPayload, result: ChartSyncResult) -> str | None:
-    """``acct``'s parent code, or None — recorded in ``parent_code_dropped``
-    — when it does not fit the column. The parent is descriptive (nothing
-    posts to it), so the account still syncs; letting the flush raise would
-    abort the whole sync, and a truncated code would name another account."""
+def _parent_code(
+    code: str, acct: GLAccountPayload, result: ChartSyncResult, our_code_of_id: dict[str, str]
+) -> str | None:
+    """``acct``'s parent, named by OUR code for the parent account when the
+    adapter reports its id and a row is linked to it (``our_code_of_id``),
+    else by the ERP's code. None — recorded in ``parent_code_dropped`` — when
+    it does not fit the column. The parent is descriptive (nothing posts to
+    it), so the account still syncs; letting the flush raise would abort the
+    whole sync, and a truncated code would name another account."""
     parent = acct.parent_code
+    if acct.parent_erp_account_id:
+        parent = our_code_of_id.get(acct.parent_erp_account_id) or parent
     if parent is not None and len(parent) > GL_CODE_MAX_LENGTH:
         result.parent_code_dropped.append(code)
         return None
@@ -546,7 +556,14 @@ def _clear_confirmation(row: GLAccount) -> None:
     row.erp_link_confirmed_by = None
 
 
-def _apply(row: GLAccount, acct: GLAccountPayload, result: ChartSyncResult, *, count=True):
+def _apply(
+    row: GLAccount,
+    acct: GLAccountPayload,
+    result: ChartSyncResult,
+    our_code_of_id: dict[str, str],
+    *,
+    count=True,
+):
     """Refresh a matched row's descriptive fields. Counts as updated only when
     something actually changed, so a re-run of an unchanged chart reports 0."""
     changed = False
@@ -556,8 +573,11 @@ def _apply(row: GLAccount, acct: GLAccountPayload, result: ChartSyncResult, *, c
     if acct.account_type and row.account_type != acct.account_type:
         row.account_type = acct.account_type
         changed = True
-    parent_code = _parent_code(row.code, acct, result)
-    if parent_code is not None and row.parent_code != parent_code:
+    parent_code = _parent_code(row.code, acct, result, our_code_of_id)
+    # A reported top-level account clears a parent it no longer has; an
+    # unreported or dropped one leaves ours alone.
+    clears = acct.reports_parent and acct.parent_code is None and not acct.parent_erp_account_id
+    if (parent_code is not None or clears) and row.parent_code != parent_code:
         row.parent_code = parent_code
         changed = True
     if not acct.active and row.is_active:

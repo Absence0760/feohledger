@@ -217,6 +217,10 @@ async def test_the_chart_is_keyed_by_what_quickbooks_keeps_unique(sandbox):
     assert by_id["1150040000"].code == "Software"
     assert by_id["1150040001"].code == "Office Expenses:Software"
     assert by_id["1150040001"].parent_code == "6020"
+    # ...and its id, which the sync uses to name the parent by OUR code.
+    assert by_id["1150040001"].parent_erp_account_id == "15"
+    assert all(a.reports_parent for a in accounts)
+    assert by_id["29"].parent_erp_account_id is None and by_id["29"].parent_code is None
     assert "Software" in by_id["1150040001"].legacy_codes
     # Each repeated leaf is one code per path.
     assert (by_id["40"].code, by_id["39"].code) == ("Depreciation", "Truck:Depreciation")
@@ -238,7 +242,34 @@ async def test_the_chart_is_keyed_by_what_quickbooks_keeps_unique(sandbox):
     ]
     assert len(accounts) == 91
     assert by_id["8"].active is False
+    # QuickBooks renames an inactive record "Bank Charges (deleted)"; the
+    # adapter reads it back under the name it is linked by.
+    assert (by_id["8"].code, by_id["8"].name) == ("Bank Charges", "Bank Charges")
+    assert "Bank Charges" in by_id["8"].legacy_codes
     assert all(a.active for a in accounts if a.erp_account_id != "8")
+
+
+def test_only_an_inactive_records_deleted_suffix_is_removed():
+    """QuickBooks appends " (deleted)" to every name of a record it makes
+    inactive, a sub-account's path included. An ACTIVE record's name is the
+    company's own, whatever it ends in."""
+    undeleted = quickbooks_online._undeleted
+    inactive = {
+        "Id": "9",
+        "Active": False,
+        "Name": "Fuel (deleted)",
+        "FullyQualifiedName": "Automobile:Fuel (deleted)",
+    }
+    assert undeleted(inactive) == {
+        **inactive,
+        "Name": "Fuel",
+        "FullyQualifiedName": "Automobile:Fuel",
+    }
+    assert inactive["Name"] == "Fuel (deleted)"  # the raw record is not mutated
+    vendor = {"Id": "5", "Active": "false", "DisplayName": "Acme: West (deleted)"}
+    assert undeleted(vendor)["DisplayName"] == "Acme: West"
+    active = {"Id": "7", "Active": True, "DisplayName": "Salvage (deleted)"}
+    assert undeleted(active) is active
 
 
 async def test_paging_walks_the_whole_chart(sandbox, monkeypatch):
@@ -267,6 +298,7 @@ async def test_vendors_keep_their_names_terms_and_never_take_acctnum_as_code(san
     assert vendors["32"].payment_terms == "Due on receipt"
     # Squeaky Kleen is inactive: read, and marked so (live it was never read).
     assert len(vendors) == 29 and vendors["57"].active is False
+    assert vendors["57"].name == "Squeaky Kleen Car Wash"  # not "... (deleted)"
     # The AcctNum rides as legacy_code, for the old mapping's cleanup only.
     assert northwind.legacy_code == "NW-778812"
 
@@ -313,9 +345,11 @@ def _comparable(summary: dict) -> dict:
 
 
 async def test_the_live_sync_of_the_pre_284_chart_replays_exactly(realdb, sandbox):
-    """The live answer, plus exactly what the inactive-inclusive query adds:
-    Bank Charges (8), inactive in QuickBooks, is retired in our chart — one
-    more "updated" — where live it was never read and stayed active."""
+    """The live answer, plus exactly what two later fixes add, one "updated"
+    each: Bank Charges (8), inactive in QuickBooks, is retired in our chart
+    (live it was never read and stayed active), and Equipment Rental (29),
+    top-level in QuickBooks, loses the "Job Expenses" parent the merged row
+    carried (live a top-level account never cleared a stale parent)."""
     await _seed_legacy_chart(realdb)
     assert len(await _chart(realdb)) == 81  # "89 accounts became 81 rows"
 
@@ -325,7 +359,8 @@ async def test_the_live_sync_of_the_pre_284_chart_replays_exactly(realdb, sandbo
     assert _comparable(result.summary(capped=False)) == _comparable(
         {
             **live,
-            "updated": live["updated"] + 1,
+            "updated": live["updated"] + 2,
+            "unchanged": live["unchanged"] - 1,
             "deactivated": ["Bank Charges"],
             "deactivated_count": 1,
             "realm": LINK_REALM,
@@ -380,6 +415,19 @@ async def test_after_the_repair_every_path_has_its_own_correctly_linked_row(real
         "15",
     )
     assert "6010" not in chart and "6020" not in chart
+
+    # Parents name OUR row for the parent account: the numbered Office
+    # Expenses keeps its code, so its Software is under "Office Expenses",
+    # not QuickBooks' "6020"; and a top-level account has no parent, however
+    # the merged row it came from was filed.
+    assert chart["Office Expenses:Software"].parent_code == "Office Expenses"
+    assert chart["Equipment Rental"].parent_code is None
+    assert chart["Job Expenses:Equipment Rental"].parent_code == "Job Expenses"
+
+    # Inactive in QuickBooks, so retired here and still on its own id: the
+    # " (deleted)" QuickBooks puts on its name does not cost it its link.
+    assert (chart["Bank Charges"].erp_account_id, chart["Bank Charges"].is_active) == ("8", False)
+    assert chart["Bank Charges"].name == "Bank Charges"
 
 
 async def test_a_second_sync_changes_nothing_and_still_refuses_the_same_codes(realdb, sandbox):
