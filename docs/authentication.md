@@ -158,6 +158,31 @@ surfaces, through the HTTP login route).
 
 `POST /api/auth/login` — accepts email and password, verifies against the hashed password in the **control-plane database**. Returns either a signed JWT (`{access_token, ...}`) or, when MFA is in play, a short-lived challenge token (`{mfa_required: true, mfa_challenge_token, methods, must_enroll}`). See the **MFA** section below for the full flow. This endpoint uses `get_control_db` (not the tenant DB).
 
+### Signing in on another workspace's page is refused
+
+An email names one account in one organization, so login used to mint that
+organization's token whatever workspace page the form was on. The SPA then sent
+that page's `X-Tenant-Slug` with a token for a different org, `tenant.get_tenant`
+refused every tenant-scoped call with `403` "Token does not match the requested
+tenant", and the user sat on a signed-in screen stuck on "Loading…" (seen in
+production on 2026-10-20: an account from another workspace signed in on
+`sandbox.feohledger.com`).
+
+`POST /api/auth/login` now refuses that sign-in: when the request names a
+workspace — the `X-Tenant-Slug` header, or a registered custom domain in `Host`
+(`tenant.resolve_tenant_slug_by_custom_domain`, as `get_tenant_slug` reads it) —
+and it is not the account's own, the answer is `403` with the coded refusal
+`wrong_workspace` (`api/auth._refuse_other_workspace`), whose
+`params.sign_in_url` is the account's own sign-in page (`tenant_urls.sign_in_url`),
+plus an `auth.login.failure` / `reason=wrong_workspace` audit row. No token is
+issued. The check runs **after** the password verifies, so a wrong password
+there is still the plain `401` and the link reveals nothing the caller could not
+learn by signing in. A request naming no workspace (an API client) is
+unaffected. The login page localizes the refusal (`refusal.wrongWorkspace`,
+with the link, or `refusal.wrongWorkspaceNoLink`). Reasoning:
+[decisions.md](decisions.md) §288. Test:
+`backend/tests/test_email_identity_case.py::test_signing_in_on_another_workspaces_page_is_refused`.
+
 ### An email address is matched without regard to case
 
 `users.email` (and, per tenant, `vendor_users.email`) is the login identifier

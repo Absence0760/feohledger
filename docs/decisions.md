@@ -12405,3 +12405,28 @@ failed the flush and rolled back the whole vendor sync.
 **Not done here** (`docs/followups.md`): a resumable sync for listings over the
 bound, the sync UI's reporting of the new keys, over-long names, and the
 adapters that still drop or mislabel records.
+
+## 288. Password sign-in is refused on another workspace's page (2026-10-20)
+
+**Found in production.** A user of one workspace signed in on
+`sandbox.feohledger.com`. Login looks the user up by email across every
+organization and minted a token for the user's own org, whatever page the form
+was on. The page then sent `X-Tenant-Slug: sandbox` with that token,
+`tenant.get_tenant` refused every tenant-scoped call with `403`, and the user
+saw a signed-in screen stuck on "Loading…".
+
+**The rule:** when the login request names a workspace (`X-Tenant-Slug`, or a
+registered custom domain in `Host`) that is not the account's own, login answers
+`403` coded `wrong_workspace`, issues no token, audits
+`auth.login.failure` / `reason=wrong_workspace`, and carries the account's own
+sign-in URL in `params.sign_in_url`. It runs after the password verifies, like
+the `sso_only` refusal, so the unknown-vs-wrong-password parity is untouched and
+the link discloses nothing a correct password does not already prove. A request
+naming no workspace (an API client) is unaffected.
+
+**Rejected:** silently issuing the token and redirecting the browser to the
+account's own workspace. The user asked to sign in *here*; moving them to a
+different tenant without saying so hides which workspace they are in, and a
+token for one tenant handed to another tenant's origin is the confusion the
+refusal exists to stop. Detail: `docs/authentication.md` § Signing in on another
+workspace's page is refused.
