@@ -47,6 +47,13 @@ sync. So a QuickBooks org's pushes refuse ``account_not_linked`` /
 ``vendor_not_linked`` until its first chart and vendor sync adopt each link by
 evidence and stamp its realm.
 
+The realm is computed by :func:`_realm_0115`, a frozen copy of
+``services/erp_link_realm.connection_realm`` as it stood when this revision
+was written. A migration must write the same thing on every replay
+(docs/decisions.md §282 replays the chain over untracked databases), so it
+never imports live app code; ``tests/test_migration_0115_erp_link_realm.py``
+pins the copy against the live function.
+
 Revision ID: 0115_erp_link_realm
 Revises: 0114_gl_code_width
 Create Date: 2026-10-19
@@ -83,15 +90,74 @@ def _has_table(name: str) -> bool:
     )
 
 
+#: ``catalog.LEGACY_REALM_KEY`` when this revision was written.
+LEGACY_REALM_KEY = "legacy_link_realm"
+
 #: Adapters whose pre-0115 links are never trusted: the chart sync keyed
 #: QuickBooks accounts by their non-unique ``Name`` and merged namesakes.
 _UNTRUSTED_LEGACY_ADAPTERS = frozenset({"quickbooks_online"})
 
+# --- Frozen copy of services/erp_link_realm.connection_realm (2026-10-19) ---
+# Do not "fix" this to follow the live function. It is what this revision
+# wrote; a change to the realm format needs its own revision for the values
+# already stamped.
+
+_OAUTH_ADAPTERS = frozenset({"quickbooks_online", "xero", "sage_accounting", "blackbaud_fe_nxt"})
+_DIRECT_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
+    "netsuite": ("account_id",),
+    "dynamics_365_bc": ("base_url", "tenant_id", "environment", "company_id"),
+    "sage_intacct": ("company_id",),
+    "syspro": ("base_url", "company_id"),
+    "sage_accounting_za": ("base_url", "company_id"),
+}
+_FIELD_DEFAULTS: dict[tuple[str, str], str] = {
+    ("dynamics_365_bc", "environment"): "production",
+}
+
+
+def _adapter_key_0115(erp: dict) -> str:
+    """``dispatcher.resolve_adapter_key`` when this revision was written."""
+    if erp.get("integration_method", "merge_dev") == "merge_dev":
+        return "merge_dev"
+    return erp.get("type") or "mock"
+
+
+def _norm(value) -> str:
+    return str(value or "").strip().rstrip("/").lower()
+
+
+def _realm_0115(erp) -> str | None:
+    """The connection realm ``erp`` (a stored ``settings.erp``) names."""
+    if not isinstance(erp, dict) or not erp:
+        return None
+    key = _adapter_key_0115(erp)
+    if key == "mock":
+        return None
+    if key in _OAUTH_ADAPTERS:
+        company = str((erp.get("oauth") or {}).get("external_tenant_id") or "").strip()
+        if not company:
+            return None
+        identity = company
+    elif key in _DIRECT_IDENTITY_FIELDS:
+        identity = "|".join(
+            _norm(erp.get(f) or _FIELD_DEFAULTS.get((key, f))) for f in _DIRECT_IDENTITY_FIELDS[key]
+        )
+    else:
+        identity = ""
+    return f"{key}:{identity}"
+
+
+# --- end of frozen copy ---
+
+
+def _legacy_realm(erp) -> str | None:
+    """The realm to trust this org's NULL-realm links under, or None for none."""
+    if not isinstance(erp, dict) or _adapter_key_0115(erp) in _UNTRUSTED_LEGACY_ADAPTERS:
+        return None
+    return _realm_0115(erp)
+
 
 def _snapshot_legacy_realms(bind) -> None:
-    from app.services.erp_adapters.dispatcher import resolve_adapter_key
-    from app.services.erp_link_realm import LEGACY_REALM_KEY, connection_realm
-
     rows = bind.execute(
         text(
             "SELECT id, settings->'erp' FROM organizations "
@@ -103,9 +169,7 @@ def _snapshot_legacy_realms(bind) -> None:
             erp = json.loads(erp)
         if not isinstance(erp, dict) or LEGACY_REALM_KEY in erp:
             continue
-        if resolve_adapter_key(erp) in _UNTRUSTED_LEGACY_ADAPTERS:
-            continue
-        realm = connection_realm(erp)
+        realm = _legacy_realm(erp)
         if realm is None:
             continue
         bind.execute(
