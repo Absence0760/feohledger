@@ -349,6 +349,13 @@ class ErpPostResult:
     #: code the ERP answered with (``intuit_code``), the GL ``accounts`` it
     #: named. ``services/erp`` merges them into the recorded refusal's params.
     refusal_params: dict | None = None
+    #: True only when the adapter KNOWS this attempt left no document in the
+    #: ERP — the ERP's own create answered a deterministic refusal (a 4xx that
+    #: names why: books closed, an inactive vendor). ``services/erp`` then does
+    #: not count the attempt as one whose outcome is unknown. Never set it on a
+    #: path that may have created something first (a failed read-back, a
+    #: timeout, a 5xx): the default False is the fail-closed answer.
+    not_posted: bool = False
 
 
 @dataclass

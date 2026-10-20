@@ -513,7 +513,11 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             request_id = create_attempt_key(payload.correlation_id, attempt, REQUEST_ID_MAX)
             resp = await self._request("POST", "bill", params={"requestid": request_id}, body=body)
             if resp.status_code != 200:
-                return await self._create_refusal(resp, payload, body)
+                refused = await self._create_refusal(resp, payload, body)
+                # A deterministic refusal of the create itself created nothing
+                # (an earlier attempt's replayed bill would have answered 200).
+                refused.not_posted = not erp_status_retryable(resp.status_code)
+                return refused
             created = _json(resp).get("Bill") or {}
             document_number = created.get("DocNumber") or payload.invoice_number
             if created.get("Id") is None:

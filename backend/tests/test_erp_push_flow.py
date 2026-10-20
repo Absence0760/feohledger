@@ -1463,6 +1463,9 @@ async def test_a_coded_erp_refusal_records_its_params_on_the_audit_row():
         # read-back raises it), so every non-success counts.
         ("refused", True),
         ("not_connected", True),
+        # ...except an attempt the adapter states left nothing: the ERP's
+        # create refused it outright (QuickBooks' closed books, 2026-10-20).
+        ("refused_not_posted", False),
         ("success", False),
     ],
 )
@@ -1482,6 +1485,10 @@ async def test_call_erp_records_whether_the_attempt_outcome_is_unknown(answer, u
                 return ErpPostResult(success=False, message="HTTP 503", retryable=True)
             if answer == "refused":
                 return erp_refusal("Xero", "vendor_not_linked")
+            if answer == "refused_not_posted":
+                result = erp_refusal("QuickBooks Online", "period_closed")
+                result.not_posted = True
+                return result
             return ErpPostResult(success=True, erp_document_id="B-1")
 
     inst = _instance(state_data={})
@@ -1509,6 +1516,26 @@ async def test_a_refusal_after_an_unknown_outcome_keeps_it_unknown():
         with pytest.raises(ErpPostRefusedError):
             await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
     assert inst.state_data[OUTCOME_UNKNOWN_KEY] is True
+    assert possibly_posted(inst.state_data)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_that_posted_nothing_still_keeps_an_earlier_unknown():
+    """``not_posted`` speaks for this attempt only: the earlier 503 may still
+    have left a bill."""
+    from app.services.erp import OUTCOME_UNKNOWN_KEY, _call_erp, possibly_posted
+    from app.services.erp_adapters.base import erp_refusal
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            result = erp_refusal("QuickBooks Online", "period_closed")
+            result.not_posted = True
+            return result
+
+    inst = _instance(state_data={"erp_retries": 1, OUTCOME_UNKNOWN_KEY: True})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostRefusedError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
     assert possibly_posted(inst.state_data)
 
 

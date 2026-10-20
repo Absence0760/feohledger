@@ -991,6 +991,8 @@ def _refused(qbo, payload=None):
     result = _run_with(qbo, lambda: _adapter().post_invoice(payload or _payload()))
     assert result.success is False
     assert result.retryable is False
+    # QuickBooks refused the create itself, so this attempt left no bill.
+    assert result.not_posted is True
     assert _ECHO not in str(result.message) and "Acme" not in str(result.refusal_params)
     return result
 
@@ -1089,6 +1091,8 @@ def test_a_status_that_can_change_stays_retryable_and_uncoded(token, no_override
     result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
     assert result.success is False and result.retryable is True
     assert result.refusal_code is None
+    # A 5xx / 429 / 408 may have been applied: never "nothing posted".
+    assert result.not_posted is False
 
 
 def test_a_failed_pre_check_query_400_is_not_retryable(token, no_override):

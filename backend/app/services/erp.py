@@ -59,8 +59,11 @@ _ORPHAN_KEYS = (ORPHAN_DOCUMENT_ID_KEY, ORPHAN_DOCUMENT_NUMBER_KEY)
 #: anything (``vendor_not_linked``) cannot be told apart from one it made after
 #: the create went through (a QuickBooks read-back that lost its connection
 #: returns ``not_connected``; a Xero read-back raises it), so every non-success
-#: counts. It is committed as True BEFORE the adapter call, so a worker that
-#: dies mid-call (a Lambda timeout, which SQS redelivers) leaves it True.
+#: counts — unless the adapter states the attempt left nothing
+#: (``ErpPostResult.not_posted``: QuickBooks' create refused outright, as for
+#: closed books), and then only if no earlier attempt was already unknown.
+#: It is committed as True BEFORE the adapter call, so a worker that dies
+#: mid-call (a Lambda timeout, which SQS redelivers) leaves it True.
 #: Read through :func:`possibly_posted`, which is what a later refusal reports.
 OUTCOME_UNKNOWN_KEY = "erp_outcome_unknown"
 
@@ -639,7 +642,11 @@ async def _call_erp(
 
     if instance is not None:
         new_state = dict(state)
-        new_state[OUTCOME_UNKNOWN_KEY] = not result.success
+        # A refusal the ERP answered outright adds no uncertainty of its own,
+        # but cannot clear an earlier attempt's: that one may have posted.
+        new_state[OUTCOME_UNKNOWN_KEY] = not result.success and (
+            prior_unknown or not result.not_posted
+        )
         if result.success:
             # Recorded with the success itself, not only once the caller's
             # transitions commit: a failure between the two would otherwise
