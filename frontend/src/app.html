@@ -7,7 +7,34 @@
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
 		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
 		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
-		<meta name="theme-color" content="#0F1117" />
+		<meta name="theme-color" content="#0f1117" />
+		<!--
+			Theme before first paint (docs/decisions.md §289). Runs before any
+			bundle, so a visitor who chose Light never sees a dark frame. It cannot
+			import src/lib/theme.ts, so it repeats the storage key, the three
+			accepted values and the two theme-color values from there;
+			src/lib/theme.test.ts executes this script to hold them equal.
+			Storage can throw (private modes, blocked site data): the page then
+			follows the OS, exactly as if nothing had been chosen.
+		-->
+		<script>
+			(function () {
+				var choice = 'system';
+				try {
+					var stored = window.localStorage.getItem('feoh_theme');
+					if (stored === 'light' || stored === 'dark' || stored === 'system') choice = stored;
+				} catch (e) {}
+				document.documentElement.setAttribute('data-theme', choice);
+				var light = choice === 'light';
+				if (choice === 'system') {
+					try {
+						light = !!window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+					} catch (e) {}
+				}
+				var meta = document.querySelector('meta[name="theme-color"]');
+				if (meta) meta.setAttribute('content', light ? '#f4f5f8' : '#0f1117');
+			})();
+		</script>
 		<!--
 			Link-preview card. It lives here, not in svelte:head, because unfurl
 			crawlers run no JavaScript. Platform-branded on every host, like the

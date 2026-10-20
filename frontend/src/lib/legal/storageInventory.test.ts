@@ -82,7 +82,13 @@ describe('the Cookie Notice lists every key the app actually stores', () => {
 		// vacuously — the failure mode this guard is least able to notice about
 		// itself.
 		const found = declaredKeys();
-		for (const known of ['auth_token', 'portal_auth_token', 'feoh_locale', 'feoh_consent_choice']) {
+		for (const known of [
+			'auth_token',
+			'portal_auth_token',
+			'feoh_locale',
+			'feoh_theme',
+			'feoh_consent_choice'
+		]) {
 			expect(found, `scan missed a known key: ${known}`).toContain(known);
 		}
 	});

@@ -9,6 +9,7 @@
 	import { api } from '#lib/api.ts';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { theme } from '#lib/stores/theme.svelte.ts';
 	import { legalTitle } from '#lib/legal/pages.ts';
 	import type { PublicConfig } from '#lib/types/publicConfig.ts';
 
@@ -162,10 +163,11 @@
 		if (!captchaSitekey || !captchaEl || typeof hcaptcha?.render !== 'function') return;
 		hcaptcha.render(captchaEl, {
 			sitekey: captchaSitekey,
-			// The app is dark-only (app.css `color-scheme: dark`); hCaptcha's
-			// default light widget is a white box on the form. The markup's
-			// `data-theme` does the same for the implicit first render.
-			theme: 'dark',
+			// The widget is an iframe and cannot see our palette, so it is told
+			// which one is showing — a light widget on the dark form (or the
+			// reverse) is a glaring box. The markup's `data-theme` does the same
+			// for the implicit first render (docs/decisions.md §289).
+			theme: theme.resolved,
 			callback: (token: string) => (captchaToken = token),
 			'expired-callback': () => (captchaToken = null)
 		});
@@ -351,7 +353,7 @@
 					class="h-captcha"
 					bind:this={captchaEl}
 					data-sitekey={captchaSitekey}
-					data-theme="dark"
+					data-theme={theme.resolved}
 					data-callback="hcaptchaCallback"
 					data-expired-callback="hcaptchaExpired"
 				></div>
@@ -431,14 +433,14 @@
 		transition: border-color 0.15s, box-shadow 0.15s;
 	}
 	.slug-row:hover {
-		border-color: #3a3e4f;
+		border-color: var(--border-strong);
 	}
 	.slug-row:focus-within {
 		border-color: var(--accent);
-		box-shadow: 0 0 0 4px rgba(99, 140, 255, 0.22);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
 	}
 	.slug-row.ok {
-		border-color: rgba(38, 185, 119, 0.55);
+		border-color: color-mix(in srgb, var(--success) 55%, transparent);
 	}
 	.slug-row.bad {
 		border-color: var(--danger);
@@ -536,8 +538,8 @@
 		width: 60px;
 		height: 60px;
 		border-radius: 18px;
-		border: 1px solid rgba(99, 140, 255, 0.3);
-		background: linear-gradient(140deg, rgba(99, 140, 255, 0.24), rgba(163, 125, 255, 0.14));
+		border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+		background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 24%, transparent), rgba(163, 125, 255, 0.14));
 		color: var(--accent-on-tint);
 		font-size: 30px;
 		animation: pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
@@ -605,7 +607,7 @@
 		top: 14px;
 		bottom: 14px;
 		width: 1px;
-		background: linear-gradient(180deg, rgba(99, 140, 255, 0.55), rgba(231, 185, 94, 0.35));
+		background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 55%, transparent), rgba(231, 185, 94, 0.35));
 	}
 	.next-steps li {
 		position: relative;
@@ -621,8 +623,8 @@
 		width: 27px;
 		height: 27px;
 		border-radius: 50%;
-		border: 1px solid rgba(99, 140, 255, 0.45);
-		background: #151a2b;
+		border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+		background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 		color: var(--text);
 		font-size: 0.78rem;
 		font-weight: 700;

@@ -174,6 +174,13 @@ export const messages = {
 	'profile.language.hint':
 		'Elija el idioma utilizado en toda la aplicación. Su elección se guarda en este dispositivo.',
 	'profile.language.label': 'Idioma de visualización',
+	'profile.appearance.heading': 'Apariencia',
+	'profile.appearance.hint':
+		'Elija el tema de color para este navegador. «Sistema» sigue el ajuste claro u oscuro de su dispositivo. Su elección se guarda en este dispositivo.',
+	'profile.appearance.legend': 'Tema',
+	'profile.appearance.system': 'Sistema',
+	'profile.appearance.light': 'Claro',
+	'profile.appearance.dark': 'Oscuro',
 
 	// Profile → Notification preferences
 	'profile.notifications.event.invoiceAssigned': 'Factura asignada a mí',

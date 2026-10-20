@@ -175,6 +175,13 @@ export const messages = {
 	'profile.language.hint':
 		'Choisissez la langue utilisée dans toute l’application. Votre choix est enregistré sur cet appareil.',
 	'profile.language.label': 'Langue d’affichage',
+	'profile.appearance.heading': 'Apparence',
+	'profile.appearance.hint':
+		'Choisissez le thème de couleurs de ce navigateur. « Système » suit le réglage clair ou sombre de votre appareil. Votre choix est enregistré sur cet appareil.',
+	'profile.appearance.legend': 'Thème',
+	'profile.appearance.system': 'Système',
+	'profile.appearance.light': 'Clair',
+	'profile.appearance.dark': 'Sombre',
 
 	// Profile → Notification preferences
 	'profile.notifications.event.invoiceAssigned': 'Facture qui m’est attribuée',

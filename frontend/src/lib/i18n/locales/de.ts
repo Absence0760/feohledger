@@ -173,6 +173,13 @@ export const messages = {
 	'profile.language.hint':
 		'Wählen Sie die in der App verwendete Sprache. Ihre Auswahl wird auf diesem Gerät gespeichert.',
 	'profile.language.label': 'Anzeigesprache',
+	'profile.appearance.heading': 'Darstellung',
+	'profile.appearance.hint':
+		'Wählen Sie das Farbschema für diesen Browser. „System“ folgt der hellen oder dunklen Einstellung Ihres Geräts. Ihre Auswahl wird auf diesem Gerät gespeichert.',
+	'profile.appearance.legend': 'Farbschema',
+	'profile.appearance.system': 'System',
+	'profile.appearance.light': 'Hell',
+	'profile.appearance.dark': 'Dunkel',
 
 	// Profile → Notification preferences
 	'profile.notifications.event.invoiceAssigned': 'Mir zugewiesene Rechnung',

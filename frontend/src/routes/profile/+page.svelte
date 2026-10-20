@@ -8,6 +8,9 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
+	import SegmentedControl from '#lib/components/ui/SegmentedControl.svelte';
+	import { theme } from '#lib/stores/theme.svelte.ts';
+	import { THEME_CHOICES, type ThemeChoice } from '#lib/theme.ts';
 	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '#lib/i18n/locale.ts';
 	import { currentLocale, setLocale, m } from '#lib/i18n/store.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -30,10 +33,10 @@
 	}
 
 	// ── Section navigation ────────────────────────────────────────────────
-	// Seven panels, all genuinely one subject ("my account"), so the rail is
+	// Eight panels, all genuinely one subject ("my account"), so the rail is
 	// FLAT — no group headings, which is what `ui/SettingsRail.svelte` renders
 	// when a group carries no label. `/organization` groups its fifteen because
-	// they are fifteen unrelated concerns; seven coherent ones do not need it.
+	// they are fifteen unrelated concerns; eight coherent ones do not need it.
 	//
 	// The reason to give this page a rail at all is not the section count but
 	// the three reads below: preferences, passkeys and signed-in devices each
@@ -53,7 +56,8 @@
 		{ slug: 'passkeys', labelKey: 'profile.passkeys.heading' },
 		{ slug: 'sessions', labelKey: 'profile.sessions.heading' },
 		{ slug: 'notifications', labelKey: 'profile.notifications.heading' },
-		{ slug: 'language', labelKey: 'profile.language.heading' }
+		{ slug: 'language', labelKey: 'profile.language.heading' },
+		{ slug: 'appearance', labelKey: 'profile.appearance.heading' }
 	];
 
 	const SECTION_SLUGS = new Set(SECTIONS.map((s) => s.slug));
@@ -554,6 +558,18 @@
 		const value = (e.currentTarget as HTMLSelectElement).value as Locale;
 		await setLocale(value);
 	}
+
+	// Colour theme. Device-scoped like the language above — a preference about
+	// this screen, saved in this browser, applied the moment it is picked
+	// (`stores/theme.svelte.ts`, docs/decisions.md §289).
+	const THEME_LABEL_KEYS: Record<ThemeChoice, MessageKey> = {
+		system: 'profile.appearance.system',
+		light: 'profile.appearance.light',
+		dark: 'profile.appearance.dark'
+	};
+	const themeOptions = $derived(
+		THEME_CHOICES.map((value) => ({ value, label: m(THEME_LABEL_KEYS[value]) }))
+	);
 </script>
 
 <!-- The one field a factor change asks the member to type. A snippet rather than
@@ -610,6 +626,21 @@
 							{/each}
 						</select>
 					</label>
+				</section>
+			{/if}
+
+			{#if section === 'appearance'}
+				<section class="card">
+					<h2>{m('profile.appearance.heading')}</h2>
+					<p class="hint" id="appearance-hint">{m('profile.appearance.hint')}</p>
+					<SegmentedControl
+						legend={m('profile.appearance.legend')}
+						name="theme"
+						options={themeOptions}
+						value={theme.choice}
+						onchange={(choice) => theme.set(choice)}
+						describedBy="appearance-hint"
+					/>
 				</section>
 			{/if}
 
@@ -1138,7 +1169,7 @@
 		color: var(--warning-on-tint);
 		font-size: 0.85rem;
 		background: var(--warning-tint);
-		border: 1px solid rgba(255, 165, 0, 0.3);
+		border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
 		padding: 8px 12px;
 		border-radius: 4px;
 		margin: 0 0 12px;
@@ -1311,7 +1342,7 @@
 	}
 
 	button.danger {
-		background: #e04040;
+		background: var(--danger);
 	}
 
 	button.small {

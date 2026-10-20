@@ -176,6 +176,13 @@ export const messages = {
 	'profile.language.hint':
 		'アプリ全体で使用する言語を選択してください。選択内容はこの端末に保存されます。',
 	'profile.language.label': '表示言語',
+	'profile.appearance.heading': '外観',
+	'profile.appearance.hint':
+		'このブラウザーで使うカラーテーマを選択してください。「システム」は端末のライト／ダーク設定に従います。選択内容はこの端末に保存されます。',
+	'profile.appearance.legend': 'テーマ',
+	'profile.appearance.system': 'システム',
+	'profile.appearance.light': 'ライト',
+	'profile.appearance.dark': 'ダーク',
 
 	// Profile → Notification preferences
 	'profile.notifications.event.invoiceAssigned': '自分に割り当てられた請求書',
