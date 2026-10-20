@@ -21,6 +21,10 @@
 	let email = $state('');
 	let password = $state('');
 	let error = $state('');
+	// Why the user is on this page, when `api.ts` sent them here (a session for
+	// another workspace). Information, not a failure: it renders as a neutral
+	// notice in a polite live region, and a submit clears it.
+	let notice = $state('');
 	// The account's own sign-in page, when the server refused a sign-in made
 	// on another workspace's page (`wrong_workspace`, decisions §288).
 	let ownWorkspaceUrl = $state<string | null>(null);
@@ -55,8 +59,8 @@
 		email = emailFromQuery(page.url.searchParams);
 		// `api.ts` sends a session it had to end here with the reason in the
 		// URL — a token for another workspace than this page's.
-		const notice = loginNoticeKey(page.url.searchParams);
-		if (notice) error = m(notice);
+		const noticeKey = loginNoticeKey(page.url.searchParams);
+		if (noticeKey) notice = m(noticeKey);
 		// A tenant is configured for at most one protocol; query both and render
 		// whichever is enabled. Both are non-fatal — password login still works.
 		// On the platform apex (marketing / signup host) there is neither a slug
@@ -99,6 +103,7 @@
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
+		notice = '';
 		ownWorkspaceUrl = null;
 		loading = true;
 		try {
@@ -132,10 +137,19 @@
 			<p class="subtitle">{m('auth.login.subtitle')}</p>
 		</div>
 
+		<div role="status" aria-live="polite">
+			{#if notice}
+				<div class="info">{notice}</div>
+			{/if}
+		</div>
+
 		<div role="alert" aria-live="assertive">
 			{#if error}
+				<!-- AuthShell stacks the banner: the sentence, then the link on its
+				     own full-width line. The sentence names the workspace by host
+				     only; the URL lives in the link (codedRefusals `wrong_workspace`). -->
 				<div class="error">
-					{error}
+					<span>{error}</span>
 					{#if ownWorkspaceUrl}
 						<a class="own-workspace-link" href={ownWorkspaceUrl}>
 							{m('auth.login.goToOwnWorkspace')}
@@ -240,8 +254,6 @@
 	}
 
 	.own-workspace-link {
-		display: block;
-		margin-top: 6px;
 		color: inherit;
 		font-weight: 600;
 		text-decoration: underline;
