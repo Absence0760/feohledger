@@ -40,7 +40,7 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-20 — the admin persona's user-management fixes
-(decisions §290) closed the (c) entry "A SCIM deactivation writes no audit
+(decisions §293) closed the (c) entry "A SCIM deactivation writes no audit
 row", taking the file from 115 → 114. Before that, 2026-10-20 — the light theme (decisions §289) opened one
 (c) entry, a white-label accent left unchecked as text on the light surfaces,
 taking the file from 114 → 115. Before that, 2026-10-20 — the live QuickBooks re-test (#598) reached

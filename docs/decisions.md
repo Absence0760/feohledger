@@ -12545,7 +12545,7 @@ through CSS alone, the keyboard model of the picker, and axe in light mode on
 a cross-section of the signed-in app, the portal, the auth shell, the help
 centre and the legal pages).
 
-## 290. SCIM writes are audited and last-admin guarded, the guard is serialized, and a deleted user's row says who they were (2026-10-20)
+## 293. SCIM writes are audited and last-admin guarded, the guard is serialized, and a deleted user's row says who they were (2026-10-20)
 
 An admin persona review found four gaps in how user accounts change, all in the
 same family: the record of a change, and the one invariant user management

@@ -19,7 +19,7 @@ UPDATE`` conflicts with ``FOR NO KEY UPDATE``); the weaker mode is chosen so an
 unrelated insert of a ``users`` row in the org, whose foreign key takes ``FOR
 KEY SHARE`` on that row, is not made to wait behind it. The lock is taken only
 when the write would actually remove an active admin, so ordinary edits never
-touch it. ``docs/decisions.md`` §290.
+touch it. ``docs/decisions.md`` §293.
 """
 
 from __future__ import annotations

@@ -1212,7 +1212,7 @@ exactly as before.
     refused `400` `scimType: "mutability"` and audited, and so is a group
     change that would revoke an IdP-managed `admin` role from the last one —
     see [SCIM 2.0](#scim-20-user-provisioning-from-okta--entra).
-    `docs/decisions.md` §290.
+    `docs/decisions.md` §293.
 - **Frontend** — `auth.can(perm)` mirrors `require_permission`; the gated
   controls converted so far are payment Execute, payment Void, vendor
   Block/Unblock (`VendorModal.svelte`), vendor create/edit + the consolidation
@@ -2329,7 +2329,7 @@ retrying it; a 409 was rejected because the RFC reserves it for uniqueness and
 version conflicts. The guard, and the organization-row lock that serializes it,
 are the admin API's own (`services/admin_lockout`). To deprovision that person,
 make someone else an admin in FeohLedger first (`tests/test_scim_user_lifecycle_audit.py`,
-`docs/decisions.md` §290).
+`docs/decisions.md` §293).
 
 ### Filter syntax
 

@@ -11,7 +11,7 @@ could they do": each changed field as before AND after, and on deletion the
 address and roles the account held, since the row it pointed at is gone. The
 address is recorded the way the `auth.*` rows already record it; `full_name`
 is named in `changed_fields` but its value stays out, the rule `user.updated`
-has always followed. `docs/decisions.md` §290.
+has always followed. `docs/decisions.md` §293.
 """
 
 from __future__ import annotations
