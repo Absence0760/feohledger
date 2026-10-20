@@ -95,7 +95,8 @@ describe('codedRefusalText', () => {
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
 		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
-		['erp_not_connected', 'erpRefusal.notConnected']
+		['erp_not_connected', 'erpRefusal.notConnected'],
+		['invoice_due_before_date', 'refusal.invoiceDueBeforeDate']
 	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});

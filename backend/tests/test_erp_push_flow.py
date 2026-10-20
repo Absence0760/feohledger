@@ -1600,3 +1600,29 @@ async def test_a_success_clears_an_earlier_unknown_and_names_the_bill():
     assert inst.state_data[OUTCOME_UNKNOWN_KEY] is False
     assert inst.state_data["erp_reference"] == "B-1"
     assert possibly_posted(inst.state_data)
+
+
+@pytest.mark.asyncio
+async def test_call_erp_refuses_a_bill_due_before_it_is_dated():
+    """Live QuickBooks sandbox, 2026-10-20: a bill dated after its due date
+    posted, and QuickBooks' own UI then flagged it invalid. Whatever path made
+    the invoice, the push refuses it before any adapter is built."""
+    from datetime import date
+
+    from app.services.erp import INVOICE_DUE_BEFORE_DATE, _call_erp
+    from app.services.erp_adapters.base import ErpPostResult
+
+    inv = _invoice()
+    inv.invoice_date, inv.due_date = date(2026, 10, 20), date(2026, 10, 15)
+    with patch("app.services.erp.get_erp_adapter") as get_adapter:
+        with pytest.raises(ErpPostRefusedError) as exc:
+            await _call_erp(_line_items_db([]), inv, {"type": "x"}, instance=_instance())
+    get_adapter.assert_not_called()
+    assert exc.value.refusal == {"code": INVOICE_DUE_BEFORE_DATE, "params": {}}
+
+    # Due the day it is dated is fine.
+    inv.due_date = inv.invoice_date
+    adapter = AsyncMock()
+    adapter.post_invoice.return_value = ErpPostResult(success=True, erp_document_id="B-1")
+    with patch("app.services.erp.get_erp_adapter", return_value=adapter):
+        assert await _call_erp(_line_items_db([]), inv, {"type": "x"}) == "B-1"

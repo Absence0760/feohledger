@@ -107,6 +107,9 @@ describe('erpRefusalText', () => {
 		expect(erpRefusalText({ code: 'not_connected', params: {} }, enT)).toContain(
 			"The ERP isn't connected"
 		);
+		expect(erpRefusalText({ code: 'invoice_due_before_date', params: {} }, enT)).toBe(
+			'This invoice is due before its invoice date, which the ERP rejects. Correct the dates, then retry.'
+		);
 	});
 
 	it('says which open exception stopped the push, and what to do (§286)', () => {

@@ -322,6 +322,8 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
 	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
 	// or whose listing could not be read whole, so nothing synced.
+	// `api/refusals.py::refuse_due_before_invoice_date` — create / edit.
+	invoice_due_before_date: fixed('refusal.invoiceDueBeforeDate'),
 	erp_not_connected: fixed('erpRefusal.notConnected'),
 	erp_listing_incomplete: (p, t) => {
 		const provider = str(p, 'provider');

@@ -95,3 +95,24 @@ def erp_pull_failure(exc: Exception) -> HTTPException:
             ),
         )
     return HTTPException(status_code=502, detail=f"ERP request failed: {type(exc).__name__}")
+
+
+#: An invoice whose due date falls before its invoice date. QuickBooks accepts
+#: such a bill over the API and then flags it invalid in its own UI (live
+#: sandbox, 2026-10-20: changing only the invoice date to escape a closed
+#: period left bill 154 due five days before it was dated). Entry refuses the
+#: pair; the ERP push refuses it too (``services/erp``), for invoices that
+#: arrive by extraction, CSV or the recurring sweep.
+INVOICE_DUE_BEFORE_DATE = "invoice_due_before_date"
+
+
+def refuse_due_before_invoice_date(invoice_date, due_date) -> None:
+    """422 when both dates are set and the invoice is due before it is dated."""
+    if invoice_date is not None and due_date is not None and due_date < invoice_date:
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                INVOICE_DUE_BEFORE_DATE,
+                "The due date is before the invoice date. Correct one of them.",
+            ),
+        )

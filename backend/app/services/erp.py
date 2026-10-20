@@ -67,6 +67,9 @@ _ORPHAN_KEYS = (ORPHAN_DOCUMENT_ID_KEY, ORPHAN_DOCUMENT_NUMBER_KEY)
 #: Read through :func:`possibly_posted`, which is what a later refusal reports.
 OUTCOME_UNKNOWN_KEY = "erp_outcome_unknown"
 
+#: The push refusal for an invoice due before it is dated (`api/refusals`).
+INVOICE_DUE_BEFORE_DATE = "invoice_due_before_date"
+
 
 def _outcome_unknown(state_data: dict | None) -> bool:
     """The recorded :data:`OUTCOME_UNKNOWN_KEY`, read fail-closed for a row
@@ -620,6 +623,14 @@ async def _call_erp(
         raise ErpPostRefusedError(
             blocked_export_message(blocking, possibly_posted=posted),
             refusal=blocked_export_refusal(blocking, possibly_posted=posted),
+        )
+    # A bill due before it is dated is invalid in the ERP, whichever path made
+    # the invoice; entry refuses the pair too (`api/refusals`). No adapter has
+    # been built, so this attempt sent nothing.
+    if invoice.invoice_date and invoice.due_date and invoice.due_date < invoice.invoice_date:
+        raise ErpPostRefusedError(
+            f"ERP post refused: {INVOICE_DUE_BEFORE_DATE}",
+            refusal=erp_refusal_record(INVOICE_DUE_BEFORE_DATE),
         )
 
     config = erp_config or {"type": "mock", "integration_method": "direct"}

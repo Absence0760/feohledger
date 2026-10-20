@@ -316,3 +316,39 @@ async def test_manual_create_audit_row_is_on_the_invoice_trail(realdb):
     entries = trail.json()
     actions = [e["action"] for e in entries]
     assert "invoice.created" in actions, actions
+
+
+async def test_an_invoice_due_before_it_is_dated_is_refused_at_entry(realdb):
+    """Live QuickBooks sandbox, 2026-10-20: moving an invoice's date out of a
+    closed period left it due five days before it was dated, and the bill that
+    posted was invalid in QuickBooks. Entry refuses the pair; an edit is judged
+    on the pair as it will stand."""
+    body = {
+        "vendor": "Date Order Co",
+        "invoice_number": "DATES-001",
+        "amount": "10.00",
+        "currency": "USD",
+        "invoice_date": "2026-10-20",
+        "due_date": "2026-10-15",
+    }
+    async with realdb.client(key="a", role="ap_manager") as c:
+        refused = await c.post("/api/invoices", json=body)
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["detail"]["code"] == "invoice_due_before_date"
+
+        created = await c.post("/api/invoices", json={**body, "invoice_date": "2026-10-01"})
+        assert created.status_code == 201, created.text
+        inv_id = created.json()["id"]
+
+        # Moving the date past the due date alone is refused...
+        moved = await c.patch(f"/api/invoices/{inv_id}", json={"invoice_date": "2026-10-20"})
+        assert moved.status_code == 422, moved.text
+        assert moved.json()["detail"]["code"] == "invoice_due_before_date"
+        # ...moving both together is not, and neither is an edit of other fields.
+        both = await c.patch(
+            f"/api/invoices/{inv_id}",
+            json={"invoice_date": "2026-10-20", "due_date": "2026-11-19"},
+        )
+        assert both.status_code == 200, both.text
+        other = await c.patch(f"/api/invoices/{inv_id}", json={"description": "fine"})
+        assert other.status_code == 200, other.text

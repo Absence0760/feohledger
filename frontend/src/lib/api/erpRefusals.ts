@@ -39,13 +39,18 @@ type Params = Record<string, unknown>;
 export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
 
 /** The refusals raised outside an adapter, which name no provider. */
-const PROVIDERLESS = new Set(['not_connected', 'erp_credentials_unavailable']);
+const PROVIDERLESS = new Set([
+	'not_connected',
+	'erp_credentials_unavailable',
+	'invoice_due_before_date'
+]);
 
 /** Every code's sentence, each naming `{provider}` unless in `PROVIDERLESS`. */
 const KEYS: Record<string, MessageKey> = {
 	vendor_not_linked: 'erpRefusal.vendorNotLinked',
 	account_not_linked: 'erpRefusal.accountNotLinked',
 	not_connected: 'erpRefusal.notConnected',
+	invoice_due_before_date: 'erpRefusal.invoiceDueBeforeDate',
 	amount_mismatch: 'erpRefusal.amountMismatch',
 	line_amount_missing: 'erpRefusal.lineAmountMissing',
 	posted_total_mismatch: 'erpRefusal.postedTotalMismatch',

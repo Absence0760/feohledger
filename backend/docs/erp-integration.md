@@ -1017,6 +1017,15 @@ reasoning).
   `possibly_posted: true`, and the browser says to check the ERP before anyone
   pays the bill. The gate does not look the bill up; once the flag is cleared
   the next push's own idempotency lookup finds it instead of posting another.
+- **A bill due before it is dated never posts.** Right after the exception
+  gate, `_call_erp` refuses an invoice whose `due_date` is before its
+  `invoice_date` (`invoice_due_before_date`, no adapter built, so nothing was
+  sent). QuickBooks accepts such a bill over the API and then marks it invalid
+  in its own UI (live sandbox, 2026-10-20: moving only the invoice date out of
+  a closed period left bill 154 due five days early). `POST /api/invoices` and
+  `PATCH /api/invoices/{id}` refuse the pair at entry with the same code (422,
+  `api/refusals.refuse_due_before_invoice_date`); the push gate is what covers
+  extraction, CSV import and the recurring sweep.
 - **The HTTP doors answer first:** `POST /api/invoices/{id}/complete` (the
   modal's "Send to ERP" on an approved invoice), `/send-to-erp` and
   `/retry-erp` return **409** with that coded refusal before they move the
