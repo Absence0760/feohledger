@@ -5821,6 +5821,7 @@ export const messages = {
 	'invoices.modal.toast.staleConflict': '保存されませんでした。請求書を再読み込みして最新バージョンを確認してください。',
 	'invoices.modal.toast.submitFailed': '送信に失敗しました',
 	'invoices.modal.toast.submitted': '請求書を送信しました',
+	'invoices.modal.toast.sendingToErp': "ERP に送信しています。拒否された場合、請求書は「失敗」になり、ERP ステータスに理由が表示されます。",
 	'invoices.modal.toast.summaryFailed': '概要を再生成できませんでした',
 	'invoices.modal.toast.unlinkFailed': 'リンク解除に失敗しました',
 	'paymentRuns.runDetail.approveAsCfo': 'CFO として承認',

@@ -5893,6 +5893,7 @@ export const messages = {
 	'invoices.modal.toast.staleConflict': 'Non enregistre - rechargez la facture pour voir la version la plus recente.',
 	'invoices.modal.toast.submitFailed': 'Échec de la soumission',
 	'invoices.modal.toast.submitted': 'Facture soumise',
+	'invoices.modal.toast.sendingToErp': "Envoi à l'ERP en cours. S'il est refusé, la facture passe à l'état Échouée et son statut ERP en indique la raison.",
 	'invoices.modal.toast.summaryFailed': 'Impossible de régénérer le résumé',
 	'invoices.modal.toast.unlinkFailed': 'Échec de la dissociation',
 	'paymentRuns.runDetail.approveAsCfo': 'Approuver en tant que directeur financier',

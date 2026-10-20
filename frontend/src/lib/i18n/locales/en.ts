@@ -6117,6 +6117,7 @@ export const en = {
 	'invoices.modal.toast.staleConflict': 'Not saved — reload the invoice to see the latest version.',
 	'invoices.modal.toast.submitFailed': 'Submit failed',
 	'invoices.modal.toast.submitted': 'Invoice submitted',
+	'invoices.modal.toast.sendingToErp': "Sending to the ERP. If it is refused, the invoice moves to Failed and its ERP status says why.",
 	'invoices.modal.toast.summaryFailed': 'Could not regenerate summary',
 	'invoices.modal.toast.unlinkFailed': 'Unlink failed',
 	'paymentRuns.runDetail.approveAsCfo': 'Approve as CFO',

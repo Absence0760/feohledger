@@ -5893,6 +5893,7 @@ export const messages = {
 	'invoices.modal.toast.staleConflict': 'Nicht gespeichert – laden Sie die Rechnung neu, um die aktuelle Version zu sehen.',
 	'invoices.modal.toast.submitFailed': 'Übermittlung fehlgeschlagen',
 	'invoices.modal.toast.submitted': 'Rechnung übermittelt',
+	'invoices.modal.toast.sendingToErp': "Wird an das ERP gesendet. Wird sie abgelehnt, wechselt die Rechnung zu „Fehlgeschlagen“ und ihr ERP-Status nennt den Grund.",
 	'invoices.modal.toast.summaryFailed': 'Zusammenfassung konnte nicht neu erstellt werden',
 	'invoices.modal.toast.unlinkFailed': 'Trennen fehlgeschlagen',
 	'paymentRuns.runDetail.approveAsCfo': 'Als CFO genehmigen',

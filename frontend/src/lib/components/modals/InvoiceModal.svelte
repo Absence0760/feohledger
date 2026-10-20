@@ -796,7 +796,15 @@
 			if (selectedApproverId && result.status === 'ready_for_review') {
 				await api.post(`/api/invoices/${invoice.id}/assign`, { user_id: selectedApproverId });
 			}
-			toast(m('invoices.modal.toast.submitted'), 'success');
+			// A send to the ERP is queued, not done: its outcome — posted, or
+			// refused with a reason — lands on the invoice moments later, so the
+			// toast says where to look rather than reading as success.
+			toast(
+				result.status === 'sending_to_erp'
+					? m('invoices.modal.toast.sendingToErp')
+					: m('invoices.modal.toast.submitted'),
+				'success'
+			);
 			// No refresh here: `onclose()` hands the list back to the host,
 			// which refetches it with its own filters (same reason
 			// `handleApprove` doesn't refresh either).

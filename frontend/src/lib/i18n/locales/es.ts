@@ -5916,6 +5916,7 @@ export const messages = {
 	'invoices.modal.toast.staleConflict': 'No guardado: recarga la factura para ver la version mas reciente.',
 	'invoices.modal.toast.submitFailed': 'Error al enviar',
 	'invoices.modal.toast.submitted': 'Factura enviada',
+	'invoices.modal.toast.sendingToErp': "Enviando al ERP. Si se rechaza, la factura pasa a Fallida y su estado del ERP indica el motivo.",
 	'invoices.modal.toast.summaryFailed': 'No se pudo regenerar el resumen',
 	'invoices.modal.toast.unlinkFailed': 'Error al desvincular',
 	'paymentRuns.runDetail.approveAsCfo': 'Aprobar como director financiero',
