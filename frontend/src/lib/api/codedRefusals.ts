@@ -447,7 +447,16 @@ const BUILDERS: Record<string, Builder> = {
 	commerce_sync_not_retryable: fixed('refusal.commerceSyncNotRetryable'),
 	commerce_sync_not_found: fixed('refusal.commerceSyncNotFound'),
 	commerce_unknown_entity: fixed('refusal.commerceUnknownEntity'),
-	commerce_unknown_provider: fixed('refusal.commerceUnknownProvider')
+	commerce_unknown_provider: fixed('refusal.commerceUnknownProvider'),
+	// One address, one account, one workspace (decisions §291). An SSO / SAML
+	// sign-in whose IdP asserted an address held in another workspace — stated
+	// on the callback page, deliberately with no link (`api/refusals.py`) — and
+	// a user-manager's create / rename onto a taken address.
+	sso_email_in_other_workspace: fixed('refusal.ssoEmailInOtherWorkspace'),
+	email_in_this_workspace: fixed('refusal.emailInThisWorkspace'),
+	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
+	// The admin path's other-workspace budget is spent (`api/admin.py`).
+	email_check_throttled: fixed('refusal.emailCheckThrottled')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

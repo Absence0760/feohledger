@@ -9,22 +9,42 @@
 		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
 		<meta name="theme-color" content="#0f1117" />
 		<!--
-			Theme before first paint (docs/decisions.md §289). Runs before any
-			bundle, so a visitor who chose Light never sees a dark frame. It cannot
-			import src/lib/theme.ts, so it repeats the storage key, the three
-			accepted values and the two theme-color values from there;
-			src/lib/theme.test.ts executes this script to hold them equal.
-			Storage can throw (private modes, blocked site data): the page then
+			Theme before first paint (docs/decisions.md §289, §290). Runs before
+			any bundle, so a visitor who chose Light never sees a dark frame. It
+			cannot import src/lib/theme.ts, so it repeats the key (cookie name and
+			storage key alike), the three accepted values, the cookie-first order
+			and the two theme-color values from there; src/lib/theme.test.ts
+			executes this script to hold them equal. The shared cookie (every
+			workspace of the platform) wins over this origin's localStorage.
+			Either can throw (private modes, blocked site data): the page then
 			follows the OS, exactly as if nothing had been chosen. The id is how
 			the test finds it; keep it.
 		-->
 		<script id="theme-boot">
 			(function () {
 				var choice = 'system';
+				var found = false;
+				function valid(v) {
+					return v === 'light' || v === 'dark' || v === 'system';
+				}
 				try {
-					var stored = window.localStorage.getItem('feoh_theme');
-					if (stored === 'light' || stored === 'dark' || stored === 'system') choice = stored;
+					var parts = document.cookie.split(';');
+					for (var i = 0; i < parts.length && !found; i++) {
+						var eq = parts[i].indexOf('=');
+						if (eq < 0 || parts[i].slice(0, eq).trim() !== 'feoh_theme') continue;
+						var value = parts[i].slice(eq + 1).trim();
+						if (valid(value)) {
+							choice = value;
+							found = true;
+						}
+					}
 				} catch (e) {}
+				if (!found) {
+					try {
+						var stored = window.localStorage.getItem('feoh_theme');
+						if (valid(stored)) choice = stored;
+					} catch (e) {}
+				}
 				document.documentElement.setAttribute('data-theme', choice);
 				var light = choice === 'light';
 				if (choice === 'system') {

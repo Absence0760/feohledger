@@ -25,7 +25,12 @@ from app.api.permissions import (
     permissions_for_role,
     sanitize_permissions,
 )
-from app.api.refusals import coded_refusal
+from app.api.refusals import (
+    EMAIL_CHECK_THROTTLED_DETAIL,
+    EMAIL_IN_OTHER_WORKSPACE_DETAIL,
+    EMAIL_IN_THIS_WORKSPACE_DETAIL,
+    coded_refusal,
+)
 from app.database import get_control_db, get_tenant_engine
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
@@ -48,9 +53,16 @@ from app.services.admin_lockout import (
 )
 from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.email_adapters import EmailMessage, get_email_adapter
+from app.services.identity_provisioning import email_holder_org_id
+from app.services.rate_limit import (
+    RateLimitExceeded,
+    auth_identity_key,
+    check_auth_failures,
+    record_auth_failure,
+)
 from app.services.session_management import revoke_user_sessions
 from app.services.user_audit import user_deleted_details, user_updated_details
-from app.utils.emails import email_matches, normalize_email
+from app.utils.emails import normalize_email
 from app.utils.passwords import generate_temp_password, hash_password
 from app.utils.search import ilike_contains
 from app.utils.tenant_urls import tenant_base_url
@@ -410,6 +422,66 @@ def _authorize_target_mutation(caller: User, target: User) -> None:
         )
 
 
+#: Budget on refusals that an address belongs to ANOTHER workspace, per acting
+#: workspace. One address is one account (`users.email` is globally unique), so
+#: that refusal unavoidably says "an account exists somewhere on the platform"
+#: — an oracle to anyone holding `user.manage`, including the admin of a free
+#: self-signup tenant. Generous for a real admin (inviting someone already on
+#: the platform is occasional), tight for a sweep. Per WORKSPACE rather than per
+#: user, so minting extra user-managers does not widen it. `docs/decisions.md`
+#: §291.
+EMAIL_COLLISION_SCOPE = "admin_email_other_workspace"
+EMAIL_COLLISION_LIMIT = 20
+EMAIL_COLLISION_WINDOW_SECONDS = 3600
+
+
+async def _refuse_taken_email(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    email: str,
+    *,
+    exclude_user_id: uuid.UUID | None = None,
+) -> None:
+    """409 when ``email`` already names an account — here, or in another workspace.
+
+    Two coded refusals, because they need different actions: an address in THIS
+    workspace is a user the admin can already see and edit; one in ANOTHER is a
+    dead end until the person uses a different address, and the message has to
+    say so instead of a bare "Email already in use". The second names no
+    workspace and no account. It still confirms the address is on the platform
+    — unavoidable while one address is one account — which the budget above
+    bounds; it is checked BEFORE the lookup so a throttled sweep learns nothing
+    more, and only an other-workspace hit spends it.
+    """
+    budget_key = auth_identity_key(str(org_id))
+    try:
+        await check_auth_failures(
+            EMAIL_COLLISION_SCOPE,
+            budget_key,
+            limit=EMAIL_COLLISION_LIMIT,
+            window_seconds=EMAIL_COLLISION_WINDOW_SECONDS,
+        )
+    except RateLimitExceeded as exc:
+        # Spent: EVERY create / email rename in this workspace waits, a free
+        # address included — refusing only the taken ones would make the 429
+        # itself the oracle. Said in words, so an admin onboarding people
+        # knows why and that it lifts on its own.
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=EMAIL_CHECK_THROTTLED_DETAIL,
+            headers=exc.headers,
+        ) from exc
+    holder = await email_holder_org_id(db, email, exclude_user_id=exclude_user_id)
+    if holder is None:
+        return
+    if holder == org_id:
+        raise HTTPException(status_code=409, detail=EMAIL_IN_THIS_WORKSPACE_DETAIL)
+    await record_auth_failure(
+        EMAIL_COLLISION_SCOPE, budget_key, window_seconds=EMAIL_COLLISION_WINDOW_SECONDS
+    )
+    raise HTTPException(status_code=409, detail=EMAIL_IN_OTHER_WORKSPACE_DETAIL)
+
+
 async def _guard_against_last_admin_lockout(
     db: AsyncSession,
     *,
@@ -521,9 +593,7 @@ async def create_user(
     # identifier, so `Jane@Acme.com` and `jane@acme.com` are one person
     # (`utils/emails`).
     email = normalize_email(body.email)
-    existing = await db.execute(select(User.id).where(email_matches(User.email, email)).limit(1))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Email already in use")
+    await _refuse_taken_email(db, org_id, email)
 
     # The SHARED generator (`utils/passwords`), not a local one. The local copy
     # this replaces drew 12 characters from `ascii_letters + digits` with no
@@ -671,13 +741,7 @@ async def update_user(
     if body.email is not None:
         new_email = normalize_email(body.email)
         if new_email != normalize_email(target.email):
-            existing = await db.execute(
-                select(User.id)
-                .where(email_matches(User.email, new_email), User.id != user_id)
-                .limit(1)
-            )
-            if existing.scalar_one_or_none():
-                raise HTTPException(status_code=409, detail="Email already in use")
+            await _refuse_taken_email(db, org_id, new_email, exclude_user_id=user_id)
             target.email = new_email
             changed_fields.append("email")
     if body.is_active is not None and body.is_active != target.is_active:

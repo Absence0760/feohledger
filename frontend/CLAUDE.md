@@ -333,6 +333,11 @@ simply stay unreachable until an operator opts in.
   an operator requirement (see `docs/white-label.md`).
 - `getTenantStorageKey()` — per-tenant browser-storage key (`#lib/entity.ts`):
   the slug on a platform host, the hostname on a vanity one.
+- `sharedCookieDomain()` — the `Domain` for a cookie every host of the
+  platform reads (apex + every workspace): only a build-declared domain
+  (`PUBLIC_PLATFORM_DOMAINS` or `PUBLIC_SITE_URL`'s host), never the legacy
+  host rule; `null` on localhost / IP / vanity hosts. Only the theme uses it
+  (decisions §290); per-workspace state must never go through it.
 
 `tenantSlugUsage.test.ts` ratchets both invariants: nothing re-derives the slug
 by hand, and the list of files still reading `PUBLIC_API_URL` directly may only
@@ -371,7 +376,7 @@ Grouped into subfolders by role; import with the full path
 component the second time you would duplicate one.**
 
 - `help/` — `HelpTip` (the ⓘ toggletip: `<HelpTip term="glossary-id" />`; `KpiCard helpTerm` / DataTable column `help` forward one) `RichText` `HelpNav` `HelpCrumbs` `InvoiceLifecycle` `EnglishNotice` `diagrams/` — placement rules in `docs/ui-patterns.md` § Contextual help
-- `ui/` — primitives: `PageHeader` (renders the page's "How this page works" link) `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `SegmentedControl` `FieldWarning` `SecretReveal` `BrandMark` `PlanUpgradeNotice` (a setting the plan lacks — decisions §258)
+- `ui/` — primitives: `PageHeader` (renders the page's "How this page works" link) `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `SegmentedControl` `ThemePicker` `FieldWarning` `SecretReveal` `BrandMark` `PlanUpgradeNotice` (a setting the plan lacks — decisions §258)
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `InvoicePicker` (both over `ui/SearchPicker`) `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`

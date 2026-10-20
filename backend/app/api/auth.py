@@ -411,6 +411,12 @@ async def _reject_login(
 #: Signing in on one workspace's page with an account that belongs to another.
 WRONG_WORKSPACE = "wrong_workspace"
 
+#: Cap on the `attempted_workspace` the wrong-workspace audit row stores. A real
+#: slug is at most 30 characters (`utils/slug.SLUG_PATTERN`) and a custom domain
+#: resolves to one; the cap only stops an arbitrary `X-Tenant-Slug` header from
+#: bloating the row.
+_ATTEMPTED_WORKSPACE_MAX = 63
+
 
 async def _refuse_other_workspace(
     db: AsyncSession,
@@ -441,13 +447,31 @@ async def _refuse_other_workspace(
     requested = x_tenant_slug or await resolve_tenant_slug_by_custom_domain(db, host)
     if not requested or requested == org.slug:
         return
+    # Audited in the ACCOUNT's workspace only, and with what an auditor needs to
+    # tell a confused user from a stuffer who already holds the password: which
+    # workspace's page it was, and that the password DID verify (a wrong one
+    # never reaches here — it is the ordinary `bad_password` row). The email is
+    # the same field every `auth.login.failure` row already carries.
+    #
+    # The attempted workspace gets no row of its own (decisions §291): it holds
+    # no account here, the event is the account's, and an unknown address
+    # leaves no row anywhere — so a row there ONLY when the password was right
+    # would turn that workspace's audit log into an oracle for "this address
+    # has an account, and someone typed its password on our page".
     await dispatch_auth_audit(
         organization_id=org.id,
         actor_id=None,
         action="auth.login.failure",
-        details={"email": email, "ip": ip, "reason": WRONG_WORKSPACE},
+        details={
+            "email": email,
+            "ip": ip,
+            "reason": WRONG_WORKSPACE,
+            # Header- or Host-derived, so bounded rather than trusted verbatim.
+            "attempted_workspace": requested[:_ATTEMPTED_WORKSPACE_MAX],
+            "password_verified": True,
+        },
     )
-    url = sign_in_url(org.slug, org.settings, email=email)
+    url = sign_in_url(org.slug, org.settings, email=email, prefer_custom_domain=True)
     # The sentence names the workspace by host only: the URL carries the
     # address as a percent-encoded `?email=`, which is unreadable in prose and
     # is the link's job (`params.sign_in_url`), not the message's.

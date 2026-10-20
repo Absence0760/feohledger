@@ -12545,6 +12545,184 @@ through CSS alone, the keyboard model of the picker, and axe in light mode on
 a cross-section of the signed-in app, the portal, the auth shell, the help
 centre and the legal pages).
 
+## 290. The theme choice is a cookie on the platform domain, so it follows the visitor across workspaces (2026-10-20)
+
+**§289 said "per browser", and built per origin.** The choice lived in
+`localStorage`, which is scoped to an origin, and every workspace is its own
+origin: `acme.feohledger.com`, `globex.feohledger.com`, and the apex
+`feohledger.com` where signup lives. So Light picked on one workspace did not
+reach another, and — the case a new customer meets first — a theme picked
+while signing up was gone the moment the verification link landed them in
+their new workspace. The copy ("Choose the colour theme for this browser")
+was the intent; the storage was the bug.
+
+**Options weighed.** (a) Keep per-origin and reword everything to say "this
+workspace" — honest, but it makes a screen preference behave like workspace
+data, and the signup → workspace hop would still drop it. (b) Store it on the
+account — §289 already rejected that (a preference about this screen, not the
+person), and signup and sign-in come before any account. (c) Hand it over in
+the post-signup redirect URL — fixes one hop, not workspace → workspace. (d) A
+cookie on the platform's registrable domain, read by the pre-paint script.
+Only (d) is per browser in fact, so it is what shipped.
+
+**How.** On a platform host the choice is written to `feoh_theme` with
+`Domain=<platform domain>; Path=/; Max-Age=1 year; SameSite=Lax` (+ `Secure`
+on https). The domain is never hardcoded. It is never inferred from the
+host's shape either: it is only ever one the build positively declares as
+ours. `hostRouting.ts::sharedCookieDomainForHost` matches the host against
+`PUBLIC_PLATFORM_DOMAINS`, when set, and against the host of
+`PUBLIC_SITE_URL`, the platform's apex origin, which every deployed build
+already sets (`vm-deploy.yml` from `APP_URL`, `deploy/deploy.sh` from
+`APP_DOMAIN`) and which switches no routing on. Production builds leave
+`PUBLIC_PLATFORM_DOMAINS` unset, because setting it turns on vanity-domain
+routing. So the site URL is what makes the cookie work there.
+
+**The legacy host rule is deliberately not an input.** A first cut used it
+when `PUBLIC_PLATFORM_DOMAINS` was unset: a 3+-label host shared at its
+parent. That rule reads a customer's `ap.customer.example` as workspace `ap` of
+`customer.example`, so it would have put our cookie on the customer's own
+parent domain. That is wrong technically, and it would also make the "one
+cookie, on our domain" sentence in the Cookie Notice false. A host that is not
+equal to, or beneath, a declared domain gets no shared cookie, and a build
+that declares nothing shares nothing.
+
+There is no shared domain on localhost (browsers refuse `Domain=localhost`),
+on an IP literal, or on a customer's vanity host (a platform cookie does not
+belong on the customer's domain, and no other workspace could read it there).
+Those keep the §289 `localStorage` behaviour, per origin. On a vanity host
+that loses nothing, because it serves one workspace. The pre-paint
+script reads the cookie first and `localStorage` second, so a choice made on
+another workspace beats an older one remembered here. Two consequences of that
+order, both deliberate: System is written to the cookie as `system` rather
+than by deleting it — deleting would let a stale per-origin Light resurface —
+and a write reads the cookie back before removing this origin's copy, because
+a browser blocking cookies drops the write silently; then the choice falls
+back to `localStorage` and still survives a reload.
+
+**It is a cookie, and the legal pages said there were none.** The Cookie
+Notice and the Privacy Policy both stated the app sets no cookies. They now
+say it sets exactly one, `feoh_theme`: the one word, set only when the visitor
+picks a theme, identifying no one, classified like the language preference as
+functional storage the visitor explicitly asked for (ePrivacy's
+user-interface-customisation exemption). It is sent with navigations to the
+platform's hosts but not with API calls (the API client never sends
+credentials cross-origin). `storageInventory.test.ts` now fails if a second
+`document.cookie =` appears anywhere in `src/`, so "exactly one" cannot go
+stale silently the way "none" would have.
+
+**A picker on the auth pages.** A cross-workspace theme is most useful before
+there is a workspace, and signed-out visitors have no `/profile`. Every
+`AuthShell` page (sign-in, MFA, signup, verify, change-password) now carries
+the same picker under the form — `ui/ThemePicker`, extracted because it was
+about to be wired twice — outside `.form-wrap` so the shell's field styles
+never reach it.
+
+**hCaptcha follows the theme after first render.** It was told the palette
+once, at render, so changing the theme (or the OS, on System) left a dark
+captcha on a light form. hCaptcha has no call to restyle a live widget, so the
+page now loads it in explicit-render mode and an effect redraws it (remove +
+render) whenever `theme.resolved` changes — except when the visitor has
+already solved it: redrawing would discard a token they earned, for a
+cosmetic reason. A solved widget is redrawn in the current palette once its
+token is gone (expired, or spent on a submit).
+
+Guards: `src/lib/theme.test.ts` (the domain derivation — apex, workspace,
+localhost, IP, vanity, the site-URL-only production shape, and a custom
+domain under a foreign parent never getting a `Domain=` with only the legacy
+rule in play; cookie read/write incl. System, a blocked and a
+throwing jar; the pre-paint script against every cookie × stored value),
+`src/lib/legal/storageInventory.test.ts` (one cookie writer, and the notice
+says so), `tests-e2e/a11y/light-theme.spec.ts` (the cookie beats a stored
+choice at the first frame; localhost writes no cookie; the auth-shell picker
+persists and passes axe) and `tests-e2e/signup/flow.spec.ts` (the captcha
+redraws on a picker change and on an OS change, keeps a solved widget, and
+redraws after expiry).
+
+## 291. One address is one account in one workspace, and every collision says so (2026-10-20)
+
+**Found by the admin persona review.** `users.email` is globally unique, so an
+address names one account in one workspace and there is no multi-workspace
+membership. Three paths had not caught up with that:
+
+- **SSO/SAML JIT** searched only the signing-in workspace, then inserted, and the
+  UNIQUE constraint raised at flush: a bare `500` on the callback, no audit row.
+  A contractor in two customers' IdPs hit it on first sign-in and nobody could
+  see why. SCIM already answered the same collision with a `409`.
+- **Admin create/rename** answered a bare "Email already in use" — a dead end
+  for the inviter, and a platform-wide existence oracle for anyone holding
+  `user.manage`, including the admin of a free self-signup tenant.
+- **The `wrong_workspace` row** (§288) recorded neither the workspace whose page
+  it was nor that the password had verified.
+
+**The rules:**
+
+1. `identity_provisioning.email_holder_org_id` is the one platform-wide,
+   case-insensitive "who holds this address" lookup; JIT, admin and SCIM all ask
+   it before writing. JIT raises `EmailInOtherWorkspace` before the insert, and
+   the insert runs in a savepoint so a concurrent writer is the same refusal.
+2. **SSO refuses with a coded `403` `sso_email_in_other_workspace`, and no link.**
+   The password path links the account's own sign-in page because only someone
+   who proved the password sees it. Here the proof is an assertion from the
+   signing-in workspace's IdP, which that workspace's admin controls and can
+   make assert any address; a link would name another tenant's workspace (slug
+   or vanity host) for any address typed. The real user knows their own
+   workspace; the sentence tells them to sign in there or ask for a different
+   address. The row goes in the IdP's workspace (its admin is the one who can
+   act) and **not** in the account's: that admin must not be able to write
+   rows into another tenant's log by typing addresses. SAML routes the refusal
+   through a refusal-only handoff code so the browser lands on the SPA bridge,
+   not raw JSON at the ACS.
+3. **Admin and SCIM say which case it is** — `email_in_this_workspace` (edit the
+   existing user) or `email_in_other_workspace` (use a different address) —
+   naming no workspace and no account.
+4. **The remaining existence signal is bounded, not hidden.** While the address
+   is global, any refusal confirms it is taken. Hiding it would mean answering a
+   collision as if it succeeded (inventing a user that does not exist) or
+   refusing without a reason (the dead end again), so the admin path spends a
+   per-workspace budget of 20 other-workspace refusals an hour, checked before
+   the lookup so a throttled sweep learns nothing. Per workspace rather than per
+   user, so minting extra user-managers does not widen it. Once spent, EVERY
+   create and email rename in that workspace waits out the window — a free
+   address included, with its own coded 429 `email_check_throttled` saying so
+   — because refusing only the taken addresses would make the 429 the oracle.
+   That can pause a real onboarding for up to an hour after twenty
+   other-workspace hits, which is the accepted price. SCIM and SSO are **not**
+   budgeted, and their signal is accepted: an IdP re-sends a doomed SCIM write
+   every reconcile cycle, so a throttle would turn a stated 409 into a stuck
+   provisioning job, and a budget on SSO refusals would lock a whole
+   workspace's sign-ins; both also need the plan-gated SSO/SCIM feature and a
+   configured IdP, each SSO probe is a full browser round trip that leaves a
+   row in the prober's own audit log, and the same admin can already ask the
+   budgeted admin path.
+5. **`wrong_workspace` audits `attempted_workspace` and `password_verified:
+   true` in the account's workspace, and nothing in the attempted one.** An
+   unknown address leaves no row anywhere, so a row in the attempted workspace
+   only when the password was right would make its log an oracle; the event is
+   the account's.
+6. **The wrong-workspace link prefers a registered custom domain** when the org
+   sets no `tenant_url_template` (an explicit template still wins). The runbook
+   registers a host only once DNS and TLS are live, and the slug subdomain is a
+   different origin: another stored token, and no passkeys bound to the vanity
+   host. Other outbound links are unchanged.
+7. **A token refused as `token_tenant_mismatch` is also revoked**, best-effort,
+   by the SPA calling `POST /api/auth/logout` with it and without the page's
+   `X-Tenant-Slug` (logout reads the token's own claims and needs no
+   workspace). Clearing it locally left a live session in its own workspace.
+
+**Rejected:** silently linking or migrating the person into the second
+workspace (an IdP is not entitled to move an account between tenants), and
+true multi-workspace membership now — the right long-term model, but it
+reaches login, sessions, every `organization_id`-keyed user query, SCIM, JIT,
+access reviews and DSAR; tracked in `docs/followups.md` § Surfaced by the
+cross-workspace identity fixes.
+
+Tests: `backend/tests/test_email_identity_case.py` (JIT, the race, the OIDC
+callback, admin create/rename, the budget, SCIM, the wrong-workspace audit
+row), `backend/tests/test_saml_acs_integration.py` (ACS → bridge → exchange),
+`backend/tests/test_tenant_url_resolver.py` (the custom-domain link),
+`frontend/src/lib/api/sessionRejection.test.ts` (revocation) and
+`frontend/src/lib/api/codedRefusals.test.ts` (the three sentences).
+
 ## 293. SCIM writes are audited and last-admin guarded, the guard is serialized, and a deleted user's row says who they were (2026-10-20)
 
 An admin persona review found four gaps in how user accounts change, all in the

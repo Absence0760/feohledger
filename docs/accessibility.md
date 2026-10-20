@@ -248,7 +248,8 @@ The current build implements:
   required fields are marked.
 - **Sufficient colour contrast** in both the dark and the light theme (text and
   UI components meet the 4.5:1 / 3:1 AA thresholds; the theme follows the OS or
-  a per-browser choice on `/profile`, decisions §289), verified three ways: the
+  a choice on `/profile` or the auth pages, shared across the platform's
+  workspaces, decisions §289, §290), verified three ways: the
   contrast rules in the axe guard on what a route renders (`axe.spec.ts` dark,
   `light-theme.spec.ts` light), the stylesheet-wide colour-token scan on every
   rule in the app — once per theme — whether a guarded route renders it or not, and the
