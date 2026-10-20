@@ -3,7 +3,7 @@ import { expect, test } from '../fixtures/helpers';
 /**
  * `/profile` — the section rail.
  *
- * The seven cards used to render on one scroll, which meant every arrival also
+ * The cards (seven then; eight since the theme picker) used to render on one scroll, which meant every arrival also
  * fetched notification preferences, the passkey list and the signed-in-device
  * list. They are now one panel at a time, addressed by `?section=` through
  * `ui/SettingsRail.svelte`, and each of those three reads waits for its own
@@ -23,7 +23,8 @@ const SECTIONS = [
 	['passkeys', 'Passkeys'],
 	['sessions', 'Signed-in devices'],
 	['notifications', 'Notifications'],
-	['language', 'Language']
+	['language', 'Language'],
+	['appearance', 'Appearance']
 ] as const;
 
 test.describe('/profile — section rail', () => {
