@@ -123,6 +123,44 @@ test.describe('light theme — choosing, persisting, first paint', () => {
 		expect((await rootStyle(page)).scheme).toBe('dark');
 	});
 
+	test('the shared theme cookie wins over this origin’s stored choice, before the first frame', async ({
+		page
+	}) => {
+		// The cookie is how a choice made on another workspace — or on the
+		// apex signup page — arrives (docs/decisions.md §290); this origin's
+		// localStorage may still hold an older one. Set as a host cookie here:
+		// what reaches this page is the same `feoh_theme=…` pair either way,
+		// and the Domain derivation is unit-tested (`theme.test.ts`).
+		await page.emulateMedia({ colorScheme: 'dark' });
+		await storeTheme(page, 'dark');
+		await page.addInitScript(() => {
+			document.cookie = 'feoh_theme=light; path=/';
+		});
+		await recordFirstFrameTheme(page);
+		await page.goto('/profile?section=appearance');
+		await expect(page.getByRole('heading', { name: 'Appearance', exact: true })).toBeVisible();
+		expect(
+			await page.evaluate(() => (window as unknown as { __firstFrameTheme: string }).__firstFrameTheme)
+		).toBe('light');
+		await expect(page.getByRole('group', { name: 'Theme' }).getByRole('radio', { name: 'Light' })).toBeChecked();
+		expect(await rootStyle(page)).toEqual({ theme: 'light', bg: LIGHT_BG, scheme: 'light' });
+	});
+
+	test('on localhost the choice stays per origin: no cookie, localStorage only', async ({
+		page,
+		context
+	}) => {
+		// Browsers refuse `Domain=localhost`, so there is no platform domain to
+		// share across here; the store must not write a cookie that would only
+		// pretend to be shared.
+		await page.emulateMedia({ colorScheme: 'dark' });
+		await page.goto('/profile?section=appearance');
+		await page.getByRole('group', { name: 'Theme' }).getByRole('radio', { name: 'Light' }).check();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+		expect(await page.evaluate(() => localStorage.getItem('feoh_theme'))).toBe('light');
+		expect((await context.cookies()).filter((c) => c.name === 'feoh_theme')).toEqual([]);
+	});
+
 	test('an explicit Dark overrides a light OS', async ({ page }) => {
 		await page.emulateMedia({ colorScheme: 'light' });
 		await storeTheme(page, 'dark');
@@ -190,6 +228,28 @@ test.describe('light theme — axe (WCAG 2.2 AA), signed out', () => {
 		await page.goto('/portal/login');
 		await expect(page.locator('input[type="email"]')).toBeVisible();
 		expect((await rootStyle(page)).bg).toBe(LIGHT_BG);
+		await expectNoA11yViolations(page);
+	});
+
+	test('the auth shell carries a theme picker: it applies at once, persists, and is a keyboard radio group', async ({
+		page
+	}) => {
+		// Signed out there is no /profile to reach, and signup is where a new
+		// workspace's first theme is chosen (docs/decisions.md §290).
+		await page.goto('/login');
+		const group = page.getByRole('group', { name: 'Theme' });
+		await expect(group.getByRole('radio', { name: 'System' })).toBeChecked();
+		await group.getByRole('radio', { name: 'System' }).focus();
+		await page.keyboard.press('ArrowRight');
+		await page.keyboard.press('ArrowRight');
+		await expect(group.getByRole('radio', { name: 'Dark' })).toBeChecked();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await expect.poll(async () => (await rootStyle(page)).bg).toBe(DARK_BG);
+
+		await page.reload();
+		await expect(page.locator('input[type="email"]')).toBeVisible();
+		await expect(group.getByRole('radio', { name: 'Dark' })).toBeChecked();
+		expect((await rootStyle(page)).bg).toBe(DARK_BG);
 		await expectNoA11yViolations(page);
 	});
 
