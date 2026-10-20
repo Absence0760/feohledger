@@ -3992,6 +3992,9 @@ export const messages = {
 	'auth.verify.setPassword': 'Establecer tu contraseña',
 	'auth.verify.errorHeading': 'Algo salió mal',
 	'auth.verify.startOver': 'Empezar de nuevo',
+	'auth.verify.alreadyVerified': "Ya confirmaste este correo, así que tu espacio de trabajo está listo. Para elegir tu contraseña, usa el enlace de tu correo de bienvenida o «¿Olvidaste tu contraseña?» en la página de inicio de sesión.",
+	'auth.verify.goToSignIn': "Ir a iniciar sesión",
+	'auth.verify.existingHeading': "Ya tienes un espacio de trabajo",
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
 	'admin.usersRoles.title': 'Usuarios y roles',
 	'admin.usersRoles.inviteUser': '+ Invitar usuario',
@@ -5134,6 +5137,8 @@ export const messages = {
 	'refusal.mfaCodeInvalid': "Ese código no es válido. Compruebe su aplicación de autenticación e inténtelo de nuevo.",
 	'refusal.wrongWorkspace': "Esta cuenta pertenece a otro espacio de trabajo. Inicie sesión en {url}.",
 	'refusal.wrongWorkspaceNoLink': "Esta cuenta pertenece a otro espacio de trabajo. Inicie sesión en la página de ese espacio de trabajo.",
+	'refusal.signupEmailHasWorkspace': "Esta dirección de correo ya tiene un espacio de trabajo de FeohLedger. Inicie sesión en {url}.",
+	'refusal.signupEmailHasWorkspaceNoLink': "Esta dirección de correo ya tiene un espacio de trabajo de FeohLedger. Inicie sesión en la página de su espacio de trabajo.",
 	'csvImport.result.summary': '{imported} importadas, {skipped} omitidas',
 	'csvImport.toast.failed': 'Error al importar',
 	'csvImport.toast.partial': '{imported} importadas, {skipped} omitidas — vea los detalles abajo',

@@ -3969,6 +3969,9 @@ export const messages = {
 	'auth.verify.setPassword': 'Passwort festlegen',
 	'auth.verify.errorHeading': 'Etwas ist schiefgelaufen',
 	'auth.verify.startOver': 'Von vorne beginnen',
+	'auth.verify.alreadyVerified': "Sie haben diese E-Mail-Adresse bereits bestätigt, Ihr Arbeitsbereich ist also eingerichtet. Ihr Passwort legen Sie über den Link in Ihrer Willkommens-E-Mail fest oder über „Passwort vergessen“ auf der Anmeldeseite.",
+	'auth.verify.goToSignIn': "Zur Anmeldung",
+	'auth.verify.existingHeading': "Sie haben bereits einen Arbeitsbereich",
 	// Admin — Users & Roles host (routes/admin/+page.svelte)
 	'admin.usersRoles.title': 'Benutzer & Rollen',
 	'admin.usersRoles.inviteUser': '+ Benutzer einladen',
@@ -5111,6 +5114,8 @@ export const messages = {
 	'refusal.mfaCodeInvalid': "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
 	'refusal.wrongWorkspace': "Dieses Konto gehört zu einem anderen Workspace. Melden Sie sich unter {url} an.",
 	'refusal.wrongWorkspaceNoLink': "Dieses Konto gehört zu einem anderen Workspace. Melden Sie sich auf der Seite dieses Workspace an.",
+	'refusal.signupEmailHasWorkspace': "Für diese E-Mail-Adresse gibt es bereits einen FeohLedger-Arbeitsbereich. Melden Sie sich unter {url} an.",
+	'refusal.signupEmailHasWorkspaceNoLink': "Für diese E-Mail-Adresse gibt es bereits einen FeohLedger-Arbeitsbereich. Melden Sie sich auf der Seite Ihres Arbeitsbereichs an.",
 	'csvImport.result.summary': '{imported} importiert, {skipped} übersprungen',
 	'csvImport.toast.failed': 'Import fehlgeschlagen',
 	'csvImport.toast.partial': '{imported} importiert, {skipped} übersprungen — Details siehe unten',

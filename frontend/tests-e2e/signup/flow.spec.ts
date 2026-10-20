@@ -1,6 +1,14 @@
 import type { Page } from '@playwright/test';
 
-import { API_BASE, expect, NO_TENANT_BASE, TENANT_ROOT_URL, tenantBase, test } from '../fixtures/helpers';
+import {
+	ACME_ADMIN,
+	API_BASE,
+	expect,
+	NO_TENANT_BASE,
+	TENANT_ROOT_URL,
+	tenantBase,
+	test
+} from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 
 /**
@@ -73,6 +81,37 @@ async function waitForEmail(page: Page, email: string, subjectPrefix: string): P
 		)
 		.not.toBeNull();
 	return messageText(page, id!);
+}
+
+/**
+ * Like {@link waitForEmail}, but for an address other specs also mail (a seeded
+ * login): the message must also mention `needle`, so an older one with the same
+ * subject is never mistaken for this run's.
+ */
+async function waitForEmailMentioning(
+	page: Page,
+	email: string,
+	subjectPrefix: string,
+	needle: string
+): Promise<string> {
+	let text: string | null = null;
+	await expect
+		.poll(
+			async () => {
+				for (const msg of await messagesTo(page, email)) {
+					if (!msg.Subject.startsWith(subjectPrefix)) continue;
+					const body = await messageText(page, msg.ID);
+					if (body.includes(needle)) {
+						text = body;
+						break;
+					}
+				}
+				return text;
+			},
+			{ timeout: 15_000 }
+		)
+		.not.toBeNull();
+	return text!;
 }
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -349,6 +388,67 @@ test.describe('/verify — outcomes', () => {
 		await expect(page.getByRole('link', { name: 'Set your password' })).toHaveCount(0);
 	});
 
+	test('a re-opened link shows the workspace and a way to sign in, with nothing re-issued', async ({
+		page
+	}) => {
+		// decisions §290: a reload or a second tab used to get "invalid, sign up
+		// again". The server now re-answers a spent link with its workspace.
+		const signInUrl = `${tenantBase('stubco')}/login?email=admin%40stubco.example`;
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) =>
+				route.fulfill({
+					json: {
+						status: 'provisioned',
+						slug: 'stubco',
+						tenant_url: tenantBase('stubco'),
+						admin_email: 'admin@stubco.example',
+						set_password_url: null,
+						sign_in_url: signInUrl,
+						already_verified: true
+					}
+				})
+		);
+		await page.goto('/verify?token=' + 'x'.repeat(40));
+		await expect(page.getByRole('heading', { name: 'Your workspace is ready' })).toBeVisible();
+		await expect(page.getByText(/you already confirmed this email/i)).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute(
+			'href',
+			signInUrl
+		);
+		await expect(page.getByRole('link', { name: 'Set your password' })).toHaveCount(0);
+	});
+
+	test('an address that already has a workspace is pointed at it', async ({ page }) => {
+		const signInUrl = `${tenantBase('stubco')}/login?email=admin%40stubco.example`;
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) =>
+				route.fulfill({
+					status: 409,
+					json: {
+						detail: {
+							code: 'signup_email_has_workspace',
+							message: 'server English',
+							params: { sign_in_url: signInUrl }
+						}
+					}
+				})
+		);
+		await page.goto('/verify?token=' + 'x'.repeat(40));
+		await expect(
+			page.getByRole('heading', { name: 'You already have a workspace' })
+		).toBeVisible();
+		// The localized sentence, not the server's English.
+		await expect(
+			page.getByText('This email address already has a FeohLedger workspace.', { exact: false })
+		).toBeVisible();
+		await expect(
+			page.getByRole('link', { name: "Go to your workspace's sign-in page" })
+		).toHaveAttribute('href', signInUrl);
+		await expect(page.getByText(/something went wrong/i)).toHaveCount(0);
+	});
+
 	test('an invalid/expired token surfaces the uniform error', async ({ page }) => {
 		await page.goto('/verify?token=' + 'x'.repeat(40));
 		await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible({
@@ -406,6 +506,22 @@ test.describe('signup happy path (UI + Mailpit)', () => {
 		const setPassword = page.getByRole('link', { name: 'Set your password' });
 		await expect(setPassword).toHaveAttribute('href', emailed![0]);
 
+		// 3b. Opening the same link again — a second tab here — is re-answered
+		//     with the workspace, not "invalid, sign up again", and issues no
+		//     second set-password link (decisions §290).
+		const secondTab = await page.context().newPage();
+		await secondTab.goto(verifyLink![0]);
+		await expect(
+			secondTab.getByRole('heading', { name: 'Your workspace is ready' })
+		).toBeVisible({ timeout: 20_000 });
+		await expect(secondTab.getByText(/you already confirmed this email/i)).toBeVisible();
+		await expect(secondTab.getByRole('link', { name: 'Set your password' })).toHaveCount(0);
+		await expect(secondTab.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute(
+			'href',
+			`${tenantBase(slug)}/login?email=${encodeURIComponent(email)}`
+		);
+		await secondTab.close();
+
 		// 4. "Set your password" goes straight to the tenant's set-password page.
 		await setPassword.click();
 		await expect(page).toHaveURL(new RegExp(`^${tenantBase(slug)}/login/reset-password\\?`));
@@ -436,5 +552,51 @@ test.describe('signup happy path (UI + Mailpit)', () => {
 			data: { token }
 		});
 		expect(spent.status()).toBe(400);
+	});
+
+	test('an address that already has a workspace: verify link → pointed at that workspace', async ({
+		page
+	}) => {
+		// `users.email` is unique across workspaces, so this used to end in a 500
+		// "contact support" on every open of the link (decisions §290). /start
+		// still answers it like any other address — it is public.
+		const slug = `e2edup${Date.now().toString().slice(-9)}`;
+		const email = ACME_ADMIN.email;
+
+		await page.goto('/signup');
+		await page.getByLabel('Company name').fill('Duplicate Co');
+		await page.getByPlaceholder('acme').fill(slug);
+		await page.getByLabel('Your name').fill('Duplicate Admin');
+		await page.getByLabel('Email').fill(email);
+		await expect(page.locator('small.hint.ok')).toBeVisible({ timeout: 5_000 });
+		await page.getByRole('button', { name: 'Send verification email' }).click();
+		await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible({
+			timeout: 10_000
+		});
+
+		// The seeded login is mailed by other specs too: pick this run's message.
+		const verifyBody = await waitForEmailMentioning(page, email, 'Verify your FeohLedger', slug);
+		const verifyLink = verifyBody.match(/\/verify\?token=[A-Za-z0-9_-]+/);
+		expect(verifyLink, 'verify link in email').toBeTruthy();
+
+		const ownSignIn = `${tenantBase('acme')}/login?email=${encodeURIComponent(email)}`;
+		for (const open of ['first open', 'reload']) {
+			if (open === 'first open') await page.goto(verifyLink![0]);
+			else await page.reload();
+			await expect(
+				page.getByRole('heading', { name: 'You already have a workspace' }),
+				open
+			).toBeVisible({ timeout: 20_000 });
+			await expect(
+				page.getByRole('link', { name: "Go to your workspace's sign-in page" }),
+				open
+			).toHaveAttribute('href', ownSignIn);
+		}
+
+		// Nothing was created under the requested name.
+		const check = await page.request.get(`${API_BASE}/api/signup/slug-check`, {
+			params: { slug }
+		});
+		expect(((await check.json()) as { available: boolean }).available).toBe(true);
 	});
 });
