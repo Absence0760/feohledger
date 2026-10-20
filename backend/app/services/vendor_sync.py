@@ -16,6 +16,10 @@ overwrite its name. A link from another realm — or from before realms were
 recorded — is kept only when the pulled record with that id is recognisably the
 same supplier (same name, or the same tax id); otherwise it is dropped, audited
 (``change: "unlinked"``), and the record is matched afresh like any other.
+Between two NAMED companies that name or tax id must also be unique in the
+pull: one another record shares is not evidence that this colliding id is the
+same supplier (a pre-0115 link, overwhelmingly into the same company, keeps
+the looser rule).
 
 **Absence is evidence only in a whole listing.** That pass reads "no record
 with this id" as "not this company's vendor", and the name rule counts a name
@@ -137,6 +141,11 @@ async def sync_vendors_from_erp(
     for erp_v in erp_vendors:
         if erp_v.get("erp_vendor_id"):
             by_id.setdefault(str(erp_v["erp_vendor_id"]), erp_v)
+    # How often each identity appears in the pull: evidence another record
+    # shares does not single out the record at a colliding id.
+    evidence_counts = Counter(
+        key for record in by_id.values() for key in _identity_keys(record) if key
+    )
     if not by_id:
         # An empty pull proves nothing (module docstring): the pass below would
         # read every link's absence from it as "another company's vendor".
@@ -159,7 +168,10 @@ async def sync_vendors_from_erp(
             # link made under one (module docstring).
             continue
         record = by_id.get(vendor.erp_vendor_id)
-        if record is not None and _same_vendor(vendor, record):
+        unique_only = vendor.erp_link_realm is not None
+        if record is not None and _same_vendor(
+            vendor, record, evidence_counts if unique_only else None
+        ):
             if vendor.erp_link_realm is None:
                 realm_adopted += 1
             else:
@@ -397,14 +409,29 @@ def _norm_name(value: object) -> str:
     return " ".join(str(value or "").split()).casefold()
 
 
-def _same_vendor(vendor: Vendor, record: dict) -> bool:
+def _identity_keys(record: dict) -> tuple[tuple[str, str], tuple[str, str]]:
+    """The two identities a record can be recognised by: its normalised name
+    and its tax id (either blank when absent)."""
+    return (
+        ("name", _norm_name(record.get("name"))),
+        ("tax_id", (record.get("tax_id") or "").strip()),
+    )
+
+
+def _same_vendor(vendor: Vendor, record: dict, unique_in: Counter | None = None) -> bool:
     """Is the pulled ``record`` recognisably the supplier ``vendor`` was linked
     to? The evidence a link from another realm must show to be kept: the same
-    name (case and spacing aside), or the same non-blank tax id."""
-    if _norm_name(vendor.name) and _norm_name(vendor.name) == _norm_name(record.get("name")):
+    name (case and spacing aside), or the same non-blank tax id. With
+    ``unique_in`` (the pull's identity counts) that name or tax id must also
+    belong to no other record in the pull."""
+    name_key, tax_key = _identity_keys(record)
+
+    def holds(key: tuple[str, str]) -> bool:
+        return unique_in is None or unique_in[key] == 1
+
+    if name_key[1] and name_key[1] == _norm_name(vendor.name) and holds(name_key):
         return True
-    tax_id = (record.get("tax_id") or "").strip()
-    return bool(tax_id) and tax_id == (vendor.tax_id or "").strip()
+    return bool(tax_key[1]) and tax_key[1] == (vendor.tax_id or "").strip() and holds(tax_key)
 
 
 async def _audit_synced(

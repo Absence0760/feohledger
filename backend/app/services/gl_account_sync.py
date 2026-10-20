@@ -16,6 +16,12 @@ The rules, in the order they apply (docs/decisions.md §284):
    link from another realm, or from before realms were recorded, is kept only
    when this pull shows the same id holding the row's own code; otherwise it
    is dead — dropped, re-matched by code, and recorded in ``link_changes``.
+   The legacy key an older adapter gave an account (QuickBooks' bare
+   ``Name``, which two sub-accounts can share) counts as that evidence only
+   for a link from before realms were recorded, which is overwhelmingly a
+   link into the same company. A move between two NAMED companies needs the
+   current code; a row whose code is only a legacy key there keeps the
+   accounts that key names as ``erp_link_candidates`` for a person.
 1. **By the ERP's id first.** An account whose ``erp_account_id`` a row already
    holds updates that row — its name, type and parent — so a rename in the ERP
    renames our row instead of creating a second one. The row's **code is never
@@ -311,17 +317,20 @@ async def sync_chart_from_erp(
         return row.erp_link_realm is not None or pending_realm is not None
 
     # -- rule 0: a link made under another connection is not trusted --------
-    # Kept only when this pull shows the SAME id holding the row's own code
-    # (its current one, or the legacy key an older adapter gave it): then the
-    # id names the account the row's invoices meant in this company too.
-    # Anything else is dead — dropped here, re-matched by code below, and
-    # every change recorded in `link_changes` (the audit row lists them all).
+    # Kept only when this pull shows the SAME id holding the row's own code:
+    # then the id names the account the row's invoices meant in this company
+    # too. Its current code, or — for a pre-0115 link only — the legacy key an
+    # older adapter gave it: a legacy key is not unique, so between two named
+    # companies a colliding id that merely shares it proves nothing. Anything
+    # else is dead — dropped here, re-matched by code below, and every change
+    # recorded in `link_changes` (the audit row lists them all).
     dead: dict[uuid.UUID, str] = {}
     for row in all_rows:
         if row.erp_account_id is None or row.erp_link_realm == realm or foreign(row):
             continue
         acct = by_id.get(row.erp_account_id)
-        if acct is not None and _same_account(row.code, acct):
+        legacy_ok = row.erp_link_realm is None
+        if acct is not None and _same_account(row.code, acct, legacy_ok=legacy_ok):
             if row.erp_link_realm is None:
                 result.realm_adopted += 1
             else:
@@ -342,6 +351,11 @@ async def sync_chart_from_erp(
         row.erp_account_id = None
         row.erp_link_realm = None
         _clear_confirmation(row)
+        if legacy_claims.get(row.code):
+            # The row's code is a key an older adapter gave these accounts;
+            # which one its invoices meant is a person's call. Cleared if a
+            # code match re-links the row below.
+            row.erp_link_candidates = candidates_for(AMBIGUOUS_LEGACY, legacy_claims[row.code])
 
     # -- rules 3 and 4, over the whole organization -------------------------
     # A row a person confirmed is the answer to exactly the question these
@@ -499,10 +513,13 @@ async def sync_chart_from_erp(
     return result
 
 
-def _same_account(code: str, acct: GLAccountPayload) -> bool:
-    """Does ``acct`` answer to ``code`` — its current code, or a key an older
-    adapter gave it? The evidence a link from another realm must show."""
-    return code == (acct.code or "").strip() or code in acct.legacy_codes
+def _same_account(code: str, acct: GLAccountPayload, *, legacy_ok: bool) -> bool:
+    """Does ``acct`` answer to ``code`` — its current code, or (``legacy_ok``)
+    a key an older adapter gave it? The evidence a link from another realm
+    must show (rule 0)."""
+    if code == (acct.code or "").strip():
+        return True
+    return legacy_ok and code in acct.legacy_codes
 
 
 def _clear_confirmation(row: GLAccount) -> None:

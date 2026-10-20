@@ -289,6 +289,56 @@ async def test_the_same_id_holding_the_same_code_in_the_new_company_is_kept(real
     ]
 
 
+async def test_a_move_between_companies_needs_the_current_code_not_a_legacy_name(realdb):
+    """Sandbox "1000" was our "Job Materials" (keyed by its bare name before
+    §284). In production "1000" is "Landscaping Services:Job Materials", whose
+    legacy key is also "Job Materials" — a name QuickBooks lets two
+    sub-accounts share, so a colliding id holding it proves nothing. The link
+    is dropped and the account is offered for a person to confirm."""
+    row_id = await _add(
+        realdb,
+        code="Job Materials",
+        name="Job Materials",
+        erp_account_id="1000",
+        erp_link_realm=SANDBOX,
+    )
+    landscaping = _acct(
+        "Landscaping Services:Job Materials", "1000", legacy_codes=("Job Materials",)
+    )
+    result = await _sync(realdb, [landscaping], realm=PROD)
+
+    row = (await _chart(realdb))["Job Materials"]
+    assert row.id == row_id
+    assert (row.erp_account_id, row.erp_link_realm) == (None, None)
+    assert row.erp_link_candidates == {
+        "realm": PROD,
+        "reason": AMBIGUOUS_LEGACY,
+        "accounts": [
+            {
+                "erp_account_id": "1000",
+                "code": "Landscaping Services:Job Materials",
+                "name": "Landscaping Services:Job Materials",
+            }
+        ],
+    }
+    assert {"code": "Job Materials", "from": "1000", "to": None} in result.link_changes
+    assert "Job Materials" in result.unlinked
+
+
+async def test_a_pre_migration_link_still_takes_its_legacy_name_as_evidence(realdb):
+    """A NULL-realm link is overwhelmingly into the company it is still
+    connected to, where that legacy key is the row's own (§284's rule 4 then
+    judges whether it is ambiguous)."""
+    await _add(realdb, code="Job Materials", name="Job Materials", erp_account_id="1000")
+    landscaping = _acct(
+        "Landscaping Services:Job Materials", "1000", legacy_codes=("Job Materials",)
+    )
+    result = await _sync(realdb, [landscaping], realm=PROD)
+    row = (await _chart(realdb))["Job Materials"]
+    assert (row.erp_account_id, row.erp_link_realm) == ("1000", PROD)
+    assert result.realm_adopted == 1
+
+
 async def test_a_pre_migration_link_the_pull_confirms_is_adopted_silently(realdb):
     """A single-company tenant: its NULL-realm links are stamped, not churned."""
     await _add(realdb, code="6100", name="Office", erp_account_id="7")
@@ -488,6 +538,41 @@ async def test_a_sandbox_vendor_link_is_never_matched_by_the_colliding_productio
         "linked": "60",
     }
     assert by_change["unlinked"]["from_realm"] == SANDBOX
+
+
+async def test_a_vendor_move_between_companies_needs_evidence_unique_in_the_pull(realdb):
+    """Production has two "Acme" records, one at sandbox Acme's colliding "57".
+    A name two records share does not say which one our Acme is, so the link is
+    dropped and the name rule reports the ambiguity instead of guessing."""
+    await _add(
+        realdb, Vendor, name="Acme", erp_vendor_id="57", erp_link_realm=SANDBOX, source="erp_sync"
+    )
+    result = await _vsync(realdb, [_vendor("57", "Acme"), _vendor("60", "Acme")], realm=PROD)
+
+    acme = (await _vendors(realdb))["Acme"]
+    assert (acme.erp_vendor_id, acme.erp_link_realm) == (None, None)
+    assert result["unlinked"] == ["Acme"]
+    assert result["realm_adopted"] == 0
+    assert result["conflicts"] == [
+        {"name": "Acme", "reason": "ambiguous_name", "erp_vendor_ids": ["57", "60"]}
+    ]
+    # A tax id only this record holds is still evidence.
+    await _add(
+        realdb,
+        Vendor,
+        name="Beta",
+        tax_id="98-7654321",
+        erp_vendor_id="70",
+        erp_link_realm=SANDBOX,
+        source="erp_sync",
+    )
+    await _vsync(
+        realdb,
+        [_vendor("70", "Beta Trading", tax_id="98-7654321"), _vendor("71", "Beta Trading")],
+        realm=PROD,
+    )
+    beta = (await _vendors(realdb))["Beta Trading"]
+    assert (beta.erp_vendor_id, beta.erp_link_realm) == ("70", PROD)
 
 
 async def test_a_pre_migration_vendor_link_the_pull_confirms_is_adopted(realdb):
