@@ -474,7 +474,12 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
     instance and hands it back on the next attempt — a manual retry after a
     non-retryable `job_unconfirmed` included — so the adapter checks that job
     instead of queueing a second bill. A later result without one clears it."""
-    from app.services.erp import PENDING_JOB_KEY, ErpPostRefusedError, _call_erp
+    from app.services.erp import (
+        OUTCOME_UNKNOWN_KEY,
+        PENDING_JOB_KEY,
+        ErpPostRefusedError,
+        _call_erp,
+    )
     from app.services.erp_adapters.base import ErpPostResult
 
     seen: list[str | None] = []
@@ -494,13 +499,22 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
     with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
         with pytest.raises(ErpPostRefusedError):
             await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
-        assert inst.state_data == {"erp_retries": 0, PENDING_JOB_KEY: "job-41"}
+        assert inst.state_data == {
+            "erp_retries": 0,
+            PENDING_JOB_KEY: "job-41",
+            OUTCOME_UNKNOWN_KEY: True,
+        }
 
         ref = await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
 
     assert ref == "FE-9"
     assert seen == [None, "job-41"]
-    assert inst.state_data == {"erp_retries": 0, PENDING_JOB_KEY: None}
+    assert inst.state_data == {
+        "erp_retries": 0,
+        PENDING_JOB_KEY: None,
+        OUTCOME_UNKNOWN_KEY: False,
+        "erp_reference": "FE-9",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -925,6 +939,7 @@ async def test_call_erp_keeps_the_id_of_a_bill_a_refusal_left_in_the_erp(kind):
     from app.services.erp import (
         ORPHAN_DOCUMENT_ID_KEY,
         ORPHAN_DOCUMENT_NUMBER_KEY,
+        OUTCOME_UNKNOWN_KEY,
         _call_erp,
     )
 
@@ -948,6 +963,7 @@ async def test_call_erp_keeps_the_id_of_a_bill_a_refusal_left_in_the_erp(kind):
         "erp_retries": 0,
         ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7",
         ORPHAN_DOCUMENT_NUMBER_KEY: "BILL-0007",
+        OUTCOME_UNKNOWN_KEY: True,
     }
 
 
@@ -975,7 +991,7 @@ async def test_call_erp_retryable_failure_carries_the_bill_ids_too():
 async def test_call_erp_failure_without_a_document_keeps_the_earlier_orphan():
     """A later attempt that reports no document does not erase the bill an
     earlier attempt left in the ERP — it is still there."""
-    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY, _call_erp
+    from app.services.erp import ORPHAN_DOCUMENT_ID_KEY, OUTCOME_UNKNOWN_KEY, _call_erp
     from app.services.erp_adapters.base import erp_refusal
 
     class _Adapter:
@@ -988,7 +1004,7 @@ async def test_call_erp_failure_without_a_document_keeps_the_earlier_orphan():
         with pytest.raises(ErpPostRefusedError) as exc:
             await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
     assert exc.value.erp_document_id is None
-    assert inst.state_data == state
+    assert inst.state_data == {**state, OUTCOME_UNKNOWN_KEY: True}
 
 
 @pytest.mark.asyncio
@@ -998,6 +1014,7 @@ async def test_call_erp_success_clears_an_earlier_orphan():
     from app.services.erp import (
         ORPHAN_DOCUMENT_ID_KEY,
         ORPHAN_DOCUMENT_NUMBER_KEY,
+        OUTCOME_UNKNOWN_KEY,
         _call_erp,
     )
     from app.services.erp_adapters.base import ErpPostResult
@@ -1016,7 +1033,11 @@ async def test_call_erp_success_clears_an_earlier_orphan():
     with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
         ref = await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
     assert ref == "XERO-BILL-7"
-    assert inst.state_data == {"erp_retries": 0}
+    assert inst.state_data == {
+        "erp_retries": 0,
+        OUTCOME_UNKNOWN_KEY: False,
+        "erp_reference": "XERO-BILL-7",
+    }
 
 
 @pytest.mark.asyncio
@@ -1423,3 +1444,132 @@ async def test_a_coded_erp_refusal_records_its_params_on_the_audit_row():
         "code": "account_inactive",
         "params": {"intuit_code": "2500", "accounts": ["6100"], "provider": "QuickBooks Online"},
     }
+
+
+# ---------------------------------------------------------------------------
+# _call_erp — whether the ERP may already hold the bill (decisions §286)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("answer", "unknown"),
+    [
+        ("retryable", True),
+        ("raised", True),
+        # Fail-closed: from here a refusal made before anything was sent cannot
+        # be told from one made after the create went through (a QuickBooks
+        # read-back that lost its connection answers `not_connected`; a Xero
+        # read-back raises it), so every non-success counts.
+        ("refused", True),
+        ("not_connected", True),
+        ("success", False),
+    ],
+)
+async def test_call_erp_records_whether_the_attempt_outcome_is_unknown(answer, unknown):
+    """Only a success says definitely where the bill stands."""
+    from app.services.erp import OUTCOME_UNKNOWN_KEY, _call_erp
+    from app.services.erp_adapters.base import ErpPostResult, erp_refusal
+    from app.services.erp_oauth import ErpNotConnectedError
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            if answer == "raised":
+                raise TimeoutError("read timed out")
+            if answer == "not_connected":
+                raise ErpNotConnectedError("quickbooks_online")
+            if answer == "retryable":
+                return ErpPostResult(success=False, message="HTTP 503", retryable=True)
+            if answer == "refused":
+                return erp_refusal("Xero", "vendor_not_linked")
+            return ErpPostResult(success=True, erp_document_id="B-1")
+
+    inst = _instance(state_data={})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        if answer == "success":
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+        else:
+            with pytest.raises((RuntimeError, TimeoutError)):
+                await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is unknown
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_after_an_unknown_outcome_keeps_it_unknown():
+    """The refusal posted nothing, but the earlier 503 may have."""
+    from app.services.erp import OUTCOME_UNKNOWN_KEY, _call_erp, possibly_posted
+    from app.services.erp_adapters.base import erp_refusal
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return erp_refusal("Xero", "vendor_not_linked")
+
+    inst = _instance(state_data={"erp_retries": 1, OUTCOME_UNKNOWN_KEY: True})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostRefusedError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is True
+    assert possibly_posted(inst.state_data)
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ({}, False),
+        ({"erp_retries": 0}, False),
+        # A row written before the key existed is read fail-closed.
+        ({"erp_retries": 3, "last_error": "HTTP 503"}, True),
+        ({"erp_retries": 0, "last_error": "HTTP 503"}, True),
+        # Once pinned, the recorded value wins over the legacy reading.
+        ({"last_error": "refused", "erp_outcome_unknown": False}, False),
+        ({"erp_outcome_unknown": True}, True),
+        ({"erp_outcome_unknown": False, "erp_pending_job_id": "job-41"}, True),
+        ({"erp_outcome_unknown": False, "erp_orphan_document_id": "B-7"}, True),
+        ({"erp_outcome_unknown": False, "erp_reference": "B-1"}, True),
+    ],
+)
+def test_possibly_posted(state, expected):
+    from app.services.erp import possibly_posted
+
+    assert possibly_posted(state) is expected
+
+
+@pytest.mark.asyncio
+async def test_call_erp_commits_the_unknown_outcome_before_the_adapter_call():
+    """A worker that dies mid-call (a Lambda timeout SQS redelivers) leaves the
+    committed row saying the bill may exist, not the state before the call."""
+    from app.services.erp import OUTCOME_UNKNOWN_KEY, _call_erp
+    from app.services.erp_adapters.base import ErpPostResult
+
+    inst = _instance(state_data={})
+    db = _line_items_db([])
+    seen_at_call: list[tuple[int, object]] = []
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            seen_at_call.append((db.commit.await_count, inst.state_data[OUTCOME_UNKNOWN_KEY]))
+            return ErpPostResult(success=True, erp_document_id="B-1")
+
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        await _call_erp(db, _invoice(), {"type": "x"}, instance=inst)
+    assert seen_at_call == [(1, True)]
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is False
+
+
+@pytest.mark.asyncio
+async def test_a_success_clears_an_earlier_unknown_and_names_the_bill():
+    """The success is the bill of record, recorded with the result itself so a
+    failure before the caller's transitions commit still reads as posted."""
+    from app.services.erp import OUTCOME_UNKNOWN_KEY, _call_erp, possibly_posted
+    from app.services.erp_adapters.base import ErpPostResult
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return ErpPostResult(success=True, erp_document_id="B-1")
+
+    inst = _instance(state_data={"erp_retries": 1, OUTCOME_UNKNOWN_KEY: True})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is False
+    assert inst.state_data["erp_reference"] == "B-1"
+    assert possibly_posted(inst.state_data)

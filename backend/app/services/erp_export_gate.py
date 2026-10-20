@@ -14,7 +14,10 @@ Two places ask, with one predicate (``payment_runs.blocking_exception_types``):
   dispatcher and the Lambda worker), and it re-reads on every attempt, so a
   flag raised between retries stops the next one. It raises
   ``ErpPostRefusedError`` with :func:`blocked_export_refusal`, which lands the
-  invoice at ``failed`` without spending the retry budget.
+  invoice at ``failed`` without spending the retry budget. When an earlier
+  attempt's outcome is unknown (``erp.possibly_posted``: a timeout or 5xx the
+  ERP may have applied), the refusal and the audit row say
+  ``possibly_posted: true``, since that bill would already be payable there.
 * the three HTTP doors in ``api/workflow.py``, before they move the invoice to
   ``sending_to_erp``, so the user gets a 409 saying what to do instead of a
   queued push that fails a moment later, and the invoice stays where it was.
@@ -54,14 +57,32 @@ async def erp_export_blocking_exception(db: AsyncSession, invoice_id: uuid.UUID)
     return blocked.get(invoice_id)
 
 
-def blocked_export_message(exception_type: str) -> str:
+#: Appended to the English when an earlier attempt may have created the bill.
+_POSSIBLY_POSTED_NOTE = "a bill from an earlier attempt may already be in the ERP"
+
+
+def blocked_export_message(exception_type: str, *, possibly_posted: bool = False) -> str:
     """The English ``error`` on the ``invoice.erp_failed`` row."""
-    return f"ERP post refused: {EXCEPTION_BLOCKS_ERP_EXPORT} ({exception_type})"
+    message = f"ERP post refused: {EXCEPTION_BLOCKS_ERP_EXPORT} ({exception_type})"
+    return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
 
 
-def blocked_export_refusal(exception_type: str) -> dict:
+def blocked_export_params(exception_type: str, *, possibly_posted: bool = False) -> dict:
+    """The refusal's params. ``possibly_posted`` appears only when true (an
+    earlier attempt's outcome is unknown, ``erp.possibly_posted``), so a
+    first-attempt refusal keeps the shape it always had."""
+    params: dict = {"exception_type": exception_type}
+    if possibly_posted:
+        params["possibly_posted"] = True
+    return params
+
+
+def blocked_export_refusal(exception_type: str, *, possibly_posted: bool = False) -> dict:
     """The coded ``refusal`` beside it, in ``erp.erp_refusal_record``'s shape."""
-    return {"code": EXCEPTION_BLOCKS_ERP_EXPORT, "params": {"exception_type": exception_type}}
+    return {
+        "code": EXCEPTION_BLOCKS_ERP_EXPORT,
+        "params": blocked_export_params(exception_type, possibly_posted=possibly_posted),
+    }
 
 
 async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> None:
@@ -76,17 +97,30 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> 
     transition.
     """
     from app.api.refusals import coded_refusal
+    from app.services.erp import possibly_posted
+    from app.services.workflow_engine import get_workflow_instance
 
     exception_type = await erp_export_blocking_exception(db, invoice_id)
     if exception_type is None:
         return
+    # `/retry-erp` after a timed-out attempt: the bill may already be there.
+    instance = await get_workflow_instance(db, invoice_id)
+    posted = possibly_posted(instance.state_data if instance is not None else None)
     await db.commit()
+    message = (
+        f"This invoice has an open {exception_type.replace('_', ' ')} exception. "
+        "Resolve or dismiss it in Exceptions, then send it to the ERP."
+    )
+    if posted:
+        message += (
+            " An earlier attempt may already have created the bill in the ERP; "
+            "check there before anyone pays it."
+        )
     raise HTTPException(
         status_code=409,
         detail=coded_refusal(
             EXCEPTION_BLOCKS_ERP_EXPORT,
-            f"This invoice has an open {exception_type.replace('_', ' ')} exception. "
-            "Resolve or dismiss it in Exceptions, then send it to the ERP.",
-            exception_type=exception_type,
+            message,
+            **blocked_export_params(exception_type, possibly_posted=posted),
         ),
     )

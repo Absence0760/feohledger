@@ -6167,6 +6167,7 @@ export const messages = {
 	'erpRefusal.companySubscriptionInactive': "{provider} rechazó esta factura porque la suscripción de la empresa ha finalizado, se canceló o tiene un problema de facturación. Resuélvalo en {provider} y vuelva a intentarlo.",
 	'erpRefusal.intuitFault': "{provider} rechazó esta factura (error de Intuit {code}). Compare los datos de la factura con {provider}, corríjalos y vuelva a intentarlo. Si sigue fallando, comunique el código de error a un administrador.",
 	'erpRefusal.exceptionBlocksExport': "Esta factura tiene una excepción abierta ({type}). Resuélvala o descártela en Excepciones y, después, envíela al ERP.",
+	'erpRefusal.exceptionBlocksExportPossiblyPosted': "Esta factura tiene una excepción abierta ({type}) y es posible que un intento anterior ya haya creado la factura en el ERP. Compruebe el ERP antes de que nadie la pague y, después, resuelva o descarte la excepción en Excepciones.",
 	'glAccounts.toast.synced': "Se sincronizaron {created} cuentas nuevas y {updated} actualizadas.",
 	'glAccounts.toast.syncConflicts': "Sin vincular porque el código lo comparten varias cuentas del ERP, ya está en uso o es demasiado largo: {codes}.",
 	'glAccounts.toast.syncUnlinked': "Desvinculadas porque el código ya no identifica una sola cuenta del ERP; vuelva a codificar sus facturas: {codes}.",

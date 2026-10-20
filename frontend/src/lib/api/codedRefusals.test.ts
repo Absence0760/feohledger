@@ -501,4 +501,14 @@ describe('the ERP send refused for an open duplicate or fraud exception (§286)'
 	it('falls back to the server sentence when the type is missing', () => {
 		expect(codedRefusalText('exception_blocks_erp_export', {}, enT)).toBeNull();
 	});
+
+	it('says the bill may already be in the ERP on a retry after a timed-out push', () => {
+		expect(
+			codedRefusalText(
+				'exception_blocks_erp_export',
+				{ exception_type: 'duplicate', possibly_posted: true },
+				enT
+			)
+		).toContain('an earlier attempt may already have created the bill in the ERP');
+	});
 });

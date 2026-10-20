@@ -167,6 +167,10 @@ async def _push(mk, inv_id, *, adapter=None) -> None:
                 await send_to_erp_internal(s, inv, actor_id=None, erp_config=None)
 
 
+async def _no_sleep(_seconds) -> None:
+    return None
+
+
 class _SpyAdapter:
     """An adapter that must never be reached."""
 
@@ -348,6 +352,105 @@ async def test_call_erp_refuses_before_any_adapter_is_built():
             await _call_erp(_Db(), SimpleNamespace(id=inv_id), {"type": "quickbooks_online"})
     factory.assert_not_called()
     assert exc.value.refusal == {"code": CODE, "params": {"exception_type": "duplicate"}}
+
+
+# ---------------------------------------------------------------------------
+# a refusal after an attempt whose outcome is unknown: the bill may be there
+# ---------------------------------------------------------------------------
+
+
+async def _set_state(mk, inv_id, state_data: dict) -> None:
+    async with mk() as s:
+        await s.execute(
+            update(WorkflowInstance)
+            .where(WorkflowInstance.invoice_id == inv_id)
+            .values(state_data=state_data)
+        )
+        await s.commit()
+
+
+async def test_a_flag_raised_during_a_503_refuses_the_next_attempt_as_possibly_posted(
+    realdb, monkeypatch
+):
+    """The first attempt answers 503, which the ERP may still have applied; a
+    fraud flag lands while it was in flight. The next attempt is refused by
+    the gate, and the refusal and the `invoice.erp_failed` row say a bill may
+    already be in the ERP, rather than reading as "nothing was posted"."""
+    from app.services.erp_adapters.base import ErpPostResult
+
+    monkeypatch.setattr("app.services.erp.asyncio.sleep", _no_sleep)
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="ERPX-503", status=InvoiceStatus.sending_to_erp)
+
+    class _TimesOutThenFlagged:
+        def __init__(self):
+            self.posted = 0
+
+        async def post_invoice(self, payload):
+            self.posted += 1
+            await _open(mk, info.org_id, inv_id, "fraud_flag")
+            return ErpPostResult(success=False, message="HTTP 503", retryable=True)
+
+    adapter = _TimesOutThenFlagged()
+    await _push(mk, inv_id, adapter=adapter)
+
+    assert adapter.posted == 1, "the gate stops the second attempt"
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    (failed,) = await _audit(mk, inv_id, "invoice.erp_failed")
+    assert failed.details["refusal"] == {
+        "code": CODE,
+        "params": {"exception_type": "fraud_flag", "possibly_posted": True},
+    }
+    assert failed.details["possibly_posted"] is True
+    assert failed.details["error"] == (
+        f"ERP post refused: {CODE} (fraud_flag); "
+        "a bill from an earlier attempt may already be in the ERP"
+    )
+
+
+async def test_retry_erp_after_a_timed_out_push_says_the_bill_may_be_posted(realdb, dispatched):
+    """The 409 from `/retry-erp` carries the same hint as the audit row."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="ERPX-RETRY-503", status=InvoiceStatus.failed)
+    await _set_state(
+        mk, inv_id, {"erp_retries": 3, "last_error": "HTTP 503", "erp_outcome_unknown": True}
+    )
+    await _open(mk, info.org_id, inv_id, "duplicate")
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/retry-erp")
+
+    assert res.status_code == 409, res.text
+    detail = res.json()["detail"]
+    assert detail["code"] == CODE
+    assert detail["params"] == {"exception_type": "duplicate", "possibly_posted": True}
+    assert "may already have created the bill in the ERP" in detail["message"]
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    assert dispatched == []
+
+
+async def test_a_refusal_after_only_refusals_does_not_claim_a_bill(realdb):
+    """No attempt reached the ERP: the gate refused the first one, so the second
+    refusal must not claim a bill may exist (its own `last_error` is not a
+    timeout)."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="ERPX-TWICE", status=InvoiceStatus.sending_to_erp)
+    await _open(mk, info.org_id, inv_id, "duplicate")
+
+    await _push(mk, inv_id, adapter=_SpyAdapter())
+    async with mk() as s:
+        await s.execute(
+            update(Invoice).where(Invoice.id == inv_id).values(status=InvoiceStatus.sending_to_erp)
+        )
+        await s.commit()
+    await _push(mk, inv_id, adapter=_SpyAdapter())
+
+    for row in await _audit(mk, inv_id, "invoice.erp_failed"):
+        assert "possibly_posted" not in row.details
+        assert row.details["refusal"]["params"] == {"exception_type": "duplicate"}
 
 
 # ---------------------------------------------------------------------------

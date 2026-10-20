@@ -6072,6 +6072,7 @@ export const messages = {
 	'erpRefusal.companySubscriptionInactive': "会社のサブスクリプションが終了、解約、または支払いの問題があるため、{provider} がこの請求を拒否しました。{provider} で解決してから再試行してください。",
 	'erpRefusal.intuitFault': "{provider} がこの請求を拒否しました（Intuit エラー {code}）。請求の内容を {provider} と照らし合わせて修正してから再試行してください。失敗が続く場合は、管理者にエラーコードを伝えてください。",
 	'erpRefusal.exceptionBlocksExport': "この請求書には未解決の例外（{type}）があります。「例外」で解決または却下してから、ERP に送信してください。",
+	'erpRefusal.exceptionBlocksExportPossiblyPosted': "この請求書には未解決の例外（{type}）があり、以前の送信で ERP に請求書が既に作成されている可能性があります。支払われる前に ERP を確認し、「例外」で例外を解決または却下してください。",
 	'glAccounts.toast.synced': "新規 {created} 件、更新 {updated} 件の勘定科目を同期しました。",
 	'glAccounts.toast.syncConflicts': "コードが複数の ERP 勘定科目で共有されている、すでに使われている、または長すぎるため、紐付けませんでした: {codes}。",
 	'glAccounts.toast.syncUnlinked': "コードが 1 つの ERP 勘定科目を特定しなくなったため、紐付けを解除しました。該当する請求書を仕訳し直してください: {codes}。",

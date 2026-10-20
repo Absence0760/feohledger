@@ -32,8 +32,10 @@ type Params = Record<string, unknown>;
 
 /** An open duplicate / fraud exception refused the push before any adapter ran
  *  (`backend/app/services/erp_export_gate.py`, decisions §286). It names the
- *  exception TYPE, not a provider. The same code is the 409 the send doors
- *  answer with, which `codedRefusals.ts` states through this module. */
+ *  exception TYPE, not a provider, and carries `possibly_posted: true` when an
+ *  earlier attempt may have created the bill anyway. The same code is the 409
+ *  the send doors answer with, which `codedRefusals.ts` states through this
+ *  module. */
 export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
 
 /** The refusals raised outside an adapter, which name no provider. */
@@ -115,7 +117,14 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 		const type = refusal.params.exception_type;
 		if (typeof type !== 'string' || !type.trim()) return null;
 		const label = exceptionTypeLabelKey(type);
-		return t(key, { type: label ? t(label) : exceptionTypeFallback(type) });
+		// An earlier attempt timed out or failed in a way the ERP may still
+		// have applied (`possibly_posted`), so the bill may already be there,
+		// payable from the ERP: say so, and where to look first.
+		const sentence: MessageKey =
+			refusal.params.possibly_posted === true
+				? 'erpRefusal.exceptionBlocksExportPossiblyPosted'
+				: key;
+		return t(sentence, { type: label ? t(label) : exceptionTypeFallback(type) });
 	}
 	// The adapter's fixed literal ("QuickBooks Online"). Every other sentence
 	// names it, so a refusal recorded without one is stated by the server.

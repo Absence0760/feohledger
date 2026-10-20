@@ -52,6 +52,46 @@ ORPHAN_DOCUMENT_ID_KEY = "erp_orphan_document_id"
 ORPHAN_DOCUMENT_NUMBER_KEY = "erp_orphan_document_number"
 _ORPHAN_KEYS = (ORPHAN_DOCUMENT_ID_KEY, ORPHAN_DOCUMENT_NUMBER_KEY)
 
+#: ``WorkflowInstance.state_data`` key: True once an attempt of this push
+#: reached the adapter and did not come back with a success, so the ERP may
+#: hold the bill even though we recorded a failure; False after a success.
+#: Fail-closed on purpose: from here a refusal the adapter made before sending
+#: anything (``vendor_not_linked``) cannot be told apart from one it made after
+#: the create went through (a QuickBooks read-back that lost its connection
+#: returns ``not_connected``; a Xero read-back raises it), so every non-success
+#: counts. It is committed as True BEFORE the adapter call, so a worker that
+#: dies mid-call (a Lambda timeout, which SQS redelivers) leaves it True.
+#: Read through :func:`possibly_posted`, which is what a later refusal reports.
+OUTCOME_UNKNOWN_KEY = "erp_outcome_unknown"
+
+
+def _outcome_unknown(state_data: dict | None) -> bool:
+    """The recorded :data:`OUTCOME_UNKNOWN_KEY`, read fail-closed for a row
+    written before the key existed: any failure it records may have been a
+    timeout the ERP applied."""
+    state = state_data or {}
+    if OUTCOME_UNKNOWN_KEY in state:
+        return bool(state[OUTCOME_UNKNOWN_KEY])
+    return bool(state.get("last_error") or state.get("erp_retries"))
+
+
+def possibly_posted(state_data: dict | None) -> bool:
+    """May the ERP already hold a bill for this invoice?
+
+    True when an earlier attempt's outcome is unknown, an ERP job it queued is
+    unconfirmed (``PENDING_JOB_KEY``), it left a bill behind (the orphan keys),
+    or an earlier push was confirmed (``erp_reference``). A refusal that stops
+    the next attempt says so (decisions §286), because a bill already in the
+    ERP is payable there whatever our gate decides.
+    """
+    state = state_data or {}
+    return bool(
+        _outcome_unknown(state)
+        or state.get(PENDING_JOB_KEY)
+        or any(state.get(key) for key in _ORPHAN_KEYS)
+        or state.get("erp_reference")
+    )
+
 
 @dataclass(frozen=True)
 class ErpRefs:
@@ -370,6 +410,16 @@ def _orphan_details(exc: BaseException, state_data: dict | None) -> dict:
     return details
 
 
+def _possibly_posted_details(instance: WorkflowInstance | None) -> dict:
+    """``{"possibly_posted": True}`` for the failure audit row when the ERP may
+    already hold this bill (:func:`possibly_posted`), so whoever reads why the
+    push failed knows to look in the ERP before anyone pays or re-posts it.
+    Empty otherwise, and with no workflow instance to read."""
+    if instance is not None and possibly_posted(instance.state_data):
+        return {"possibly_posted": True}
+    return {}
+
+
 def _is_final(exc: BaseException) -> bool:
     """Would a re-send fail the same way? Then the push is not retried."""
     from app.services.erp_oauth import ErpNotConnectedError, ErpTokenRefreshError
@@ -475,6 +525,7 @@ async def send_to_erp_internal(
                         "retries": attempt + 1,
                         **_refusal_details(exc),
                         **_orphan_details(exc, instance.state_data if instance else None),
+                        **_possibly_posted_details(instance),
                     },
                 )
                 if instance:
@@ -540,15 +591,32 @@ async def _call_erp(
     second one. A failure that reports the bill it left in the ERP has that
     bill's ids kept the same way (``ORPHAN_DOCUMENT_ID_KEY`` /
     ``ORPHAN_DOCUMENT_NUMBER_KEY``) and carried on the raised error; a success
-    clears them. The caller's commit persists all of it.
+    clears them. The caller's commit persists all of it, except
+    ``OUTCOME_UNKNOWN_KEY = True``, which is committed here before the call.
     """
+    # Pin how much we know about earlier attempts before this one writes
+    # `last_error`: a row from before `OUTCOME_UNKNOWN_KEY` is read once, from
+    # what it records, and every later read takes the pinned value.
+    state = (instance.state_data if instance is not None else None) or {}
+    prior_unknown = _outcome_unknown(state)
+    if instance is not None and OUTCOME_UNKNOWN_KEY not in state:
+        state = {**state, OUTCOME_UNKNOWN_KEY: prior_unknown}
+        instance.state_data = state
+
     # Before anything reaches an adapter: a bill whose liability is in question
     # (an open duplicate or fraud flag) is never posted, because once it is in
     # the ERP it can be paid there, past our payment-run gate (decisions §286).
+    # A retry after an attempt whose outcome is unknown may find the bill
+    # already there, so the refusal says so rather than reading as "nothing
+    # was posted". Nothing is looked up in the ERP from here: the gate refuses
+    # before any adapter is built, and once a person clears the flag the next
+    # push's own idempotency lookup finds that bill instead of posting another.
     blocking = await erp_export_blocking_exception(db, invoice.id)
     if blocking is not None:
+        posted = possibly_posted(state)
         raise ErpPostRefusedError(
-            blocked_export_message(blocking), refusal=blocked_export_refusal(blocking)
+            blocked_export_message(blocking, possibly_posted=posted),
+            refusal=blocked_export_refusal(blocking, possibly_posted=posted),
         )
 
     config = erp_config or {"type": "mock", "integration_method": "direct"}
@@ -557,12 +625,26 @@ async def _call_erp(
     line_items = await _fetch_line_items(db, invoice.id)
     refs = await _resolve_erp_refs(db, invoice, line_items, config)
     payload = _build_payload(invoice, line_items, refs)
-    state = (instance.state_data if instance is not None else None) or {}
     payload.pending_job_id = state.get(PENDING_JOB_KEY)
+    # Until the ERP answers, assume it may act on this request, and commit that
+    # before the call: an exception out of the adapter reaches the caller's
+    # failure path with it on the instance, and a worker that dies mid-call
+    # leaves it in the row the redelivered attempt reads. The commit also ends
+    # the transaction for the length of the HTTP call.
+    if instance is not None:
+        instance.state_data = {**state, OUTCOME_UNKNOWN_KEY: True}
+        await db.commit()
     result = await adapter.post_invoice(payload)
+    reference = result.erp_document_id or result.erp_document_number or "UNKNOWN"
 
     if instance is not None:
         new_state = dict(state)
+        new_state[OUTCOME_UNKNOWN_KEY] = not result.success
+        if result.success:
+            # Recorded with the success itself, not only once the caller's
+            # transitions commit: a failure between the two would otherwise
+            # leave a confirmed bill reading as never posted.
+            new_state["erp_reference"] = reference
         if result.pending_job_id != payload.pending_job_id:
             new_state[PENDING_JOB_KEY] = result.pending_job_id
         if result.success:
@@ -571,8 +653,7 @@ async def _call_erp(
         elif result.erp_document_id or result.erp_document_number:
             new_state[ORPHAN_DOCUMENT_ID_KEY] = result.erp_document_id
             new_state[ORPHAN_DOCUMENT_NUMBER_KEY] = result.erp_document_number
-        if new_state != state:
-            instance.state_data = new_state
+        instance.state_data = new_state
 
     if not result.success:
         error = ErpPostFailedError if result.retryable else ErpPostRefusedError
@@ -583,4 +664,4 @@ async def _call_erp(
             refusal=_result_refusal(result, invoice, line_items, refs),
         )
 
-    return result.erp_document_id or result.erp_document_number or "UNKNOWN"
+    return reference

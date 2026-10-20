@@ -133,6 +133,41 @@ describe('erpRefusalText', () => {
 		).toContain('open brand new kind exception');
 	});
 
+	it('says the bill may already be in the ERP when an earlier attempt may have posted it', () => {
+		const params = { exception_type: 'fraud_flag', possibly_posted: true };
+		expect(erpRefusalText({ code: 'exception_blocks_erp_export', params }, enT)).toBe(
+			`This invoice has an open ${en['exceptions.type.fraudFlag']} exception, and an earlier attempt may already have created the bill in the ERP. Check the ERP before anyone pays it, then resolve or dismiss the exception in Exceptions.`
+		);
+		const locales = { de, es, fr, ja, 'pt-BR': ptBR } as Record<string, Record<string, string>>;
+		for (const [locale, messages] of Object.entries(locales)) {
+			const text = erpRefusalText(
+				{ code: 'exception_blocks_erp_export', params },
+				translator(messages, locale)
+			);
+			expect(text, locale).toBe(
+				interpolate(messages['erpRefusal.exceptionBlocksExportPossiblyPosted'], {
+					type: messages['exceptions.type.fraudFlag']
+				}, locale)
+			);
+			expect(text, `${locale} left a placeholder`).not.toMatch(/\{\w+\}/);
+		}
+		// Only a literal `true` switches the sentence: a first-attempt refusal
+		// carries no flag, and a malformed one reads as the plain refusal.
+		for (const flag of [undefined, false, 'true', 1]) {
+			expect(
+				erpRefusalText(
+					{
+						code: 'exception_blocks_erp_export',
+						params: { exception_type: 'duplicate', possibly_posted: flag }
+					},
+					enT
+				)
+			).toBe(
+				`This invoice has an open ${en['exceptions.type.duplicate']} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.`
+			);
+		}
+	});
+
 	it.each([
 		['no refusal recorded (a row from before coded refusals)', undefined],
 		['an exception refusal with no type', { code: 'exception_blocks_erp_export', params: {} }],

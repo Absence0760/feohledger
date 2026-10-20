@@ -6144,6 +6144,7 @@ export const messages = {
 	'erpRefusal.companySubscriptionInactive': "{provider} hat diese Rechnung abgelehnt, weil das Abonnement des Unternehmens abgelaufen, gekündigt oder von einem Zahlungsproblem betroffen ist. Klären Sie das in {provider}, und versuchen Sie es dann erneut.",
 	'erpRefusal.intuitFault': "{provider} hat diese Rechnung abgelehnt (Intuit-Fehler {code}). Gleichen Sie die Angaben der Rechnung mit {provider} ab und korrigieren Sie sie, und versuchen Sie es dann erneut. Wenn es weiterhin fehlschlägt, nennen Sie einem Administrator den Fehlercode.",
 	'erpRefusal.exceptionBlocksExport': "Diese Rechnung hat eine offene Ausnahme ({type}). Lösen oder verwerfen Sie sie unter Ausnahmen und senden Sie die Rechnung dann an das ERP.",
+	'erpRefusal.exceptionBlocksExportPossiblyPosted': "Diese Rechnung hat eine offene Ausnahme ({type}), und ein früherer Versuch hat die Rechnung möglicherweise bereits im ERP angelegt. Prüfen Sie das ERP, bevor jemand sie bezahlt, und lösen oder verwerfen Sie die Ausnahme dann unter Ausnahmen.",
 	'glAccounts.toast.synced': "{created} neue und {updated} aktualisierte Konten synchronisiert.",
 	'glAccounts.toast.syncConflicts': "Nicht verknüpft, weil der Code mehreren ERP-Konten gehört, bereits verwendet wird oder zu lang ist: {codes}.",
 	'glAccounts.toast.syncUnlinked': "Verknüpfung aufgehoben, weil der Code kein eindeutiges ERP-Konto mehr bezeichnet – kontieren Sie die zugehörigen Rechnungen um: {codes}.",
