@@ -15,6 +15,7 @@ guess about (the live sandbox's "Depreciation").
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import uuid
 from pathlib import Path
@@ -23,7 +24,7 @@ from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
@@ -793,6 +794,72 @@ async def test_the_confirm_endpoint_refuses_anything_but_an_offered_candidate(
         moved = await c.post(f"/api/gl-accounts/{row_id}/erp-link", json={"erp_account_id": "40"})
     assert moved.status_code == 409
     assert (await _chart(realdb))["Depreciation"].erp_account_id is None
+
+
+async def _wait_for_lock_waiter(mk, *, timeout: float = 15.0) -> bool:
+    """True once Postgres reports another backend here waiting on a lock.
+
+    Asked of the server's own wait state, never slept for (the signal
+    ``test_credit_memos.py`` waits on); the timeout only bounds a failure.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND pid <> pg_backend_pid() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def test_two_confirmations_at_once_link_the_row_once(realdb, restore_settings):
+    """A second admin confirming another candidate while the first is mid-write
+    must see the first link and be refused. Without ``FOR UPDATE`` on the read
+    it passed the "not linked yet" check against the last committed row, its
+    UPDATE queued behind the first, and then overwrote the first person's
+    choice: last write wins, two audit rows naming different accounts."""
+    await _set_erp(realdb, PROD_CFG)
+    row_id = await _add(realdb, code="Depreciation", name="Depreciation")
+    await _sync(realdb, _depreciation_chart(), realm=PROD)
+    mk = realdb.sessionmaker(TENANT)
+
+    async with mk() as held:
+        # Stand-in for the first confirmation, holding the row mid-transaction.
+        await held.execute(select(GLAccount).where(GLAccount.id == row_id).with_for_update())
+        await held.execute(
+            update(GLAccount)
+            .where(GLAccount.id == row_id)
+            .values(erp_account_id="39", erp_link_realm=PROD, erp_link_candidates=None)
+        )
+        async with realdb.client(key=TENANT, role="admin") as c:
+            second = asyncio.create_task(
+                c.post(f"/api/gl-accounts/{row_id}/erp-link", json={"erp_account_id": "40"})
+            )
+            assert await _wait_for_lock_waiter(mk), "the second confirmation never queued"
+            await held.commit()
+            resp = await second
+
+    assert resp.status_code == 409, resp.text
+    assert (await _chart(realdb))["Depreciation"].erp_account_id == "39"
+    async with mk() as s:
+        audits = (
+            await s.execute(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.action == "gl_account.erp_link_confirmed")
+            )
+        ).scalar_one()
+    assert audits == 0
 
 
 async def test_the_confirm_endpoint_is_admin_or_ap_manager_only(realdb, restore_settings):

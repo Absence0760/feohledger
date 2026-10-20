@@ -582,13 +582,29 @@ async def confirm_gl_account_erp_link(
     The same editor rule as ``PATCH /{id}``: with an entity selected only that
     entity's own rows; a shared row from the consolidated view. Gate: admin |
     ap_manager, like the sync that produced the candidates.
+
+    The row is read ``FOR UPDATE``: two people confirming different candidates
+    at once would otherwise both pass the "not linked yet" check and the last
+    write would win, with two audit rows naming different accounts. Locked, the
+    second waits, then sees the first link and is refused 409. The connection
+    is resolved first so the lock is never held across the credential decrypt.
     """
+    try:
+        erp_config = await provider_config(org, "erp", db=control_db)
+    except CredentialCryptoError:
+        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
+    if not erp_config:
+        raise HTTPException(status_code=400, detail="No ERP configured")
+    realm = connection_realm(erp_config)
+
     account = (
         await db.execute(
-            select(GLAccount).where(
+            select(GLAccount)
+            .where(
                 GLAccount.id == account_id,
                 GLAccount.organization_id == org_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if account is None:
@@ -611,13 +627,6 @@ async def confirm_gl_account_erp_link(
             detail="Choose one of the ERP accounts the last sync named for this row.",
         )
 
-    try:
-        erp_config = await provider_config(org, "erp", db=control_db)
-    except CredentialCryptoError:
-        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
-    if not erp_config:
-        raise HTTPException(status_code=400, detail="No ERP configured")
-    realm = connection_realm(erp_config)
     if pending.get("realm") != realm:
         raise HTTPException(
             status_code=409,
