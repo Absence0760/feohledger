@@ -320,6 +320,9 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 			deactivated_count: 1,
 			realm: `${PROVIDER}:${COMPANY.realm}`,
 			realm_adopted: legacyLinks,
+			// Reported since the live run; every sandbox parent path fits.
+			parent_code_dropped: [],
+			parent_code_dropped_count: 0,
 			link_changes: expect.any(Array),
 			success: true,
 			adapter: PROVIDER

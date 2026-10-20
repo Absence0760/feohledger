@@ -133,6 +133,10 @@ class ChartSyncResult:
     realm_adopted: int = 0
     #: Codes of rows marked inactive because the ERP made their account inactive.
     deactivated: list[str] = field(default_factory=list)
+    #: Codes of accounts whose ERP ``parent_code`` is longer than the column
+    #: (``GL_CODE_MAX_LENGTH``): the account is synced, its parent is not
+    #: recorded (never truncated — a cut code names nothing).
+    parent_code_dropped: list[str] = field(default_factory=list)
 
     def summary(self, *, capped: bool = True) -> dict:
         """The response projection (lists capped at :data:`MAX_LISTED`; counts
@@ -159,6 +163,8 @@ class ChartSyncResult:
             "realm_adopted": self.realm_adopted,
             "deactivated_count": len(self.deactivated),
             "deactivated": listed(self.deactivated),
+            "parent_code_dropped_count": len(self.parent_code_dropped),
+            "parent_code_dropped": listed(self.parent_code_dropped),
         }
 
 
@@ -448,7 +454,7 @@ async def sync_chart_from_erp(
                 code=code,
                 name=acct.name,
                 account_type=acct.account_type,
-                parent_code=acct.parent_code,
+                parent_code=_parent_code(code, acct, result),
                 organization_id=organization_id,
                 entity_id=entity_id,
                 erp_account_id=erp_id,
@@ -510,6 +516,7 @@ async def sync_chart_from_erp(
     ]
     result.unlinked.sort()
     result.deactivated.sort()
+    result.parent_code_dropped.sort()
     return result
 
 
@@ -520,6 +527,18 @@ def _same_account(code: str, acct: GLAccountPayload, *, legacy_ok: bool) -> bool
     if code == (acct.code or "").strip():
         return True
     return legacy_ok and code in acct.legacy_codes
+
+
+def _parent_code(code: str, acct: GLAccountPayload, result: ChartSyncResult) -> str | None:
+    """``acct``'s parent code, or None — recorded in ``parent_code_dropped``
+    — when it does not fit the column. The parent is descriptive (nothing
+    posts to it), so the account still syncs; letting the flush raise would
+    abort the whole sync, and a truncated code would name another account."""
+    parent = acct.parent_code
+    if parent is not None and len(parent) > GL_CODE_MAX_LENGTH:
+        result.parent_code_dropped.append(code)
+        return None
+    return parent
 
 
 def _clear_confirmation(row: GLAccount) -> None:
@@ -537,8 +556,9 @@ def _apply(row: GLAccount, acct: GLAccountPayload, result: ChartSyncResult, *, c
     if acct.account_type and row.account_type != acct.account_type:
         row.account_type = acct.account_type
         changed = True
-    if acct.parent_code is not None and row.parent_code != acct.parent_code:
-        row.parent_code = acct.parent_code
+    parent_code = _parent_code(row.code, acct, result)
+    if parent_code is not None and row.parent_code != parent_code:
+        row.parent_code = parent_code
         changed = True
     if not acct.active and row.is_active:
         # Retired in the ERP, so retired here: nothing new is coded to it

@@ -17,7 +17,14 @@ from app.models.vendor import Vendor
 from app.services.vendor_sync import sync_vendors_from_erp
 
 #: What a pull with no realm and nothing to repair reports beside its counts.
-_QUIET = {"unlinked": [], "deactivated": 0, "codes_cleared": 0, "realm_adopted": 0, "realm": None}
+_QUIET = {
+    "unlinked": [],
+    "deactivated": 0,
+    "codes_cleared": 0,
+    "realm_adopted": 0,
+    "values_too_long": [],
+    "realm": None,
+}
 
 # ---------------------------------------------------------------------------
 # Service-layer (direct DB) cases
@@ -158,6 +165,76 @@ async def test_sync_does_not_null_out_existing_fields(realdb):
     async with mk() as s:
         v = (await s.execute(select(Vendor).where(Vendor.erp_vendor_id == "ERP-K"))).scalar_one()
     assert v.email == "keep@vendor.test"
+
+
+async def test_a_value_too_long_for_its_column_is_dropped_never_aborts_the_sync(realdb):
+    """A NetSuite `entityid` is up to 83 characters and `Vendor.code` is 50:
+    writing it failed the flush and rolled back the WHOLE sync. The vendor
+    syncs, the over-long field is not written (an existing value is kept, never
+    truncated), and the run says which fields."""
+    from app.models.workflow import AuditLog
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with mk() as s:
+        s.add(
+            Vendor(
+                name="Has Code",
+                code="OLD-CODE",
+                erp_vendor_id="ERP-L1",
+                organization_id=org_id,
+                status="active",
+                source="erp_sync",
+            )
+        )
+        await s.commit()
+
+    long_code = "V" * 51
+    async with mk() as s:
+        result = await sync_vendors_from_erp(
+            s,
+            org_id,
+            [
+                {"erp_vendor_id": "ERP-L1", "name": "Has Code", "code": long_code},
+                {
+                    "erp_vendor_id": "ERP-L2",
+                    "name": "Long Fields Ltd",
+                    "code": long_code,
+                    "phone": "1" * 51,
+                    "tax_id": "9" * 51,
+                    "email": "ap@long.test",
+                },
+                {"erp_vendor_id": "ERP-L3", "name": "Fine Co", "code": "FINE"},
+            ],
+        )
+        await s.commit()
+
+    assert result["created"] == 2
+    assert result["values_too_long"] == [
+        {"name": "Has Code", "erp_vendor_id": "ERP-L1", "fields": ["code"]},
+        {
+            "name": "Long Fields Ltd",
+            "erp_vendor_id": "ERP-L2",
+            "fields": ["code", "phone", "tax_id"],
+        },
+    ]
+    async with mk() as s:
+        rows = {v.erp_vendor_id: v for v in (await s.execute(select(Vendor))).scalars().all()}
+        audit = (
+            await s.execute(
+                select(AuditLog)
+                .where(AuditLog.action == "vendor.synced_from_erp")
+                .where(AuditLog.entity_id == rows["ERP-L2"].id)
+            )
+        ).scalar_one()
+    assert rows["ERP-L1"].code == "OLD-CODE"
+    long_fields = rows["ERP-L2"]
+    assert (long_fields.code, long_fields.phone, long_fields.tax_id) == (None, None, None)
+    assert long_fields.email == "ap@long.test"
+    assert rows["ERP-L3"].code == "FINE"
+    # Field NAMES only on the append-only row, never the values.
+    assert audit.details["values_too_long"] == ["code", "phone", "tax_id"]
+    assert long_code not in str(audit.details)
 
 
 async def test_sync_links_name_match_and_activates(realdb):

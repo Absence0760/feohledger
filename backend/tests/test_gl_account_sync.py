@@ -268,6 +268,31 @@ async def test_an_over_long_code_is_refused_not_truncated(realdb):
     assert result.conflicts == [{"code": code, "reason": CODE_TOO_LONG, "erp_account_ids": ["L"]}]
 
 
+async def test_an_over_long_parent_code_is_dropped_never_aborts_the_sync(realdb):
+    """`parent_code` is as wide as `code` and was written unchecked: one
+    account whose parent's code ran past the column failed the flush and rolled
+    back the whole sync. The account syncs, its parent is not recorded (never
+    truncated, which would name another account), and the run says which."""
+    long_parent = "p" * (GL_CODE_MAX_LENGTH + 1)
+    await _add(realdb, code="6200", name="Rent", parent_code="Occupancy", erp_account_id="62")
+    result = await _sync(
+        realdb,
+        [
+            _acct("6100", "61", parent_code=long_parent),
+            _acct("6200", "62", parent_code=long_parent),
+            _acct("6300", "63", parent_code="Overheads"),
+        ],
+    )
+
+    chart = await _rows(realdb)
+    assert (chart["6100"].erp_account_id, chart["6100"].parent_code) == ("61", None)
+    assert chart["6200"].parent_code == "Occupancy"  # kept, not overwritten
+    assert chart["6300"].parent_code == "Overheads"
+    assert result.created == 2
+    assert result.parent_code_dropped == ["6100", "6200"]
+    assert result.summary()["parent_code_dropped_count"] == 2
+
+
 # ---------------------------------------------------------------------------
 # Repair of a chart a pre-§284 sync collapsed
 # ---------------------------------------------------------------------------

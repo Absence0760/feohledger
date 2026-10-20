@@ -47,6 +47,14 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.vendor_screening import screen_best_effort
 from app.services.vendor_tax_id import rekey_tax_id
 
+#: Optional fields an ERP record supplies, each bounded by its column. A value
+#: longer than the column is not written: it would abort the flush — and with
+#: it the whole sync — and a truncated code or tax id would identify the wrong
+#: thing. The vendor still syncs (only its ERP id, ``name`` and these fields are
+#: written, and none of these is how the vendor is linked), the field keeps
+#: whatever value it had, and the run reports it (``values_too_long``).
+_BOUNDED_FIELDS = ("code", "email", "phone", "address", "tax_id", "payment_terms")
+
 
 async def sync_vendors_from_erp(
     db: AsyncSession,
@@ -114,9 +122,11 @@ async def sync_vendors_from_erp(
 
     Returns summary: {created, updated, unchanged: int, conflicts: list of
     {"name", "reason", "erp_vendor_ids"}, unlinked: names whose link this run
-    dropped, deactivated / codes_cleared / realm_adopted: int, realm} — the
-    name is the vendor's business name, which the per-vendor audit row already
-    records.
+    dropped, deactivated / codes_cleared / realm_adopted: int,
+    values_too_long: {"name", "erp_vendor_id", "fields"} per record with a
+    field too long to store (:data:`_BOUNDED_FIELDS`; field NAMES only), realm}
+    — the name is the vendor's business name, which the per-vendor audit row
+    already records.
     """
     now = datetime.now(UTC)
     created = 0
@@ -132,6 +142,7 @@ async def sync_vendors_from_erp(
     rescreen: list[Vendor] = []
     conflicts: dict[str, set[str]] = {}
     unlinked: list[str] = []
+    too_long: list[dict] = []
     deactivated = 0
     codes_cleared = 0
     realm_adopted = 0
@@ -221,6 +232,15 @@ async def sync_vendors_from_erp(
         if not erp_id:
             continue
 
+        overlong = _overlong_fields(erp_v)
+        dropped: dict = {}
+        if overlong:
+            erp_v = {**erp_v, **dict.fromkeys(overlong)}
+            dropped = {"values_too_long": overlong}
+            too_long.append(
+                {"name": erp_v.get("name"), "erp_vendor_id": str(erp_id), "fields": overlong}
+            )
+
         active = erp_v.get("active", True) is not False
 
         # Check if vendor already exists by ERP ID — in this realm only. Under
@@ -255,7 +275,7 @@ async def sync_vendors_from_erp(
                 identity_changed = True
             if identity_changed:
                 rescreen.append(existing)
-            extra: dict = {}
+            extra: dict = dict(dropped)
             legacy_code = erp_v.get("legacy_code")
             if existing.source == "erp_sync" and legacy_code and existing.code == legacy_code:
                 # The old QuickBooks mapping's AcctNum; never our code.
@@ -315,7 +335,7 @@ async def sync_vendors_from_erp(
                         name_match.status = "active"
                         name_match.source = "erp_sync"
                     updated += 1
-                    audited.append((name_match, "linked", erp_id, {}))
+                    audited.append((name_match, "linked", erp_id, dropped))
                     continue
 
             # Create new vendor
@@ -337,7 +357,7 @@ async def sync_vendors_from_erp(
             )
             db.add(vendor)
             created += 1
-            audited.append((vendor, "created", erp_id, {}))
+            audited.append((vendor, "created", erp_id, dropped))
 
     if audited:
         await db.flush()
@@ -377,7 +397,18 @@ async def sync_vendors_from_erp(
         deactivated=deactivated,
         codes_cleared=codes_cleared,
         realm_adopted=realm_adopted,
+        values_too_long=too_long,
     )
+
+
+def _overlong_fields(record: dict) -> list[str]:
+    """The :data:`_BOUNDED_FIELDS` whose value in ``record`` exceeds its column."""
+    columns = Vendor.__table__.c
+    return [
+        f
+        for f in _BOUNDED_FIELDS
+        if isinstance(record.get(f), str) and len(record[f]) > columns[f].type.length
+    ]
 
 
 def _summary(
@@ -391,6 +422,7 @@ def _summary(
     deactivated: int = 0,
     codes_cleared: int = 0,
     realm_adopted: int = 0,
+    values_too_long: list[dict] | None = None,
 ) -> dict:
     return {
         "created": created,
@@ -401,6 +433,7 @@ def _summary(
         "deactivated": deactivated,
         "codes_cleared": codes_cleared,
         "realm_adopted": realm_adopted,
+        "values_too_long": values_too_long or [],
         "realm": realm,
     }
 

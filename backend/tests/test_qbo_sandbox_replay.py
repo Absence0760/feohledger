@@ -330,6 +330,9 @@ async def test_the_live_sync_of_the_pre_284_chart_replays_exactly(realdb, sandbo
             "deactivated_count": 1,
             "realm": LINK_REALM,
             "realm_adopted": ADOPTED_CHART_LINKS,
+            # Reported since the live run; every sandbox parent path fits.
+            "parent_code_dropped": [],
+            "parent_code_dropped_count": 0,
         }
     )
     assert (await _chart(realdb))["Bank Charges"].is_active is False
@@ -447,6 +450,8 @@ async def test_the_live_vendor_sync_replays_exactly(realdb, sandbox):
         "deactivated": 1,
         "codes_cleared": 0,
         "realm_adopted": ADOPTED_VENDOR_LINKS,
+        # Reported since the live run; every sandbox value fits its column.
+        "values_too_long": [],
         "realm": LINK_REALM,
     }
     async with realdb.sessionmaker(TENANT)() as s:
