@@ -46,6 +46,7 @@ import { exceptionTypeFallback, exceptionTypeLabelKey } from '#lib/types/excepti
 import { nachaFieldLabelKey } from '#lib/types/paymentExecution.ts';
 import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRefusal.ts';
 import { authRefusalText } from '#lib/api/authRefusals.ts';
+import { ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
 import { EXCEPTION_BLOCKS_ERP_EXPORT, erpRefusalText } from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
@@ -341,10 +342,15 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
 	// `api/auth.py::_refuse_other_workspace` — signing in on another
-	// workspace's page; the link is the account's own sign-in page.
+	// workspace's page. `sign_in_url` is the account's own sign-in page, query
+	// string (`?email=`) included; the sentence names only its host, which is
+	// readable, and leaves the link itself to a button (the login page renders
+	// one under the text). A URL that is not a plain http(s) one names nothing.
 	wrong_workspace: (p, t) => {
-		const url = str(p, 'sign_in_url');
-		return url ? t('refusal.wrongWorkspace', { url }) : t('refusal.wrongWorkspaceNoLink');
+		const url = ownWorkspaceSignInUrl(p);
+		return url
+			? t('refusal.wrongWorkspace', { workspace: new URL(url).host })
+			: t('refusal.wrongWorkspaceNoLink');
 	},
 	// `api/signup.py::_refuse_if_email_has_account` — a verified signup for an
 	// address that already has an account; the link is that account's own

@@ -6,6 +6,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, NoReturn
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
@@ -447,12 +448,18 @@ async def _refuse_other_workspace(
         details={"email": email, "ip": ip, "reason": WRONG_WORKSPACE},
     )
     url = sign_in_url(org.slug, org.settings, email=email)
+    # The sentence names the workspace by host only: the URL carries the
+    # address as a percent-encoded `?email=`, which is unreadable in prose and
+    # is the link's job (`params.sign_in_url`), not the message's.
+    workspace = urlsplit(url).netloc if url else ""
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=coded_refusal(
             WRONG_WORKSPACE,
-            "This account belongs to a different workspace."
-            + (f" Sign in at {url}." if url else ""),
+            f"This account belongs to another workspace, {workspace}. Sign in there instead."
+            if workspace
+            else "This account belongs to a different workspace."
+            " Sign in on that workspace's own page.",
             sign_in_url=url,
         ),
     )
