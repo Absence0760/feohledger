@@ -39,7 +39,12 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-19 — reviewing the QuickBooks live-test fixes
+**Last reconciled:** 2026-10-20 — the live QuickBooks re-test (#598) reached
+the sync screens' entry, which landed (coded `erp_listing_incomplete` /
+`erp_not_connected` answers, parent and too-long values reported), and narrowed
+the posted-bill entry to the other adapters' pre-flight refusals, taking the
+file from 115 → 114.
+Before that, 2026-10-19 — reviewing the QuickBooks live-test fixes
 (decisions §284–§287) opened eight (c) entries (listings over the sync bound,
 the collapsed row §284 accepts, the sync UI's reporting, over-long names, the
 exact-name ambiguity rule, adapters that still drop or mislabel records, vendor
@@ -161,7 +166,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**115 open: 99 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**114 open: 98 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1737,20 +1742,6 @@ scope (§260) — do not fold them into any of these.
       than trusting it silently. **Trigger:** the next change to rule 4 in
       `services/gl_account_sync`, or a report of a bill posted to a parent
       account that meant a sub-account.
-- [ ] **(c) The ERP sync screens do not explain what the new keys report.**
-      (1) A 502 from `POST /api/gl-accounts/sync-erp` or
-      `POST /api/vendors/sync-erp` reads "ERP request failed:
-      ErpListingIncomplete", a class name; it should be a message built from
-      `exc.gap` (`fetch_failed` / `truncated`) and the collection. (2) The
-      sync success messages do not surface `values_too_long` (vendors) or
-      `parent_code_dropped` (GL), so a dropped value is visible only in the
-      response body and the audit row. (3) `frontend/src/lib/api/glAccounts.ts`
-      does not type `parent_code_dropped` / `parent_code_dropped_count`.
-      **Durable fix:** catch `ErpListingIncomplete` in both endpoints
-      (`api/gl_accounts.py`, `api/vendors.py`) and answer a coded detail;
-      type the keys and state them in the frontend sync result, in all six
-      locales. **Trigger:** the next change to either sync endpoint or to the
-      sync result UI.
 - [ ] **(c) An ERP `name` over 255 characters still aborts a sync.** decisions
       §287 drops an over-long optional vendor field and an over-long GL
       `parent_code` instead of failing the flush, but `vendors.name` and

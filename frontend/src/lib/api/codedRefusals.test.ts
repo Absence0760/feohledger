@@ -94,9 +94,24 @@ describe('codedRefusalText', () => {
 		['credit_memo_currency_mismatch', 'refusal.creditMemoCurrencyMismatch'],
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
-		['mfa_code_invalid', 'refusal.mfaCodeInvalid']
+		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
+		['erp_not_connected', 'erpRefusal.notConnected']
 	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
+	});
+
+	it('states an incomplete ERP listing by why it stopped', () => {
+		const provider = 'QuickBooks Online';
+		expect(
+			codedRefusalText('erp_listing_incomplete', { provider, gap: 'fetch_failed' }, enT)
+		).toBe(
+			'QuickBooks Online could not be read in full, so nothing was synced. Try again in a few minutes.'
+		);
+		expect(codedRefusalText('erp_listing_incomplete', { provider, gap: 'truncated' }, enT)).toBe(
+			'QuickBooks Online has more records than one sync can read, so nothing was synced. Contact support.'
+		);
+		// A gap this build does not know → the server's sentence.
+		expect(codedRefusalText('erp_listing_incomplete', { provider, gap: 'other' }, enT)).toBeNull();
 	});
 
 	it('states the CFO gate with both figures in their own currencies', () => {

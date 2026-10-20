@@ -17,6 +17,7 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.pagination import PaginationParams, paginated, pagination_params
+from app.api.refusals import erp_pull_failure
 from app.database import get_control_db
 from app.models.invoice import Invoice
 from app.models.organization import Organization
@@ -371,10 +372,8 @@ async def sync_pos_from_erp(
         erp_pos = await adapter.list_pos()
     except Exception as exc:
         logger.exception("ERP list_pos failed for org %s", org_id)
-        raise HTTPException(
-            status_code=502,
-            detail=f"ERP request failed: {type(exc).__name__}",
-        ) from exc
+
+        raise erp_pull_failure(exc) from exc
 
     # Vendor lookup map for linking POs to existing vendor rows.
     v_result = await db.execute(select(Vendor).where(Vendor.organization_id == org_id))

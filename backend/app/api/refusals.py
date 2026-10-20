@@ -10,6 +10,8 @@ A server-side catcher that turns one back into text reads it through
 `utils/http.detail_text`, never `str(exc.detail)`.
 """
 
+from fastapi import HTTPException
+
 
 def coded_refusal(code: str, message: str, **params: object) -> dict:
     """The `detail` of a refusal a client must be able to localize.
@@ -39,3 +41,57 @@ def coded_refusal(code: str, message: str, **params: object) -> dict:
 #: replaces. The login challenge's own "Invalid code" stays a 401: there is no
 #: session yet, so a 401 is the truth and nobody is signed out by it.
 MFA_CODE_INVALID_DETAIL = coded_refusal("mfa_code_invalid", "Invalid code")
+
+
+#: An ERP pull (chart, vendor or PO sync) refused because the org's OAuth
+#: connection is gone — never consented, revoked at the provider, or past its
+#: lifetime (``erp_oauth.ErpNotConnectedError``). A 409: the request was fine
+#: and only the connection's state stops it, and an administrator reconnecting
+#: resolves it. Before this it was the 502 "ERP request failed:
+#: ErpNotConnectedError", which named an exception class to a person who could
+#: not act on one (live QuickBooks sandbox, 2026-10-19).
+ERP_NOT_CONNECTED = "erp_not_connected"
+
+#: An ERP pull whose adapter could not read the whole collection
+#: (``ErpListingIncomplete``): a page failed (``gap = fetch_failed``) or the
+#: walk hit the adapter's row bound (``truncated``; each adapter has its own).
+#: Still a 502 and nothing synced, but stated, where it used to read "ERP
+#: request failed: ErpListingIncomplete" — a class name.
+ERP_LISTING_INCOMPLETE = "erp_listing_incomplete"
+
+
+def erp_pull_failure(exc: Exception) -> HTTPException:
+    """The HTTP answer for an ERP sync whose adapter read raised ``exc``.
+
+    A lost connection is the coded 409 above, and a listing that could not be
+    read whole is a coded 502. Anything else — a provider
+    outage, a token refresh that could not reach the provider
+    (``ErpTokenRefreshError``, whose connection is still good), an incomplete
+    listing — stays the 502 it always was: the gateway failed and a later
+    retry may succeed.
+    """
+    from app.services.erp_adapters.base import ErpListingIncomplete
+    from app.services.erp_oauth import ErpNotConnectedError, ErpTokenRefreshError
+
+    if isinstance(exc, ErpListingIncomplete):
+        return HTTPException(
+            status_code=502,
+            detail=coded_refusal(
+                ERP_LISTING_INCOMPLETE,
+                f"{exc.provider} could not be read in full ({exc.gap.value}), so nothing was "
+                "synced.",
+                provider=exc.provider,
+                gap=exc.gap.value,
+            ),
+        )
+
+    if isinstance(exc, ErpNotConnectedError) and not isinstance(exc, ErpTokenRefreshError):
+        return HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                ERP_NOT_CONNECTED,
+                "The ERP isn't connected, or its connection has expired. An administrator "
+                "can reconnect it under Organization, then sync again.",
+            ),
+        )
+    return HTTPException(status_code=502, detail=f"ERP request failed: {type(exc).__name__}")

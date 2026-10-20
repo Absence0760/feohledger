@@ -35,6 +35,7 @@ from app.api.permissions import (
     PERM_VENDOR_BLOCK,
     PERM_VENDOR_MANAGE,
 )
+from app.api.refusals import erp_pull_failure
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.contract import Contract
@@ -1762,10 +1763,8 @@ async def sync_vendors_from_erp_endpoint(
         erp_vendors = await adapter.list_vendors()
     except Exception as exc:
         logger.exception("ERP list_vendors failed for org %s", org_id)
-        raise HTTPException(
-            status_code=502,
-            detail=f"ERP request failed: {type(exc).__name__}",
-        ) from exc
+
+        raise erp_pull_failure(exc) from exc
 
     vendor_dicts = [dataclasses.asdict(v) for v in erp_vendors]
 

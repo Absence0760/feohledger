@@ -21,8 +21,9 @@
  *    the no-rail pilot's refusals (a record-only tenant's dispatch refusal,
  *    recording a payment made outside FeohLedger, the NACHA bank file), and
  *    the plan-feature 402 every tier gate answers with, recording or
- *    cancelling a goods receipt, and an ERP send refused for an open duplicate
- *    or fraud exception (stated by `api/erpRefusals.ts`);
+ *    cancelling a goods receipt, an ERP send refused for an open duplicate
+ *    or fraud exception (stated by `api/erpRefusals.ts`), and an ERP sync
+ *    refused because the connection is gone or the listing is incomplete;
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -318,6 +319,18 @@ const BUILDERS: Record<string, Builder> = {
 	// modal's ERP panel, which states the same code off the audit row.
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: (p, t) =>
 		erpRefusalText({ code: EXCEPTION_BLOCKS_ERP_EXPORT, params: p }, t),
+	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
+	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
+	// or whose listing could not be read whole, so nothing synced.
+	erp_not_connected: fixed('erpRefusal.notConnected'),
+	erp_listing_incomplete: (p, t) => {
+		const provider = str(p, 'provider');
+		if (provider === null) return null;
+		const gap = str(p, 'gap');
+		if (gap === 'fetch_failed') return t('erpSync.listingFetchFailed', { provider });
+		if (gap === 'truncated') return t('erpSync.listingTruncated', { provider });
+		return null;
+	},
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
 	// `api/payments.py::_refuse_record_only` — every dispatching endpoint on a

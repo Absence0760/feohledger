@@ -36,6 +36,16 @@ describe('glSyncReportLines', () => {
 	});
 });
 
+describe('glSyncReportLines — parents', () => {
+	it('names accounts synced without a parent that did not fit', () => {
+		const lines = glSyncReportLines({ created: 1, updated: 0, parent_code_dropped: ['6100'] }, t);
+		expect(lines[1]).toEqual({
+			text: "Synced without their parent account, because the parent's code is too long to store: 6100.",
+			tone: 'warning'
+		});
+	});
+});
+
 describe('vendorSyncReportLines', () => {
 	it('names the vendors left unlinked by an ambiguous name', () => {
 		const lines = vendorSyncReportLines(
@@ -52,13 +62,33 @@ describe('vendorSyncReportLines', () => {
 		});
 	});
 
-	it('names the vendors whose link belonged to another ERP company', () => {
+	it('names the vendors whose link this pull could not confirm', () => {
 		const lines = vendorSyncReportLines(
 			{ created: 1, updated: 1, unchanged: 0, conflicts: [], unlinked: ['Acme'] },
 			t
 		);
 		expect(lines.map((l) => l.tone)).toEqual(['success', 'warning']);
-		expect(lines[1].text).toContain('linked in another ERP company');
+		expect(lines[1].text).toContain('no longer matches them by name or tax ID');
 		expect(lines[1].text).toContain(': Acme.');
+	});
+
+	it('counts retired vendors and names those with a value too long to store', () => {
+		const lines = vendorSyncReportLines(
+			{
+				created: 0,
+				updated: 1,
+				unchanged: 0,
+				deactivated: 1,
+				values_too_long: [{ name: 'Northwind' }]
+			},
+			t
+		);
+		expect(lines.slice(1)).toEqual([
+			{ text: '1 vendor retired, because the ERP made them inactive.', tone: 'warning' },
+			{
+				text: 'Synced, but some details were too long to store and kept their old values: Northwind.',
+				tone: 'warning'
+			}
+		]);
 	});
 });

@@ -836,7 +836,14 @@ async def test_a_listing_that_cannot_prove_itself_whole_syncs_nothing(
             resp = await c.post(path)
 
     assert resp.status_code == 502, resp.text
-    assert "ErpListingIncomplete" in resp.json()["detail"]
+    # Coded, never the exception's class name (followups: the sync screens).
+    detail = resp.json()["detail"]
+    assert detail["code"] == "erp_listing_incomplete"
+    gap = "fetch_failed" if path.startswith("/api/gl-accounts") else "truncated"
+    assert detail["params"] == {
+        "provider": "QuickBooks Online",
+        "gap": gap,
+    }
     chart_after = {
         c: (r.erp_account_id, r.erp_link_realm) for c, r in (await _chart(realdb)).items()
     }
@@ -1195,3 +1202,60 @@ async def test_the_migration_snapshots_the_company_each_org_is_connected_to(
 ):
     await _set_erp(realdb, erp)
     assert (await _run_migration_snapshot(realdb)).get(LEGACY_REALM_KEY) == expected
+
+
+def _disconnected_adapter(exc: Exception):
+    class _Adapter:
+        erp_type = "quickbooks_online"
+
+        async def list_gl_accounts(self):
+            raise exc
+
+        async def list_vendors(self):
+            raise exc
+
+        async def list_pos(self):
+            raise exc
+
+    return patch("app.services.erp_adapters.get_erp_adapter", return_value=_Adapter())
+
+
+_SYNC_PATHS = [
+    "/api/gl-accounts/sync-erp",
+    "/api/vendors/sync-erp",
+    "/api/purchase-orders/sync-erp",
+]
+
+
+@pytest.mark.parametrize("path", _SYNC_PATHS)
+async def test_a_sync_on_a_lost_connection_says_to_reconnect(realdb, restore_settings, path):
+    """Live sandbox, 2026-10-19: a revoked QuickBooks consent answered every
+    sync with the 502 "ERP request failed: ErpNotConnectedError". It is a
+    coded 409 the browser states as "reconnect it under Organization"."""
+    from app.services.erp_oauth import ErpNotConnectedError
+
+    await _set_erp(realdb, PROD_CFG)
+    with _disconnected_adapter(ErpNotConnectedError("quickbooks_online")):
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.post(path)
+
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert (detail["code"], detail["params"]) == ("erp_not_connected", {})
+    assert "ErpNotConnectedError" not in detail["message"]
+
+
+@pytest.mark.parametrize("path", _SYNC_PATHS)
+async def test_a_sync_whose_token_refresh_could_not_reach_the_provider_stays_502(
+    realdb, restore_settings, path
+):
+    """An outage while refreshing is not a lost connection: nothing is marked
+    for reconnect, and a later retry can succeed."""
+    from app.services.erp_oauth import ErpTokenRefreshError
+
+    await _set_erp(realdb, PROD_CFG)
+    with _disconnected_adapter(ErpTokenRefreshError("quickbooks_online", "HTTP 503")):
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.post(path)
+
+    assert resp.status_code == 502, resp.text

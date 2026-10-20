@@ -1084,7 +1084,14 @@ vendor listing returns the whole collection or raises: up to
 50,000), and any failed page or a collection past the bound raises
 `ErpListingIncomplete` (`fetch_failed` / `truncated`; QuickBooks raises its own
 request error on a failed page). `POST /api/gl-accounts/sync-erp` and
-`POST /api/vendors/sync-erp` answer **502** and change nothing. An empty pull
+`POST /api/vendors/sync-erp` answer **502** and change nothing, with the coded
+detail `erp_listing_incomplete` (`params: {provider, gap}`) the browser states
+in the reader's language. Every sync (chart, vendors, POs) that finds the OAuth
+connection gone — revoked, never consented, expired — answers the coded **409**
+`erp_not_connected` ("reconnect it under Organization") rather than a 502
+naming the exception class; a token refresh that could not reach the provider
+stays a 502, since the connection is still good (`api/refusals.erp_pull_failure`,
+the one place all three routes turn an adapter failure into HTTP). An empty pull
 changes nothing either. PO listings keep their bounded best-effort reads, since
 nothing is unlinked by a PO's absence.
 

@@ -16,6 +16,7 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.refusals import erp_pull_failure
 from app.database import get_control_db
 from app.models.entity import Entity
 from app.models.gl_account import GLAccount
@@ -509,10 +510,7 @@ async def sync_gl_accounts_from_erp(
     try:
         erp_accounts = await adapter.list_gl_accounts()
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"ERP request failed: {type(exc).__name__}",
-        ) from exc
+        raise erp_pull_failure(exc) from exc
 
     result = await sync_chart_from_erp(
         db,

@@ -147,6 +147,9 @@ export interface GlAccountSyncResult {
 	deactivated_count?: number;
 	/** Codes retired because the ERP made their account inactive. Capped at 50. */
 	deactivated?: string[];
+	parent_code_dropped_count?: number;
+	/** Codes synced without their parent (its code did not fit). Capped at 50. */
+	parent_code_dropped?: string[];
 	adapter: string;
 }
 
