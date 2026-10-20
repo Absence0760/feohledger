@@ -268,6 +268,7 @@ def test_refuses_without_vendor_erp_id_before_any_http():
     result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload(vendor_erp_id=None)))
     assert not result.success
     assert result.message == "SYSPRO post refused: vendor_not_linked"
+    assert result.not_posted is True
     assert fake.requests == []
 
 

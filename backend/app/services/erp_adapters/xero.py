@@ -52,6 +52,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
     sync_listing_pages,
 )
@@ -305,13 +306,13 @@ class XeroAdapter(OAuthErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         if payload.invoice_date is None or payload.due_date is None:
-            return erp_refusal(PROVIDER, MISSING_DATES)
+            return erp_preflight_refusal(PROVIDER, MISSING_DATES)
         try:
             allocation = allocate_bill_lines(payload)
         except BillRefusal as refusal:
-            return erp_refusal(PROVIDER, refusal.reason)
+            return erp_preflight_refusal(PROVIDER, refusal.reason)
 
         status = str(self.config.get("bill_status") or "AUTHORISED").upper()
         if status not in _BILL_STATUSES:

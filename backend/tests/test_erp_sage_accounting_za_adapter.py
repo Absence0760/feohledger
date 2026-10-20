@@ -466,6 +466,7 @@ def test_refuses_without_a_numeric_supplier_id_before_any_http(vendor_erp_id):
     result = _post(fake, _payload(vendor_erp_id=vendor_erp_id))
     assert not result.success and not result.retryable
     assert result.message.endswith("vendor_not_linked")
+    assert result.not_posted is True
     assert fake.requests == []
 
 

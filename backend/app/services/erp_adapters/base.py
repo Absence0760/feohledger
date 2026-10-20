@@ -312,6 +312,18 @@ def erp_refusal(provider: str, reason: str) -> ErpPostResult:
     )
 
 
+def erp_preflight_refusal(provider: str, reason: str) -> ErpPostResult:
+    """:func:`erp_refusal` for a refusal made before the adapter's first
+    network call, which therefore left nothing in the ERP
+    (``ErpPostResult.not_posted``). Use it ONLY there: a refusal after any
+    request — a lookup that found our own earlier bill, a lost read-back — may
+    stand beside a document, and must stay the fail-closed :func:`erp_refusal`.
+    """
+    result = erp_refusal(provider, reason)
+    result.not_posted = True
+    return result
+
+
 @dataclass
 class ErpPostResult:
     """Outcome of an ``ErpAdapter.post_invoice`` call.

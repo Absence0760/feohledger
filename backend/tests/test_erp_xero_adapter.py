@@ -158,6 +158,8 @@ def test_refusals_send_nothing(token, overrides, reason):
         result = _run(_adapter().post_invoice(_payload(**overrides)))
     assert result.success is False
     assert result.message == f"Xero post refused: {reason}"
+    # Refused before any request: the attempt left nothing in the ERP.
+    assert result.not_posted is True
 
 
 # ---------------------------------------------------------------------------

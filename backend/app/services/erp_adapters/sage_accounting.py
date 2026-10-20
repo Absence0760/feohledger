@@ -54,6 +54,7 @@ from app.services.erp_adapters.base import (
     ListingGap,
     VendorPayload,
     erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
     sync_listing_pages,
 )
@@ -162,6 +163,11 @@ def _failure(resp) -> ErpPostResult:
 
 def _refused(reason: str) -> ErpPostResult:
     return erp_refusal(PROVIDER, reason)
+
+
+def _preflight_refused(reason: str) -> ErpPostResult:
+    """Before the first request: nothing was sent (``erp_preflight_refusal``)."""
+    return erp_preflight_refusal(PROVIDER, reason)
 
 
 class _HttpFailure(Exception):
@@ -287,16 +293,16 @@ class SageAccountingAdapter(OAuthErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return _refused(VENDOR_NOT_LINKED)
+            return _preflight_refused(VENDOR_NOT_LINKED)
         if payload.invoice_date is None or payload.due_date is None:
-            return _refused(MISSING_DATES)
+            return _preflight_refused(MISSING_DATES)
         try:
             allocation = allocate_bill_lines(payload)
         except BillRefusal as refusal:
-            return _refused(refusal.reason)
+            return _preflight_refused(refusal.reason)
         if allocation.inclusive_unsplit:
             # v3.1 needs every line's tax amount and never derives it.
-            return _refused(TAX_NOT_ITEMISED)
+            return _preflight_refused(TAX_NOT_ITEMISED)
 
         headers = await self._headers()
         async with self.oauth_client(timeout=30) as client:

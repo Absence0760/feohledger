@@ -86,6 +86,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
@@ -433,10 +434,10 @@ class SysproAdapter(ErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         lines = bill_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal(PROVIDER, lines)
+            return erp_preflight_refusal(PROVIDER, lines)
 
         supplier = payload.vendor_erp_id
         document_id = doc_id(supplier, payload.invoice_number)

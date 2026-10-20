@@ -26,7 +26,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_http_failure,
-    erp_refusal,
+    erp_preflight_refusal,
     sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
@@ -175,10 +175,10 @@ class NetSuiteAdapter(ErpAdapter):
         # never a stand-in (a name picks the wrong "Acme" the first time two
         # vendors share one).
         if not payload.vendor_erp_id:
-            return erp_refusal("NetSuite", VENDOR_NOT_LINKED)
+            return erp_preflight_refusal("NetSuite", VENDOR_NOT_LINKED)
         expense_lines = _netsuite_expense_lines(payload)
         if isinstance(expense_lines, str):
-            return erp_refusal("NetSuite", expense_lines)
+            return erp_preflight_refusal("NetSuite", expense_lines)
         try:
             self._account_id()
         except NetSuiteConfigError as exc:

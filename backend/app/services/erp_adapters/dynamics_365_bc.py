@@ -26,6 +26,7 @@ from app.services.erp_adapters.base import (
     VendorPayload,
     erp_failure_message,
     erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
     sync_listing_pages,
 )
@@ -207,10 +208,10 @@ class BusinessCentralAdapter(ErpAdapter):
         # vendor's NUMBER (V00010) — the name we used to send there could only
         # fail, or match another vendor whose number happens to equal it.
         if not payload.vendor_erp_id:
-            return erp_refusal(_PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(_PROVIDER, VENDOR_NOT_LINKED)
         lines = _bc_invoice_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal(_PROVIDER, lines)
+            return erp_preflight_refusal(_PROVIDER, lines)
         if not settings.erp_d365_api_base:
             try:
                 self._admin_base_url()

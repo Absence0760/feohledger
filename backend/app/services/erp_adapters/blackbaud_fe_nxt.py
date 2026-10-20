@@ -141,6 +141,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_failure_reason,
+    erp_preflight_refusal,
     erp_refusal,
     erp_status_retryable,
     sync_listing_pages,
@@ -498,10 +499,10 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         try:
             self.subscription_key()
         except BlackbaudConfigError:
-            return erp_refusal(PROVIDER, SUBSCRIPTION_KEY_MISSING)
+            return erp_preflight_refusal(PROVIDER, SUBSCRIPTION_KEY_MISSING)
         body = self._preflight(payload)
         if isinstance(body, str):
-            return erp_refusal(PROVIDER, body)
+            return erp_preflight_refusal(PROVIDER, body)
 
         headers = await self._headers()
         async with self.oauth_client(timeout=30) as client:

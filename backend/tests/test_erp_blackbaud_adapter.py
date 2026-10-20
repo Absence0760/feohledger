@@ -359,6 +359,7 @@ def test_preflight_refusals_make_no_call(config_overrides, payload_overrides, re
     assert not result.success and not result.retryable
     assert result.message == f"Blackbaud FE NXT post refused: {reason}"
     assert fake.requests == []
+    assert result.not_posted is True
 
 
 # ---------------------------------------------------------------------------

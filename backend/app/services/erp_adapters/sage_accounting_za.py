@@ -98,6 +98,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_http_failure,
+    erp_preflight_refusal,
     erp_refusal,
     sync_listing_pages,
 )
@@ -456,15 +457,15 @@ class SageAccountingZaAdapter(ErpAdapter):
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         supplier_id = _int_id(payload.vendor_erp_id)
         if supplier_id is None:
-            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         lines = bill_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal(PROVIDER, lines)
+            return erp_preflight_refusal(PROVIDER, lines)
         account_lines = [(_int_id(gl), amount, memo) for gl, amount, memo in lines]
         if any(account is None for account, _, _ in account_lines):
-            return erp_refusal(PROVIDER, ACCOUNT_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, ACCOUNT_NOT_LINKED)
         if (payload.currency or "").upper() != self._company_currency():
-            return erp_refusal(PROVIDER, CURRENCY_NOT_SUPPORTED)
+            return erp_preflight_refusal(PROVIDER, CURRENCY_NOT_SUPPORTED)
 
         base = await self._base()
         async with self._client(30) as client:

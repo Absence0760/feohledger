@@ -62,7 +62,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_http_failure,
-    erp_refusal,
+    erp_preflight_refusal,
     sync_listing_pages,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
@@ -267,10 +267,10 @@ class SageIntacctAdapter(ErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         lines = bill_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal(PROVIDER, lines)
+            return erp_preflight_refusal(PROVIDER, lines)
 
         async with httpx.AsyncClient(timeout=30) as client:
             token = await self._token(client)

@@ -1680,19 +1680,13 @@ scope (§260) — do not fold them into any of these.
       refusal of the retry now says `possibly_posted: true` (decisions §286),
       but nothing finds or voids that bill. **Durable fix:** from the exception
       or the failed invoice, run the adapter's read-only idempotency lookup to
-      name the orphan, and offer the existing ERP void. Separately,
-      `state_data.erp_outcome_unknown` is fail-closed. `ErpPostResult.not_posted`
-      now lets an adapter say an attempt left nothing. QuickBooks sets it for
-      every refusal made before its bill create is sent (pre-flight checks, the
-      currency read, a connection lost first) and for a create Intuit refused
-      outright — the first false positives, live 2026-10-20: closed books and a
-      disconnected company both recorded `possibly_posted: true`. The other
-      adapters' pre-flight `erp_refusal` calls do not set it yet — `erp_refusal`
-      cannot default it, because an adapter can also return one after a create
-      (`not_connected` from a lost read-back). **Durable fix:** set it at each
-      other adapter's pre-flight refusal sites, the way
-      `quickbooks_online.post_invoice` tracks `_bill_create_sent`. **Trigger:** the next false positive
-      reported on another adapter, or the next adapter refactor.
+      name the orphan, and offer the existing ERP void. (The other half of
+      this entry landed 2026-10-20: `ErpPostResult.not_posted` now stops a
+      refusal that sent nothing from reading as `possibly_posted` — every
+      adapter's pre-network refusals via `base.erp_preflight_refusal`, and
+      QuickBooks up to its bill create.) **Trigger:** a bill found in an ERP
+      for an invoice we show as failed, or the next change to the ERP void
+      path.
 - [ ] **(c) A human-cleared finding of any other type is re-opened by the next
       refresh.** §286 stops `refresh_warnings` re-opening a `duplicate` or
       `fraud_flag` a person resolved or dismissed while the invoice is

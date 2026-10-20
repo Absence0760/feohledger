@@ -271,6 +271,7 @@ def test_refuses_without_vendor_erp_id_before_any_http():
     )
     assert not result.success
     assert result.message == "Sage Intacct post refused: vendor_not_linked"
+    assert result.not_posted is True
     assert fake.requests == []
 
 
