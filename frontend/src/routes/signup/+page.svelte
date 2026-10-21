@@ -6,9 +6,10 @@
 	import IconCheck from '~icons/material-symbols/check-circle';
 	import IconClose from '~icons/material-symbols/cancel';
 	import { tick, untrack } from 'svelte';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError, formatApiDetail } from '#lib/api.ts';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { theme } from '#lib/stores/theme.svelte.ts';
 	import type { ResolvedTheme } from '#lib/theme.ts';
 	import { legalTitle } from '#lib/legal/pages.ts';
@@ -33,6 +34,9 @@
 	let captchaSitekey = $state<string>('');
 	// hCaptcha's API has loaded (its explicit-mode onload fired).
 	let captchaApiReady = $state(false);
+	// hCaptcha's script could not be loaded — almost always a content / ad
+	// blocker or a browser privacy shield. Shown where the widget would be.
+	let captchaLoadFailed = $state(false);
 	// The widget currently drawn: which container, and in which palette. Plain,
 	// not $state — only the captcha effect reads it, and it must not re-run
 	// that effect by being written there.
@@ -48,6 +52,18 @@
 
 	let submitting = $state(false);
 	let error = $state('');
+
+	/** The `/api/signup/start` body fields, which a refusal can be about. */
+	type Field = 'company_name' | 'slug' | 'admin_name' | 'admin_email';
+	const FIELD_INPUT_IDS: Record<Field, string> = {
+		company_name: 'signup-company',
+		slug: 'signup-slug',
+		admin_name: 'signup-name',
+		admin_email: 'signup-email'
+	};
+	// A server refusal about one field, shown under that field. The slug's
+	// lives in `slugError` instead, with its live availability state.
+	let fieldErrors = $state<Partial<Record<Exclude<Field, 'slug'>, string>>>({});
 	let successMessage = $state<string | null>(null);
 
 	// `FEOH_SIGNUP_ENABLED` off: every `/api/signup/*` route answers 404, so the
@@ -93,6 +109,17 @@
 	 * effect below, which is the only way to give it a theme after the fact —
 	 * hCaptcha has no call to change a live widget's theme, so following the
 	 * page means removing the widget and drawing it again.
+	 *
+	 * **When the script cannot load** — a content blocker, a browser privacy
+	 * shield, a filtering proxy — the page used to say only "Please complete
+	 * the captcha" with nothing on screen to complete. The `<script>` element's
+	 * own events are the signal, not a timer: `error` when the request fails,
+	 * and `load` with no `hcaptcha` global when a blocker answered it with an
+	 * empty stand-in. Either way the failed element is removed, so the next
+	 * visit to the page asks again (the visitor may have allowed the page in
+	 * their blocker meanwhile) instead of finding an element that looks like it
+	 * is still loading. The listeners go on whichever element is in the head —
+	 * this visit's, or one an earlier visit added that is still in flight.
 	 */
 	function loadHCaptcha() {
 		const w = window as any;
@@ -102,13 +129,49 @@
 			captchaApiReady = true;
 			return;
 		}
-		if (document.querySelector('script[data-hcaptcha]')) return;
-		const s = document.createElement('script');
-		s.src = `https://hcaptcha.com/1/api.js?render=explicit&onload=${HCAPTCHA_ONLOAD}`;
-		s.async = true;
-		s.defer = true;
-		s.setAttribute('data-hcaptcha', 'true');
-		document.head.appendChild(s);
+		let s = document.querySelector<HTMLScriptElement>('script[data-hcaptcha]');
+		if (!s) {
+			s = document.createElement('script');
+			s.src = `https://hcaptcha.com/1/api.js?render=explicit&onload=${HCAPTCHA_ONLOAD}`;
+			s.async = true;
+			s.defer = true;
+			s.setAttribute('data-hcaptcha', 'true');
+			document.head.appendChild(s);
+		}
+		const script = s;
+		const failed = () => {
+			script.remove();
+			captchaLoadFailed = true;
+		};
+		script.addEventListener('error', failed, { once: true });
+		// hCaptcha's api.js defines its `hcaptcha` global synchronously as it
+		// runs, so by `load` it exists; readiness itself is still the `onload`
+		// callback above. Only a script that ran and defined NOTHING — a
+		// blocker's empty stand-in — counts as failed here.
+		script.addEventListener(
+			'load',
+			() => {
+				if (!w.hcaptcha) failed();
+			},
+			{ once: true }
+		);
+	}
+
+	/**
+	 * The client-side half of `backend/app/utils/slug.py::validate_slug_format`
+	 * — the same rule, checked as the visitor types and in their language,
+	 * instead of after a round trip in the server's English. The reserved-word
+	 * list is left to the availability check, which reports it: it is the
+	 * server's to extend. Length is the input's own `minlength`/`maxlength`, and
+	 * the character set is enforced by the clean-up in `onSlugInput`.
+	 */
+	function slugFormatProblem(value: string): MessageKey | null {
+		if (!value) return null;
+		if (!/^[a-z]/.test(value)) return 'auth.signup.slugStartLetter';
+		if (value.length < 3) return null;
+		if (value.endsWith('-')) return 'auth.signup.slugEndHyphen';
+		if (value.includes('--')) return 'auth.signup.slugDoubleHyphen';
+		return null;
 	}
 
 	function onSlugInput() {
@@ -116,12 +179,27 @@
 		slugError = null;
 		slugStatus = 'idle';
 		if (slugCheckTimer) clearTimeout(slugCheckTimer);
+		// A wrong first character is never a step on the way to a valid
+		// address, so it is said at once. A trailing hyphen usually is ("my-"
+		// on the way to "my-co"), so that waits for the pause like the
+		// availability check does.
+		if (slug && !/^[a-z]/.test(slug)) {
+			slugStatus = 'bad';
+			slugError = m('auth.signup.slugStartLetter');
+			return;
+		}
 		if (slug.length < 3) return;
 		slugStatus = 'checking';
 		slugCheckTimer = setTimeout(checkSlug, 400);
 	}
 
 	async function checkSlug() {
+		const problem = slugFormatProblem(slug);
+		if (problem) {
+			slugStatus = 'bad';
+			slugError = m(problem);
+			return;
+		}
 		try {
 			const res = await api.get<SlugCheckResponse>(
 				`/api/signup/slug-check?slug=${encodeURIComponent(slug)}`
@@ -210,14 +288,134 @@
 		captchaWidget = { id, el, theme: wanted };
 	}
 
+	/**
+	 * Throw away a captcha token the server may already have spent.
+	 *
+	 * The backend verifies the captcha BEFORE it checks the slug is free or
+	 * sends the email, so a 409 or a 502 arrives with the token used up while
+	 * the widget still shows a tick. Kept, it satisfied the client-side check
+	 * and rode along on the retry, which the server refused with "Captcha
+	 * verification failed" — a misleading reason, with nothing on screen to
+	 * solve again. Cleared here on every answer from the server (a refusal
+	 * that came before verification costs the visitor one more tick; reusing
+	 * a spent token costs them a confusing dead end), and the widget is reset
+	 * so it looks as unsolved as it now is. The captcha effect redraws it
+	 * instead if the theme changed while it was solved.
+	 */
+	function discardCaptchaToken() {
+		if (captchaToken === null) return;
+		captchaToken = null;
+		const hcaptcha = (window as any).hcaptcha;
+		if (captchaWidget && typeof hcaptcha?.reset === 'function') {
+			try {
+				hcaptcha.reset(captchaWidget.id);
+			} catch {
+				// Its container already left the DOM; the effect draws a new one.
+			}
+		}
+	}
+
+	/** A Pydantic validation item's message, in the reader's language where we know its type. */
+	function validationMessage(item: { type?: unknown; msg?: unknown; ctx?: Record<string, unknown> }): string {
+		const min = item.ctx?.min_length;
+		const max = item.ctx?.max_length;
+		if (item.type === 'string_too_short' && typeof min === 'number') {
+			return m('auth.signup.fieldTooShort', { min });
+		}
+		if (item.type === 'string_too_long' && typeof max === 'number') {
+			return m('auth.signup.fieldTooLong', { max });
+		}
+		return typeof item.msg === 'string' ? item.msg : m('auth.signup.failed');
+	}
+
+	/**
+	 * Put a server refusal next to the field it is about, and move focus there.
+	 * Returns the refusal's left-over text for the top banner — `null` when
+	 * every part of it found a field.
+	 *
+	 * Two shapes are about one field: the 409 (`/start` refuses only a taken
+	 * slug with it — the address-already-has-a-workspace 409 is `/complete`'s),
+	 * and a Pydantic 422, whose items name their field in `loc`. Anything else
+	 * — a rate limit, the captcha, the email failing to send, a plain-string
+	 * 422 that names no field — stays in the banner.
+	 */
+	async function showRefusal(err: unknown): Promise<string | null> {
+		if (!(err instanceof ApiError)) {
+			return err instanceof Error ? err.message : m('auth.signup.failed');
+		}
+		let first: Field | null = null;
+		let leftOver: string | null = err.message;
+		if (err.status === 409) {
+			slugStatus = 'bad';
+			slugError = err.message;
+			first = 'slug';
+			leftOver = null;
+		} else if (err.status === 422 && Array.isArray(err.detail)) {
+			const unplaced: unknown[] = [];
+			const found: Partial<Record<Field, string>> = {};
+			for (const raw of err.detail) {
+				const item = (raw ?? {}) as { loc?: unknown; type?: unknown; msg?: unknown; ctx?: Record<string, unknown> };
+				const loc = Array.isArray(item.loc) ? item.loc : [];
+				const field = loc[loc.length - 1];
+				if (typeof field === 'string' && Object.hasOwn(FIELD_INPUT_IDS, field)) {
+					found[field as Field] ??= validationMessage(item);
+				} else {
+					unplaced.push({ ...item, msg: validationMessage(item) });
+				}
+			}
+			for (const field of Object.keys(FIELD_INPUT_IDS) as Field[]) {
+				const msg = found[field];
+				if (!msg) continue;
+				first ??= field;
+				if (field === 'slug') {
+					slugStatus = 'bad';
+					slugError = msg;
+				} else {
+					fieldErrors[field] = msg;
+				}
+			}
+			// Left-overs keep their `field: message` form, since they are shown
+			// away from any field.
+			leftOver = first
+				? unplaced.length
+					? formatApiDetail(unplaced, m('auth.signup.failed'))
+					: null
+				: err.message;
+		}
+		if (first) {
+			// The field's error is its description (aria-describedby), so
+			// landing focus on it is what announces it (WCAG 3.3.1, 4.1.3).
+			await tick();
+			document.getElementById(FIELD_INPUT_IDS[first])?.focus();
+		}
+		return leftOver;
+	}
+
+	function clearFieldError(field: Exclude<Field, 'slug'>) {
+		if (fieldErrors[field]) fieldErrors[field] = undefined;
+	}
+
 	async function onSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
+		fieldErrors = {};
+		// The form can be submitted inside the slug check's pause, before the
+		// format was looked at.
+		const slugProblem = slugFormatProblem(slug);
+		if (slugProblem) {
+			slugStatus = 'bad';
+			slugError = m(slugProblem);
+			document.getElementById(FIELD_INPUT_IDS.slug)?.focus();
+			return;
+		}
+		if (captchaSitekey && !captchaToken) {
+			error = captchaLoadFailed
+				? m('auth.signup.captchaBlockedSubmit')
+				: m('auth.signup.captchaRequired');
+			return;
+		}
 		submitting = true;
 		try {
-			if (captchaSitekey && !captchaToken) {
-				throw new Error(m('auth.signup.captchaRequired'));
-			}
 			const res = await api.post<StartResponse>('/api/signup/start', {
 				company_name: companyName,
 				slug,
@@ -234,7 +432,8 @@
 			await tick();
 			successHeading?.focus();
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('auth.signup.failed');
+			discardCaptchaToken();
+			error = (await showRefusal(err)) ?? '';
 		} finally {
 			submitting = false;
 		}
@@ -318,19 +517,39 @@
 				{/if}
 			</div>
 
-			<label>
-				<span>{m('auth.signup.companyName')}</span>
-				<input bind:value={companyName} required maxlength="255" autocomplete="organization" />
-			</label>
+			<!-- Each field is a <label for> beside its input, not an input
+			     wrapped in its label: a message under the field is then its
+			     DESCRIPTION (aria-describedby) rather than part of its name, so a
+			     screen reader says "Company name, invalid, Must be at least 2
+			     characters" instead of folding the error into the label. The
+			     `minlength`s mirror backend/app/schemas/signup.py. -->
+			<div class="field">
+				<label for="signup-company"><span>{m('auth.signup.companyName')}</span></label>
+				<input
+					id="signup-company"
+					bind:value={companyName}
+					oninput={() => clearFieldError('company_name')}
+					required
+					minlength="2"
+					maxlength="255"
+					autocomplete="organization"
+					aria-invalid={fieldErrors.company_name ? 'true' : undefined}
+					aria-describedby={fieldErrors.company_name ? 'signup-company-error' : undefined}
+				/>
+				{#if fieldErrors.company_name}
+					<small id="signup-company-error" class="hint bad">{fieldErrors.company_name}</small>
+				{/if}
+			</div>
 
-			<label>
-				<span>{m('auth.signup.workspaceUrl')}</span>
+			<div class="field">
+				<label for="signup-slug"><span>{m('auth.signup.workspaceUrl')}</span></label>
 				<!-- The input and its host suffix read as ONE field: the row takes
 				     the field chrome (border, focus ring) and the input inside it
 				     drops its own, so the ring wraps the whole address the user is
 				     composing rather than half of it. -->
 				<div class="slug-row" class:ok={slugStatus === 'ok'} class:bad={slugStatus === 'bad'}>
 					<input
+						id="signup-slug"
 						class="slug-input"
 						bind:value={slug}
 						oninput={onSlugInput}
@@ -341,10 +560,12 @@
 						autocapitalize="off"
 						autocorrect="off"
 						spellcheck="false"
-						aria-describedby="slug-hint"
+						aria-describedby="slug-suffix slug-hint"
 						aria-invalid={slugStatus === 'bad'}
 					/>
-					<span class="slug-suffix">{tenantUrlSuffix}</span>
+					<!-- Part of the field's description: the label says "Workspace URL",
+					     and this is the rest of the address the slug becomes. -->
+					<span class="slug-suffix" id="slug-suffix">{tenantUrlSuffix}</span>
 					<span class="slug-state" aria-hidden="true">
 						{#if slugStatus === 'checking'}
 							<span class="spinner"></span>
@@ -366,32 +587,68 @@
 						<small class="hint">{m('auth.signup.slugHint')}</small>
 					{/if}
 				</div>
-			</label>
+			</div>
 
-			<label>
-				<span>{m('auth.signup.yourName')}</span>
-				<input bind:value={adminName} required maxlength="255" autocomplete="name" />
-			</label>
-
-			<label>
-				<span>{m('auth.signup.email')}</span>
+			<div class="field">
+				<label for="signup-name"><span>{m('auth.signup.yourName')}</span></label>
 				<input
+					id="signup-name"
+					bind:value={adminName}
+					oninput={() => clearFieldError('admin_name')}
+					required
+					minlength="2"
+					maxlength="255"
+					autocomplete="name"
+					aria-invalid={fieldErrors.admin_name ? 'true' : undefined}
+					aria-describedby={fieldErrors.admin_name ? 'signup-name-error' : undefined}
+				/>
+				{#if fieldErrors.admin_name}
+					<small id="signup-name-error" class="hint bad">{fieldErrors.admin_name}</small>
+				{/if}
+			</div>
+
+			<div class="field">
+				<label for="signup-email"><span>{m('auth.signup.email')}</span></label>
+				<input
+					id="signup-email"
 					type="email"
 					bind:this={emailInput}
 					bind:value={adminEmail}
+					oninput={() => clearFieldError('admin_email')}
 					required
 					maxlength="320"
 					autocomplete="email"
+					aria-invalid={fieldErrors.admin_email ? 'true' : undefined}
+					aria-describedby={fieldErrors.admin_email ? 'signup-email-error' : undefined}
 				/>
-			</label>
+				{#if fieldErrors.admin_email}
+					<small id="signup-email-error" class="hint bad">{fieldErrors.admin_email}</small>
+				{/if}
+			</div>
 
 			{#if captchaSitekey}
-				<!-- Drawn into by the captcha effect (explicit render), never by
-				     hCaptcha scanning for the class. -->
-				<div class="h-captcha" bind:this={captchaEl}></div>
+				{#if captchaLoadFailed}
+					<!-- Where the widget would have been, and announced on arrival:
+					     without it the only thing on screen was a "complete the
+					     captcha" request with nothing to complete. -->
+					<div class="error captcha-blocked" id="captcha-blocked" role="alert">
+						<strong>{m('auth.signup.captchaBlockedTitle')}</strong>
+						<span>{m('auth.signup.captchaBlockedBody')}</span>
+					</div>
+				{:else}
+					<!-- Drawn into by the captcha effect (explicit render), never by
+					     hCaptcha scanning for the class. -->
+					<div class="h-captcha" bind:this={captchaEl}></div>
+				{/if}
 			{/if}
 
-			<button type="submit" disabled={submitting || slugStatus === 'bad'}>
+			<!-- While the captcha cannot load, the button is described by the
+			     notice, so pressing it says why nothing can be sent. -->
+			<button
+				type="submit"
+				disabled={submitting || slugStatus === 'bad'}
+				aria-describedby={captchaSitekey && captchaLoadFailed ? 'captcha-blocked' : undefined}
+			>
 				{submitting ? m('auth.signup.submitting') : m('auth.signup.submit')}
 			</button>
 
@@ -452,6 +709,14 @@
 		font-size: 0.93rem;
 		line-height: 1.55;
 		color: var(--text-muted);
+	}
+
+	/* A label beside its input rather than around it (see the markup), laid
+	   out the way AuthShell lays out a wrapping label. */
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
 	}
 
 	/* ------------------------------ slug field ----------------------------- */
