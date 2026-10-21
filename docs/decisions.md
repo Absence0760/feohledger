@@ -13773,3 +13773,56 @@ that do need one.
 **Sign-off.** This changes a documented accessibility pattern
 (`docs/accessibility.md`, `frontend/docs/ui-patterns.md` § Toast); it should
 be confirmed by whoever owns `docs/accessibility.md`.
+
+## 308. The sidebar's groups say what is in them: Treasury, Subscription under Settings, Cash-flow analytics (issue #635, 2026-10-21)
+
+**Decided** by the operator's delegate on #635 finding 23 · `frontend/src/lib/nav.ts`
+
+A new admin met about thirteen sidebar rows and forty-odd destinations on day
+one, and three of the names misled:
+
+- **"Billing" held the customer's payables money tools** — Credit Memos,
+  Discounts, Positive Pay, Bank Reconciliation, vendor Statements — beside
+  *our* subscription page. Read cold, "Billing" is the vendor's bill or the
+  platform's invoice to you, not treasury work. The group is now
+  **Treasury** (`nav.group.treasury`; the old `nav.group.billing` key is gone,
+  so nothing can keep rendering the old name).
+- **Subscription moved to Settings, directly after Organization.** It is the
+  platform's plan and usage page (`/billing`, control plane), which describes
+  the workspace itself — the same kind of thing as Organization — and is
+  nothing to do with paying suppliers. It keeps its gate (admin | cfo, the
+  backend's `GET /api/billing/subscription`). A CFO, who can see no other
+  Settings child, now sees a Settings row that lands on Subscription; per-item
+  gating already handles a one-child view (the group row is the page).
+- **`/cfo` is "Cash-flow analytics"**, so it reads as distinct from
+  "Cash-Flow Copilot" beside it: one is the forecasting dashboard, the other a
+  conversation. Only the nav label changed (`nav.cashFlow`); the page keeps its
+  own heading key. In French the old label *was* "Trésorerie", which would have
+  collided with the new group name, so the guard below checks every locale.
+
+**What this does not change.** §174's row budget is untouched: no row was
+added, Treasury drops from nine tabs to eight, Settings grows from eight to
+nine, both under `nav.test.ts`'s ten-tab ceiling. The role matrix in
+`nav.test.ts` (`NAV_GATES`) moves `/billing` to the Settings block with the
+same roles.
+
+**Guard.** `nav.test.ts` pins the new placement, the CFO landing, and a
+locale-wide rule: no two sidebar rows share a name, and within a group no two
+tabs (nor a tab and its group) read the same, in any of the six catalogues.
+`tests-e2e/smoke/section-nav.spec.ts` checks the rendered sidebar.
+
+**Partner Admin is NOT hidden yet — it needs a product call.** The finding
+asked to hide it unless the workspace is a partner. There is no partner flag:
+`GET /api/partner`'s `is_partner` is *derived* — true once the org parents at
+least one child — and the page that row opens is also where a standalone org
+(a) provisions or attaches its **first** child, which is how it becomes a
+partner at all, and (b) mints the link code that consents to being adopted
+*by* a partner. Gating the row on `is_partner` would make both unreachable
+from the UI for exactly the orgs that need them, and the row's gate would no
+longer agree with the page's (admin-only, the backend's
+`require_roles(ROLE_ADMIN)` on every `/api/partner` route) — the mismatch
+`frontend/CLAUDE.md` calls a defect. Doing it properly means either an
+operator-set partner capability (a plan entitlement or an
+`organizations.is_partner` column, exposed on `/auth/me`) with the link-code
+minting moved to Organization settings, or accepting the row as is. Tracked in
+`docs/followups.md`.

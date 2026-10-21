@@ -400,9 +400,10 @@ test.describe('/billing (admin)', () => {
 	});
 
 	test('the Subscription section tab is visible + active for the admin', async ({ page }) => {
-		// /billing is a child of the Billing nav group, so it surfaces as a
-		// section sub-tab (not a top-level sidebar row). On /billing the Billing
-		// group's sub-tab bar is shown with Subscription as the active tab.
+		// /billing is a child of the Settings nav group (beside Organization —
+		// decisions §308), so it surfaces as a section sub-tab, not a top-level
+		// sidebar row. On /billing the Settings sub-tab bar is shown with
+		// Subscription as the active tab.
 		const tab = page.locator('nav.section-tabs a[href="/billing"]');
 		await expect(tab).toBeVisible();
 		await expect(tab).toHaveText('Subscription');

@@ -80,7 +80,7 @@ const NAV_GATES: Record<string, { roles: string[] | null; permissions?: string[]
 	'/catalogs': { roles: ALL_FOUR },
 	'/gl-accounts': { roles: ALL_FOUR },
 	'/budgets': { roles: NOT_CLERK },
-	// Billing
+	// Treasury
 	'/contracts': { roles: ALL_FOUR },
 	'/expenses': { roles: ALL_FOUR },
 	'/credit-memos': { roles: ALL_FOUR },
@@ -89,7 +89,6 @@ const NAV_GATES: Record<string, { roles: string[] | null; permissions?: string[]
 	'/vendor-statements': { roles: ALL_FOUR },
 	'/positive-pay': { roles: NOT_CLERK },
 	'/bank-reconciliation': { roles: ALL_FOUR },
-	'/billing': { roles: ['admin', 'cfo'] },
 	// Insights
 	'/assistant': { roles: ALL_FOUR },
 	'/cfo': { roles: ['admin', 'cfo'] },
@@ -107,6 +106,7 @@ const NAV_GATES: Record<string, { roles: string[] | null; permissions?: string[]
 	'/admin/privacy': { roles: ['admin'] },
 	// Settings
 	'/organization': { roles: ['admin'] },
+	'/billing': { roles: ['admin', 'cfo'] },
 	'/admin?tab=users': { roles: ['admin'], permissions: [PERM_USER_MANAGE] },
 	'/admin?tab=roles': { roles: ['admin'] },
 	'/admin/entities': { roles: ['admin'] },
@@ -495,6 +495,7 @@ test('the Settings split preserves every destination exactly once', () => {
 	expect(split).toEqual(
 		expect.arrayContaining([
 			'/organization',
+			'/billing',
 			'/admin?tab=users',
 			'/admin?tab=roles',
 			'/admin/entities',
@@ -511,7 +512,54 @@ test('the Settings split preserves every destination exactly once', () => {
 			'/adaptive',
 		])
 	);
-	expect(split).toHaveLength(15);
+	// 15 from the split, plus Subscription, moved in from Billing (§308).
+	expect(split).toHaveLength(16);
+});
+
+// ---------------------------------------------------------------------------
+// Group names that say what is in them (issue #635 #23, decisions §308).
+// ---------------------------------------------------------------------------
+
+test('our own subscription sits in Settings beside Organization, not among the payables tools', () => {
+	const treasury = group('Treasury');
+	expect(treasury.labelKey).toBe('nav.group.treasury');
+	expect(treasury.children.map((c) => c.href)).not.toContain('/billing');
+	expect(treasury.children.map((c) => c.href)).toEqual(
+		expect.arrayContaining(['/credit-memos', '/positive-pay', '/bank-reconciliation'])
+	);
+	const settingsHrefs = settings.children.map((c) => c.href);
+	expect(settingsHrefs.indexOf('/billing')).toBe(settingsHrefs.indexOf('/organization') + 1);
+});
+
+test('a CFO sees Settings as the one page it can open there — Subscription — and lands on it', () => {
+	const hasCfo = (...roles: string[]) => roles.includes('cfo');
+	expect(visibleChildren(settings, hasCfo).map((c) => c.href)).toEqual(['/billing']);
+	expect(sidebarHrefs(hasCfo)).toContain('/billing');
+});
+
+test('no two sidebar groups, and no two tabs in one group, read the same in any locale', async () => {
+	// "Cash Flow" beside "Cash-Flow Copilot" — and in French, a "Trésorerie" tab
+	// that would have shared its name with the Treasury group — is the defect
+	// this pins: two destinations a reader cannot tell apart by name.
+	const catalogues: Record<string, Record<string, string>> = {
+		en: (await import('./i18n/locales/en')).en,
+		de: (await import('./i18n/locales/de')).messages,
+		es: (await import('./i18n/locales/es')).messages,
+		fr: (await import('./i18n/locales/fr')).messages,
+		ja: (await import('./i18n/locales/ja')).messages,
+		'pt-BR': (await import('./i18n/locales/pt-BR')).messages
+	};
+	for (const [locale, cat] of Object.entries(catalogues)) {
+		const sidebar = NAV.map((e) => cat[e.labelKey]);
+		expect(new Set(sidebar).size, `${locale}: two sidebar rows share a name`).toBe(sidebar.length);
+		for (const g of groups) {
+			const tabs = [cat[g.labelKey], ...g.children.map((c) => cat[c.labelKey])];
+			expect(
+				new Set(tabs).size,
+				`${locale}: group "${g.label}" has a tab named like another tab or the group`
+			).toBe(tabs.length);
+		}
+	}
 });
 
 test('no section grows back to a tab count the row cannot hold', () => {

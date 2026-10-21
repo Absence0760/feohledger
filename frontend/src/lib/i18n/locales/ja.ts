@@ -17,7 +17,7 @@ export const messages = {
 
 	// Primary navigation — group labels
 	'nav.group.procurement': '調達',
-	'nav.group.billing': '請求',
+	'nav.group.treasury': '資金管理',
 	'nav.group.insights': '分析',
 	'nav.group.automation': '自動化',
 	'nav.group.governance': 'ガバナンス',
@@ -40,7 +40,7 @@ export const messages = {
 	'nav.positivePay': 'ポジティブペイ',
 	'nav.platformBilling': 'サブスクリプション',
 	'nav.aiAssistant': 'AIアシスタント',
-	'nav.cashFlow': 'キャッシュフロー',
+	'nav.cashFlow': 'キャッシュフロー分析',
 	'nav.cashFlowCopilot': 'キャッシュフロー・コパイロット',
 	'nav.taxReporting': '1099報告',
 	'nav.reports': 'レポートビルダー',

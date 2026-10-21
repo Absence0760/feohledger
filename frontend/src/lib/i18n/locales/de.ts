@@ -13,7 +13,7 @@ export const messages = {
 
 	// Primary navigation — group labels
 	'nav.group.procurement': 'Beschaffung',
-	'nav.group.billing': 'Abrechnung',
+	'nav.group.treasury': 'Treasury',
 	'nav.group.insights': 'Auswertungen',
 	'nav.group.automation': 'Automatisierung',
 	'nav.group.governance': 'Governance',
@@ -36,7 +36,7 @@ export const messages = {
 	'nav.positivePay': 'Positive Pay',
 	'nav.platformBilling': 'Abonnement',
 	'nav.aiAssistant': 'KI-Assistent',
-	'nav.cashFlow': 'Liquidität',
+	'nav.cashFlow': 'Cashflow-Analyse',
 	'nav.cashFlowCopilot': 'Cashflow-Copilot',
 	'nav.taxReporting': '1099-Meldung',
 	'nav.reports': 'Berichtsgenerator',

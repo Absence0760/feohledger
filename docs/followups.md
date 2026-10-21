@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — extracting `ui/LoadError` (issue #635) opened
+**Last reconciled:** 2026-10-21 — the sidebar renames (issue #635 #23,
+decisions §308) opened one (c) entry, hiding Partner Admin from non-partners,
+taking the file from 130 → 131. Before that, 2026-10-21 — extracting `ui/LoadError` (issue #635) opened
 one (c) entry, the pages still hand-rolling a load-error + Retry block, taking
 the file from 129 → 130. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
 decisions §305) opened three (c) entries — the modal's assignee clause, bulk
@@ -204,7 +206,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**130 open: 112 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**131 open: 113 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2086,6 +2088,22 @@ providers still have the same gap.
       in each, drop the private `*.retry` keys for `common.retry`, and move
       each page's spec selector to its `testId`. **Trigger:** the next change to
       any of those pages, or a focus-order (WCAG 2.4.3) report on a retry.
+
+### Surfaced by the sidebar renames (2026-10-21, issue #635 #23, decisions §308)
+
+- [ ] **(c) Partner Admin shows to every admin, partner or not — needs a product
+      call.** #635 asked to hide the row unless the workspace is a partner, but
+      nothing says so: `GET /api/partner`'s `is_partner` is derived from having
+      at least one child, and `/admin/partner` is also where a standalone org
+      provisions or attaches its first child (how it becomes a partner) and
+      mints the link code that consents to being adopted. Gating the row on
+      `is_partner` would strand both and break "the sidebar gate and the page's
+      gate agree" (`frontend/CLAUDE.md`). **Durable fix:** an operator-granted
+      partner capability (plan entitlement, or `organizations.is_partner`) on
+      `/auth/me`, the `/api/partner` routes gated on it, the link-code minting
+      moved to Organization settings (any admin may consent to adoption), and
+      the nav row gated on the capability. **Trigger:** the product decision on
+      who may act as a partner, or the next partner/reseller onboarding.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

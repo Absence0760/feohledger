@@ -698,7 +698,7 @@ export const PAYMENT_GUIDES: Guide[] = [
 		id: 'reports-and-analytics',
 		title: 'Reports, analytics and exports',
 		summary:
-			'Find the figures you need: the dashboard, the Cash Flow page, your own reports in the Report Builder, scheduled email reports and 1099 reporting.',
+			'Find the figures you need: the dashboard, the Cash-flow analytics page, your own reports in the Report Builder, scheduled email reports and 1099 reporting.',
 		kind: 'howto',
 		route: '/',
 		sections: [
@@ -719,7 +719,7 @@ export const PAYMENT_GUIDES: Guide[] = [
 				]
 			},
 			{
-				heading: 'Cash Flow (for CFOs and admins)',
+				heading: 'Cash-flow analytics (for CFOs and admins)',
 				blocks: [
 					{
 						type: 'p',

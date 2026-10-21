@@ -3,14 +3,14 @@ import { clickSectionTab, expect, sectionTabHrefs, test } from '../fixtures/help
 /**
  * Grouped sidebar navigation + the per-page section sub-tab bar.
  *
- * Lower-traffic routes are folded behind group rows (Procurement / Billing /
+ * Lower-traffic routes are folded behind group rows (Procurement / Treasury /
  * Insights / Automation / Governance / Settings — see `#lib/nav`). A group row
  * lands on its first child; the page then shows the group's children as a
  * section tab bar that round-trips navigation and tracks the active route. Run
  * as admin (sees every group).
  *
  * The bar folds whatever does not fit into a More menu (`decisions §174`), and
- * Billing's 9 children overflow the default 1280px viewport — so a "which tabs
+ * Treasury's 8 children overflow the default 1280px viewport — so a "which tabs
  * does this group have" assertion goes through `sectionTabHrefs`, which reads
  * the row AND the menu. Asserting the row alone would only pin what fits.
  */
@@ -32,7 +32,9 @@ test.describe('grouped sidebar navigation', () => {
 			'Bank Changes',
 			'Exceptions',
 			'Procurement',
-			'Billing',
+			// "Treasury", not "Billing" (decisions §308): it holds the payables
+			// money tools, and our own subscription moved to Settings.
+			'Treasury',
 			'Insights',
 			'Automation',
 			'Governance',
@@ -42,12 +44,12 @@ test.describe('grouped sidebar navigation', () => {
 
 	test('a group row lands on its first child and shows the section tabs', async ({ page }) => {
 		await page.goto('/');
-		await page.locator('aside.sidebar a.nav-item', { hasText: 'Billing' }).click();
+		await page.locator('aside.sidebar a.nav-item', { hasText: 'Treasury' }).click();
 
-		// Billing → Contracts (first child).
+		// Treasury → Contracts (first child).
 		await expect(page).toHaveURL(/\/contracts$/);
-		// Row + More menu, in nav order — all nine are offered whether or not
-		// they fit (Billing is the widest group and does not, at 1280px).
+		// Row + More menu, in nav order — all eight are offered whether or not
+		// they fit (Treasury is the widest group and does not, at 1280px).
 		expect(await sectionTabHrefs(page)).toEqual([
 			'/contracts',
 			'/expenses',
@@ -56,13 +58,19 @@ test.describe('grouped sidebar navigation', () => {
 			'/recurring',
 			'/vendor-statements',
 			'/positive-pay',
-			'/bank-reconciliation',
-			'/billing'
+			'/bank-reconciliation'
 		]);
 		// The landing tab is the active one.
 		await expect(page.locator('.section-tab.active')).toHaveText('Contracts');
 		// The sidebar group row reflects the active section.
-		await expect(page.locator('aside.sidebar a.nav-item.active')).toHaveText('Billing');
+		await expect(page.locator('aside.sidebar a.nav-item.active')).toHaveText('Treasury');
+	});
+
+	test('our own subscription is a Settings tab beside Organization', async ({ page }) => {
+		await page.goto('/billing');
+		await expect(page.locator('aside.sidebar a.nav-item.active')).toHaveText('Settings');
+		const tabs = await sectionTabHrefs(page);
+		expect(tabs.slice(0, 2)).toEqual(['/organization', '/billing']);
 	});
 
 	test('section tabs navigate and the active tab + group follow the route', async ({ page }) => {
@@ -71,8 +79,8 @@ test.describe('grouped sidebar navigation', () => {
 
 		await expect(page).toHaveURL(/\/discounts$/);
 		await expect(page.locator('.section-tab.active')).toHaveText('Discounts');
-		// Still inside the Billing group → sidebar Billing row stays active.
-		await expect(page.locator('aside.sidebar a.nav-item.active')).toHaveText('Billing');
+		// Still inside the Treasury group → sidebar Treasury row stays active.
+		await expect(page.locator('aside.sidebar a.nav-item.active')).toHaveText('Treasury');
 	});
 
 	test('deep-linking straight to a group child restores the right active tab', async ({ page }) => {

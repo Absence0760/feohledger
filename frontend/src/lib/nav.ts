@@ -227,10 +227,14 @@ export const NAV: NavEntry[] = [
 			{ label: 'Budgets', labelKey: 'nav.budgets', href: '/budgets', roles: ['admin', 'ap_manager', 'cfo'] },
 		],
 	},
+	// "Treasury", not "Billing" (decisions §308): every row here is the
+	// customer's own payables money — memos, discounts, bank files, the bank
+	// reconciliation — and "Billing" read as OUR subscription, which lived here
+	// too and has moved to Settings.
 	{
 		kind: 'group',
-		label: 'Billing',
-		labelKey: 'nav.group.billing',
+		label: 'Treasury',
+		labelKey: 'nav.group.treasury',
 		icon: 'receipt',
 		children: [
 			{ label: 'Contracts', labelKey: 'nav.contracts', href: '/contracts', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
@@ -263,10 +267,6 @@ export const NAV: NavEntry[] = [
 			// renders read-only for a clerk and hiding the row would be a dead end
 			// rather than a gate.
 			{ label: 'Bank Reconciliation', labelKey: 'bankRecon.navLabel', href: '/bank-reconciliation', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
-			// Platform billing — the AP platform's OWN subscription / plan / usage
-			// (control-plane), distinct from the customer AP money path above.
-			// Admin/CFO only (the backend GET /api/billing/subscription 403s the rest).
-			{ label: 'Subscription', labelKey: 'nav.platformBilling', href: '/billing', roles: ['admin', 'cfo'] },
 		],
 	},
 	{
@@ -276,7 +276,9 @@ export const NAV: NavEntry[] = [
 		icon: 'assistant',
 		children: [
 			{ label: 'AI Assistant', labelKey: 'nav.aiAssistant', href: '/assistant', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
-			{ label: 'Cash Flow', labelKey: 'nav.cashFlow', href: '/cfo', roles: ['admin', 'cfo'] },
+			// "Cash-flow analytics", so it reads as distinct from the Copilot below
+			// it (decisions §308): this is the CFO dashboard, that is a conversation.
+			{ label: 'Cash-flow analytics', labelKey: 'nav.cashFlow', href: '/cfo', roles: ['admin', 'cfo'] },
 			// Conversational cash-flow copilot (finance leaders — mirrors the
 			// /api/cash-flow façade RBAC; distinct from the /cfo analytics dashboard).
 			{ label: 'Cash-Flow Copilot', labelKey: 'nav.cashFlowCopilot', href: '/cash-flow', roles: ['admin', 'ap_manager', 'cfo'] },
@@ -339,6 +341,13 @@ export const NAV: NavEntry[] = [
 		icon: 'settings',
 		children: [
 			{ label: 'Organization', labelKey: 'nav.organization', href: '/organization', roles: ['admin'] },
+			// Platform billing — the AP platform's OWN subscription / plan / usage
+			// (control-plane), distinct from the customer money path in Treasury,
+			// which is where it used to sit (decisions §308). Beside Organization
+			// because both describe the workspace itself. Admin/CFO (the backend
+			// GET /api/billing/subscription 403s the rest), so a CFO sees Settings
+			// as a group of this one page and lands on it.
+			{ label: 'Subscription', labelKey: 'nav.platformBilling', href: '/billing', roles: ['admin', 'cfo'] },
 			// Users + Roles share the /admin route via ?tab=; they're surfaced as
 			// peer section tabs (not a second tab row inside the page).
 			// Users: `GET /api/admin/users` is `require_permission(user.manage)`
