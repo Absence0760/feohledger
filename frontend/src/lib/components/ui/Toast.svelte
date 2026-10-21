@@ -30,12 +30,11 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import {
-		DIALOG_SATELLITE_ATTR,
 		onModalDialogsChange,
 		topModalDialog
 	} from '#lib/actions/focusTrap.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { placeToasts, TOAST_MARGIN, type Box } from '#lib/utils/toastPlacement.ts';
+	import { placeToasts, TOAST_MARGIN } from '#lib/utils/toastPlacement.ts';
 
 	let region = $state<HTMLElement | null>(null);
 	let hovered = $state(false);
@@ -188,18 +187,23 @@
 	});
 
 	/**
-	 * Keep persistent errors clear of what the reader needs next (WCAG 2.4.11).
+	 * Keep the toasts clear of what the reader needs next (WCAG 2.4.11, 2.5.8).
 	 * The region sits bottom-right, which is where the shared bulk-action bar
 	 * sits too (centred, `bottom: 24px`) — while one is on screen the region
-	 * rises above it — and, on a phone, where an open dialog's footer sits.
-	 * `utils/toastPlacement.ts` decides where the stack goes around that footer
-	 * (#635 G); this measures the page for it. Observed only while toasts are
-	 * showing.
+	 * rises above it — and where an open dialog reaches on a phone, or on a
+	 * desktop when it is wide. `utils/toastPlacement.ts` decides; when the
+	 * dialog is in the way, the dialog yields a band at the bottom of the
+	 * viewport and the stack sits in it (`dock`), so a toast never covers any
+	 * of the dialog's controls. Observed only while toasts are showing.
 	 */
 	$effect(() => {
 		if (toasts.length === 0) {
 			placedBottom = null;
 			maxHeight = null;
+			// The band is NOT given back here: the dialog moving back down as the
+			// last toast goes would slide its footer under the pointer that just
+			// dismissed it (on a phone, an armed "Confirm cancel"). It is given
+			// back when the dialog closes or another takes its place.
 			return;
 		}
 		const observed = new Set<Element>();
@@ -216,8 +220,10 @@
 			frame = 0;
 			if (!region) return;
 			const dialog = topModalDialog();
+			// The dialog a band was yielded by has closed or is no longer on top.
+			if (dock && dock.dialog !== dialog) undock();
 			// A bulk bar behind an open dialog's backdrop is not what the
-			// reader is looking at; only the dialog's actions are.
+			// reader is looking at; only the dialog is.
 			const bar = dialog ? null : document.querySelector('.bulk-bar');
 			watch([bar, dialog, region]);
 			const vh = window.innerHeight;
@@ -226,15 +232,17 @@
 					getComputedStyle(document.documentElement).getPropertyValue('--consent-banner-height')
 				) || 0;
 			const barLift = bar ? Math.max(0, vh - bar.getBoundingClientRect().top) + 8 : 0;
+			const r = dialog?.getBoundingClientRect();
 			const placed = placeToasts({
 				viewport: { width: window.innerWidth, height: vh },
 				stack: { width: region.offsetWidth, height: region.scrollHeight },
 				bottomInset: Math.max(TOAST_MARGIN + consent, barLift),
-				avoid: dialog ? dialogActions(dialog) : null,
-				focused: dialog ? focusedControl(dialog) : null
+				dialog: r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null,
+				docked: !!dock
 			});
 			placedBottom = placed.bottom;
 			maxHeight = placed.maxHeight;
+			if (dialog && placed.band !== null) yieldBand(dialog, placed.band);
 		}
 		function schedule() {
 			if (!frame) frame = requestAnimationFrame(measure);
@@ -247,10 +255,6 @@
 		window.addEventListener('resize', schedule);
 		// The topmost modal dialog (what the stack keeps clear of) changed.
 		const offModals = onModalDialogsChange(schedule);
-		// A long dialog scrolls inside itself, carrying its footer with it.
-		document.addEventListener('scroll', schedule, { capture: true, passive: true });
-		// Focus moving to a control the stack would cover moves the stack.
-		document.addEventListener('focusin', schedule);
 		measure();
 		return () => {
 			cancelAnimationFrame(frame);
@@ -259,57 +263,159 @@
 			resize.disconnect();
 			window.removeEventListener('resize', schedule);
 			offModals();
-			document.removeEventListener('scroll', schedule, true);
-			document.removeEventListener('focusin', schedule);
+		};
+	});
+
+	// The band is given back when its dialog closes or another dialog takes the
+	// top — whether or not toasts are still showing — and when this component
+	// goes.
+	$effect(() => {
+		const off = onModalDialogsChange(() => {
+			if (dock && dock.dialog !== topModalDialog()) undock();
+		});
+		return () => {
+			off();
+			undock();
 		};
 	});
 
 	/**
-	 * The focused control inside `dialog`, to keep clear of (2.4.11): not the
-	 * dialog node itself, not a toast's own button, and not something as tall
-	 * as half the screen (a scrolling pane that took focus is a container, and
-	 * keeping it clear would squeeze the stack to nothing).
+	 * The open dialog yielding the band at the bottom of the viewport that the
+	 * stack sits in. Once yielded it is kept, and only ever grows, for as long
+	 * as that dialog is open (`placeToasts`' `docked`): the dialog moving back
+	 * as a toast leaves would slide its footer under the pointer that just
+	 * dismissed the toast. Given back by `undock` when the dialog closes or
+	 * another takes the top.
+	 *
+	 * Every dialog shell here is a `role="dialog"` box centred in a
+	 * `position: fixed; inset: 0` backdrop (its parent) — the rule § Toast
+	 * already sets for hosting the region. The backdrop's bottom padding grows
+	 * to the band, so the dialog is centred in what is left; the dialog's
+	 * height is capped to that space, since its own `max-height` is in `vh` and
+	 * would ignore the padding. A dialog that is shorter keeps its height and
+	 * only moves up. Its own scrolling (the dialog's, or its body's) takes the
+	 * rest (a shell that never scrolled is made to) — so the focused control
+	 * is scrolled back into view if the shortening hid it. The inline styles
+	 * are saved and restored exactly (scroll positions are not: they stay
+	 * where the reader left them). While the band is held a click in it does
+	 * not close the dialog, and a new viewport recomputes the cap.
 	 */
-	function focusedControl(dialog: HTMLElement): Box | null {
-		const el = document.activeElement;
-		if (!(el instanceof HTMLElement) || el === dialog || !dialog.contains(el)) return null;
-		if (region?.contains(el)) return null;
-		const r = el.getBoundingClientRect();
-		if (r.height === 0 || r.height > window.innerHeight / 2) return null;
-		return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+	let dock: {
+		dialog: HTMLElement;
+		backdrop: HTMLElement;
+		saved: { maxHeight: string; overflowY: string; paddingBottom: string };
+		band: number;
+		/** The viewport the dialog's cap was computed for. */
+		viewport: string;
+		/** Swallows a click in the band (see `yieldBand`). */
+		guard: (e: MouseEvent) => void;
+		/** Recomputes the cap for a new viewport, toasts showing or not. */
+		onResize: () => void;
+	} | null = null;
+
+	function yieldBand(dialog: HTMLElement, band: number) {
+		const backdrop = dialog.parentElement;
+		// Only a dialog centred in a full-viewport fixed backdrop (every shell
+		// here, and the rule § Toast sets): padding anything else would push
+		// page layout around.
+		if (!backdrop || !isFullViewportBackdrop(backdrop)) return;
+		const viewport = `${window.innerWidth}x${window.innerHeight}`;
+		// Grow-only while the dialog is open: a toast leaving (a timed-out
+		// success beside a persistent error) must not move the dialog either.
+		// A new viewport (rotation, zoom, a resized window) always recomputes
+		// the cap, or the dialog would keep a height that no longer fits.
+		if (dock && band <= dock.band && dock.viewport === viewport) return;
+		if (!dock) {
+			// A click in the band is on the backdrop, which every shell reads
+			// as "close": a tap aimed at a control where it was a moment ago
+			// would close the dialog instead. The band is not the backdrop's
+			// to give away, so its clicks are swallowed here.
+			const guard = (e: MouseEvent) => {
+				if (e.target === backdrop && dock && e.clientY >= window.innerHeight - dock.band) {
+					e.stopPropagation();
+				}
+			};
+			backdrop.addEventListener('click', guard, true);
+			const onResize = () => {
+				if (dock) yieldBand(dock.dialog, dock.band);
+			};
+			window.addEventListener('resize', onResize);
+			dock = {
+				dialog,
+				backdrop,
+				saved: {
+					maxHeight: dialog.style.maxHeight,
+					overflowY: dialog.style.overflowY,
+					paddingBottom: backdrop.style.paddingBottom
+				},
+				band,
+				viewport,
+				guard,
+				onResize
+			};
+		}
+		dock.band = Math.max(dock.band, band);
+		dock.viewport = viewport;
+		band = dock.band;
+		// Shortening the dialog must not scroll away what the reader was just
+		// looking at — on a failed Save, the footer they retry from. Each
+		// scroller in the dialog keeps its distance from its own bottom.
+		const fromBottom = new Map(
+			scrollersIn(dialog).map((el) => [el, el.scrollHeight - el.clientHeight - el.scrollTop])
+		);
+		// The dialog's own cap, read with ours lifted.
+		dialog.style.maxHeight = dock.saved.maxHeight;
+		const own = parseFloat(getComputedStyle(dialog).maxHeight);
+		backdrop.style.paddingBottom = `${band}px`;
+		const room = backdrop.clientHeight - parseFloat(getComputedStyle(backdrop).paddingTop) - band;
+		dialog.style.maxHeight = `${Math.max(0, Number.isFinite(own) ? Math.min(own, room) : room)}px`;
+		// A shell that never needed to scroll must now, or its content would
+		// spill out of the shortened box into the band.
+		if (getComputedStyle(dialog).overflowY === 'visible') dialog.style.overflowY = 'auto';
+		for (const el of scrollersIn(dialog)) {
+			el.scrollTop = el.scrollHeight - el.clientHeight - (fromBottom.get(el) ?? 0);
+		}
+		// And the focused control, wherever it is, stays in view (2.4.11).
+		const focused = document.activeElement;
+		if (
+			focused instanceof HTMLElement &&
+			focused !== dialog &&
+			dialog.contains(focused) &&
+			!region?.contains(focused)
+		) {
+			focused.scrollIntoView({ block: 'nearest' });
+		}
 	}
 
-	/**
-	 * The dialog's action row as it shows on screen: its last visible
-	 * `.modal-footer` (the shared footer class), else the row holding its last
-	 * visible button. Clipped to the dialog's own box, since a long dialog
-	 * scrolls and a footer scrolled out of it is not on screen to cover; null
-	 * when none of it is.
-	 */
-	function dialogActions(dialog: HTMLElement): Box | null {
-		const visible = (el: Element) => {
-			const r = el.getBoundingClientRect();
-			return r.width > 0 && r.height > 0;
+	function isFullViewportBackdrop(el: HTMLElement): boolean {
+		if (getComputedStyle(el).position !== 'fixed') return false;
+		const r = el.getBoundingClientRect();
+		return r.top <= 0 && r.left <= 0 && r.bottom >= window.innerHeight && r.right >= window.innerWidth;
+	}
+
+	/** The dialog and every element inside it that scrolls vertically (not the
+	 *  hosted toast region). */
+	function scrollersIn(dialog: HTMLElement): HTMLElement[] {
+		const found: HTMLElement[] = [];
+		const consider = (el: HTMLElement) => {
+			if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) found.push(el);
 		};
-		// The hosted toast region is inside the dialog; its buttons are not the
-		// dialog's actions.
-		const own = (el: Element) => !el.closest(`[${DIALOG_SATELLITE_ATTR}]`);
-		const footers = [...dialog.querySelectorAll('.modal-footer')].filter(visible);
-		let row: Element | null = footers.at(-1) ?? null;
-		if (!row)
-			row =
-				[...dialog.querySelectorAll('button')].filter((b) => own(b) && visible(b)).at(-1)
-					?.parentElement ?? null;
-		if (!row) return null;
-		const r = row.getBoundingClientRect();
-		const d = dialog.getBoundingClientRect();
-		const box = {
-			top: Math.max(r.top, d.top, 0),
-			bottom: Math.min(r.bottom, d.bottom, window.innerHeight),
-			left: Math.max(r.left, d.left),
-			right: Math.min(r.right, d.right)
-		};
-		return box.top < box.bottom && box.left < box.right ? box : null;
+		consider(dialog);
+		for (const el of dialog.querySelectorAll<HTMLElement>('*')) {
+			if (!region?.contains(el)) consider(el);
+		}
+		return found;
+	}
+
+	function undock() {
+		if (!dock) return;
+		const { dialog, backdrop, saved, guard, onResize } = dock;
+		dock = null;
+		backdrop.removeEventListener('click', guard, true);
+		window.removeEventListener('resize', onResize);
+		dialog.style.maxHeight = saved.maxHeight;
+		dialog.style.overflowY = saved.overflowY;
+		backdrop.style.paddingBottom = saved.paddingBottom;
 	}
 
 	function onFocusIn(e: FocusEvent) {
@@ -442,8 +548,9 @@
 	   just groups them for the landmark. */
 	.toast-region {
 		position: fixed;
-		/* `bottom` is set inline: above the consent banner, any bulk bar, and
-		   an open dialog's actions (`utils/toastPlacement.ts`). */
+		/* `bottom` is set inline: above the consent banner and any bulk bar
+		   (`utils/toastPlacement.ts`). An open dialog makes room for it rather
+		   than the other way round. */
 		bottom: 16px;
 		right: 16px;
 		z-index: 9999;
@@ -453,8 +560,8 @@
 		pointer-events: none;
 	}
 
-	/* Too tall to fit beside a dialog's actions: the stack scrolls instead of
-	   covering them — by pointer (the wheel works over the toasts themselves)
+	/* Taller than its share of the viewport (`TOAST_MAX_SHARE`), with or
+	   without a dialog open: the stack scrolls — by pointer (the wheel works over the toasts themselves)
 	   and by keyboard (Tab reaches each dismiss button and the browser scrolls
 	   it into view: the region is in the dialog's Tab cycle). */
 	.toast-region.capped {

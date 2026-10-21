@@ -122,8 +122,8 @@ test.describe('toast timing and focus', () => {
 /**
  * #635 G: on a phone an open dialog's footer sits where the toast corner is,
  * and an error toast no longer times out — so it stayed over the button the
- * reader needed to retry with. `utils/toastPlacement.ts` (unit-tested) moves
- * the stack clear of the dialog's actions; this pins the wiring at the two
+ * reader needed to retry with. `utils/toastPlacement.ts` (unit-tested) has the
+ * dialog yield a band below it for the stack; this pins the wiring at the two
  * widths the issue names, with a real error from a real dialog. The bank-
  * details dialog is the tall case: at phone heights it fills 90vh and its
  * footer lands on the corner.
@@ -519,5 +519,265 @@ test.describe('a toast inside an open dialog is reachable by keyboard', () => {
 		await expect(toast).toBeVisible();
 		expect(await region(page).evaluate((el) => !el.closest('[role="dialog"]'))).toBe(true);
 		await expect(trigger).toBeFocused();
+	});
+});
+
+/**
+ * A toast raised while a dialog is open covers NONE of the dialog's controls —
+ * not only its footer or the focused field (#636: an error toast that no longer
+ * times out sat over "Record run as paid…" in a dialog's body). Checked with
+ * every visible interactive element in the dialog against every toast's box,
+ * for the three dialog shells: `ui/Modal` (the dialog itself scrolls), the
+ * hand-rolled `RunDetailModal` (a scrolling body between a fixed header and
+ * footer) and `InvoiceModal`.
+ */
+async function coveredControls(page: Page): Promise<string[]> {
+	return page.evaluate(() => {
+		const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')];
+		const dialog = dialogs.at(-1);
+		if (!dialog) return ['no dialog'];
+		const toasts = [...document.querySelectorAll<HTMLElement>('[data-testid="toast"]')].map((t) =>
+			t.getBoundingClientRect()
+		);
+		if (toasts.length === 0) return ['no toast'];
+		type R = { top: number; bottom: number; left: number; right: number };
+		const clip = (a: R, b: R): R => ({
+			top: Math.max(a.top, b.top),
+			bottom: Math.min(a.bottom, b.bottom),
+			left: Math.max(a.left, b.left),
+			right: Math.min(a.right, b.right)
+		});
+		const empty = (r: R) => r.top >= r.bottom || r.left >= r.right;
+		const viewport: R = { top: 0, left: 0, bottom: innerHeight, right: innerWidth };
+		const covered: string[] = [];
+		const controls = dialog.querySelectorAll<HTMLElement>(
+			'button, input, select, textarea, a[href], [role="button"], [tabindex]:not([tabindex="-1"])'
+		);
+		for (const el of controls) {
+			if (el.closest('.toast-region')) continue;
+			// What of it is actually on screen: inside the viewport and every
+			// clipping ancestor up to (and including) the dialog.
+			let box: R = clip(el.getBoundingClientRect(), viewport);
+			for (let a = el.parentElement; a && box && !empty(box); a = a.parentElement) {
+				const o = getComputedStyle(a);
+				if (a === dialog || /(auto|scroll|hidden|clip)/.test(o.overflowY + o.overflowX))
+					box = clip(box, a.getBoundingClientRect());
+				if (a === dialog) break;
+			}
+			if (empty(box)) continue;
+			if (toasts.some((t) => !empty(clip(box, t))))
+				covered.push(el.getAttribute('aria-label') || el.textContent?.trim() || el.tagName);
+		}
+		return covered;
+	});
+}
+
+async function expectToastClearOfDialog(page: Page, toast: ReturnType<Page['locator']>) {
+	await settle(toast);
+	await expect.poll(() => coveredControls(page)).toEqual([]);
+	// And the toast itself is whole and on screen.
+	const t = (await toast.boundingBox())!;
+	const vp = page.viewportSize()!;
+	expect(t.y).toBeGreaterThanOrEqual(0);
+	expect(t.y + t.height).toBeLessThanOrEqual(vp.height);
+	expect(t.x + t.width).toBeLessThanOrEqual(vp.width);
+}
+
+const RUN_ID = '00000000-0000-4000-8000-0000000000aa';
+
+/** A stubbed draft run with enough payments to make the dialog scroll. */
+async function stubDraftRun(page: Page) {
+	const payments = Array.from({ length: 12 }, (_, i) => ({
+		id: `00000000-0000-4000-8000-0000000001${String(i).padStart(2, '0')}`,
+		invoice_id: `00000000-0000-4000-8000-0000000002${String(i).padStart(2, '0')}`,
+		invoice_number: `STUB-${i + 1}`,
+		vendor_name: `Stub Vendor ${i + 1}`,
+		amount: '100.00',
+		currency: 'USD',
+		method: 'ach',
+		status: 'pending',
+		reference: null
+	}));
+	const run = {
+		id: RUN_ID,
+		status: 'draft',
+		total_amount: '1200.00',
+		currency: 'USD',
+		initiated_by: null,
+		executed_at: null,
+		created_at: '2026-10-01T12:00:00Z',
+		requires_cfo_approval: false,
+		cfo_approved_by: null,
+		cfo_approved_at: null,
+		actions: { approve: null, execute: null, cancel: null },
+		payments
+	};
+	await page.route(
+		(url) => url.pathname === '/api/payments/runs/',
+		(route) =>
+			route.fulfill({
+				json: {
+					items: [
+						{
+							id: RUN_ID,
+							status: 'draft',
+							total_amount: 1200,
+							currency: 'USD',
+							executed_at: null,
+							created_at: run.created_at,
+							payment_count: payments.length
+						}
+					],
+					total: 1
+				}
+			})
+	);
+	await page.route(
+		(url) => url.pathname === `/api/payments/runs/${RUN_ID}`,
+		(route) => route.fulfill({ json: run })
+	);
+	await page.route(
+		(url) => url.pathname === `/api/payments/runs/${RUN_ID}/cancel`,
+		(route) =>
+			route.fulfill({ status: 500, json: { detail: 'The run could not be cancelled: the ledger is locked.' } })
+	);
+}
+
+test.describe('a toast in an open dialog covers none of its controls', () => {
+	for (const size of SIZES) {
+		test(`ui/Modal (bank dialog) at ${size.width}px`, async ({ page }) => {
+			await page.setViewportSize(size);
+			const detail = 'The bank change could not be staged: the processor refused it.';
+			await page.route(
+				(url) => /^\/api\/vendors\/[^/]+\/bank-change$/.test(url.pathname),
+				(route) => route.fulfill({ status: 500, json: { detail } })
+			);
+			await page.goto('/vendors');
+			await page.getByRole('button', { name: /^Bank/ }).first().click();
+			const dialog = page.getByRole('dialog', { name: 'Vendor bank counterparty' });
+			await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+			const toast = region(page).getByTestId('toast').filter({ hasText: detail });
+			await expect(toast).toBeVisible();
+			await expectToastClearOfDialog(page, toast);
+			// The focused control stays in view in the dialog (2.4.11).
+			await dialog.locator('input').last().focus();
+			await expect.poll(() => coveredControls(page)).toEqual([]);
+			await expect(dialog.locator('input').last()).toBeInViewport();
+
+			// The last toast gone, the dialog stays put — moving back would slide
+			// its footer under the pointer that just dismissed the toast...
+			const styles = () =>
+				dialog.evaluate((el) => [
+					(el as HTMLElement).style.maxHeight,
+					(el.parentElement as HTMLElement).style.paddingBottom
+				]);
+			const docked = await styles();
+			await toast.getByRole('button', { name: 'Dismiss' }).click();
+			await expect(toast).toHaveCount(0);
+			expect(await styles()).toEqual(docked);
+			// ...and the next time it opens, it has all its room back.
+			await page.keyboard.press('Escape');
+			await expect(dialog).toHaveCount(0);
+			await page.getByRole('button', { name: /^Bank/ }).first().click();
+			await expect(dialog).toBeVisible();
+			expect(await styles()).toEqual(['', '']);
+		});
+
+		test(`RunDetailModal (scrolling body) at ${size.width}px`, async ({ page }) => {
+			await page.setViewportSize(size);
+			await stubDraftRun(page);
+			await page.goto('/payments?tab=runs');
+			await page.getByRole('button', { name: `View payment run ${RUN_ID.slice(0, 8)}` }).click();
+			const dialog = page.locator('div.modal[role="dialog"][aria-label="Payment run"]');
+			await expect(dialog.locator('.status-badge')).toHaveText('Draft');
+			await dialog.getByRole('button', { name: 'Cancel run' }).click();
+			await dialog.getByRole('button', { name: 'Confirm cancel' }).click();
+			const toast = region(page)
+				.getByTestId('toast')
+				.filter({ hasText: 'the ledger is locked' });
+			await expect(toast).toBeVisible();
+			await expect(dialog).toBeVisible();
+			await expectToastClearOfDialog(page, toast);
+			// A failed cancel disarms (as Execute does), and the control the
+			// reader retries with takes a real pointer hit.
+			await expect(dialog.getByRole('button', { name: 'Confirm cancel' })).toHaveCount(0);
+			await dialog.getByRole('button', { name: 'Cancel run' }).click({ trial: true });
+
+			// Dismissing the toast moves nothing under the pointer that did it:
+			// what is at the dismiss button's centre afterwards is never one of
+			// the dialog's controls.
+			const d = (await toast.getByRole('button', { name: 'Dismiss' }).boundingBox())!;
+			await toast.getByRole('button', { name: 'Dismiss' }).click();
+			await expect(toast).toHaveCount(0);
+			const under = await page.evaluate(
+				({ x, y }) => {
+					const el = document.elementFromPoint(x, y);
+					const control = el?.closest('button, a[href], input, select, textarea');
+					return control && control.closest('[role="dialog"]') ? control.textContent?.trim() : null;
+				},
+				{ x: d.x + d.width / 2, y: d.y + d.height / 2 }
+			);
+			expect(under).toBeNull();
+		});
+
+		test(`InvoiceModal at ${size.width}px`, async ({ page }) => {
+			await page.setViewportSize(size);
+			const failure = 'The invoice could not be saved: the ledger is closed.';
+			await page.route(
+				(url) => /^\/api\/invoices\/[^/]+$/.test(url.pathname),
+				(route) =>
+					route.request().method() === 'PATCH'
+						? route.fulfill({ status: 500, json: { detail: failure } })
+						: route.fallback()
+			);
+			await page.goto('/invoices?status=new');
+			const open = page
+				.locator('table tbody tr')
+				.first()
+				.getByRole('button', { name: /^Edit invoice/ });
+			await open.focus();
+			await open.press('Enter');
+			const dialog = page.locator('div.modal[role="dialog"][aria-label*="Edit invoice"]');
+			await expect(dialog).toBeVisible();
+			await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+			const toast = region(page).getByTestId('toast').filter({ hasText: failure });
+			await expect(toast).toBeVisible();
+			await expectToastClearOfDialog(page, toast);
+		});
+	}
+});
+
+test.describe('a dialog holding the toast band', () => {
+	test('a click in the band does not close it, and a rotated phone refits it', async ({ page }) => {
+		await page.setViewportSize({ width: 375, height: 667 });
+		await stubDraftRun(page);
+		await page.goto('/payments?tab=runs');
+		await page.getByRole('button', { name: `View payment run ${RUN_ID.slice(0, 8)}` }).click();
+		const dialog = page.locator('div.modal[role="dialog"][aria-label="Payment run"]');
+		await expect(dialog.locator('.status-badge')).toHaveText('Draft');
+		await dialog.getByRole('button', { name: 'Cancel run' }).click();
+		await dialog.getByRole('button', { name: 'Confirm cancel' }).click();
+		const toast = region(page).getByTestId('toast').filter({ hasText: 'the ledger is locked' });
+		await expect(toast).toBeVisible();
+		await settle(toast);
+		// The band was yielded: the dialog ends above the toast.
+		const t = (await toast.boundingBox())!;
+		await expect.poll(async () => (await dialog.boundingBox())!.y + (await dialog.boundingBox())!.height).toBeLessThanOrEqual(t.y);
+
+		// Bottom-left corner of the band: backdrop, not a toast.
+		await page.mouse.click(4, 667 - 4);
+		await expect(dialog).toBeVisible();
+
+		// Rotated: the dialog is refitted inside the new, shorter viewport, its
+		// Close and footer reachable.
+		await page.setViewportSize({ width: 667, height: 375 });
+		await expect
+			.poll(async () => {
+				const b = (await dialog.boundingBox())!;
+				return b.y >= 0 && b.y + b.height <= 375;
+			})
+			.toBe(true);
+		await expect(dialog.getByRole('button', { name: 'Close' }).first()).toBeInViewport();
+		await expect(dialog.locator('footer')).toBeInViewport();
 	});
 });

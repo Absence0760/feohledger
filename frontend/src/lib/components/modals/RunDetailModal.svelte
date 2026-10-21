@@ -381,6 +381,9 @@
 			toast(err instanceof Error ? err.message : m('paymentRuns.runDetail.cancelFailed'), 'error');
 		} finally {
 			cancelling = false;
+			// Disarm whichever way it went, as Execute does: a failed cancel must
+			// not leave a destructive control one click from firing.
+			confirmCancel = false;
 		}
 	}
 
