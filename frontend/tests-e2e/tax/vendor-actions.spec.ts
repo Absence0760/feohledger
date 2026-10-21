@@ -158,8 +158,13 @@ test.describe('/tax — vendor tax workflow (admin/ap_manager)', () => {
 		await expect(modal.getByRole('button', { name: 'Confirm — submit to the IRS' })).toBeVisible();
 
 		await modal.getByRole('button', { name: 'Confirm — submit to the IRS' }).click();
+		// The dialog's own result line, anchored: the success toast says the
+		// same thing in other words, and while a dialog is open the toast region
+		// is hosted inside it (`docs/ui-patterns.md` § Toast).
 		await expect(
-			modal.getByText(/forms accepted|Already filed/)
+			modal.getByText(
+				/^(\d+ of \d+ forms accepted|Already filed — showing the stored confirmation for this year\.)$/
+			)
 		).toBeVisible({ timeout: 15_000 });
 	});
 });
