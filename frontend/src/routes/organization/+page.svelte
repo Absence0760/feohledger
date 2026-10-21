@@ -43,6 +43,7 @@
 	} from '#lib/types/ssoSettings.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import ErpConnectionPanel from '#lib/components/organization/ErpConnectionPanel.svelte';
 	import CommerceConnectionPanel from '#lib/components/organization/CommerceConnectionPanel.svelte';
 	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
@@ -118,6 +119,10 @@
 	}
 
 	let org = $state<OrgResponse | null>(null);
+	// Set when `GET /api/organization` fails, so the page says so and offers a
+	// retry. `org` is only ever set on success, so without this the template's
+	// fallback branch read "Loading…" forever after a failed load (#635).
+	let orgLoadFailed = $state(false);
 	// Editable fields
 	let name = $state('');
 	let address = $state('');
@@ -425,6 +430,7 @@
 	});
 
 	async function loadOrg() {
+		orgLoadFailed = false;
 		try {
 			const data = await api.get<OrgResponse>('/api/organization');
 			org = data;
@@ -508,7 +514,8 @@
 				brandSsoCallbackBaseUrl = (brandCfg.sso_callback_base_url as string) || '';
 			}
 		} catch {
-			toast(m('org.toast.loadFailed'), 'error');
+			// In place, not a toast: the toast faded and left the loading line.
+			orgLoadFailed = true;
 		}
 	}
 
@@ -3206,6 +3213,8 @@
 				{/if}
 			</fieldset>
 		</div>
+	{:else if orgLoadFailed}
+		<LoadError message={m('org.error.loadFailed')} onretry={loadOrg} testId="org-load-error" />
 	{:else}
 		<div class="loading">{m('org.loading')}</div>
 	{/if}

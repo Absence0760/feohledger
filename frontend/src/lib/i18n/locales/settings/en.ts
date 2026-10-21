@@ -10,7 +10,7 @@ export const enSettings = {
 	// Organization settings (routes/organization/+page.svelte)
 	'org.title': 'Organization',
 	'org.loading': 'Loading...',
-	'org.toast.loadFailed': 'Failed to load organization',
+	'org.error.loadFailed': 'Failed to load organization',
 	'org.toast.sectionSaved': '{section} saved',
 	'org.toast.saveFailed': 'Save failed',
 	'org.toast.testFailed': 'Test failed',

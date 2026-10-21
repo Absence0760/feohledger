@@ -6,6 +6,7 @@
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		formatMoney,
@@ -315,10 +316,7 @@
 	{/if}
 
 	{#if error}
-		<div class="dashboard-error" role="alert">
-			<p>{m('dashboard.error.loadFailed')}</p>
-			<button class="btn-primary" onclick={load}>{m('dashboard.error.retry')}</button>
-		</div>
+		<LoadError message={m('dashboard.error.loadFailed')} onretry={load} testId="dashboard-error" />
 	{:else if loading}
 		<p class="loading">{m('common.loading')}</p>
 	{:else if data && !isEmptyTenant}
@@ -613,15 +611,6 @@
 
 	.loading {
 		color: var(--text-muted);
-	}
-
-	.dashboard-error {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 12px;
-		color: var(--text-muted);
-		padding: 24px 0;
 	}
 
 	.empty {

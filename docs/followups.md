@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — the UI action-verdict pass (issue #575,
+**Last reconciled:** 2026-10-21 — extracting `ui/LoadError` (issue #635) opened
+one (c) entry, the pages still hand-rolling a load-error + Retry block, taking
+the file from 129 → 130. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
 decisions §305) opened three (c) entries — the modal's assignee clause, bulk
 status approving a draft past review, and the pages still restating server
 predicates — taking the file from 126 → 129. Before that, 2026-10-21 — storing the ERP document id on the invoice
@@ -202,7 +204,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**129 open: 111 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**130 open: 112 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2067,6 +2069,23 @@ providers still have the same gap.
       ones (settlement, ERP sync, run record / NACHA, expense approval) first.
       **Trigger:** the next change to any of those controls, or a report of a
       button that 403s / 409s.
+
+### Surfaced by extracting `ui/LoadError` (2026-10-21, issue #635)
+
+- [ ] **(c) About a dozen pages still hand-roll the load-error + Retry block.**
+      `ui/LoadError.svelte` (`frontend/docs/component-library.md`) now owns "a
+      failed load, stated in place, with Retry" — including moving focus to
+      `<main>` on Retry, so a keyboard user is not dropped onto `<body>` when
+      the block unmounts. The dashboard and `/organization` use it; `/catalogs`,
+      `/admin/entities`, `/admin/api-keys`, `/admin/webhooks`,
+      `/bank-reconciliation` (page + `StatementDetailModal`),
+      `ScheduledReportsPanel` and the other `role="alert"` + Retry copies
+      (`grep -rln 'role="alert"' frontend/src/routes | xargs grep -l -i retry`)
+      still carry their own markup and their own retry key, and lose focus the
+      same way. **Durable fix:** render `<LoadError message onretry testId />`
+      in each, drop the private `*.retry` keys for `common.retry`, and move
+      each page's spec selector to its `testId`. **Trigger:** the next change to
+      any of those pages, or a focus-order (WCAG 2.4.3) report on a retry.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

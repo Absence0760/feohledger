@@ -12,7 +12,7 @@ export const messages = {
 	// Organization settings (routes/organization/+page.svelte)
 	'org.title': 'Organização',
 	'org.loading': 'Carregando...',
-	'org.toast.loadFailed': 'Falha ao carregar a organização',
+	'org.error.loadFailed': 'Falha ao carregar a organização',
 	'org.toast.sectionSaved': '{section} salvo',
 	'org.toast.saveFailed': 'Falha ao salvar',
 	'org.toast.testFailed': 'Falha no teste',
