@@ -139,7 +139,7 @@ def paid_on_timestamp(paid_on: date) -> datetime:
 
 
 async def _live_payments(db: AsyncSession, invoice_id: uuid.UUID) -> list[Payment]:
-    from app.api.payments import LIVE_PAYMENT_TERMINAL_STATUSES
+    from app.models.payment import LIVE_PAYMENT_TERMINAL_STATUSES
 
     return list(
         (

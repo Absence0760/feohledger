@@ -37,6 +37,7 @@ from reportlab.platypus import (
 )
 
 from app.services.branding import BrandContext, build_logo_flowable, get_brand_context
+from app.services.pdf_text import pdf_markup
 
 
 @dataclass
@@ -132,7 +133,7 @@ def render_remittance_pdf(ctx: RemittanceContext) -> bytes:
         story.append(logo)
         story.append(Spacer(1, 0.08 * inch))
     else:
-        story.append(Paragraph(_escape(brand.product_name), h_brand))
+        story.append(Paragraph(pdf_markup(brand.product_name), h_brand))
 
     story.append(Paragraph("Remittance Advice", h_title))
     story.append(
@@ -148,17 +149,17 @@ def render_remittance_pdf(ctx: RemittanceContext) -> bytes:
     # Two-column header: payer left, vendor right.
     payer_block = [
         Paragraph("FROM", label),
-        Paragraph(_escape(ctx.payer_name), body),
+        Paragraph(pdf_markup(ctx.payer_name), body),
     ]
     if ctx.payer_address:
-        payer_block.append(Paragraph(_escape(ctx.payer_address), body))
+        payer_block.append(Paragraph(pdf_markup(ctx.payer_address), body))
 
     vendor_block = [
         Paragraph("TO", label),
-        Paragraph(_escape(ctx.vendor_name), body),
+        Paragraph(pdf_markup(ctx.vendor_name), body),
     ]
     if ctx.vendor_address:
-        vendor_block.append(Paragraph(_escape(ctx.vendor_address), body))
+        vendor_block.append(Paragraph(pdf_markup(ctx.vendor_address), body))
 
     parties = Table(
         [[payer_block, vendor_block]],
@@ -181,11 +182,16 @@ def render_remittance_pdf(ctx: RemittanceContext) -> bytes:
     # Invoice line items.
     story.append(Paragraph("Invoices Paid", h_section))
     table_data = [["Invoice #", "Description", "Amount"]]
+    # Supplier-supplied text goes in a Paragraph, never a bare cell string: a
+    # bare string is drawn in the cell's one font with no markup (so it can
+    # neither escape nor fall back to a face with the glyph) and never wraps —
+    # an ERP invoice number ran straight through the Description column.
+    line_cell = ParagraphStyle("line_cell", parent=body, fontSize=9, leading=11)
     for ln in ctx.lines:
         table_data.append(
             [
-                ln.invoice_number,
-                _escape(ln.description or "—"),
+                Paragraph(pdf_markup(ln.invoice_number), line_cell),
+                Paragraph(pdf_markup(ln.description or "—"), line_cell),
                 _format_money(ln.amount, ctx.currency),
             ]
         )
@@ -231,7 +237,7 @@ def render_remittance_pdf(ctx: RemittanceContext) -> bytes:
     if ctx.notes:
         story.append(Spacer(1, 0.25 * inch))
         story.append(Paragraph("Notes", h_section))
-        story.append(Paragraph(_escape(ctx.notes), body))
+        story.append(Paragraph(pdf_markup(ctx.notes), body))
 
     story.append(Spacer(1, 0.4 * inch))
     footer_style = ParagraphStyle(
@@ -245,7 +251,7 @@ def render_remittance_pdf(ctx: RemittanceContext) -> bytes:
         "number above."
     )
     if brand.has_support_url:
-        footer += f" Or visit {_escape(brand.support_url)}."
+        footer += f" Or visit {pdf_markup(brand.support_url)}."
     story.append(Paragraph(footer, footer_style))
 
     doc.build(story)
@@ -282,9 +288,3 @@ def _format_money(amount: Decimal, currency: str) -> str:
         sign = "-"
         amount = -amount
     return f"{sign}{currency} {amount:,.2f}"
-
-
-def _escape(s: str) -> str:
-    """ReportLab's Paragraph parses the string as inline XML — escape <, >, &
-    so a vendor with `<Manufacturing>` in its name doesn't break the doc."""
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

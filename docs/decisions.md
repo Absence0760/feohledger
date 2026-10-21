@@ -13869,6 +13869,122 @@ update each held off until the delete), `backend/tests/test_tenant_deletion.py`
 `frontend/src/lib/api/sessionRejection.test.ts` and
 `frontend/tests-e2e/organization/close-workspace.spec.ts`.
 
+## 307. PDFs draw non-Latin text through one escaper with font fallback; the seed carries production-shaped rows from one shared file (2026-10-20)
+
+**Found by the production-shaped fixtures (#575 § 2).** The seed and e2e
+fixtures now carry a non-ASCII vendor (`Ōsaka Seimitsu Kōgyō 株式会社 — …
+Zürich`), and rendering it into the remittance advice printed
+`■saka Seimitsu K■gy■ ■■■■`. Every PDF here sets text in ReportLab's built-in
+Helvetica, a WinAnsi (cp1252) Type 1 font with no glyph outside Latin-1, and
+each renderer had its own `_escape` that only escaped XML. The same render
+showed a second defect: the remittance line table put the invoice number and
+description in **bare** cell strings, so a long ERP invoice number never wrapped
+(it ran through the Description column) and the description printed its
+escaped `&amp;` literally.
+
+**Decision.** `services/pdf_text.pdf_markup` is the one escaper: it escapes and
+wraps each run Helvetica cannot draw in a `<font>` that can — DejaVu Sans,
+bundled (~1.4 MB, Bitstream Vera / DejaVu licence) and subset-embedded, for
+Latin Extended / Greek / Cyrillic; ReportLab's built-in Adobe CID fonts for CJK
+(`HeiseiKakuGo-W5`) and Hangul (`HYGothic-Medium`). Supplier text in a table
+cell becomes a `Paragraph`.
+
+**Rejected: switching every PDF's base font to DejaVu.** It would change the
+look of every existing document for the benefit of the few characters
+Helvetica lacks; fallback per run leaves an all-Latin-1 document byte-for-byte
+in its old typeface.
+
+**Rejected: bundling a CJK TrueType face.** Noto Sans CJK ships as CFF/OTF,
+which ReportLab cannot embed, and a TrueType CJK face is several MB in a public
+repo. The CID fonts cost nothing and every mainstream viewer (Acrobat, Preview,
+pdf.js, pdfium) supplies the glyphs. The trade: CJK glyphs are the viewer's,
+not embedded, and Han characters are drawn with the Japanese face (which covers
+the common Chinese repertoire). Revisit if a customer reports a viewer without
+Adobe-Japan1 / Korea1 support.
+
+**Shared values.** The long / non-ASCII / tax-exclusive values live in
+`backend/scripts/fixtures/realistic_rows.json` and nowhere else: the full seed
+adds them (`scripts/seed_realistic.py`), the lean seed reshapes its existing
+rows with them (so no e2e count moves), and the layout specs and day-one
+journey read them through `frontend/tests-e2e/fixtures/realisticValues.ts`. A
+value spelled twice is how the layout spec and the demo would drift apart.
+
+Guards: `backend/tests/test_pdf_text.py` (each renderer, with the fixture's
+names, asserts no glyph outside cp1252 was drawn in a Helvetica face; the long
+number wraps; `&` prints as `&`), `backend/tests/test_seed_realistic.py`.
+
+## 308. "Approved or beyond" is one population for budgets and fraud baselines; a printed currency code is evidence, never a default (#575, 2026-10-20)
+
+(Numbered 308, with §307 above it, because §295, §296, §301 and §302–§304
+landed on `main` first and §297–§299, §305 and §306 are held by pull requests
+still in flight.)
+
+**Budget actual.** The realised leg of a budget (and the PO-relief leg, which
+must admit exactly the same invoices) is `APPROVED_OR_BEYOND_STATUSES`, so it now
+includes `sending_to_erp`: an approved invoice no longer drops out of `actual`
+while its ERP push is in flight or stuck. It also includes `failed` **with**
+`Invoice.approval_date` set — an approved invoice whose push failed is still
+spend a human signed off, while an unstamped `failed` is a failed extraction
+nobody reviewed (`budget_service.realised_invoice_clause`). That is the same
+evidence rule §73 uses for the touchless rate and §286 for the bank-change flag.
+
+**Fraud baselines.** The remit-to-change, statistical-anomaly and LLM-anomaly
+baselines in `invoice_warnings` now read `APPROVED_OR_BEYOND_STATUSES` too,
+which adds `sending_to_erp`, `sent_to_erp` and `done`. Before that, a vendor
+whose history had all finished (`done`) had no baseline at all, so every check
+that needs one silently skipped.
+
+**The trade-off we accepted.** `done` is the CSV importer's default status
+(`services/csv_import`), so unreviewed imported history now seeds the remit-to
+baseline (and the anomaly baselines). `paid` was already in the set and already
+importable, so the exposure is not new in kind. The direction it fails is the
+safe one: a baseline built from unreviewed history makes the checks fire *more*
+often (a remit-to that differs from an imported row raises `remit_to_changed`),
+never less. An attacker who could plant a CSV row could already plant a `paid`
+one.
+
+**Why this is not §73.** §73 says `done` / `paid` are not proof of *review*,
+and it is right for the question it answers: the touchless rate claims the
+platform did the approving, and an imported row is evidence neither way. A
+baseline asks something else: "what has this vendor historically billed us,
+and where did we pay?" Accepted history answers that whether or not this
+platform reviewed it, and excluding it leaves a migrated tenant with no
+baseline at all, which is worse. Where proof of an approval matters (touchless
+rate, budget `failed`, bank-change flag), read `approval_date`. Where the
+question is history, read the status set.
+
+**A currency code printed on an amount.** A model transcribing `GBP 9,500.00`
+keeps the code. Stripping it so the magnitude parses (#575) then discarded it,
+so with no `currency` field the invoice kept the upload's `USD` placeholder and
+was gated as USD 9,500; `USD 1,000.00` beside `currency: EUR` was silently
+EUR 1,000. Before #575 the token failed to parse, so the amount stayed empty.
+That was wrong too, but it erred towards a human. The code is now evidence
+(`extraction.CurrencyEvidence`), weighed with the field and never overruled by
+a default (§160, §196, §200: a missing currency stays missing):
+
+- the field and the printed codes agree, or only one of them speaks → that is the currency;
+- they disagree, or two amounts print different codes → no header money is written and the row's currency is left as it was. The amount stays at `0`, so `missing_amount` fires, and `self_correction_currency_conflict` / `_mixed` tells the reviewer why;
+- neither speaks → unchanged (see `docs/followups.md`: the upload still stamps `USD`).
+
+A symbol (`$`, `€`) is not evidence, because `$` names a dozen currencies.
+
+**Rejected: let the field win.** It is the model's summary, and the code is
+the page's own text next to the figure. When they disagree there is no basis
+for picking one, and either pick can be wrong by the full exchange rate.
+
+**Found alongside it.** "Amount unset" did not actually block auto-approve.
+`decide_auto_approve` never read `missing_amount`, so an extraction that left
+the 0 placeholder auto-approved under any `auto_approve_below` floor (0 < floor)
+or on confidence alone. It now refuses an amount `<= 0` on both triggers, the
+same rule as the `missing_amount` warning.
+
+Guards: `tests/test_budget_rollup.py::test_actual_counts_an_invoice_mid_erp_push`,
+`tests/test_budgets.py::test_spend_po_relief_counts_an_approved_invoice_whose_erp_push_failed`,
+`tests/test_extraction_cleaners.py` (currency evidence),
+`tests/test_extraction_golden.py` (the eur_multipage read with its currency
+field removed and contradicted), `tests/test_extraction_self_correction.py`,
+`tests/test_extraction_confidence_contract.py::test_no_amount_never_auto_approves_on_either_trigger`.
+
 ## 310. The app signs in to RDS as a least-privilege role with an IAM token, and the master password leaves the VM (2026-10-21)
 
 **The problem.** Production connected as the RDS master user `postgres`, whose

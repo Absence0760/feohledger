@@ -51,6 +51,7 @@ from app.services.branding import (
     build_logo_flowable,
     get_brand_context,
 )
+from app.services.pdf_text import pdf_markup
 
 
 @dataclass
@@ -135,10 +136,10 @@ def render_analytics_report_pdf(ctx: AnalyticsReportContext) -> bytes:
         story.append(logo)
         story.append(Spacer(1, 0.06 * inch))
     else:
-        story.append(Paragraph(_escape(brand.product_name), h_brand))
-    story.append(Paragraph(_escape(ctx.title), h_title))
-    story.append(Paragraph(_escape(ctx.org_name), body))
-    story.append(Paragraph(f"Period: <b>{_escape(ctx.period_label)}</b>", body))
+        story.append(Paragraph(pdf_markup(brand.product_name), h_brand))
+    story.append(Paragraph(pdf_markup(ctx.title), h_title))
+    story.append(Paragraph(pdf_markup(ctx.org_name), body))
+    story.append(Paragraph(f"Period: <b>{pdf_markup(ctx.period_label)}</b>", body))
     story.append(
         Paragraph(
             f"Generated: <b>{ctx.generated_at.strftime('%B %d, %Y %H:%M UTC')}</b>",
@@ -148,15 +149,15 @@ def render_analytics_report_pdf(ctx: AnalyticsReportContext) -> bytes:
     story.append(Spacer(1, 0.2 * inch))
 
     # ---- Data table -----------------------------------------------------
-    story.append(Paragraph(f"{_escape(ctx.title)} ({len(ctx.rows)} rows)", h_section))
+    story.append(Paragraph(f"{pdf_markup(ctx.title)} ({len(ctx.rows)} rows)", h_section))
     if not ctx.rows:
         story.append(Paragraph("No rows in scope.", body))
         doc.build(story)
         return buf.getvalue()
 
-    table_data = [[Paragraph(f"<b>{_escape(h)}</b>", cell) for h in ctx.header]]
+    table_data = [[Paragraph(f"<b>{pdf_markup(h)}</b>", cell) for h in ctx.header]]
     for row in ctx.rows:
-        table_data.append([Paragraph(_escape(c), cell) for c in row])
+        table_data.append([Paragraph(pdf_markup(c), cell) for c in row])
 
     table = Table(table_data, repeatRows=1)
     table.setStyle(
@@ -184,7 +185,7 @@ def render_analytics_report_pdf(ctx: AnalyticsReportContext) -> bytes:
             textColor=colors.HexColor("#b45309"),
             spaceBefore=8,
         )
-        story.append(Paragraph(f"<b>Note:</b> {_escape(ctx.note)}", h_note))
+        story.append(Paragraph(f"<b>Note:</b> {pdf_markup(ctx.note)}", h_note))
 
     doc.build(story)
     return buf.getvalue()
@@ -197,9 +198,3 @@ def _brand_color(hex_value: str):
         return colors.HexColor(hex_value)
     except Exception:  # noqa: BLE001 — never let a color literal break the PDF.
         return colors.HexColor(PLATFORM_ACCENT_COLOR)
-
-
-def _escape(s: str) -> str:
-    """ReportLab's Paragraph parses the string as inline XML — escape <, >, &
-    so a cell value containing those characters doesn't break the doc."""
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

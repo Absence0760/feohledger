@@ -2978,6 +2978,19 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  ) {
+    return 'Die Beträge sind in $printedCurrency angegeben, die Rechnungswährung lautet jedoch $fieldCurrency. Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies) {
+    return 'Die Beträge sind in mehr als einer Währung angegeben ($printedCurrencies). Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.';
+  }
+
+  @override
   String invoiceWarningSelfCorrectionLineItemMath(
     String lineNumber,
     String quantity,

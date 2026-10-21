@@ -42,7 +42,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gl_account import GLAccount
-from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice import Invoice
+from app.models.invoice_status import POST_APPROVAL_LOCKED_STATUSES
 from app.models.vendor_priors import VendorExtractionPrior
 from app.services.gl_chart import chart_is_empty
 
@@ -51,18 +52,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Same set as `api/invoices.py:IMMUTABLE_STATUSES`. Keep in sync — the
-# eligibility contract has to match the rest of the bulk-write surface.
-_IMMUTABLE_STATUSES: frozenset[InvoiceStatus] = frozenset(
-    {
-        InvoiceStatus.sending_to_erp,
-        InvoiceStatus.sent_to_erp,
-        InvoiceStatus.posted_in_erp,
-        InvoiceStatus.payment_scheduled,
-        InvoiceStatus.paid,
-        InvoiceStatus.done,
-    }
-)
+# The same set `api/invoices.py:IMMUTABLE_STATUSES` reads — one definition
+# (`models/invoice_status`), so the eligibility contract cannot drift from the
+# rest of the bulk-write surface.
+_IMMUTABLE_STATUSES = POST_APPROVAL_LOCKED_STATUSES
 
 
 class AiRecodeRefused(RuntimeError):

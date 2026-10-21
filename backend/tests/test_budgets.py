@@ -139,6 +139,7 @@ async def _mk_invoice(
     currency="USD",
     entity_id=None,
     po_number=None,
+    approval_date=None,
 ) -> uuid.UUID:
     mk = realdb.sessionmaker(key)
     org_id = realdb.info(key).org_id
@@ -159,6 +160,7 @@ async def _mk_invoice(
                 currency=currency,
                 entity_id=entity_id,
                 po_number=po_number,
+                approval_date=approval_date,
                 organization_id=org_id,
             )
         )
@@ -630,6 +632,10 @@ async def test_spend_po_relief_only_for_invoices_actual_counts(realdb):
     number = await _mk_converted_po(realdb, bid, total="1000.00")
     sibling = await _mk_entity(realdb, "a")
     await _mk_invoice(realdb, "a", amount="300.00", status="new", cost_center=cc, po_number=number)
+    # A failed EXTRACTION (no approval stamp) is not in `actual`, so relieves nothing.
+    await _mk_invoice(
+        realdb, "a", amount="300.00", status="failed", cost_center=cc, po_number=number
+    )
     await _mk_invoice(
         realdb, "a", amount="300.00", status="paid", cost_center="CC-ELSEWHERE", po_number=number
     )
@@ -670,6 +676,30 @@ async def test_spend_po_relief_only_for_invoices_actual_counts(realdb):
         scoped_body = (await c.get(f"/api/budgets/{scoped}/spend")).json()
     assert scoped_body["committed"] == 600.0
     assert scoped_body["actual"] == 200.0
+
+
+async def test_spend_po_relief_counts_an_approved_invoice_whose_erp_push_failed(realdb):
+    """An approved invoice whose ERP push failed sits at `failed` with its
+    approval stamp; `actual` counts it (decisions §308), so it must relieve its
+    PO too — the two legs share `_realised_for_budget`."""
+    cc = f"CC-{_u()}"
+    bid = await _mk_budget_row(
+        realdb, dimension="cost_center", dimension_value=cc, amount="5000.00"
+    )
+    number = await _mk_converted_po(realdb, bid, total="1000.00")
+    await _mk_invoice(
+        realdb,
+        "a",
+        amount="400.00",
+        status="failed",
+        cost_center=cc,
+        po_number=number,
+        approval_date=date(2026, 9, 1),
+    )
+    async with realdb.client(key="a", role="cfo") as c:
+        body = (await c.get(f"/api/budgets/{bid}/spend")).json()
+    assert body["actual"] == 400.0
+    assert body["committed"] == 600.0
 
 
 async def test_spend_committed_po_leg_reads_the_pos_own_currency(realdb):

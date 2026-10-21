@@ -61,16 +61,17 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.payment import Payment
+from app.models.payment import LIVE_PAYMENT_TERMINAL_STATUSES, Payment
 from app.models.vendor import Vendor
 from app.models.virtual_card import VirtualCard
+from app.services.payment_runs import PAYABLE_VENDOR_STATUS
 
 # Card statuses that can no longer move money: closed, aged out, or spent.
 _CARD_DEAD_STATUSES = frozenset({"cancelled", "expired"})
 
-# Payment statuses with no money behind them — the same set the
-# one-live-payment-per-invoice index excludes (`models/payment.py`).
-_PAYMENT_NOT_LIVE_STATUSES = frozenset({"voided", "failed", "cancelled"})
+# Payment statuses with no money behind them — the set the
+# one-live-payment-per-invoice index excludes, read from its one definition.
+_PAYMENT_NOT_LIVE_STATUSES = frozenset(LIVE_PAYMENT_TERMINAL_STATUSES)
 
 RevocationDisposition = Literal["closed", "not_closed_retryable", "requires_payment_void"]
 
@@ -111,7 +112,9 @@ def vendor_is_card_eligible(vendor: Vendor) -> bool:
     """Whether a card may be spent against ``vendor`` — the same two gates the
     payment run and ``/api/cards/generate`` apply (status ``active``, no
     payment block)."""
-    return vendor.status == "active" and not bool(getattr(vendor, "payments_blocked", False))
+    return vendor.status == PAYABLE_VENDOR_STATUS and not bool(
+        getattr(vendor, "payments_blocked", False)
+    )
 
 
 async def revoke_vendor_cards(

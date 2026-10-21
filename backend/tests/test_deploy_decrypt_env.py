@@ -14,8 +14,8 @@ What the tests pin:
 - a file that fails any check never replaces the `.env` already in place, because
   `backup.sh` and `add-tenant.sh` read that file between deploys;
 - a value compose's `env_file` would silently rewrite is refused;
-- `FEOH_HCAPTCHA_SECRET` is required exactly when the app would require it —
-  while `FEOH_SIGNUP_ENABLED` is not false;
+- the hCaptcha secret AND site key are required exactly when the app would
+  require them — while `FEOH_SIGNUP_ENABLED` is not false;
 - the database mode is checked the way deploy/lib.sh will use it: the local
   container needs `POSTGRES_PASSWORD` (compose no longer refuses it empty
   itself) and no TLS mode it cannot serve; an external database (RDS) needs a
@@ -55,6 +55,7 @@ REQUIRED = {
     "FEOH_S3_BUCKET": "feohledger-invoice-files",
     "BACKUP_S3_BUCKET": "feohledger-backups",
     "FEOH_HCAPTCHA_SECRET": "dummy-captcha-secret",
+    "FEOH_HCAPTCHA_SITEKEY": "dummy-captcha-sitekey",
     "FEOH_CREDENTIAL_KMS_KEY_ID": "alias/feohledger-app-prod",
     "FEOH_EMAIL_PROVIDER": "ses",
 }
@@ -173,25 +174,49 @@ def test_refuses_a_missing_required_var(deploy: Deploy, missing: str, shape: str
 
 
 @pytest.mark.parametrize("spelling", ["false", "False", "0", "no", "off", "f", "n"])
-def test_a_closed_signup_needs_no_captcha_secret(deploy: Deploy, spelling: str) -> None:
-    """The app demands FEOH_HCAPTCHA_SECRET only while self-service signup is on
-    (config.py `_require_captcha_in_deployed_envs`). The script mirrors that, for
-    every spelling pydantic reads as false, so an invite-only deploy is not
-    refused here for a secret the app itself would boot without."""
-    dotenv = _dotenv({"FEOH_HCAPTCHA_SECRET": None, "FEOH_SIGNUP_ENABLED": spelling})
+def test_a_closed_signup_needs_no_captcha_keys(deploy: Deploy, spelling: str) -> None:
+    """The app demands the hCaptcha secret and site key only while self-service
+    signup is on (config.py `_require_captcha_in_deployed_envs`). The script
+    mirrors that, for every spelling pydantic reads as false, so an invite-only
+    deploy is not refused here for keys the app itself would boot without."""
+    dotenv = _dotenv(
+        {
+            "FEOH_HCAPTCHA_SECRET": None,
+            "FEOH_HCAPTCHA_SITEKEY": None,
+            "FEOH_SIGNUP_ENABLED": spelling,
+        }
+    )
     result = deploy.run(dotenv)
     assert result.returncode == 0, result.stderr
     assert deploy.env.read_text() == dotenv
 
 
+@pytest.mark.parametrize("key", ["FEOH_HCAPTCHA_SECRET", "FEOH_HCAPTCHA_SITEKEY"])
 @pytest.mark.parametrize("signup", [None, "true", "1", "falsey"])
-def test_an_open_signup_still_needs_the_captcha_secret(deploy: Deploy, signup: str | None) -> None:
+def test_an_open_signup_still_needs_both_captcha_keys(
+    deploy: Deploy, signup: str | None, key: str
+) -> None:
     """Unset, true, or anything pydantic would not read as false keeps signup on,
-    and with it the captcha requirement — never loosened by a near-miss spelling."""
+    and with it the captcha requirement — never loosened by a near-miss spelling.
+    The site key counts as much as the secret: without it /signup renders no
+    widget and every signup fails the captcha (#575)."""
     deploy.env.write_text(PREVIOUS_ENV)
-    result = deploy.run(_dotenv({"FEOH_HCAPTCHA_SECRET": None, "FEOH_SIGNUP_ENABLED": signup}))
+    result = deploy.run(_dotenv({key: None, "FEOH_SIGNUP_ENABLED": signup}))
     _assert_refused_and_kept(deploy, result)
-    assert "FEOH_HCAPTCHA_SECRET" in result.stderr
+    assert key in result.stderr
+
+
+def test_the_last_signup_line_wins_as_for_compose(deploy: Deploy) -> None:
+    """Compose and the app read the LAST FEOH_SIGNUP_ENABLED line; an earlier
+    `false` must not waive the captcha keys for a signup the app serves."""
+    deploy.env.write_text(PREVIOUS_ENV)
+    dotenv = (
+        _dotenv({"FEOH_HCAPTCHA_SITEKEY": None})
+        + "FEOH_SIGNUP_ENABLED=false\nFEOH_SIGNUP_ENABLED=true\n"
+    )
+    result = deploy.run(dotenv)
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_HCAPTCHA_SITEKEY" in result.stderr
 
 
 @pytest.mark.parametrize("provider", ["console", "Console", "CONSOLE "])
