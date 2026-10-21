@@ -906,6 +906,7 @@ export const en = {
 	'payments.void.reasonPlaceholder': 'Why is this being voided?',
 	'payments.void.voiding': 'Voiding…',
 	'payments.void.confirm': 'Void payment',
+	'payments.void.failed': 'The payment could not be voided.',
 	'payments.void.card.title': 'Virtual card not closed',
 	'payments.void.card.retryable':
 		'The payment was voided, but its virtual card was not closed at the provider. The card is still live and can be spent until it is closed.',

@@ -55,6 +55,7 @@
 	import { vendorSyncReportLines, type VendorSyncReport } from '#lib/utils/erpSyncReport.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { vendorErpSyncOffer, type VendorErpSyncOffer } from '#lib/utils/vendorErpSync.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	type BankDetails = VendorBankDetails;
 
@@ -136,8 +137,7 @@
 			toast(m('vendors.bank.toast.submitted'), 'success');
 			bankEditing = null;
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
-			toast(e?.detail ?? e?.message ?? m('vendors.bank.toast.submitFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bank.toast.submitFailed')), 'error');
 		} finally {
 			savingBank = false;
 		}

@@ -88,6 +88,7 @@
 	import { replaceState } from '$app/navigation';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	let RUNS_COLUMNS = $derived([
 		{ label: m('payments.col.run') },
@@ -853,8 +854,7 @@
 			}
 			await reloadAfterVoid();
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
-			toast(e?.detail ?? e?.message ?? 'Void failed', 'error');
+			toast(errorMessage(err, m('payments.void.failed')), 'error');
 		} finally {
 			voiding = false;
 		}
@@ -880,9 +880,8 @@
 			}
 			await reloadAfterVoid();
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
 			cardRetryFailed = true;
-			toast(e?.detail ?? e?.message ?? m('payments.void.card.retryFailed'), 'error');
+			toast(errorMessage(err, m('payments.void.card.retryFailed')), 'error');
 		} finally {
 			retryingCardCancel = false;
 		}

@@ -812,6 +812,7 @@ export const messages = {
 	'payments.void.reasonPlaceholder': 'なぜ取り消すのですか？',
 	'payments.void.voiding': '取消中…',
 	'payments.void.confirm': '支払いを取消',
+	'payments.void.failed': '支払いを取り消せませんでした。',
 	'payments.void.card.title': 'バーチャルカードが閉鎖されていません',
 	'payments.void.card.retryable':
 		'支払いは取り消されましたが、バーチャルカードはプロバイダー側で閉鎖されていません。閉鎖されるまでカードは有効なままで、利用される可能性があります。',

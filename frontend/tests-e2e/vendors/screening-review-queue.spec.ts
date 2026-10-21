@@ -146,6 +146,62 @@ test.describe('/vendors/screening review queue (admin — cached session)', () =
 			deleteVendorCascade(vendor.id);
 		}
 	});
+
+	// The shared limiter's 429 is a CODED refusal (`backend/app/services/
+	// rate_limit.py`): its `detail` is `{code, message, params}`. The toast used
+	// to be built from `e.detail ?? e.message`, so it printed "[object Object]";
+	// it now reads `ApiError.message`, which the transport already localized
+	// (`utils/apiError.ts::errorMessage`). Stubbed: tripping the real limiter
+	// would throttle every other spec on the tenant, and the body is exactly
+	// what the limiter serializes (pinned in backend/tests/test_rate_limit_security.py).
+	test('a rate-limited re-screen is toasted in German, never "[object Object]"', async ({
+		page
+	}) => {
+		const name = `Screen-Throttle Co ${Date.now()}`;
+		const vendor = await createVendor(page, name);
+		try {
+			flagForReview(vendor.id);
+			const screenPath = `/api/vendors/${vendor.id}/screen`;
+			let refused = false;
+			await page.route(
+				(url) => url.pathname === screenPath,
+				async (route) => {
+					if (route.request().method() !== 'POST') return route.fallback();
+					refused = true;
+					await route.fulfill({
+						status: 429,
+						headers: { 'Retry-After': '45' },
+						json: {
+							detail: {
+								code: 'rate_limited',
+								message: 'Too many requests. Please wait 45 seconds before trying again.',
+								params: { retry_after_seconds: 45 }
+							}
+						}
+					});
+				}
+			);
+			await page.addInitScript(() => {
+				localStorage.setItem('feoh_locale', 'de');
+			});
+
+			await page.goto('/vendors/screening');
+			const row = page.locator('table tbody tr', { hasText: name });
+			await row.locator('.row-link').click();
+			const modal = page.getByRole('dialog', { name: 'Lieferanten-Screening-Prüfung' });
+			await modal.getByRole('button', { name: 'Jetzt erneut prüfen' }).click();
+
+			await expect.poll(() => refused).toBe(true);
+			const toast = page.locator('.toast.error .toast-text');
+			await expect(toast).toHaveText(
+				'Zu viele Versuche. Warten Sie 45 Sekunden und versuchen Sie es dann erneut.'
+			);
+			await expect(page.locator('body')).not.toContainText('[object Object]');
+			await expect(page.locator('body')).not.toContainText('Too many requests');
+		} finally {
+			deleteVendorCascade(vendor.id);
+		}
+	});
 });
 
 test.describe('/vendors/screening review queue (cfo — non-holder)', () => {

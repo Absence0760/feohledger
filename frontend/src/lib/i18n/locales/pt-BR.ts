@@ -825,6 +825,7 @@ export const messages = {
 	'payments.void.reasonPlaceholder': 'Por que este pagamento está sendo anulado?',
 	'payments.void.voiding': 'Anulando…',
 	'payments.void.confirm': 'Anular pagamento',
+	'payments.void.failed': 'Não foi possível anular o pagamento.',
 	'payments.void.card.title': 'Cartão virtual não encerrado',
 	'payments.void.card.retryable':
 		'O pagamento foi anulado, mas o cartão virtual não foi encerrado no provedor. O cartão continua ativo e pode ser gasto até ser encerrado.',

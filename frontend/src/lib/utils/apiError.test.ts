@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiErrorCode, formatApiDetail } from './apiError';
+import { apiErrorCode, errorMessage, formatApiDetail } from './apiError';
 
 /**
  * Regression guard for the "[object Object]" toast.
@@ -114,5 +114,31 @@ describe('coded refusal details', () => {
 			code: 'step_up_failed',
 			params: {}
 		});
+	});
+});
+
+describe('errorMessage', () => {
+	const FALLBACK = 'Aktion fehlgeschlagen';
+
+	it("shows an Error's message — the already-localized ApiError sentence", () => {
+		const err = Object.assign(new Error('Zu viele Anfragen. Versuchen Sie es in 30 Sekunden erneut.'), {
+			detail: { code: 'rate_limited', message: 'Too many requests', params: { retry_after: 30 } }
+		});
+		expect(errorMessage(err, FALLBACK)).toBe(
+			'Zu viele Anfragen. Versuchen Sie es in 30 Sekunden erneut.'
+		);
+	});
+
+	it('never reads the raw detail, so a coded refusal cannot render as "[object Object]"', () => {
+		const err = Object.assign(new Error(''), { detail: { code: 'rate_limited' } });
+		expect(errorMessage(err, FALLBACK)).toBe(FALLBACK);
+	});
+
+	it('falls back for a blank message and for non-Error throwables', () => {
+		expect(errorMessage(new Error('   '), FALLBACK)).toBe(FALLBACK);
+		expect(errorMessage('boom', FALLBACK)).toBe(FALLBACK);
+		expect(errorMessage({ message: 'not an Error' }, FALLBACK)).toBe(FALLBACK);
+		expect(errorMessage(undefined, FALLBACK)).toBe(FALLBACK);
+		expect(errorMessage(null, FALLBACK)).toBe(FALLBACK);
 	});
 });

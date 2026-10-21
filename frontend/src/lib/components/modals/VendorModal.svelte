@@ -35,6 +35,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { getVendorScore, type VendorScoreResponse } from '#lib/api/enrichment.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	const SCREENING_RESULTS: ScreeningStatus[] = ['unscreened', 'clear', 'review', 'match'];
 
@@ -154,8 +155,7 @@
 	}
 
 	function errMsg(err: unknown, fallback: string): string {
-		const e = err as { detail?: string; message?: string } | null;
-		return e?.detail ?? e?.message ?? fallback;
+		return errorMessage(err, fallback);
 	}
 
 	async function reScreen() {

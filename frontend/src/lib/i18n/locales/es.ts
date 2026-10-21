@@ -823,6 +823,7 @@ export const messages = {
 	'payments.void.reasonPlaceholder': '¿Por qué se anula este pago?',
 	'payments.void.voiding': 'Anulando…',
 	'payments.void.confirm': 'Anular pago',
+	'payments.void.failed': 'No se pudo anular el pago.',
 	'payments.void.card.title': 'Tarjeta virtual sin cerrar',
 	'payments.void.card.retryable':
 		'El pago se anuló, pero su tarjeta virtual no se cerró en el proveedor. La tarjeta sigue activa y puede gastarse hasta que se cierre.',

@@ -822,6 +822,7 @@ export const messages = {
 	'payments.void.reasonPlaceholder': 'Warum wird diese Zahlung storniert?',
 	'payments.void.voiding': 'Wird storniert …',
 	'payments.void.confirm': 'Zahlung stornieren',
+	'payments.void.failed': 'Die Zahlung konnte nicht storniert werden.',
 	'payments.void.card.title': 'Virtuelle Karte nicht geschlossen',
 	'payments.void.card.retryable':
 		'Die Zahlung wurde storniert, ihre virtuelle Karte wurde beim Anbieter jedoch nicht geschlossen. Die Karte ist weiterhin aktiv und kann belastet werden, bis sie geschlossen wird.',

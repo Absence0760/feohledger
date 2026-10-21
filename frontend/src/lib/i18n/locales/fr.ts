@@ -824,6 +824,7 @@ export const messages = {
 	'payments.void.reasonPlaceholder': 'Pourquoi ce paiement est-il annulé ?',
 	'payments.void.voiding': 'Annulation…',
 	'payments.void.confirm': 'Annuler le paiement',
+	'payments.void.failed': "Le paiement n'a pas pu être annulé.",
 	'payments.void.card.title': 'Carte virtuelle non clôturée',
 	'payments.void.card.retryable':
 		"Le paiement a été annulé, mais sa carte virtuelle n'a pas été clôturée chez le fournisseur. La carte reste active et peut être débitée tant qu'elle n'est pas clôturée.",

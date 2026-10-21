@@ -41,6 +41,7 @@
 	// rounding or locale can't land in one and not the others.
 	import { formatAmountWithoutCurrency } from '#lib/utils/discountRecommendation.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	let {
 		runId,
@@ -358,8 +359,8 @@
 			await load();
 			onchange?.();
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
 			toast(e?.detail ?? e?.message ?? m('paymentRuns.runDetail.approveFailed'), 'error');
+			toast(errorMessage(err, m('paymentRuns.runDetail.approveFailed')), 'error');
 		} finally {
 			approving = false;
 		}

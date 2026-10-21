@@ -108,3 +108,27 @@ export function apiErrorCode(detail: unknown): ApiErrorCode {
 			: {};
 	return { code, params: safeParams };
 }
+
+/**
+ * The text to show for a caught error: its `message`, else `fallback`.
+ *
+ * For an `ApiError` the message is already the display sentence —
+ * `apiErrorFromBody` ran the body through the coded-refusal registry
+ * (`api/codedRefusals.ts::localizeApiDetail`) and then `formatApiDetail`, so a
+ * coded refusal arrives in the reader's language and a validation list as
+ * `field: msg`. Its `detail`, by contrast, is the RAW body field: a
+ * `{code, message, params}` object for a coded refusal (the shared limiter's
+ * 429 `rate_limited`, vendor merge, signup), which a toast built as
+ * `e.detail ?? e.message` printed as `"[object Object]"`. Never read `.detail`
+ * for display text; `errorDetailDisplay.test.ts` fails if a file does.
+ *
+ * Anything that is not an `Error` with a non-blank message (a thrown string, an
+ * `AbortError` with no text, `undefined`) gets the caller's localized fallback.
+ */
+export function errorMessage(err: unknown, fallback: string): string {
+	if (err instanceof Error) {
+		const text = err.message.trim();
+		if (text) return text;
+	}
+	return fallback;
+}

@@ -42,6 +42,7 @@
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BLOCK } from '#lib/types/admin.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	// Reviewer capabilities — mirror the backend gates so the UI can't drift.
 	// Block/unblock is the splittable granular permission; re-screen stays on
@@ -390,8 +391,7 @@
 			// typed for a vendor opened meanwhile is not this action's to wipe.
 			if (selected?.vendor_id === target.vendor_id) blockReason = '';
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
-			toast(e?.detail ?? e?.message ?? m('vendors.screening.queue.toast.actionFailed'), 'error');
+			toast(errorMessage(err, m('vendors.screening.queue.toast.actionFailed')), 'error');
 		} finally {
 			if (busy?.vendorId === target.vendor_id) busy = null;
 		}
@@ -413,8 +413,7 @@
 			// overwrite the timeline of a vendor opened meanwhile.
 			await loadHistory(target.vendor_id);
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
-			toast(e?.detail ?? e?.message ?? m('vendors.screening.queue.toast.rescreenFailed'), 'error');
+			toast(errorMessage(err, m('vendors.screening.queue.toast.rescreenFailed')), 'error');
 		} finally {
 			if (busy?.vendorId === target.vendor_id) busy = null;
 		}
