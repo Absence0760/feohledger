@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import { PAYMENT_METHODS } from './payment';
 import {
 	EXTERNAL_PAYMENT_METHODS,
@@ -129,7 +129,7 @@ describe('NACHA settings', () => {
 		expect(reported.length).toBeGreaterThan(2);
 		expect([...NACHA_FIELDS].sort()).toEqual([...new Set(reported)].sort());
 		for (const field of NACHA_FIELDS) {
-			expect(en[NACHA_FIELD_LABEL_KEYS[field]], field).toBeTruthy();
+			expect(EN_ALL[NACHA_FIELD_LABEL_KEYS[field]], field).toBeTruthy();
 		}
 		expect(nachaFieldLabelKey('company_name')).toBe('org.payments.nachaField.companyName');
 		expect(nachaFieldLabelKey('nope')).toBeNull();

@@ -7,7 +7,7 @@ import {
 	contractStatusLabelKey,
 	contractTypeLabelKey
 } from './contract';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Map-completeness guard for the contract label maps.
@@ -27,13 +27,13 @@ describe('STATUS_LABEL_KEYS', () => {
 		for (const status of CONTRACT_STATUSES) {
 			const key = STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 
 	it('never uses the raw enum value as its own label', () => {
 		for (const status of CONTRACT_STATUSES) {
-			expect(en[STATUS_LABEL_KEYS[status]]).not.toBe(status);
+			expect(EN_ALL[STATUS_LABEL_KEYS[status]]).not.toBe(status);
 		}
 	});
 
@@ -53,7 +53,7 @@ describe('CONTRACT_TYPE_LABEL_KEYS', () => {
 		for (const type of CONTRACT_TYPES) {
 			const key = CONTRACT_TYPE_LABEL_KEYS[type];
 			expect(key, `${type} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${type} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${type} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 

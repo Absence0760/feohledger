@@ -5,7 +5,7 @@ import {
 	REQUISITION_STATUS_LABEL_KEYS,
 	requisitionStatusLabelKey
 } from './requisition';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Map-completeness guard for the requisition status labels — the sibling of
@@ -23,13 +23,13 @@ describe('REQUISITION_STATUS_LABEL_KEYS', () => {
 		for (const status of REQUISITION_STATUSES) {
 			const key = REQUISITION_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 
 	it('never uses the raw enum value as its own label', () => {
 		for (const status of REQUISITION_STATUSES) {
-			expect(en[REQUISITION_STATUS_LABEL_KEYS[status]]).not.toBe(status);
+			expect(EN_ALL[REQUISITION_STATUS_LABEL_KEYS[status]]).not.toBe(status);
 		}
 	});
 

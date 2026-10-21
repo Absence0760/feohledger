@@ -1,10 +1,9 @@
 import { browser } from '$app/env';
 import { en } from './locales/en';
-import { enHelp } from './locales/help/en';
-import { CATALOGUE_LOADERS, HELP_CATALOGUE_LOADERS } from './catalogues';
+import { CATALOGUE_LOADERS, EN_FALLBACK, SLICE_LOADERS, SLICE_NAMES, sliceOf } from './catalogues';
 import { interpolate } from './interpolate';
 import { setActiveFormatLocale } from './formatLocale';
-import type { AnyMessageKey, HelpMessages, Messages } from './messages';
+import type { MessageKey, Messages, SliceName } from './messages';
 import { DEFAULT_LOCALE, dirForLocale, isSupportedLocale, negotiateLocale, type Locale } from './locale';
 
 // localStorage key for the persisted picker choice. Kept distinct from the
@@ -16,74 +15,111 @@ const STORAGE_KEY = 'feoh_locale';
 // setLocale re-renders every call site (template / $derived).
 let locale = $state<Locale>(DEFAULT_LOCALE);
 let dict = $state<Messages>(en);
-// The help-centre slice for `locale` once loaded, English until then — the
-// same English-first degradation the main dict gives a slow chunk. Loaded only
-// after something renders help copy (`ensureHelpCatalogue`), so a page with no
-// /help route and no ⓘ HelpTip never downloads it (decisions §261).
-let helpDict = $state<HelpMessages>(enHelp);
-let helpLocale: Locale = 'en';
-let helpWanted = false;
-let helpLoading: Promise<void> | null = null;
+
+// The lazy catalogue slices (catalogues.ts, decisions §261 + §300). A slice is
+// absent until `ensureSlices()` loads it, except help, which starts on its
+// static English copy. `$state.raw`: the record is replaced whole on every
+// change rather than deep-proxied, since a slice is a thousand-key object that
+// is only ever swapped, never mutated.
+type SliceDict = Record<string, string>;
+let sliceDicts = $state.raw<Partial<Record<SliceName, SliceDict>>>({ ...EN_FALLBACK });
+// The locale each loaded slice is in (absent: not loaded), which slices
+// something has asked for (so a locale switch reloads them), and the load in
+// flight per slice.
+const sliceLocale: Partial<Record<SliceName, Locale>> = Object.fromEntries(
+	Object.keys(EN_FALLBACK).map((s) => [s, 'en'])
+);
+const wanted = new Set<SliceName>();
+const sliceLoading = new Map<SliceName, Promise<void>>();
+// Dev-only: keys already reported as rendered before their slice was asked for.
+const reported = new Set<string>();
 
 export function currentLocale(): Locale {
 	return locale;
 }
 
 /**
- * Reactive message lookup. Reading `dict` here makes every call site
- * (template / `$derived`) re-render when the active locale changes. Falls
- * back to the English string, then the raw key, so a not-yet-translated key
- * degrades gracefully rather than rendering blank.
+ * Reactive message lookup. Reading `dict` here makes every call site (template
+ * / `$derived`) re-render when the active locale changes; a slice key also
+ * reads `sliceDicts`, so it re-renders when its slice lands. Falls back to the
+ * English string, then the raw key, so a not-yet-translated key degrades
+ * gracefully rather than rendering blank.
  */
-export function m(key: AnyMessageKey, params?: Record<string, string | number>): string {
-	const main = dict as Record<string, string>;
-	const help = helpDict as Record<string, string>;
-	const value: string =
-		main[key] ??
-		help[key] ??
-		(en as Record<string, string>)[key] ??
-		(enHelp as Record<string, string>)[key] ??
-		key;
-	return interpolate(value, params, locale);
+export function m(key: MessageKey, params?: Record<string, string | number>): string {
+	let value: string | undefined = (dict as Record<string, string>)[key] ?? (en as Record<string, string>)[key];
+	if (value === undefined) {
+		const slice = sliceOf(key);
+		if (slice) {
+			if (import.meta.env.DEV && !wanted.has(slice) && !reported.has(key)) {
+				// A slice key rendered where nothing loaded its slice: it shows as
+				// its raw name. `slices.test.ts` catches this statically; this
+				// names the call site in the browser console.
+				reported.add(key);
+				console.error(
+					`i18n: '${key}' is in the '${slice}' catalogue slice, which nothing on this page loaded. ` +
+						`Call ensureSlices('${slice}') from the route's +layout.ts (decisions §300).`
+				);
+			}
+			value = sliceDicts[slice]?.[key] ?? (EN_FALLBACK[slice] as SliceDict | undefined)?.[key];
+		}
+	}
+	return interpolate(value ?? key, params, locale);
+}
+
+/** A slice in `target`, else in English; null only if both fail to load. */
+async function fetchSlice(name: SliceName, target: Locale): Promise<{ dict: SliceDict; loc: Locale } | null> {
+	try {
+		return { dict: await SLICE_LOADERS[name][target](), loc: target };
+	} catch {
+		if (target === 'en') return null;
+		try {
+			return { dict: await SLICE_LOADERS[name].en(), loc: 'en' };
+		} catch {
+			return null;
+		}
+	}
+}
+
+function setSlice(name: SliceName, loaded: SliceDict, loc: Locale): void {
+	sliceDicts = { ...sliceDicts, [name]: loaded };
+	sliceLocale[name] = loc;
+}
+
+function loadSlice(name: SliceName): Promise<void> {
+	if (sliceLocale[name] === locale) return Promise.resolve();
+	const inflight = sliceLoading.get(name);
+	if (inflight) return inflight;
+	const target = locale;
+	const p = fetchSlice(name, target)
+		.then((got) => {
+			// A locale switch while this was in flight makes it stale. A slice
+			// that could not load at all keeps whatever it had.
+			if (got && locale === target) setSlice(name, got.dict, got.loc);
+		})
+		.finally(() => {
+			sliceLoading.delete(name);
+			// Settled for a locale that is no longer active: fetch the current
+			// one. Only then — retrying a chunk that failed for THIS locale would
+			// loop for as long as the network stays down.
+			if (locale !== target) void loadSlice(name);
+		});
+	sliceLoading.set(name, p);
+	return p;
 }
 
 /**
- * Load the help-centre slice for the active locale, once. Called by the /help
- * layout and by every ⓘ HelpTip on mount; idempotent and cheap after the first
- * call. Remembers that help was wanted, so a later locale switch loads the new
- * locale's slice too. Until it lands `m()` answers help keys in English; a
- * failed load keeps English rather than blanking anything.
+ * Load catalogue slices for the active locale, once each. A route calls it from
+ * its `+layout.ts` `load` (`export const load = () => ensureSlices('settings')`),
+ * which SvelteKit awaits before rendering the route, so a slice key is never
+ * read before its slice is there; a component that owns a slice (the ⓘ
+ * HelpTip) calls it as it initialises. Idempotent and cheap after the first
+ * call. Remembers the slices were wanted, so a later locale switch loads them
+ * in the new locale together with the main catalogue. A slice that fails to
+ * load in the active locale falls back to English.
  */
-export function ensureHelpCatalogue(): Promise<void> {
-	helpWanted = true;
-	if (helpLocale === locale) return Promise.resolve();
-	if (helpLoading) return helpLoading;
-	const target = locale;
-	helpLoading = HELP_CATALOGUE_LOADERS[target]()
-		.then((loaded) => {
-			// A locale switch while this was in flight makes it stale.
-			if (locale !== target) return;
-			helpDict = loaded;
-			helpLocale = target;
-		})
-		.catch(() => {
-			/* keep English help copy */
-		})
-		.finally(() => {
-			helpLoading = null;
-			// Settled for a locale that is no longer active: fetch the current one.
-			if (helpWanted && helpLocale !== locale) void ensureHelpCatalogue();
-		});
-	return helpLoading;
-}
-
-/** The help slice follows the main dict: back to English the moment the
- *  locale changes (never one language's help under another's chrome), then
- *  the new locale's slice if help copy is on screen. */
-function followLocaleWithHelp(): void {
-	helpDict = enHelp;
-	helpLocale = 'en';
-	if (helpWanted && locale !== 'en') void ensureHelpCatalogue();
+export function ensureSlices(...names: SliceName[]): Promise<void> {
+	for (const name of names) wanted.add(name);
+	return Promise.all(names.map(loadSlice)).then(() => undefined);
 }
 
 /**
@@ -119,27 +155,35 @@ function applyDocumentLocale(next: Locale): void {
 }
 
 /**
- * Switch the active locale. English swaps synchronously; other locales load
- * their chunk first and keep the current dict on failure (layered resilience —
- * a failed locale fetch must not blank the UI). Persists to localStorage and
- * sets `<html lang/dir>`.
+ * Switch the active locale. Loads the locale's main catalogue first and keeps
+ * the current one on failure (layered resilience — a failed locale fetch must
+ * not blank the UI). The slices something has asked for load in parallel and
+ * swap in with the main catalogue, so the page never shows one language's
+ * chrome around another's settings form; a slice that cannot load in `next`
+ * falls back to English. Persists to localStorage and sets `<html lang/dir>`.
  */
 export async function setLocale(next: Locale): Promise<void> {
-	if (next === 'en') {
-		dict = en;
-		locale = 'en';
-		followLocaleWithHelp();
-		applyDocumentLocale('en');
-		return;
-	}
+	const slices = [...wanted];
+	let main: Messages;
+	let got: Awaited<ReturnType<typeof fetchSlice>>[];
 	try {
-		dict = await CATALOGUE_LOADERS[next]();
-		locale = next;
-		followLocaleWithHelp();
-		applyDocumentLocale(next);
+		[main, ...got] = await Promise.all([CATALOGUE_LOADERS[next](), ...slices.map((s) => fetchSlice(s, next))]);
 	} catch {
-		/* keep the current locale + dict */
+		return; /* keep the current locale + dict */
 	}
+	dict = main;
+	locale = next;
+	slices.forEach((s, i) => {
+		const loaded = got[i];
+		if (loaded) setSlice(s, loaded.dict, loaded.loc);
+	});
+	for (const s of SLICE_NAMES) {
+		if (slices.includes(s)) continue;
+		// Asked for while the catalogue was loading: fetch it in the new locale.
+		if (wanted.has(s)) void loadSlice(s);
+		// Never asked for: only help's static English is loaded, and stays.
+	}
+	applyDocumentLocale(next);
 }
 
 /**
