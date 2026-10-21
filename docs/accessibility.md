@@ -253,9 +253,19 @@ The current build implements:
   "Notifications" beside the sidebar bell. A failed page load is stated in
   place with a Retry (`ui/LoadError`), never by a toast alone. Persistent
   errors rise above a showing bulk-action bar and the consent banner rather
-  than covering them (SC 2.4.11). Guarded by
-  `frontend/src/lib/utils/toastQueue.test.ts` (the rules) and
-  `frontend/tests-e2e/a11y/toast-timing.spec.ts` (the wiring in a page).
+  than covering them (SC 2.4.11), and while a dialog is open they sit clear of
+  its action row — lifted above it, or capped and scrolling when the stack is
+  too tall to fit — so an error never hides the button the reader retries
+  with (`utils/toastPlacement.ts`, issue #635). Guarded by
+  `frontend/src/lib/utils/toastQueue.test.ts` and `toastPlacement.test.ts`
+  (the rules) and `frontend/tests-e2e/a11y/toast-timing.spec.ts` (the wiring
+  in a page, including an open dialog at 375px and 320px).
+- **The sidebar on a phone floats over the page** — at 700px and below the
+  sidebar is an icon rail, and expanding it opens the full panel as an overlay
+  over an inert, dimmed page instead of squeezing the content to the ~100px a
+  320px screen has left beside a pushed panel (SC 1.4.10). Focus moves into the
+  panel on open and back to its toggle on Escape or a backdrop click; following
+  a link closes it. Guarded by `frontend/tests-e2e/a11y/sidebar-overlay.spec.ts`.
 - **Popovers that are dialogs take focus** — the sidebar notification bell's
   popover (`role="dialog"`, labelled by its heading) moves focus to that
   heading on open and back to the bell on Escape, an outside click or opening

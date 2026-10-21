@@ -122,17 +122,31 @@
 
 	// WCAG 1.4.10 Reflow: on narrow viewports collapse the sidebar to its icon
 	// rail so the 220px panel doesn't force the page wider than the screen. Nav
-	// stays reachable (icon rail), the user can still expand it. Desktop is
-	// unaffected — the breakpoint only fires below 700px.
+	// stays reachable (icon rail), and expanding it there opens the panel as an
+	// OVERLAY over the page (`sidebar.overlay`) rather than pushing the content
+	// into the ~100px a 320px screen has left beside it (#635 finding 39).
+	// Desktop is unaffected — the breakpoint only fires at 700px and below.
 	$effect(() => {
 		if (!browser) return;
 		const mq = window.matchMedia('(max-width: 700px)');
 		const apply = () => {
-			if (mq.matches && !sidebar.collapsed) sidebar.toggle();
+			sidebar.setNarrow(mq.matches);
+			if (mq.matches) sidebar.collapse();
 		};
 		apply();
 		mq.addEventListener('change', apply);
 		return () => mq.removeEventListener('change', apply);
+	});
+
+	// While the overlay is open the page behind it is inert (below) and must not
+	// scroll under the backdrop either — the same lock `ui/Modal` takes.
+	$effect(() => {
+		if (!sidebar.overlay) return;
+		const prev = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.body.style.overflow = prev;
+		};
 	});
 
 	// White-label theming: once the user is fully signed into a tenant, load the
@@ -201,13 +215,18 @@
 	<div class="app-shell">
 		<!-- WCAG 2.4.1 Bypass Blocks: first focusable element jumps past the
 		     sidebar nav straight to the page content. -->
-		<a href="#main-content" class="skip-link">{m('shell.skipToMain')}</a>
+		<a href="#main-content" class="skip-link" inert={sidebar.overlay}>{m('shell.skipToMain')}</a>
 		<Sidebar />
+		<!-- On a narrow viewport the expanded sidebar floats OVER the page, so
+		     the page keeps the rail's 60px offset and is inert behind the
+		     overlay: no focus, no clicks, hidden from assistive tech until the
+		     panel closes (`sidebar.overlay`). -->
 		<main
 			id="main-content"
 			tabindex="-1"
 			class="main-content"
-			style="margin-left: {sidebar.collapsed ? 60 : 220}px"
+			inert={sidebar.overlay}
+			style="margin-left: {sidebar.collapsed || sidebar.narrow ? 60 : 220}px"
 		>
 			<SectionTabs />
 			<slot />

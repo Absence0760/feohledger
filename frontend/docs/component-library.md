@@ -250,7 +250,10 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 - `NewPasswordFields.svelte` — "New password" + its rules checklist + "Confirm new password", for `/change-password` and `/login/reset-password`. `<NewPasswordFields bind:this idPrefix newLabel confirmLabel bind:newPassword bind:confirmPassword bind:serverError? />`. The rules (`#lib/utils/passwordRules.ts`, mirroring the backend's complexity check) are linked to the new field by `aria-describedby`, each with a spoken met / not-yet state. The page keeps Submit enabled and calls `validate(focus = true)` on submit — it marks every bad field and focuses the first; `focusNew()` after a server 422 set into `serverError`, which clears on edit. The mismatch also shows once the confirmation is blurred non-empty, then follows each keystroke.
 - `AuthBrandMark.svelte` — the mark at the top of a pre-auth form column. `<AuthBrandMark size? />` (default 40). On the platform apex (`!hasTenantContext()`) it is a link to `/` named `auth.shell.homeLink` ("FeohLedger home"); on a workspace subdomain (where `/` only redirects to `/login`) and on a vanity host (where a link to FeohLedger marketing would break the partner's white-label) it is the plain decorative `BrandMark`. The rule lives here, not per page — render this rather than a bare `BrandMark` in a form's head. `AuthShell`'s panel mark stays a plain `BrandMark` so the page never carries two home links. Used by signup, sign-in, the MFA step, `/verify` and `AuthCard` (so the SSO / SAML callbacks too). Guard: `tests-e2e/signup/brand-link.spec.ts`.
 **`layout/`** — the shared left side panel:
-- `Sidebar.svelte` — collapsed/expanded nav + profile popover. The nav is
+- `Sidebar.svelte` — collapsed/expanded nav + profile popover. **At 700px and
+  below it starts as the 60px rail, and expanding it opens an overlay** rather
+  than pushing the page (`sidebar.overlay`; `docs/ui-patterns.md` § Accessibility
+  → Sidebar on a phone). The nav is
   driven by **`#lib/nav.ts`** (the single source of truth, also read by
   `SectionTabs`): high-traffic destinations are top-level `link`s; the rest are
   folded into `group`s (Procurement / Treasury / Insights / Automation /

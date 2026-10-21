@@ -1082,7 +1082,15 @@ inherit it for free. Reuse these; don't re-solve them per page.
   dismiss, or back to where it came from when it was the last (`<main>` if that
   element is gone). The region rises above a showing bulk-action bar
   (`.bulk-bar`) and the consent banner, and a toast is never wider than
-  `100vw − 32px` (2.4.11, 1.4.10). Browser guard:
+  `100vw − 32px` (2.4.11, 1.4.10). **While a dialog is open** (a `role="dialog"`
+  in a `.backdrop`, or `aria-modal`) the stack also clears the dialog's action
+  row — its last visible `.modal-footer`, else the row holding its last button —
+  by lifting above it, or, when the stack is too tall for that, capping its
+  height and scrolling; it never covers the actions (`utils/toastPlacement.ts`,
+  #635). Give a new dialog's buttons a `.modal-footer` row and it is covered
+  automatically. The stack stays outside the dialog in the DOM, so it is
+  pointer-operable over the backdrop, but the dialog's focus trap keeps Tab
+  inside the dialog: a keyboard user reaches a toast after closing it. Browser guard:
   `tests-e2e/a11y/toast-timing.spec.ts` (Playwright clock, no sleeps). The
   rules are the pure `utils/toastQueue.ts` (unit-tested with fake timers).
   **A toast is never the only sign of a failed LOAD**: a page whose data did not
@@ -1162,6 +1170,26 @@ inherit it for free. Reuse these; don't re-solve them per page.
   `<Badge tone="danger">Below minimum</Badge>` in the Closing cell, the
   `/payments` queue's overdue rows an "Overdue" badge. The banner above a table
   can give the count; only the row can say which.
+- **Sidebar on a phone** (WCAG 1.4.10, 2.1.2, 2.4.3; #635) — at 700px and
+  below the sidebar starts as its 60px icon rail, and expanding it opens the
+  panel as an **overlay**, never a push: `<main>` keeps the rail's 60px offset
+  and its full width, a `--overlay` backdrop covers it, and `<main>` plus the
+  skip link carry `inert` while it is open (with the body scroll lock `ui/Modal`
+  takes). Focus moves to the first nav row on open and back to the toggle when
+  Escape or the backdrop closes it; following a link closes it too. A popup
+  inside the panel (bell, entity menu, profile) takes Escape first — the panel
+  reads `[aria-expanded="true"]` inside itself, so the order the window
+  listeners run in does not matter. The open panel stacks at z-index 55
+  (backdrop 54): above a page's own fixed bars (`BulkBar` is 50), below
+  modals (100). It stays the primary-nav landmark rather than becoming a
+  `role="dialog"` — the inert page already confines the screen reader to it,
+  and the toggle's name ("Collapse sidebar") states that it is open. The
+  rail's buttons transition `background-color` only, never `all`: a colour
+  transition fades the muted labels through sub-4.5:1 values on every theme
+  change. Desktop keeps the push layout. State lives
+  in `stores/sidebar.svelte.ts` (`narrow`, `overlay`). Guard:
+  `tests-e2e/a11y/sidebar-overlay.spec.ts` (375 and 320px, both themes under
+  axe, desktop unchanged).
 - **Icon-only controls** — every icon-only `<button>` needs an
   `aria-label` (NotificationBell reflects the unread count; the sidebar
   collapse toggle + profile button carry `aria-label` + `aria-expanded`).
