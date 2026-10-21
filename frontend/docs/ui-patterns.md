@@ -1091,28 +1091,15 @@ inherit it for free. Reuse these; don't re-solve them per page.
   dismiss, or back to where it came from when it was the last (`<main>` if that
   element is gone). The region rises above a showing bulk-action bar
   (`.bulk-bar`) and the consent banner, and a toast is never wider than
-  `100vw − 32px` (2.4.11, 1.4.10). **While a modal dialog is open** (a
-  `role="dialog"` with `aria-modal="true"` — every dialog here carries both) the
-  stack also clears the dialog's action row — its last visible `.modal-footer`,
-  else the row holding its last button — and the **focused control** in the
-  dialog, by lifting above whichever is lowest, or, when the stack is too tall
-  for that, capping its height and scrolling; it never covers the actions or
-  the field being typed in (`utils/toastPlacement.ts`, #635). Scroll padding
-  cannot do the second job: every dialog's footer scrolls with its form, and
-  the stack follows the footer. Give a new dialog's buttons a `.modal-footer`
-  row and it is covered automatically. **The region is hosted inside the
-  topmost modal dialog** while one is open (appended last, still
-  `position: fixed`), and goes back to its place in the layout when the dialog
-  closes: `aria-modal` hides everything outside the dialog from assistive tech
-  (WebKit and Chromium prune it), so a region left outside was not announced
-  and its dismiss buttons could not be reached. `actions/focusTrap` puts the
-  region's dismiss buttons (`data-dialog-satellite`) after the dialog's own
-  controls in its Tab cycle — last control → toasts → first control,
-  Shift+Tab the reverse — and never gives one the dialog's initial focus;
-  dismissing the last toast hands focus back to the dialog control it came
-  from (2.1.1, 2.4.3). The trap is told which dialogs are modal by the
-  `aria-modal` attribute, so a new dialog without it neither hosts the region
-  nor is avoided by it. Browser guard:
+  `100vw − 32px` (2.4.11, 1.4.10). **While a dialog is open** (a `role="dialog"`
+  in a `.backdrop`, or `aria-modal`) the stack also clears the dialog's action
+  row — its last visible `.modal-footer`, else the row holding its last button —
+  by lifting above it, or, when the stack is too tall for that, capping its
+  height and scrolling; it never covers the actions (`utils/toastPlacement.ts`,
+  #635). Give a new dialog's buttons a `.modal-footer` row and it is covered
+  automatically. The stack stays outside the dialog in the DOM, so it is
+  pointer-operable over the backdrop, but the dialog's focus trap keeps Tab
+  inside the dialog: a keyboard user reaches a toast after closing it. Browser guard:
   `tests-e2e/a11y/toast-timing.spec.ts` (Playwright clock, no sleeps). The
   rules are the pure `utils/toastQueue.ts` (unit-tested with fake timers).
   **A toast is never the only sign of a failed LOAD**: a page whose data did not
