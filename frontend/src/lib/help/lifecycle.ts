@@ -59,7 +59,7 @@ export const LIFECYCLE: LifecycleStage[] = [
 		id: 'erp',
 		statuses: ['sending_to_erp', 'sent_to_erp', 'posted_in_erp'],
 		branches: ['failed'],
-		text: 'If your organization has an ERP connected, the approved invoice is posted to it, and FeohLedger follows it until the ERP confirms. Without an ERP, an approved invoice goes straight on to payment.',
+		text: 'If your organization has an ERP connected, the approved invoice is posted to it as a bill, and the ERP pays it: a posted invoice waits at this stage, never in FeohLedger’s payment queue, until FeohLedger learns from the ERP that it was paid and records that payment. Without an ERP, an approved invoice goes straight on to payment.',
 		who: 'Automatic.',
 		guide: 'connect-erp'
 	},
