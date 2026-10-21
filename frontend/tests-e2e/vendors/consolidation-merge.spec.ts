@@ -118,6 +118,16 @@ test.describe('/vendors consolidation merge (admin)', () => {
 		await expect(cluster.getByText(dupeName, { exact: true })).toBeVisible();
 		await expect(cluster.getByText('Canonical', { exact: true })).toBeVisible();
 		await expect(cluster.getByText('Duplicate', { exact: true })).toBeVisible();
+		// The backend's English evidence ("same tax id") is keyed, not echoed (#635).
+		await expect(cluster.locator('.reason-pill', { hasText: 'Same tax ID' })).toBeVisible();
+
+		// At 320px the six-column member table pans inside its own named region
+		// instead of pushing the dialog sideways (WCAG 1.4.10).
+		const desktop = page.viewportSize()!;
+		await page.setViewportSize({ width: 320, height: 568 });
+		await expect(cluster.getByRole('region', { name: /^Duplicate cluster for / })).toBeVisible();
+		expect(await modal.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+		await page.setViewportSize(desktop);
 
 		// Read which member the backend picked as canonical (most invoices, tie →
 		// oldest) so the assertion doesn't assume which of our two it is.
@@ -134,6 +144,13 @@ test.describe('/vendors consolidation merge (admin)', () => {
 		await expect(confirmBtn).toBeVisible();
 		await confirmBtn.click();
 
+		// One duplicate, so the singular — this was a hand-built `s` suffix.
+		await expect(
+			page
+				.getByRole('region', { name: 'Status messages' })
+				.getByText(/^Merged 1 duplicate \(\d+ records? re-homed\)$/)
+		).toBeVisible();
+
 		// The merged cluster drops out of the modal list.
 		await expect(modal.locator('li.cluster', { hasText: token })).toHaveCount(0);
 
@@ -148,6 +165,31 @@ test.describe('/vendors consolidation merge (admin)', () => {
 
 		const checkCanon = await page.request.get(`${API_BASE}/api/vendors/${canonId}`, { headers });
 		expect((await checkCanon.json()).status).toBe('active');
+	});
+});
+
+test.describe('/vendors consolidation suggestions fail to load', () => {
+	test('the dialog states the failure in place, announced', async ({ page }) => {
+		await page.addInitScript(() => {
+			try {
+				localStorage.setItem('feoh_consent_choice', 'accepted');
+			} catch {
+				/* about:blank — ignore */
+			}
+		});
+		await page.route(
+			(url) => url.pathname === '/api/enrichment/vendors/consolidation-suggestions',
+			(route) => route.fulfill({ status: 500, json: { detail: 'boom' } })
+		);
+		await page.goto('/vendors');
+		await page.getByRole('button', { name: 'Merge duplicates' }).click();
+		const modal = page.getByRole('dialog', { name: 'Vendor consolidation' });
+		// The only signal now (its old toast duplicated it, and an error toast
+		// no longer times out): an alert inside the dialog.
+		await expect(modal.getByRole('alert')).toHaveText(
+			"Couldn't load suggestions. Close and try again."
+		);
+		await expect(page.getByTestId('toast')).toHaveCount(0);
 	});
 });
 

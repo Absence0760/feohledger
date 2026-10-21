@@ -293,7 +293,7 @@
 	}
 </script>
 
-<Modal open ariaLabel="Vendor screening and risk" width="lg" {onclose}>
+<Modal open ariaLabel={m('vendors.modal.dialogAria')} width="lg" {onclose}>
 	<h2>{vendor.name}</h2>
 
 	<section class="panel">

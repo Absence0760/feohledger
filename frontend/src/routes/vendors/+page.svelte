@@ -431,14 +431,14 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('vendors.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching vendor(s)`, 'success');
+				toast(m('vendors.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Failed to select all matching', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -460,7 +460,7 @@
 				: m('vendors.bulk.verified', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk verify failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.verifyFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -478,7 +478,7 @@
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk reject failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.rejectFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -496,7 +496,7 @@
 			toast(msg, res.screened > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk screen failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.screenFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -509,7 +509,7 @@
 			await exportVendorsCsv(ids);
 			toast(m('vendors.bulk.exported', { n: ids.length }), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk export failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.exportFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -543,9 +543,9 @@
 		try {
 			await api.post(`/api/vendors/${id}/verify`, {});
 			await fetchVendors();
-			toast('Vendor verified', 'success');
+			toast(m('vendors.toast.verified'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Verify failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.toast.verifyFailed'), 'error');
 		}
 	}
 
@@ -556,10 +556,10 @@
 		try {
 			const rejected = await rejectVendorRequest(id);
 			await fetchVendors();
-			toast('Vendor rejected', 'success');
+			toast(m('vendors.toast.rejected'), 'success');
 			toastCardRevocations([rejected.card_revocation]);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Reject failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.toast.rejectFailed'), 'error');
 		}
 	}
 
@@ -666,7 +666,7 @@
 		{/if}
 		{#if canManageVendors}
 			<button class="btn-outline" onclick={() => (showConsolidation = true)}>
-				Merge duplicates
+				{m('vendors.mergeDuplicates')}
 			</button>
 		{/if}
 		{#if canManageVendors && erpOffer?.kind === 'sync'}
@@ -791,8 +791,8 @@
 							<span
 								class="erp-linked"
 								role="img"
-								aria-label={`Linked to ERP: ${v.erp_vendor_id}`}
-								title="Linked to ERP: {v.erp_vendor_id}"
+								aria-label={m('vendors.erpLinked', { id: v.erp_vendor_id })}
+								title={m('vendors.erpLinked', { id: v.erp_vendor_id })}
 							>
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
 							</span>
@@ -967,7 +967,7 @@
 
 <Modal
 	open={bankEditing !== null}
-	ariaLabel="Vendor bank counterparty"
+	ariaLabel={m('vendors.bank.dialogAria')}
 	onclose={() => (bankEditing = null)}
 >
 	{#if bankEditing}
@@ -975,11 +975,7 @@
 			<h2>{m('vendors.bank.title', { vendor: bankEditing.name })}</h2>
 			<HelpTip term="bank-change-request" />
 		</div>
-		<p class="modal-hint">
-			These values bridge to your payment processor (e.g. Modern Treasury). The
-			<code>counterparty_id</code> is the processor's identifier; the last4s are stored
-			here for display only — full account / routing numbers belong with the processor.
-		</p>
+		<p class="modal-hint">{m('vendors.bank.processorHint')}</p>
 		<p class="dual-control-hint">
 			{m('vendors.bank.dualControlHint')}
 			{#if auth.isManager}
@@ -1188,11 +1184,6 @@
 	}
 
 	/* Bank-counterparty modal extras */
-	.modal-hint code {
-		font-family: 'SF Mono', 'Cascadia Code', monospace;
-		font-size: 0.78rem;
-		color: var(--text);
-	}
 	.modal input:focus {
 		outline: none;
 		border-color: var(--accent);

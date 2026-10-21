@@ -51,13 +51,18 @@ const TRANSLATED = [
 	'/src/lib/components/marketing/HeroPipeline.svelte',
 	'/src/lib/components/marketing/Landing.svelte',
 	'/src/lib/components/marketing/Pricing.svelte',
+	'/src/lib/components/modals/CreateVendorModal.svelte',
+	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
+	'/src/lib/components/modals/VendorConsolidationModal.svelte',
+	'/src/lib/components/modals/VendorModal.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
 	'/src/lib/components/ui/InvoicePicker.svelte',
 	'/src/lib/components/ui/PlanUpgradeNotice.svelte',
 	'/src/lib/components/ui/VendorPicker.svelte',
 	'/src/routes/credit-memos/+page.svelte',
 	'/src/routes/exceptions/+page.svelte',
-	'/src/routes/find-workspace/+page.svelte'
+	'/src/routes/find-workspace/+page.svelte',
+	'/src/routes/vendors/+page.svelte'
 ];
 
 /**
@@ -75,7 +80,18 @@ const TRANSLATED = [
  * template (`/invoices` still renders the CSV / JSON / XML format names and the
  * RAG·n priors chip as literals, so it is not on `TRANSLATED`).
  */
-const TOASTS_TRANSLATED = ['/src/routes/invoices/+page.svelte'];
+const TOASTS_TRANSLATED = [
+	'/src/lib/components/modals/CreateVendorModal.svelte',
+	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
+	// Was "Merged 2 duplicates (5 records re-homed)", spelled with two
+	// hand-built `s` suffixes (#635).
+	'/src/lib/components/modals/VendorConsolidationModal.svelte',
+	'/src/lib/components/modals/VendorModal.svelte',
+	'/src/routes/invoices/+page.svelte',
+	// Was "Selected all 3 matching vendor(s)" and every bulk-action failure in
+	// English (#635).
+	'/src/routes/vendors/+page.svelte'
+];
 
 /** Attributes a human reads. `class` / `role` / `type` are not copy. */
 const COPY_ATTRS = new Set(['aria-label', 'aria-description', 'title', 'placeholder', 'alt']);
