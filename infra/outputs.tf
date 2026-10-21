@@ -54,7 +54,7 @@ output "app_public_ip" {
 }
 
 output "db_address" {
-  description = "RDS endpoint hostname — the host part of FEOH_DATABASE_URL in the sops env: postgresql+asyncpg://feoh_app@<db_address>:5432/feohledger with FEOH_DATABASE_IAM_AUTH true (no password — docs/decisions.md §305)."
+  description = "RDS endpoint hostname — the host part of FEOH_DATABASE_URL in the sops env: postgresql+asyncpg://feoh_app@<db_address>:5432/feohledger with FEOH_DATABASE_IAM_AUTH true (no password — docs/decisions.md §310)."
   value       = aws_db_instance.main.address
 }
 

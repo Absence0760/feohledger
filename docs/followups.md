@@ -2096,7 +2096,7 @@ as oversights.
 
 - [ ] **Move production onto the IAM-authenticated `feoh_app` role, then rotate
       the master password.** The code, the cutover script and the
-      `rds-db:connect` grant are merged (decisions §305), and nothing changes
+      `rds-db:connect` grant are merged (decisions §310), and nothing changes
       until the operator runs them. Production still signs in as the RDS master
       with its password in the VM's env. Steps, verification and rollback:
       `deploy/README.md` § Database role. In order: `terraform apply`, then

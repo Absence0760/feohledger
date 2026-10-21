@@ -145,7 +145,7 @@ async def _drop_postgres_database(db_name: str) -> None:
     conn = await connect_raw(settings.database_url, database="postgres")
     try:
         # In production the session signs in as `feoh_app` and acts as
-        # `feoh_owner` (its role default, docs/decisions.md §305). WITH (FORCE)
+        # `feoh_owner` (its role default, docs/decisions.md §310). WITH (FORCE)
         # terminates the database's other sessions, and Postgres allows that only
         # to a role with the privileges of the role that SIGNED THEM IN — which
         # `feoh_owner` lacks for `feoh_app`. Back to the session user, which has

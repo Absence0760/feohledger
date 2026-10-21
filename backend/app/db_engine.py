@@ -42,7 +42,7 @@ Settings has no ``env_file``, so the two readers see the same environment.
 
 ``tests/test_db_engine_chokepoint.py`` fails on any engine constructor or
 ``asyncpg.connect`` reached for anywhere else under ``app/``, ``scripts/`` or
-``alembic/``. Reasoning and the rollout: ``docs/decisions.md`` §305.
+``alembic/``. Reasoning and the rollout: ``docs/decisions.md`` §310.
 """
 
 from __future__ import annotations

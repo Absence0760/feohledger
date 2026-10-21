@@ -20,7 +20,7 @@ Two layers, both offline (no AWS, no RDS):
   `tests/test_deploy_db_mode.py`): which databases it visits, that each gets the
   role settings and ON_ERROR_STOP, and its refusals before anything runs.
 
-Docs: `docs/decisions.md` §305, `deploy/README.md` § Database role.
+Docs: `docs/decisions.md` §310, `deploy/README.md` § Database role.
 """
 
 from __future__ import annotations

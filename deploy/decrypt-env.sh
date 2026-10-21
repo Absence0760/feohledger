@@ -63,7 +63,7 @@ REQUIRED_VARS=(APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
 . ./lib.sh
 DB_URL=$(env_value FEOH_DATABASE_URL)
 SSLMODE=$(env_value PGSSLMODE)
-# FEOH_DATABASE_IAM_AUTH (docs/decisions.md §305): spelled the way pydantic
+# FEOH_DATABASE_IAM_AUTH (docs/decisions.md §310): spelled the way pydantic
 # reads a bool, or the app refuses to boot on it.
 IAM_AUTH=$(env_value FEOH_DATABASE_IAM_AUTH)
 if feoh_is_true "$IAM_AUTH"; then

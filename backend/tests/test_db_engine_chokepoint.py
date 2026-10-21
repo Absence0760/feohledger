@@ -12,7 +12,7 @@ So this is the same shape as `tests/test_storage_nonblocking.py` and
 `tests/test_tenant_engine_construction.py`: a pure AST scan, no import, over
 `app/`, `scripts/` and `alembic/` (the deploy's migration step runs the last
 two). Tests are out of scope — the suite connects with the local password on
-purpose. Reasoning: `docs/decisions.md` §305.
+purpose. Reasoning: `docs/decisions.md` §310.
 """
 
 from __future__ import annotations

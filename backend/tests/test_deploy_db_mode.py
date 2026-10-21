@@ -160,7 +160,7 @@ def test_pg_tools_get_the_password_through_the_environment_only(lib: Lib) -> Non
     assert lib.docker_env()["PGPASSWORD"] == "p@ss/w0rd"
 
 
-# ── IAM auth (docs/decisions.md §305) ────────────────────────────────────────
+# ── IAM auth (docs/decisions.md §310) ────────────────────────────────────────
 
 IAM_DOTENV = (
     f"FEOH_DATABASE_URL=postgresql+asyncpg://feoh_app@{RDS_HOST}:5432/feohledger\n"

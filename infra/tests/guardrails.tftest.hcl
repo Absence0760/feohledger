@@ -603,7 +603,7 @@ run "app_vm_signs_in_to_the_database_as_the_app_role_only" {
       for s in data.aws_iam_policy_document.app_permissions.statement : tolist(s.resources)
       if contains(s.actions, "rds-db:connect")
     ])) == toset(["arn:aws:rds-db:us-east-1:000000000000:dbuser:db-TESTRESOURCEID0000000000/feoh_app"])
-    error_message = "rds-db:connect must name exactly the feoh_app user on this instance — never dbuser:*, another instance, or the master user (docs/decisions.md §305)."
+    error_message = "rds-db:connect must name exactly the feoh_app user on this instance — never dbuser:*, another instance, or the master user (docs/decisions.md §310)."
   }
 
   assert {

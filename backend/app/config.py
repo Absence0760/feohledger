@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     tenant_db_prefix: str = "feoh_"
     # FEOH_DATABASE_IAM_AUTH: sign in to the database with an RDS IAM auth token
     # minted per connection instead of a password in the URL (`app/db_engine.py`,
-    # docs/decisions.md §305). Off by default, so a laptop and CI keep password
+    # docs/decisions.md §310). Off by default, so a laptop and CI keep password
     # auth against the local container (guard rail 7). On, `database_url` must
     # carry NO password and TLS must be verify-full — checked at boot below, and
     # again by the engine factory itself on paths that never load settings

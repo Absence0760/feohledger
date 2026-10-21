@@ -104,7 +104,7 @@ resource "aws_iam_role_policy_attachment" "app_ssm" {
 data "aws_region" "current" {}
 
 # The database role the app signs in as with an IAM auth token
-# (backend/app/db_engine.py, deploy/db-role-cutover.sh, docs/decisions.md §305).
+# (backend/app/db_engine.py, deploy/db-role-cutover.sh, docs/decisions.md §310).
 # Not a variable: the cutover script creates exactly this role, and widening the
 # grant to another name should be a reviewed change here, not a tfvars edit.
 locals {

@@ -20,7 +20,7 @@ What the tests pin:
   container needs `POSTGRES_PASSWORD` (compose no longer refuses it empty
   itself) and no TLS mode it cannot serve; an external database (RDS) needs a
   URL lib.sh can hand to libpq and `PGSSLMODE` at `require` or stricter;
-- IAM auth (`FEOH_DATABASE_IAM_AUTH`, docs/decisions.md §305) and a URL
+- IAM auth (`FEOH_DATABASE_IAM_AUTH`, docs/decisions.md §310) and a URL
   password are exclusive, IAM auth needs `verify-full` exactly, and the flag
   must be a boolean the app reads;
 - a refusal names the key, never the value.

@@ -212,7 +212,7 @@ variable "db_multi_az" {
 }
 
 variable "db_master_password" {
-  description = "RDS master password. Ephemeral and write-only: it is passed to RDS but never stored in Terraform state or plans. Supply it from the private infra-secrets repo at apply time (README.md § Workload stack). Break-glass only: the app signs in as feoh_app with an IAM token, so this is not in the VM's sops env (docs/decisions.md §305). URL-safe characters only (e.g. `openssl rand -hex 24`), since the break-glass URL embeds it."
+  description = "RDS master password. Ephemeral and write-only: it is passed to RDS but never stored in Terraform state or plans. Supply it from the private infra-secrets repo at apply time (README.md § Workload stack). Break-glass only: the app signs in as feoh_app with an IAM token, so this is not in the VM's sops env (docs/decisions.md §310). URL-safe characters only (e.g. `openssl rand -hex 24`), since the break-glass URL embeds it."
   type        = string
   sensitive   = true
   ephemeral   = true

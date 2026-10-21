@@ -10,7 +10,7 @@
 #              tools run in the one-shot `pgtools` service against the URL's
 #              host. PGSSLMODE comes from the sops env (decrypt-env.sh refuses
 #              anything weaker than `require`, and anything but `verify-full`
-#              with IAM auth). Two ways to sign in (docs/decisions.md §305):
+#              with IAM auth). Two ways to sign in (docs/decisions.md §310):
 #                IAM  — FEOH_DATABASE_IAM_AUTH true and a URL with NO password
 #                       (the app role, `feoh_app`). Each pg tool run gets a
 #                       fresh 15-minute RDS auth token, minted here on the VM

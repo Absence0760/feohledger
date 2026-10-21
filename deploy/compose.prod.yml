@@ -109,7 +109,7 @@ services:
       # warning on every compose call (compose v2 expands it even when unused);
       # decrypt-env.sh is what refuses it empty in container mode.
       FEOH_DATABASE_URL: ${FEOH_DATABASE_URL:-postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-}@postgres:5432/feohledger}
-      # RDS IAM auth (docs/decisions.md §305): on, the URL above names the app
+      # RDS IAM auth (docs/decisions.md §310): on, the URL above names the app
       # role with NO password and the app mints a 15-minute token per new
       # connection from the instance profile. Interpolated here rather than left
       # to env_file so the shell overrides it exactly as it overrides the URL —

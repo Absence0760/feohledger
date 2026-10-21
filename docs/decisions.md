@@ -13562,7 +13562,7 @@ run and a bulk approve each dispatch once), `tests/test_erp_dispatch.py` and
 and `frontend/tests-e2e/erp/xero.spec.ts` (approving reaches fake Xero as a bill
 with no click; with the flag off nothing is posted until the click).
 
-## 305. The app signs in to RDS as a least-privilege role with an IAM token, and the master password leaves the VM (2026-10-21)
+## 310. The app signs in to RDS as a least-privilege role with an IAM token, and the master password leaves the VM (2026-10-21)
 
 **The problem.** Production connected as the RDS master user `postgres`, whose
 password sat in `FEOH_DATABASE_URL` in the VM's deploy env. A leaked env file,
