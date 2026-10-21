@@ -13271,3 +13271,69 @@ read is fresher than any sync. The check follows
 `FEOH_ERP_STATUS_SYNC_ENABLED`: an operator who turns sync off leaves
 `posted_in_erp` invoices payable with no read, by design — the flag is the
 statement that QuickBooks is in the loop.
+
+## 301. The bundle budget and the security scans gate merges through `CI gate`, called from ci.yml (2026-10-20)
+
+**What was wrong.** Branch protection on `main` requires one status check,
+`CI gate` (the `ci-gate` job in `ci.yml`), which fans in on every job in that
+file. Two workflows ran on pull requests from files of their own —
+`web-bundle-budget.yml` and `security.yml` (CodeQL Python, TypeScript/JavaScript
+and GitHub Actions, plus Trivy on the backend image) — so the gate never saw
+their results. A red one was advisory in practice: PR #611 merged with the
+budget red and left `main` failing it, though the budget file's own header said
+"a PR that pushes either metric over its budget fails".
+
+**Rejected: make them required checks too.** The budget is path-scoped. A
+required check whose workflow never triggers never reports, and GitHub holds
+the PR as "expected — waiting for status" forever. Every PR that leaves
+`frontend/` alone would have hung. That is the same reason `ci.yml` has no
+`paths-ignore` and does its scoping inside the run (the `changes` job).
+
+**The rule.** A check that lives in another workflow file gates merges only by
+being *called* from `ci.yml` (`on: workflow_call`), from a job `ci-gate` needs.
+Both files are now reusable workflows, and `ci.yml` calls them as
+`bundle-budget` and `security`.
+
+- **Path scoping moves into `changes`.** The budget's old `paths:` list
+  (`frontend/**`, its own workflow file) is the new `bundle` filter, plus
+  `ci.yml` like every other filter. An unrelated PR **skips** the caller job;
+  `ci-gate` counts `skipped` as a pass and anything else — `failure`,
+  `cancelled` — as a fail, unchanged. If `changes` itself fails, the caller is
+  skipped, but `ci-gate` needs `changes` directly, so the gate still fails.
+- **Security runs on every PR and every push to main, with no filter.** It
+  used to skip docs-only PRs (`paths-ignore`). Keeping that would need a
+  negated filter, and `dorny/paths-filter`'s default `some` quantifier cannot
+  express "anything except docs"; switching the quantifier would change every
+  other filter. CodeQL on a docs-only PR costs two minutes. Not worth a
+  second mechanism.
+- **Trivy comes along.** It is in the same file. It runs with `exit-code: 0`, so
+  only an image that fails to build (or a broken scan step) can turn it red, and
+  a backend image that does not build should block a merge.
+- **The weekly schedule stays in `security.yml`.** No commit starts a CI run on
+  Monday morning, and a full CI run to rescan for new CVEs would be waste. So
+  `security.yml` keeps `schedule` alongside `workflow_call`. Nothing else
+  triggers either file, so no job runs twice.
+- **Permissions are granted at the call site.** A called workflow's token is
+  capped by the calling job, and `ci.yml` defaults to `contents: read`, so the
+  `security` job grants `security-events: write` (SARIF upload) and
+  `actions: read` (CodeQL's workflow-run lookup) itself.
+- **The budget's steps, comments, ceilings and change log are untouched.**
+  Only the trigger changed, so the error messages that tell a contributor to
+  edit `web-bundle-budget.yml` still point at the right file.
+
+**CodeQL timeout: 10 → 20 minutes, no retries.** One CodeQL Python run hit
+the 10-minute timeout on 2026-10-20. Its log shows it was not hung. Extraction
+progressed the whole time, at about ten times the normal per-file cost: 943
+files in 8.5 minutes, where a healthy runner did 1431 in 83 seconds. Over the
+previous 60 runs the three CodeQL jobs took a median of 0.7–1.5 minutes and a
+maximum of 6.6. Ten minutes was about 2× a slow-but-healthy run, too little
+for a check that now blocks merges. Twenty absorbs a degraded runner and still
+stops a real hang long before GitHub's six-hour default. Retrying was
+rejected: a second attempt would hide a genuine hang instead of surfacing it.
+Trivy keeps 10 (median 0.9, max 3.8).
+
+**Transition note.** CodeQL keys an analysis by workflow file and job, so the
+first runs from `ci.yml` start a new configuration beside the old
+`security.yml` ones. The weekly schedule still runs from `security.yml`. Alerts
+are matched across configurations, so this changes which configuration an
+alert is reported under, not whether it is reported.

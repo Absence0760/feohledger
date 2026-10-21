@@ -1230,7 +1230,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       2026-10-20, again not taken:** the settings and portal slices (§300)
       generalised that to one file per catalogue kind; the total measured 1034
       of 1075 (down from 1050), still not binding, and the change was scoped to
-      the per-chunk ceiling that was.
+      the per-chunk ceiling that was. **Fired a third time 2026-10-20, not
+      taken:** the workflow became a reusable workflow called from `ci.yml` so
+      the budget gates merges through `CI gate` (decisions §301). That change
+      was deliberately limited to the trigger, with the measurement and the
+      numbers left exactly as they were, and the total is still not binding.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
