@@ -9,14 +9,6 @@ from app.schemas.money import MoneyAmount, OptionalExactMoneyInput, OptionalMone
 from app.services.card_issuance import CardCancelDisposition
 
 
-class PaymentStatus(StrEnum):
-    pending = "pending"
-    processing = "processing"
-    completed = "completed"
-    failed = "failed"
-    cancelled = "cancelled"
-
-
 class PaymentMethod(StrEnum):
     ach = "ach"
     wire = "wire"
@@ -60,7 +52,6 @@ class PaymentRunStatus(StrEnum):
     cancelled = "cancelled"
 
 
-PAYMENT_STATUSES = [s.value for s in PaymentStatus]
 PAYMENT_RUN_STATUSES = [s.value for s in PaymentRunStatus]
 
 

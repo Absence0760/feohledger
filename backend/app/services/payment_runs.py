@@ -32,7 +32,7 @@ from app.models.credit_memo import CreditMemo
 from app.models.exception import Exception as InvoiceException
 from app.models.invoice import Invoice
 from app.models.organization import Organization
-from app.models.payment import Payment, PaymentRun
+from app.models.payment import LIVE_PAYMENT_TERMINAL_STATUSES, Payment, PaymentRun
 from app.models.user import User
 from app.services.applied_credit_integrity import applied_credit_conflicts
 from app.services.currency_conversion import (
@@ -61,12 +61,12 @@ logger = logging.getLogger(__name__)
 # derivation: a `pending` payment is one nothing has attempted yet, which is
 # the normal state of a `draft` run and the resumable state of a crashed one.
 RUN_PAYMENT_COMPLETED_STATUSES = ("completed",)
-# `voided` belongs here too: it is a non-success TERMINAL state (grouped with
-# `failed` / `cancelled` in `api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`), and
-# a payment a human reversed after the fact must pull the run off "completed"
+# `voided` belongs here too: it is a non-success TERMINAL state — this bucket IS
+# `models/payment.LIVE_PAYMENT_TERMINAL_STATUSES`, not a copy of it — and a
+# payment a human reversed after the fact must pull the run off "completed"
 # exactly as a `cancelled` one does. Leaving it out made a run of all-voided
 # payments fall through to `completed` with `payments_completed: 0`.
-RUN_PAYMENT_FAILED_STATUSES = ("failed", "cancelled", "voided")
+RUN_PAYMENT_FAILED_STATUSES = LIVE_PAYMENT_TERMINAL_STATUSES
 RUN_PAYMENT_IN_FLIGHT_STATUSES = ("submitted", "processing", "pending_compliance")
 RUN_PAYMENT_PENDING_STATUSES = ("pending",)
 
@@ -775,7 +775,6 @@ async def live_payment_invoices(
     Invoice NUMBER, not vendor or amount: it is the identifier the operator
     selected the row by, and it carries no PII.
     """
-    from app.api.payments import LIVE_PAYMENT_TERMINAL_STATUSES
 
     ids = list(invoice_ids)
     if not ids:
