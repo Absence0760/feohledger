@@ -672,16 +672,29 @@ def test_no_realm_is_not_connected(no_override):
 # ---------------------------------------------------------------------------
 
 
+_PAID_BY_CHEQUE = [{"TxnId": "901", "TxnType": "BillPaymentCheck"}]
+_PAID_BY_CARD = [{"TxnId": "902", "TxnType": "BillPaymentCreditCard"}]
+_FROM_A_PO = [{"TxnId": "77", "TxnType": "PurchaseOrder"}]
+
+
 @pytest.mark.parametrize(
-    ("balance", "total", "expected"),
+    ("balance", "total", "linked", "expected"),
     [
-        ("0", "100.10", ErpInvoiceStatus.paid),
-        ("0.10", "100.10", ErpInvoiceStatus.partially_paid),
-        ("100.10", "100.10", ErpInvoiceStatus.open),
+        ("0", "100.10", _PAID_BY_CHEQUE, ErpInvoiceStatus.paid),
+        ("0", "100.10", _PAID_BY_CARD, ErpInvoiceStatus.paid),
+        # A zero balance with no bill payment linked is not a payment: a credit
+        # or a zero-total bill clears the balance too (decisions §303).
+        ("0", "100.10", None, ErpInvoiceStatus.settled_no_payment),
+        ("0", "100.10", _FROM_A_PO, ErpInvoiceStatus.settled_no_payment),
+        ("0", "0", _PAID_BY_CHEQUE, ErpInvoiceStatus.settled_no_payment),
+        ("0.10", "100.10", _PAID_BY_CHEQUE, ErpInvoiceStatus.partially_paid),
+        ("100.10", "100.10", None, ErpInvoiceStatus.open),
     ],
 )
-def test_status_mapping(token, no_override, balance, total, expected):
+def test_status_mapping(token, no_override, balance, total, linked, expected):
     bill = {"Id": "145", "Balance": Decimal(balance), "TotalAmt": Decimal(total)}
+    if linked is not None:
+        bill["LinkedTxn"] = linked
     qbo = _Qbo(bill=bill)
     assert _run_with(qbo, lambda: _adapter().get_invoice_status("145")) == expected
 

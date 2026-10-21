@@ -13391,3 +13391,42 @@ link (`docs/followups.md`). The supplier portal's invoice schema and the public
 `/api/v1` contract deliberately leave both out. The ERP bill is our ledger's
 record, not the supplier's, and adding a field to `/v1` is a published-contract
 change that needs its own decision.
+
+## 303. An adapter reads a bill as paid only on the ERP's own paid status or a payment it records (2026-10-21)
+
+**The problem.** `get_invoice_status` mapped a zero balance to `paid` in three
+adapters (SYSPRO, Sage Accounting ZA, QuickBooks), and Sage Intacct and
+Blackbaud FE NXT did the same as a fallback when their own status word still
+said open. A credit note, a write-off or a zero-total bill also leaves nothing
+owing, so anything recording an ERP-reported payment from that answer would
+book money that never moved, as a 1099-reportable cash payment. The open
+follow-up named this as the precondition for wiring any status poll.
+
+**The rule.** `paid` is a claim that money left the customer. An adapter returns
+it only on the ERP's own paid status, or on a payment the ERP records against
+the bill:
+
+| Adapter | `paid` when | Nothing owing otherwise |
+|---|---|---|
+| QuickBooks Online | `Balance == 0`, `TotalAmt != 0`, and a `BillPaymentCheck` / `BillPaymentCreditCard` in `LinkedTxn` | `settled_no_payment` |
+| Xero | `Status == PAID` and `AmountPaid > 0` (credit notes count in `AmountCredited`) | `settled_no_payment` |
+| Sage Accounting ZA | `AmountDue == 0`, Sage's own `Paid` flag, and a non-zero `Total` | `settled_no_payment` |
+| SYSPRO | never: `ApInvoice` states only a balance | `settled_no_payment` |
+| Sage Intacct | `state == paid` | `open` until the state catches up |
+| Blackbaud FE NXT | `status == Paid` | `open` until the status catches up |
+
+`settled_no_payment` is a new `ErpInvoiceStatus` member. It means "nothing is
+owing, and no payment can be seen", and a caller must flag it for a person, not
+record a payment. Intacct and FE NXT return `open` instead because a lagging
+status word is a timing issue that the next read resolves, not a different fact.
+
+**Relation to §295.** QuickBooks' status sync-back does not use
+`get_invoice_status`. It reads `bill_report`, which judges "settled outside
+FeohLedger" from the balance and treats a vendor credit as not cash. This entry
+brings the older per-adapter read into line with that, so a later generic poll
+for ERPs without `supports_status_sync` (Xero, the gap the live Demo Company
+test found, which is tracked in `docs/followups.md`) starts from honest answers.
+No caller under `app/` reads `get_invoice_status` today, so nothing changes at
+runtime.
+
+Guards: `tests/test_erp_{quickbooks_online,xero,sage_accounting_za,syspro,sage_intacct,blackbaud}_adapter.py`.
