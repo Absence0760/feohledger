@@ -132,7 +132,28 @@ pnpm test:e2e:a11y      # frontend/package.json — targets just tests-e2e/a11y
 It uses the same per-worker `e2e<N>` tenant + admin storage-state fixtures as
 every other spec (the two login surfaces opt out of the storage state). The
 shared `a11y/axe-helper.ts` owns the tag set + the `expectNoA11yViolations`
-assertion; reuse it when adding a route to the guard. Automated tooling only
+assertion; reuse it when adding a route to the guard. Call it rather than
+`new AxeBuilder(...)` directly, because it measures the page **at rest**:
+
+- It emulates `prefers-reduced-motion: reduce`, which collapses every new
+  animation and transition to its final frame (`app.css` § Reduced motion).
+- It then waits until nothing on the document is moving
+  (`waitForMotionToSettle`, exported for a spec that needs the same wait for
+  its own reads). Reduced motion does not cover this case: a transition that
+  was already running when the media changed keeps the duration it started
+  with. So a spec that flips the theme (`emulateMedia({ colorScheme })` or the
+  theme picker) and scans at once measured backgrounds part-way between the
+  two surfaces. One example: `EntitySwitcher`'s old `transition: all` read
+  #3a3c43 under its hint text, a false 3.41:1, and failed 4 of 10 runs of
+  `dashboard/first-run.spec.ts` (#635). The wait lets two animation frames
+  pass, so a style change made just before the call has started its
+  transitions. Then it awaits the `finished` promise of every running
+  `document.getAnimations()` entry, looping until a pass finds none.
+  Infinite and paused animations are skipped, not awaited. The wait is
+  bounded by the test timeout and uses no sleep. With it, the same spec passed
+  20 of 20 runs with the `transition: all` put back.
+
+Automated tooling only
 covers the machine-detectable criteria — the manual screen-reader passes and
 the conformance docs (`docs/accessibility.md`, `docs/accessibility-vpat.md`)
 cover the rest.
