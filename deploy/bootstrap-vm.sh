@@ -5,7 +5,8 @@
 # Targets Amazon Linux 2023 (the recommended AMI). On other distros it exits
 # with the manual install list instead of guessing package names.
 #
-# Installs docker + the compose v2 plugin + sops + cronie (AL2023 ships no
+# Installs docker + the compose v2 plugin (at exactly COMPOSE_VERSION — an
+# older or newer plugin is replaced) + sops + cronie (AL2023 ships no
 # cron daemon), adds 2 GB swap, installs the nightly backup cron, and sets
 # the IMDSv2 hop limit to 2 (containers cannot reach instance-profile
 # credentials through Docker's NAT without it).
@@ -27,24 +28,36 @@ if ! command -v dnf >/dev/null; then
 	exit 1
 fi
 
-echo "==> packages (docker, git, cronie, aws cli)"
+echo "==> packages (docker, git, cronie, python3, aws cli)"
 # cronie is NOT in the AL2023 base image (Amazon dropped cron for systemd
 # timers) — without it /etc/cron.d/feoh-backup below is a file nothing reads
-# and the nightly backup never runs.
-sudo dnf install -y docker git cronie
+# and the nightly backup never runs. python3 ships with AL2023; it is listed
+# because deploy/smoke.sh parses /api/public-config with it.
+sudo dnf install -y docker git cronie python3
 command -v aws >/dev/null || sudo dnf install -y awscli-2
 sudo systemctl enable --now docker
 sudo systemctl enable --now crond
 sudo usermod -aG docker "$USER"
 
-if ! docker compose version >/dev/null 2>&1 && ! sudo docker compose version >/dev/null 2>&1; then
-	echo "==> docker compose plugin ${COMPOSE_VERSION}"
+# Converge on the pin, not merely "some compose is installed": CI checks
+# deploy/compose.prod.yml with exactly this version (scripts/install_vm_compose.sh
+# reads the line above), so a VM left on an older plugin after a bump would run
+# a compose nothing tests — #569 was a warning only the VM's version printed.
+# `compose version` needs no daemon, so this works before the docker group
+# membership takes effect.
+compose_running() { docker compose version --short 2>/dev/null || true; }
+if [ "v$(compose_running | sed 's/^v//')" != "$COMPOSE_VERSION" ]; then
+	echo "==> docker compose plugin ${COMPOSE_VERSION} (found: $(compose_running | sed 's/^$/none/'))"
 	ARCH=$(uname -m) # x86_64 | aarch64
 	sudo mkdir -p /usr/local/lib/docker/cli-plugins
 	sudo curl -fsSL \
 		"https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${ARCH}" \
 		-o /usr/local/lib/docker/cli-plugins/docker-compose
 	sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+	if [ "v$(compose_running | sed 's/^v//')" != "$COMPOSE_VERSION" ]; then
+		echo "installed docker compose ${COMPOSE_VERSION} to /usr/local/lib/docker/cli-plugins, but 'docker compose' still reports '$(compose_running)' — a plugin earlier in docker's search path (~/.docker/cli-plugins) wins. Remove it and re-run." >&2
+		exit 1
+	fi
 fi
 
 if ! command -v sops >/dev/null; then

@@ -3,7 +3,8 @@
 # shellcheck disable=SC2034
 # Shared by every deploy script (sourced, never run): the ONE place the
 # database mode is decided, and the compose invocation that follows from it —
-# plus feoh_sync_source, deploy.sh's choice of which commit to build (bottom).
+# plus feoh_sync_source, deploy.sh's choice of which commit to build, and
+# feoh_smoke_check, which smoke.sh runs after every deploy (bottom).
 #
 #   external — the sops env sets FEOH_DATABASE_URL (the documented path:
 #              Amazon RDS). The `postgres` service never starts; pg client
@@ -27,6 +28,51 @@
 # The value of KEY in deploy/.env (last one wins, as for compose), or empty.
 feoh_env() {
 	grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true
+}
+
+# feoh_is_false <value> succeeds when the app would read <value> as boolean
+# false: every spelling pydantic accepts, in any case. Anything else, empty
+# included, is not false.
+feoh_is_false() {
+	[[ "$1" =~ ^([Ff][Aa][Ll][Ss][Ee]|0|[Nn][Oo]|[Oo][Ff][Ff]|[Ff]|[Nn])$ ]]
+}
+
+# feoh_signup_enabled [<dotenv>] prints `true` or `false`: whether the API
+# configured by that file (default deploy/.env) serves self-service signup.
+# FEOH_SIGNUP_ENABLED defaults to true (config.py), so only a false spelling
+# closes it; the last line wins, as for compose. decrypt-env.sh (the captcha
+# keys are required exactly when it is on) and smoke.sh (what public-config
+# must report) both ask here, so they cannot disagree.
+feoh_signup_enabled() {
+	local value
+	value=$(grep -E '^FEOH_SIGNUP_ENABLED=' "${1:-.env}" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+	if feoh_is_false "$value"; then echo false; else echo true; fi
+}
+
+# The first tenant host in deploy/tenants.caddy (a `<host> {` line, the shape
+# add-tenant.sh appends), or empty when no tenant has been added yet.
+feoh_first_tenant_host() {
+	{ sed -nE 's/^([A-Za-z0-9][A-Za-z0-9.-]*)[[:space:]]*\{[[:space:]]*$/\1/p' tenants.caddy 2>/dev/null || true; } | head -1
+}
+
+# feoh_compose_pin <bootstrap-vm.sh> prints the Docker Compose release tag
+# (vX.Y.Z) the VM is bootstrapped with: that file's one COMPOSE_VERSION= line.
+# The one parser of the pin: deploy.sh compares the running compose with it,
+# and CI installs it (scripts/install_vm_compose.sh), so CI checks deploy/ with
+# the compose the VM runs (#575). Fails on no line, several, or a non-tag.
+feoh_compose_pin() {
+	local count pin
+	count=$(grep -cE '^COMPOSE_VERSION=' "$1" 2>/dev/null || true)
+	if [ "${count:-0}" != 1 ]; then
+		echo "expected exactly one COMPOSE_VERSION= line in $1, found ${count:-0}." >&2
+		return 1
+	fi
+	pin=$(sed -nE 's/^COMPOSE_VERSION=(.*)$/\1/p' "$1")
+	if ! [[ "$pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "COMPOSE_VERSION in $1 is '${pin}', not a vX.Y.Z release tag." >&2
+		return 1
+	fi
+	printf '%s\n' "$pin"
 }
 
 # The external-database URL contract, as one ERE: an asyncpg URL with user,
@@ -281,18 +327,25 @@ feoh_caddy_reload() {
 	fi
 }
 
-# feoh_smoke_check <host> <path> fetches https://<host><path> through THIS VM's
-# Caddy — `--resolve <host>:443:127.0.0.1`, so it depends on neither public DNS
-# nor the network hairpinning back to the VM's own public IP — under the real
-# hostname, so SNI, the certificate and the site block are the ones users hit.
+# feoh_smoke_check <host> <path> [<body-file>] fetches https://<host><path>
+# through THIS VM's Caddy — `--resolve <host>:443:127.0.0.1`, so it depends on
+# neither public DNS nor the network hairpinning back to the VM's own public IP
+# — under the real hostname, so SNI, the certificate and the site block are the
+# ones users hit. FEOH_SMOKE_RESOLVE names that address; set it EMPTY to go
+# through public DNS instead (smoke.sh does, run from outside the VM). curl
+# verifies the certificate either way, so a host without a valid one fails.
 # It passes on HTTP 200 with a non-empty body: the v0.1.0 outage answered 404
-# with an empty one while the API healthcheck stayed green. It retries for a
-# while (FEOH_SMOKE_ATTEMPTS × FEOH_SMOKE_INTERVAL seconds, default 20 × 3): a
-# just-recreated Caddy may still be loading its certificates, and on a first
-# deploy issuing them.
+# with an empty one while the API healthcheck stayed green. Given a
+# <body-file>, the passing body is copied there for the caller to inspect. It
+# retries for a while (FEOH_SMOKE_ATTEMPTS × FEOH_SMOKE_INTERVAL seconds,
+# default 20 × 3): a just-recreated Caddy may still be loading its
+# certificates, and on a first deploy issuing them.
 feoh_smoke_check() {
-	local host=$1 path=$2 attempts=${FEOH_SMOKE_ATTEMPTS:-20} interval=${FEOH_SMOKE_INTERVAL:-3}
+	local host=$1 path=$2 keep=${3:-} attempts=${FEOH_SMOKE_ATTEMPTS:-20} interval=${FEOH_SMOKE_INTERVAL:-3}
+	local resolve=${FEOH_SMOKE_RESOLVE-127.0.0.1}
 	local url="https://${host}${path}" body err code="000" i
+	local via=()
+	[ -z "$resolve" ] || via=(--resolve "${host}:443:${resolve}")
 	body=$(mktemp) || return 1
 	err=$(mktemp) || return 1
 	for ((i = 1; i <= attempts; i++)); do
@@ -300,9 +353,10 @@ feoh_smoke_check() {
 		# otherwise leave the previous attempt's body in place to be counted.
 		: >"$body"
 		code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 10 \
-			--resolve "${host}:443:127.0.0.1" "$url" 2>"$err") || true
+			${via[@]+"${via[@]}"} "$url" 2>"$err") || true
 		[ -n "$code" ] || code="000"
 		if [ "$code" = 200 ] && [ -s "$body" ]; then
+			if [ -n "$keep" ]; then cp "$body" "$keep" || return 1; fi
 			rm -f "$body" "$err"
 			echo "==> smoke: ${url} → 200"
 			return 0
