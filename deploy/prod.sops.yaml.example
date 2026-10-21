@@ -142,10 +142,13 @@ FEOH_APPROVAL_SIGNING_KEY: ""
 # FEOH_SIGNUP_ENABLED is the switch. "false" closes signup: every /api/signup/*
 # route answers 404, /signup says signup is closed, and neither hCaptcha key is
 # needed — the right setting for a pilot whose tenants come from add-tenant.sh.
-# Delete the line (or set "true") to open public signup; then the hCaptcha
-# SECRET is REQUIRED — FEOH_ENVIRONMENT=production refuses to boot without it
-# (config.py _require_captcha_in_deployed_envs), and decrypt-env.sh refuses
-# before it gets that far — and the SITEKEY must be set for the widget to render.
+# Delete the line (or set "true") to open public signup; then BOTH hCaptcha
+# keys are REQUIRED — FEOH_ENVIRONMENT=production refuses to boot without
+# either (config.py _require_captcha_in_deployed_envs), and decrypt-env.sh
+# refuses before it gets that far. The secret verifies each signup; the site
+# key is what /api/public-config hands the browser so the widget renders, and
+# without it every signup fails the captcha. The post-deploy smoke check
+# (deploy/smoke.sh) confirms public-config reports this switch and the key.
 # docs/self-service-signup.md § Turning signup off.
 FEOH_SIGNUP_ENABLED: "false"
 # FEOH_HCAPTCHA_SECRET: ""

@@ -33,7 +33,9 @@ pilot. With it off:
 
 **What production should set:** a deployment that takes self-service customers
 keeps the default (`true`) and **must** set `FEOH_HCAPTCHA_SECRET` and
-`FEOH_HCAPTCHA_SITEKEY` — it refuses to boot without the secret. A deployment
+`FEOH_HCAPTCHA_SITEKEY` — it refuses to boot without either (the site key is
+what `/api/public-config` hands the widget; without it every signup fails the
+captcha), and the post-deploy smoke check confirms `public-config` serves it. A deployment
 whose tenants are provisioned by hand sets `FEOH_SIGNUP_ENABLED=false` and may
 leave both hCaptcha values empty.
 

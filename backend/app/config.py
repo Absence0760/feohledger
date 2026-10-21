@@ -1096,6 +1096,18 @@ class Settings(BaseSettings):
                 "refusing to boot with captcha verification disabled on the public "
                 "signup endpoint. Set FEOH_SIGNUP_ENABLED=false to close signup instead."
             )
+        # The other half of the pair. With the secret set the server verifies
+        # every signup, but the browser only renders the widget when
+        # /api/public-config hands it a site key — so a missing key is a
+        # signup page whose every submit fails the captcha (#575: the
+        # post-deploy smoke check asserts the same thing from outside).
+        if self.is_deployed and self.signup_enabled and not self.hcaptcha_sitekey.strip():
+            raise ValueError(
+                "FEOH_HCAPTCHA_SITEKEY must be set when FEOH_ENVIRONMENT is a deployed "
+                f"environment ({self.environment!r}) and self-service signup is on; "
+                "without it /signup renders no captcha and every signup is refused. "
+                "Set FEOH_SIGNUP_ENABLED=false to close signup instead."
+            )
         return self
 
     @model_validator(mode="after")
