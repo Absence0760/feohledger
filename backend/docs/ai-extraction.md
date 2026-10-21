@@ -279,7 +279,11 @@ Runs after `_apply_extraction()`, before line items are saved. Implemented in `s
 **Invariant checks (4):**
 
 1. **Total reconciliation** — `|subtotal + tax_amount + shipping_amount - discount_amount - amount| / amount <= 2%` (skipped when no subtotal was extracted)
-2. **Date ordering** — `due_date >= invoice_date`
+2. **Date ordering** — `due_date >= invoice_date`, with both dates read by
+   `extraction._clean_date` under the org's day-first preference — the same
+   reading `_apply_extraction` stored them under. It used to accept ISO only, so
+   a swapped `28/10/2026` / `28/09/2026` pair (or `March 15, 2026`) went
+   unchecked.
 3. **Line items sum** — `sum(line_item.total)` must reconcile with the header by
    `invoice_warnings.line_total_reconciles`, the **same definition the
    payment-blocking `line_total_mismatch` check uses**: within one cent of
@@ -291,7 +295,11 @@ Runs after `_apply_extraction()`, before line items are saved. Implemented in `s
    the payment gate itself accepted (issue #566). The gate's absolute cent
    replaced the 2 % slop so the two checks cannot disagree in either direction.
    See `line-total-reconciliation.md`.
-4. **Line item math** — per line: `|quantity * unit_price - total| / total <= 1%`
+4. **Line item math** — per line: `|quantity * unit_price - total| / total <= 1%`,
+   or, when the line states its own `tax`, the same test against
+   `quantity * unit_price + tax` — a Net / VAT / Gross invoice whose model read
+   reports the net unit price and the gross line total is consistent, and was
+   flagged on every line until #575.
 
 **On violation:**
 
