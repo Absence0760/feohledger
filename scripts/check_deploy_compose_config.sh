@@ -52,12 +52,22 @@ PGSSLMODE=verify-full
 ${COMMON}"
 	fi
 	printf '%s\n' "$env_text" >"$work/deploy/.env"
-	# A subshell per mode: lib.sh sets COMPOSE / DB_MODE / PGPASSWORD globals,
-	# and FEOH_DATABASE_URL in this environment would override the .env.
+	# A subshell per mode: lib.sh sets COMPOSE / DB_MODE / PGPASSWORD globals.
 	# errexit does not apply inside an `if` condition, hence the explicit exits.
 	if ! (
 		cd "$work/deploy" || exit 1
-		unset FEOH_DATABASE_URL
+		# Render with the VM's environment, not the caller's. Compose gives the
+		# shell environment precedence over .env, so any variable the caller
+		# happens to export (CI's backend job exports FEOH_REDIS_URL, a
+		# workstation may export FEOH_DATABASE_URL or COMPOSE_*) would satisfy
+		# a `${VAR}` with no default and hide the very warning this check
+		# exists to catch. Only what docker itself needs to run survives.
+		while IFS= read -r var; do
+			case "$var" in
+			PATH | HOME | TMPDIR | XDG_RUNTIME_DIR | DOCKER_HOST | DOCKER_CONFIG | DOCKER_CONTEXT | DOCKER_CERT_PATH | DOCKER_TLS_VERIFY) ;;
+			*) unset "$var" 2>/dev/null || true ;;
+			esac
+		done < <(compgen -e)
 		# shellcheck source=deploy/lib.sh
 		. ./lib.sh || exit 1
 		feoh_load_db_mode || exit 1

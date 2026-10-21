@@ -18,6 +18,7 @@ ran compose against deploy/ at all. What is pinned here:
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -139,10 +140,28 @@ def _repo_copy(tmp_path: Path, compose_text: str) -> Path:
     return tmp_path
 
 
-def _check(root: Path) -> subprocess.CompletedProcess[str]:
+def _check(root: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(CHECKER), str(root)], capture_output=True, text=True, check=False, timeout=120
+        [str(CHECKER), str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+        env=env,
     )
+
+
+def _no_redis_default(tmp_path: Path) -> Path:
+    compose = (
+        (DEPLOY / "compose.prod.yml")
+        .read_text()
+        .replace(
+            "FEOH_REDIS_URL: ${FEOH_REDIS_URL:-redis://redis:6379}",
+            "FEOH_REDIS_URL: ${FEOH_REDIS_URL}",
+        )
+    )
+    assert "${FEOH_REDIS_URL}" in compose
+    return _repo_copy(tmp_path, compose)
 
 
 needs_compose = pytest.mark.skipif(not _has_compose(), reason="docker compose is not installed")
@@ -159,16 +178,25 @@ def test_the_real_compose_file_renders_cleanly_in_both_modes() -> None:
 def test_a_variable_with_no_default_fails_the_check(tmp_path: Path) -> None:
     """#569's class: compose prints "variable is not set" and carries on. A
     warning is a failure here, however the run exits."""
-    compose = (
-        (DEPLOY / "compose.prod.yml")
-        .read_text()
-        .replace(
-            "FEOH_REDIS_URL: ${FEOH_REDIS_URL:-redis://redis:6379}",
-            "FEOH_REDIS_URL: ${FEOH_REDIS_URL}",
-        )
-    )
-    assert "${FEOH_REDIS_URL}" in compose
-    result = _check(_repo_copy(tmp_path, compose))
+    result = _check(_no_redis_default(tmp_path))
+    assert result.returncode != 0
+    assert "FEOH_REDIS_URL" in result.stderr
+    assert "FAIL local mode" in result.stderr and "FAIL external mode" in result.stderr
+
+
+@needs_compose
+def test_the_caller_s_environment_cannot_mask_a_missing_default(tmp_path: Path) -> None:
+    """Compose prefers the shell environment over .env, so a variable the caller
+    exports satisfies a `${VAR}` with no default. CI's backend job exports
+    FEOH_REDIS_URL, and the check passed there while the VM, whose shell sets
+    none of these, would warn. The check renders with the VM's environment."""
+    env = {
+        **os.environ,
+        "FEOH_REDIS_URL": "redis://localhost:6379",
+        "FEOH_DATABASE_URL": "postgresql+asyncpg://u:p@localhost:5432/x",
+        "COMPOSE_PROFILES": "tools",
+    }
+    result = _check(_no_redis_default(tmp_path), env=env)
     assert result.returncode != 0
     assert "FEOH_REDIS_URL" in result.stderr
     assert "FAIL local mode" in result.stderr and "FAIL external mode" in result.stderr
