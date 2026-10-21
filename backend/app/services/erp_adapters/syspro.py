@@ -307,7 +307,7 @@ def map_invoice_status(row: dict[str, str]) -> ErpInvoiceStatus:
     note or a write-off zeroes as readily as a cheque, and it carries no paid
     status of its own. A zero balance is ``settled_no_payment`` — the status
     sweep flags it for a person instead of recording a payment nobody can see
-    (docs/decisions.md §293). A SYSPRO bill reaches ``paid`` in FeohLedger by a
+    (docs/decisions.md §303). A SYSPRO bill reaches ``paid`` in FeohLedger by a
     person recording the payment, or by the ERP webhook.
     """
     original = _decimal(row.get("OrigInvValue"))

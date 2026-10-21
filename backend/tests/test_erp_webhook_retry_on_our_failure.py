@@ -123,10 +123,11 @@ async def _post(*, org, invoice, transition_side_effect=None, event_id="ev_1"):
         "tenant_slug": org.slug,
         "correlation_id": str(uuid.uuid4()),
         "erp_document_id": "doc_1",
-        # posted_in_erp → payment_scheduled is NOT in VALID_TRANSITIONS' way:
-        # `sent_to_erp` + `posted` is a permitted edge, so the handler reaches
-        # `transition_invoice` and the injected failure is genuinely OURS.
-        "status": "posted",
+        # `sending_to_erp` + `cancelled` (→ failed) is a permitted edge, so the
+        # handler reaches `transition_invoice` and the injected failure is
+        # genuinely OURS. (`sent_to_erp` + `posted` used to serve, but a pushed
+        # invoice no longer applies `posted` — decisions §303.)
+        "status": "cancelled",
         "event_id": event_id,
     }
     body_bytes = json.dumps(body).encode("utf-8")
@@ -156,7 +157,7 @@ async def _post(*, org, invoice, transition_side_effect=None, event_id="ev_1"):
 async def test_db_failure_returns_bodyless_503_so_the_erp_redelivers(fake_redis):
     org = _org()
     invoice = SimpleNamespace(
-        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.sent_to_erp
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.sending_to_erp
     )
 
     result, db = await _post(
@@ -185,7 +186,7 @@ async def test_concurrent_transition_conflict_also_asks_for_redelivery(fake_redi
     """
     org = _org()
     invoice = SimpleNamespace(
-        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.sent_to_erp
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.sending_to_erp
     )
 
     result, db = await _post(
@@ -205,13 +206,13 @@ async def test_concurrent_transition_conflict_also_asks_for_redelivery(fake_redi
 async def test_a_successful_transition_still_acks_204(fake_redis):
     org = _org()
     invoice = SimpleNamespace(
-        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.sent_to_erp
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.sending_to_erp
     )
 
     result, db = await _post(org=org, invoice=invoice, event_id="ev_ok")
 
     assert result is None, "a decision (here: success) stays the silent 204"
-    assert invoice.status is InvoiceStatus.posted_in_erp
+    assert invoice.status is InvoiceStatus.failed
     db.commit.assert_awaited()
 
 

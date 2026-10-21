@@ -65,9 +65,10 @@ _NO_RAISING_ACTOR: dict[str, str] = {
         "the rail settled for an amount we did not book — the discrepancy is the "
         "processor's, arriving on a webhook"
     ),
-    "app/api/erp_webhook.py": (
-        "inbound ERP webhook — the caller is the tenant's ERP, authenticated by HMAC, "
-        "not a control-plane user"
+    "app/services/erp_reported_status.py": (
+        "raised on the ERP's word — the inbound ERP webhook (the tenant's ERP, "
+        "authenticated by HMAC) or the ERP status sweep's own read; no control-plane "
+        "user acted"
     ),
     "app/api/payments.py": (
         "the sanctions/KYC screening verdict raised the hold, not the operator who "

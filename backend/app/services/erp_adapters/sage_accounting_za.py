@@ -212,7 +212,7 @@ def map_invoice_status(record: dict) -> ErpInvoiceStatus:
     Nothing due is ``paid`` only when Sage itself marks the invoice ``Paid`` and
     it had something to pay; otherwise (a zero-total invoice, or a zero balance
     Sage does not call paid) it is ``settled_no_payment``, which the status
-    sweep flags rather than records (docs/decisions.md §293).
+    sweep flags rather than records (docs/decisions.md §303).
     """
     total = _decimal(record.get("Total"))
     due = _decimal(record.get("AmountDue"))

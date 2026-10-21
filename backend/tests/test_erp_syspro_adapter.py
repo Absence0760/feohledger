@@ -456,7 +456,7 @@ def test_operator_override_skips_the_guard(monkeypatch):
         ({"OrigInvValue": "100.00", "MthInvBal1": "100.00"}, ErpInvoiceStatus.open),
         ({"OrigInvValue": "100.00", "MthInvBal1": "40.00"}, ErpInvoiceStatus.partially_paid),
         # A zero balance is never read as paid: ApInvoice cannot tell a payment
-        # from a credit note or write-off (decisions §293).
+        # from a credit note or write-off (decisions §303).
         ({"OrigInvValue": "100.00", "MthInvBal1": "0.00"}, ErpInvoiceStatus.settled_no_payment),
         ({"OrigInvValue": "0.00", "MthInvBal1": "0.00"}, ErpInvoiceStatus.settled_no_payment),
         ({"OrigInvValue": "100.00", "MthInvBal1": ""}, ErpInvoiceStatus.unknown),

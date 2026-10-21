@@ -683,7 +683,7 @@ _FROM_A_PO = [{"TxnId": "77", "TxnType": "PurchaseOrder"}]
         ("0", "100.10", _PAID_BY_CHEQUE, ErpInvoiceStatus.paid),
         ("0", "100.10", _PAID_BY_CARD, ErpInvoiceStatus.paid),
         # A zero balance with no bill payment linked is not a payment: a credit
-        # or a zero-total bill clears the balance too (decisions §293).
+        # or a zero-total bill clears the balance too (decisions §303).
         ("0", "100.10", None, ErpInvoiceStatus.settled_no_payment),
         ("0", "100.10", _FROM_A_PO, ErpInvoiceStatus.settled_no_payment),
         ("0", "0", _PAID_BY_CHEQUE, ErpInvoiceStatus.settled_no_payment),

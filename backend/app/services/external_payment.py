@@ -33,7 +33,10 @@ paid status is the customer's own record.
 
 Controls, the same as the money path where the reason carries over:
 
-* the invoice must be payable (approved / posted_in_erp / payment_scheduled);
+* the invoice must be payable (approved / posted_in_erp / payment_scheduled)
+  or held by the ERP awaiting its payment (``sent_to_erp`` — where a pushed
+  invoice rests, docs/decisions.md §303; recording it walks it through
+  ``posted_in_erp`` first);
 * **segregation of duties** — the recorder may not be anyone implicated in
   creating the payable (``approval_chain.violates_segregation``, the approval
   rule), unless the org opted out with
@@ -177,6 +180,20 @@ def _same_record(payment: Payment, *, reference: str, paid_on: date) -> bool:
     )
 
 
+def recordable_statuses() -> tuple[str, ...]:
+    """The invoice statuses a payment made outside FeohLedger may be recorded from.
+
+    The payable statuses, plus ``sent_to_erp``: a pushed invoice rests there
+    while the ERP holds the bill (decisions §303). It is NOT payable — FeohLedger
+    must never pay what the ERP will — but the ERP's payment of it, or a person
+    recording that payment, is exactly what this module records. A function, not
+    a constant, because `api.payments` imports this module.
+    """
+    from app.api.payments import PAYABLE_INVOICE_STATUSES
+
+    return (*PAYABLE_INVOICE_STATUSES, InvoiceStatus.sent_to_erp.value)
+
+
 def segregation_refusal(
     invoice: Invoice, actor_id: uuid.UUID | None, org_settings: dict | None
 ) -> Refusal | None:
@@ -209,9 +226,7 @@ async def check_recordable(
 
     The caller holds ``invoice`` FOR UPDATE.
     """
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
-
-    if invoice.status.value not in PAYABLE_INVOICE_STATUSES:
+    if invoice.status.value not in recordable_statuses():
         return Refusal(
             REFUSAL_NOT_PAYABLE,
             "Only an approved invoice that has not been paid can be recorded as paid.",
@@ -417,6 +432,20 @@ async def _complete(
     )
 
     details = {"payment_id": str(payment.id), "source": source}
+    if invoice.status == InvoiceStatus.sent_to_erp:
+        # A pushed invoice the ERP has paid: the ERP can only have paid a bill
+        # it holds, so the posting is applied first and the trail reads in the
+        # order things happened. Only here, after every gate passed — moving
+        # it earlier would leave a refused record's invoice at `posted_in_erp`,
+        # which IS payable, and put a bill the ERP paid in our payment queue.
+        await transition_invoice(
+            db,
+            invoice,
+            InvoiceStatus.posted_in_erp,
+            actor_id=actor_id,
+            action_name="invoice.erp_status_posted_in_erp",
+            details={**details, "erp_status": "implied_by_paid"},
+        )
     if InvoiceStatus.payment_scheduled in VALID_TRANSITIONS.get(invoice.status, set()):
         await transition_invoice(
             db,

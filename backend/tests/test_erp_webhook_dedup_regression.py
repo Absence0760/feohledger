@@ -156,11 +156,13 @@ async def test_distinct_status_events_without_event_id_both_apply(fake_redis):
     `correlation_id`) would still be claimed when the second, genuinely
     different, event arrived — silently dropping it.
 
-    Mirrors the issue's own scenario: the ERP reports `posted_in_erp`, then —
-    after a payment run separately schedules the payment (a different code
-    path, simulated here by advancing the invoice between the two webhook
-    calls) — the ERP reports `paid`. Both are individually valid transitions
-    for the state the invoice is actually in at delivery time."""
+    The issue's scenario was `posted` then `paid`; a pushed invoice no longer
+    applies `posted` (decisions §303), so the pair here is the ERP reporting a
+    push `cancelled` while it is still `sending_to_erp` (→ `failed`), then —
+    after the invoice separately moves on to `payment_scheduled` (a different
+    code path, simulated here by advancing it between the two calls) — `paid`.
+    Both are individually valid transitions for the state the invoice is
+    actually in at delivery time."""
     org = _org_with_erp_secret("erp-secret")
     correlation_id = str(uuid.uuid4())
     erp_document_id = "doc_1"
@@ -175,7 +177,7 @@ async def test_distinct_status_events_without_event_id_both_apply(fake_redis):
         id=uuid.uuid4(),
         correlation_id=uuid.UUID(correlation_id),
         currency="USD",
-        status=InvoiceStatus.sent_to_erp,
+        status=InvoiceStatus.sending_to_erp,
         amount=None,
         settled_amount=None,
         settled_currency=None,
@@ -186,15 +188,15 @@ async def test_distinct_status_events_without_event_id_both_apply(fake_redis):
     first_calls = await _post(
         org=org,
         invoice=invoice,
-        status_value="posted",  # -> posted_in_erp (valid from sent_to_erp)
+        status_value="cancelled",  # -> failed (valid from sending_to_erp)
         correlation_id=correlation_id,
         erp_document_id=erp_document_id,
         secret="erp-secret",
     )
     assert len(first_calls) == 1
-    assert first_calls[0]["target"] == InvoiceStatus.posted_in_erp
+    assert first_calls[0]["target"] == InvoiceStatus.failed
 
-    # A payment run (unrelated code path) schedules payment in between.
+    # Another code path moves the invoice on to a scheduled payment in between.
     invoice.status = InvoiceStatus.payment_scheduled
 
     # Second, DISTINCT status event — same correlation_id/erp_document_id

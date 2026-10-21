@@ -13,7 +13,7 @@ class ErpInvoiceStatus(enum.StrEnum):
 
     ``paid`` is a claim that money left the customer: an adapter returns it only
     on the ERP's own paid status or a payment the ERP records against the bill,
-    never on a zero balance alone (docs/decisions.md §293). A credit note, a
+    never on a zero balance alone (docs/decisions.md §303). A credit note, a
     write-off or a zero-total bill also leaves nothing owing, and recording one
     of those as a payment would book money that never moved.
     ``settled_no_payment`` is that case: nothing is owing, but the read shows no

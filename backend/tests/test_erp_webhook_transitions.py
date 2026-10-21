@@ -220,8 +220,8 @@ async def test_forbidden_void_while_advanced_opens_reconciliation_exception(fake
     already-advanced invoice is a real reconciliation signal (money may be in
     flight), so it opens exactly ONE open `erp_reconciliation` Exception for
     human review, with a PII-free description."""
-    from app.api.erp_webhook import ERP_RECONCILIATION_EXCEPTION_TYPE
     from app.models.exception import Exception as APException
+    from app.services.erp_reported_status import ERP_RECONCILIATION_EXCEPTION_TYPE
 
     org = _org_with_erp_secret("erp-secret")
     invoice = SimpleNamespace(
@@ -347,7 +347,7 @@ async def test_erp_paid_for_an_invoice_feohledger_never_paid_is_recorded(fake_re
     invoice = SimpleNamespace(id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=current)
 
     recorded = AsyncMock()
-    with patch("app.api.erp_webhook._record_erp_reported_payment", recorded):
+    with patch("app.api.erp_webhook.record_erp_reported_payment", recorded):
         result, db, transition_calls = await _post(
             org=org, invoice=invoice, status_value="Paid", event_id=f"ev_paid_{current.value}"
         )
@@ -362,10 +362,12 @@ async def test_erp_paid_for_an_invoice_feohledger_never_paid_is_recorded(fake_re
 
 
 @pytest.mark.asyncio
-async def test_permitted_transition_sent_to_posted_applies_and_audits(fake_redis):
-    """A legitimately-permitted ERP-driven transition still applies. ERP reports
-    `Open` (→ posted_in_erp) for an invoice at `sent_to_erp` — a legal edge —
-    so it must go through transition_invoice (the audit chokepoint) and commit."""
+async def test_an_erp_posting_report_leaves_a_pushed_invoice_resting(fake_redis):
+    """`Open` (→ posted_in_erp) for an invoice at `sent_to_erp` is a legal edge,
+    but it is acknowledged and NOT applied (decisions §303): a pushed invoice
+    rests at `sent_to_erp` until the ERP pays it, and `posted_in_erp` is payable
+    in FeohLedger — applying it would put a bill the ERP is about to pay into
+    our payment queue too."""
     org = _org_with_erp_secret("erp-secret")
     invoice = SimpleNamespace(status=InvoiceStatus.sent_to_erp)
 
@@ -374,13 +376,34 @@ async def test_permitted_transition_sent_to_posted_applies_and_audits(fake_redis
     )
 
     assert result is None
+    assert transition_calls == []
+    assert invoice.status is InvoiceStatus.sent_to_erp
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_permitted_transition_scheduled_to_paid_applies_and_audits(fake_redis):
+    """A legitimately-permitted ERP-driven transition still applies. ERP reports
+    `Paid` for an invoice at `payment_scheduled` with no completed payment to
+    hold it — a legal edge — so it goes through transition_invoice (the audit
+    chokepoint) and commits."""
+    org = _org_with_erp_secret("erp-secret")
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.payment_scheduled
+    )
+
+    result, db, transition_calls = await _post(
+        org=org, invoice=invoice, status_value="Paid", event_id="ev_paid"
+    )
+
+    assert result is None
     assert len(transition_calls) == 1
     call = transition_calls[0]
-    assert call["target"] is InvoiceStatus.posted_in_erp
-    assert call["action_name"] == "invoice.erp_status_posted_in_erp"
+    assert call["target"] is InvoiceStatus.paid
+    assert call["action_name"] == "invoice.erp_status_paid"
     # PII-free whitelisted audit details only.
     assert set(call["details"]) == {"erp_type", "erp_status", "erp_document_id", "raw_event_id"}
-    assert invoice.status is InvoiceStatus.posted_in_erp
+    assert invoice.status is InvoiceStatus.paid
     db.commit.assert_awaited()
 
 
@@ -454,8 +477,8 @@ async def test_scheduled_to_paid_is_held_when_the_rail_settled_short(fake_redis)
     payment settled SHORT of what AP authorized must NOT flip it to `paid` —
     `payment_erp_sync` holds it at `payment_scheduled`, and this must too. It
     opens exactly one `erp_reconciliation` exception and does not transition."""
-    from app.api.erp_webhook import ERP_RECONCILIATION_EXCEPTION_TYPE
     from app.models.exception import Exception as APException
+    from app.services.erp_reported_status import ERP_RECONCILIATION_EXCEPTION_TYPE
 
     org = _org_with_erp_secret("erp-secret")
     invoice = SimpleNamespace(
@@ -605,15 +628,17 @@ async def test_normal_signed_request_under_cap_still_succeeds(fake_redis):
     """Regression guard: the new size-cap check must not break a legitimate,
     normal-sized signed request (default cap is a few MB; this body is tiny)."""
     org = _org_with_erp_secret("erp-secret")
-    invoice = SimpleNamespace(status=InvoiceStatus.sent_to_erp)
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.payment_scheduled
+    )
 
     result, db, transition_calls = await _post(
-        org=org, invoice=invoice, status_value="Open", event_id="ev_size_ok"
+        org=org, invoice=invoice, status_value="Paid", event_id="ev_size_ok"
     )
 
     assert result is None
     assert len(transition_calls) == 1
-    assert transition_calls[0]["target"] is InvoiceStatus.posted_in_erp
+    assert transition_calls[0]["target"] is InvoiceStatus.paid
     db.commit.assert_awaited()
 
 
@@ -646,7 +671,7 @@ async def test_dedup_claim_released_when_transition_raises(fake_redis):
 
     org = _org_with_erp_secret("erp-secret")
     invoice = SimpleNamespace(
-        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.sent_to_erp
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.payment_scheduled
     )
 
     tenant_factory, db = _fake_tenant_session_factory(invoice)
@@ -658,7 +683,7 @@ async def test_dedup_claim_released_when_transition_raises(fake_redis):
         "tenant_slug": "acme",
         "correlation_id": str(uuid.uuid4()),
         "erp_document_id": "doc_1",
-        "status": "Open",
+        "status": "Paid",
         "event_id": "ev_claim_release",
     }
     body_bytes = json.dumps(body).encode("utf-8")

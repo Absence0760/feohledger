@@ -263,7 +263,7 @@ def test_split_inclusive_always_adds_back_to_the_gross(gross, pct, exclusive, ta
         ({"Total": 115, "AmountDue": 115}, ErpInvoiceStatus.open),
         ({"Total": 115, "AmountDue": 15}, ErpInvoiceStatus.partially_paid),
         # Paid only on Sage's own Paid flag, and never for a zero total
-        # (decisions §293); nothing due without it is not a payment.
+        # (decisions §303); nothing due without it is not a payment.
         ({"Total": 115, "AmountDue": 0, "Paid": True}, ErpInvoiceStatus.paid),
         ({"Total": 115, "AmountDue": 0}, ErpInvoiceStatus.settled_no_payment),
         ({"Total": 115, "AmountDue": 0, "Paid": False}, ErpInvoiceStatus.settled_no_payment),

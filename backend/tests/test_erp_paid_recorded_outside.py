@@ -1,11 +1,13 @@
 """An ERP `Paid` for an invoice FeohLedger never paid — recorded, over a real DB.
 
-`api/erp_webhook._record_erp_reported_payment` (issue #517): the ERP-led path of
-the no-rail pilot. The handler's routing to it is pinned (mock-based) in
-`test_erp_webhook_transitions.py`; this drives the helper itself against real
-rows, through `services/external_payment` — so the invoice really reaches
-`paid` with a `completed` external payment behind it, and a refusal really opens
-an `erp_reconciliation` exception instead of vanishing.
+`services/erp_reported_status.record_erp_reported_payment` (issue #517,
+decisions §303): the ERP-led path of the no-rail pilot, shared by the ERP
+webhook and the ERP status sweep. The handler's routing to it is pinned
+(mock-based) in `test_erp_webhook_transitions.py`; this drives the helper itself
+against real rows, through `services/external_payment` — so the invoice really
+reaches `paid` with a `completed` external payment behind it, and a refusal
+really opens the BLOCKING `payment_reconciliation` exception instead of
+vanishing.
 
 Runs against the opt-in `realdb` fixture (skips without `pnpm db:up`).
 """
@@ -53,12 +55,12 @@ async def _org(realdb, key="a") -> Organization:
 
 
 async def _drive(realdb, inv_id, *, erp_document_id="BILLPAY-77"):
-    from app.api.erp_webhook import _record_erp_reported_payment
+    from app.services.erp_reported_status import record_erp_reported_payment
 
     org = await _org(realdb)
     async with realdb.sessionmaker("a")() as s:
         invoice = await get_invoice_for_update(s, inv_id)
-        await _record_erp_reported_payment(
+        await record_erp_reported_payment(
             s,
             invoice,
             org=org,
@@ -104,14 +106,18 @@ async def test_erp_paid_records_an_external_payment(realdb, status):
         assert "invoice.erp_status_posted_in_erp" in invoice_actions
 
 
-async def test_a_refusal_opens_a_reconciliation_exception(realdb):
+@pytest.mark.parametrize("status", [InvoiceStatus.posted_in_erp, InvoiceStatus.sent_to_erp])
+async def test_a_refusal_opens_a_blocking_reconciliation_exception(realdb, status):
     """An open duplicate flag: recording would bury it under a closed item, so
-    the ERP's report becomes a human's reconciliation task — never silent."""
+    the ERP's report becomes a human's reconciliation task — never silent.
+
+    The flag BLOCKS payment (decisions §303): the ERP says it paid, so once
+    someone dismisses the duplicate flag nothing else may let FeohLedger pay the
+    supplier again. And a refused record leaves a pushed invoice at
+    `sent_to_erp` — never at the payable `posted_in_erp`."""
     info = realdb.info("a")
     mk = realdb.sessionmaker("a")
-    inv_id = await _seed(
-        mk, info.org_id, number="ERP-PAID-BLOCKED", status=InvoiceStatus.posted_in_erp
-    )
+    inv_id = await _seed(mk, info.org_id, number=f"ERP-PAID-BLOCKED-{status.value}", status=status)
     async with mk() as s:
         s.add(
             APException(
@@ -138,14 +144,20 @@ async def test_a_refusal_opens_a_reconciliation_exception(realdb):
                 await s.execute(
                     select(APException).where(
                         APException.invoice_id == inv_id,
-                        APException.exception_type == "erp_reconciliation",
+                        APException.exception_type == "payment_reconciliation",
                     )
                 )
             )
             .scalars()
             .all()
         )
-    assert invoice.status == InvoiceStatus.posted_in_erp
+        invoice_actions = set(
+            (await s.execute(select(AuditLog.action).where(AuditLog.entity_id == inv_id)))
+            .scalars()
+            .all()
+        )
+    assert invoice.status == status
+    assert "invoice.erp_status_posted_in_erp" not in invoice_actions
     assert payments == []
     assert "external_payment_blocking_exception" in recon.description
     assert recon.status == "open"

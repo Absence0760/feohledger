@@ -354,7 +354,7 @@ def test_token_failure_raises_with_status_only():
             ErpInvoiceStatus.open,
         ),
         # Nothing due is not "paid" until Intacct's own state says so: an
-        # applied credit zeroes the due amount too (decisions §293).
+        # applied credit zeroes the due amount too (decisions §303).
         (
             {"state": "posted", "totalTxnAmount": "100.00", "totalTxnAmountDue": "0.00"},
             ErpInvoiceStatus.open,

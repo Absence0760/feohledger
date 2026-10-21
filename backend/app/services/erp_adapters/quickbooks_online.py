@@ -192,7 +192,7 @@ def map_bill_status(bill: dict) -> ErpInvoiceStatus:
     (``LinkedTxn`` of type ``BillPaymentCheck`` / ``BillPaymentCreditCard``)
     and there was something to pay. A zero balance with no payment linked — a
     zero-total bill, or one cleared some other way — is ``settled_no_payment``,
-    which the status sweep flags rather than records (docs/decisions.md §293).
+    which the status sweep flags rather than records (docs/decisions.md §303).
     """
     balance = _dec(bill.get("Balance"))
     total = _dec(bill.get("TotalAmt"))

@@ -124,7 +124,7 @@ def map_bill_status(bill: dict) -> ErpInvoiceStatus:
     Xero marks a bill ``PAID`` once nothing is owing, which a fully allocated
     credit note achieves as well as a payment. So ``PAID`` is ``paid`` only
     when the bill records money paid against it (``AmountPaid > 0``); a bill
-    settled wholly by credit is ``settled_no_payment`` (docs/decisions.md §293).
+    settled wholly by credit is ``settled_no_payment`` (docs/decisions.md §303).
     """
     status = str(bill.get("Status") or "").upper()
     amount_paid = _decimal(bill.get("AmountPaid")) or 0

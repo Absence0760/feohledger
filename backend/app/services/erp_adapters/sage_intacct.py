@@ -131,7 +131,7 @@ def map_bill_status(record: dict) -> ErpInvoiceStatus:
 
     A posted bill with nothing left due is NOT read as paid: an applied credit
     zeroes the due amount too, and only Intacct's ``paid`` state says money
-    went out (docs/decisions.md §293). A bill whose state lags its payment is
+    went out (docs/decisions.md §303). A bill whose state lags its payment is
     reported ``open`` until the state catches up, and the next poll sees it.
     """
     state = str(record.get("state") or "").replace("_", "").replace(" ", "").lower()

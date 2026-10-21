@@ -490,9 +490,10 @@ async def test_refused_then_cleared_by_a_non_implicated_user_then_posted(realdb,
     assert sent.json()["status"] == "sending_to_erp"
     assert dispatched == [inv_id]
 
-    # And the dispatcher's own run posts it (mock ERP) to `done`.
+    # And the dispatcher's own run posts it (mock ERP), where it rests at
+    # `sent_to_erp` until the ERP pays it (decisions §303).
     await _push(mk, inv_id)
-    assert await _status(mk, inv_id) == InvoiceStatus.done
+    assert await _status(mk, inv_id) == InvoiceStatus.sent_to_erp
     assert len(await _audit(mk, inv_id, "invoice.erp_confirmed")) == 1
 
 

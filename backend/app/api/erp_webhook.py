@@ -4,17 +4,21 @@ import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import settings
 from app.database import control_session_factory, get_tenant_engine
-from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.services.credential_crypto import CredentialCryptoError
-from app.services.exception_service import create_exception
+from app.services.erp_reported_status import (
+    ERP_PAID_RECORDABLE,
+    open_erp_reconciliation_exception,
+    raise_erp_cancelled_exception,
+    record_erp_reported_payment,
+)
 from app.services.payment_settlement import settlement_coverage
 from app.services.provider_credentials import provider_config
 from app.services.webhook_security import (
@@ -32,12 +36,6 @@ from app.services.workflow_engine import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/erp", tags=["erp"])
-
-# Exception type opened when the ERP reports an invoice void/cancel we can no
-# longer safely auto-apply (the invoice already advanced past the point where
-# ``→ failed`` is a legal transition). Free-form ``Exception.exception_type``
-# string — no migration. See the § Exception types list in backend/CLAUDE.md.
-ERP_RECONCILIATION_EXCEPTION_TYPE = "erp_reconciliation"
 
 
 def _retry_please() -> Response:
@@ -243,6 +241,16 @@ async def erp_webhook(
                 return  # no matching invoice → silent ack
             invoice = await get_invoice_for_update(db, invoice_id)
 
+            # A pushed invoice RESTS at `sent_to_erp` until the ERP pays it
+            # (decisions §303). The ERP confirming it holds the bill (OPEN /
+            # posted) changes nothing about who pays it, and `posted_in_erp` is
+            # payable in FeohLedger — applying the report would put a bill the
+            # ERP is about to pay into our payment queue as well. So it is
+            # acknowledged and not applied; `posted_in_erp` is reached only on
+            # the way to `paid` (`services/external_payment`).
+            if target_status is InvoiceStatus.posted_in_erp:
+                return  # silent 204 — see above
+
             # Only transition if the AUTHORITATIVE state machine permits it.
             # We deliberately do NOT keep a second local transition map here: a
             # divergent copy that permitted an edge VALID_TRANSITIONS forbids
@@ -269,7 +277,7 @@ async def erp_webhook(
                 # OTHER forbidden transition stays a pure silent no-op — turning
                 # them all into exceptions would be noise.
                 if target_status is InvoiceStatus.failed:
-                    await _raise_erp_reconciliation_exception(
+                    await raise_erp_cancelled_exception(
                         db,
                         invoice,
                         org_id=org.id,
@@ -288,7 +296,7 @@ async def erp_webhook(
                     # outside FeohLedger" goes through. Before this the report
                     # was dropped here, and a tenant with no rail had no
                     # automatic path to `paid` at all.
-                    await _record_erp_reported_payment(
+                    await record_erp_reported_payment(
                         db,
                         invoice,
                         org=org,
@@ -336,7 +344,7 @@ async def erp_webhook(
                         settled_amount_unstorable=settling.settled_amount_unstorable,
                     )
                     if not coverage.completes_invoice:
-                        await _open_erp_reconciliation_exception(
+                        await open_erp_reconciliation_exception(
                             db,
                             invoice,
                             org_id=org.id,
@@ -398,177 +406,3 @@ async def erp_webhook(
             # redeliver. Bodyless — no diagnostic detail in the response.
             logger.exception("ERP webhook: processing failed for erp_type=%s", erp_type)
             return _retry_please()
-
-
-#: Invoice statuses from which an ERP `Paid` report is RECORDED as a payment
-#: made outside FeohLedger rather than dropped. `payment_scheduled` is absent on
-#: purpose: it already has a FeohLedger payment behind it, and the legal
-#: `payment_scheduled → paid` edge (with its settlement-coverage hold) handles it.
-ERP_PAID_RECORDABLE = frozenset(
-    {InvoiceStatus.approved, InvoiceStatus.sent_to_erp, InvoiceStatus.posted_in_erp}
-)
-
-
-#: Refusals meaning FeohLedger still holds its own claim on paying the invoice
-#: (`services/external_payment`). Raised as the BLOCKING `payment_reconciliation`
-#: type, because that claim proceeding after the ERP paid is a double payment.
-DOUBLE_PAY_REFUSALS = frozenset(
-    {
-        "external_payment_in_run",
-        "external_payment_payment_live",
-        "external_payment_card_live",
-    }
-)
-
-
-async def _record_erp_reported_payment(
-    db: AsyncSession,
-    invoice: Invoice,
-    *,
-    org: Organization,
-    erp_type: str,
-    erp_document_id: str | None,
-    event_id: str | None,
-) -> None:
-    """Book the ERP's `Paid` as a payment made outside FeohLedger.
-
-    Through `services/external_payment.record_invoice_paid_outside` — the same
-    gates a user's record goes through, minus segregation of duties (no human
-    actor). A refusal (an open payment-blocking exception, a live FeohLedger
-    payment or card that would make this a double payment, a credit we can't
-    net) is never silent: it opens an `erp_reconciliation` exception naming the
-    refusal code, so a human decides. Never commits.
-    """
-    from app.services.external_payment import (
-        ExternalPaymentRefused,
-        record_invoice_paid_outside,
-    )
-    from app.utils.dates import utc_today
-
-    if invoice.status == InvoiceStatus.sent_to_erp:
-        # The ERP can only have paid a bill it holds: the `posted_in_erp` report
-        # was lost or arrived out of order. Apply it first so the trail reads in
-        # the order things happened.
-        await transition_invoice(
-            db,
-            invoice,
-            InvoiceStatus.posted_in_erp,
-            action_name="invoice.erp_status_posted_in_erp",
-            details={
-                "erp_type": erp_type,
-                "erp_status": "implied_by_paid",
-                "erp_document_id": erp_document_id,
-                "event_id": event_id,
-            },
-        )
-
-    reference = (erp_document_id or (f"erp-event:{event_id}" if event_id else None) or erp_type)[
-        :255
-    ]
-    try:
-        await record_invoice_paid_outside(
-            db,
-            org=org,
-            invoice=invoice,
-            method=None,
-            reference=reference,
-            paid_on=utc_today(),
-            actor_id=None,
-            source="erp",
-        )
-    except ExternalPaymentRefused as exc:
-        # When FeohLedger itself still has a claim on paying this invoice — a
-        # live payment, a draft/exported run, a live card — the ERP has just
-        # paid it, so letting that claim proceed pays the supplier TWICE.
-        # `erp_reconciliation` is not payment-blocking, so for those refusals
-        # the flag is the blocking `payment_reconciliation`, which the run
-        # builder and every dispatch (`dispatch_preflight`) refuse on. Any other
-        # refusal is a question for a human, not a double-pay risk.
-        double_pay = exc.refusal.code in DOUBLE_PAY_REFUSALS
-        await _open_erp_reconciliation_exception(
-            db,
-            invoice,
-            org_id=org.id,
-            exception_type=(
-                "payment_reconciliation" if double_pay else ERP_RECONCILIATION_EXCEPTION_TYPE
-            ),
-            description=(
-                f"ERP reported 'Paid' via {erp_type} for an invoice FeohLedger has not "
-                f"paid, but it could not be recorded ({exc.refusal.code}). Resolve the "
-                f"cause, then record it via POST /api/payments/record-outside "
-                f"(erp_document_id={erp_document_id or '-'}, event={event_id or '-'})."
-            ),
-        )
-
-
-async def _open_erp_reconciliation_exception(
-    db: AsyncSession,
-    invoice: Invoice,
-    *,
-    org_id,
-    description: str,
-    exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
-) -> None:
-    """Open ONE ``erp_reconciliation`` Exception for human review, PII-free.
-
-    **Idempotent.** The webhook already dedupes redeliveries by event id, but
-    two DISTINCT ERP events for the same invoice must not pile up duplicate
-    reconciliation exceptions — so we skip if an OPEN ``erp_reconciliation``
-    exception already exists for this invoice.
-
-    ``description`` must carry only safe routing identifiers and status —
-    never the raw ERP ``details`` payload (which may include vendor bank / tax
-    / address fields).
-    """
-    existing = await db.execute(
-        select(func.count()).where(
-            APException.invoice_id == invoice.id,
-            APException.exception_type == exception_type,
-            APException.status.in_(("open", "escalated")),
-        )
-    )
-    if (existing.scalar() or 0) > 0:
-        return  # already flagged for this invoice — don't duplicate
-
-    await create_exception(
-        db,
-        exception_type=exception_type,
-        severity="error",
-        description=description,
-        status="open",
-        organization_id=org_id,
-        invoice=invoice,
-        # Raised from an inbound ERP webhook — the caller is the tenant's ERP,
-        # authenticated by HMAC, not a control-plane user.
-        raised_by_user_id=None,
-    )
-
-
-async def _raise_erp_reconciliation_exception(
-    db: AsyncSession,
-    invoice: Invoice,
-    *,
-    org_id,
-    erp_type: str,
-    erp_status: str,
-    erp_document_id: str | None,
-    event_id,
-) -> None:
-    """Open an ``erp_reconciliation`` Exception when the ERP reports an invoice
-    VOIDED/CANCELLED (``→ failed``) that we've already advanced past the point
-    where ``→ failed`` is a legal transition (``sent_to_erp`` /
-    ``posted_in_erp`` / ``payment_scheduled`` / ``paid``). Money may already be
-    in flight, so this is a review signal — we deliberately do NOT
-    auto-transition the invoice.
-    """
-    await _open_erp_reconciliation_exception(
-        db,
-        invoice,
-        org_id=org_id,
-        description=(
-            f"ERP reported '{erp_status}' (void/cancel) via {erp_type} for an "
-            f"invoice already at '{invoice.status.value}' — money may be in flight. "
-            f"Needs human reconciliation "
-            f"(erp_document_id={erp_document_id or '-'}, event={event_id or '-'})."
-        ),
-    )

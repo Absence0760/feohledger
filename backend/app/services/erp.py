@@ -16,6 +16,7 @@ from app.services.erp_adapters import (
     get_erp_adapter,
 )
 from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, NOT_CONNECTED
+from app.services.erp_adapters.dispatcher import resolve_adapter_key
 from app.services.erp_export_gate import (
     blocked_export_message,
     blocked_export_refusal,
@@ -66,6 +67,17 @@ _ORPHAN_KEYS = (ORPHAN_DOCUMENT_ID_KEY, ORPHAN_DOCUMENT_NUMBER_KEY)
 #: mid-call (a Lambda timeout, which SQS redelivers) leaves it True.
 #: Read through :func:`possibly_posted`, which is what a later refusal reports.
 OUTCOME_UNKNOWN_KEY = "erp_outcome_unknown"
+
+#: ``WorkflowInstance.state_data`` keys naming WHERE a confirmed bill lives: the
+#: adapter key (`erp_adapters.dispatcher.resolve_adapter_key`) and the ERP
+#: company (`erp_link_realm.connection_realm`, None for one that names no
+#: company) the push posted to. The status sweep polls ``erp_reference`` only
+#: while the tenant is still connected to that same adapter and company: an ERP
+#: id means nothing in another company, and QuickBooks reuses small integers
+#: across companies, so polling it there would read another bill's status
+#: (docs/decisions.md §284, §303).
+ERP_ADAPTER_KEY = "erp_adapter"
+ERP_REALM_KEY = "erp_realm"
 
 #: The push refusal for an invoice due before it is dated (`api/refusals`).
 INVOICE_DUE_BEFORE_DATE = "invoice_due_before_date"
@@ -475,6 +487,16 @@ async def send_to_erp_internal(
         try:
             erp_ref = await _call_erp(db, invoice, erp_config, instance=instance)
 
+            # The invoice RESTS at `sent_to_erp`: the ERP now holds a payable
+            # bill and pays it. It used to walk on to `done` here, which is
+            # terminal, so the ERP's later payment had nowhere to land — neither
+            # the webhook's paid handling nor a recorded payment can move a
+            # `done` invoice. `sent_to_erp` is deliberately NOT payable in
+            # FeohLedger (`api/payments.PAYABLE_INVOICE_STATUSES`), so resting
+            # here cannot put the bill in our payment queue as well as the ERP's
+            # (docs/decisions.md §303). The ERP's payment reaches it through
+            # `services/erp_reported_status`, from the webhook or the status
+            # sweep (`services/erp_status_sync`).
             await transition_invoice(
                 db,
                 invoice,
@@ -482,13 +504,6 @@ async def send_to_erp_internal(
                 actor_id=actor_id,
                 action_name="invoice.erp_confirmed",
                 details={"erp_reference": erp_ref},
-            )
-            await transition_invoice(
-                db,
-                invoice,
-                InvoiceStatus.done,
-                actor_id=actor_id,
-                action_name="invoice.completed",
             )
 
             if instance:
@@ -663,6 +678,8 @@ async def _call_erp(
             # transitions commit: a failure between the two would otherwise
             # leave a confirmed bill reading as never posted.
             new_state["erp_reference"] = reference
+            new_state[ERP_ADAPTER_KEY] = resolve_adapter_key(config)
+            new_state[ERP_REALM_KEY] = connection_realm(config)
         if result.pending_job_id != payload.pending_job_id:
             new_state[PENDING_JOB_KEY] = result.pending_job_id
         if result.success:

@@ -319,7 +319,7 @@ def map_invoice_status(record: dict) -> ErpInvoiceStatus:
 
     A zero ``balance`` on an ``Approved`` invoice is not read as paid: a credit
     zeroes it as well, and only FE NXT's ``Paid`` says money went out
-    (docs/decisions.md §293). An invoice whose status lags its payment reads
+    (docs/decisions.md §303). An invoice whose status lags its payment reads
     ``open`` until the word catches up, and the next poll sees it.
     """
     return _STATUS_MAP.get(str(record.get("status") or "").lower(), ErpInvoiceStatus.unknown)

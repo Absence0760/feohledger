@@ -2986,7 +2986,7 @@ async def qbo_set_balance(body: dict) -> dict:
     Body: {"id": "<bill Id>", "balance": <number>, "payment"?: true}.
     A zero balance alone reads as settled with no payment; ``payment: true``
     also links a ``BillPaymentCheck``, which is what the backend reads as paid
-    (docs/decisions.md §293).
+    (docs/decisions.md §303).
     """
     bill = _qbo()["bills"].get(str(body.get("id", "")))
     if bill is None:

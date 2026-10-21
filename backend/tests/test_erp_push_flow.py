@@ -1,7 +1,8 @@
 """ERP push pipeline — `send_to_erp_internal` and `retry_erp`.
 
 `send_to_erp_internal` is the load-bearing path that moves an approved
-invoice to `done` via the ERP: `api/workflow.py` transitions
+invoice to `sent_to_erp` via the ERP, where it rests until the ERP pays it
+(decisions §303): `api/workflow.py` transitions
 approved → sending_to_erp and then dispatches, and both `erp_dispatch`
 and `erp_lambda` land here. A regression in retry counting double-charges
 ERP IDs; a regression in the "all retries exhausted" branch wedges
@@ -17,8 +18,8 @@ invoice arrives here ALREADY in `sending_to_erp`, and the
 approved → sending_to_erp leg is the route's, not this function's.
 
 These tests pin:
-  - happy path walks approved → sending_to_erp → sent_to_erp → done
-    with audit rows on each leg
+  - happy path walks approved → sending_to_erp → sent_to_erp and STOPS
+    there (never `done`: the ERP's later payment must be able to land)
   - the erp_reference returned by the adapter rides on the
     `invoice.erp_confirmed` audit row's details
   - workflow_instance.state_data captures `erp_retries` and
@@ -137,10 +138,11 @@ class _AuditRecorder:
 
 
 @pytest.mark.asyncio
-async def test_send_to_erp_happy_path_walks_approved_to_done():
+async def test_send_to_erp_happy_path_rests_at_sent_to_erp():
     """ERP call succeeds on the first try → invoice walks
-    sending_to_erp → sent_to_erp → done. Two audit rows; the
-    erp_reference rides on the first."""
+    sending_to_erp → sent_to_erp and rests there (decisions §303): `done` is
+    terminal, and a pushed invoice must still accept the ERP's payment. One
+    audit row, carrying the erp_reference."""
     inv = _invoice(status=InvoiceStatus.sending_to_erp)
     inst = _instance()
     recorder = _AuditRecorder()
@@ -154,13 +156,10 @@ async def test_send_to_erp_happy_path_walks_approved_to_done():
     ):
         await send_to_erp_internal(db, inv)
 
-    assert inv.status == InvoiceStatus.done
-    # Two transitions in order — the approved → sending_to_erp leg belongs to
-    # `api/workflow.py`, which runs it before dispatching to this function.
-    assert recorder.transitions() == [
-        ("sending_to_erp", "sent_to_erp"),
-        ("sent_to_erp", "done"),
-    ]
+    assert inv.status == InvoiceStatus.sent_to_erp
+    # The approved → sending_to_erp leg belongs to `api/workflow.py`, which
+    # runs it before dispatching to this function.
+    assert recorder.transitions() == [("sending_to_erp", "sent_to_erp")]
     # erp_reference rides on the sent_to_erp row.
     confirm = next(r for r in recorder.rows if r["action"] == "invoice.erp_confirmed")
     assert confirm["details"]["erp_reference"] == "ERP-12345"
@@ -514,6 +513,10 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
         PENDING_JOB_KEY: None,
         OUTCOME_UNKNOWN_KEY: False,
         "erp_reference": "FE-9",
+        # Where the bill lives, for the status sweep (decisions §303). A bare
+        # `type` routes through Merge.dev, whose realm is the adapter alone.
+        "erp_adapter": "merge_dev",
+        "erp_realm": "merge_dev:",
     }
 
 
@@ -1030,13 +1033,22 @@ async def test_call_erp_success_clears_an_earlier_orphan():
             ORPHAN_DOCUMENT_NUMBER_KEY: "BILL-0007",
         }
     )
+    config = {
+        "type": "xero",
+        "integration_method": "direct",
+        "oauth": {"external_tenant_id": "xero-org-1"},
+    }
     with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
-        ref = await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+        ref = await _call_erp(_line_items_db([]), _invoice(), config, instance=inst)
     assert ref == "XERO-BILL-7"
     assert inst.state_data == {
         "erp_retries": 0,
         OUTCOME_UNKNOWN_KEY: False,
         "erp_reference": "XERO-BILL-7",
+        # The adapter and ERP company the bill was posted to: the status sweep
+        # polls it only while the tenant is still connected there (§284, §303).
+        "erp_adapter": "xero",
+        "erp_realm": "xero:xero-org-1",
     }
 
 
