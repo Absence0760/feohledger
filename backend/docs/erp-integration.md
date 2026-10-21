@@ -482,7 +482,11 @@ included, under `erp_integrations`, §281).
 `catalog.PENDING_ADAPTERS` lists catalogue keys whose adapter has not landed;
 `tests/test_erp_catalog.py` fails if a catalogue key is neither registered nor
 pending, if a registered direct adapter has no catalogue entry, or if a
-`label_key` / `help_key` is missing from the frontend's English catalogue.
+`label_key` / `help_key` is missing from the frontend's English catalogue. Those keys
+live in the frontend's **settings** catalogue slice (`frontend/src/lib/i18n/locales/settings/`,
+`docs/decisions.md` §300), which only the screens that render the form load; the
+test reads it with the main catalogue, and the frontend's `slices.test.ts` reads
+this package to prove the form's panel loads it.
 
 ## Per-ERP Integration Details
 

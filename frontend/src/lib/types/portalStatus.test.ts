@@ -17,7 +17,7 @@ import {
 	type PortalInvoicePhase,
 	type PortalPaymentPhase
 } from './portalStatus';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Drift guard + regression test for the persona-supplier audit finding
@@ -156,15 +156,15 @@ describe('portal invoice phases', () => {
 		for (const phase of PORTAL_INVOICE_PHASE_ORDER) {
 			const key = PORTAL_INVOICE_PHASE_LABEL_KEYS[phase];
 			expect(key, `${phase} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${phase} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key].trim().length).toBeGreaterThan(0);
+			expect(Object.keys(EN_ALL), `${phase} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
 		}
 	});
 
 	it('never renders an internal-only status as its own raw value', () => {
 		for (const status of INTERNAL_ONLY_INVOICE_STATUSES) {
 			expect(
-				en[portalInvoiceStatusLabelKey(status)],
+				EN_ALL[portalInvoiceStatusLabelKey(status)],
 				`${status} rendered verbatim to the supplier portal`
 			).not.toBe(status);
 		}
@@ -175,11 +175,11 @@ describe('portal invoice phases', () => {
 		// null: a null would send the caller back to the raw wire value, which
 		// is precisely what must not reach a supplier.
 		expect(portalInvoicePhase('some_future_internal_status')).toBe('processing');
-		expect(en[portalInvoiceStatusLabelKey('some_future_internal_status')]).not.toBe(
+		expect(EN_ALL[portalInvoiceStatusLabelKey('some_future_internal_status')]).not.toBe(
 			'some_future_internal_status'
 		);
 		for (const status of INVOICE_STATUSES) {
-			expect(en[portalInvoiceStatusLabelKey(status)]).not.toBe(status);
+			expect(EN_ALL[portalInvoiceStatusLabelKey(status)]).not.toBe(status);
 		}
 	});
 });
@@ -225,15 +225,15 @@ describe('portal payment phases', () => {
 		for (const phase of PORTAL_PAYMENT_PHASE_ORDER) {
 			const key = PORTAL_PAYMENT_PHASE_LABEL_KEYS[phase];
 			expect(key, `${phase} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${phase} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key].trim().length).toBeGreaterThan(0);
+			expect(Object.keys(EN_ALL), `${phase} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
 		}
 	});
 
 	it('never renders an internal-only status as its own raw value', () => {
 		for (const status of INTERNAL_ONLY_PAYMENT_STATUSES) {
 			expect(
-				en[portalPaymentStatusLabelKey(status)],
+				EN_ALL[portalPaymentStatusLabelKey(status)],
 				`${status} rendered verbatim to the supplier portal`
 			).not.toBe(status);
 		}
@@ -242,7 +242,7 @@ describe('portal payment phases', () => {
 	it('fails soft to the neutral phase, never to a raw value', () => {
 		expect(portalPaymentPhase('some_future_internal_status')).toBe('processing');
 		for (const status of PAYMENT_STATUSES) {
-			expect(en[portalPaymentStatusLabelKey(status)]).not.toBe(status);
+			expect(EN_ALL[portalPaymentStatusLabelKey(status)]).not.toBe(status);
 		}
 	});
 });
@@ -260,10 +260,10 @@ describe('phase ids are locale-independent', () => {
 
 	it('never uses the phase id as its own English label', () => {
 		for (const phase of PORTAL_INVOICE_PHASE_ORDER) {
-			expect(en[PORTAL_INVOICE_PHASE_LABEL_KEYS[phase]]).not.toBe(phase);
+			expect(EN_ALL[PORTAL_INVOICE_PHASE_LABEL_KEYS[phase]]).not.toBe(phase);
 		}
 		for (const phase of PORTAL_PAYMENT_PHASE_ORDER) {
-			expect(en[PORTAL_PAYMENT_PHASE_LABEL_KEYS[phase]]).not.toBe(phase);
+			expect(EN_ALL[PORTAL_PAYMENT_PHASE_LABEL_KEYS[phase]]).not.toBe(phase);
 		}
 	});
 });

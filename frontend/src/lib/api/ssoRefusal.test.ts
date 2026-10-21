@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { interpolate } from '#lib/i18n/interpolate.ts';
 import {
@@ -16,7 +16,7 @@ import {
  * falls back to the server's English.
  */
 const t = (key: MessageKey, params?: Record<string, string | number>) =>
-	interpolate(en[key], params, 'en');
+	interpolate(EN_ALL[key], params, 'en');
 
 describe('ssoRefusalText', () => {
 	it('pins the backend code — a rename on either side fails here', () => {

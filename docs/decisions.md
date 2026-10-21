@@ -12810,6 +12810,107 @@ through Mailpit: the link opened again in a second tab after success, and an
 existing login's signup refused on first open and on reload, with the slug left
 free).
 
+## 300. Strings only some routes render load with those routes, as lazy catalogue slices in every locale (2026-10-20)
+
+(Numbered 300 because §292–§299 are held by pull requests still in flight.)
+
+The Japanese catalogue measured 100 KB gzipped on `main` — the per-chunk
+ceiling in `web-bundle-budget.yml` — and the five keys of PR #611 took it to
+101. The help slice of §261 had bought two weeks. Behind it sat a second
+problem: English main is a static import, so it shares an entry chunk with
+the i18n runtime, and that chunk was at ~97 KB. Moving keys out of the other
+five catalogues alone would have left the English chunk to trip the ceiling
+next.
+
+The keys moved were chosen by measuring gzipped bytes per top-level namespace
+in `ja` and `en` and keeping the namespaces only a bounded set of routes
+renders:
+
+| Slice | Namespaces | Keys | Share of `ja` | Loaded by |
+|---|---|---|---|---|
+| `settings` | `org`, `orgSso`, `admin`, `billing`, `sweepHealth` | 1,023 | ~20% | `/organization`, `/admin/**`, `/billing`, `/help` |
+| `portal` | `portal` | 295 | ~5% | `/portal/**` |
+
+`invoices`, `vendors`, `payments` and `workflows` are as large but render
+across the app (modals, pickers, status badges), so they stay in the main
+catalogue. Measured on `main` + the split: largest main catalogue 77 KB,
+largest chunk 77 KB (the English one), settings 21 KB, portal 6 KB, total
+1034 KB (was 1050); with #611 on top, 77 / 78 / 1034.
+
+How it works, and what it guarantees:
+
+1. **One mechanism, not a second hand-rolled copy of §261's.**
+   `ensureSlices(...names)` replaces `ensureHelpCatalogue()`;
+   `SLICE_LOADERS` holds a loader per slice per locale; `m()` reads the main
+   catalogue first and only then finds a key's slice by prefix
+   (`SLICE_PREFIXES`), so the runtime never bundles a slice's key list.
+   `MessageKey` now means any key `m()` resolves.
+2. **A route awaits its slice.** Each route's `+layout.ts` is
+   `export const load = () => ensureSlices('settings')`. SvelteKit awaits it
+   before rendering, so a slice key is never read before its slice is there and
+   a client-side navigation paints the reader's language on the first frame —
+   which is better than §261's "English until it lands" on a route.
+   `tests-e2e/i18n/catalogue-slices.spec.ts` proves this with the slice's
+   chunk deliberately delayed; a `load` that does not wait fails it.
+3. **The route-scoped slices are lazy in English too.** Nothing reads them
+   unloaded, and keeping their English out of the entry chunk is what brought
+   the English chunk from ~97 to 77 KB. The help slice keeps its static
+   English copy: a HelpTip renders on every page with no route `load` to wait
+   on, so it needs something to show while its chunk is in flight.
+4. **A key rendered where its slice is not loaded is a test failure.**
+   `src/lib/i18n/slices.test.ts` builds the import graph of `src/` and fails on
+   any file that names a key of a slice (a literal, a `{ui:}` reference in help
+   prose, or a runtime-built prefix) and is reachable from a route whose
+   layouts do not load that slice, naming the chain. Keys the backend names —
+   the ERP and commerce form fields' `label_key`s — are read out of the backend
+   adapter packages and attributed to the panel that renders them. Every slice
+   key must be named somewhere, so a key the scan cannot place fails rather
+   than slipping through; that found two dead keys (`help.glossary.topic`,
+   `org.section.brandingSaved`), removed. In dev, `m()` also logs such a key.
+   The thirteen keys under the slice prefixes that shared code renders —
+   role names, NACHA field names, commerce environment options, the portal's
+   "waiting on" phases — stay in the main catalogue, which the test is what
+   decided.
+5. **A locale switch swaps everything at once.** `setLocale` loads the main
+   catalogue and every wanted slice in parallel and assigns them together, so
+   a settings form never shows one language inside another's chrome. A slice
+   that fails in the new locale falls back to English. §261's loader retried a
+   failed help chunk in a loop for as long as it kept failing; the loader now
+   retries only when the locale changed while it was in flight.
+6. **Parity and plurals cover every slice.** `messages_parity.test.ts` holds
+   each slice in each locale to the main catalogue's rules;
+   `plural_messages.test.ts` and `approvalThresholdCurrency.test.ts` read every
+   slice through `allMessages.ts::loadAllMessages`, having silently stopped
+   seeing the keys that moved (help's plurals included, since §261).
+7. **The budget counts one file per catalogue kind**, the kinds read off the
+   `locales/` subdirectories, so a further slice is counted correctly without
+   editing the workflow.
+
+Rejected:
+
+- **Raising `MAX_LARGEST_CHUNK_KB`.** The workflow's own log says not to for
+  catalogues, and the next feature would trip it again.
+- **A slice per route.** Six thousand keys reorganised for a problem two
+  prefixes solved, and a page's strings would fragment across its modals and
+  shared components.
+- **Moving `invoices.*` / `vendors.*` / `payments.*`.** Larger, but rendered
+  from shared modals and pickers on most routes; the scope test would have
+  kept most of them in main, and a slice every route loads saves nothing.
+- **Keeping the new slices' English static, as help's is.** Simpler, but it
+  leaves the English chunk at ~98 KB, two kilobytes from the ceiling.
+- **Resolving the visitor's locale before the first route `load` runs**, so a
+  non-English cold load of a settings route does not fetch the English slice
+  before its own. It saves ~15 KB on that one cold load and would mean the
+  route `load` and `initLocale` racing to decide the locale; the existing
+  English-first paint of the main catalogue already has the same shape.
+
+Tests: `frontend/src/lib/i18n/slices.test.ts`,
+`frontend/src/lib/i18n/messages_parity.test.ts`,
+`frontend/src/lib/i18n/plural_messages.test.ts`,
+`frontend/tests-e2e/i18n/catalogue-slices.spec.ts`, and the backend's
+`test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
+settings slice for the form labels they check.
+
 ## 295. QuickBooks status flows back, our payments flow there, and a dying connection says so (QuickBooks Phases 3–5, migration 0117, 2026-10-20)
 
 **Context.** Phases 0–2 of the QuickBooks Online adapter (§269–§270, §284–§287)

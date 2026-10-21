@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
 import {
 	buildErpPayload,
 	buildErpSecretUpdate,
@@ -255,9 +256,9 @@ describe('readOAuthReturn', () => {
 
 describe('OAUTH_ERROR_KEYS', () => {
 	it('explains every actionable callback code in every locale', async () => {
-		const { CATALOGUE_LOADERS } = await import('#lib/i18n/catalogues.ts');
-		for (const [locale, load] of Object.entries(CATALOGUE_LOADERS)) {
-			const messages = await load();
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
 			for (const key of Object.values(OAUTH_ERROR_KEYS)) {
 				expect(messages[key], `${locale}: ${key}`).toBeTruthy();
 			}
@@ -404,11 +405,11 @@ describe('withoutOAuthReturn', () => {
 
 describe('optionLabelKey', () => {
 	it('labels every catalogued option value in every locale, and nothing else', async () => {
-		const { CATALOGUE_LOADERS } = await import('#lib/i18n/catalogues.ts');
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
 		// Blackbaud approval_status, Xero bill_status, QuickBooks environment, Merge.dev "other".
 		const values = ['Pending', 'Approved', 'AUTHORISED', 'DRAFT', 'production', 'sandbox', 'other'];
-		for (const [locale, load] of Object.entries(CATALOGUE_LOADERS)) {
-			const messages = await load();
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
 			for (const value of values) {
 				const key = optionLabelKey(value);
 				expect(key, value).not.toBeNull();
