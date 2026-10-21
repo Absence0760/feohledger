@@ -130,7 +130,9 @@ Follow exactly. Everything except steps 2 and 7 touches only new files.
      than one match.
    - Whole-unit platforms call `require_integral(delta)`.
    - Prefer reusing an existing label key (`catalog.KNOWN_FIELD_LABELS`); a new
-     field name needs `org.commerce.field.<name>` in all six frontend locales.
+     field name needs `org.commerce.field.<name>` in all six frontend locales —
+     in the settings catalogue slice, `frontend/src/lib/i18n/locales/settings/<locale>.ts`
+     (`docs/decisions.md` §300).
 2. **Sealed-store secret names** — add every field your spec marks
    `secret=True` to `provider_credentials.SECRET_FIELDS["commerce"]`
    (`backend/app/services/provider_credentials.py`), one line with a comment
