@@ -105,8 +105,8 @@ Things an auditor expects to see *in code or config*, not just in a policy doc. 
 | Control | Status | Where it lives |
 |---|---|---|
 | Dependabot for Python, npm, Dart/Flutter (pub), Docker, GitHub Actions, Terraform | Done | `.github/dependabot.yml` |
-| SAST in CI | Done | `.github/workflows/security.yml` (CodeQL — Python + JS) |
-| Container image scanning | Done | `.github/workflows/security.yml` (Trivy on backend Dockerfile) |
+| SAST in CI | Done | `.github/workflows/security.yml` (CodeQL — Python, TypeScript/JavaScript, GitHub Actions), called from `ci.yml` on every PR and push to `main`, so a red scan fails `CI gate` and blocks the merge; plus a weekly scheduled run |
+| Container image scanning | Done | `.github/workflows/security.yml` (Trivy on backend Dockerfile; same `CI gate` wiring as SAST) |
 | Secret scanning in repo | Done | GitHub native (free for public + paid tiers) |
 | Penetration test (annual) | Pending | One-time engagement, ~$8–15K |
 
@@ -135,7 +135,7 @@ Things an auditor expects to see *in code or config*, not just in a policy doc. 
 | Control | Status | Where it lives |
 |---|---|---|
 | All changes via PR + review | Done | GitHub branch protection on `main`: PR required and enforced on admins (no direct pushes, incl. the owner), linear history, no force-push/deletions, conversation resolution required. 0 required approvals — a green CI is the merge gate, not a human sign-off. |
-| CI gate (lint + tests) before merge | Done | `.github/workflows/ci.yml` — the "CI gate" aggregator job (`needs:` every CI job) is the **single required status check** on `main`, so a red CI blocks the merge. |
+| CI gate (lint + tests) before merge | Done | `.github/workflows/ci.yml` — the "CI gate" aggregator job (`needs:` every CI job) is the **single required status check** on `main`, so a red CI blocks the merge. Checks kept in other workflow files are gated by being called from `ci.yml` (`workflow_call`): `security.yml` (CodeQL + Trivy) and `web-bundle-budget.yml`. A workflow that is not called this way does not block a merge. |
 | Production deploy from `main` only | **Not yet evidenced** | Corrected 2026-09-06: the cited `.github/workflows/deploy.yml` **does not exist**. The real workflow is `.github/workflows/aws-deploy.yml`, which triggers on `release: [published]` — not `push: main` — and every job is gated on the repo variable `AWS_DEPLOY_ENABLED`, unset today, so **nothing deploys at all**. Branch protection (row 1) does enforce that `main` is the only source a release tag can come from, which is the control's substance; but there is no running deploy pipeline to evidence, so this cannot be claimed as Done until the AWS estate exists and the variable is set. Re-evidence at that point against `aws-deploy.yml` and its release trigger. |
 | Documented incident-response runbook | Pending | Vendor template + customise; needs on-call rotation |
 
@@ -181,7 +181,7 @@ Renewals (Type II + pen test annually) are around **$25–40K/yr** thereafter.
 - `docs/backup-disaster-recovery.md` — backup + DR runbook with RTO/RPO
 - `docs/secrets-rotation.md` — secrets rotation procedure
 - `backend/scripts/access_review.py` — quarterly access-review CSV export
-- `.github/workflows/security.yml` — CodeQL (SAST) + Trivy (container scan), weekly + on push
+- `.github/workflows/security.yml` — CodeQL (SAST) + Trivy (container scan), on every PR and push to `main` via `ci.yml` (gating merges through `CI gate`) + weekly
 - Concurrent session limit (Redis sorted set per user, configurable cap)
 - Forced logout on role change + account deactivation
 - Auth event audit logging (login/logout/MFA/SSO → tenant `audit_log`)
