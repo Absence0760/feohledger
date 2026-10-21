@@ -1,9 +1,22 @@
 name: Security
 
-# Static analysis + container scanning. Runs on every push to main, on PRs
-# that touch code (docs-only PRs skipped), and weekly to catch CVEs
-# disclosed since the last commit. Findings flow to the GitHub Security
+# Static analysis + container scanning. Findings flow to the GitHub Security
 # tab via SARIF.
+#
+# How it runs, and why it blocks merges: this is a reusable workflow. ci.yml's
+# `security` job calls it on EVERY pull request and push to main, and the
+# `CI gate` job (the single required check on `main`) needs that job, so a red
+# CodeQL or Trivy job blocks the merge. It used to carry its own
+# `pull_request` / `push` triggers and sat outside the gate, where a red
+# result was advisory in practice. Those triggers were removed rather than
+# kept alongside the call, so nothing runs twice. It deliberately has no path
+# filter any more (it used to skip docs-only PRs): CodeQL on a docs-only PR
+# costs a couple of minutes, and a gated job that always runs is simpler to
+# reason about than one more filter.
+#
+# The weekly schedule below is the one trigger of its own: it catches CVEs
+# disclosed since the last commit (Trivy) and new CodeQL queries, with no
+# commit to start a CI run.
 #
 # This job is part of the SOC 2 prerequisite checklist
 # (`docs/soc2-readiness.md` § Vulnerability + dependency management).
@@ -11,21 +24,16 @@ name: Security
 # officer before disabling.
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-  pull_request:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
+  workflow_call:
   schedule:
     # Mondays at 06:00 UTC — catches CVEs disclosed since the last commit.
     - cron: '0 6 * * 1'
 
 permissions:
+  # When called from ci.yml these are capped by the CALLING job's
+  # `permissions:` block (ci.yml's `security` job grants exactly these three);
+  # a called workflow can only narrow the token, never widen it.
+  #
   # SARIF upload requires `security-events: write`. `actions: read` is
   # needed by the CodeQL analyze step's telemetry / workflow-run lookup
   # (without it you get "Resource not accessible by integration" which
@@ -38,7 +46,19 @@ jobs:
   codeql-python:
     name: CodeQL (Python)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20 minutes, not the 10 this had. A healthy run takes 1-4 minutes
+    # (measured over the last 60 runs: Python median 1.4 / max 4.4,
+    # TypeScript median 1.5 / max 4.1, Actions median 0.7 / max 6.6). The one
+    # run that hit 10 (2026-10-20, CodeQL Python) was not hung: its log shows
+    # extraction progressing the whole time, file after file, at about ten
+    # times the normal per-file cost (943 files in 8.5 minutes, against 1431
+    # in 83 seconds on a healthy runner) — a slow runner, not a stuck one.
+    # Ten minutes left only ~2x headroom over a good run, which a degraded
+    # runner eats; twenty absorbs that while still killing a genuine hang long
+    # before GitHub's 6-hour default. Now that this blocks merges, a runner
+    # blip should not fail a PR on its own. Do not add retries instead: a
+    # second attempt hides a real hang rather than surfacing it.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
@@ -58,7 +78,8 @@ jobs:
   codeql-javascript:
     name: CodeQL (TypeScript/JavaScript)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # See codeql-python: 20, from measured run times.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
@@ -73,7 +94,8 @@ jobs:
   codeql-actions:
     name: CodeQL (GitHub Actions)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # See codeql-python: 20, from measured run times.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
