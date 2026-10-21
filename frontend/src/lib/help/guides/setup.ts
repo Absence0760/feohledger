@@ -324,7 +324,7 @@ export const SETUP_GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'The section first checks whether the workspace can be closed here. It cannot while other people have active accounts in it, or once it holds anything that must be kept: approved invoices, payments, payment runs, virtual cards, applied credit memos, approved expense reports, card transactions, bank statements, tax records, Positive Pay files, e-invoices, goods receipts, contracts that have been in force, or accepted discounts. It also cannot while it has a paid subscription, a partner relationship or a custom domain. In those cases the section lists the reasons, and support closes the workspace instead.'
+						text: 'The section first checks whether the workspace can be closed here. It cannot while other people have active accounts in it, or once it holds anything that must be kept: approved invoices, payments, payment runs, virtual cards, applied credit memos, approved expense reports, card transactions, bank statements, tax records, Positive Pay files, e-invoices, goods receipts, contracts that have been in force, or accepted discounts. It also cannot while it has a paid subscription, a partner relationship or a custom domain. In those cases the section lists the reasons, and support closes the workspace instead. Otherwise it lists what closing would delete, such as how many invoices and vendors, before it asks you to confirm.'
 					},
 					{
 						type: 'note',

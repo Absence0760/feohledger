@@ -4728,6 +4728,7 @@ export const messages = {
 	'refusal.emailCheckThrottled': "Trop d’adresses saisies récemment dans cet espace de travail appartenaient déjà à d’autres espaces de travail : l’ajout d’utilisateurs et la modification de leur e-mail sont suspendus pendant une heure au plus. Réessayez plus tard.",
 	'refusal.workspaceCloseConfirmationMismatch': "Saisissez l’adresse de cet espace de travail exactement comme affichée pour confirmer qu’il doit être fermé.",
 	'refusal.workspaceCloseRefused': "Cet espace de travail ne peut pas être fermé ici, car il contient des données qui doivent être conservées ou les comptes d’autres personnes. Contactez le support pour le fermer.",
+	'refusal.workspaceCloseActorNotAdmin': "Seul un administrateur actif de cet espace de travail peut le fermer.",
 	'refusal.signupSlugHeld': "Cette adresse appartenait à un espace de travail fermé récemment et n’est pas disponible pendant un certain temps. Choisissez une autre adresse.",
 	'refusal.workspaceCloseInProgress': "Cet espace de travail est déjà en cours de fermeture.",
 	'refusal.workspaceCloseAuditUnavailable': "L’espace de travail n’a pas pu être fermé pour le moment, car son enregistrement d’audit n’a pas pu être sauvegardé. Rien n’a été supprimé. Réessayez dans quelques minutes.",

@@ -32,6 +32,7 @@
 	import {
 		blockerLabelKey,
 		confirmationMatches,
+		inventoryLines,
 		refusalBlockers,
 		type ClosurePreflight
 	} from '#lib/types/workspaceClosure.ts';
@@ -58,6 +59,7 @@
 	let noFactor = $state(false);
 
 	const blockers = $derived(preflight?.blockers ?? []);
+	const willDelete = $derived(inventoryLines(preflight?.will_delete ?? {}));
 	const canSubmit = $derived(
 		!!preflight &&
 			preflight.closable &&
@@ -153,6 +155,18 @@
 			<p>{m('org.close.blockedSupport')}</p>
 		</div>
 	{:else}
+		<div class="will-delete" data-testid="close-workspace-will-delete">
+			{#if willDelete.length}
+				<p>{m('org.close.willDelete.title')}</p>
+				<ul>
+					{#each willDelete as [key, n] (key)}
+						<li>{m(key, { n })}</li>
+					{/each}
+				</ul>
+			{:else}
+				<p>{m('org.close.willDelete.none')}</p>
+			{/if}
+		</div>
 		<form
 			class="confirm"
 			onsubmit={(e) => {
@@ -270,6 +284,17 @@
 	.blocked h3 {
 		margin: 0 0 6px;
 		font-size: 1rem;
+	}
+
+	.will-delete p {
+		margin: 0 0 4px;
+		font-size: 0.85rem;
+	}
+
+	.will-delete ul {
+		margin: 0 0 14px;
+		padding-left: 1.25rem;
+		font-size: 0.85rem;
 	}
 
 	.blocked ul {

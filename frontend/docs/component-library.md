@@ -308,7 +308,8 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 
 - `CloseWorkspacePanel.svelte` — the Organization → Close workspace panel (decisions §294). Props:
   `readOnly`, `userLoaded`. Reads the preflight once the user resolves as admin; a workspace with
-  blockers shows each one's sentence (`#lib/types/workspaceClosure.ts`) and no control. Otherwise a
+  blockers shows each one's sentence (`#lib/types/workspaceClosure.ts`) and no control. Otherwise it lists
+  what the closure would delete (`inventoryLines`, ICU plurals), then a
   type-the-slug confirmation enables the destructive button, `ui/StepUpPrompt` collects a second
   factor when the server asks, and success clears the token and navigates to
   `/login?reason=workspace_closed`. Admin-only hint for everyone else.

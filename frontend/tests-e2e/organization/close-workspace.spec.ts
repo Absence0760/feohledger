@@ -49,7 +49,8 @@ test.describe('/organization close workspace', () => {
 		await stubPreflight(page, {
 			closable: false,
 			blockers: ['payments', 'other_users'],
-			slug: SLUG
+			slug: SLUG,
+			will_delete: {}
 		});
 		await page.goto('/organization?section=close');
 
@@ -58,7 +59,7 @@ test.describe('/organization close workspace', () => {
 		await expect(blocked).toBeVisible();
 		await expect(blocked.locator('[data-blocker="payments"]')).toHaveText('It holds payments.');
 		await expect(blocked.locator('[data-blocker="other_users"]')).toContainText(
-			'Other people have active accounts in it.'
+			'Other people have active accounts in this workspace.'
 		);
 		await expect(blocked).toContainText('Contact support to close it.');
 		await expect(card.getByTestId('close-workspace-submit')).toHaveCount(0);
@@ -67,7 +68,12 @@ test.describe('/organization close workspace', () => {
 	test('the slug must be typed back, a second factor is asked for, and success signs out', async ({
 		page
 	}) => {
-		await stubPreflight(page, { closable: true, blockers: [], slug: SLUG });
+		await stubPreflight(page, {
+			closable: true,
+			blockers: [],
+			slug: SLUG,
+			will_delete: { invoices: 2, vendors: 1 }
+		});
 		const posted: Record<string, unknown>[] = [];
 		await page.route(
 			(url) => url.pathname === CLOSE_PATH,
@@ -98,6 +104,10 @@ test.describe('/organization close workspace', () => {
 		await page.goto('/organization?section=close');
 
 		const card = panel(page);
+		// What will go is stated before anything is asked.
+		const willDelete = card.getByTestId('close-workspace-will-delete');
+		await expect(willDelete).toContainText('2 invoices');
+		await expect(willDelete).toContainText('1 vendor');
 		const confirm = card.getByLabel(`Type ${SLUG} to confirm`);
 		const submit = card.getByTestId('close-workspace-submit');
 		await expect(confirm).toBeVisible();
@@ -125,7 +135,7 @@ test.describe('/organization close workspace', () => {
 	});
 
 	test('a refusal at submit replaces the form with the blockers it names', async ({ page }) => {
-		await stubPreflight(page, { closable: true, blockers: [], slug: SLUG });
+		await stubPreflight(page, { closable: true, blockers: [], slug: SLUG, will_delete: {} });
 		await page.route(
 			(url) => url.pathname === CLOSE_PATH,
 			async (route: Route) => {

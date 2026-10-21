@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { enSettings as en } from '#lib/i18n/locales/settings/en.ts';
 import {
 	WORKSPACE_CLOSE_BLOCKER_KEYS,
+	WORKSPACE_CLOSE_INVENTORY_KEYS,
+	inventoryLines,
 	blockerLabelKey,
 	confirmationMatches,
 	refusalBlockers
@@ -31,6 +33,24 @@ describe('workspace closure blockers', () => {
 		expect(blockerLabelKey('payments')).toBe('org.close.blocker.payments');
 		expect(blockerLabelKey('a_newer_guard')).toBeNull();
 		expect(blockerLabelKey('toString')).toBeNull();
+	});
+});
+
+describe('inventoryLines', () => {
+	it('lists the non-zero classes in a stable order and drops unknown codes', () => {
+		expect(
+			inventoryLines({ vendors: 1, invoices: 2, contracts: 0, a_newer_class: 4 })
+		).toEqual([
+			['org.close.inventory.invoices', 2],
+			['org.close.inventory.vendors', 1]
+		]);
+		expect(inventoryLines({})).toEqual([]);
+	});
+
+	it('labels every class with a catalogued plural', () => {
+		for (const key of Object.values(WORKSPACE_CLOSE_INVENTORY_KEYS)) {
+			expect(en[key]).toContain('{n, plural,');
+		}
 	});
 });
 

@@ -4909,6 +4909,7 @@ export const en = {
 	'refusal.emailCheckThrottled': "Too many addresses entered in this workspace recently already belonged to other workspaces, so adding users or changing their email is paused for up to an hour. Try again later.",
 	'refusal.workspaceCloseConfirmationMismatch': "Type this workspace's address exactly as shown to confirm that it should be closed.",
 	'refusal.workspaceCloseRefused': "This workspace can't be closed here because it holds records that must be kept or other people's accounts. Contact support to close it.",
+	'refusal.workspaceCloseActorNotAdmin': "Only an active administrator of this workspace can close it.",
 	'refusal.signupSlugHeld': "This workspace address belonged to a workspace that was closed recently, and is unavailable for a while. Choose a different address.",
 	'refusal.workspaceCloseInProgress': "This workspace is already being closed.",
 	'refusal.workspaceCloseAuditUnavailable': "The workspace could not be closed right now because its audit record could not be saved. Nothing was deleted. Try again in a few minutes.",

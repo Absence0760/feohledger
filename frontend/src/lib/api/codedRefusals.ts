@@ -479,6 +479,7 @@ const BUILDERS: Record<string, Builder> = {
 	workspace_close_refused: (p, t) =>
 		refusalBlockers(p) === null ? null : t('refusal.workspaceCloseRefused'),
 	workspace_close_in_progress: fixed('refusal.workspaceCloseInProgress'),
+	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
 	// A slug resting after a workspace closure (`api/signup.py`, decisions §294).
 	signup_slug_held: fixed('refusal.signupSlugHeld'),
 	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
