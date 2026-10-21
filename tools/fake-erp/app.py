@@ -157,6 +157,31 @@ class FakeOAuthApp:
             "expires_in": st["lifetime"],
         }
 
+    async def revoke(self, request: Request) -> Response:
+        """RFC 7009 revocation (HTTP Basic client auth, form ``token``).
+
+        Revoking the live refresh token ends the consent: it and every access
+        token issued under it stop working. An unknown token is still a 200, as
+        RFC 7009 requires, so a revoke never reveals which tokens exist.
+        """
+        import base64
+
+        header = request.headers.get("authorization", "")
+        try:
+            decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
+        except Exception:  # noqa: BLE001
+            decoded = ""
+        cid, _, secret = decoded.partition(":")
+        if (cid, secret) != (self.client_id, self.client_secret):
+            raise ProviderError(401, {"error": "invalid_client"})
+        raw = (await request.body()).decode("utf-8", errors="replace")
+        token = (parse_qs(raw).get("token") or [""])[0]
+        st = self._state()
+        if token and token == st["refresh_token"]:
+            st["refresh_token"] = None
+            st["issued"].clear()
+        return Response(status_code=200)
+
     def issued(self, request: Request) -> bool:
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         return token in self._state()["issued"]
@@ -1649,6 +1674,11 @@ async def xero_authorize(
 @app.post("/xero/identity/connect/token")
 async def xero_token(request: Request) -> dict:
     return await XERO_OAUTH.token(request, client_auth="basic")
+
+
+@app.post("/xero/identity/connect/revocation")
+async def xero_revocation(request: Request) -> Response:
+    return await XERO_OAUTH.revoke(request)
 
 
 @app.get("/xero/connections")
