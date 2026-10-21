@@ -87,7 +87,8 @@ const PANELS = [
 	['sso', 'Single Sign-On'],
 	['fraud', 'Fraud Detection'],
 	['residency', 'Data Residency'],
-	['plan', 'Plan']
+	['plan', 'Plan'],
+	['close', 'Close this workspace']
 ] as const;
 
 /**
@@ -108,8 +109,24 @@ const ADMIN_ONLY_PANELS = [
 	['cards', 'Virtual Cards', 'cards-admin-only'],
 	['security', 'Security', 'security-admin-only'],
 	['sso', 'Single Sign-On', 'sso-admin-only'],
-	['fraud', 'Fraud Detection', 'fraud-admin-only']
+	['fraud', 'Fraud Detection', 'fraud-admin-only'],
+	// Closing the workspace is an admin act, so the panel is the hint alone.
+	['close', 'Close this workspace', 'close-workspace-admin-only']
 ] as const;
+
+/**
+ * What an admin's body is, for a panel whose body is not a form.
+ *
+ * Close this workspace shows an admin the server's verdict, and only a
+ * workspace with nothing to keep gets the confirm field. The e2e tenants hold
+ * invoices and several people's accounts, so the true verdict here is the
+ * blocker list (`GET /api/organization/close` → `closable: false`), and a
+ * field on screen would mean the panel was offering a control the server
+ * refuses. The form branch is held, stubbed, by `close-workspace.spec.ts`.
+ */
+const ADMIN_BODY: Partial<Record<(typeof ADMIN_ONLY_PANELS)[number][0], string>> = {
+	close: '[data-testid="close-workspace-blocked"]'
+};
 
 /** The `section.card` carrying `heading`. */
 function card(page: import('@playwright/test').Page, heading: string) {
@@ -363,8 +380,10 @@ test.describe('/organization settings', () => {
 			await page.goto(`/organization?section=${slug}`);
 
 			await expect(
-				card(page, heading).locator('select, input, textarea').first(),
-				`${heading} must keep its fields for an admin`
+				card(page, heading)
+					.locator(ADMIN_BODY[slug] ?? 'select, input, textarea')
+					.first(),
+				`${heading} must keep its body for an admin`
 			).toBeVisible();
 
 			await expect(

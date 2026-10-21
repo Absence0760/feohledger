@@ -384,6 +384,23 @@ async def drain_auth_audits(*, timeout: float | None = None) -> int:
     return abandoned
 
 
+async def settle_auth_audits(*, timeout: float) -> int:
+    """Wait, bounded, for this process's queued auth audit writes to land.
+
+    For a caller about to read or ship the audit table as a whole — a workspace
+    closure flushes the tenant's trail to the archive just before dropping its
+    database (`services/workspace_closure`). Unlike :func:`drain_auth_audits`
+    it never cancels: these writes belong to other requests, and a write still
+    running past the bound is left to finish (or to be reported at ERROR by
+    `_guarded_auth_audit`), not abandoned. Returns how many were still running.
+    """
+    pending = list(_pending_auth_audits)
+    if not pending:
+        return 0
+    _done, still = await asyncio.wait(pending, timeout=timeout)
+    return len(still)
+
+
 def _send_to_sqs(
     *,
     tenant_db_name: str,

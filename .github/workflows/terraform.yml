@@ -37,9 +37,12 @@ on:
       - '.github/workflows/terraform.yml'
 
 permissions:
+  # Read-only at the top. The SARIF upload's `security-events: write` is
+  # granted on the trivy-iac job alone (fmt-validate never needed it), and
+  # the `pull-requests: write` once held "for a future PR-comment step" is
+  # gone — nothing used it. backend/tests/test_workflow_token_permissions.py
+  # keeps it that way.
   contents: read
-  security-events: write
-  pull-requests: write
 
 jobs:
   fmt-validate:
@@ -92,6 +95,10 @@ jobs:
 
   trivy-iac:
     name: Trivy IaC scan
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

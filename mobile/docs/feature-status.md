@@ -141,6 +141,11 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   log in by email OTP on mobile and is pointed to the web app to finish setup.
 - **Passkey (WebAuthn) MFA** — web-only; never offered as a mobile factor.
 - **Org Security settings** — the web `/organization` page exposes the `mfa.required` toggle; mobile has no equivalent.
+- **Closing a workspace** — web-only by design (`/organization?section=close`,
+  `docs/decisions.md` §306). It is an irreversible configuration action whose
+  refusals (the list of records that must be kept) need room to explain
+  themselves, and its second-factor step-up offers a passkey, which mobile
+  never does. `OrgSettingsScreen` deliberately has no equivalent.
 - **OIDC SSO** — `Sign in with Okta/Microsoft` button is web-only.
 - **Workflow management (create / edit / no-code builder)** — the read-only
   list + step viewer is now on mobile (see Done → "Workflow management

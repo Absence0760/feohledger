@@ -10,6 +10,8 @@ A server-side catcher that turns one back into text reads it through
 `utils/http.detail_text`, never `str(exc.detail)`.
 """
 
+from dataclasses import dataclass
+
 from fastapi import HTTPException
 
 
@@ -30,6 +32,59 @@ def coded_refusal(code: str, message: str, **params: object) -> dict:
     from a wrong code, an unknown account from a known one).
     """
     return {"code": code, "message": message, "params": params}
+
+
+#: An action verdict's refusal for a caller whose roles / permissions the
+#: action's endpoint would turn away. The endpoints themselves answer that with
+#: ``require_roles`` / ``require_permission``'s plain-string 403 (unchanged —
+#: every client reads it); a verdict is read BEFORE any click, so it carries the
+#: same sentence under a code the page can localize. Built from the same
+#: predicates the dependencies use (``api/deps.holds_any_role`` /
+#: ``holds_any_permission``), never a restated role list.
+ROLE_NOT_PERMITTED = "role_not_permitted"
+ROLE_NOT_PERMITTED_MESSAGE = "Your role does not permit this action."
+
+
+@dataclass(frozen=True)
+class ActionRefusal:
+    """One gate's refusal, in the two shapes it is read in.
+
+    The gate function returns it (or ``None``); the endpoint raises
+    :meth:`http` and the verdict a page reads before offering the control is
+    :meth:`verdict` — so both come from the one function (issue #575).
+    :meth:`http` keeps the plain-string ``detail`` the endpoint always answered
+    with, for the clients (mobile included) that read it as text.
+    """
+
+    code: str
+    message: str
+    http_status: int
+
+    def http(self) -> HTTPException:
+        return HTTPException(status_code=self.http_status, detail=self.message)
+
+    def verdict(self) -> dict:
+        return coded_refusal(self.code, self.message)
+
+
+def role_not_permitted() -> dict:
+    """The coded verdict for :data:`ROLE_NOT_PERMITTED`."""
+    return coded_refusal(ROLE_NOT_PERMITTED, ROLE_NOT_PERMITTED_MESSAGE)
+
+
+def refusal_of(exc: HTTPException, *, fallback_code: str) -> dict:
+    """An endpoint gate's raised refusal, as an action verdict.
+
+    A verdict is computed by RUNNING the gate the endpoint runs and catching
+    what it raises, so the page and the endpoint cannot disagree on a rule
+    (issue #575 § One rule, one place). A coded detail passes through as-is; a
+    gate still answering with a plain string is wrapped under
+    ``fallback_code`` with that string as its ``message``.
+    """
+    detail = exc.detail
+    if isinstance(detail, dict) and isinstance(detail.get("code"), str):
+        return detail
+    return coded_refusal(fallback_code, str(detail))
 
 
 #: A wrong authenticator code on a SIGNED-IN factor change that takes only a
@@ -162,7 +217,9 @@ EMAIL_IN_OTHER_WORKSPACE = "email_in_other_workspace"
 EMAIL_IN_OTHER_WORKSPACE_DETAIL = coded_refusal(
     EMAIL_IN_OTHER_WORKSPACE,
     "This email address already has an account in another workspace. An address "
-    "can belong to only one workspace, so use a different address for this person.",
+    "can belong to only one workspace, so use a different address for this person. "
+    "If they no longer use that other workspace, its administrator can close it, "
+    "which frees the address.",
 )
 
 #: The admin path's other-workspace budget is spent (``admin.EMAIL_COLLISION_LIMIT``
@@ -175,4 +232,65 @@ EMAIL_CHECK_THROTTLED_DETAIL = coded_refusal(
     "Too many addresses entered in this workspace recently already belonged to other "
     "workspaces, so adding users or changing their email is paused for up to an hour. "
     "Try again later.",
+)
+
+
+# --- Closing a workspace (`api/organization_close.py`, decisions §306) --------
+
+#: The typed confirmation did not match the workspace's slug. A 400; nothing
+#: was checked or changed.
+WORKSPACE_CLOSE_CONFIRMATION_MISMATCH = "workspace_close_confirmation_mismatch"
+WORKSPACE_CLOSE_CONFIRMATION_MISMATCH_DETAIL = coded_refusal(
+    WORKSPACE_CLOSE_CONFIRMATION_MISMATCH,
+    "Type this workspace's address exactly as shown to confirm that it should be closed.",
+)
+
+#: The workspace holds something a self-service closure must not destroy. A
+#: 409 whose `params.blockers` lists the stable codes
+#: (`services/workspace_closure.BLOCKERS`), so the page can say what each one
+#: is. The way forward for any of them is support, never a retry.
+WORKSPACE_CLOSE_REFUSED = "workspace_close_refused"
+
+
+def workspace_close_refused_detail(blockers: list[str]) -> dict:
+    return coded_refusal(
+        WORKSPACE_CLOSE_REFUSED,
+        "This workspace can't be closed here because it holds records that must be "
+        "kept or other people's accounts. Contact support to close it.",
+        blockers=list(blockers),
+    )
+
+
+#: Under the closure's lock, the requester was no longer an active administrator
+#: of the workspace (deactivated, demoted or removed since the request began).
+#: A 403; nothing was deleted.
+WORKSPACE_CLOSE_ACTOR_NOT_ADMIN = "workspace_close_actor_not_admin"
+WORKSPACE_CLOSE_ACTOR_NOT_ADMIN_DETAIL = coded_refusal(
+    WORKSPACE_CLOSE_ACTOR_NOT_ADMIN,
+    "Only an active administrator of this workspace can close it.",
+)
+
+#: Another closure of the same workspace is running. A 409.
+WORKSPACE_CLOSE_IN_PROGRESS = "workspace_close_in_progress"
+WORKSPACE_CLOSE_IN_PROGRESS_DETAIL = coded_refusal(
+    WORKSPACE_CLOSE_IN_PROGRESS,
+    "This workspace is already being closed.",
+)
+
+#: The closure's audit record could not be written or shipped to the
+#: write-once archive, so nothing was deleted. A 503; a retry is safe.
+WORKSPACE_CLOSE_AUDIT_UNAVAILABLE = "workspace_close_audit_unavailable"
+WORKSPACE_CLOSE_AUDIT_UNAVAILABLE_DETAIL = coded_refusal(
+    WORKSPACE_CLOSE_AUDIT_UNAVAILABLE,
+    "The workspace could not be closed right now because its audit record could not be "
+    "saved. Nothing was deleted. Try again in a few minutes.",
+)
+
+#: The deletion started and failed part-way. A 503; a retry by the same
+#: administrator finishes it (every step of `services/tenant_deletion` is
+#: idempotent, and the guards are not re-run against a database already gone).
+WORKSPACE_CLOSE_INCOMPLETE = "workspace_close_incomplete"
+WORKSPACE_CLOSE_INCOMPLETE_DETAIL = coded_refusal(
+    WORKSPACE_CLOSE_INCOMPLETE,
+    "Closing the workspace did not finish. Try again; if it fails again, contact support.",
 )

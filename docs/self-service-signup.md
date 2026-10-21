@@ -78,6 +78,46 @@ There is no self-service way yet to find your workspace without starting a signu
 
 The welcome email carries the **Set your password** button (with the paste-this fallback and the expiry), the workspace URL and the email as plain panel values, and a sign-in link with the address prefilled — no password anywhere. Its preheader is fixed copy ("Your workspace is live."), never the link. With no tenant base URL configured, `/complete` refuses with `503` **before** provisioning and leaves the verification unconsumed — a passwordless admin with no link to set a password (forgot-password needs that URL too) would have no way in. A Redis failure while minting yields no link (the email and the verify page point at Forgot password) rather than failing a request whose tenant already exists. The response is sent `Cache-Control: no-store`, and the issuance is audited as `auth.password_reset.requested` with `via: signup`.
 
+## Closing a workspace the signer-up no longer wants
+
+The address used at signup becomes that workspace's one account, and one address
+can belong to only one workspace (`docs/decisions.md` §291). A trial that is
+abandoned therefore holds its admin's address: if that person is later added to
+another workspace — their employer's, typically — the add is refused
+`email_in_other_workspace`. The way out is self-service, not support: they sign
+in to the abandoned workspace (**Forgot password** works if they never set one)
+and close it from **Organization → Close workspace**. Closing deletes the
+workspace and every account in it, through the operator's own deletion code, so
+the address is free at once.
+
+It is a narrow door on purpose: a workspace that holds anything that must be
+kept — approved invoices, payments, other active users, a paid subscription and
+the rest of the list in [`user-management.md`](user-management.md) § Freeing an
+address held by an abandoned workspace — is refused with its reasons, and
+support closes it instead. The closure needs the slug typed back and, where MFA
+is on, a code or a passkey. What it leaves behind: a control-plane
+`workspace_closures` row (ids, slug, proof, counts — no address), the
+`organization.closing` audit event already shipped to the write-once archive
+where audit shipping is on, and the per-tenant backups, which an operator
+removes within the DPA's 60 days
+([`founder-runbooks/workspace-closure.md`](founder-runbooks/workspace-closure.md)).
+Until the operator has — and for 90 days from the closure in any case
+(`utils/slug.CLOSED_SLUG_COOLDOWN`), so bookmarks, identity-provider redirect
+URIs and invite emails cannot point at a new owner early — the closed
+workspace's slug is held. Signup says so in its own words: the slug check
+returns `reason_code: signup_slug_held` and `/signup/complete` refuses with the
+coded `409 signup_slug_held` ("temporarily unavailable after a workspace
+closure", localized), never the bare "already taken". The hold lives in
+`provision_tenant`, so the partner and operator paths get it too.
+
+After a closure, the address it held signs up again like any other: `/start`
+and `/complete` provision a new workspace under a different slug, since §292's
+existing-account refusal no longer finds it. The closed workspace's own
+verification link is deleted with it, so re-opening it is the uniform 410.
+Nothing deletes an abandoned trial on its own; why, and what would have to
+change first: `docs/decisions.md` §306 and `docs/followups.md` § Surfaced by
+self-service workspace closure.
+
 ## Backend components
 
 | Layer | File |

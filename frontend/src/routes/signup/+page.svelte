@@ -23,6 +23,7 @@
 		slug: string;
 		available: boolean;
 		reason?: string | null;
+		reason_code?: string | null;
 	}
 
 	let companyName = $state('');
@@ -131,7 +132,12 @@
 				slugError = null;
 			} else {
 				slugStatus = 'bad';
-				slugError = res.reason || m('auth.signup.slugUnavailable');
+				// A slug resting after a workspace closure is stated as such, in
+				// the reader's language (decisions §306); otherwise the reason.
+				slugError =
+					res.reason_code === 'signup_slug_held'
+						? m('refusal.signupSlugHeld')
+						: res.reason || m('auth.signup.slugUnavailable');
 			}
 		} catch {
 			slugStatus = 'idle';

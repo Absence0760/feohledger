@@ -31,6 +31,7 @@
 	import type { EligibleInvoice } from '#lib/types/creditMemo.ts';
 	import type { SearchPickerLoad } from '#lib/utils/searchPicker.ts';
 	import { creditAmountParam } from '#lib/utils/invoicePicker.ts';
+	import { isAllowed, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
 
 	// Create / edit / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on
 	// the backend, while the LIST (and its chip summary) is open to all four
@@ -112,6 +113,13 @@
 		applied_at: string | null;
 		applied_by: string | null;
 		created_at: string;
+		/** The CALLER's verdict on the row's three actions — each `null` when
+		 *  its endpoint would accept them, else the coded refusal
+		 *  (`api/credit_memos.py::memo_action_refusals`, which RUNS the
+		 *  endpoints' own `_assert_applicable` / `_assert_editable` /
+		 *  `_assert_voidable`). Read, never restated (issue #575). Absent on a
+		 *  row from any other payload = nothing offered. */
+		actions?: { apply: ActionRefusal; edit: ActionRefusal; void: ActionRefusal };
 	}
 
 	let memos = $state<CreditMemo[]>([]);
@@ -428,12 +436,12 @@
 	});
 
 	/**
-	 * Only a memo that has never moved money is editable — the same predicate
-	 * the backend's `_assert_editable` enforces, so the control is never offered
-	 * for a row whose PATCH can only 409.
+	 * Only a memo that has never moved money is editable — answered by the
+	 * server (`actions.edit`, from the very `_assert_editable` the PATCH runs),
+	 * so the control is never offered for a row whose PATCH can only 409.
 	 */
 	function isEditable(memo: CreditMemo): boolean {
-		return memo.status === 'open' && !memo.invoice_id && !memo.applied_at;
+		return isAllowed(memo.actions?.edit);
 	}
 
 	function openCreate() {
@@ -726,11 +734,13 @@
 							</Badge>
 						</td>
 						<td class="actions">
-							{#if canMutate && memo.status === 'open'}
+							{#if isAllowed(memo.actions?.apply)}
 								<RowAction onclick={() => { applyTargetId = memo.id; applyInvoiceId = ''; }}>{m('creditMemos.row.apply')}</RowAction>
-								{#if isEditable(memo)}
-									<RowAction onclick={() => openEdit(memo)}>{m('creditMemos.row.edit')}</RowAction>
-								{/if}
+							{/if}
+							{#if isEditable(memo)}
+								<RowAction onclick={() => openEdit(memo)}>{m('creditMemos.row.edit')}</RowAction>
+							{/if}
+							{#if isAllowed(memo.actions?.void)}
 								<RowAction
 									variant="danger"
 									armed={confirmVoidId === memo.id}
