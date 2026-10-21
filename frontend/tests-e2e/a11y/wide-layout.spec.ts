@@ -18,7 +18,9 @@ import {
  * card's edge — on a page whose every seeded row fit. The seed's strings are
  * short; a customer's are not. So this visits every page the sidebar offers,
  * with `fixtures/realisticRows.ts`'s long vendor names, ERP invoice numbers,
- * email assignee, non-ASCII vendor and thirteen-digit amounts in the tenant,
+ * email assignee, non-ASCII unverified vendor, tax-exclusive invoice and
+ * thirteen-digit amounts in the tenant (values shared with the seed through
+ * `backend/scripts/fixtures/realistic_rows.json`),
  * and asserts at 1280px and 1666px that:
  *
  *   - the DOCUMENT never scrolls sideways;
@@ -140,6 +142,7 @@ test.describe('desktop layout with production-shaped rows (#575)', () => {
 		await expect(page.getByText(REALISTIC.assigneeEmail(tenantSlug)).first()).toBeAttached();
 		await page.goto('/invoices');
 		await expect(page.getByText(REALISTIC.invoiceNumbers[0]).first()).toBeAttached();
+		await expect(page.getByText(REALISTIC.taxExclusive.invoiceNumber).first()).toBeAttached();
 		await page.goto(`/vendors?search=${REALISTIC_MARKER}`);
 		await expect(page.getByText(REALISTIC.nonAsciiVendor).first()).toBeAttached();
 		await page.goto(`/contracts?search=${REALISTIC_MARKER}`);
