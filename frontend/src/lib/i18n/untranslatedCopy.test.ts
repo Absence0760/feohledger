@@ -1,6 +1,9 @@
 import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 import { en } from './locales/en';
+import { CATALOGUE_LOADERS } from './catalogues';
+import { interpolate } from './interpolate';
+import { SUPPORTED_LOCALES } from './locale';
 
 /**
  * Source-scan guard: a surface declared translated must not carry English in
@@ -437,4 +440,62 @@ describe('the "Select all N matching" bulk affordance', () => {
 			);
 		}
 	});
+});
+
+describe('the /invoices toasts render with the params their call sites pass', () => {
+	/**
+	 * `satisfies Messages` checks keys, not placeholders, and the parity test
+	 * checks that each locale matches English — neither checks the CALL SITE.
+	 * A toast called with `{ shown }` against a message reading `{count}`
+	 * renders the literal `{count}` in every locale. So read each
+	 * `m('invoices.toast.*', { … })` call's property names off the AST and
+	 * render the message with them in all six locales, at a singular and a
+	 * plural count, with no `{` left over.
+	 */
+	const PAGE = '/src/routes/invoices/+page.svelte';
+
+	function toastCalls(source: string): { key: string; params: string[] }[] {
+		const ast = parse(source, { modern: true }) as unknown as { instance?: { content: unknown } };
+		const calls: { key: string; params: string[] }[] = [];
+		const seen = new Set<unknown>();
+		(function walk(node: unknown): void {
+			if (node === null || typeof node !== 'object' || seen.has(node)) return;
+			seen.add(node);
+			if (Array.isArray(node)) {
+				for (const child of node) walk(child);
+				return;
+			}
+			const r = node as Record<string, unknown>;
+			const callee = r.callee as Record<string, unknown> | undefined;
+			const args = r.arguments as Record<string, unknown>[] | undefined;
+			if (r.type === 'CallExpression' && callee?.type === 'Identifier' && callee.name === 'm' && args) {
+				const key = args[0]?.type === 'Literal' ? String(args[0].value) : '';
+				if (key.startsWith('invoices.toast.')) {
+					const props = (args[1]?.properties as Record<string, unknown>[] | undefined) ?? [];
+					const params = props.map((p) => String((p.key as Record<string, unknown>).name));
+					calls.push({ key, params });
+				}
+			}
+			for (const [k, v] of Object.entries(r)) if (k !== 'loc') walk(v);
+		})(ast.instance?.content);
+		return calls;
+	}
+
+	it('finds the keyed toasts', () => {
+		expect(toastCalls(RAW[PAGE]).length).toBeGreaterThan(15);
+	});
+
+	for (const loc of SUPPORTED_LOCALES) {
+		it(`${loc}: every call site fills every placeholder`, async () => {
+			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
+			for (const { key, params } of toastCalls(RAW[PAGE])) {
+				expect(dict, `${loc} lacks ${key}`).toHaveProperty(key);
+				for (const count of [1, 2]) {
+					const values = Object.fromEntries(params.map((p) => [p, count]));
+					const out = interpolate(dict[key], values, loc);
+					expect(out, `${loc} ${key} with {${params.join(', ')}} = ${count}`).not.toMatch(/[{}#]/);
+				}
+			}
+		});
+	}
 });
