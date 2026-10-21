@@ -39,6 +39,12 @@
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatApiDetail } from '#lib/utils/apiError.ts';
 	import {
+		isAllowed,
+		isOffered,
+		refusalText,
+		type ActionRefusal
+	} from '#lib/api/actionVerdicts.ts';
+	import {
 		exceptionDescriptionText,
 		exceptionDescriptionTitle,
 		type ExceptionDescriptionText
@@ -78,6 +84,15 @@
 		is_overdue: boolean;
 		time_to_resolution_hours: number | null;
 		created_at: string;
+		/** The CALLER's verdict on each decision for this row — `null` when
+		 *  `POST /{id}/resolve` would accept that action from them, else the
+		 *  coded refusal it would answer with (`api/exceptions.py::
+		 *  decision_refusals`: the status gate, then the segregation predicate
+		 *  `record_decision` raises from). The resolve dialog offers each button
+		 *  from this; the page used to check only the status, so the uploader of
+		 *  a duplicate invoice was offered a Resolve that 403'd (issue #575).
+		 *  Absent on a row from any other payload = unknown = nothing offered. */
+		decision_refusals?: Record<Action, ActionRefusal>;
 	}
 
 	/** Every chip tally on the page — see {@link ExceptionSummary}. */
@@ -692,8 +707,11 @@
 
 	let selectableIds = $derived(
 		new Set(
+			// Selectable = some decision is open to the reader on the row (escalate
+			// is refused only by the status and role gates). Bulk resolve still
+			// reports a per-row segregation skip by name.
 			exceptions
-				.filter((e) => e.status === 'open' || e.status === 'escalated')
+				.filter((e) => e.decision_refusals && Object.values(e.decision_refusals).some(isAllowed))
 				.map((e) => e.id)
 		)
 	);
@@ -1121,7 +1139,9 @@
 						</Badge>
 					</td>
 					<td class="actions">
-						{#if exc.status === 'open' || exc.status === 'escalated'}
+						<!-- Open the dialog when ANY decision is open to this reader —
+						     escalate stays open to a refused actor, and is their exit. -->
+						{#if exc.decision_refusals && Object.values(exc.decision_refusals).some(isAllowed)}
 							<RowAction onclick={() => openResolve(exc)}>{m('exceptions.row.resolve')}</RowAction>
 						{/if}
 						{#if exc.invoice_id}
@@ -1205,7 +1225,7 @@
 				<button
 					type="button"
 					class="btn-secondary"
-					disabled={saving}
+					disabled={saving || !isAllowed(resolveTarget.decision_refusals?.dismiss)}
 					onclick={() => commitResolve('dismiss')}
 				>
 					{m('exceptions.resolveModal.dismiss')}
@@ -1213,15 +1233,30 @@
 				<button
 					type="button"
 					class="btn-warning"
-					disabled={saving || !resolutionText.trim()}
+					disabled={saving ||
+						!resolutionText.trim() ||
+						!isAllowed(resolveTarget.decision_refusals?.escalate)}
 					onclick={() => commitResolve('escalate')}
 				>
 					{m('exceptions.resolveModal.escalate')}
 				</button>
-				<button type="submit" class="btn-primary" disabled={saving || !resolutionText.trim()}>
+				<button
+					type="submit"
+					class="btn-primary"
+					disabled={saving ||
+						!resolutionText.trim() ||
+						!isAllowed(resolveTarget.decision_refusals?.resolve)}
+				>
 					{saving ? m('common.saving') : m('exceptions.resolveModal.resolve')}
 				</button>
 			</div>
+			{#if resolveTarget.decision_refusals?.resolve && isOffered(resolveTarget.decision_refusals.resolve)}
+				<!-- Why Resolve / Dismiss are disabled, in the server's words: a
+				     colleague must clear this one; escalating it is still open. -->
+				<p class="modal-hint" data-testid="exception-decision-refusal">
+					{refusalText(resolveTarget.decision_refusals.resolve, m)}
+				</p>
+			{/if}
 		</form>
 	{/if}
 </Modal>

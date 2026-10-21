@@ -13561,3 +13561,73 @@ run and a bulk approve each dispatch once), `tests/test_erp_dispatch.py` and
 `tests/test_erp_lambda.py` (inline dispatch in a worker scope, the null actor),
 and `frontend/tests-e2e/erp/xero.spec.ts` (approving reaches fake Xero as a bill
 with no click; with the flag off nothing is posted until the click).
+
+## 305. A page offers an action from the server's verdict, computed by the gate the endpoint raises from (issue #575, 2026-10-21)
+
+**What was wrong.** Pages decided whether to show a money-path control by
+restating the endpoint's rule — a status list, a role list, `uploaded_by !==
+me` — and every copy drifted in its own direction. The invoice modal checked
+status + `invoice.approve`, so the uploader, a non-named approver and an
+ap_manager over the CFO limit were offered an Approve that 403'd. The run dialog
+offered the run's creator an Execute (and a CFO-creator an Approve as CFO) that
+maker-checker refused. The exception queue checked only the status, so the
+uploader of a duplicate invoice got a Resolve that 403'd. The bank-change queue
+compared only `requested_by_user_id`, missing the provisioned-login SoD axis.
+The vendor list hid Reject on an `active` vendor both `/reject` and bulk status
+accept. #573 fixed one instance (`record_outside_refusal`); this generalises it.
+
+**The rule.** Each covered action has ONE gate function returning an
+`api/refusals.ActionRefusal` (or raising the coded `HTTPException` it already
+did). The endpoint raises from it, and the read that lists the row ships
+`*_refusal` / `actions` built from the endpoint's permission predicate
+(`api/deps.holds_any_role` / `holds_any_permission`, which `require_roles` /
+`require_permission` now call too) followed by that same gate. `null` = offer
+it; a coded refusal = don't, and say why. The client reads it through
+`#lib/api/actionVerdicts.ts`: unknown is a refusal (fail closed),
+`role_not_permitted` hides the control, any other refusal disables it beside
+its localized reason. The invoice review verdict is its own read (`GET
+/api/invoices/{id}/review-actions`, `review.review_refusals`) because its gates
+need the workflow instance and the receipts — the approve path was split into
+`_identity_gates` / `_figure_gates` / `_chain_level_gate` so the verdict runs
+exactly those, the chain on a scratch copy so reading writes nothing.
+
+Every verdict has a parity test that asks both sides for every seeded role and
+row state — the verdict and the real POST — and fails unless they agree. A
+verdict compared only to itself would prove nothing.
+
+**Two refusals moved onto the server rather than off the page.** Where a page's
+restated rule was stricter than its endpoint, and the endpoint's looser
+behaviour was the defect, the endpoint took the rule:
+
+- `POST /api/invoices/{id}/approve|reject` refuse an invoice that is not
+  `ready_for_review` (409 `invoice_not_in_review`). The single in-app door used
+  to approve a `new` draft straight past review while the email, Slack and
+  Teams doors already refused; all four now read one predicate,
+  `review.awaiting_review`. `POST /api/invoices/bulk/status` with
+  `status=approved` still moves a draft (`new → approved` is a legal
+  transition, through the same approve gates). That is the documented
+  "manager sets a batch's status" capability rather than a review decision, and
+  whether it should skip drafts too is a product call this change does not
+  make — tracked in `docs/followups.md`.
+- `POST /api/payments/{id}/void` refuses a run's `pending` leg and
+  `pending_compliance` (`payment_controls.payment_void_refusal`). A pending leg of an exported run
+  could be voided back into the queue while the uploaded bank file could still
+  pay it — a second payment — and voiding a compliance hold left its
+  `payment_compliance_hold` exception open beside a re-queued invoice. Their
+  exits are the run's (Cancel run, Bank rejected the file, Record run as paid)
+  and Release / Dismiss. Cancel run releases every leg: there is no per-leg
+  removal from a draft run, which is a capability this takes away rather than
+  one it ever offered safely. A standalone `pending` payment (no run, booked by
+  `POST /api/payments`) stays voidable — nothing will send it, and refusing the
+  void would leave recording a payment that never happened as its only exit.
+
+**Rejected: put the verdicts on the mutation responses too.** The rows are
+re-read after a decision on every covered page except the vendor list's
+detail-modal updates, which keep the row's verdict while its status is
+unchanged and drop it otherwise (fail closed until the next read). Widening
+every mutation response to carry a reader-specific verdict would put a
+per-caller field on payloads other clients (mobile, the public API) share.
+
+**Not covered here** (tracked in `docs/followups.md`): the modal's
+assigned-elsewhere clause, which the server does not enforce, and the pages
+that still restate a predicate.
