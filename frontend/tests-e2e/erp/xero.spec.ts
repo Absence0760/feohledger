@@ -109,7 +109,7 @@ type WorkflowStepShape = { type: string; config?: Record<string, unknown> };
 /** Run `body` with the tenant's default workflow's ERP step set to auto-send
  *  on approval (or not), through the same PATCH the builder saves with, and
  *  put the steps back afterwards. An invoice freezes the workflow when it is
- *  created (decisions §293 reads that snapshot), so `body` creates its own. */
+ *  created (decisions §302 reads that snapshot), so `body` creates its own. */
 async function withAutoSend(page: Page, on: boolean, body: () => Promise<void>): Promise<void> {
 	const headers = await authedTenantHeaders(page);
 	const list = await page.request.get(`${API_BASE}/api/workflows?page_size=100`, { headers });
