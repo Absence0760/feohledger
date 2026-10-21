@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — the sidebar renames (issue #635 #23,
+**Last reconciled:** 2026-10-21 — coding the shared rate limiter's 429 (issue
+#635) opened one (c) entry, the assistant stream reading every 429 as a budget
+error, taking the file from 131 → 132. Before that, 2026-10-21 — the sidebar renames (issue #635 #23,
 decisions §308) opened one (c) entry, hiding Partner Admin from non-partners,
 taking the file from 130 → 131. Before that, 2026-10-21 — extracting `ui/LoadError` (issue #635) opened
 one (c) entry, the pages still hand-rolling a load-error + Retry block, taking
@@ -206,7 +208,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**131 open: 113 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**132 open: 114 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2104,6 +2106,22 @@ providers still have the same gap.
       moved to Organization settings (any admin may consent to adoption), and
       the nav row gated on the capability. **Trigger:** the product decision on
       who may act as a partner, or the next partner/reseller onboarding.
+
+### Surfaced by coding the shared rate limiter's 429 (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) The assistant stream reads any 429 as "AI budget reached".**
+      `streamAssistantChat` (`frontend/src/lib/api.ts`, the `res.status === 429`
+      branch) builds an `AssistantBudgetError` from every 429, reading
+      `detail as string` plus `used` / `budget` / `period`. Today only the
+      assistant's own budget mapping (`backend/app/api/assistant.py`) answers 429
+      on `/chat/stream`, so it is correct. But the shared limiter's 429 is now the
+      coded `rate_limited` refusal, so if that limiter is ever put in front of the
+      assistant, a rate-limit refusal would show as "budget reached 0 / 0".
+      **Durable fix:** treat a 429 as a budget error only when the body carries
+      `budget`, and send any other 429 through `apiErrorFromBody` so the coded
+      refusal is localized like everywhere else. Cover both with a stubbed
+      stream e2e. **Trigger:** any change that rate-limits `/api/assistant/*`, or
+      the next edit to `streamAssistantChat`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
