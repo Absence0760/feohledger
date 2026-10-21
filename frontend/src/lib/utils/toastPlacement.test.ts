@@ -84,4 +84,64 @@ describe('placeToasts', () => {
 		expect(overlaps(box, avoid)).toBe(false);
 		expect(box.top).toBeGreaterThanOrEqual(TOAST_MARGIN);
 	});
+
+	// 2.4.11: lifted above the footer, the stack sits over the last fields
+	// above it. The focused one is kept clear too.
+	describe('keeping the focused control clear', () => {
+		const footer = { top: 590, bottom: 636, left: 30, right: 345 };
+
+		it('lifts above a focused field that sits just above the footer', () => {
+			const field = { top: 540, bottom: 578, left: 30, right: 345 };
+			const placed = placeToasts({ viewport, stack, bottomInset: corner, avoid: footer, focused: field });
+			expect(placed.maxHeight).toBeNull();
+			expect(placed.bottom).toBe(viewport.height - (field.top - TOAST_CLEARANCE));
+			const box = stackBox(placed.bottom, stack.height);
+			expect(overlaps(box, field)).toBe(false);
+			expect(overlaps(box, footer)).toBe(false);
+		});
+
+		it('stays just above the footer when the focused field is far above the stack', () => {
+			const field = { top: 120, bottom: 158, left: 30, right: 345 };
+			const placed = placeToasts({ viewport, stack, bottomInset: corner, avoid: footer, focused: field });
+			expect(placed).toEqual({ bottom: viewport.height - (footer.top - TOAST_CLEARANCE), maxHeight: null });
+		});
+
+		it('keeps the corner when the focused field is in the other column', () => {
+			const narrow = { width: 160, height: 70 };
+			const field = { top: 600, bottom: 640, left: 20, right: 150 };
+			const placed = placeToasts({
+				viewport,
+				stack: narrow,
+				bottomInset: corner,
+				avoid: null,
+				focused: field
+			});
+			expect(placed).toEqual({ bottom: corner, maxHeight: null });
+		});
+
+		it('moves off a focused field even with no footer on screen', () => {
+			// A long dialog scrolled so its footer is below the fold; the corner
+			// stack sat on the field the reader tabbed to.
+			const field = { top: 590, bottom: 628, left: 30, right: 345 };
+			const placed = placeToasts({ viewport, stack, bottomInset: corner, avoid: null, focused: field });
+			expect(overlaps(stackBox(placed.bottom, stack.height), field)).toBe(false);
+			expect(placed.maxHeight).toBeNull();
+		});
+
+		it('ignores a focused Save already in the footer (same box)', () => {
+			const placed = placeToasts({ viewport, stack, bottomInset: corner, avoid: footer, focused: footer });
+			expect(placed.bottom).toBe(viewport.height - (footer.top - TOAST_CLEARANCE));
+		});
+
+		it('caps beside both rather than covering either when nothing fits whole', () => {
+			const tall = { width: 343, height: 500 };
+			const field = { top: 300, bottom: 338, left: 30, right: 345 };
+			const placed = placeToasts({ viewport, stack: tall, bottomInset: corner, avoid: footer, focused: field });
+			expect(placed.maxHeight).not.toBeNull();
+			const box = stackBox(placed.bottom, placed.maxHeight!);
+			expect(overlaps(box, field)).toBe(false);
+			expect(overlaps(box, footer)).toBe(false);
+			expect(box.top).toBeGreaterThanOrEqual(TOAST_MARGIN);
+		});
+	});
 });

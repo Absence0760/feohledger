@@ -17,6 +17,13 @@
  *    of the space above and the space below and scrolls (`maxHeight`). It never
  *    falls back to covering the actions: the stack scrolls, the actions don't.
  *
+ * The focused control inside the dialog is a second thing to keep clear
+ * (`focused`), for the same criterion: lifted above the footer, the stack sits
+ * exactly over the last fields above it. Scrolling the dialog cannot fix that —
+ * the footer scrolls with the form in every dialog here, and the stack follows
+ * the footer — so the stack moves instead: to just above whichever of the two
+ * is lowest with room above it, else capped beside both.
+ *
  * Pure: the component measures the DOM and applies the result; this owns only
  * the geometry, so it unit-tests without a browser.
  */
@@ -38,6 +45,9 @@ export interface ToastPlacementInput {
 	bottomInset: number;
 	/** The open dialog's action row, in viewport coordinates; null = none. */
 	avoid: Box | null;
+	/** The focused control inside the open dialog (not a toast's own button),
+	 *  in viewport coordinates; null/omitted = none to keep clear. */
+	focused?: Box | null;
 }
 
 export interface ToastPlacement {
@@ -56,8 +66,17 @@ function intersects(a: Box, b: Box): boolean {
 	return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
+function keepClearOf(b: Box): Box {
+	return {
+		top: b.top - TOAST_CLEARANCE,
+		bottom: b.bottom + TOAST_CLEARANCE,
+		left: b.left - TOAST_CLEARANCE,
+		right: b.right + TOAST_CLEARANCE
+	};
+}
+
 export function placeToasts(input: ToastPlacementInput): ToastPlacement {
-	const { viewport, stack, bottomInset, avoid } = input;
+	const { viewport, stack, bottomInset, avoid, focused = null } = input;
 	const left = viewport.width - TOAST_MARGIN - stack.width;
 	const right = viewport.width - TOAST_MARGIN;
 	const at = (bottom: number): Box => ({
@@ -67,22 +86,27 @@ export function placeToasts(input: ToastPlacementInput): ToastPlacement {
 		right
 	});
 
-	if (!avoid) return { bottom: bottomInset, maxHeight: null };
-	const keepClear: Box = {
-		top: avoid.top - TOAST_CLEARANCE,
-		bottom: avoid.bottom + TOAST_CLEARANCE,
-		left: avoid.left - TOAST_CLEARANCE,
-		right: avoid.right + TOAST_CLEARANCE
-	};
-	if (!intersects(at(bottomInset), keepClear)) return { bottom: bottomInset, maxHeight: null };
+	const obstacles = [avoid, focused].filter((b): b is Box => b !== null).map(keepClearOf);
+	const clear = (b: Box) => obstacles.every((o) => !intersects(b, o));
+	if (clear(at(bottomInset))) return { bottom: bottomInset, maxHeight: null };
 
-	// Just above the actions (never lower than the corner would put it).
-	const lifted = Math.max(bottomInset, viewport.height - keepClear.top);
+	// Just above an obstacle (never lower than the corner would put it), the
+	// lowest one that fits whole and covers nothing.
+	const lifts = obstacles
+		.map((o) => Math.max(bottomInset, viewport.height - o.top))
+		.sort((a, b) => a - b);
+	for (const bottom of lifts) {
+		const box = at(bottom);
+		if (box.top >= TOAST_MARGIN && clear(box)) return { bottom, maxHeight: null };
+	}
+
+	// Too tall for any band whole: cap it to the larger of the space above and
+	// below everything it must keep clear.
+	const top = Math.min(...obstacles.map((o) => o.top));
+	const lowest = Math.max(...obstacles.map((o) => o.bottom));
+	const lifted = Math.max(bottomInset, viewport.height - top);
 	const roomAbove = viewport.height - lifted - TOAST_MARGIN;
-	if (stack.height <= roomAbove) return { bottom: lifted, maxHeight: null };
-
-	// Too tall for either band whole: cap it to the larger one.
-	const roomBelow = viewport.height - bottomInset - keepClear.bottom;
+	const roomBelow = viewport.height - bottomInset - lowest;
 	return roomBelow > roomAbove
 		? { bottom: bottomInset, maxHeight: Math.max(0, Math.floor(roomBelow)) }
 		: { bottom: lifted, maxHeight: Math.max(0, Math.floor(roomAbove)) };

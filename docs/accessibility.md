@@ -254,12 +254,22 @@ The current build implements:
   place with a Retry (`ui/LoadError`), never by a toast alone. Persistent
   errors rise above a showing bulk-action bar and the consent banner rather
   than covering them (SC 2.4.11), and while a dialog is open they sit clear of
-  its action row — lifted above it, or capped and scrolling when the stack is
-  too tall to fit — so an error never hides the button the reader retries
-  with (`utils/toastPlacement.ts`, issue #635). Guarded by
-  `frontend/src/lib/utils/toastQueue.test.ts` and `toastPlacement.test.ts`
-  (the rules) and `frontend/tests-e2e/a11y/toast-timing.spec.ts` (the wiring
-  in a page, including an open dialog at 375px and 320px).
+  its action row and of the control that has focus — lifted above them, or
+  capped and scrolling when the stack is too tall to fit — so an error never
+  hides the button the reader retries with or the field they are typing in
+  (`utils/toastPlacement.ts`, issue #635). While a modal dialog is open the
+  toast region lives inside it, so `aria-modal` does not hide the toasts from
+  a screen reader, and the dialog's focus trap includes their dismiss buttons
+  after its own controls: an error that stays until dismissed can be reached
+  and dismissed by keyboard without closing the dialog, and focus returns into
+  the dialog afterwards (SC 2.1.1, 2.4.3, 4.1.3); Escape on a focused toast
+  dismisses the toast, not the dialog. A dialog control that loses
+  focus to the page (disabled under it while saving) hands it back to the
+  dialog rather than letting the next Tab leave a modal. Guarded by
+  `frontend/src/lib/utils/toastQueue.test.ts`, `toastPlacement.test.ts` and
+  `frontend/src/lib/actions/focusTrap.test.ts` (the rules) and
+  `frontend/tests-e2e/a11y/toast-timing.spec.ts` (the wiring in a page: `ui/Modal`
+  and `InvoiceModal` at 1280, 375 and 320px, and a capped, scrolling stack).
 - **The sidebar on a phone floats over the page** — at 700px and below the
   sidebar is an icon rail, and expanding it opens the full panel as an overlay
   over an inert, dimmed page instead of squeezing the content to the ~100px a

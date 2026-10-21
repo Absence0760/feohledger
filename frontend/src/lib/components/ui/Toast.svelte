@@ -29,6 +29,11 @@
 
 <script lang="ts">
 	import { tick } from 'svelte';
+	import {
+		DIALOG_SATELLITE_ATTR,
+		onModalDialogsChange,
+		topModalDialog
+	} from '#lib/actions/focusTrap.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { placeToasts, TOAST_MARGIN, type Box } from '#lib/utils/toastPlacement.ts';
 
@@ -46,6 +51,125 @@
 
 	$effect(() => {
 		queue.setPaused(hovered || focusInside);
+	});
+
+	/**
+	 * While a modal dialog is open the region lives INSIDE it (appended last),
+	 * and goes back to its place in the layout when the dialog closes.
+	 *
+	 * `aria-modal="true"` tells assistive tech that everything outside the
+	 * dialog is inert: WebKit and Chromium prune it from the accessibility
+	 * tree, so a region left outside would not be announced and its dismiss
+	 * buttons could not be reached by a screen reader's cursor (the Shopify
+	 * Polaris toast hit exactly this). And the dialog's focus trap kept Tab
+	 * inside it, so a persistent error could not be dismissed by keyboard at
+	 * all (WCAG 2.1.1). Inside the dialog both are true by construction: the
+	 * live regions are in the modal subtree, and `actions/focusTrap` puts the
+	 * dismiss buttons (marked `data-dialog-satellite`) after the dialog's own
+	 * controls in its Tab cycle.
+	 *
+	 * The region stays `position: fixed`, so it still sits in the viewport
+	 * corner, not in the dialog's flow. Its containing block is then the
+	 * nearest ancestor with a transform / filter / backdrop-filter / contain:
+	 * every modal backdrop has `backdrop-filter` and is itself
+	 * `position: fixed; inset: 0`, so that box IS the viewport — the rule a
+	 * modal backdrop must keep (`docs/ui-patterns.md` § Toast). Its z-index now
+	 * stacks inside the backdrop's layer, above the dialog. The dialog's own
+	 * entrance animation transforms it for 0.22s, which would clip and shift
+	 * the region, so the move waits for that animation to finish.
+	 *
+	 * A toast that was inserted where a screen reader would not hear it — into
+	 * a region that was detached (raised in the same update that closed the
+	 * dialog: "Saved" + close) or outside the open modal — is re-inserted once
+	 * the region has moved (`rekey`): live regions announce what is added to
+	 * them, not the content of a subtree that is moved or re-attached.
+	 */
+	let host = $state<HTMLElement | null>(null);
+	// Marks the region's own place in the layout while it is hosted elsewhere.
+	let home: Comment | null = null;
+	$effect(() => {
+		host = topModalDialog();
+		return onModalDialogsChange(() => (host = topModalDialog()));
+	});
+	$effect(() => {
+		if (!region) return;
+		const el = region;
+		const marker = document.createComment('toast-region');
+		el.before(marker);
+		home = marker;
+		return () => {
+			if (el.previousSibling !== marker) relocate(el, marker.parentNode, marker.nextSibling);
+			marker.remove();
+			home = null;
+		};
+	});
+	$effect(() => {
+		const target = host;
+		if (!region || !home) return;
+		const el = region;
+		if (!target) {
+			if (el.previousSibling !== home) relocate(el, home.parentNode, home.nextSibling);
+			return;
+		}
+		let cancelled = false;
+		Promise.all(target.getAnimations().map((a) => a.finished.catch(() => undefined))).then(() => {
+			if (!cancelled && target.isConnected) relocate(el, target, null);
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	/**
+	 * Move the region. Moving a focused node drops its focus; the focus
+	 * bookkeeping is reset first so the hand-off logic below does not then
+	 * "rescue" focus to a toast — the dialog's own focus handling (focus in on
+	 * open, restore to the trigger on close) owns where focus goes.
+	 */
+	function relocate(el: HTMLElement, parent: Node | null, before: Node | null) {
+		if (!parent) return;
+		focusInside = false;
+		returnTo = null;
+		parent.insertBefore(el, before);
+		for (const t of toasts) {
+			if (!unheard.has(t.id)) continue;
+			unheard.delete(t.id);
+			rekey[t.id] = (rekey[t.id] ?? 0) + 1;
+		}
+	}
+
+	// Toast ids inserted where no screen reader would hear them (see above),
+	// and a per-id counter that re-keys (so re-inserts) them after a move.
+	const unheard = new Set<number>();
+	let rekey = $state<Record<number, number>>({});
+
+	/** Records whether a toast element arrived somewhere it is announced. */
+	function arrive(node: HTMLElement, id: number) {
+		const modal = topModalDialog();
+		const heard = node.isConnected && (!modal || modal.contains(node));
+		if (heard) unheard.delete(id);
+		else unheard.add(id);
+	}
+
+	/**
+	 * Escape on a focused toast dismisses that toast — and only that: it is a
+	 * native listener on the region so it runs before the dialog's own Escape
+	 * (on the dialog node, an ancestor while hosted), which would close the
+	 * dialog and could discard its edits.
+	 */
+	$effect(() => {
+		if (!region) return;
+		const el = region;
+		function onKey(e: KeyboardEvent) {
+			if (e.key !== 'Escape') return;
+			const item = (e.target as Element | null)?.closest<HTMLElement>('[data-toast-id]');
+			if (!item) return;
+			e.stopPropagation();
+			e.preventDefault();
+			dismiss(Number(item.dataset.toastId));
+		}
+		el.addEventListener('keydown', onKey);
+		return () => el.removeEventListener('keydown', onKey);
 	});
 
 	/**
@@ -91,7 +215,7 @@
 		function measure() {
 			frame = 0;
 			if (!region) return;
-			const dialog = openDialog();
+			const dialog = topModalDialog();
 			// A bulk bar behind an open dialog's backdrop is not what the
 			// reader is looking at; only the dialog's actions are.
 			const bar = dialog ? null : document.querySelector('.bulk-bar');
@@ -106,7 +230,8 @@
 				viewport: { width: window.innerWidth, height: vh },
 				stack: { width: region.offsetWidth, height: region.scrollHeight },
 				bottomInset: Math.max(TOAST_MARGIN + consent, barLift),
-				avoid: dialog ? dialogActions(dialog) : null
+				avoid: dialog ? dialogActions(dialog) : null,
+				focused: dialog ? focusedControl(dialog) : null
 			});
 			placedBottom = placed.bottom;
 			maxHeight = placed.maxHeight;
@@ -120,8 +245,12 @@
 		const rootStyle = new MutationObserver(schedule);
 		rootStyle.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
 		window.addEventListener('resize', schedule);
+		// The topmost modal dialog (what the stack keeps clear of) changed.
+		const offModals = onModalDialogsChange(schedule);
 		// A long dialog scrolls inside itself, carrying its footer with it.
 		document.addEventListener('scroll', schedule, { capture: true, passive: true });
+		// Focus moving to a control the stack would cover moves the stack.
+		document.addEventListener('focusin', schedule);
 		measure();
 		return () => {
 			cancelAnimationFrame(frame);
@@ -129,21 +258,25 @@
 			rootStyle.disconnect();
 			resize.disconnect();
 			window.removeEventListener('resize', schedule);
+			offModals();
 			document.removeEventListener('scroll', schedule, true);
+			document.removeEventListener('focusin', schedule);
 		};
 	});
 
 	/**
-	 * The open modal dialog, topmost last: `ui/Modal` and the feature dialogs
-	 * that hand-roll its shell (`InvoiceModal`, `RunDetailModal`, …) all render
-	 * `role="dialog"` inside a `.backdrop`; the portal's dialog sets
-	 * `aria-modal`. A popover (the bell's `role="dialog"`) is neither.
+	 * The focused control inside `dialog`, to keep clear of (2.4.11): not the
+	 * dialog node itself, not a toast's own button, and not something as tall
+	 * as half the screen (a scrolling pane that took focus is a container, and
+	 * keeping it clear would squeeze the stack to nothing).
 	 */
-	function openDialog(): HTMLElement | null {
-		const all = document.querySelectorAll<HTMLElement>(
-			'.backdrop [role="dialog"], [role="dialog"][aria-modal="true"]'
-		);
-		return all.length ? all[all.length - 1] : null;
+	function focusedControl(dialog: HTMLElement): Box | null {
+		const el = document.activeElement;
+		if (!(el instanceof HTMLElement) || el === dialog || !dialog.contains(el)) return null;
+		if (region?.contains(el)) return null;
+		const r = el.getBoundingClientRect();
+		if (r.height === 0 || r.height > window.innerHeight / 2) return null;
+		return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
 	}
 
 	/**
@@ -158,9 +291,15 @@
 			const r = el.getBoundingClientRect();
 			return r.width > 0 && r.height > 0;
 		};
+		// The hosted toast region is inside the dialog; its buttons are not the
+		// dialog's actions.
+		const own = (el: Element) => !el.closest(`[${DIALOG_SATELLITE_ATTR}]`);
 		const footers = [...dialog.querySelectorAll('.modal-footer')].filter(visible);
 		let row: Element | null = footers.at(-1) ?? null;
-		if (!row) row = [...dialog.querySelectorAll('button')].filter(visible).at(-1)?.parentElement ?? null;
+		if (!row)
+			row =
+				[...dialog.querySelectorAll('button')].filter((b) => own(b) && visible(b)).at(-1)
+					?.parentElement ?? null;
 		if (!row) return null;
 		const r = row.getBoundingClientRect();
 		const d = dialog.getBoundingClientRect();
@@ -213,7 +352,10 @@
 			return;
 		}
 		focusInside = false;
-		const target = returnTo?.isConnected ? returnTo : document.getElementById('main-content');
+		// Hosted in a dialog, the fallback is the dialog, never the page behind
+		// it (the dialog node takes focus: it carries tabindex="-1").
+		const fallback = region?.closest<HTMLElement>('[role="dialog"]') ?? document.getElementById('main-content');
+		const target = returnTo?.isConnected ? returnTo : fallback;
 		returnTo = null;
 		target?.focus();
 	}
@@ -238,6 +380,7 @@
 <div
 	bind:this={region}
 	class="toast-region"
+	data-dialog-satellite
 	role="region"
 	aria-label={m('toast.region')}
 	class:capped={maxHeight !== null}
@@ -249,12 +392,12 @@
 	onfocusout={onFocusOut}
 >
 	<div class="toast-container" aria-live="assertive">
-		{#each toasts.filter((t) => t.type === 'error') as t (t.id)}
+		{#each toasts.filter((t) => t.type === 'error') as t (`${t.id}:${rekey[t.id] ?? 0}`)}
 			{@render toastItem(t)}
 		{/each}
 	</div>
 	<div class="toast-container" aria-live="polite">
-		{#each toasts.filter((t) => t.type !== 'error') as t (t.id)}
+		{#each toasts.filter((t) => t.type !== 'error') as t (`${t.id}:${rekey[t.id] ?? 0}`)}
 			{@render toastItem(t)}
 		{/each}
 	</div>
@@ -266,6 +409,8 @@
 		class="toast {t.type}"
 		data-testid="toast"
 		data-toast-type={t.type}
+		data-toast-id={t.id}
+		use:arrive={t.id}
 		onmouseenter={() => (hovered = true)}
 		onmouseleave={() => (hovered = false)}
 	>
@@ -309,9 +454,9 @@
 	}
 
 	/* Too tall to fit beside a dialog's actions: the stack scrolls instead of
-	   covering them, by pointer (the wheel works over the toasts themselves).
-	   The dialog's focus trap keeps Tab inside the dialog, so a keyboard user
-	   reaches these toasts once the dialog closes. */
+	   covering them — by pointer (the wheel works over the toasts themselves)
+	   and by keyboard (Tab reaches each dismiss button and the browser scrolls
+	   it into view: the region is in the dialog's Tab cycle). */
 	.toast-region.capped {
 		overflow-y: auto;
 		overscroll-behavior: contain;

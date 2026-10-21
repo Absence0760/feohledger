@@ -115,7 +115,7 @@
 		if (e.target === e.currentTarget) onclose();
 	}}
 >
-	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-label="Bulk re-code GL" tabindex="-1">
+	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label="Bulk re-code GL" tabindex="-1">
 		<header class="modal-header">
 			<div class="help-row">
 				<h2>Bulk Re-code GL Codes</h2>

@@ -459,7 +459,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
 <div class="backdrop" onclick={handleBackdrop} role="presentation">
-	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-label="Payment run" tabindex="-1">
+	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label="Payment run" tabindex="-1">
 		<header>
 			<div class="title-block">
 				<h2>{m('paymentRuns.runDetail.title')}</h2>
