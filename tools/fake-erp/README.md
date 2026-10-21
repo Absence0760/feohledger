@@ -330,6 +330,22 @@ backend's ERP OAuth callback on the dev API port and the worktree offsets);
 set `FAKE_ERP_OAUTH_REDIRECT_URIS` (comma-separated) to replace it. The same
 registered set guards the Xero authorize route.
 
+**Status sync-back and BillPayment write-back** (decisions §295): bills carry
+`LinkedTxn` and `MetaData.LastUpdatedTime` like QuickBooks'.
+`POST /qbo/v3/company/{realm}/billpayment?requestid=…` creates a BillPayment
+against the bill its `Line[0].LinkedTxn` names (a repeated `requestid` replays
+the first answer, as Intuit does; more than the bill's open balance is a 400
+Fault `6000`), and `…?operation=update&include=void` voids one (sparse,
+`SyncToken` checked; the bill's balance comes back). `GET …/billpayment/{id}`
+reads one (610 when unknown). `GET …/cdc?entities=Bill,BillPayment&changedSince=…`
+answers the bills and payments changed since that time, deleted bills as
+`{"Id", "status": "Deleted"}`. Test hooks that play a person in QuickBooks:
+`POST /__qbo/pay-bill {"id", "amount"?, "pay_type"?: "Check"|"CreditCard",
+"txn_date"?}` (no FeohLedger marker on it), `POST /__qbo/delete-bill {"id"}`,
+and `POST /__qbo/token-lifetime {"seconds"}` (the `x_refresh_token_expires_in`
+later token responses carry, to stand a connection near its expiry).
+State: `STATE["qbo"]` (`payments`, `deleted_bills`, `refresh_lifetime`).
+
 ## QuickBooks Online sandbox company (`/qbo`, `fake_company=sandbox`)
 
 The Intuit sample company FeohLedger was tested against live on 2026-10-19

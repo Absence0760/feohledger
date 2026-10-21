@@ -1,6 +1,7 @@
 # QuickBooks Online direct adapter — scope
 
-**Status (2026-10-08): Phases 1 and 2 built; Phases 3–5 open.** The OAuth
+**Status (2026-10-20): Phases 0–5 built** (Phases 3–5 in decisions §295 —
+see § Phases 3–5 as built, below). The OAuth
 connect flow (`services/erp_oauth.py`, `api/erp_oauth.py`) and the adapter
 (`erp_adapters/quickbooks_online.py`) are described as built in
 `erp-integration.md` § Connecting an OAuth ERP. Where the build departs from
@@ -9,9 +10,14 @@ this plan:
 - Tokens are sealed under the app KMS key in the control-plane
   `provider_credentials` row for the `erp` block (decisions §266, §271);
   `settings.erp.oauth` keeps only the connection metadata.
-- There is no `erp_connections` realm index table. A company already connected
-  to another tenant is refused at connect time by a JSONB query; the Phase 3
-  webhook still needs the index.
+- There is no `erp_connections` realm index table. The realm index is a
+  control-plane UNIQUE expression index over the OAuth block itself,
+  `uq_organizations_erp_oauth_company` on `settings.erp.oauth.(provider,
+  external_tenant_id)` (migration 0117, §295): the block is the one record of
+  the connection, so a second table would be a copy every writer of it must
+  keep in step. The connect callback still refuses a company linked elsewhere
+  (JSONB query under a Redis claim), and the index now refuses it in the
+  database too (the callback answers `already_linked` on the IntegrityError).
 - Access tokens are not cached in Redis: each call reads the stored block (one
   primary-key select). Refreshes are serialised by a Redis lock plus a
   compare-and-swap write.
@@ -60,8 +66,147 @@ this plan:
 - The panel's **Test connection** is offered on a connected QuickBooks
   connection too; `POST /api/organization/test-erp` tests the saved connection
   with its stored tokens and answers a coded result the panel names the ERP in.
-- The `x_refresh_token_expires_in` expiry is recorded and shown on `/status`,
-  but nothing yet notifies an admin 30 days before it.
+- The `x_refresh_token_expires_in` expiry is recorded on every token response
+  (each refresh rotates it) and shown on `/status`; Phase 5 below acts on it.
+
+## Phases 3–5 as built (decisions §295)
+
+**The lifecycle change that makes them mean anything.** Until §295 a
+confirmed push closed the invoice at `done` (`sent_to_erp → done`): the ERP
+owned payment, FeohLedger never paid a pushed bill, and a QuickBooks `Paid` had
+nothing to move. With `FEOH_ERP_STATUS_SYNC_ENABLED` on, a confirmed push to an
+adapter that reports back (`ErpAdapter.supports_status_sync` — QuickBooks
+Online) lands at `posted_in_erp` instead: still payable here, and paid status
+flows back. With it off (the default) the push still closes at `done`, because
+nothing would then guarantee a payment made in QuickBooks ever reached us.
+`services/erp_status_sync.status_sync_active` is the one predicate. The push
+also records `state_data.erp_realm`, the connection realm the bill lives in.
+
+**Phase 3 — status sync-back** (`services/erp_status_sync.py`):
+
+- `POST /api/erp/webhook/quickbooks` (before the generic `/webhook/{erp_type}`):
+  the raw body is verified against `FEOH_ERP_QBO_WEBHOOK_VERIFIER_TOKEN`
+  (`intuit-signature`, base64 HMAC-SHA256 — `webhook_security.
+  verify_hmac_sha256_base64`) before it is parsed; empty token = refused.
+  CloudEvents only (`qbo.bill.*` / `qbo.billpayment.*`; `intuitaccountid` is
+  the company, `intuitentityid` the record). Each event is claimed by its id
+  (`is_event_already_processed`) before the 204 goes back; a dedup store we
+  cannot reach is a bodyless 503 so Intuit redelivers. The work — routing the
+  company to its tenant through the realm index, reading the bill back, applying
+  it — runs after the response (Intuit wants an answer within seconds); a
+  failure releases the claim, and the sweep below is what guarantees delivery.
+  Every rejection is a silent 204.
+- The change-data-capture sweep (`erp-status-sync`, off by default) asks each
+  connected company for `GET cdc?entities=Bill,BillPayment&changedSince=…` from
+  its last COMPLETE pass (`settings.erp.oauth.status_sync_through`) or the
+  lookback window (`FEOH_ERP_STATUS_SYNC_LOOKBACK_HOURS`, 72 h), whichever is
+  earlier, and applies every bill the same way. A pass that cannot vouch for
+  the gap — no mark (a first pass, or a new connection after a reconnect), a
+  mark older than CDC's 30-day reach, or a CDC answer too full to trust (1,000
+  objects) — reads back every bill still payable here that was posted to the
+  company instead, so a sweep that was off, failing or skipped for days loses
+  nothing. The mark moves only when the whole pass went through. The same pass
+  finishes any ERP void a payment void recorded but did not complete.
+- `bill_report(bill_id)` reads the bill (and its BillPayments through
+  `LinkedTxn`): `paid` / `partially_paid` / `open` / `deleted` (Fault 610 or
+  `status: Deleted` only — an unreadable bill raises), the correlation id from
+  our `PrivateNote` marker, and the latest cash payment a PERSON made: its date
+  and rail (`PayType` `Check` → `check`, `CreditCard` → `card`). Whether the
+  bill was taken down outside FeohLedger is judged from the BALANCE
+  (`reduced_outside`: `TotalAmt − Balance` beyond what our own marked
+  BillPayments applied), so a vendor credit — QuickBooks records one as a $0
+  BillPayment linked to the `VendorCredit`, which is NOT a void — or a journal
+  entry counts too; `settled_by_credit` says when a credit took part or no
+  readable cash paid it.
+- `apply_bill_report` matches a bill to its invoice by the marker's correlation
+  id AND the invoice's `erp_reference` (a deleted bill, which cannot be read, by
+  `erp_reference` within the recorded realm only), row-locks it, and:
+
+  | Bill in QuickBooks | Invoice here | Result |
+  |---|---|---|
+  | settled outside us, by a vendor credit (in part or whole) | payable here | blocking `payment_reconciliation`; no cash payment is booked |
+  | paid outside us, in cash | approved / sent / posted | recorded as paid outside FeohLedger (the ERP-paid path, `record_erp_reported_payment`), with QuickBooks' date and rail → `paid`, out of the queue |
+  | paid outside us | payment_scheduled | blocking `payment_reconciliation`: FeohLedger is paying it too |
+  | paid outside us | paid by a FeohLedger rail | `erp_reconciliation`: paid twice (a payment recorded as made outside is taken to be that same payment) |
+  | paid only by our write-back | any | nothing |
+  | partly paid or credited outside us | payable here | blocking `payment_reconciliation`: a full payment would overpay |
+  | open again | paid by an ERP report | `erp_reconciliation`: the payment was deleted/voided there |
+  | deleted / voided | payable here | blocking `payment_reconciliation` |
+  | deleted / voided | sent / paid / done / failed | `erp_reconciliation` |
+
+  Every exception is de-duplicated per (invoice, type) while open, and PII-free.
+- The generic ERP webhook now also accepts optional `paid_on` / `payment_method`
+  on a paid report (validated: a real date not in the future, a recordable rail
+  — never `virtual_card`), falling back to the arrival date / NULL.
+
+**Phase 4 — `post_payment` → BillPayment** (`services/erp_payment_writeback.py`,
+`QuickBooksOnlineAdapter.post_payment`):
+
+- `payment_erp_sync` writes a settled payment back once its invoice is `paid`,
+  after committing the transition (no lock held across Intuit). Only for a bill
+  the push recorded under the CURRENT realm; an invoice never pushed has no bill
+  and nothing is written.
+- `POST billpayment?requestid=<payment id>`, `LinkedTxn` → the bill,
+  `PrivateNote: "FeohLedger payment <id>"`. Idempotent in two layers like the
+  bill: the bill's own BillPayments are searched for the marker first, and the
+  request id makes Intuit replay a retry. A replay of a payment someone voided
+  in QuickBooks is refused `bill_payment_voided`, never reported as written.
+- `PayType`: `Check` with `BankAccountRef` for bank rails, `CreditCard` with
+  `CCAccountRef` for card rails. The accounts are the org's choice —
+  `settings.erp.bill_payment_bank_account` / `bill_payment_card_account`, GL
+  codes from our chart (the ERP setup form's two optional fields), resolved to
+  QuickBooks ids under the current realm. Unmapped or unlinked →
+  `payment_account_not_mapped`.
+- Refused before any write: `bill_not_in_erp`, `currency_mismatch`,
+  `payment_exceeds_balance` (more than the bill still has open). A QuickBooks
+  refusal is coded from the numeric Fault code exactly like a bill
+  (`period_closed`, `reference_invalid`, `intuit_fault` + `intuit_code`), never
+  from `Message` / `Detail`.
+- Outcomes are audited on the payment (`payment.erp_posted` /
+  `payment.erp_post_failed` with the coded refusal); a failure opens a de-duped
+  `erp_reconciliation` naming the code and the retry
+  (`POST /api/payments/runs/{id}/sync-erp`). It never undoes the transition: the
+  money moved.
+- **Open question 3 (early-pay discounts) is answered conservatively:** the
+  BillPayment is for what was actually paid; when the bill keeps a balance in
+  QuickBooks afterwards (a discount or credit taken in FeohLedger), an
+  `erp_reconciliation` exception names the balance for the bookkeeper. No
+  vendor credit is created on their behalf.
+- Voiding a settled payment (`POST /api/payments/{id}/void`) records the
+  pending ERP void on the invoice's workflow state IN the void's transaction
+  (`erp_payment_voids_pending`), then voids our BillPayment after the commit
+  (sparse update, `include=void`, current `SyncToken`). A process that dies
+  before that task, or an ERP that refuses, leaves the marker for the next
+  status-sync pass; a refusal also opens `erp_reconciliation`. "Nothing of ours
+  there" is audited as `payment.erp_void_not_needed`, not as a void.
+- **Voiding a payment the ERP REPORTED** (`provider = external`, referencing the
+  bill) sends the invoice back to `approved` while QuickBooks still shows the
+  bill paid, and nothing about the bill changes again — so the void opens the
+  blocking `payment_reconciliation` in the same transaction.
+- The write-back re-reads the payment's status first (a void can commit
+  between the sync's transition and the ERP call), posts what reached the
+  supplier (the settled amount when it is in the bill's currency), and runs
+  for every FeohLedger path to `paid`: the sync pass and an accepted short
+  settlement (`/settlement/accept`, `dispatch_settled_writeback`).
+- Not written back, by design: a payment recorded as made outside FeohLedger
+  (a record-only tenant's, §251 — the customer enters it in QuickBooks too,
+  and status sync then reads it as that same payment), and a bill pushed
+  before §295 (no recorded realm, so nothing proves which company it is in).
+
+**Phase 5 — the refresh-token expiry notice** (`services/erp_connection_health.py`,
+sweep `erp-connection-health`, off by default): for every OAuth ERP connection,
+a refresh token with fewer than `FEOH_ERP_CONNECTION_KEEPALIVE_DAYS` (45) left is
+refreshed (`get_access_token(force_refresh=True)`, through the refresher's lock
+and compare-and-swap) so a quiet tenant does not lose its connection; one still
+inside a lead of `FEOH_ERP_CONNECTION_EXPIRY_NOTICE_DAYS` (`[30, 7, 1]`) — the
+hard cap — gets an in-app + email notice to the org's admins
+(`erp_connection_expiring`, once per (reported expiry, lead), marker
+`settings.erp.oauth.expiry_notice`); a connection the provider already refused
+gets one "reconnect" notice. The refresher now records why it was refused
+(`reconnect_reason`: `refresh_token_expired` when past the expiry Intuit last
+reported, else `refresh_token_revoked`); `/status` returns it and
+`expires_soon`, and the ERP panel states the reason and offers Reconnect while
+the connection is still live.
 
 The rest of this file is the original plan.
 
@@ -306,7 +451,7 @@ is a question for that audit.
 
 ## Open questions (product calls, not engineering)
 
-Three remain open.
+Two remain open (1 and 2 are answered conservatively in the build; 3 is decided).
 
 1. **"Void" on a QuickBooks bill means delete.** Allow it only while no
    payment is applied (`Balance == TotalAmt`) and refuse otherwise? Or never
@@ -314,9 +459,10 @@ Three remain open.
 2. **Tax.** Phase 2 as scoped handles US companies with tax carried in the
    lines. UK/CA/AU VAT/GST needs `TxnTaxDetail` and tax-code mapping. Ship US
    first, or block on non-US?
-3. **Early-pay discounts.** BillPayment has no discount field. Book the
-   discount as a vendor credit applied in the same payment, or post the net
-   amount and leave the difference open? It has to be decided before Phase 4.
+3. ~~**Early-pay discounts.**~~ Decided for Phase 4 (`docs/decisions.md` §295):
+   post the amount actually paid and leave the difference open in QuickBooks,
+   flagged as an `erp_reconciliation` exception naming the balance. Booking it
+   as a vendor credit stays a possible later refinement.
 4. ~~**Merge for Growth customers.**~~ Decided (`docs/decisions.md` §256):
    Merge-routed ERPs become a Scale-only `erp_merge` feature, and Growth's
    `erp_integrations` covers the direct adapters. Built with §281, which also
