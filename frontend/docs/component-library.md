@@ -307,7 +307,11 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   `docs/authentication.md` § When the account cannot be loaded.
 - `NotificationBell.svelte` — bell + unread badge in the sidebar header with a
   recent-notifications popover (replaced the old Notifications nav row; the full
-  `/notifications` page is the "View all" target). Closes on Esc / backdrop.
+  `/notifications` page is the "View all" link). The popover is a `role="dialog"`
+  labelled by its heading: opening moves focus to that heading, Esc / backdrop
+  close it and return focus to the bell. A failed load renders
+  `notifications.empty.errored` with a Retry — never "No notifications yet."
+  Every string is a `notifications.*` key (`tests-e2e/notifications/bell.spec.ts`).
 - `EntitySwitcher.svelte` — multi-entity (subsidiary) selector; hidden for
   single-entity tenants.
 

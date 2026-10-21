@@ -1293,6 +1293,8 @@ export const messages = {
 		'Benachrichtigungen konnten nicht geladen werden. Bitte erneut versuchen.',
 	'notifications.empty.unread': 'Keine ungelesenen Benachrichtigungen.',
 	'notifications.empty.all': 'Noch keine Benachrichtigungen.',
+	'notifications.bell.ariaUnread': "Benachrichtigungen, {count} ungelesen",
+	'notifications.bell.viewAll': "Alle anzeigen",
 	'notifications.loadMore': 'Mehr laden ({shown} von {total})',
 	'notifications.showingAll':
 		'{total, plural, one {Alle # Benachrichtigung werden angezeigt} other {Alle # Benachrichtigungen werden angezeigt}}',

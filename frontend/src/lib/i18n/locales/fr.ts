@@ -1293,6 +1293,8 @@ export const messages = {
 	'notifications.empty.errored': 'Impossible de charger les notifications. Veuillez réessayer.',
 	'notifications.empty.unread': 'Aucune notification non lue.',
 	'notifications.empty.all': 'Aucune notification pour le moment.',
+	'notifications.bell.ariaUnread': "Notifications, {count} non lues",
+	'notifications.bell.viewAll': "Tout afficher",
 	'notifications.loadMore': 'Charger plus ({shown} sur {total})',
 	'notifications.showingAll':
 		'{total, plural, one {Affichage de # notification} other {Affichage des # notifications}}',

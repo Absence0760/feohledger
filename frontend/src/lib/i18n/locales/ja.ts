@@ -1263,6 +1263,8 @@ export const messages = {
 	'notifications.empty.errored': '通知を読み込めませんでした。もう一度お試しください。',
 	'notifications.empty.unread': '未読の通知はありません。',
 	'notifications.empty.all': '通知はまだありません。',
+	'notifications.bell.ariaUnread': "通知、未読 {count} 件",
+	'notifications.bell.viewAll': "すべて表示",
 	'notifications.loadMore': 'さらに読み込む（{total}件中{shown}件）',
 	'notifications.showingAll': '{total, plural, other {#件すべての通知を表示中}}',
 

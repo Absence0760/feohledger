@@ -1432,6 +1432,8 @@ export const en = {
 	'notifications.empty.errored': 'Could not load notifications. Try again.',
 	'notifications.empty.unread': 'No unread notifications.',
 	'notifications.empty.all': 'No notifications yet.',
+	'notifications.bell.ariaUnread': "Notifications, {count} unread",
+	'notifications.bell.viewAll': "View all",
 	'notifications.loadMore': 'Load more ({shown} of {total})',
 	'notifications.showingAll':
 		'{total, plural, one {Showing all # notification} other {Showing all # notifications}}',

@@ -1291,6 +1291,8 @@ export const messages = {
 		'No se pudieron cargar las notificaciones. Inténtelo de nuevo.',
 	'notifications.empty.unread': 'No hay notificaciones sin leer.',
 	'notifications.empty.all': 'Aún no hay notificaciones.',
+	'notifications.bell.ariaUnread': "Notificaciones, {count} sin leer",
+	'notifications.bell.viewAll': "Ver todas",
 	'notifications.loadMore': 'Cargar más ({shown} de {total})',
 	'notifications.showingAll':
 		'{total, plural, one {Mostrando # notificación} other {Mostrando las # notificaciones}}',
