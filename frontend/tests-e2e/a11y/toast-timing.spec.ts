@@ -118,3 +118,80 @@ test.describe('toast timing and focus', () => {
 			.toBe(true);
 	});
 });
+
+/**
+ * #635 G: on a phone an open dialog's footer sits where the toast corner is,
+ * and an error toast no longer times out — so it stayed over the button the
+ * reader needed to retry with. `utils/toastPlacement.ts` (unit-tested) moves
+ * the stack clear of the dialog's actions; this pins the wiring at the two
+ * widths the issue names, with a real error from a real dialog. The bank-
+ * details dialog is the tall case: at phone heights it fills 90vh and its
+ * footer lands on the corner.
+ */
+test.describe('toasts clear an open dialog’s actions', () => {
+	const detail =
+		'The bank change could not be staged because the processor rejected the counterparty.';
+
+	for (const size of [
+		{ width: 375, height: 667 },
+		{ width: 320, height: 568 }
+	]) {
+		test(`at ${size.width}px an error toast leaves the dialog's Save uncovered`, async ({
+			page
+		}) => {
+			await page.setViewportSize(size);
+			await page.route(
+				(url) => /^\/api\/vendors\/[^/]+\/bank-change$/.test(url.pathname),
+				(route) => route.fulfill({ status: 500, json: { detail } })
+			);
+			await page.goto('/vendors');
+			await page
+				.getByRole('button', { name: /^Bank/ })
+				.first()
+				.click();
+			const dialog = page.getByRole('dialog', { name: 'Vendor bank counterparty' });
+			const save = dialog.getByRole('button', { name: 'Save', exact: true });
+			await save.click();
+
+			const toast = region(page).getByTestId('toast').filter({ hasText: detail });
+			await expect(toast).toBeVisible();
+			// The dialog stays open on a failed save: the reader retries from it.
+			await expect(dialog).toBeVisible();
+			// Measure the toast at rest, not mid slide-in (its transform moves the box).
+			await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+
+			await expect
+				.poll(async () => {
+					const t = await toast.boundingBox();
+					const c = await save.boundingBox();
+					if (!t || !c) return 'unmeasured';
+					const overlap =
+						t.x < c.x + c.width && c.x < t.x + t.width && t.y < c.y + c.height && c.y < t.y + t.height;
+					return overlap ? 'covered' : 'clear';
+				})
+				.toBe('clear');
+
+			// The dialog itself reflows: its paired fields used to be wider than
+			// it at 320px, so the click on Save scrolled the form sideways.
+			expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+			// The toast is on screen, not pushed off it.
+			const t = (await toast.boundingBox())!;
+			expect(t.y).toBeGreaterThanOrEqual(0);
+			expect(t.y + t.height).toBeLessThanOrEqual(size.height);
+
+			// Both operable: Save takes a real pointer hit (trial runs
+			// Playwright's "receives events" check — a toast on top fails it),
+			// and the toast's 24px dismiss closes it without closing the dialog.
+			await save.click({ trial: true });
+			const dismiss = toast.getByRole('button', { name: 'Dismiss' });
+			const d = (await dismiss.boundingBox())!;
+			expect(d.width).toBeGreaterThanOrEqual(24);
+			expect(d.height).toBeGreaterThanOrEqual(24);
+			await dismiss.click();
+			await expect(toast).toHaveCount(0);
+			await expect(dialog).toBeVisible();
+			await save.click();
+			await expect(toast).toBeVisible();
+		});
+	}
+});

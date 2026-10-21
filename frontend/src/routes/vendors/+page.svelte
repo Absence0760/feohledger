@@ -1189,9 +1189,12 @@
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
+	/* `minmax(0, 1fr)`, not `1fr`: a bare `1fr` track never shrinks below its
+	   input's intrinsic width, so at 320px the bank dialog's paired fields
+	   overflowed it and the form scrolled sideways (WCAG 1.4.10). */
 	.form-row {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
 	}
 

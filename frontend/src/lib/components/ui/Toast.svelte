@@ -30,6 +30,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { placeToasts, TOAST_MARGIN, type Box } from '#lib/utils/toastPlacement.ts';
 
 	let region = $state<HTMLElement | null>(null);
 	let hovered = $state(false);
@@ -37,9 +38,11 @@
 	// Where keyboard focus came from when it entered the region, so the last
 	// dismissal can hand it back there rather than to the top of the page.
 	let returnTo: HTMLElement | null = null;
-	// Distance (px) from the viewport bottom the region must clear: the top of
-	// a fixed bulk-action bar, when one is showing. 0 = none.
-	let lift = $state(0);
+	// Distance (px) from the viewport bottom to the region's bottom edge, and a
+	// cap on its height (it scrolls past it). Measured while toasts show; null
+	// = the CSS default corner (above the consent banner), uncapped.
+	let placedBottom = $state<number | null>(null);
+	let maxHeight = $state<number | null>(null);
 
 	$effect(() => {
 		queue.setPaused(hovered || focusInside);
@@ -63,41 +66,112 @@
 	/**
 	 * Keep persistent errors clear of what the reader needs next (WCAG 2.4.11).
 	 * The region sits bottom-right, which is where the shared bulk-action bar
-	 * sits too (centred, `bottom: 24px`); while one is on screen the region
-	 * rises above it. Observed only while toasts are showing.
+	 * sits too (centred, `bottom: 24px`) — while one is on screen the region
+	 * rises above it — and, on a phone, where an open dialog's footer sits.
+	 * `utils/toastPlacement.ts` decides where the stack goes around that footer
+	 * (#635 G); this measures the page for it. Observed only while toasts are
+	 * showing.
 	 */
 	$effect(() => {
 		if (toasts.length === 0) {
-			lift = 0;
+			placedBottom = null;
+			maxHeight = null;
 			return;
 		}
-		let observed: Element | null = null;
+		const observed = new Set<Element>();
 		let frame = 0;
 		const resize = new ResizeObserver(() => schedule());
+		function watch(els: (Element | null)[]) {
+			const next = new Set(els.filter((el): el is Element => el !== null));
+			for (const el of observed) if (!next.has(el)) resize.unobserve(el);
+			for (const el of next) if (!observed.has(el)) resize.observe(el);
+			observed.clear();
+			for (const el of next) observed.add(el);
+		}
 		function measure() {
 			frame = 0;
-			const bar = document.querySelector('.bulk-bar');
-			if (bar !== observed) {
-				if (observed) resize.unobserve(observed);
-				observed = bar;
-				if (bar) resize.observe(bar);
-			}
-			lift = bar ? Math.max(0, window.innerHeight - bar.getBoundingClientRect().top) + 8 : 0;
+			if (!region) return;
+			const dialog = openDialog();
+			// A bulk bar behind an open dialog's backdrop is not what the
+			// reader is looking at; only the dialog's actions are.
+			const bar = dialog ? null : document.querySelector('.bulk-bar');
+			watch([bar, dialog, region]);
+			const vh = window.innerHeight;
+			const consent =
+				parseFloat(
+					getComputedStyle(document.documentElement).getPropertyValue('--consent-banner-height')
+				) || 0;
+			const barLift = bar ? Math.max(0, vh - bar.getBoundingClientRect().top) + 8 : 0;
+			const placed = placeToasts({
+				viewport: { width: window.innerWidth, height: vh },
+				stack: { width: region.offsetWidth, height: region.scrollHeight },
+				bottomInset: Math.max(TOAST_MARGIN + consent, barLift),
+				avoid: dialog ? dialogActions(dialog) : null
+			});
+			placedBottom = placed.bottom;
+			maxHeight = placed.maxHeight;
 		}
 		function schedule() {
 			if (!frame) frame = requestAnimationFrame(measure);
 		}
 		const mutations = new MutationObserver(schedule);
 		mutations.observe(document.body, { childList: true, subtree: true });
+		// The consent banner publishes its height on <html>'s style.
+		const rootStyle = new MutationObserver(schedule);
+		rootStyle.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
 		window.addEventListener('resize', schedule);
+		// A long dialog scrolls inside itself, carrying its footer with it.
+		document.addEventListener('scroll', schedule, { capture: true, passive: true });
 		measure();
 		return () => {
 			cancelAnimationFrame(frame);
 			mutations.disconnect();
+			rootStyle.disconnect();
 			resize.disconnect();
 			window.removeEventListener('resize', schedule);
+			document.removeEventListener('scroll', schedule, true);
 		};
 	});
+
+	/**
+	 * The open modal dialog, topmost last: `ui/Modal` and the feature dialogs
+	 * that hand-roll its shell (`InvoiceModal`, `RunDetailModal`, …) all render
+	 * `role="dialog"` inside a `.backdrop`; the portal's dialog sets
+	 * `aria-modal`. A popover (the bell's `role="dialog"`) is neither.
+	 */
+	function openDialog(): HTMLElement | null {
+		const all = document.querySelectorAll<HTMLElement>(
+			'.backdrop [role="dialog"], [role="dialog"][aria-modal="true"]'
+		);
+		return all.length ? all[all.length - 1] : null;
+	}
+
+	/**
+	 * The dialog's action row as it shows on screen: its last visible
+	 * `.modal-footer` (the shared footer class), else the row holding its last
+	 * visible button. Clipped to the dialog's own box, since a long dialog
+	 * scrolls and a footer scrolled out of it is not on screen to cover; null
+	 * when none of it is.
+	 */
+	function dialogActions(dialog: HTMLElement): Box | null {
+		const visible = (el: Element) => {
+			const r = el.getBoundingClientRect();
+			return r.width > 0 && r.height > 0;
+		};
+		const footers = [...dialog.querySelectorAll('.modal-footer')].filter(visible);
+		let row: Element | null = footers.at(-1) ?? null;
+		if (!row) row = [...dialog.querySelectorAll('button')].filter(visible).at(-1)?.parentElement ?? null;
+		if (!row) return null;
+		const r = row.getBoundingClientRect();
+		const d = dialog.getBoundingClientRect();
+		const box = {
+			top: Math.max(r.top, d.top, 0),
+			bottom: Math.min(r.bottom, d.bottom, window.innerHeight),
+			left: Math.max(r.left, d.left),
+			right: Math.min(r.right, d.right)
+		};
+		return box.top < box.bottom && box.left < box.right ? box : null;
+	}
 
 	function onFocusIn(e: FocusEvent) {
 		const from = e.relatedTarget as HTMLElement | null;
@@ -166,9 +240,11 @@
 	class="toast-region"
 	role="region"
 	aria-label={m('toast.region')}
-	style:bottom={lift
-		? `max(${lift}px, calc(16px + var(--consent-banner-height, 0px)))`
-		: 'calc(16px + var(--consent-banner-height, 0px))'}
+	class:capped={maxHeight !== null}
+	style:bottom={placedBottom === null
+		? 'calc(16px + var(--consent-banner-height, 0px))'
+		: `${placedBottom}px`}
+	style:max-height={maxHeight === null ? null : `${maxHeight}px`}
 	onfocusin={onFocusIn}
 	onfocusout={onFocusOut}
 >
@@ -221,7 +297,8 @@
 	   just groups them for the landmark. */
 	.toast-region {
 		position: fixed;
-		/* `bottom` is set inline: above the consent banner and any bulk bar. */
+		/* `bottom` is set inline: above the consent banner, any bulk bar, and
+		   an open dialog's actions (`utils/toastPlacement.ts`). */
 		bottom: 16px;
 		right: 16px;
 		z-index: 9999;
@@ -229,6 +306,15 @@
 		flex-direction: column;
 		gap: 8px;
 		pointer-events: none;
+	}
+
+	/* Too tall to fit beside a dialog's actions: the stack scrolls instead of
+	   covering them, by pointer (the wheel works over the toasts themselves).
+	   The dialog's focus trap keeps Tab inside the dialog, so a keyboard user
+	   reaches these toasts once the dialog closes. */
+	.toast-region.capped {
+		overflow-y: auto;
+		overscroll-behavior: contain;
 	}
 
 	.toast-container {
