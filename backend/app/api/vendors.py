@@ -21,6 +21,7 @@ from app.api.deps import (
     ensure_live_erp_entitled,
     get_org_id,
     require_permission,
+    require_role_or_permission,
     require_roles,
 )
 from app.api.pagination import (
@@ -129,6 +130,18 @@ from app.utils.tenant_urls import tenant_base_url
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vendors", tags=["vendors"])
+
+#: The vendor READS a vendor-permission holder needs to reach the rows it acts
+#: on — the list, its select-all ids, its chip counts and the detail the Block /
+#: Edit controls open from. The system roles keep exactly the set they had
+#: (admin, ap_manager, cfo); a custom role holding only `vendor.manage` or
+#: `vendor.block` is admitted too, where the role-only gate answered 403 on the
+#: list its own permission acts on. `cfo` holds no vendor permission, so this
+#: cannot be a plain `require_permission` the way the payment-run list is.
+_VENDOR_READ = require_role_or_permission(
+    roles=(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO),
+    permissions=(PERM_VENDOR_MANAGE, PERM_VENDOR_BLOCK),
+)
 
 
 def _merge_bank_details(existing: dict | None, incoming: dict | None) -> dict | None:
@@ -467,7 +480,7 @@ async def list_vendors(
     source: str | None = None,
     sort: SortParams = Depends(sort_params),
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(_VENDOR_READ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     query = _vendor_list_filters(
@@ -536,7 +549,7 @@ async def list_vendor_ids(
     status_filter: str | None = Query(None, alias="status"),
     source: str | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(_VENDOR_READ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Every vendor id matching the caller's list filters — the resolver
@@ -761,7 +774,7 @@ async def vendor_status_counts(
     search: str | None = None,
     source: str | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(_VENDOR_READ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Status tallies for the vendor filter chips, plus the payment-block tally.
@@ -1065,7 +1078,7 @@ async def screening_review_queue(
 async def get_vendor(
     vendor_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(_VENDOR_READ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     await ensure_in_entity_scope(

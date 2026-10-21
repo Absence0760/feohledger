@@ -39,12 +39,14 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — the #575 money-path review (decisions §302)
+**Last reconciled:** 2026-10-20 — the #575 money-path review (decisions §304)
 opened one (c) entry, the invoice currency that cannot be unknown, taking the
-file from 120 → 121. Before that, 2026-10-20 — giving backend rules a single owner (issue #575 §3)
+file from 119 → 120. Before that, 2026-10-20 — giving backend rules a single owner (issue #575 §3)
 opened two (c) entries, the payment-schedule readers that join every row and the CSV
-importer's byte-exact duplicate skip, taking the file from 118 → 120. Before that,
-2026-10-20 — fixing signup's dead ends (decisions §292)
+importer's byte-exact duplicate skip, taking the file from 117 → 119. Before that,
+2026-10-20 — the admin persona's user-management fixes (decisions §293) closed
+the (c) entry "A SCIM deactivation writes no audit row", taking the file from
+118 → 117. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
@@ -178,7 +180,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**121 open: 105 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**120 open: 104 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1226,7 +1228,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       2026-10-20, again not taken:** the settings and portal slices (§300)
       generalised that to one file per catalogue kind; the total measured 1034
       of 1075 (down from 1050), still not binding, and the change was scoped to
-      the per-chunk ceiling that was.
+      the per-chunk ceiling that was. **Fired a third time 2026-10-20, not
+      taken:** the workflow became a reusable workflow called from `ci.yml` so
+      the budget gates merges through `CI gate` (decisions §301). That change
+      was deliberately limited to the trigger, with the measurement and the
+      numbers left exactly as they were, and the total is still not binding.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
@@ -1337,19 +1343,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       Scale customer who asks for it, or before the pricing page next lists it
       — whichever is first; until then the listing should be qualified or
       dropped (owned by the pricing-page work, issue #426).
-- [ ] **(c) A SCIM deactivation writes no audit row.** `api/scim.py`'s PUT
-      (`active: false`), PATCH (`active` replace / remove) and DELETE all set
-      `User.is_active = False` with no `user.deactivated`-style audit row, where
-      the admin path (`/api/admin/users`) audits the same change. Access is
-      still cut at once — `get_current_user` refuses an inactive user, so the
-      leaver's live JWTs stop working — so this is a SOX trail gap, not an
-      access gap. Pre-existing; the plan-gate review noticed it because §258
-      keeps deprovisioning open on every plan. **Durable fix:** one helper in
-      `api/scim.py` that every deactivating branch calls, writing a PII-free
-      audit row (actor `None`, `details.source: "scim"`) through
-      `dispatch_auth_audit`, plus `revoke_user_sessions` for parity with the
-      admin path; a test per branch. **Trigger:** the next change to
-      `api/scim.py`, or before the first SCIM-provisioned customer.
 
 ### Receiving, ERP depth and commerce sync (2026-10-07, roadmap Priority 14, decisions §260)
 
@@ -1686,7 +1679,7 @@ scope (§260) — do not fold them into any of these.
       `currency="USD"` before anything has read the document. So an extraction
       whose model returns no currency field, and no code beside the amounts,
       leaves a non-US invoice labelled USD, which is the default decisions
-      §160/§196/§200 forbid. Since §302 the printed code fills the gap when the
+      §160/§196/§200 forbid. Since §304 the printed code fills the gap when the
       page has one; this entry is the case where it doesn't. Two readers then
       stamp the same default again: `invoice_warnings` scopes the
       statistical-anomaly history with `Invoice.currency == (invoice.currency

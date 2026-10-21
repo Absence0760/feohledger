@@ -510,7 +510,7 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         {"lineItemsTotal": "number", "amount": "number"},
     ),
     # The document contradicts itself about its currency, so `_apply_extraction`
-    # left the header money unread (`decisions.md` §302). The codes are `text`,
+    # left the header money unread (`decisions.md` §304). The codes are `text`,
     # not `currency`: a `currency` param only labels a `money` figure beside it
     # and never reaches the sentence, and here the codes ARE the sentence.
     WarningSpec(

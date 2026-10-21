@@ -422,7 +422,7 @@ async def test_golden_inconsistent_read_is_flagged(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# The printed ISO code is currency evidence (decisions §302)
+# The printed ISO code is currency evidence (decisions §304)
 # --------------------------------------------------------------------------- #
 
 

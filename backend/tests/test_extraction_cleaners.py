@@ -250,7 +250,7 @@ def test_extracted_line_number_is_an_int_or_none(raw, expected):
 #
 # Stripping the ISO code made `GBP 9,500.00` parse — and then threw the code
 # away, so with no `currency` field the row kept the upload's `USD` and a
-# GBP 9,500 invoice was gated as USD 9,500 (decisions §302). The code is the
+# GBP 9,500 invoice was gated as USD 9,500 (decisions §304). The code is the
 # document's own statement of the currency and is now weighed, not discarded.
 
 

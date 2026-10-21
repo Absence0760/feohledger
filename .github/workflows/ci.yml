@@ -42,6 +42,7 @@ jobs:
       mobile: ${{ steps.filter.outputs.mobile }}
       e2e: ${{ steps.filter.outputs.e2e }}
       day_one: ${{ steps.filter.outputs.day_one }}
+      bundle: ${{ steps.filter.outputs.bundle }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: filter
@@ -83,6 +84,14 @@ jobs:
               - 'scripts/day-one/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+            # The web bundle budget (web-bundle-budget.yml) builds frontend/
+            # alone, from frontend/pnpm-lock.yaml, so only frontend/ and the
+            # two workflow files that define the check can move its numbers.
+            # These are the paths its standalone `pull_request` trigger used.
+            bundle:
+              - 'frontend/**'
+              - '.github/workflows/web-bundle-budget.yml'
               - '.github/workflows/ci.yml'
 
   # The core service images every test job starts — pgvector, Redis, MinIO — are
@@ -196,6 +205,18 @@ jobs:
       # paid for eight times over in jobs that have them.
       - name: pytest-split baseline still describes the suite
         run: python scripts/check_test_durations.py
+
+      # Source-level checks on the migration chain: revision ids fit the
+      # version column, parents resolve, ONE head, and no two migrations share
+      # a number. Two PRs that each add the next migration are both green alone
+      # and fork the chain once both merge, which fails the deploy's
+      # `alembic upgrade head`. It needs no database, so it runs here, where a
+      # fork is reported in seconds rather than inside one of eight shards; the
+      # same file still runs in the shards as part of the suite. ci.yml also
+      # runs on every push to main, which is where two such PRs merged
+      # back to back are caught.
+      - name: Alembic migration chain has one head
+        run: python -m pytest -q tests/test_alembic_revision_ids.py
 
   # The backend pytest suite (~10,100 tests against a real Postgres/Redis/MinIO)
   # would run ~60 min as one serial job — the longest job in CI. It's sharded the
@@ -1559,6 +1580,35 @@ jobs:
           docker compose -p feoh-day-one -f backend/docker-compose.yml -f scripts/day-one/compose.yml \
             --profile mail --profile aws logs --tail 200 || true
 
+  # The web bundle budget. Its steps, ceilings and their change log live in
+  # web-bundle-budget.yml, a reusable workflow, so this job is only the call.
+  # It is here, rather than a standalone workflow, so that `ci-gate` needs it:
+  # standalone, it ran outside the gate and a red budget merged anyway
+  # (PR #611). Path-scoped by the `bundle` filter — an unrelated PR skips it,
+  # and the gate counts a skip as a pass.
+  bundle-budget:
+    name: Web bundle budget
+    needs: [changes]
+    if: needs.changes.outputs.bundle == 'true'
+    uses: ./.github/workflows/web-bundle-budget.yml
+
+  # CodeQL (Python, TypeScript/JavaScript, GitHub Actions) and Trivy on the
+  # backend image, from security.yml, a reusable workflow. Runs on EVERY pull
+  # request and push to main — no path filter — so the gate always has a real
+  # result. The weekly scan stays a schedule in security.yml itself.
+  #
+  # A called workflow's token is capped by the caller's permissions, and this
+  # file's default is `contents: read` only, so the grant the SARIF uploads
+  # need is made here: `security-events: write` to upload, `actions: read` for
+  # CodeQL's workflow-run lookup (see the note in security.yml).
+  security:
+    name: Security
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/security.yml
+
   # Single required status check for branch protection. `main` requires
   # only this context; it fans in on every job above via `needs` +
   # always(), failing the merge if any of them did not pass. A skipped
@@ -1567,7 +1617,11 @@ jobs:
   # still goes green here. This workflow always triggers on PRs (no
   # paths-ignore), so the gate always reports; no docs-companion needed.
   # Add a new job's id to `needs` to gate merges on it — the
-  # branch-protection config never changes.
+  # branch-protection config never changes. A check that lives in another
+  # workflow file gates merges only by being CALLED from here
+  # (`workflow_call`), as `bundle-budget` and `security` are: a separate
+  # workflow's red result is invisible to this job, and making one a required
+  # check of its own hangs every PR its path filter skips.
   ci-gate:
     name: CI gate
     runs-on: ubuntu-latest
@@ -1587,6 +1641,8 @@ jobs:
       - service-e2e
       - erp-e2e
       - day-one-e2e
+      - bundle-budget
+      - security
     steps:
       - name: Require every upstream job to have passed
         env:

@@ -680,7 +680,7 @@ async def test_spend_po_relief_only_for_invoices_actual_counts(realdb):
 
 async def test_spend_po_relief_counts_an_approved_invoice_whose_erp_push_failed(realdb):
     """An approved invoice whose ERP push failed sits at `failed` with its
-    approval stamp; `actual` counts it (decisions §302), so it must relieve its
+    approval stamp; `actual` counts it (decisions §304), so it must relieve its
     PO too — the two legs share `_realised_for_budget`."""
     cc = f"CC-{_u()}"
     bid = await _mk_budget_row(
