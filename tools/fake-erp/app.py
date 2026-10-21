@@ -1410,6 +1410,10 @@ XERO_CONTACTS = [
         "PaymentTerms": {"Bills": {"Day": 30, "Type": "DAYSAFTERBILLDATE"}},
     },
     {"ContactID": "xero-contact-2", "Name": "Fake Xero Customer Co", "IsSupplier": False},
+    # Real Xero sets IsSupplier only once a contact has a bill, so a supplier
+    # that has only been sent purchase orders is NOT one (seen live in the
+    # Demo Company). The vendor sync must still find it, through its POs.
+    {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier", "IsSupplier": False},
 ]
 XERO_ACCOUNTS = [
     {
@@ -1456,6 +1460,32 @@ XERO_PURCHASE_ORDERS = [
                 "AccountCode": "6100",
             }
         ],
+    },
+    {
+        "PurchaseOrderID": "xero-po-3",
+        "PurchaseOrderNumber": "PO-XERO-403",
+        "Contact": {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier"},
+        "Total": 250.00,
+        "Status": "AUTHORISED",
+        "CurrencyCode": "ZAR",
+        "LineItems": [
+            {
+                "Description": "Paper and toner",
+                "Quantity": 10,
+                "UnitAmount": 25.00,
+                "LineAmount": 250.00,
+                "AccountCode": "6100",
+            }
+        ],
+    },
+    {
+        "PurchaseOrderID": "xero-po-4",
+        "PurchaseOrderNumber": "PO-XERO-404",
+        "Contact": {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier"},
+        "Total": 362.00,
+        "Status": "DRAFT",
+        "CurrencyCode": "ZAR",
+        "LineItems": [],
     },
     {
         "PurchaseOrderID": "xero-po-2",
