@@ -65,11 +65,14 @@ if [ "$VM" = 1 ]; then
 	SIGNUP=$(feoh_signup_enabled .env)
 	SITEKEY=$(feoh_env FEOH_HCAPTCHA_SITEKEY)
 	TENANT=$(feoh_first_tenant_host)
-	[ -n "$APP" ] && [ -n "$API" ] || usage "APP_DOMAIN / API_DOMAIN missing from deploy/.env"
+	if [ -z "$APP" ] || [ -z "$API" ]; then
+		usage "APP_DOMAIN / API_DOMAIN missing from deploy/.env"
+	fi
 	export FEOH_SMOKE_RESOLVE=127.0.0.1
 else
-	[ -n "$APP" ] && [ -n "$API" ] && [ -n "$TENANT" ] && [ -n "$SIGNUP" ] ||
+	if [ -z "$APP" ] || [ -z "$API" ] || [ -z "$TENANT" ] || [ -z "$SIGNUP" ]; then
 		usage "--app, --api, --tenant and --signup are all required without --vm"
+	fi
 	export FEOH_SMOKE_RESOLVE=""
 fi
 case "$SIGNUP" in

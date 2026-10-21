@@ -50,8 +50,9 @@ curl -fsSL --retry 3 -o "$work/$asset" "$url" || die "could not download ${url}"
 curl -fsSL --retry 3 -o "$work/$asset.sha256" "$url.sha256" || die "could not download ${url}.sha256"
 want=$(cut -d' ' -f1 <"$work/$asset.sha256")
 got=$(sha256sum "$work/$asset" | cut -d' ' -f1)
-[ -n "$want" ] && [ "$want" = "$got" ] ||
+if [ -z "$want" ] || [ "$want" != "$got" ]; then
 	die "${asset} ${version}: sha256 ${got} does not match the published ${want}."
+fi
 install -m 0755 "$work/$asset" "$dest_dir/docker-compose"
 
 running=$(docker compose version --short)
