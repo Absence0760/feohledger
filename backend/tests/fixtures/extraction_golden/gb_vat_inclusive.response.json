@@ -1,0 +1,20 @@
+{
+  "id": "msg_golden_gb_vat_inclusive",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"invoice_number\": {\n    \"value\": \"HF-2291\",\n    \"confidence\": 0.97\n  },\n  \"vendor_name\": {\n    \"value\": \"Harrow & Finch Facilities Ltd\",\n    \"confidence\": 0.96\n  },\n  \"vendor_address\": {\n    \"value\": \"12 Sample Row, Leeds LS1 4AB\",\n    \"confidence\": 0.9\n  },\n  \"vendor_tax_id\": {\n    \"value\": \"GB 999 9999 73\",\n    \"confidence\": 0.9\n  },\n  \"amount\": {\n    \"value\": \"£2,238.00\",\n    \"confidence\": 0.96\n  },\n  \"currency\": {\n    \"value\": \"GBP\",\n    \"confidence\": 0.96\n  },\n  \"subtotal\": {\n    \"value\": \"£1,865.00\",\n    \"confidence\": 0.94\n  },\n  \"tax_amount\": {\n    \"value\": \"£373.00\",\n    \"confidence\": 0.94\n  },\n  \"tax_rate\": {\n    \"value\": \"20%\",\n    \"confidence\": 0.93\n  },\n  \"discount_amount\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"shipping_amount\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"invoice_date\": {\n    \"value\": \"2026-09-03\",\n    \"confidence\": 0.95\n  },\n  \"due_date\": {\n    \"value\": \"2026-10-03\",\n    \"confidence\": 0.93\n  },\n  \"payment_terms\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"po_number\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"description\": {\n    \"value\": \"HVAC maintenance and parts\",\n    \"confidence\": 0.8\n  },\n  \"reference_number\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"payment_method\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"bill_to_address\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"remit_to_address\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"suggested_gl_account\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"suggested_cost_center\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"line_items\": [\n    {\n      \"line_number\": 1,\n      \"item_code\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"description\": {\n        \"value\": \"Quarterly HVAC service\",\n        \"confidence\": 0.93\n      },\n      \"quantity\": {\n        \"value\": \"1\",\n        \"confidence\": 0.93\n      },\n      \"unit_price\": {\n        \"value\": \"£1,450.00\",\n        \"confidence\": 0.93\n      },\n      \"tax\": {\n        \"value\": \"£290.00\",\n        \"confidence\": 0.85\n      },\n      \"total\": {\n        \"value\": \"£1,740.00\",\n        \"confidence\": 0.93\n      }\n    },\n    {\n      \"line_number\": 2,\n      \"item_code\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"description\": {\n        \"value\": \"Filter replacement\",\n        \"confidence\": 0.93\n      },\n      \"quantity\": {\n        \"value\": \"12\",\n        \"confidence\": 0.93\n      },\n      \"unit_price\": {\n        \"value\": \"£18.75\",\n        \"confidence\": 0.93\n      },\n      \"tax\": {\n        \"value\": \"£45.00\",\n        \"confidence\": 0.85\n      },\n      \"total\": {\n        \"value\": \"£270.00\",\n        \"confidence\": 0.93\n      }\n    },\n    {\n      \"line_number\": 3,\n      \"item_code\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"description\": {\n        \"value\": \"Call-out charge\",\n        \"confidence\": 0.93\n      },\n      \"quantity\": {\n        \"value\": \"2\",\n        \"confidence\": 0.93\n      },\n      \"unit_price\": {\n        \"value\": \"£95.00\",\n        \"confidence\": 0.93\n      },\n      \"tax\": {\n        \"value\": \"£38.00\",\n        \"confidence\": 0.85\n      },\n      \"total\": {\n        \"value\": \"£228.00\",\n        \"confidence\": 0.93\n      }\n    }\n  ]\n}"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 3120,
+    "output_tokens": 1480,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}
