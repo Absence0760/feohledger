@@ -12637,3 +12637,276 @@ choice at the first frame; localhost writes no cookie; the auth-shell picker
 persists and passes axe) and `tests-e2e/signup/flow.spec.ts` (the captcha
 redraws on a picker change and on an OS change, keeps a solved widget, and
 redraws after expiry).
+
+## 291. One address is one account in one workspace, and every collision says so (2026-10-20)
+
+**Found by the admin persona review.** `users.email` is globally unique, so an
+address names one account in one workspace and there is no multi-workspace
+membership. Three paths had not caught up with that:
+
+- **SSO/SAML JIT** searched only the signing-in workspace, then inserted, and the
+  UNIQUE constraint raised at flush: a bare `500` on the callback, no audit row.
+  A contractor in two customers' IdPs hit it on first sign-in and nobody could
+  see why. SCIM already answered the same collision with a `409`.
+- **Admin create/rename** answered a bare "Email already in use" — a dead end
+  for the inviter, and a platform-wide existence oracle for anyone holding
+  `user.manage`, including the admin of a free self-signup tenant.
+- **The `wrong_workspace` row** (§288) recorded neither the workspace whose page
+  it was nor that the password had verified.
+
+**The rules:**
+
+1. `identity_provisioning.email_holder_org_id` is the one platform-wide,
+   case-insensitive "who holds this address" lookup; JIT, admin and SCIM all ask
+   it before writing. JIT raises `EmailInOtherWorkspace` before the insert, and
+   the insert runs in a savepoint so a concurrent writer is the same refusal.
+2. **SSO refuses with a coded `403` `sso_email_in_other_workspace`, and no link.**
+   The password path links the account's own sign-in page because only someone
+   who proved the password sees it. Here the proof is an assertion from the
+   signing-in workspace's IdP, which that workspace's admin controls and can
+   make assert any address; a link would name another tenant's workspace (slug
+   or vanity host) for any address typed. The real user knows their own
+   workspace; the sentence tells them to sign in there or ask for a different
+   address. The row goes in the IdP's workspace (its admin is the one who can
+   act) and **not** in the account's: that admin must not be able to write
+   rows into another tenant's log by typing addresses. SAML routes the refusal
+   through a refusal-only handoff code so the browser lands on the SPA bridge,
+   not raw JSON at the ACS.
+3. **Admin and SCIM say which case it is** — `email_in_this_workspace` (edit the
+   existing user) or `email_in_other_workspace` (use a different address) —
+   naming no workspace and no account.
+4. **The remaining existence signal is bounded, not hidden.** While the address
+   is global, any refusal confirms it is taken. Hiding it would mean answering a
+   collision as if it succeeded (inventing a user that does not exist) or
+   refusing without a reason (the dead end again), so the admin path spends a
+   per-workspace budget of 20 other-workspace refusals an hour, checked before
+   the lookup so a throttled sweep learns nothing. Per workspace rather than per
+   user, so minting extra user-managers does not widen it. Once spent, EVERY
+   create and email rename in that workspace waits out the window — a free
+   address included, with its own coded 429 `email_check_throttled` saying so
+   — because refusing only the taken addresses would make the 429 the oracle.
+   That can pause a real onboarding for up to an hour after twenty
+   other-workspace hits, which is the accepted price. SCIM and SSO are **not**
+   budgeted, and their signal is accepted: an IdP re-sends a doomed SCIM write
+   every reconcile cycle, so a throttle would turn a stated 409 into a stuck
+   provisioning job, and a budget on SSO refusals would lock a whole
+   workspace's sign-ins; both also need the plan-gated SSO/SCIM feature and a
+   configured IdP, each SSO probe is a full browser round trip that leaves a
+   row in the prober's own audit log, and the same admin can already ask the
+   budgeted admin path.
+5. **`wrong_workspace` audits `attempted_workspace` and `password_verified:
+   true` in the account's workspace, and nothing in the attempted one.** An
+   unknown address leaves no row anywhere, so a row in the attempted workspace
+   only when the password was right would make its log an oracle; the event is
+   the account's.
+6. **The wrong-workspace link prefers a registered custom domain** when the org
+   sets no `tenant_url_template` (an explicit template still wins). The runbook
+   registers a host only once DNS and TLS are live, and the slug subdomain is a
+   different origin: another stored token, and no passkeys bound to the vanity
+   host. Other outbound links are unchanged.
+7. **A token refused as `token_tenant_mismatch` is also revoked**, best-effort,
+   by the SPA calling `POST /api/auth/logout` with it and without the page's
+   `X-Tenant-Slug` (logout reads the token's own claims and needs no
+   workspace). Clearing it locally left a live session in its own workspace.
+
+**Rejected:** silently linking or migrating the person into the second
+workspace (an IdP is not entitled to move an account between tenants), and
+true multi-workspace membership now — the right long-term model, but it
+reaches login, sessions, every `organization_id`-keyed user query, SCIM, JIT,
+access reviews and DSAR; tracked in `docs/followups.md` § Surfaced by the
+cross-workspace identity fixes.
+
+Tests: `backend/tests/test_email_identity_case.py` (JIT, the race, the OIDC
+callback, admin create/rename, the budget, SCIM, the wrong-workspace audit
+row), `backend/tests/test_saml_acs_integration.py` (ACS → bridge → exchange),
+`backend/tests/test_tenant_url_resolver.py` (the custom-domain link),
+`frontend/src/lib/api/sessionRejection.test.ts` (revocation) and
+`frontend/src/lib/api/codedRefusals.test.ts` (the three sentences).
+
+## 292. Signup refuses an address that already has an account at /complete, and a used verification link is re-answered (2026-10-20)
+
+**Two dead ends in self-service signup.**
+
+1. **An address that already had an account.** `users.email` is unique across
+   every organization, but `/signup/start` never looked at the address. The
+   visitor was told a link was on its way; opening it ran `provision_tenant`,
+   which created the database, hit the unique index, dropped the database and
+   surfaced as a 500 "Something went wrong… contact support". The verification
+   stayed unconsumed, so every reload did all of that again.
+2. **Opening the link twice.** `/verify` redeems on page load and the token is
+   spent on success, so a reload, a second tab, or a mail scanner that ran the
+   page first met the uniform 410 "invalid or expired, please sign up again" —
+   and signing up again then failed, because the slug was now taken by the
+   workspace that very link had created.
+
+**The rule for (1): refuse at `/complete`, keep `/start` uniform.**
+`/signup/complete` checks the address (case-insensitively, as sign-in does)
+before the slug and before provisioning. An address with an account answers
+`409` coded `signup_email_has_workspace`, with `params.sign_in_url` the existing
+account's own sign-in page, built exactly as the wrong-workspace login refusal
+builds it (§288). The verification is spent and committed before the refusal is
+raised, so it can never reach provisioning again, and re-opening it re-states
+the same refusal. The address is checked before the slug so someone signing up
+again for their own workspace is pointed at it, not told the name is taken.
+
+`/start` answers an address with an account exactly as it answers any other —
+same status, same message, a verification link sent. It is public and captcha'd
+but unauthenticated, and a different answer there would let anyone test which
+addresses have accounts. At `/complete` the visitor has proven they read the
+mailbox, so naming the workspace tells them nothing they could not learn from
+their own inbox.
+
+**Rejected: sending a "you already have a workspace" email from `/start`
+instead of a verification link.** It saves the visitor a click and also keeps
+the answer uniform, but it needs a second email template in six locales, and
+`/complete` needs the check regardless: an address can gain an account between
+the two steps. One refusal point covers both.
+
+**The race is a definite answer too.** If the account appears after the check,
+the real `provision_tenant` fails on the unique index. It already drops the
+database it created and removes any control-plane rows it committed (#575), so
+nothing half-made is left. `/complete` then re-reads the address and the slug
+and, when either explains the failure, answers the coded refusal or the slug
+409, never a 500 the link would repeat. A failure neither explains is still the
+500 with the link left unconsumed, so a transient fault can be retried.
+
+**The rule for (2): `/complete` is idempotent for a spent link.** A spent,
+unexpired verification whose slug now names an organization holding an account
+with the link's address is re-answered with that workspace: `200`,
+`already_verified: true`, the tenant URL, the address and `sign_in_url`.
+Nothing is issued. There is no second set-password link (`set_password_url` is
+null), no welcome email, and no audit row. The first answer and the welcome
+email carry the only link, and minting a fresh credential every time an email
+link is opened is what the single-token design of §283 avoids. The page shows
+"Your workspace is ready" with **Go to sign in** and says where the
+set-password link is. A spent link that matches no workspace, or one past its
+24-hour life, is still the uniform 410: the re-answer never shows a workspace
+the link did not create, and a stale link is not kept alive.
+
+**Rejected: redeeming on a button, as the reset-password page spends its token
+only on submit.** The property that page has is that opening the link costs the
+user nothing (its load is a non-consuming `check`, §283). A button would not
+give `/verify` that property: once the workspace exists the token is spent
+however it was spent, so a reload after success would still meet the 410. The
+re-answer does give it, for every way the link gets opened, the button click
+included. It also makes a JavaScript-running mail scanner harmless: if it
+redeems first, the person who clicks next sees their workspace, and the
+set-password link is in the welcome email the scanner's visit sent.
+
+**Not fixed here.** Nobody who has forgotten which workspace their account is in
+can find it without support. Forgot-password works only on a workspace host,
+and the apex has no sign-in page. This refusal helps only someone who has
+already started a signup. The durable fix, an apex "email me my workspace
+address" form with a uniform answer, is in `docs/followups.md`.
+
+Guards: `backend/tests/test_signup.py` (`/start` uniform for an address with an
+account; the coded refusal on a case variant, never provisioning and stable
+across re-opening; the race against the real `provision_tenant` leaving no
+database and no organization; a spent link re-answered twice with nothing
+minted, sent or provisioned; a spent link on someone else's slug still 410),
+`frontend/src/lib/api/codedRefusals.test.ts` (the refusal localized, the link
+carried), and `frontend/tests-e2e/signup/flow.spec.ts` (both states stubbed, plus
+through Mailpit: the link opened again in a second tab after success, and an
+existing login's signup refused on first open and on reload, with the slug left
+free).
+
+## 300. Strings only some routes render load with those routes, as lazy catalogue slices in every locale (2026-10-20)
+
+(Numbered 300 because §292–§299 are held by pull requests still in flight.)
+
+The Japanese catalogue measured 100 KB gzipped on `main` — the per-chunk
+ceiling in `web-bundle-budget.yml` — and the five keys of PR #611 took it to
+101. The help slice of §261 had bought two weeks. Behind it sat a second
+problem: English main is a static import, so it shares an entry chunk with
+the i18n runtime, and that chunk was at ~97 KB. Moving keys out of the other
+five catalogues alone would have left the English chunk to trip the ceiling
+next.
+
+The keys moved were chosen by measuring gzipped bytes per top-level namespace
+in `ja` and `en` and keeping the namespaces only a bounded set of routes
+renders:
+
+| Slice | Namespaces | Keys | Share of `ja` | Loaded by |
+|---|---|---|---|---|
+| `settings` | `org`, `orgSso`, `admin`, `billing`, `sweepHealth` | 1,023 | ~20% | `/organization`, `/admin/**`, `/billing`, `/help` |
+| `portal` | `portal` | 295 | ~5% | `/portal/**` |
+
+`invoices`, `vendors`, `payments` and `workflows` are as large but render
+across the app (modals, pickers, status badges), so they stay in the main
+catalogue. Measured on `main` + the split: largest main catalogue 77 KB,
+largest chunk 77 KB (the English one), settings 21 KB, portal 6 KB, total
+1034 KB (was 1050); with #611 on top, 77 / 78 / 1034.
+
+How it works, and what it guarantees:
+
+1. **One mechanism, not a second hand-rolled copy of §261's.**
+   `ensureSlices(...names)` replaces `ensureHelpCatalogue()`;
+   `SLICE_LOADERS` holds a loader per slice per locale; `m()` reads the main
+   catalogue first and only then finds a key's slice by prefix
+   (`SLICE_PREFIXES`), so the runtime never bundles a slice's key list.
+   `MessageKey` now means any key `m()` resolves.
+2. **A route awaits its slice.** Each route's `+layout.ts` is
+   `export const load = () => ensureSlices('settings')`. SvelteKit awaits it
+   before rendering, so a slice key is never read before its slice is there and
+   a client-side navigation paints the reader's language on the first frame —
+   which is better than §261's "English until it lands" on a route.
+   `tests-e2e/i18n/catalogue-slices.spec.ts` proves this with the slice's
+   chunk deliberately delayed; a `load` that does not wait fails it.
+3. **The route-scoped slices are lazy in English too.** Nothing reads them
+   unloaded, and keeping their English out of the entry chunk is what brought
+   the English chunk from ~97 to 77 KB. The help slice keeps its static
+   English copy: a HelpTip renders on every page with no route `load` to wait
+   on, so it needs something to show while its chunk is in flight.
+4. **A key rendered where its slice is not loaded is a test failure.**
+   `src/lib/i18n/slices.test.ts` builds the import graph of `src/` and fails on
+   any file that names a key of a slice (a literal, a `{ui:}` reference in help
+   prose, or a runtime-built prefix) and is reachable from a route whose
+   layouts do not load that slice, naming the chain. Keys the backend names —
+   the ERP and commerce form fields' `label_key`s — are read out of the backend
+   adapter packages and attributed to the panel that renders them. Every slice
+   key must be named somewhere, so a key the scan cannot place fails rather
+   than slipping through; that found two dead keys (`help.glossary.topic`,
+   `org.section.brandingSaved`), removed. In dev, `m()` also logs such a key.
+   The thirteen keys under the slice prefixes that shared code renders —
+   role names, NACHA field names, commerce environment options, the portal's
+   "waiting on" phases — stay in the main catalogue, which the test is what
+   decided.
+5. **A locale switch swaps everything at once.** `setLocale` loads the main
+   catalogue and every wanted slice in parallel and assigns them together, so
+   a settings form never shows one language inside another's chrome. A slice
+   that fails in the new locale falls back to English. §261's loader retried a
+   failed help chunk in a loop for as long as it kept failing; the loader now
+   retries only when the locale changed while it was in flight.
+6. **Parity and plurals cover every slice.** `messages_parity.test.ts` holds
+   each slice in each locale to the main catalogue's rules;
+   `plural_messages.test.ts` and `approvalThresholdCurrency.test.ts` read every
+   slice through `allMessages.ts::loadAllMessages`, having silently stopped
+   seeing the keys that moved (help's plurals included, since §261).
+7. **The budget counts one file per catalogue kind**, the kinds read off the
+   `locales/` subdirectories, so a further slice is counted correctly without
+   editing the workflow.
+
+Rejected:
+
+- **Raising `MAX_LARGEST_CHUNK_KB`.** The workflow's own log says not to for
+  catalogues, and the next feature would trip it again.
+- **A slice per route.** Six thousand keys reorganised for a problem two
+  prefixes solved, and a page's strings would fragment across its modals and
+  shared components.
+- **Moving `invoices.*` / `vendors.*` / `payments.*`.** Larger, but rendered
+  from shared modals and pickers on most routes; the scope test would have
+  kept most of them in main, and a slice every route loads saves nothing.
+- **Keeping the new slices' English static, as help's is.** Simpler, but it
+  leaves the English chunk at ~98 KB, two kilobytes from the ceiling.
+- **Resolving the visitor's locale before the first route `load` runs**, so a
+  non-English cold load of a settings route does not fetch the English slice
+  before its own. It saves ~15 KB on that one cold load and would mean the
+  route `load` and `initLocale` racing to decide the locale; the existing
+  English-first paint of the main catalogue already has the same shape.
+
+Tests: `frontend/src/lib/i18n/slices.test.ts`,
+`frontend/src/lib/i18n/messages_parity.test.ts`,
+`frontend/src/lib/i18n/plural_messages.test.ts`,
+`frontend/tests-e2e/i18n/catalogue-slices.spec.ts`, and the backend's
+`test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
+settings slice for the form labels they check.

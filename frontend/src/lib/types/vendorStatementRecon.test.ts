@@ -12,7 +12,7 @@ import {
 	isMachineRead,
 	sourceStatementFilename
 } from './vendorStatementRecon';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 // The vendor-statement provenance surface is the only place a reviewer learns
 // that a run's lines were MACHINE-READ off a PDF rather than typed or parsed
@@ -102,7 +102,7 @@ describe('RECON_SOURCE_FORMAT_LABEL_KEYS', () => {
 		// naming nothing in the catalogue typechecks fine and renders the raw key
 		// string in the provenance pill, so check the catalogue too.
 		for (const key of Object.values(RECON_SOURCE_FORMAT_LABEL_KEYS)) {
-			expect(Object.keys(en), `"${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `"${key}" is not in the catalogue`).toContain(key);
 		}
 		expect(reconSourceFormatLabelKey('pdf')).toBe('vendorStatements.sourceFormat.pdf');
 		expect(reconSourceFormatLabelKey('edi')).toBeNull();
@@ -114,8 +114,8 @@ describe('RECON_STATUS_LABEL_KEYS', () => {
 		for (const status of RECON_STATUSES) {
 			const key = RECON_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key]).not.toBe(status);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key]).not.toBe(status);
 		}
 	});
 
@@ -136,7 +136,7 @@ describe('the per-line label maps', () => {
 			...Object.values(RECON_CLASSIFICATION_LABEL_KEYS),
 			...Object.values(RECON_RESOLUTION_LABEL_KEYS)
 		]) {
-			expect(Object.keys(en), `"${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `"${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 });

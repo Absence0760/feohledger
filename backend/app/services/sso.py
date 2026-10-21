@@ -718,6 +718,19 @@ async def create_saml_handoff(
     return code
 
 
+async def create_saml_refusal_handoff(refusal: str, tenant_slug: str) -> str:
+    """Park a refusal the ACS decided behind the same one-time code shape, so
+    the browser lands on the SPA bridge (which can state it, localized) rather
+    than on the ACS's raw JSON. `/exchange` answers the code with the coded
+    refusal and no token. Same TTL, prefix and single-use consume as a token
+    handoff — the bridge cannot tell them apart until it exchanges."""
+    code = secrets.token_urlsafe(32)
+    r = await get_redis()
+    payload = json.dumps({"refusal": refusal, "tenant": tenant_slug})
+    await r.setex(f"{SAML_HANDOFF_PREFIX}{code}", settings.saml_handoff_ttl_seconds, payload)
+    return code
+
+
 async def consume_saml_handoff(code: str) -> dict[str, Any]:
     """Look up + delete the handoff record (single-use). Raises if expired."""
     r = await get_redis()

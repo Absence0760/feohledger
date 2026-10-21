@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { CATALOGUE_LOADERS } from './catalogues';
-import { en } from './locales/en';
+import { EN_ALL, loadAllMessages } from './allMessages';
 import { SUPPORTED_LOCALES } from './locale';
 import { interpolate } from './interpolate';
 
@@ -10,7 +9,8 @@ import { interpolate } from './interpolate';
 // unbalanced brace, a missing `other` branch, a mistyped `plural`) survives
 // parity and renders the raw `{n, plural, one {…}` markup to the reader.
 //
-// This resolves every plural-bearing message in every shipped locale at the
+// This resolves every plural-bearing message in every shipped locale — the
+// main catalogue and every lazy slice (catalogues.ts) — at the
 // counts that select each CLDR category we use, and asserts nothing of the ICU
 // syntax survives into the output.
 
@@ -29,7 +29,7 @@ function paramsFor(template: string, n: number): Record<string, string | number>
 }
 
 describe('ICU plural messages resolve in every locale', () => {
-	const pluralKeys = Object.entries(en as Record<string, string>)
+	const pluralKeys = Object.entries(EN_ALL as Record<string, string>)
 		.filter(([, v]) => v.includes(PLURAL_MARKER))
 		.map(([k]) => k);
 
@@ -39,7 +39,7 @@ describe('ICU plural messages resolve in every locale', () => {
 
 	for (const loc of SUPPORTED_LOCALES) {
 		test(`${loc}: every plural block selects a branch`, async () => {
-			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
+			const dict = (await loadAllMessages(loc)) as Record<string, string>;
 			for (const key of pluralKeys) {
 				const template = dict[key];
 				for (const n of COUNTS) {

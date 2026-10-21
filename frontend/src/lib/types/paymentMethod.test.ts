@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABEL_KEYS, paymentMethodLabelKey } from './payment';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
 import { CATALOGUE_LOADERS } from '#lib/i18n/catalogues.ts';
 
@@ -53,8 +53,8 @@ describe('PAYMENT_METHODS', () => {
 		for (const method of PAYMENT_METHODS) {
 			const key = PAYMENT_METHOD_LABEL_KEYS[method];
 			expect(key, `${method} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${method} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key].trim().length).toBeGreaterThan(0);
+			expect(Object.keys(EN_ALL), `${method} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
 		}
 	});
 
@@ -68,9 +68,9 @@ describe('PAYMENT_METHODS', () => {
 	});
 
 	it('labels the UK domestic rails with their industry names', () => {
-		expect(en[PAYMENT_METHOD_LABEL_KEYS.bacs]).toBe('BACS');
-		expect(en[PAYMENT_METHOD_LABEL_KEYS.faster_payments]).toBe('Faster Payments');
-		expect(en[PAYMENT_METHOD_LABEL_KEYS.chaps]).toBe('CHAPS');
+		expect(EN_ALL[PAYMENT_METHOD_LABEL_KEYS.bacs]).toBe('BACS');
+		expect(EN_ALL[PAYMENT_METHOD_LABEL_KEYS.faster_payments]).toBe('Faster Payments');
+		expect(EN_ALL[PAYMENT_METHOD_LABEL_KEYS.chaps]).toBe('CHAPS');
 	});
 
 	it('keeps the scheme NAMES verbatim in every locale', async () => {
@@ -83,7 +83,7 @@ describe('PAYMENT_METHODS', () => {
 			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
 			for (const scheme of schemes) {
 				const key = PAYMENT_METHOD_LABEL_KEYS[scheme];
-				expect(dict[key], `${loc} renamed the ${scheme} scheme`).toBe(en[key]);
+				expect(dict[key], `${loc} renamed the ${scheme} scheme`).toBe(EN_ALL[key]);
 			}
 		}
 	});

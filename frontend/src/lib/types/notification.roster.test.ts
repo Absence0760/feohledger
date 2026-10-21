@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import {
 	EVENT_LABELS,
 	EVENT_LABEL_KEYS,
@@ -115,7 +115,7 @@ describe('notification event roster', () => {
 		// are not in the i18n extraction slice yet. Pinning them together is what
 		// stops that from becoming two different names for one event.
 		for (const event of EVENT_ORDER) {
-			expect(en[EVENT_LABEL_KEYS[event]], `${event} label differs between EVENT_LABELS and en`).toBe(
+			expect(EN_ALL[EVENT_LABEL_KEYS[event]], `${event} label differs between EVENT_LABELS and en`).toBe(
 				EVENT_LABELS[event]
 			);
 		}

@@ -4,7 +4,7 @@ import type { HelpMessages } from '../../messages';
 // diagram labels under `help.*` — all of them but `help.pageLink` and
 // `help.tip.*`, which every page's chrome reads and so stay in the main
 // catalogue. Split out because it is ~9 KB gzipped per locale that only the
-// /help routes and the ⓘ HelpTips need (decisions §261). Lazy-loaded by `ensureHelpCatalogue()` in store.svelte.ts;
+// /help routes and the ⓘ HelpTips need (decisions §261). Lazy-loaded by `ensureSlices('help')` in store.svelte.ts;
 // `satisfies HelpMessages` makes a missing or extra key a compile error.
 export const messages = {
 	'help.title': 'ヘルプセンター',
@@ -63,7 +63,6 @@ export const messages = {
 	'help.note.role': '実行できるロール',
 	'help.glossary.title': '用語集',
 	'help.glossary.intro': '{product} で使われる買掛金業務の用語と、ここでの意味。',
-	'help.glossary.topic': 'トピック',
 	'help.glossary.allTopics': 'すべてのトピック',
 	'help.glossary.aliases': '別名:',
 	'help.glossary.related': '関連項目:',
