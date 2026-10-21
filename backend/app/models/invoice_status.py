@@ -77,7 +77,7 @@ OPEN_AP_STATUSES: tuple[InvoiceStatus, ...] = (
 #: from `sending_to_erp`, so the status alone proves nothing; the budget adds it
 #: back only with the stamp (`budget_service.realised_invoice_clause`). Why the
 #: baselines read imported `done` history when §73's touchless rate does not:
-#: `docs/decisions.md` §304.
+#: `docs/decisions.md` §305.
 APPROVED_OR_BEYOND_STATUSES: tuple[InvoiceStatus, ...] = (
     *OPEN_AP_STATUSES,
     InvoiceStatus.paid,

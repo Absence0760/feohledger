@@ -298,7 +298,7 @@ def _check_currency_evidence(
 
     ``_apply_extraction`` already refuses to write header money from a document
     that contradicts itself about its currency (``CurrencyEvidence``,
-    `decisions.md` §304) — that half is not optional and does not depend on
+    `decisions.md` §305) — that half is not optional and does not depend on
     this pass. This check is the half that tells the reviewer WHY the amount is
     blank, and docks ``amount`` / ``currency`` so the score the auto-approve
     gate reads says the read is suspect.

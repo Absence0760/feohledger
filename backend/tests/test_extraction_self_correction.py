@@ -580,7 +580,7 @@ async def test_every_violation_is_json_safe():
 
 @pytest.mark.asyncio
 async def test_a_printed_code_contradicting_the_currency_field_is_flagged():
-    """`_apply_extraction` leaves the money unread (decisions §304); this pass
+    """`_apply_extraction` leaves the money unread (decisions §305); this pass
     tells the reviewer why and docks the confidence the auto-approve gate reads."""
     result = _result(amount=_field("USD 1,000.00"), currency=_field("EUR"))
     report = await run_self_correction(result)

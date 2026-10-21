@@ -495,7 +495,7 @@ each group from `VALID_TRANSITIONS` and fails on a literal restatement anywhere
 under `app/`.
 
 Two readings of these sets are deliberate and are recorded in
-`docs/decisions.md` §304. The budget's realised spend adds `failed` back, but
+`docs/decisions.md` §305. The budget's realised spend adds `failed` back, but
 only with `Invoice.approval_date` set (an approved invoice whose ERP push
 failed). And the fraud baselines read `done`, which is the CSV importer's
 default status, so imported history seeds them. That is safe because the checks

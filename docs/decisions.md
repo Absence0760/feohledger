@@ -13338,7 +13338,7 @@ first runs from `ci.yml` start a new configuration beside the old
 are matched across configurations, so this changes which configuration an
 alert is reported under, not whether it is reported.
 
-## 303. PDFs draw non-Latin text through one escaper with font fallback; the seed carries production-shaped rows from one shared file (2026-10-20)
+## 304. PDFs draw non-Latin text through one escaper with font fallback; the seed carries production-shaped rows from one shared file (2026-10-20)
 
 **Found by the production-shaped fixtures (#575 § 2).** The seed and e2e
 fixtures now carry a non-ASCII vendor (`Ōsaka Seimitsu Kōgyō 株式会社 — …
@@ -13382,10 +13382,11 @@ Guards: `backend/tests/test_pdf_text.py` (each renderer, with the fixture's
 names, asserts no glyph outside cp1252 was drawn in a Helvetica face; the long
 number wraps; `&` prints as `&`), `backend/tests/test_seed_realistic.py`.
 
-## 304. "Approved or beyond" is one population for budgets and fraud baselines; a printed currency code is evidence, never a default (#575, 2026-10-20)
+## 305. "Approved or beyond" is one population for budgets and fraud baselines; a printed currency code is evidence, never a default (#575, 2026-10-20)
 
-(Numbered 304, with §303 above it, because §301 landed on `main` first and
-§295–§299 and §302 are held by pull requests still in flight.)
+(Numbered 305, with §304 above it, because §295, §296 and §301 landed on
+`main` first and §297–§299, §302 and §303 are held by pull requests still in
+flight.)
 
 **Budget actual.** The realised leg of a budget (and the PO-relief leg, which
 must admit exactly the same invoices) is `APPROVED_OR_BEYOND_STATUSES`, so it now

@@ -139,7 +139,7 @@ def realised_invoice_clause():
     ``Invoice.approval_date`` stamp (written on every approval path, never
     cleared) is the evidence — the reading ``services/analytics`` takes for the
     touchless rate (`decisions.md` §73) and ``api/vendors._bank_change_flag_statuses``
-    for the bank-change flag (§286). See §304.
+    for the bank-change flag (§286). See §305.
 
     One function because the ``actual`` leg and the PO-relief leg must admit
     exactly the same invoices (``_realised_for_budget``)."""

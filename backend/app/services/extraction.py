@@ -395,7 +395,7 @@ def decide_auto_approve(
     # raises `missing_amount`, but that warning is not an input to this pure
     # gate, and without this a 0 sails under any `auto_approve_below` floor and
     # past every max / CFO cap. Same `<= 0` rule as the `missing_amount`
-    # warning in `invoice_warnings.refresh_warnings` (`decisions.md` §304).
+    # warning in `invoice_warnings.refresh_warnings` (`decisions.md` §305).
     if amount_gate.amount <= 0:
         return False
 
@@ -1298,7 +1298,7 @@ _NUMERIC_WHITESPACE = (" ", "\t", "\u00a0", "\u202f")
 # decoration: it is the document stating the figure's currency, so
 # :func:`_amount_core_and_codes` hands it back and
 # :func:`extraction_currency_evidence` weighs it against the ``currency`` field
-# (`decisions.md` §304). Discarding it is how ``GBP 9,500.00`` with no currency
+# (`decisions.md` §305). Discarding it is how ``GBP 9,500.00`` with no currency
 # field was stored as USD 9,500 — the column default — and cleared a USD cap.
 _CURRENCY_CODE_AFFIX = re.compile(
     r"^(?P<lead>[A-Z]{3})(?=[\s\d.,(+-])|(?<=[\d.,)\s])(?P<trail>[A-Z]{3})$"
@@ -1456,7 +1456,7 @@ class CurrencyEvidence:
 
     Two sources can name it: the model's ``currency`` field, and the ISO codes
     the page printed beside the amounts themselves (``GBP 9,500.00``). They are
-    weighed together, never one silently over the other (`decisions.md` §304):
+    weighed together, never one silently over the other (`decisions.md` §305):
 
     * they agree, or only one speaks → :attr:`currency` is that code;
     * they disagree — the field says ``EUR`` beside ``USD 1,000.00``, or two
@@ -1726,7 +1726,7 @@ def _apply_extraction(
 
     # Which currency the money is in — decided BEFORE any amount is written,
     # because an amount is only meaningful with its currency (`decisions.md`
-    # §304). A document that contradicts itself about it gets no header money
+    # §305). A document that contradicts itself about it gets no header money
     # at all: the amount stays unread, so `refresh_warnings` raises
     # `missing_amount` / `missing_data` and `decide_auto_approve` refuses a
     # zero amount — the same fail-closed path an unparseable token always took.
