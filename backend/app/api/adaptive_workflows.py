@@ -43,6 +43,7 @@ from app.api.deps import (
 )
 from app.models.adaptive_suggestion import WorkflowSuggestion
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES, IN_REVIEW_STATUSES
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
 from app.models.workflow import AuditLog, WorkflowDefinition
@@ -108,23 +109,6 @@ _APPROVAL_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 # Minimum decided invoices an approver must have before the routing down-weight
 # penalises them on overturns — thin evidence (one bad call) never penalises.
 _ROUTING_OUTCOME_MIN_SAMPLE = 5
-
-# Approved-or-beyond — the "historically accepted" set used for the vendor
-# baseline (pending / rejected invoices are not part of the accepted norm).
-_APPROVED_STATUSES = (
-    InvoiceStatus.approved,
-    InvoiceStatus.sending_to_erp,
-    InvoiceStatus.sent_to_erp,
-    InvoiceStatus.posted_in_erp,
-    InvoiceStatus.payment_scheduled,
-    InvoiceStatus.paid,
-    InvoiceStatus.done,
-)
-_IN_REVIEW_STATUSES = (
-    InvoiceStatus.new,
-    InvoiceStatus.pending,
-    InvoiceStatus.ready_for_review,
-)
 
 
 def _adaptive_settings(org: Organization) -> dict:
@@ -530,7 +514,7 @@ async def _vendor_approved_rows(
         & (AuditLog.entity_type == "invoice")
         & (AuditLog.action == "invoice.approved"),
         isouter=True,
-    ).where(Invoice.status.in_(_APPROVED_STATUSES))
+    ).where(Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES))
     if vendor_id is not None:
         q = q.where(Invoice.vendor_id == vendor_id)
     else:
@@ -730,7 +714,7 @@ async def anomalies(
     # baseline once.
     q = apply_entity_scope(
         select(Invoice)
-        .where(Invoice.status.in_(_IN_REVIEW_STATUSES))
+        .where(Invoice.status.in_(IN_REVIEW_STATUSES))
         .order_by(Invoice.created_at.desc())
         .limit(200),
         Invoice,

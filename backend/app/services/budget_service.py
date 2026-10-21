@@ -86,6 +86,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
+from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES
 from app.models.procurement import (
     DEAD_PO_STATUSES,
     Budget,
@@ -120,15 +121,12 @@ _DIMENSION_MATCH_COLUMN = {
     BudgetDimension.project: Invoice.project,
 }
 
-# Invoice statuses that represent realised spend against a budget dimension.
-REALISED_INVOICE_STATUSES: tuple[str, ...] = (
-    "approved",
-    "sent_to_erp",
-    "posted_in_erp",
-    "payment_scheduled",
-    "paid",
-    "done",
-)
+# Invoice statuses that represent realised spend against a budget dimension:
+# every status a human-approved invoice can hold. This was a hand-listed copy
+# that left out `sending_to_erp`, so an invoice dropped out of `actual` (and
+# stopped relieving its PO) for as long as its ERP push was in flight or stuck
+# there (issue #575). It is the shared set now, not a copy of it.
+REALISED_INVOICE_STATUSES: tuple[str, ...] = tuple(s.value for s in APPROVED_OR_BEYOND_STATUSES)
 
 
 @dataclass(frozen=True)

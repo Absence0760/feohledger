@@ -43,6 +43,7 @@ from app.models.credit_memo import CreditMemo
 from app.models.discount import DiscountOffer
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_embedding import InvoiceEmbedding
+from app.models.invoice_status import PRE_APPROVAL_STATUSES
 from app.models.organization import Organization
 from app.models.procurement import PurchaseOrder
 from app.models.sanctions_check import SanctionsCheck
@@ -278,18 +279,6 @@ async def _screen_best_effort(
     )
 
 
-# The statuses an invoice holds before its approval decision. An invoice in one
-# of these reaches money only through a fresh approval, so the bank-change flag
-# leaves it alone (`invoice_warnings._PRE_APPROVAL_STATUSES` names the same four).
-_PRE_APPROVAL_STATUSES = frozenset(
-    {
-        InvoiceStatus.new,
-        InvoiceStatus.pending,
-        InvoiceStatus.ready_for_review,
-        InvoiceStatus.rejected,
-    }
-)
-
 # Where money has already left: nothing for the flag to stop.
 _MONEY_MOVED_STATUSES = frozenset({InvoiceStatus.paid, InvoiceStatus.done})
 
@@ -310,7 +299,9 @@ def _bank_change_flag_statuses() -> frozenset[InvoiceStatus]:
     frontier = [InvoiceStatus.approved]
     while frontier:
         current = frontier.pop()
-        if current in reached or current in _PRE_APPROVAL_STATUSES:
+        # Pre-approval statuses reach money only through a fresh approval, so the
+        # flag leaves them alone (`models/invoice_status.PRE_APPROVAL_STATUSES`).
+        if current in reached or current in PRE_APPROVAL_STATUSES:
             continue
         reached.add(current)
         if current not in _MONEY_MOVED_STATUSES:
