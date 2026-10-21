@@ -3140,6 +3140,9 @@ export const messages = {
 	'auth.verify.setPassword': 'Definir sua senha',
 	'auth.verify.errorHeading': 'Algo deu errado',
 	'auth.verify.startOver': 'Começar de novo',
+	'auth.verify.alreadyVerified': "Você já confirmou este e-mail, então seu espaço de trabalho está pronto. Para escolher sua senha, use o link do seu e-mail de boas-vindas ou \"Esqueci minha senha\" na página de login.",
+	'auth.verify.goToSignIn': "Ir para o login",
+	'auth.verify.existingHeading': "Você já tem um espaço de trabalho",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the
@@ -3716,6 +3719,8 @@ export const messages = {
 	'refusal.mfaCodeInvalid': "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
 	'refusal.wrongWorkspace': "Esta conta pertence a outro espaço de trabalho, {workspace}. Entre por lá.",
 	'refusal.wrongWorkspaceNoLink': "Esta conta pertence a outro espaço de trabalho. Entre pela página desse espaço de trabalho.",
+	'refusal.signupEmailHasWorkspace': "Este endereço de e-mail já tem um espaço de trabalho no FeohLedger. Entre em {url}.",
+	'refusal.signupEmailHasWorkspaceNoLink': "Este endereço de e-mail já tem um espaço de trabalho no FeohLedger. Entre pela página do seu espaço de trabalho.",
 	'csvImport.result.summary': '{imported} importados, {skipped} ignorados',
 	'csvImport.toast.failed': 'Falha na importação',
 	'csvImport.toast.partial': '{imported} importados, {skipped} ignorados — veja os detalhes abaixo',

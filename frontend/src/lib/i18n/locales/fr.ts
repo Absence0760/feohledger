@@ -3145,6 +3145,9 @@ export const messages = {
 	'auth.verify.setPassword': 'Définir votre mot de passe',
 	'auth.verify.errorHeading': 'Une erreur s\'est produite',
 	'auth.verify.startOver': 'Recommencer',
+	'auth.verify.alreadyVerified': "Vous avez déjà confirmé cette adresse e-mail : votre espace de travail est prêt. Pour choisir votre mot de passe, utilisez le lien de votre e-mail de bienvenue, ou « Mot de passe oublié » sur la page de connexion.",
+	'auth.verify.goToSignIn': "Aller à la connexion",
+	'auth.verify.existingHeading': "Vous avez déjà un espace de travail",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the
@@ -3721,6 +3724,8 @@ export const messages = {
 	'refusal.mfaCodeInvalid': "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
 	'refusal.wrongWorkspace': "Ce compte appartient à un autre espace de travail, {workspace}. Connectez-vous plutôt sur celui-ci.",
 	'refusal.wrongWorkspaceNoLink': "Ce compte appartient à un autre espace de travail. Connectez-vous sur la page de cet espace de travail.",
+	'refusal.signupEmailHasWorkspace': "Cette adresse e-mail a déjà un espace de travail FeohLedger. Connectez-vous sur {url}.",
+	'refusal.signupEmailHasWorkspaceNoLink': "Cette adresse e-mail a déjà un espace de travail FeohLedger. Connectez-vous sur la page de votre espace de travail.",
 	'csvImport.result.summary': '{imported} importées, {skipped} ignorées',
 	'csvImport.toast.failed': 'Échec de l’importation',
 	'csvImport.toast.partial': '{imported} importées, {skipped} ignorées — voir les détails ci-dessous',

@@ -12723,6 +12723,93 @@ row), `backend/tests/test_saml_acs_integration.py` (ACS → bridge → exchange)
 `frontend/src/lib/api/sessionRejection.test.ts` (revocation) and
 `frontend/src/lib/api/codedRefusals.test.ts` (the three sentences).
 
+## 292. Signup refuses an address that already has an account at /complete, and a used verification link is re-answered (2026-10-20)
+
+**Two dead ends in self-service signup.**
+
+1. **An address that already had an account.** `users.email` is unique across
+   every organization, but `/signup/start` never looked at the address. The
+   visitor was told a link was on its way; opening it ran `provision_tenant`,
+   which created the database, hit the unique index, dropped the database and
+   surfaced as a 500 "Something went wrong… contact support". The verification
+   stayed unconsumed, so every reload did all of that again.
+2. **Opening the link twice.** `/verify` redeems on page load and the token is
+   spent on success, so a reload, a second tab, or a mail scanner that ran the
+   page first met the uniform 410 "invalid or expired, please sign up again" —
+   and signing up again then failed, because the slug was now taken by the
+   workspace that very link had created.
+
+**The rule for (1): refuse at `/complete`, keep `/start` uniform.**
+`/signup/complete` checks the address (case-insensitively, as sign-in does)
+before the slug and before provisioning. An address with an account answers
+`409` coded `signup_email_has_workspace`, with `params.sign_in_url` the existing
+account's own sign-in page, built exactly as the wrong-workspace login refusal
+builds it (§288). The verification is spent and committed before the refusal is
+raised, so it can never reach provisioning again, and re-opening it re-states
+the same refusal. The address is checked before the slug so someone signing up
+again for their own workspace is pointed at it, not told the name is taken.
+
+`/start` answers an address with an account exactly as it answers any other —
+same status, same message, a verification link sent. It is public and captcha'd
+but unauthenticated, and a different answer there would let anyone test which
+addresses have accounts. At `/complete` the visitor has proven they read the
+mailbox, so naming the workspace tells them nothing they could not learn from
+their own inbox.
+
+**Rejected: sending a "you already have a workspace" email from `/start`
+instead of a verification link.** It saves the visitor a click and also keeps
+the answer uniform, but it needs a second email template in six locales, and
+`/complete` needs the check regardless: an address can gain an account between
+the two steps. One refusal point covers both.
+
+**The race is a definite answer too.** If the account appears after the check,
+the real `provision_tenant` fails on the unique index. It already drops the
+database it created and removes any control-plane rows it committed (#575), so
+nothing half-made is left. `/complete` then re-reads the address and the slug
+and, when either explains the failure, answers the coded refusal or the slug
+409, never a 500 the link would repeat. A failure neither explains is still the
+500 with the link left unconsumed, so a transient fault can be retried.
+
+**The rule for (2): `/complete` is idempotent for a spent link.** A spent,
+unexpired verification whose slug now names an organization holding an account
+with the link's address is re-answered with that workspace: `200`,
+`already_verified: true`, the tenant URL, the address and `sign_in_url`.
+Nothing is issued. There is no second set-password link (`set_password_url` is
+null), no welcome email, and no audit row. The first answer and the welcome
+email carry the only link, and minting a fresh credential every time an email
+link is opened is what the single-token design of §283 avoids. The page shows
+"Your workspace is ready" with **Go to sign in** and says where the
+set-password link is. A spent link that matches no workspace, or one past its
+24-hour life, is still the uniform 410: the re-answer never shows a workspace
+the link did not create, and a stale link is not kept alive.
+
+**Rejected: redeeming on a button, as the reset-password page spends its token
+only on submit.** The property that page has is that opening the link costs the
+user nothing (its load is a non-consuming `check`, §283). A button would not
+give `/verify` that property: once the workspace exists the token is spent
+however it was spent, so a reload after success would still meet the 410. The
+re-answer does give it, for every way the link gets opened, the button click
+included. It also makes a JavaScript-running mail scanner harmless: if it
+redeems first, the person who clicks next sees their workspace, and the
+set-password link is in the welcome email the scanner's visit sent.
+
+**Not fixed here.** Nobody who has forgotten which workspace their account is in
+can find it without support. Forgot-password works only on a workspace host,
+and the apex has no sign-in page. This refusal helps only someone who has
+already started a signup. The durable fix, an apex "email me my workspace
+address" form with a uniform answer, is in `docs/followups.md`.
+
+Guards: `backend/tests/test_signup.py` (`/start` uniform for an address with an
+account; the coded refusal on a case variant, never provisioning and stable
+across re-opening; the race against the real `provision_tenant` leaving no
+database and no organization; a spent link re-answered twice with nothing
+minted, sent or provisioned; a spent link on someone else's slug still 410),
+`frontend/src/lib/api/codedRefusals.test.ts` (the refusal localized, the link
+carried), and `frontend/tests-e2e/signup/flow.spec.ts` (both states stubbed, plus
+through Mailpit: the link opened again in a second tab after success, and an
+existing login's signup refused on first open and on reload, with the slug left
+free).
+
 ## 300. Strings only some routes render load with those routes, as lazy catalogue slices in every locale (2026-10-20)
 
 (Numbered 300 because §292–§299 are held by pull requests still in flight.)

@@ -19,6 +19,7 @@ import {
 	INVOICE_STALE_APPROVAL,
 	INVOICE_STALE_EDIT,
 	PLAN_FEATURE_REQUIRED,
+	SIGNUP_EMAIL_HAS_WORKSPACE,
 	codedRefusalText,
 	localizeApiDetail
 } from './codedRefusals';
@@ -143,6 +144,31 @@ describe('codedRefusalText', () => {
 			noLink
 		);
 		expect(codedRefusalText('wrong_workspace', { sign_in_url: 'not a url' }, enT)).toBe(noLink);
+	});
+
+	it('points a signup for an address that has an account at that workspace', () => {
+		const url = 'https://example-co.feohledger.com/login?email=a%40example.com';
+		expect(codedRefusalText(SIGNUP_EMAIL_HAS_WORKSPACE, { sign_in_url: url }, enT)).toBe(
+			`This email address already has a FeohLedger workspace. Sign in at ${url}.`
+		);
+		expect(codedRefusalText(SIGNUP_EMAIL_HAS_WORKSPACE, { sign_in_url: null }, enT)).toBe(
+			"This email address already has a FeohLedger workspace. Sign in on your workspace's own page."
+		);
+		// Stated in the reader's language, the link carried through verbatim.
+		expect(codedRefusalText(SIGNUP_EMAIL_HAS_WORKSPACE, { sign_in_url: url }, deT)).toBe(
+			de['refusal.signupEmailHasWorkspace'].replace('{url}', url)
+		);
+		// The transport localizes it the same way from the raw `detail`.
+		expect(
+			localizeApiDetail(
+				{
+					code: SIGNUP_EMAIL_HAS_WORKSPACE,
+					message: 'server English',
+					params: { sign_in_url: url }
+				},
+				enT
+			)
+		).toBe(`This email address already has a FeohLedger workspace. Sign in at ${url}.`);
 	});
 
 	it('states the CFO gate with both figures in their own currencies', () => {

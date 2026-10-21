@@ -3077,6 +3077,9 @@ export const messages = {
 	'auth.verify.setPassword': 'パスワードを設定',
 	'auth.verify.errorHeading': '問題が発生しました',
 	'auth.verify.startOver': '最初からやり直す',
+	'auth.verify.alreadyVerified': "このメールアドレスは確認済みのため、ワークスペースは作成されています。パスワードは、ウェルカムメールのリンクか、サインインページの「パスワードをお忘れの方」から設定してください。",
+	'auth.verify.goToSignIn': "サインインへ",
+	'auth.verify.existingHeading': "ワークスペースはすでにあります",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the
@@ -3653,6 +3656,8 @@ export const messages = {
 	'refusal.mfaCodeInvalid': "このコードは無効です。認証アプリを確認して、もう一度お試しください。",
 	'refusal.wrongWorkspace': "このアカウントは別のワークスペース（{workspace}）のものです。そちらでサインインしてください。",
 	'refusal.wrongWorkspaceNoLink': "このアカウントは別のワークスペースのものです。そのワークスペースのページでサインインしてください。",
+	'refusal.signupEmailHasWorkspace': "このメールアドレスには FeohLedger のワークスペースがすでにあります。{url} でサインインしてください。",
+	'refusal.signupEmailHasWorkspaceNoLink': "このメールアドレスには FeohLedger のワークスペースがすでにあります。ご自身のワークスペースのページでサインインしてください。",
 	'csvImport.result.summary': '{imported}件をインポート、{skipped}件をスキップ',
 	'csvImport.toast.failed': 'インポートに失敗しました',
 	'csvImport.toast.partial': '{imported}件をインポート、{skipped}件をスキップしました。詳細は下記をご覧ください',

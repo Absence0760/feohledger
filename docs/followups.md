@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — the cross-workspace identity fixes (decisions
+**Last reconciled:** 2026-10-20 — fixing signup's dead ends (decisions §292)
+opened one (c) entry, the missing self-service "find my workspace" recovery,
+taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
 other refusals still landing as raw JSON, taking the file from 115 → 117.
 Before that, 2026-10-20 — the light theme (decisions §289) opened one
@@ -171,7 +173,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**117 open: 101 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**118 open: 102 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1854,6 +1856,26 @@ scope (§260) — do not fold them into any of these.
       `inactive` / `domain_blocked` the OIDC path already states. **Trigger:**
       the first SAML tenant in production, or a support report of a blank JSON
       page after an IdP sign-in.
+
+### Surfaced by fixing signup's dead ends (2026-10-20, decisions §292)
+
+- [ ] **(c) There is no self-service "find my workspace" recovery.** A user
+      who forgets which workspace their account is in has no way back without
+      support: forgot-password only works on a workspace host (it needs the
+      tenant to build the reset link), and the apex has no sign-in page at
+      all. Signup now points an address that already has an account at its
+      workspace (§292), but only after the visitor has filled the form and
+      clicked a verification link — that is not a recovery path, and nobody
+      should have to start a signup to find a sign-in page. **Durable fix:**
+      an apex "Email me my workspace address" form — `POST
+      /api/workspace-lookup {email}`, public, captcha'd and rate-limited per
+      IP and per address like `/signup/start`, answering every address with
+      the same "if that address has an account, we've emailed it" response,
+      and emailing the account's own `tenant_urls.sign_in_url` (address
+      prefilled) only when one exists — linked from the apex landing page and
+      from the login page's error states. **Trigger:** the first support
+      request from someone who cannot find their workspace, or before signup
+      is advertised beyond the pilot.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

@@ -3317,6 +3317,9 @@ export const en = {
 	'auth.verify.setPassword': 'Set your password',
 	'auth.verify.errorHeading': 'Something went wrong',
 	'auth.verify.startOver': 'Start over',
+	'auth.verify.alreadyVerified': "You already confirmed this email, so your workspace is set up. To choose your password, use the link in your welcome email, or Forgot password on the sign-in page.",
+	'auth.verify.goToSignIn': "Go to sign in",
+	'auth.verify.existingHeading': "You already have a workspace",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the
@@ -3895,6 +3898,8 @@ export const en = {
 	'refusal.mfaCodeInvalid': "That code is not valid. Check your authenticator app and try again.",
 	'refusal.wrongWorkspace': "This account belongs to another workspace, {workspace}. Sign in there instead.",
 	'refusal.wrongWorkspaceNoLink': "This account belongs to a different workspace. Sign in on that workspace's own page.",
+	'refusal.signupEmailHasWorkspace': "This email address already has a FeohLedger workspace. Sign in at {url}.",
+	'refusal.signupEmailHasWorkspaceNoLink': "This email address already has a FeohLedger workspace. Sign in on your workspace's own page.",
 	'csvImport.result.summary': '{imported} imported, {skipped} skipped',
 	'csvImport.toast.failed': 'Import failed',
 	'csvImport.toast.partial': 'Imported {imported}, skipped {skipped} — see the details below',
