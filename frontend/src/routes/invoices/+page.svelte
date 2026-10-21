@@ -1283,7 +1283,7 @@
 		background: var(--surface);
 		color: var(--text-muted);
 		cursor: pointer;
-		transition: all 0.15s;
+		transition: border-color 0.15s;
 		flex-shrink: 0;
 	}
 
@@ -1575,7 +1575,7 @@
 		cursor: pointer;
 		font-family: inherit;
 		white-space: nowrap;
-		transition: all 0.15s;
+		transition: border-color 0.15s;
 	}
 
 	.bulk-delete-btn:hover {

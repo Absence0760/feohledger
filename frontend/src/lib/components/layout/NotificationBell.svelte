@@ -193,7 +193,7 @@
 		background: none;
 		color: var(--text-muted);
 		cursor: pointer;
-		transition: all 0.12s;
+		transition: background-color 0.12s;
 	}
 
 	.bell-btn:hover {

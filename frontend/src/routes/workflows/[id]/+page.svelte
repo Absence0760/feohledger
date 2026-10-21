@@ -835,7 +835,7 @@
 		border-radius: 6px;
 		color: var(--text-muted);
 		text-decoration: none;
-		transition: all 0.15s;
+		transition: background-color 0.15s;
 	}
 
 	.back-link:hover {
