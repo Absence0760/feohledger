@@ -8,7 +8,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import {
 	FEATURE_MIN_TIER,
 	PLAN_FEATURES,
@@ -73,8 +73,8 @@ describe('plan features', () => {
 
 	it('labels every feature and tier from the catalogue', () => {
 		for (const feature of PLAN_FEATURES) {
-			expect(en[planFeatureLabelKey(feature)]?.trim()).toBeTruthy();
-			expect(en[planTierLabelKey(feature)]?.trim()).toBeTruthy();
+			expect(EN_ALL[planFeatureLabelKey(feature)]?.trim()).toBeTruthy();
+			expect(EN_ALL[planTierLabelKey(feature)]?.trim()).toBeTruthy();
 		}
 	});
 

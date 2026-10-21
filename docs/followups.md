@@ -40,7 +40,7 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-20 — storing the ERP document id on the invoice
-(decisions §293) opened two (c) entries, the deep link not choosing the ERP
+(decisions §301) opened two (c) entries, the deep link not choosing the ERP
 organisation/company and the ERP webhook's id-only path, taking the file from
 118 → 120. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
@@ -1220,7 +1220,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       **Fired 2026-10-08, deliberately not taken:** the help-catalogue split
       (decisions §261) changed the workflow only to count one help slice like
       one catalogue; the total measured 1005 of 1075, so the every-chunk sum is
-      not binding and this stays the next budget change's job.
+      not binding and this stays the next budget change's job. **Fired again
+      2026-10-20, again not taken:** the settings and portal slices (§300)
+      generalised that to one file per catalogue kind; the total measured 1034
+      of 1075 (down from 1050), still not binding, and the change was scoped to
+      the per-chunk ceiling that was.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
@@ -1876,7 +1880,7 @@ scope (§260) — do not fold them into any of these.
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
 
-### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §293)
+### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §301)
 
 - [ ] **(c) The ERP deep link opens in whichever organisation / company the
       user last had open.** `erp_adapters/deep_links.py` builds Xero's

@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'vitest';
 import { en } from './locales/en';
 import { SUPPORTED_LOCALES } from './locale';
-import { CATALOGUE_LOADERS, HELP_CATALOGUE_LOADERS } from './catalogues';
-import { enHelp } from './locales/help/en';
+import { CATALOGUE_LOADERS, SLICE_LOADERS, SLICE_NAMES } from './catalogues';
+import { EN_SLICES } from './allMessages';
 
 // `satisfies Messages` already enforces key parity at compile time; this
 // guards it at runtime too and — by iterating SUPPORTED_LOCALES through the
@@ -50,37 +50,38 @@ describe('message catalogue parity', () => {
 	}
 });
 
-// The help-centre slice is a second catalogue per locale (decisions §261), held
-// to the same rules — and to two of its own: no key may live in both slices
-// (one would silently shadow the other in `m()`), and only `help.*` keys may
-// live in the help slice, while the main catalogue keeps just the chrome ones.
-const enHelpRecord = enHelp as Record<string, string>;
-const enHelpKeys = Object.keys(enHelp).sort();
-
-describe('help catalogue parity', () => {
-	test('the two slices never share a key', () => {
-		const shared = enHelpKeys.filter((k) => k in en);
-		expect(shared).toEqual([]);
+// Each lazy slice (catalogues.ts, decisions §261 + §300) is a catalogue per
+// locale of its own, held to the same rules. Which keys a slice may hold, and
+// that no key lives in two places, is `slices.test.ts`'s job; this file proves
+// every locale ships every slice complete.
+describe('catalogue slice parity', () => {
+	test('every slice has a loader for every shipped locale', () => {
+		expect(SLICE_NAMES.length).toBeGreaterThan(0);
+		for (const s of SLICE_NAMES)
+			for (const loc of SUPPORTED_LOCALES) expect(typeof SLICE_LOADERS[s][loc], `${s}/${loc}`).toBe('function');
 	});
 
 	test('the help slice holds help.* keys, and main keeps only the chrome ones', () => {
-		expect(enHelpKeys.length).toBeGreaterThan(0);
-		expect(enHelpKeys.every((k) => k.startsWith('help.'))).toBe(true);
+		expect(Object.keys(EN_SLICES.help).every((k) => k.startsWith('help.'))).toBe(true);
 		const helpInMain = enKeys.filter((k) => k.startsWith('help.'));
 		expect(helpInMain.every((k) => k === 'help.pageLink' || k.startsWith('help.tip.'))).toBe(true);
 	});
 
-	for (const loc of SUPPORTED_LOCALES) {
-		test(`${loc}: help slice loadable, complete, non-empty, placeholder-faithful`, async () => {
-			const dict = (await HELP_CATALOGUE_LOADERS[loc]()) as Record<string, string>;
-			expect(Object.keys(dict).sort(), `${loc} help key set differs from en`).toEqual(enHelpKeys);
-			for (const key of enHelpKeys) {
-				expect(dict[key].trim().length, `${loc}.${key} is empty`).toBeGreaterThan(0);
-				expect(placeholders(dict[key]), `${loc}.${key} placeholder mismatch`).toEqual(
-					placeholders(enHelpRecord[key]),
-				);
-			}
-		});
+	for (const slice of SLICE_NAMES) {
+		const enSlice = EN_SLICES[slice] as Record<string, string>;
+		const sliceKeys = Object.keys(enSlice).sort();
+		for (const loc of SUPPORTED_LOCALES) {
+			test(`${slice}/${loc}: loadable, complete, non-empty, placeholder-faithful`, async () => {
+				const dict = (await SLICE_LOADERS[slice][loc]()) as Record<string, string>;
+				expect(sliceKeys.length).toBeGreaterThan(0);
+				expect(Object.keys(dict).sort(), `${loc} ${slice} key set differs from en`).toEqual(sliceKeys);
+				for (const key of sliceKeys) {
+					expect(dict[key].trim().length, `${loc}.${key} is empty`).toBeGreaterThan(0);
+					expect(placeholders(dict[key]), `${loc}.${key} placeholder mismatch`).toEqual(
+						placeholders(enSlice[key]),
+					);
+				}
+			});
+		}
 	}
 });
-

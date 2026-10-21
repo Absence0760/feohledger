@@ -327,7 +327,7 @@ class Invoice {
 
   /// The bill this invoice was posted as in the ERP (a Xero InvoiceID, a
   /// QuickBooks Bill Id), set only by a confirmed push; null before one.
-  /// `InvoiceResponse.erp_document_id` (backend decisions §293).
+  /// `InvoiceResponse.erp_document_id` (backend decisions §301).
   final String? erpDocumentId;
 
   Invoice({

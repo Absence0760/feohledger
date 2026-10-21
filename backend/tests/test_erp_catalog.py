@@ -88,13 +88,14 @@ def test_catalogue_entries_are_well_formed():
 
 def test_every_catalogue_message_key_exists_in_the_frontend_catalogue():
     """`label_key` / `help_key` are frontend `MessageKey`s; a typo would render
-    the raw key. `en.ts` is the source dict every locale is checked against."""
+    the raw key. The English dicts are what every locale is checked against: the
+    main catalogue plus the settings slice, which /organization loads and which
+    holds the ERP form's labels (decisions §300)."""
     import pathlib
     import re
 
-    en = (
-        pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/i18n/locales/en.ts"
-    ).read_text()
+    locales = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/i18n/locales"
+    en = (locales / "en.ts").read_text() + (locales / "settings/en.ts").read_text()
     defined = set(re.findall(r"^\s*'([^']+)':", en, re.MULTILINE))
     used = {
         key

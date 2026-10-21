@@ -190,7 +190,7 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0006     | Tenant  | `invoices`   | Adds `invoices.po_match` JSONB column (latest 2/3-way PO match result).                                                  |
 | 0007     | Tenant  | `payments`   | Adds `payments.provider`, `provider_payment_id`, `failure_reason`, `submitted_at`, `completed_at` (adapter lifecycle).   |
 | 0022     | Tenant  | `vendors`    | Creates `vendor_change_requests` (supplier-portal staged bank/tax changes pending AP approval) + a partial index on `status='pending'`. |
-| 0117     | Tenant  | `invoices`   | Adds `invoices.erp_document_id` varchar(255) + `erp_document_url` varchar(1024); backfills the id from the invoice's single workflow instance's `state_data.erp_reference` (not `UNKNOWN`), never the URL (decisions §293). |
+| 0117     | Tenant  | `invoices`   | Adds `invoices.erp_document_id` varchar(255) + `erp_document_url` varchar(1024); backfills the id from the invoice's single workflow instance's `state_data.erp_reference` (not `UNKNOWN`), never the URL (decisions §301). |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).
 
