@@ -101,6 +101,8 @@ export const messages = {
 	'common.tryAgain': 'Tentar novamente',
 	'common.retrying': 'Tentando novamente…',
 	'common.retry': 'Tentar novamente',
+	'toast.region': "Mensagens de status",
+	'toast.dismiss': "Dispensar",
 	'common.loadFailed': 'Não foi possível carregar esta lista. Atualize para tentar novamente.',
 	'common.amountInvalid': 'Informe o valor como um número simples, por exemplo 1200 ou 1200.50',
 	'common.reportingCurrencyUnresolved': 'moeda de relatório',

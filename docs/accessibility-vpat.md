@@ -52,7 +52,7 @@ and the manual audit is the tracked outstanding work.
 | 2.1.1 Keyboard | A | Supports | All controls keyboard-operable; clickable rows expose a focusable `RowLink` rather than a click-only `<tr>`; a data grid that scrolls inside its container is a focusable, named region the arrow keys pan (`a11y/reflow.spec.ts` runs axe's `scrollable-region-focusable` on every route at 320px). |
 | 2.1.2 No Keyboard Trap | A | Supports | The shared `Modal` traps focus only while open and releases it on `Esc`/close; no other traps. |
 | 2.1.4 Character Key Shortcuts | A | Not Applicable | No single-character key shortcuts are implemented. |
-| 2.2.1 Timing Adjustable | A | Supports | No time limits on user interaction; session expiry re-prompts for login without data loss of in-progress work beyond auth. |
+| 2.2.1 Timing Adjustable | A | Supports | No time limits on user interaction; session expiry re-prompts for login without data loss of in-progress work beyond auth. Error toasts stay until dismissed; other toasts pause while hovered or focused (decisions §307). |
 | 2.2.2 Pause, Stop, Hide | A | Supports | In the app: no auto-updating/blinking content beyond brief toasts; loading indicators are not blinking content. On the public marketing page, all motion ends within 5 s: each decorative animation (hero sequence, background drift, headline sheen) runs once and rests, and the adapter list is static, so nothing moves for more than five seconds and no pause control is needed. The sign-in and signup pages have no continuous motion. |
 | 2.3.1 Three Flashes or Below Threshold | A | Supports | No flashing content. |
 | 2.4.1 Bypass Blocks | A | Supports | Skip-to-content link is the first focusable element; consistent landmark structure provides additional bypass. |

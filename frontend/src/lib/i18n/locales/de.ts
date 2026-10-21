@@ -99,6 +99,8 @@ export const messages = {
 	'common.tryAgain': 'Erneut versuchen',
 	'common.retrying': 'Wird erneut versucht…',
 	'common.retry': 'Erneut versuchen',
+	'toast.region': "Statusmeldungen",
+	'toast.dismiss': "Schließen",
 	'common.loadFailed': 'Diese Liste konnte nicht geladen werden. Zum erneuten Versuch aktualisieren.',
 	'common.amountInvalid': 'Geben Sie den Betrag als einfache Zahl ein, z. B. 1200 oder 1200.50',
 	'common.reportingCurrencyUnresolved': 'Berichtswährung',

@@ -110,6 +110,8 @@ export const en = {
 	'common.tryAgain': 'Try again',
 	'common.retrying': 'Retrying…',
 	'common.retry': 'Retry',
+	'toast.region': "Status messages",
+	'toast.dismiss': "Dismiss",
 	'common.loadFailed': 'Couldn’t load this list. Refresh to try again.',
 	'common.amountInvalid': 'Enter the amount as a plain number, e.g. 1200 or 1200.50',
 	'common.reportingCurrencyUnresolved': 'reporting currency',

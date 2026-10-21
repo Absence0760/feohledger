@@ -1064,10 +1064,24 @@ inherit it for free. Reuse these; don't re-solve them per page.
   `StepNode` pairs its drag handle with per-node Move ↑ / Move ↓ buttons
   (`onmoveup`/`onmovedown` over the canvas `onreorder`). Mirror this for any
   new drag interaction; don't ship drag as the only path.
-- **Toast** (`ui/Toast.svelte`; WCAG 4.1.3) — `role="region"` +
-  two persistent live containers (`aria-live="assertive"` for errors,
-  `"polite"` for the rest). Each toast has a real `<button>` dismiss
-  (`aria-label="Dismiss notification"`); auto-dismiss timer kept.
+- **Toast** (`ui/Toast.svelte`; WCAG 4.1.3, 2.2.1) — `role="region"` named
+  "Status messages" (`toast.region`; not "Notifications", which is the sidebar
+  bell's name) + two persistent live containers (`aria-live="assertive"` for
+  errors, `"polite"` for the rest). Each toast has a real 24px `<button>`
+  dismiss (`toast.dismiss`). **Timing (decisions §307, superseding the fixed
+  5-second timer this entry used to call deliberate):** an **error stays until
+  dismissed** — an explicit `duration` does not change that; every other toast
+  times out (5 s, or the caller's explicit `duration`), but its clock **stops
+  while the pointer is over a toast or focus is inside the region**, and runs
+  on with the time it had left. At most three errors stay on screen (the
+  oldest goes), and the same error text arriving again replaces its old copy —
+  a fresh insertion, so it is announced again. Dismissing from the button moves
+  focus to the next toast's dismiss, or to `<main>` when it was the last. The
+  rules are the pure `utils/toastQueue.ts` (unit-tested with fake timers).
+  **A toast is never the only sign of a failed LOAD**: a page whose data did not
+  arrive says so in place with `ui/LoadError` and a Retry (the vendors list and
+  the notification bell are the worked examples); a toast reports an action's
+  outcome.
 - **Inline form feedback** (WCAG 4.1.3) — a message that appears in response
   to an action (`{#if saved}<div class="message">…`) must be announced, not
   just shown. A polite status sits inside a live region that already exists

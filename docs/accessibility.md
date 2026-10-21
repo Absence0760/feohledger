@@ -244,6 +244,23 @@ The current build implements:
   back the moment a choice is made. Guarded by
   `frontend/tests-e2e/legal/pages.spec.ts` (the consent-banner rail test).
 - **Live-region announcements** for toasts and async status (`aria-live`).
+- **Toasts are timing-adjustable** (SC 2.2.1, decisions §307) — an error toast
+  stays until the reader dismisses it with its keyboard-reachable dismiss
+  button; any other toast's timer stops while it is hovered or holds focus and
+  resumes afterwards. Persistent errors are capped at three on screen, and a
+  repeated error replaces its earlier copy rather than stacking. The toast
+  region is named "Status messages", so it is not a second landmark called
+  "Notifications" beside the sidebar bell. A failed page load is stated in
+  place with a Retry (`ui/LoadError`), never by a toast alone. Guarded by
+  `frontend/src/lib/utils/toastQueue.test.ts`.
+- **Popovers that are dialogs take focus** — the sidebar notification bell's
+  popover (`role="dialog"`, labelled by its heading) moves focus to that
+  heading on open and back to the bell on Escape or an outside click; a failed
+  load inside it says so with a Retry rather than "No notifications yet".
+  Guarded by `frontend/tests-e2e/notifications/bell.spec.ts`.
+- **Disclosure toggles state what they control** — e.g. the consent banner's
+  Manage button carries `aria-expanded` and `aria-controls` naming the details
+  list (guarded by `frontend/tests-e2e/consent-banner.spec.ts`).
 - **Labelled form fields** — every input has an associated `<label>`;
   required fields are marked.
 - **Sufficient colour contrast** in both the dark and the light theme (text and

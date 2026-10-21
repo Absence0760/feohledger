@@ -103,6 +103,8 @@ export const messages = {
 	'common.tryAgain': '再試行',
 	'common.retrying': '再試行中…',
 	'common.retry': '再試行',
+	'toast.region': "ステータスメッセージ",
+	'toast.dismiss': "閉じる",
 	'common.loadFailed': 'このリストを読み込めませんでした。更新して再試行してください。',
 	'common.amountInvalid': '金額は 1200 や 1200.50 のような数値で入力してください',
 	'common.reportingCurrencyUnresolved': '報告通貨',

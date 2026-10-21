@@ -13716,3 +13716,60 @@ the header switch reached by Tab, operated by arrow keys and by pointer,
 persisting across a reload, segments ≥ 24px, a drawn focus ring, a checked
 edge the others lack; at 320px the header holds mark, CTA and switch with no
 overflow; the auth shell's panel follows the theme).
+
+## 307. Error toasts stay until dismissed; other toasts pause while hovered or focused (issue #635, 2026-10-21)
+
+**This supersedes the fixed five-second timer `frontend/docs/ui-patterns.md`
+documented as deliberate** ("auto-dismiss timer kept"). Decided by the
+operator's delegate on #635 finding 24.
+
+**What was wrong.** Every toast vanished five seconds after it appeared,
+whatever it said and whatever the reader was doing. Several screens used a
+toast as their only error signal, some with an instruction in it (#6, #20,
+#21 on the issue); a screen-reader user hears it once, a slow reader may not
+finish it, and someone moving the pointer onto it to read it watched it go.
+That is WCAG 2.2.1 Timing Adjustable: content with a time limit needs a way
+to turn it off, adjust it or extend it.
+
+**The rule** (`frontend/src/lib/utils/toastQueue.ts`, rendered by
+`ui/Toast.svelte`):
+
+- An **error** toast has no timer. It stays until dismissed with its visible,
+  keyboard-reachable dismiss button. An explicit `duration` does not make an
+  error transient — no caller passed one, and an error that can be timed away
+  is the defect.
+- Any **other** toast keeps its timer (5 s, or the caller's explicit
+  `duration` — the sync report's 12 s warnings keep theirs), but the clock
+  **stops while the pointer is over a toast or focus is inside the region**
+  and resumes with the time it had left. A toast that arrives during a pause
+  starts its clock on resume.
+- **Persistent errors are bounded.** At most three stay on screen; a fourth
+  removes the oldest. The same error text arriving again replaces its earlier
+  copy instead of stacking — a page retrying a failing call cannot fill the
+  corner with identical cards.
+- **Live-region behaviour is unchanged where it matters.** Errors still go in
+  the assertive container and the rest in the polite one. Pausing changes no
+  DOM, so it announces nothing; a repeated error is a fresh insertion, so it is
+  announced again rather than silently deduplicated.
+- **Focus never falls to `<body>`.** Dismissing from the button moves focus to
+  the next toast's dismiss button, or to `<main>` when it was the last.
+- The region is named **"Status messages"**, not "Notifications": that is the
+  sidebar bell's name, and two landmarks sharing one name are
+  indistinguishable in a landmark list.
+
+**A toast is still not a load-error state.** A page whose data did not arrive
+says so in place with `ui/LoadError` and a Retry; the vendor list (#635
+finding 20) and the notification bell (finding 22) moved off toast-only
+failures in the same change. The persistent error toast is for an action's
+outcome.
+
+**Rejected: a longer fixed timer** (10 s, 15 s). It moves the line rather than
+removing it, and 2.2.1's "extend" option needs the reader to be able to ask
+for more time, which a fixed timer cannot give. **Rejected: making every toast
+persistent.** Success and info toasts confirm what the reader just did and
+the page already shows; requiring a dismissal for each would bury the errors
+that do need one.
+
+**Sign-off.** This changes a documented accessibility pattern
+(`docs/accessibility.md`, `frontend/docs/ui-patterns.md` § Toast); it should
+be confirmed by whoever owns `docs/accessibility.md`.

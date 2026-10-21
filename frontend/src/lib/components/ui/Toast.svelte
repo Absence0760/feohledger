@@ -1,27 +1,78 @@
 <script lang="ts" module>
-	export type ToastType = 'success' | 'error' | 'info' | 'warning';
+	import {
+		createToastQueue,
+		type ToastMessage,
+		type ToastType
+	} from '#lib/utils/toastQueue.ts';
 
-	export interface ToastMessage {
-		id: number;
-		type: ToastType;
-		text: string;
-	}
+	export type { ToastMessage, ToastType };
 
 	let toasts = $state<ToastMessage[]>([]);
-	let nextId = 0;
 
-	export function toast(text: string, type: ToastType = 'info', duration = 5000) {
-		const id = nextId++;
-		toasts.push({ id, type, text });
-		setTimeout(() => dismiss(id), duration);
+	// Timing lives in `utils/toastQueue.ts` (decisions §307): an error stays
+	// until dismissed; anything else times out, but its clock stops while the
+	// toasts are hovered or hold focus (WCAG 2.2.1).
+	const queue = createToastQueue({ onChange: (items) => (toasts = items) });
+
+	/**
+	 * Show a toast. `duration` (ms) overrides the default for a non-error toast;
+	 * an error ignores it and stays until the reader dismisses it.
+	 */
+	export function toast(text: string, type: ToastType = 'info', duration?: number) {
+		queue.push(text, type, duration);
 	}
 
 	export function dismiss(id: number) {
-		toasts = toasts.filter((t) => t.id !== id);
+		queue.dismiss(id);
 	}
 </script>
 
 <script lang="ts">
+	import { tick } from 'svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+
+	let region = $state<HTMLElement | null>(null);
+	let hovered = $state(false);
+	let focusInside = $state(false);
+
+	$effect(() => {
+		queue.setPaused(hovered || focusInside);
+	});
+
+	// The list emptied under the pointer or the focus: neither `mouseleave`
+	// nor `focusout` is guaranteed to fire for an element that is removed.
+	$effect(() => {
+		if (toasts.length === 0) {
+			hovered = false;
+			focusInside = false;
+		}
+	});
+
+	function onFocusOut(e: FocusEvent) {
+		const next = e.relatedTarget as Node | null;
+		focusInside = !!(next && region?.contains(next));
+	}
+
+	/**
+	 * Dismissed from its own button: the focused button is about to vanish, so
+	 * hand focus to the next toast's dismiss button, or — when this was the
+	 * last one — to the page's `<main>` (the skip-link target), never `<body>`
+	 * (WCAG 2.4.3).
+	 */
+	async function dismissFromButton(id: number) {
+		dismiss(id);
+		await tick();
+		// The card under the pointer was just removed, so no `mouseleave` will
+		// come for it: re-read whether the pointer is over a remaining toast.
+		hovered = !!region?.querySelector('.toast:hover');
+		const next = region?.querySelector<HTMLButtonElement>('.toast-dismiss');
+		if (next) {
+			next.focus();
+		} else {
+			focusInside = false;
+			document.getElementById('main-content')?.focus();
+		}
+	}
 </script>
 
 <!--
@@ -29,9 +80,22 @@
 	Errors go in an assertive region (interrupt); everything else in a polite
 	region. Two stacked containers keep the live-region semantics clean — a
 	single region toggling aria-live is unreliable across screen readers.
+	Pausing changes no DOM, so it announces nothing; a repeated error is a new
+	insertion (its old copy is removed), so it is announced again.
 	Each toast carries a real <button> dismiss (keyboard-operable), not a div.
+	The region is named "Status messages", not "Notifications": that name
+	belongs to the sidebar bell, and two landmarks sharing a name are
+	indistinguishable in a screen reader's landmark list.
 -->
-<div class="toast-region" role="region" aria-label="Notifications">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div
+	bind:this={region}
+	class="toast-region"
+	role="region"
+	aria-label={m('toast.region')}
+	onfocusin={() => (focusInside = true)}
+	onfocusout={onFocusOut}
+>
 	<div class="toast-container" aria-live="assertive">
 		{#each toasts.filter((t) => t.type === 'error') as t (t.id)}
 			{@render toastItem(t)}
@@ -45,7 +109,14 @@
 </div>
 
 {#snippet toastItem(t: ToastMessage)}
-	<div class="toast {t.type}">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="toast {t.type}"
+		data-testid="toast"
+		data-toast-type={t.type}
+		onmouseenter={() => (hovered = true)}
+		onmouseleave={() => (hovered = false)}
+	>
 		<span class="toast-icon" aria-hidden="true">
 			{#if t.type === 'success'}
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
@@ -61,8 +132,8 @@
 		<button
 			type="button"
 			class="toast-dismiss"
-			aria-label="Dismiss notification"
-			onclick={() => dismiss(t.id)}
+			aria-label={m('toast.dismiss')}
+			onclick={() => dismissFromButton(t.id)}
 		>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 		</button>
@@ -158,8 +229,9 @@
 		flex-shrink: 0;
 		display: grid;
 		place-items: center;
-		width: 22px;
-		height: 22px;
+		/* WCAG 2.5.8 target size: 24px minimum. */
+		width: 24px;
+		height: 24px;
 		padding: 0;
 		border: none;
 		border-radius: 5px;
@@ -170,7 +242,8 @@
 		transition: opacity 0.12s, background 0.12s;
 	}
 
-	.toast-dismiss:hover {
+	.toast-dismiss:hover,
+	.toast-dismiss:focus-visible {
 		opacity: 1;
 		background: color-mix(in srgb, currentColor 12%, transparent);
 	}
