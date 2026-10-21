@@ -221,6 +221,7 @@ async def lifespan(app: FastAPI):
     from app.services.commerce_sync import run_commerce_sync_loop
     from app.services.contract_renewal import run_renewal_loop
     from app.services.discount_auto_trigger import run_discount_optimization_loop
+    from app.services.erp_status_sync import run_erp_status_sync_loop
     from app.services.extraction_reaper import run_reaper_loop
     from app.services.payment_reconciler import run_reconciler_loop
     from app.services.qms_sync import run_qms_sync_loop
@@ -334,6 +335,12 @@ async def lifespan(app: FastAPI):
     commerce_task: asyncio.Task | None = None
     if settings.commerce_sync_enabled:
         commerce_task = start_sweep(run_commerce_sync_loop(), name="commerce-sync")
+    # ERP status sync (decisions §303). Disabled by default; polls the ERP for
+    # pushed bills still awaiting their outcome and records the ERP's payment
+    # through the webhook's own path — never moves money.
+    erp_status_task: asyncio.Task | None = None
+    if settings.erp_status_sync_enabled:
+        erp_status_task = start_sweep(run_erp_status_sync_loop(), name="erp-status-sync")
 
     try:
         yield
@@ -355,6 +362,7 @@ async def lifespan(app: FastAPI):
             shortfall_alerts_task,
             ai_overage_task,
             commerce_task,
+            erp_status_task,
         ):
             if task is not None:
                 task.cancel()

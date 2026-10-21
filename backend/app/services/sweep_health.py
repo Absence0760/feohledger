@@ -77,6 +77,7 @@ SWEEP_SCHEDULED_REPORTS = "scheduled-reports"
 SWEEP_CASHFLOW_SHORTFALL = "cashflow-shortfall-alerts"
 SWEEP_BILLING_AI_OVERAGE = "billing-ai-overage"
 SWEEP_COMMERCE_SYNC = "commerce-sync"
+SWEEP_ERP_STATUS_SYNC = "erp-status-sync"
 
 #: Every sweep name → the ``Settings`` attribute that gates it. The mapping is
 #: what lets the health endpoint distinguish "operator turned this off" from
@@ -98,6 +99,7 @@ SWEEP_ENABLED_FLAGS: dict[str, str] = {
     SWEEP_CASHFLOW_SHORTFALL: "cashflow_shortfall_alerts_enabled",
     SWEEP_BILLING_AI_OVERAGE: "billing_ai_overage_sweep_enabled",
     SWEEP_COMMERCE_SYNC: "commerce_sync_enabled",
+    SWEEP_ERP_STATUS_SYNC: "erp_status_sync_enabled",
 }
 
 ALL_SWEEPS: tuple[str, ...] = tuple(SWEEP_ENABLED_FLAGS)

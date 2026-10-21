@@ -528,6 +528,121 @@ async def retry_erp(
     }
 
 
+#: `detail.code` refusals of `POST /{id}/sync-erp-status`.
+ERP_STATUS_NOT_AWAITING = "erp_status_not_awaiting"
+ERP_STATUS_NOT_PUSHED_HERE = "erp_status_not_pushed_here"
+ERP_STATUS_NOT_CONFIGURED = "erp_status_not_configured"
+
+
+@router.post("/{invoice_id}/sync-erp-status")
+async def sync_erp_status(
+    invoice_id: uuid.UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+    org: Organization = Depends(get_tenant),
+    control_db: AsyncSession = Depends(get_control_db),
+):
+    """Ask the ERP now what happened to this pushed bill, and apply it.
+
+    The on-demand form of the ERP status sweep (`services/erp_status_sync`,
+    decisions §303), for one invoice: the same poll, the same re-check under
+    the row lock and the same application through
+    `services/erp_reported_status` the webhook uses. Paid is recorded as a
+    payment made outside FeohLedger; cancelled or settled-without-payment is
+    flagged. Moves no money. Same roles as send-to-erp / retry-erp.
+
+    Not plan-gated, unlike the push: it posts nothing, it only lets the ledger
+    learn what the ERP already did with a bill it holds.
+    """
+    from app.services.credential_crypto import CredentialCryptoError
+    from app.services.erp_adapters import UnknownErpAdapterError
+    from app.services.erp_status_sync import (
+        AWAITING_ERP_OUTCOME_STATUSES,
+        apply_status,
+        poll_status,
+        pollable_reference,
+        resolve_connection,
+    )
+    from app.services.provider_credentials import (
+        CREDENTIALS_UNAVAILABLE_DETAIL,
+        provider_config,
+    )
+
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
+    row = (
+        await db.execute(
+            select(Invoice.status, WorkflowInstance.state_data)
+            .outerjoin(WorkflowInstance, WorkflowInstance.invoice_id == Invoice.id)
+            .where(Invoice.id == invoice_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice_status, state_data = row
+    if invoice_status not in AWAITING_ERP_OUTCOME_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                ERP_STATUS_NOT_AWAITING,
+                "This invoice is not waiting on the ERP.",
+                status=invoice_status.value,
+            ),
+        )
+    try:
+        erp_config = await provider_config(org, "erp", db=control_db)
+    except CredentialCryptoError:
+        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
+    if not erp_config:
+        raise HTTPException(
+            status_code=400,
+            detail=coded_refusal(ERP_STATUS_NOT_CONFIGURED, "No ERP is connected."),
+        )
+    try:
+        connection = resolve_connection(erp_config)
+    except UnknownErpAdapterError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{exc.adapter_key}' is not a supported ERP adapter.",
+        ) from exc
+
+    reference = pollable_reference(state_data, connection)
+    if reference is None:
+        raise HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                ERP_STATUS_NOT_PUSHED_HERE,
+                "This invoice was not posted to the ERP company now connected, so its "
+                "status can't be read from there.",
+            ),
+        )
+    # End the read transaction before the ERP round trip: nothing may be held
+    # open across a third party's latency.
+    await db.rollback()
+    try:
+        erp_status = await poll_status(connection, reference)
+    except Exception as exc:  # noqa: BLE001 — the ERP's failure, never its body
+        raise HTTPException(status_code=502, detail="The ERP could not be reached.") from exc
+    outcome = await apply_status(
+        db,
+        org=org,
+        invoice_id=invoice_id,
+        reference=reference,
+        erp_status=erp_status,
+        adapter_key=connection.adapter_key,
+    )
+    await db.commit()
+    current = (
+        await db.execute(select(Invoice.status).where(Invoice.id == invoice_id))
+    ).scalar_one()
+    return {
+        "id": str(invoice_id),
+        "status": current.value,
+        "erp_status": erp_status.value,
+        "outcome": outcome.value,
+    }
+
+
 # ---------- Stage 4: Complete ----------
 
 

@@ -368,6 +368,16 @@ class Settings(BaseSettings):
     # admin can still retry it by hand).
     commerce_sync_max_attempts: int = 8
 
+    # ERP status sync (decisions §303, `services/erp_status_sync.py`): polls the
+    # connected ERP for every bill FeohLedger pushed that is still awaiting its
+    # outcome, and records the ERP's payment through the same path the ERP
+    # webhook uses. Off by default like every sweep (guard rail 7); records what
+    # the ERP already did and never moves money. Batch size is a keyset page,
+    # not a cap: each tenant is paged until exhausted.
+    erp_status_sync_enabled: bool = False
+    erp_status_sync_interval_seconds: int = 900
+    erp_status_sync_batch_size: int = 200
+
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS
     sqs_audit_queue_url: str = ""  # required when audit_mode = "lambda"
