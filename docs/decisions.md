@@ -12910,3 +12910,148 @@ Tests: `frontend/src/lib/i18n/slices.test.ts`,
 `frontend/tests-e2e/i18n/catalogue-slices.spec.ts`, and the backend's
 `test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
 settings slice for the form labels they check.
+
+## 303. A pushed invoice rests at `sent_to_erp` until the ERP pays it, and the ERP is polled for that payment (2026-10-20)
+
+**The gap.** A bill paid in the ERP never reached FeohLedger. In a live Xero
+Demo Company test FEOH-INV-001 was pushed as a bill, approved and paid in Xero,
+and FeohLedger still showed it `done` with no payment. Three causes stacked:
+
+1. `services/erp.send_to_erp_internal` walked a successful push
+   `sent_to_erp → done`. `done` is terminal, so neither the webhook's paid
+   handling (§251, which accepts `approved` / `sent_to_erp` / `posted_in_erp`)
+   nor "record a payment made outside" could ever apply to a pushed invoice.
+2. Nothing asked the ERP. Every adapter implements `get_invoice_status`, and
+   nothing under `app/` called it.
+3. The only inbound path is `POST /api/erp/webhook/{erp_type}`, which takes our
+   own normalized, HMAC-signed body. Xero's native webhooks can't send it, and
+   neither can an ERP talking to a laptop.
+
+**Where a pushed invoice rests: `sent_to_erp`.** The question that decides it
+is who pays a bill FeohLedger has pushed, and the code has always answered
+"the ERP". The push ended at `done`, so no pushed invoice was ever in the
+payment queue, a run, a standalone payment or a card. An invoice is paid by
+FeohLedger only when it is NOT pushed (`approved → payment_scheduled`, then
+`payment_erp_sync` tells the ERP). The resting state has to keep that answer
+and still accept a later payment, and `sent_to_erp` does both:
+
+- it is outside `api/payments.PAYABLE_INVOICE_STATUSES`, which the queue, the
+  run builder, the standalone payment, the NACHA export and card minting all
+  read. So resting there cannot put the bill in FeohLedger's payment queue as
+  well as the ERP's;
+- it is inside `external_payment.recordable_statuses()`, the payable set plus
+  `sent_to_erp`. So the ERP's payment, or a person recording it, lands. The
+  record walks the invoice `sent_to_erp → posted_in_erp → payment_scheduled →
+  paid`. All three edges already exist, so `VALID_TRANSITIONS` is unchanged.
+
+**`posted_in_erp` stops being a place to wait.** It is payable, so an invoice
+waiting there could be paid by FeohLedger and by the ERP. The webhook used to
+apply an ERP `OPEN` / `posted` report as `sent_to_erp → posted_in_erp`. That
+edge was dormant while pushes ended at `done`, and would have gone live with
+this change, putting every confirmed bill into our queue. The report is now
+acknowledged and not applied. `posted_in_erp` is reached only inside the
+transaction that records the payment, after every gate has passed. The status
+move happens in `external_payment._complete`, not ahead of the gates as the
+webhook used to do it. A refused record therefore leaves the invoice at
+`sent_to_erp`, not at a payable status with an ERP payment behind it. Moving it
+first and rolling back on refusal was rejected: in `lambda` audit mode the
+transition's audit row ships before the rollback, so the trail would record a
+posting that never was.
+
+**Every refusal of an ERP-reported payment blocks.** §251 raised the blocking
+`payment_reconciliation` only for the three refusals where FeohLedger itself
+still claimed the payment (a run, a live payment, a live card). For the others
+it raised the non-blocking `erp_reconciliation`: an open duplicate or fraud
+flag, an applied credit that no longer pairs, nothing left to pay. That is a
+double payment too, one step later. Once someone clears the cause (dismisses
+the duplicate flag, corrects the credit), nothing stops an `approved` /
+`posted_in_erp` invoice the ERP already paid from going into a run. Once the
+ERP says it paid, every FeohLedger path to paying the invoice pays twice. So any
+refusal now opens `payment_reconciliation`, and the description says FeohLedger
+will not pay the invoice while it is open.
+
+**Rejected alternatives:**
+
+- **Resting at `posted_in_erp` and dropping it from the payable set.** It would
+  have meant the same thing, but `PAYABLE_INVOICE_STATUSES` feeds the cash-flow
+  forecast, discount offers, cards and the credit-memo derivation. Each would
+  have changed meaning in the same commit.
+- **A per-org "pay pushed bills in FeohLedger" switch, or keying on
+  `settings.payments.mode`.** `record_only` does not make the queue safe: a
+  record-only tenant still stages runs and uploads the NACHA file to its bank,
+  which pays the supplier as surely as the ERP does. Who pays a pushed bill is a
+  product decision nobody has asked for. Today's answer stays until someone
+  does.
+- **Adding `sent_to_erp → paid` / `posted_in_erp → paid` edges.** §251 already
+  rejected that: `paid` needs a payment behind it.
+
+**`paid` means money moved.** The poll would have made the adapters' zero-balance
+reading load-bearing. SYSPRO, Sage Accounting ZA and QuickBooks read a zero
+balance as paid, and Intacct and FE NXT did the same as a fallback. A credit
+note, a write-off or a zero-total bill also leaves nothing owing, and recording
+one as an external payment books money that never left. Now `paid` needs either
+the ERP's own paid status (Intacct `paid`, FE NXT `Paid`, Sage ZA's `Paid` with
+a non-zero total, Sage Accounting `PAID`, NetSuite `paidInFull`, Business
+Central `paid`, Merge `PAID`) or a payment the ERP links to the bill (a
+QuickBooks `BillPaymentCheck` / `BillPaymentCreditCard` `LinkedTxn`; Xero `PAID`
+with `AmountPaid > 0`). A zero balance with neither reads as the new
+`ErpInvoiceStatus.settled_no_payment`. The sweep flags that with an
+`erp_reconciliation` exception and records nothing. SYSPRO's `ApInvoice` has no
+paid status at all, so a SYSPRO bill never reads as paid on a poll. It reaches
+`paid` when a person records the payment, or through the webhook. Querying
+SYSPRO's payment tables was not attempted: building that from field names we
+cannot verify would be guessing on the money path.
+
+**The sweep (`services/erp_status_sync`).** It is off by default
+(`FEOH_ERP_STATUS_SYNC_ENABLED`, like every sweep) and on in
+`backend/.env.development`. That is safe there because the `mock` ERP answers
+every poll `open` and never fabricates a payment. Each tick:
+
+- it covers every tenant with a `settings.erp`, keyset-paged over invoices at
+  `sent_to_erp` / `posted_in_erp` that carry an `erp_reference`;
+- each invoice is polled with no lock and no open transaction, then locked,
+  re-checked (still awaiting, same reference) and applied in its own
+  transaction;
+- reports are applied by `services/erp_reported_status`, the module the webhook
+  now calls too. That is how the two paths are kept from disagreeing;
+- one invoice failing is counted `invoice_failures`, and one tenant failing is
+  counted `failures`.
+
+It never moves money. Idempotency:
+
+- `paid` takes the invoice out of the candidate set;
+- a refused record retries each tick, so it lands by itself once the cause is
+  cleared. Its exception opens once (the open-exception dedup);
+- a `cancelled` or `settled_no_payment` flag is raised once per reported status,
+  remembered on `WorkflowInstance.state_data["erp_status_flagged"]`, so
+  resolving the flag isn't answered by the same flag on the next tick.
+
+**It asks only the ERP company that holds the bill.** The push now records
+`erp_adapter` and `erp_realm` (§284's connection realm) beside `erp_reference`.
+An invoice is polled only while the tenant is connected to that same adapter and
+company. QuickBooks numbers bills per company with small integers, so polling a
+sandbox bill's id against production would read a different bill. A row without
+those keys is skipped for the same reason.
+
+**On demand: `POST /api/invoices/{id}/sync-erp-status`** (admin / ap_manager /
+cfo, the send-to-erp roles, entity-scoped) runs the same poll and apply for one
+invoice. Like the sweep it is not plan-gated. It posts nothing, and refusing it
+would leave the ledger wrong about what the ERP did.
+
+**Not changed.** Invoices pushed before this change stay `done`. `done` is
+terminal and has no edge out, so they are not backfilled, the FEOH-INV-001 test
+bill included. Inventing an edge out of a terminal status to repair a test row
+was rejected. The ERP's id is read from `WorkflowInstance.state_data`. When
+`invoices.erp_document_id` lands, the candidate query can read the column
+instead. Voiding or recalling a bill that is in the ERP is still unwired, and a
+bill the ERP cancels has no exit beyond the reconciliation flag. Both are tracked
+in `docs/followups.md`.
+
+Guards: the adapter mapping suites (`tests/test_erp_*_adapter.py`),
+`tests/test_erp_push_flow.py` (the push rests at `sent_to_erp` and records its
+connection), `tests/test_erp_status_sync.py` (eligibility, paging, idempotency,
+tenant isolation, connection matching, paid/cancelled/settled handling, the
+on-demand route, and a pushed invoice that cannot be paid twice),
+`tests/test_erp_paid_recorded_outside.py`, `tests/test_erp_webhook_transitions.py`,
+and `frontend/tests-e2e/erp/xero.spec.ts` (Xero marks the bill paid, and a sync
+records it).

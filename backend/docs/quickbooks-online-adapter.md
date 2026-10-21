@@ -175,7 +175,7 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
 | `list_gl_accounts` | `query: select * from Account where Active IN (true, false)` | Inactive accounts too, emitted `active=False` (the sync retires a linked row and creates none), with the ` (deleted)` QuickBooks appends to an inactive record's `Name` / `FullyQualifiedName` stripped (`_undeleted`). `parent_erp_account_id` = `ParentRef`, and `reports_parent` is set, so the sync names the parent by our code and clears it for a top-level account. **`code` = `AcctNum`, else `FullyQualifiedName`** — never the bare `Name`, which QuickBooks repeats across parents (the sandbox has "Job Materials" under both "Job Expenses" and "Landscaping Services"). `name` is the path; a path over 100 characters ends `…#<Id>`. `legacy_codes` carries the old `Name` key so the sync can unlink a row a pre-§284 sync collapsed. Map `Classification` to the asset/liability/equity/revenue/expense vocabulary. See erp-integration.md § GL accounts and vendors are linked by the ERP's unique key |
 | `list_pos` | `query: select * from PurchaseOrder` | Plus/Advanced plans only; an empty list on Simple Start is correct. PO lines carry no GL account: nothing persists or reads one, so there is no chart read, and the `AccountRef` name is never taken as one (§284) |
 | `post_invoice` | `POST bill?requestid=<correlation_id>` | See below |
-| `get_invoice_status` | `GET bill/{id}` | `Balance == 0` → `paid`; `0 < Balance < TotalAmt` → `partially_paid`; else `open` |
+| `get_invoice_status` | `GET bill/{id}` | `Balance == 0` with a `BillPaymentCheck` / `BillPaymentCreditCard` `LinkedTxn` and a non-zero `TotalAmt` → `paid`, without one → `settled_no_payment` (decisions §303); `0 < Balance < TotalAmt` → `partially_paid`; else `open` |
 | `void_invoice` | `POST bill?operation=delete` | QuickBooks has no bill void, only delete. See open question 1 |
 
 **`post_invoice`:**
@@ -233,8 +233,9 @@ Size: 3–4 days, including fake-erp routes.
   `Bill`/`BillPayment` and then runs the existing status-transition path.
 - **Webhooks are not guaranteed delivery.** Add a daily reconciliation sweep
   over `GET cdc?entities=Bill,BillPayment&changedSince=…`; Intuit's
-  change-data-capture covers 30 days. This also delivers the "polling job for
-  status sync" `erp-integration.md` lists as planned, for QuickBooks at least.
+  change-data-capture covers 30 days. The generic ERP status sweep
+  (`services/erp_status_sync`, decisions §303) already polls each open bill;
+  this would replace that poll with one change-feed read for QuickBooks.
   The sweep defaults to off, like every other sweep (guard rail 7).
 
 Size: 2–3 days.

@@ -39,7 +39,11 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — fixing signup's dead ends (decisions §292)
+**Last reconciled:** 2026-10-20 — syncing ERP-paid bills back (decisions §303)
+narrowed the ERP polling/void (c) entry to the still-open void/recall gap and
+opened two (c) entries, SYSPRO's paid read and a UI action for the on-demand
+ERP status check, taking the file from 118 → 120. Before that, 2026-10-20 —
+fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
@@ -173,7 +177,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**118 open: 102 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**120 open: 104 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1481,13 +1485,39 @@ scope (§260) — do not fold them into any of these.
       fix:** key the id by ERP (a `vendor_erp_links` table, or `{erp_type: id}`)
       and resolve by the active ERP. **Trigger:** the first tenant that
       switches ERP.
-- [ ] **(c) ERP status polling and void are unwired, and three adapters read a
-      zero balance as paid.** `get_invoice_status` / `void_invoice` have no
-      callers under `app/`. When they are wired in, SYSPRO, Sage SA and
-      QuickBooks map balance 0 to `paid`, which also catches a credited or
-      zero-total bill. **Durable fix:** map paid only on a recorded payment
-      (or the ERP's own paid status), before wiring the poll. **Trigger:**
-      wiring the ERP status poll or void into any flow.
+- [ ] **(c) A bill already posted to the ERP can't be voided or recalled from
+      FeohLedger, and one the ERP cancels has no exit.** `void_invoice` has no
+      caller under `app/` beyond `posted_total`'s own cleanup of a mismatched
+      bill, and no user action voids or recalls a pushed bill. A pushed invoice
+      rests at `sent_to_erp` (decisions §303); when the ERP reports it
+      cancelled, the status sweep / webhook only open an `erp_reconciliation`
+      flag, and the invoice stays at `sent_to_erp`, polled forever, with no
+      edge to `failed` or `done`. (The polling half and the zero-balance → paid
+      mapping landed in §303.) **Durable fix:** a `POST /api/invoices/{id}/
+      void-erp` (the push's roles) that calls `void_invoice`, refuses a bill the
+      ERP shows paid or partly paid, and on success — or on an ERP-reported
+      cancel a person confirms — walks the invoice through a new, audited
+      `sent_to_erp → approved` edge so it can be corrected and re-pushed or
+      paid; the sweep then stops polling it. **Trigger:** the first customer
+      who needs to recall a pushed bill, or the live void test now pending.
+- [ ] **(c) SYSPRO bills never read as paid on a status poll.** SYSPRO's
+      `ApInvoice` states only a balance and has no paid status, so since §303
+      a zero balance reads `settled_no_payment` and is flagged, not recorded;
+      a SYSPRO bill reaches `paid` only by a person's
+      `POST /api/payments/record-outside` or the ERP webhook. **Durable fix:**
+      read the payment SYSPRO records against the invoice (its AP payment
+      history via COMFND) and report `paid` only when one covers the bill —
+      built against a real SYSPRO instance's table and column names, not
+      guessed. **Trigger:** the first SYSPRO tenant relying on the status sweep,
+      or SYSPRO sandbox access.
+- [ ] **(c) No UI asks the ERP about one pushed bill.**
+      `POST /api/invoices/{id}/sync-erp-status` (§303) has no button; the web
+      app shows a pushed invoice as "Sent to ERP" until the sweep records the
+      ERP's payment. **Durable fix:** a "Check ERP status" action in the invoice
+      modal for `sent_to_erp` / `posted_in_erp`, for the route's roles, toasting
+      the localized `outcome` and the coded refusals (six locales). **Trigger:**
+      the next change to the invoice modal's ERP actions, or a customer asking
+      why a bill paid in the ERP still reads "Sent to ERP".
 - [ ] **(c) Business Central's vendor sync stores `paymentTermsId` (a GUID) as
       the payment-terms text, and NetSuite's PO sync pulls no lines.**
       **Durable fix:** resolve BC's `paymentTerms` code; pull NetSuite PO lines

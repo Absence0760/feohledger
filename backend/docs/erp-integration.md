@@ -1656,7 +1656,7 @@ form. JSON throughout — no XML parser on this path.
 |---|---|
 | token | `POST <base>/oauth2/token` (form: `grant_type=client_credentials`, `client_id`, `client_secret`, `username`) — one per adapter operation |
 | `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`) or any GL account ERP id (`account_not_linked`) → `POST services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` |
-| `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` (+ `totalTxnAmountDue = 0` ⇒ paid) |
+| `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` only — `paid` only on the `paid` state, never on `totalTxnAmountDue = 0` (decisions §303) |
 | `void_invoice` | deletes a draft / posted-unpaid bill; a bill that is paid, partially paid, selected for payment or reversed returns `False` (reversal with its payment is an accountant's call) |
 | `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors and accounts up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort |
 | `test_connection` | token + a one-row vendor query |
@@ -1712,7 +1712,7 @@ query-string parameters, which is how the WCF REST host takes them:
 | Operation | Business object |
 |---|---|
 | `post_invoice` | refuse without `vendor_erp_id` / a GL account ERP id → `COMFND` on `ApInvoice` by (`Supplier`, `Invoice`) → `Transaction/Post` `APSTIN` |
-| `get_invoice_status` | `COMFND` on `ApInvoice` — `MthInvBal1` 0 ⇒ paid, below `OrigInvValue` ⇒ partially paid, else open |
+| `get_invoice_status` | `COMFND` on `ApInvoice` — `MthInvBal1` 0 ⇒ `settled_no_payment` (never `paid`: no paid status to read, decisions §303), below `OrigInvValue` ⇒ partially paid, else open |
 | `void_invoice` | not automated (`False`) — reversing a posted AP invoice is an adjustment / credit in an open period, an accountant's call |
 | `list_vendors` / `list_gl_accounts` | `COMFND` on `ApSupplier` / `GenMaster` (`AccountType` A/L/C/R/E → asset/liability/equity/revenue/expense) |
 | `list_pos` | `COMFND` on `PorMasterHdr` + `PorMasterDetail` (total = Σ qty × price) + `ApSupplier` for names, one session; a PO with no lines returned is skipped, never synced at 0 |
@@ -1947,7 +1947,7 @@ pages.
 | Operation | Calls |
 |---|---|
 | `post_invoice` | refuse pre-flight without a numeric `vendor_erp_id` (SupplierId) / numeric GL account ids, or in a non-home currency → `SupplierInvoice/Get` idempotency lookup → `Supplier/Get/{id}` (+ `Company/Get/{id}`) currency check → `Account/Get` + `TaxType/Get` → `SupplierInvoice/Save` |
-| `get_invoice_status` | `SupplierInvoice/Get/{id}` — `AmountDue` 0 ⇒ paid, below `Total` ⇒ partially paid, else open |
+| `get_invoice_status` | `SupplierInvoice/Get/{id}` — `AmountDue` 0 ⇒ paid only with Sage's `Paid` flag and a non-zero `Total`, else `settled_no_payment` (decisions §303); below `Total` ⇒ partially paid, else open |
 | `void_invoice` | `SupplierInvoice/Delete/{id}`, only when `AmountDue == Total` and the invoice is neither `Locked` nor `Paid`; otherwise `False` (reverse it in Sage with its payment) |
 | `list_vendors` / `list_gl_accounts` / `list_pos` | `Supplier/Get` / `Account/Get` (active only; category → asset/liability/equity/revenue/expense, unknown → unclassified) / `PurchaseOrder/Get` (`currency` left NULL — decisions §197) |
 | `test_connection` | `Company/Get` answers *and* lists the configured `company_id` |
@@ -2028,7 +2028,7 @@ tenant; the environment is burned into the token.
 | Operation | Call |
 |---|---|
 | `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>` → `POST /accountspayable/v1/invoices/process` → `GET …/backgroundProcess/{id}/status` (≤ 10 reads, 1 s apart) → `…/result` |
-| `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (balance 0 ⇒ paid), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
+| `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (a zero balance stays open until FE NXT says `Paid`, decisions §303), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
 | `void_invoice` | not automated (`False`): the AP API has no invoice delete, and cancelling a posted payable is an adjustment in an open period |
 | `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort; template and deleted POs skipped; PO `currency` stays NULL |
 | `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take), up to `SYNC_LISTING_MAX_ROWS`; `prevent_data_entry` accounts emitted `active=False`; `account_type` unclassified (FE NXT's `class` is a net-asset class) |
