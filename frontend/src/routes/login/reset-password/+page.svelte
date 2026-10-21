@@ -94,8 +94,9 @@
 			// the page loaded is the same dead link, so it gets the same screen and
 			// its way forward, a fresh link — not a banner over a form that can
 			// never succeed. A 422 is the new password refused, and goes beside
-			// that field; anything else (a 429) rides the backend's own detail
-			// text in the banner and leaves the form to retry.
+			// that field; anything else (a 429) shows the error's message — the
+			// coded `rate_limited` refusal, localized by `api/codedRefusals.ts` —
+			// in the banner and leaves the form to retry.
 			if (err instanceof ApiError && err.status === 400) {
 				invalidOnSubmit = true;
 				phase = 'invalid';
