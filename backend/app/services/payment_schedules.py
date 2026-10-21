@@ -11,8 +11,13 @@ arbitrarily between them while the forecast picked the higher id: the discount
 engine and the cash forecast could read different due dates for one invoice
 (issue #575). The rule lives here now.
 
-The rule: the newest row wins, `created_at` descending with `id` descending as
-the tiebreak, so the answer is deterministic.
+The rule: `created_at` descending, then `id` descending. Across transactions
+that is the newest row. Within one transaction the rows tie on `created_at`,
+and `id` is a random UUID4 — so the tiebreak is deterministic (every reader
+picks the same row, every time) but it is NOT "the newer of the two": it is
+whichever id sorts higher. What the rule guarantees is agreement between the
+readers, not recency inside a tie. A writer that needs its row to win must
+not write two schedules for one invoice in one transaction.
 """
 
 from __future__ import annotations
