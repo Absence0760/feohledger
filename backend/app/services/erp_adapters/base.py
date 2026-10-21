@@ -290,6 +290,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "erp_credentials_unavailable",
         # `services/erp_export_gate`: an open duplicate / fraud exception (§286)
         "exception_blocks_erp_export",
+        # `services/erp_export_gate`: FeohLedger is already paying it (§306)
+        "payment_blocks_erp_export",
         # `services/erp` itself: the invoice is due before it is dated
         "invoice_due_before_date",
         # A payment written back to the ERP (`post_payment`, decisions §295)

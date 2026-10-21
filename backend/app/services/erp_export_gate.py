@@ -26,12 +26,25 @@ Clearing the flag goes through ``exception_lifecycle.record_decision``, whose
 segregation check refuses anyone implicated in the invoice. Nothing here
 bypasses that: the gate only reads the exceptions.
 
-Every string here is PII-free: an exception type is a fixed literal.
+**FeohLedger already paying the invoice refuses the push too** (decisions
+§306). Staging a payment run books a live ``Payment`` (``pending``; an
+``exported`` NACHA file is the same) and minting a virtual card books a live
+``VirtualCard``, and neither moves the invoice off ``approved``. A bill pushed
+then is payable in the ERP as well, so it could be paid twice: once by our
+rail and once from the ERP. The two rails already refuse each other through
+``payment_runs.live_payment_invoices`` and ``card_issuance.live_card_invoice_ids``;
+:func:`erp_export_live_claim` asks the same two predicates, so "live" has one
+definition (``api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`` and the card slot
+index). It runs at the same two places, after the exception check, and
+:func:`erp_export_refusal` is the one answer both take.
+
+Every string here is PII-free: an exception type and a claim are fixed literals.
 """
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +53,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 #: the invoice modal states it (``frontend/src/lib/api/erpRefusals.ts``) and in
 #: the coded-refusal registry the 409 is localized by (``codedRefusals.ts``).
 EXCEPTION_BLOCKS_ERP_EXPORT = "exception_blocks_erp_export"
+
+#: The refusal code when FeohLedger is already paying the invoice, registered
+#: in the same two places. Its ``claim`` param names the rail that holds it.
+PAYMENT_BLOCKS_ERP_EXPORT = "payment_blocks_erp_export"
+
+#: The ``claim`` values: a live ``Payment`` (a staged or exported run, an
+#: executing or settled payment) or a live ``VirtualCard``.
+CLAIM_PAYMENT = "payment"
+CLAIM_VIRTUAL_CARD = "virtual_card"
 
 
 async def erp_export_blocking_exception(db: AsyncSession, invoice_id: uuid.UUID) -> str | None:
@@ -85,6 +107,89 @@ def blocked_export_refusal(exception_type: str, *, possibly_posted: bool = False
     }
 
 
+async def erp_export_live_claim(db: AsyncSession, invoice_id: uuid.UUID) -> str | None:
+    """Which of our rails is already paying this invoice, or None.
+
+    The run builder and the card mint refuse each other with these same two
+    predicates, so the ERP push cannot disagree with them about what is live:
+    a payment not ``voided`` / ``failed`` / ``cancelled``, a card not
+    ``cancelled``. A payment is named first when both exist.
+    """
+    from app.services.card_issuance import live_card_invoice_ids
+    from app.services.payment_runs import live_payment_invoices
+
+    if invoice_id in await live_payment_invoices(db, [invoice_id]):
+        return CLAIM_PAYMENT
+    if invoice_id in await live_card_invoice_ids(db, [invoice_id]):
+        return CLAIM_VIRTUAL_CARD
+    return None
+
+
+def claimed_export_params(claim: str, *, possibly_posted: bool = False) -> dict:
+    """The live-claim refusal's params; ``possibly_posted`` only when true."""
+    params: dict = {"claim": claim}
+    if possibly_posted:
+        params["possibly_posted"] = True
+    return params
+
+
+def claimed_export_message(claim: str, *, possibly_posted: bool = False) -> str:
+    """The English ``error`` on the ``invoice.erp_failed`` row."""
+    message = f"ERP post refused: {PAYMENT_BLOCKS_ERP_EXPORT} ({claim})"
+    return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
+
+
+@dataclass(frozen=True)
+class ExportRefusal:
+    """Why the push is refused: the coded refusal, and its English for the
+    ``invoice.erp_failed`` row."""
+
+    code: str
+    params: dict
+    error: str
+
+    @property
+    def refusal(self) -> dict:
+        """In ``erp.erp_refusal_record``'s shape."""
+        return {"code": self.code, "params": self.params}
+
+
+async def erp_export_refusal(
+    db: AsyncSession, invoice_id: uuid.UUID, *, possibly_posted: bool
+) -> ExportRefusal | None:
+    """Every reason this invoice may not be pushed now, or None. The first wins:
+    an open duplicate / fraud exception (§286), then a live payment or card
+    (§306). Both the HTTP doors and ``erp._call_erp`` ask this one function."""
+    exception_type = await erp_export_blocking_exception(db, invoice_id)
+    if exception_type is not None:
+        return ExportRefusal(
+            EXCEPTION_BLOCKS_ERP_EXPORT,
+            blocked_export_params(exception_type, possibly_posted=possibly_posted),
+            blocked_export_message(exception_type, possibly_posted=possibly_posted),
+        )
+    claim = await erp_export_live_claim(db, invoice_id)
+    if claim is not None:
+        return ExportRefusal(
+            PAYMENT_BLOCKS_ERP_EXPORT,
+            claimed_export_params(claim, possibly_posted=possibly_posted),
+            claimed_export_message(claim, possibly_posted=possibly_posted),
+        )
+    return None
+
+
+#: The 409's English for a live claim: what holds the invoice, and what to do.
+_CLAIM_SENTENCE = {
+    CLAIM_PAYMENT: (
+        "FeohLedger is already paying this invoice: it has a live payment. "
+        "Cancel its payment run or void the payment before sending the invoice to the ERP."
+    ),
+    CLAIM_VIRTUAL_CARD: (
+        "A virtual card has been issued to pay this invoice. "
+        "Cancel the card before sending the invoice to the ERP."
+    ),
+}
+
+
 async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> None:
     """409 before an HTTP door queues a push the chokepoint would refuse.
 
@@ -100,17 +205,21 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> 
     from app.services.erp import possibly_posted
     from app.services.workflow_engine import get_workflow_instance
 
-    exception_type = await erp_export_blocking_exception(db, invoice_id)
-    if exception_type is None:
-        return
     # `/retry-erp` after a timed-out attempt: the bill may already be there.
     instance = await get_workflow_instance(db, invoice_id)
     posted = possibly_posted(instance.state_data if instance is not None else None)
+    refused = await erp_export_refusal(db, invoice_id, possibly_posted=posted)
+    if refused is None:
+        return
     await db.commit()
-    message = (
-        f"This invoice has an open {exception_type.replace('_', ' ')} exception. "
-        "Resolve or dismiss it in Exceptions, then send it to the ERP."
-    )
+    if refused.code == EXCEPTION_BLOCKS_ERP_EXPORT:
+        exception_type = refused.params["exception_type"]
+        message = (
+            f"This invoice has an open {exception_type.replace('_', ' ')} exception. "
+            "Resolve or dismiss it in Exceptions, then send it to the ERP."
+        )
+    else:
+        message = _CLAIM_SENTENCE[refused.params["claim"]]
     if posted:
         message += (
             " An earlier attempt may already have created the bill in the ERP; "
@@ -118,9 +227,5 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> 
         )
     raise HTTPException(
         status_code=409,
-        detail=coded_refusal(
-            EXCEPTION_BLOCKS_ERP_EXPORT,
-            message,
-            **blocked_export_params(exception_type, possibly_posted=posted),
-        ),
+        detail=coded_refusal(refused.code, message, **refused.params),
     )
