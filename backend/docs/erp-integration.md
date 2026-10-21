@@ -2317,7 +2317,12 @@ token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
 or `body`. `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
 which documents that) instead of RFC 7009's form body; sent a form, Intuit may
 refuse it, and Disconnect would then leave the grant live behind a
-`revoked: false` the user never sees. An empty `scopes` sends no `scope`. Operator URL overrides
+`revoked: false` the user never sees. **Which providers revoke:** QuickBooks
+(JSON) and Xero (RFC 7009 form + Basic, `identity.xero.com/connect/revocation`;
+revoking the refresh token also removes the org's connection, so the next
+consent offers the org afresh instead of "Already connected"). Sage Accounting
+and Blackbaud FE NXT configure no revoke URL yet, so their Disconnect only
+forgets our copy of the tokens (`docs/followups.md`). An empty `scopes` sends no `scope`. Operator URL overrides
 (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
