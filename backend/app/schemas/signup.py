@@ -48,3 +48,7 @@ class SlugCheckResponse(BaseModel):
     slug: str
     available: bool
     reason: str | None = None
+    #: `signup_slug_held` when the slug is resting after a workspace closure, so
+    #: the form can say "temporarily unavailable" in the reader's language
+    #: rather than render `reason` (server English) as if it were taken.
+    reason_code: str | None = None

@@ -64,6 +64,7 @@ Money is exact: every currency column is
 | `spend_limit` | numeric(15,2) | Cumulative-spend ceiling for compliance. NULL = no ceiling. |
 | `not_to_exceed` | boolean | When true, spend over `spend_limit` is a hard violation (`error` exception); else advisory (`warning`). |
 | `start_date` / `end_date` / `signed_date` | date | `end_date` indexed (renewal sweep). |
+| `activated_at` | timestamptz | When the contract first came into force — stamped by the first `activate`, never cleared, so a contract activated and later cancelled still reads as one that bound the parties (`signed_date` is optional input and cannot). Migration 0120 backfilled it from the first `contract.active` audit row, else from an `active`/`expired`/`terminated` status. Read by the workspace-closure guard (decisions §306). |
 | `auto_renew` | boolean | |
 | `renewal_term_months` | integer | |
 | `renewal_notice_days` | integer | Default 30. Per-contract lead window for the renewal alert. |

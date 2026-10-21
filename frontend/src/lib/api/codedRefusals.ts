@@ -51,6 +51,7 @@ import { EXCEPTION_BLOCKS_ERP_EXPORT, erpRefusalText } from '#lib/api/erpRefusal
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
+import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
@@ -477,7 +478,19 @@ const BUILDERS: Record<string, Builder> = {
 	email_in_this_workspace: fixed('refusal.emailInThisWorkspace'),
 	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
 	// The admin path's other-workspace budget is spent (`api/admin.py`).
-	email_check_throttled: fixed('refusal.emailCheckThrottled')
+	email_check_throttled: fixed('refusal.emailCheckThrottled'),
+	// Closing a workspace (`api/organization_close.py`, decisions §306). The
+	// refusal's blockers are listed by the page itself; the toast is the
+	// fixed sentence, and a blocker list this build cannot read falls back.
+	workspace_close_confirmation_mismatch: fixed('refusal.workspaceCloseConfirmationMismatch'),
+	workspace_close_refused: (p, t) =>
+		refusalBlockers(p) === null ? null : t('refusal.workspaceCloseRefused'),
+	workspace_close_in_progress: fixed('refusal.workspaceCloseInProgress'),
+	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
+	// A slug resting after a workspace closure (`api/signup.py`, decisions §306).
+	signup_slug_held: fixed('refusal.signupSlugHeld'),
+	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
+	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

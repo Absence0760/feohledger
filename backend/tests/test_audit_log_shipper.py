@@ -167,6 +167,53 @@ async def test_ship_once_builds_adapters_from_settings_when_none_passed():
     assert result.tenants_scanned == 1
 
 
+# ---------------------------------------------------------------------------
+# flush_tenant — one tenant's whole backlog, before a self-service closure
+# ---------------------------------------------------------------------------
+
+
+async def test_flush_tenant_ships_batches_until_a_short_one(monkeypatch):
+    monkeypatch.setattr(audit_log_shipper.settings, "audit_shipping_batch_size", 10)
+    ship = AsyncMock(side_effect=[10, 10, 3])
+    with (
+        patch.object(audit_log_shipper, "_build_adapters", return_value=[_CapturingAdapter()]),
+        patch.object(audit_log_shipper, "_ship_tenant", ship),
+    ):
+        assert await audit_log_shipper.flush_tenant("feoh_closing") == 23
+    assert ship.await_count == 3
+    assert {c.args[0] for c in ship.await_args_list} == {"feoh_closing"}
+
+
+async def test_flush_tenant_with_no_sink_ships_nothing():
+    ship = AsyncMock()
+    with (
+        patch.object(audit_log_shipper, "_build_adapters", return_value=[]),
+        patch.object(audit_log_shipper, "_ship_tenant", ship),
+    ):
+        assert await audit_log_shipper.flush_tenant("feoh_closing") == 0
+    ship.assert_not_awaited()
+
+
+async def test_flush_tenant_raises_rather_than_reporting_a_partial_flush(monkeypatch):
+    """A sink failure, and a backlog that never drains, are both errors: the
+    caller is about to drop the database the unshipped rows live in."""
+    with (
+        patch.object(audit_log_shipper, "_build_adapters", return_value=[_CapturingAdapter()]),
+        patch.object(audit_log_shipper, "_ship_tenant", AsyncMock(side_effect=OSError)),
+        pytest.raises(OSError),
+    ):
+        await audit_log_shipper.flush_tenant("feoh_closing")
+
+    monkeypatch.setattr(audit_log_shipper.settings, "audit_shipping_batch_size", 1)
+    monkeypatch.setattr(audit_log_shipper, "FLUSH_MAX_BATCHES", 3)
+    with (
+        patch.object(audit_log_shipper, "_build_adapters", return_value=[_CapturingAdapter()]),
+        patch.object(audit_log_shipper, "_ship_tenant", AsyncMock(return_value=1)),
+        pytest.raises(audit_log_shipper.AuditFlushIncomplete),
+    ):
+        await audit_log_shipper.flush_tenant("feoh_closing")
+
+
 async def test_run_shipper_loop_cancels_cleanly():
     with patch.object(audit_log_shipper, "ship_once", AsyncMock(return_value=SimpleNamespace())):
         task = asyncio.create_task(audit_log_shipper.run_shipper_loop())

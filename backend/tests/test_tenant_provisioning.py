@@ -73,6 +73,7 @@ def test_control_tables_are_the_expected_control_plane_set():
             "webhook_deliveries",
             "webauthn_credentials",
             "provider_credentials",
+            "workspace_closures",
         }
     )
 

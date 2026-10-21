@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — the UI action-verdict pass (issue #575,
+**Last reconciled:** 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
 decisions §305) opened three (c) entries — the modal's assignee clause, bulk
 status approving a draft past review, and the pages still restating server
 predicates — taking the file from 126 → 129. Before that, 2026-10-21 — storing the ERP document id on the invoice
@@ -68,7 +68,11 @@ the dispatch-time ERP check (decisions §296) then closed that (c) and opened
 one for a NACHA file's bills being read only at export, 118 → 118.
 Before that, 2026-10-20 — the admin persona's user-management fixes
 (decisions §293) closed the (c) entry "A SCIM deactivation writes no audit
-row", taking the file from 118 → 117. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
+row", taking the file from 118 → 117. Before that, 2026-10-20 — the workspace-closure review (decisions
+§306) opened one (c) entry, `lambda` audit mode refusing a self-service close,
+taking the file from 119 → 120. Before that, 2026-10-20 — self-service workspace
+closure (decisions §306) opened one (c) entry, abandoned workspaces kept forever
+unless someone closes them, taking the file from 118 → 119. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
@@ -202,7 +206,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**129 open: 110 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**131 open: 112 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1901,6 +1905,35 @@ scope (§260) — do not fold them into any of these.
       from the login page's error states. **Trigger:** the first support
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
+
+### Surfaced by self-service workspace closure (2026-10-20, decisions §306)
+
+- [ ] **(c) An abandoned workspace is kept forever unless someone closes it.**
+      §306 lets an administrator close an unused workspace (which releases its
+      addresses), and rejected an unattended sweep, because nothing in the code
+      records a trial as ended: signup binds the free plan as `active` with no
+      `trial_end`, and "idle" is not a customer's instruction. So a workspace
+      its owner simply walks away from — personal data of its users, uploaded
+      documents, a tenant database — is retained indefinitely, which a
+      storage-limitation review (GDPR Art. 5(1)(e)) will ask about. **Durable
+      fix:** an explicit end state, not a guess — a trial (or free-plan
+      inactivity) term the Terms state, recorded on the subscription; notice
+      emails to the workspace's administrators before it lapses; and only then
+      a sweep that runs the same fail-closed guards as
+      `services/workspace_closure` and deletes through `tenant_deletion`,
+      leaving the same control-plane record. **Trigger:** billing goes live
+      with a trial period, the Terms gain a free-plan inactivity clause, or
+      the first storage-limitation question from a customer or auditor.
+- [ ] **(c) A deployment in `lambda` audit mode cannot close a workspace
+      self-service.** In that mode an audit row may still be in SQS, not yet in
+      the tenant's `audit_log`, when the closure flushes the trail and drops the
+      database, and nothing can see or drain one tenant's messages, so the
+      closure refuses (`audit_queue_unverifiable`, decisions §306) and support
+      closes it. **Durable fix:** a per-tenant drain the closure can wait on —
+      e.g. the Lambda writer stamping a per-tenant high-water mark the closure
+      compares with what it enqueued, or a FIFO queue with a tenant message
+      group the closure can poll empty. **Trigger:** the first deployment that
+      runs `FEOH_AUDIT_MODE=lambda` and wants self-service closure.
 
 ### Surfaced by the live Xero Demo Company test (2026-10-20)
 

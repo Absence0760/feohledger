@@ -349,6 +349,45 @@ async def _ship_tenant(
         await engine.dispose()
 
 
+class AuditFlushIncomplete(RuntimeError):
+    """A tenant's audit trail could not be shipped in full before its deletion."""
+
+
+#: Upper bound on batches `flush_tenant` will ship before giving up. A tenant
+#: about to be closed self-service is an unused one (the closure's guards say
+#: so), so this is far above any real backlog; it exists so a sink that keeps
+#: accepting a growing table can never hold a request open forever.
+FLUSH_MAX_BATCHES = 50
+
+
+async def flush_tenant(db_name: str) -> int:
+    """Ship every still-unshipped `audit_log` row of one tenant, now.
+
+    For a deletion run from the API (`services/workspace_closure`): the tenant
+    database is about to be dropped, and with it every row the periodic sweep
+    has not reached yet. Where shipping is configured, a row the archive never
+    received would be gone for good, so the closure ships first and refuses to
+    delete if that fails. Raises on any failure; returns the rows shipped.
+
+    Concurrent with the periodic sweep this can ship a row twice, which is the
+    at-least-once seam `audit_shipping/base.py` already documents: a duplicate
+    carries the row's own id, a missing row is unrecoverable.
+    """
+    adapters = _build_adapters()
+    if not adapters:
+        return 0
+    batch_size = settings.audit_shipping_batch_size
+    shipped = 0
+    for _ in range(FLUSH_MAX_BATCHES):
+        count = await _ship_tenant(db_name, adapters)
+        shipped += count
+        if count < batch_size:
+            return shipped
+    raise AuditFlushIncomplete(
+        f"{db_name}: unshipped rows remain after {FLUSH_MAX_BATCHES} batches"
+    )
+
+
 async def run_shipper_loop() -> None:
     """Long-lived loop, started in `main.lifespan` on app startup and
     cancelled on shutdown. Sleeps `FEOH_AUDIT_SHIPPING_INTERVAL_SECONDS`
