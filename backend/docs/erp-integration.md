@@ -223,7 +223,7 @@ approved
     v
 sending_to_erp          (adapter.post_invoice() called)
     |
-    ├── success ──> sent_to_erp    (ERP accepted, document ID stored)
+    ├── success ──> sent_to_erp    (ERP accepted, document ID stored on the invoice)
     |                   |
     |                   v
     |               posted_in_erp  (ERP confirmed posting — webhook or poll)
@@ -1452,6 +1452,38 @@ These are the ERP's own ids, not PII. The provider's response body is never
 written. A failure that reports no document leaves earlier ids in place,
 because that bill is still in the ERP. A successful push clears them, because
 its `erp_reference` then names the bill of record.
+
+## The invoice names its bill in the ERP
+
+A confirmed push stores the adapter's `erp_document_id` on
+`invoices.erp_document_id` and the provider's deep link on
+`invoices.erp_document_url` (migration 0118), alongside the
+`state_data["erp_reference"]` write in `services/erp._call_erp`. Both are on
+`InvoiceResponse`; the invoice modal's ERP section shows the id as
+"ERP Reference", linked when there is a URL, at every status from
+`sending_to_erp` on, `done` included.
+
+- **Only the ERP's id is stored**, never the document number or the
+  `"UNKNOWN"` placeholder `erp_reference` falls back to: the column is what a
+  deep link or an API lookup addresses. A success that reports no id clears
+  both columns, because an earlier pair may name another ERP's bill after the
+  org switches ERP.
+- **A failure never writes it.** A bill a failed push left behind is the
+  orphan state above, not the bill of record.
+- **A payment void keeps it** (the bill is still in the ERP); a later confirmed
+  push overwrites it, and the push idempotency makes that the same bill.
+- **Deep links live in one place**, `erp_adapters/deep_links.py`, built at push
+  time from the config that posted the bill:
+
+  | Adapter | Link |
+  |---|---|
+  | `xero` | `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=<id>` |
+  | `quickbooks_online` | `https://app.qbo.intuit.com/app/bill?txnId=<id>` (`app.sandbox.qbo.intuit.com` when `environment` is `sandbox`) |
+  | everything else (Merge.dev, mock, the other direct adapters) | none — the id is shown alone |
+
+  Both open in the user's currently selected organisation / company
+  (`docs/followups.md`). Invoices posted before 0117 got the id backfilled
+  from `state_data` but no link. Reasoning: `docs/decisions.md` §302.
 
 **Manual retry:** `POST /api/invoices/{id}/retry-erp` resets `erp_retries` to 0
 and moves the invoice to `sending_to_erp`. The route then dispatches the push.

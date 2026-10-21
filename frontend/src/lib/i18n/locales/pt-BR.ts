@@ -4242,6 +4242,7 @@ export const messages = {
 	'invoices.modal.contract.unlink': 'Desvincular',
 	'invoices.modal.erp.documentId': 'ID do documento',
 	'invoices.modal.erp.error': 'Erro',
+	'invoices.modal.erp.opensInErp': '(abre a fatura no ERP em uma nova aba)',
 	'invoices.modal.erp.reference': 'Referência do ERP',
 	'invoices.modal.erp.retrySend': 'Reenviar para o ERP',
 	'invoices.modal.erp.retrying': 'Tentando novamente...',

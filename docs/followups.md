@@ -41,7 +41,10 @@ a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-21 — refusing the ERP push for an invoice
 already being paid (decisions §306) opened one (c) entry (the run builder's
-unlocked invoice read), taking the file from 124 → 125. Before that,
+unlocked invoice read), taking the file from 126 → 127. Before that,
+2026-10-21 — storing the ERP document id on the invoice (decisions §302) opened
+two (c) entries, the deep link not choosing the ERP organisation/company and the
+ERP webhook's id-only path, taking the file from 124 → 126. Before that,
 2026-10-21 — auto-sending an approved invoice to the ERP
 (decisions §304) opened one (c) entry, an approval whose post-commit push never
 ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
@@ -199,7 +202,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**125 open: 107 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**127 open: 109 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1993,6 +1996,39 @@ providers still have the same gap.
       re-locks and acts only on `approved`). **Trigger:** the first tenant that
       relies on auto-send in production, or the first report of an approved
       invoice that did not reach the ERP.
+
+### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §302)
+
+- [ ] **(c) The ERP deep link opens in whichever organisation / company the
+      user last had open.** `erp_adapters/deep_links.py` builds Xero's
+      `go.xero.com/AccountsPayable/View.aspx?InvoiceID=` and QuickBooks'
+      `app.qbo.intuit.com/app/bill?txnId=` links from the id alone, so a user
+      who works in several Xero organisations or QuickBooks companies lands on
+      "not found" (or the wrong company) unless the right one is already
+      selected. Xero's own MCP server wraps the bill page in
+      `organisationlogin/default.aspx?shortcode=<org>&redirecturl=…`, which
+      needs the organisation's `ShortCode`; we never fetch it. **Durable
+      fix:** read `ShortCode` from `GET /Organisation` when the Xero connection
+      resolves its tenant (`XeroAdapter.resolve_external_tenant_id`), keep it
+      on the ERP config, and build the shortcode redirect; find QuickBooks'
+      equivalent company-selecting URL (if Intuit has one) keyed by the
+      stored `realmId`. The mobile ERP panel shows the id with no link at
+      all, because the app carries no `url_launcher`; add it (and parse
+      `erp_document_url` into `Invoice`) in the same change. **Trigger:** a
+      multi-organisation Xero or multi-company QuickBooks customer, a report
+      of the link opening the wrong books, or a mobile user asking to open
+      the bill.
+- [ ] **(c) The ERP status webhook still ignores an event that carries only
+      `erp_document_id`.** `api/erp_webhook.py` resolves the invoice by
+      `correlation_id` and returns early without one ("not supported yet"). The
+      bill id is now on `invoices.erp_document_id`, so the lookup has a column
+      to use. **Durable fix:** with no `correlation_id`, resolve the invoice by
+      `erp_document_id` (indexed, scoped to the tenant, acting only on exactly
+      one match and taking the same `get_invoice_for_update` row lock), with a
+      realdb test that a second invoice carrying the same id is refused rather
+      than guessed. **Trigger:** wiring a provider whose webhook does not echo
+      our correlation id (QuickBooks / Xero change notifications carry only
+      the entity id).
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
