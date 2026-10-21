@@ -70,6 +70,7 @@ when each piece graduates.
 | VPC flow logs (rejected traffic only) + CloudWatch alarms | ~$1–2 |
 | SPA on S3 + CloudFront (inside CloudFront's always-free 1 TB / 10M requests) | ~$0–1 |
 | **Total** | **~$45–55** |
+| Plus external uptime checks (3 Route 53 HTTPS checks) and SMS paging (a toll-free number), `infra/uptime.tf` | ~$8–13 |
 
 This is the stack `infra/` defines (`docs/decisions.md` §254). Both instances are
 burstable in unlimited credit mode, so sustained load adds surplus-CPU charges on
