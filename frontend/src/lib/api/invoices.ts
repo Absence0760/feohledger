@@ -4,6 +4,21 @@
 // + 401-bounce) — never raw fetch. Backend: `backend/app/api/invoices.py`.
 import { api } from '#lib/api.ts';
 import type { Invoice } from '#lib/types/invoice.ts';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
+
+/**
+ * The server's verdict on the caller's two review decisions for this invoice
+ * (`GET /api/invoices/{id}/review-actions`, computed by
+ * `review.review_refusals` from the gates `POST /approve` / `POST /reject`
+ * enforce). Each is `null` when the endpoint would accept the caller, else the
+ * coded refusal it would answer with. The modal offers Approve / Reject from
+ * this and nothing else — see `#lib/api/actionVerdicts.ts`.
+ */
+export function getReviewActions(
+	invoiceId: string
+): Promise<{ approve: ActionRefusal; reject: ActionRefusal }> {
+	return api.get(`/api/invoices/${invoiceId}/review-actions`);
+}
 
 /**
  * Route an inter-company charge — generate the mirror **payable** under the

@@ -267,6 +267,16 @@ export async function createApprovedInvoice(
 	}
 	const inv = (await created.json()) as Inv;
 
+	// Submit for review first: the approve door decides only on an invoice
+	// that is awaiting review (`invoice_not_in_review` otherwise).
+	const submitted = await page.request.post(`${API_BASE}/api/invoices/${inv.id}/complete`, {
+		headers,
+		data: {}
+	});
+	if (submitted.status() !== 200) {
+		throw new Error(`submit for review failed (${submitted.status()}): ${await submitted.text()}`);
+	}
+
 	const approverHeaders = await loginAsSecondActor(page);
 	const approved = await page.request.post(`${API_BASE}/api/invoices/${inv.id}/approve`, {
 		headers: approverHeaders,
