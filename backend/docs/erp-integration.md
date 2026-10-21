@@ -1106,6 +1106,40 @@ The browser states the code from either place (`api/erpRefusals.ts`, also used
 by `codedRefusals.ts` for the 409). Tests:
 `tests/test_erp_export_blocking_exceptions.py`.
 
+### An invoice FeohLedger is already paying refuses the push
+
+Staging a payment run books a live `pending` payment and leaves the invoice
+`approved`; an `exported` (NACHA) run is the same, and so is a minted virtual
+card. A bill pushed then is payable from the ERP as well, so the bill could be
+paid twice. The same gate therefore refuses while the invoice holds a **live
+payment** (`payment_runs.live_payment_invoices`: any status outside
+`api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`) or a **live virtual card**
+(`card_issuance.live_card_invoice_ids`: any card not `cancelled`). Those are
+the predicates the run builder and the card mint refuse each other with, so
+the three cannot disagree about what is live (decisions §306).
+
+- **One answer, two places.** `erp_export_gate.erp_export_refusal` is asked by
+  `_call_erp` (before any adapter, every attempt) and by the three HTTP doors.
+  An open duplicate / fraud exception is named first; otherwise the live claim
+  refuses with code `payment_blocks_erp_export` and
+  `params = {claim: "payment" | "virtual_card"}`, plus `possibly_posted: true`
+  on the same terms as above. 409 at the doors, `failed` on the first attempt
+  at `_call_erp`.
+- **What the user does:** cancel the run (`POST /api/payments/runs/{id}/cancel`;
+  an exported run first needs `/nacha/void`) or void the payment, or cancel the
+  card, then send again. A voided, failed or cancelled payment and a cancelled
+  card no longer hold the invoice.
+- **QuickBooks status sync (§295) covers the other order, and does not
+  exempt an org from this gate.** With sync on, staging a run and then pushing
+  used to work and is now refused: the bill would sit open in QuickBooks,
+  payable there, until our run executed. Sync covers *push, then pay*:
+  with sync on, a confirmed push lands at `posted_in_erp`, payable here, and a
+  payment staged afterwards is written back as a BillPayment; the push is never
+  re-run from `posted_in_erp`, so this gate never sees it. A bill paid in
+  QuickBooks while FeohLedger also holds a payment is still the status sync's
+  `payment_reconciliation` exception. The supported order with an ERP is
+  therefore *push, then pay*.
+
 ## GL accounts and vendors are linked by the ERP's unique key
 
 A bill posts on `gl_accounts.erp_account_id` (§ above), so which ERP account a

@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (QuickBooks status sync, Xero
+**Last reconciled:** 2026-10-21 — refusing the ERP push for an invoice
+already being paid (decisions §306) opened one (c) entry (the run builder's
+unlocked invoice read), taking the file from 121 → 122. Before that, 2026-10-21 — merging main (QuickBooks status sync, Xero
 Disconnect) into the PO vendor-link branch; both sides' entries kept, taking
 the file to 121. Before that, 2026-10-20 — the live Xero Demo Company test opened two
 (c) entries (unapproved ERP POs syncing as open, and the adapters that still
@@ -190,7 +192,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**121 open: 104 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**122 open: 105 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1930,6 +1932,26 @@ providers still have the same gap.
       none and make the Disconnect message say the grant must be removed at
       the provider. **Trigger:** the next change to either adapter's OAuth
       spec, or before either provider's platform app goes live.
+
+### Surfaced by refusing the ERP push for an invoice already being paid (2026-10-21, decisions §306)
+
+- [ ] **(c) The run builder reads its invoices without a lock, so it can race
+      an ERP send.** `create_payment_run_for_invoices` loads the run's invoices
+      with a plain `SELECT`, while `/send-to-erp` takes the invoice
+      `FOR UPDATE` and the card mint `FOR NO KEY UPDATE`. A run staged
+      concurrently with a send can read the invoice as `approved` and book a
+      `pending` payment after the send's gate saw none. `_call_erp`'s own check
+      narrows the window to the moment before the adapter call but cannot close
+      it. Today this does not pay twice: with status sync off the invoice
+      closes at `done` and dispatch refuses the payment
+      (`invoice_not_payable`), leaving a stranded `pending` row in a draft run;
+      with sync on it lands at `posted_in_erp` and is paid once, with the
+      BillPayment written back. **Durable fix:** lock the run's invoices
+      `FOR NO KEY UPDATE` in id order under the bounded lock wait
+      (`utils/db_locks`, as `card_issuance.lock_invoices_for_mint` does), then
+      re-check payability under the lock, with a concurrency test against a
+      parallel `/send-to-erp`. **Trigger:** the next change to the run builder,
+      or the first stranded `pending` payment on a `done` invoice.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

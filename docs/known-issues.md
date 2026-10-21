@@ -5,8 +5,9 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Seven entries are open**: the app rendering nothing when browser storage is
-blocked (found 2026-10-20, at the top), the remove-tenant backup deletion the
+**Eight entries are open**: the run builder reading a missing invoice currency
+as USD (found 2026-10-21, at the top), the app rendering nothing when browser
+storage is blocked (found 2026-10-20), the remove-tenant backup deletion the
 VM's IAM role refuses (found 2026-10-18),
 the expense-report Attach dead end found while
 writing the help centre, the `all`-mode approval-chain segregation deadlock,
@@ -26,7 +27,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Nineteen of the twenty-six `##`
+refuses to start against a stale database. Nineteen of the twenty-seven `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included,
 and later "seventeen of the twenty-four" while nineteen were struck.)
@@ -51,6 +52,26 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## The run builder reads a missing invoice currency as USD
+
+**Found 2026-10-21**, in the money-path review of the ERP push gate (decisions
+§306); diagnosed from the code, not reproduced. `services/payment_runs.create_payment_run_for_invoices`
+refuses a run spanning more than one currency with
+`currencies = {invoices[iid].currency or "USD" for iid in invoice_ids}`. An
+invoice with no currency therefore counts as USD: a run of one USD invoice and
+one currency-less invoice passes the single-currency check, and its
+`total_amount` and CFO-threshold comparison add a figure denominated in nothing
+to a USD one. That is the substitution decisions §160 / §196 / §200 rule out ("a
+missing currency stays missing, never a USD guess").
+
+**Blast radius:** only invoices with a NULL `currency`, which entry and
+extraction normally fill; the per-payment settlement still reads each
+invoice's own currency.
+
+**Recommended fix:** treat a missing currency as its own value in that set (or
+refuse the run, naming the invoice, until the currency is set), with a pytest
+beside `tests/test_payment_run_flow.py`'s mixed-currency case.
 
 ## The app renders nothing when the browser blocks site storage
 
