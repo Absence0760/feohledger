@@ -103,7 +103,7 @@ never links one provider's vendor id onto another's vendor row.
 ## Test hooks
 
 - `GET /health` → `{"status": "ok"}`
-- `POST /__reset` → clears all in-memory state (counters + stored invoices)
+- `POST /__reset` → clears all in-memory state (counters + stored invoices), except the QuickBooks transaction-Id sequences (see QuickBooks Online below)
 - `POST /__set-status` `{"provider": "merge"|"netsuite"|"d365", "id": "…",
   "status": "…"}` → force a stored invoice into a provider-native status
   (e.g. merge `PAID`, netsuite `paidInFull`, d365 `Paid`) to drive
@@ -345,6 +345,11 @@ answers the bills and payments changed since that time, deleted bills as
 and `POST /__qbo/token-lifetime {"seconds"}` (the `x_refresh_token_expires_in`
 later token responses carry, to stand a connection near its expiry).
 State: `STATE["qbo"]` (`payments`, `deleted_bills`, `refresh_lifetime`).
+Bill and BillPayment Ids come from one sequence that `POST /__reset` does NOT
+restart and that starts from the clock, so a restarted container does not
+restart it either: QuickBooks never reuses a transaction Id within a company,
+and an e2e tenant keeps the invoices earlier runs posted, so a restarted
+sequence would hand a new bill an Id an old invoice already names.
 
 ## QuickBooks Online sandbox company (`/qbo`, `fake_company=sandbox`)
 

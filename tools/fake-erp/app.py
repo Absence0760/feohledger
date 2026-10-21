@@ -15,9 +15,11 @@ defusedxml for the request-supplied XML the SYSPRO routes parse.
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import os
 import re
+import time
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 from typing import Any
@@ -2680,6 +2682,15 @@ QBO_CLIENT_ID = "fake-qbo-client"
 QBO_CLIENT_SECRET = "fake-qbo-secret"
 QBO_REALM = "fake-realm-1"
 
+# QuickBooks never reuses a transaction Id within a company, so this sequence
+# lives outside STATE and survives `/__reset`, and starts from the clock so it
+# survives a restarted container too. An e2e tenant keeps the invoices earlier
+# runs posted (a bill posted to the ERP is not deletable here), and a restarted
+# sequence handed a new bill the Id an old invoice already names: two invoices
+# on one bill, which the status sync rightly refuses to guess between
+# (decisions §295). Every other piece of QuickBooks state still clears.
+_QBO_TXN_IDS = itertools.count(int(time.time() * 1000))
+
 
 
 def _qbo() -> dict[str, Any]:
@@ -2695,7 +2706,6 @@ def _qbo() -> dict[str, Any]:
             # Status sync-back + BillPayment write-back (decisions §295).
             "payments": {},
             "payment_requestids": {},
-            "payment_counter": 0,
             "deleted_bills": {},  # Id -> deletion time, for CDC
             "refresh_lifetime": 8726400,
         }
@@ -2968,9 +2978,8 @@ async def qbo_create_bill(request: Request, realm: str) -> dict:
     if not (body.get("VendorRef") or {}).get("value"):
         raise _qbo_fault(400, "2020", "Required param missing: VendorRef")
     _qbo_validate_bill(body)
-    st["counter"] += 1
     total = float(sum(Decimal(str(line.get("Amount") or 0)) for line in body.get("Line") or []))
-    bill = {**body, "Id": str(500 + st["counter"]), "SyncToken": "0", "TotalAmt": total}
+    bill = {**body, "Id": str(next(_QBO_TXN_IDS)), "SyncToken": "0", "TotalAmt": total}
     bill["Balance"] = total
     bill["LinkedTxn"] = []
     _qbo_touch(bill)
@@ -3036,8 +3045,7 @@ def _qbo_apply_payment(bill: dict, amount, *, note: str, pay_type: str, txn_date
     from decimal import Decimal
 
     st = _qbo()
-    st["payment_counter"] += 1
-    pid = str(800 + st["payment_counter"])
+    pid = str(next(_QBO_TXN_IDS))
     amount = Decimal(str(amount))
     record = {
         "Id": pid,
