@@ -56,10 +56,18 @@ done
 	die "--ref and --no-pull contradict each other: --ref checks a commit out. $USAGE"
 
 # ── Preflight — fail with a clear message before doing any work ──────────────
-for cmd in docker sops git flock curl; do
+for cmd in docker sops git flock curl python3; do
 	command -v "$cmd" >/dev/null || die "'$cmd' not installed — run deploy/bootstrap-vm.sh first."
 done
 docker compose version >/dev/null 2>&1 || die "docker compose plugin missing — run deploy/bootstrap-vm.sh first."
+# CI renders compose.prod.yml with the compose bootstrap-vm.sh pins (#575), so
+# any other version runs this deploy untested — #569 was a warning only the
+# VM's compose printed. Said loudly, not refused: re-running bootstrap is the
+# fix, and it should not have to wait for a deploy that is already underway.
+COMPOSE_PIN=$(feoh_compose_pin bootstrap-vm.sh) || die "bootstrap-vm.sh has no usable COMPOSE_VERSION pin."
+COMPOSE_RUNNING="v$(docker compose version --short 2>/dev/null | sed 's/^v//')"
+[ "$COMPOSE_RUNNING" = "$COMPOSE_PIN" ] ||
+	echo "WARN: docker compose here is ${COMPOSE_RUNNING}, but bootstrap-vm.sh pins ${COMPOSE_PIN} — the version CI checks deploy/ with. Re-run ./bootstrap-vm.sh to converge." >&2
 docker info >/dev/null 2>&1 || die "cannot talk to the docker daemon — is it running, and are you in the docker group? (log out/in after bootstrap-vm.sh)"
 [ -f prod.sops.yaml ] || die "prod.sops.yaml missing — copy infra-secrets/feohledger/prod.sops.yaml here (template: deploy/prod.sops.yaml.example; see deploy/README.md)."
 
@@ -185,18 +193,12 @@ fi
 # config error — do not suppress it.
 feoh_caddy_reload || die "caddy did not take the new config — see the error above; the site may be serving the previous config."
 
-# Prove the site actually serves, from outside the containers: the API's own
-# healthcheck stays green through a Caddy that serves nothing (#579).
-if ! feoh_smoke_check "$APP_DOMAIN" / || ! feoh_smoke_check "$API_DOMAIN" /api/health; then
-	die "post-deploy smoke check failed — the stack is up but not serving. See docs/troubleshooting.md § Every page 404s while the API is healthy; to roll the SPA back, deploy/README.md § Rolling the frontend back."
-fi
-
 # Reclaim disk: every deploy leaves the previous api image dangling, and on
 # a 30 GB volume months of deploys pile up until Postgres runs out of space.
 # Dangling-only — tagged images and volumes are untouched. The BuildKit
 # cache is capped rather than purged so rebuilds stay fast.
 docker image prune -f >/dev/null ||
-	echo "WARN: dangling-image prune failed (non-fatal — the deploy itself succeeded)" >&2
+	echo "WARN: dangling-image prune failed (non-fatal — the deploy carries on)" >&2
 docker builder prune -f --keep-storage 5g >/dev/null ||
 	echo "WARN: builder-cache prune failed (non-fatal; check 'docker builder prune' flags)" >&2
 
@@ -208,5 +210,13 @@ if [ "$DB_MODE" = external ] &&
 	[ -n "$(docker ps -q --filter label=com.docker.compose.project=feoh-prod --filter label=com.docker.compose.service=postgres)" ]; then
 	echo "NOTE: the local postgres container is still running, but the API now uses the external database. Once the cut-over is verified: ./compose.sh --profile localdb stop postgres" >&2
 fi
+
+# Prove the site actually serves, from outside the containers: the API's own
+# healthcheck stays green through a Caddy that serves nothing (#579). smoke.sh
+# checks the apex, api.<domain>/api/health, a tenant host's TLS and that
+# /api/public-config matches deploy/.env (#575) — the same script the ECS
+# release workflow ends with.
+./smoke.sh --vm ||
+	die "post-deploy smoke check failed (above) — the stack is up but not serving as configured. See docs/troubleshooting.md § Every page 404s while the API is healthy; to roll the SPA back, deploy/README.md § Rolling the frontend back."
 
 echo "deploy complete — API healthcheck and smoke check passed."

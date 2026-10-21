@@ -222,3 +222,42 @@ jobs:
             aws lambda wait function-updated --function-name "$fn"
             echo "  $fn updated."
           done
+
+  smoke:
+    name: Post-deploy smoke check
+    runs-on: ubuntu-latest
+    # Last: after the API rolled and the workers moved to the new image. Skipped
+    # with them while the kill switch is off. No environment — it makes no AWS
+    # call and needs no secret, and a second `production` job would pause for a
+    # second approval (docs/production-deployment.md § Production gate).
+    needs: [backend, lambdas]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: deploy
+
+      - name: Smoke-check the deployed stack (deploy/smoke.sh)
+        # The same script deploy.sh ends with on the VM (#575), here through
+        # public DNS: the apex, api/health, a tenant host's TLS, and
+        # /api/public-config agreeing with SIGNUP_ENABLED (plus a captcha site
+        # key whenever signup is on). Repository variables, none secret; an
+        # unset one fails the step rather than skipping its check.
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+          SMOKE_TENANT_HOST: ${{ vars.SMOKE_TENANT_HOST }}
+          SIGNUP_ENABLED: ${{ vars.SIGNUP_ENABLED }}
+        run: |
+          set -euo pipefail
+          for name in APP_URL PUBLIC_API_URL SMOKE_TENANT_HOST SIGNUP_ENABLED; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository variable ${name} is empty (docs/production-deployment.md § Required configuration)."
+              exit 1
+            fi
+          done
+          app=${APP_URL#https://}
+          api=${PUBLIC_API_URL#https://}
+          deploy/smoke.sh --app "${app%/}" --api "${api%/}" \
+            --tenant "$SMOKE_TENANT_HOST" --signup "$SIGNUP_ENABLED"

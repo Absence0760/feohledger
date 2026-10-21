@@ -20,13 +20,14 @@ The whole flow is four commands on a fresh VM:
 
 | File | Purpose |
 |---|---|
-| `bootstrap-vm.sh` | One-time, idempotent VM setup (Amazon Linux 2023): docker + compose plugin + sops + cronie (AL2023 ships no cron daemon) + AWS CLI, automatic security updates (dnf-automatic; docker/containerd excluded so the stack never bounces at a random hour), 2 GB swap, nightly backup cron, IMDSv2 hop-limit fix. Other distros get the manual list. |
+| `bootstrap-vm.sh` | One-time, idempotent VM setup (Amazon Linux 2023): docker + compose plugin at exactly `COMPOSE_VERSION` (the one place that version is written — CI installs it from this line, and a re-run replaces any other version) + sops + cronie (AL2023 ships no cron daemon) + AWS CLI, automatic security updates (dnf-automatic; docker/containerd excluded so the stack never bounces at a random hour), 2 GB swap, nightly backup cron, IMDSv2 hop-limit fix. Other distros get the manual list. |
 | `compose.prod.yml` | Redis (AOF) + API + Caddy, plus Postgres (pgvector) under the `localdb` profile for container mode only. No DB host ports; S3 is real AWS. API healthcheck lets deploys verify themselves. Container logs capped (json-file, 10 MB × 5 per service) so they can't fill the 30 GB disk. `FEOH_DATABASE_URL` (set → RDS) and `FEOH_REDIS_URL` are override seams; `PGSSLMODE` is passed to the api (default `prefer`). The one-shot `pgtools` service (same Postgres image, RDS CA bundle mounted, `tools` profile) carries the pg client tools for RDS. Also the one-shot `frontend-build` service (Node image + pnpm-store cache) behind a `build` profile, so `up` never starts it — `deploy.sh` runs it. Every image is `repo:tag@sha256:…`, bumped by Dependabot (`backend/docs/docker.md` § Image pinning). |
 | `Caddyfile` | TLS + static SPA (served from `/srv/current`, the live release under the gitignored `www/` — § How the SPA is served) + `api.feohledger.com` reverse proxy. Domains via env. |
 | `tenants.caddy.example` | Template for the per-VM tenant host list (`tenants.caddy`, gitignored). `add-tenant.sh` maintains it — manual edits rarely needed. |
-| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). Also `feoh_sync_source`, `deploy.sh`'s checkout step: main's tip, or with `--ref` exactly one commit that must be on `origin/main`, always leaving the checkout on `main`. And the serving half: `feoh_publish_frontend` (a build becomes the live release by an atomic symlink swap), `feoh_caddy_reload` (reload, or recreate when Caddy's single-file mounts are stale) and `feoh_smoke_check` (the post-deploy fetch through the VM's own Caddy). |
+| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). Also `feoh_sync_source`, `deploy.sh`'s checkout step: main's tip, or with `--ref` exactly one commit that must be on `origin/main`, always leaving the checkout on `main`. And the serving half: `feoh_publish_frontend` (a build becomes the live release by an atomic symlink swap), `feoh_caddy_reload` (reload, or recreate when Caddy's single-file mounts are stale) and `feoh_smoke_check` (one post-deploy fetch, through the VM's own Caddy or public DNS). Small readers shared so two scripts cannot disagree: `feoh_signup_enabled` (decrypt-env.sh and smoke.sh), `feoh_compose_pin` (deploy.sh and CI's installer). |
+| `smoke.sh` | The post-deploy smoke check: apex, `api/health`, a tenant host's TLS, and `/api/public-config` matching the env (§ Deploys). `--vm` reads `.env` and goes through this VM's Caddy (deploy.sh's last step); with explicit flags it goes through public DNS (`aws-deploy.yml`'s last job). Exit 1 on any failed check, 2 on bad usage. |
 | `compose.sh` / `psql.sh` | Ad-hoc `docker compose` / `psql` with the database mode applied — use these instead of a bare `docker compose -f compose.prod.yml …`, which in container mode would start the stack without its database. |
-| `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → publish the SPA as a release under `www/` (atomic symlink swap, § How the SPA is served) → Caddy reload (or recreate, if its mounted config is stale) → smoke check of the site and the API through the VM's own Caddy. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
+| `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → publish the SPA as a release under `www/` (atomic symlink swap, § How the SPA is served) → Caddy reload (or recreate, if its mounted config is stale) → `smoke.sh --vm`, last: the site, the API, a tenant host's TLS and `public-config` against the env, through the VM's own Caddy. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
 | `add-tenant.sh` | Tenant DB + org + admin user (same `provision_tenant` path as signup) + Caddy host block + reload, in one shot. Generates a temp password (first-login change forced) unless `--admin-password` given. |
 | `remove-tenant.sh` | The inverse of `add-tenant.sh`, and the deletion `/legal/dpa` § 13 promises within 60 days of termination: removes the Caddy host block and reloads (stop serving first), runs `scripts/delete_tenant.py` in the api container (documents → tenant DB → control-plane rows), then deletes every version of that tenant's nightly dumps from the backup bucket. `--dry-run` prints the inventory and changes nothing; otherwise it makes you type the slug back. Only `delete_tenant.py`'s exit 4 (no such organisation) lets it carry on to the Caddy and backup legs of a tenant already deleted; any other inventory failure (api down, database unreachable, a partner organisation refused) stops it before it changes anything. Prints the written confirmation to send the customer, including the two residues it does NOT reach. |
 | `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. On RDS these are the long-retention, provider-independent copy beside RDS's automated backups + PITR (globals with `--no-role-passwords`); in container mode they are the whole DR story. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. Fails, without pinging, if the server's database list does not include the control plane `feohledger` — an empty list used to report success. |
@@ -96,14 +97,34 @@ doesn't come up. If the build or migration step fails, the previously-running
 containers keep serving. Only one deploy runs at a time — a second one, manual
 or released, refuses to start while the first holds `.deploy.lock`.
 
-The deploy ends with a **smoke check**: from the VM, `curl` fetches
-`https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health` through this VM's
-own Caddy (`--resolve <host>:443:127.0.0.1` — no public DNS or hairpin NAT
-involved, but the real hostname, certificate and site block) and fails the
-deploy unless each answers 200 with a non-empty body, retrying for up to a
-minute while a just-recreated Caddy loads its certificates. The API's own
-healthcheck stays green through a Caddy that serves nothing, which is how
-v0.1.0 shipped every page as an empty 404 (#579).
+The deploy ends with a **smoke check**, `./smoke.sh --vm` — its last step, and
+the same script the ECS release workflow ends with (#575). From the VM, `curl`
+fetches through this VM's own Caddy (`--resolve <host>:443:127.0.0.1` — no
+public DNS or hairpin NAT involved, but the real hostname, certificate and site
+block), retrying for up to a minute per check while a just-recreated Caddy
+loads its certificates:
+
+- `https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health` — each a 200
+  with a non-empty body. The API's own healthcheck stays green through a Caddy
+  that serves nothing, which is how v0.1.0 shipped every page as an empty 404
+  (#579).
+- the first tenant host in `tenants.caddy` — a page over a certificate curl
+  accepts, i.e. the tenant TLS path. Before the first `add-tenant.sh` there is
+  none; the script prints a NOTE saying so rather than passing silently.
+- `https://<API_DOMAIN>/api/public-config` — `signup_enabled` must match
+  `FEOH_SIGNUP_ENABLED` in `.env` (unset means on, as in the app), and while
+  signup is on `hcaptcha_sitekey` must be `FEOH_HCAPTCHA_SITEKEY`.
+
+It reports every failed check, not just the first, and exits 1; the deploy then
+fails. Run it by hand any time: `./smoke.sh --vm`. From elsewhere, through
+public DNS: `./smoke.sh --app <host> --api <host> --tenant <host> --signup true|false [--sitekey <key>]`.
+
+`deploy.sh` also compares the running `docker compose` with `COMPOSE_VERSION`
+in `bootstrap-vm.sh` and warns when they differ: CI renders `compose.prod.yml`
+with exactly that version, in both database modes, and fails on any warning
+(`deploy-compose` job; #569 was a warning only the VM's compose printed).
+Re-running `bootstrap-vm.sh` converges the plugin on the pin. To bump compose,
+change that one line — CI reads it from there.
 
 ### How the SPA is served
 
