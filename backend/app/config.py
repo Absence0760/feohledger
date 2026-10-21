@@ -351,6 +351,44 @@ class Settings(BaseSettings):
     erp_qbo_authorize_url: str = ""
     erp_qbo_token_url: str = ""
     erp_qbo_revoke_url: str = ""
+    # QuickBooks webhooks (`POST /api/erp/webhook/quickbooks`, decisions §295).
+    # The Intuit app's ONE verifier token, which signs every CloudEvents
+    # delivery (`intuit-signature`, base64 HMAC-SHA256 over the raw body).
+    # A secret: sops in infra-secrets. Empty (the default) = webhooks are off
+    # and every delivery is refused (silent 204), never verified against a
+    # fallback. backend/.env.development sets a dev value for fake-erp.
+    erp_qbo_webhook_verifier_token: str = ""
+    # QuickBooks status sync-back (decisions §295, `services/erp_status_sync`).
+    # ON: a confirmed QuickBooks push leaves the invoice PAYABLE at
+    # `posted_in_erp` (not `done`), and the change-data-capture sweep below
+    # reconciles every connected company's bills and bill payments, so a bill
+    # paid or deleted in QuickBooks reaches FeohLedger even when a webhook was
+    # lost. OFF (the default, like every outbound sweep): a QuickBooks push
+    # closes the invoice at `done` as before, because nothing guarantees a
+    # bill paid in QuickBooks would ever leave our payment queue.
+    erp_status_sync_enabled: bool = False
+    erp_status_sync_interval_seconds: int = 21600
+    # How far back each sweep asks QuickBooks' CDC for changes. Stateless and
+    # overlapping on purpose (applying a report twice is a no-op); Intuit's CDC
+    # answers at most 30 days.
+    erp_status_sync_lookback_hours: int = 72
+    # The live read of a QuickBooks bill immediately before one of our payments
+    # for it is handed to a rail (decisions §296). Bounded, because the invoice
+    # row lock is held across it; past the bound the item is HELD, never paid
+    # blind (`erp_bill_unverified`, retry-safe).
+    erp_dispatch_check_timeout_seconds: float = 10.0
+    # OAuth connection health (Phase 5, decisions §295,
+    # `services/erp_connection_health`): keeps a quiet connection's refresh
+    # token alive, and tells admins (in-app + email) before it expires or as
+    # soon as it has. Off by default like every outbound sweep.
+    erp_connection_health_enabled: bool = False
+    erp_connection_health_interval_seconds: int = 86400
+    # A refresh token with fewer days than this left is refreshed by the sweep
+    # (Intuit's lifetime rolls forward on a refresh, up to its hard cap).
+    erp_connection_keepalive_days: int = 45
+    # Lead times, in days, for the "reconnect soon" notice. Each is sent once
+    # per expiry date Intuit reports.
+    erp_connection_expiry_notice_days: list[int] = [30, 7, 1]
 
     # Commerce / inventory sync (decisions §273, `services/commerce_sync.py`).
     # OPERATOR-only override that points EVERY commerce adapter at one fake

@@ -205,7 +205,7 @@ before changing any router; the summaries below are only an index.
 | `/dashboard` | KPI aggregates (pipeline, aging, spend, trends) |
 | `/billing` | Platform billing & metering — the AP platform's OWN customer billing (control-plane) |
 | `/commerce` | Commerce platform connection (admin), location + SKU mapping, per-receipt inventory push status + retry |
-| `/erp`, `/email-intake`, `/peppol` | Inbound webhooks — ERP status, email-to-invoice, PEPPOL AS4 receive |
+| `/erp`, `/email-intake`, `/peppol` | Inbound webhooks — ERP status (incl. QuickBooks CloudEvents, `/erp/webhook/quickbooks`), email-to-invoice, PEPPOL AS4 receive |
 | `/approvals/slack`, `/approvals/teams` | Interactive approval from a chat message — public, HMAC + single-use action token |
 | `/organization/email-intake`, `/signup` | Per-tenant intake address; self-service tenant signup |
 | `/v1`, `/api-keys`, `/webhooks` | Public Developer API (`X-API-Key`) + published OpenAPI; API-key mgmt; outbound webhooks |

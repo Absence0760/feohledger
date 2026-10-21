@@ -75,6 +75,10 @@ export interface ErpOAuthStatus {
 	external_tenant_id?: string | null;
 	expires_at?: string | null;
 	refresh_token_expires_at?: string | null;
+	/** Inside the first expiry-notice lead time: offer Reconnect now (§295). */
+	expires_soon?: boolean;
+	/** Why `needs_reconnect`: `refresh_token_expired` | `refresh_token_revoked`. */
+	reconnect_reason?: string | null;
 	connected_at?: string | null;
 	/** What a bring-your-own app must register as its redirect URI. */
 	redirect_uri: string;
@@ -324,6 +328,32 @@ export function oauthConnectionState(
 	if (!status || status.provider !== providerKey) return 'not_connected';
 	if (status.needs_reconnect) return 'needs_reconnect';
 	return status.connected ? 'connected' : 'not_connected';
+}
+
+/**
+ * The sentence for a connection that needs the admin's attention, or null:
+ * why it must be reconnected (`reconnect_reason`, decisions §295), or that it
+ * expires soon. A reason this build does not know reads as the generic
+ * "expired" sentence it always showed.
+ */
+export function oauthAttentionKey(
+	providerKey: string,
+	status: ErpOAuthStatus | null
+): MessageKey | null {
+	const state = oauthConnectionState(providerKey, status);
+	if (state === 'needs_reconnect') {
+		if (status?.reconnect_reason === 'refresh_token_revoked') {
+			return 'org.erp.oauth.needsReconnectRevoked';
+		}
+		if (status?.reconnect_reason === 'refresh_token_expired') {
+			return 'org.erp.oauth.needsReconnectExpired';
+		}
+		return 'org.erp.oauth.needsReconnect';
+	}
+	if (state === 'connected' && status?.expires_soon && status.refresh_token_expires_at) {
+		return 'org.erp.oauth.expiresSoon';
+	}
+	return null;
 }
 
 /** The `?erp_connected=` / `?erp_error=` return from the OAuth callback. */

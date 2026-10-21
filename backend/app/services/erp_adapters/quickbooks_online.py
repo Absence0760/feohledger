@@ -63,7 +63,9 @@ any other read failure fails the push without creating anything.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -73,14 +75,21 @@ from app.config import settings
 from app.models.gl_account import GL_CODE_MAX_LENGTH
 from app.services import erp_oauth
 from app.services.erp_adapters.base import (
+    BILL_NOT_IN_ERP,
+    BILL_PAYMENT_VOIDED,
     NOT_CONNECTED,
+    PAYMENT_ACCOUNT_NOT_MAPPED,
+    PAYMENT_EXCEEDS_BALANCE,
     VENDOR_NOT_LINKED,
+    ErpBillReport,
+    ErpBillState,
     ErpInvoiceStatus,
     ErpListingIncomplete,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PaymentPayload,
     PoLinePayload,
     PoPayload,
     VendorPayload,
@@ -123,7 +132,12 @@ ACCOUNT_INACTIVE = "account_inactive"
 REFERENCE_INVALID = "reference_invalid"
 COMPANY_SUBSCRIPTION_INACTIVE = "company_subscription_inactive"
 INTUIT_FAULT = "intuit_fault"
+#: A payment in another currency than the bill's (``post_payment``).
+CURRENCY_MISMATCH = "currency_mismatch"
 _PAGE_SIZE = 1000
+#: Intuit's change-data-capture answers at most this many objects per entity;
+#: a page that full may have left changes out (``changed_bills`` raises).
+_CDC_MAX_OBJECTS = 1000
 _MAX_PAGES = 50
 _PRODUCTION_BASE = "https://quickbooks.api.intuit.com"
 _SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com"
@@ -231,7 +245,31 @@ _BILL_FIELDS = frozenset(
 )
 
 
-def _fault_errors(resp: httpx.Response) -> list[tuple[str, str | None]]:
+#: The BillPayment fields an ``element`` may name (``post_payment`` refusals),
+#: on the same allowlist rule as :data:`_BILL_FIELDS`.
+_BILL_PAYMENT_FIELDS = frozenset(
+    {
+        "VendorRef",
+        "PayType",
+        "CheckPayment",
+        "CreditCardPayment",
+        "BankAccountRef",
+        "CCAccountRef",
+        "TotalAmt",
+        "TxnDate",
+        "CurrencyRef",
+        "Line",
+        "LinkedTxn",
+        "Amount",
+        "PrivateNote",
+        "DocNumber",
+    }
+)
+
+
+def _fault_errors(
+    resp: httpx.Response, fields: frozenset[str] = _BILL_FIELDS
+) -> list[tuple[str, str | None]]:
     """``(code, element)`` for each error in Intuit's ``Fault`` — nothing else.
 
     ``Message`` and ``Detail`` are never read: Intuit's detail quotes the
@@ -255,7 +293,7 @@ def _fault_errors(resp: httpx.Response) -> list[tuple[str, str | None]]:
         if not (code.isascii() and code.isdigit()) or len(code) > 8:
             continue
         element = error.get("element")
-        if not (isinstance(element, str) and element.rsplit(".", 1)[-1] in _BILL_FIELDS):
+        if not (isinstance(element, str) and element.rsplit(".", 1)[-1] in fields):
             element = None
         out.append((code, element))
     return out
@@ -293,6 +331,10 @@ def _quote(value: str) -> str:
 class QuickBooksOnlineAdapter(OAuthErpAdapter):
     erp_type = "quickbooks_online"
     oauth_provider = QBO_OAUTH
+    #: Bills' payment status flows back (webhooks + CDC, ``bill_report`` /
+    #: ``changed_bills``) and our payments are written back as BillPayments
+    #: (``post_payment``) — decisions §295.
+    supports_status_sync = True
 
     # -- transport ---------------------------------------------------------
 
@@ -719,6 +761,296 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             return False
         return await self._delete_untouched(bill)
 
+    # -- status sync-back (decisions §295) ---------------------------------
+
+    async def _get_bill_payment(self, payment_id: str) -> dict | None:
+        """The BillPayment, or None when QuickBooks positively says it is gone
+        (Fault 610 / ``status: Deleted``). Anything else raises."""
+        resp = await self._request("GET", f"billpayment/{payment_id}", timeout=15)
+        if resp.status_code == 200:
+            record = _json(resp).get("BillPayment")
+            if not isinstance(record, dict):
+                raise QboRequestError(resp.status_code)
+            if str(record.get("status") or "").lower() == "deleted":
+                return None
+            return record
+        if _object_not_found(resp):
+            return None
+        raise QboRequestError(resp.status_code)
+
+    async def _bill_payments(self, bill: dict) -> list[dict]:
+        """Every live BillPayment the bill's ``LinkedTxn`` names."""
+        out = []
+        for txn_id in _linked_ids(bill, "BillPayment"):
+            record = await self._get_bill_payment(txn_id)
+            if record is not None:
+                out.append(record)
+        return out
+
+    async def bill_report(self, bill_id: str) -> ErpBillReport:
+        """Where the bill stands, read from QuickBooks itself.
+
+        ``paid`` is ``Balance == 0``; ``partially_paid`` a balance below the
+        total; ``deleted`` only on QuickBooks' positive answer. The paying
+        BillPayments are read through the bill's ``LinkedTxn``, so a payment we
+        wrote (its ``PrivateNote`` carries our marker) is told apart from one a
+        person made in QuickBooks: a bill paid only by our own write-back is
+        not news (``paid_only_by_us``). Only ids, a date and a rail leave here.
+        """
+        resp = await self._request("GET", f"bill/{bill_id}", timeout=15)
+        if resp.status_code != 200:
+            if _object_not_found(resp):
+                return ErpBillReport(bill_id=str(bill_id), state=ErpBillState.deleted)
+            raise QboRequestError(resp.status_code)
+        bill = _json(resp).get("Bill")
+        if not isinstance(bill, dict):
+            raise QboRequestError(resp.status_code)
+        if str(bill.get("status") or "").lower() == "deleted":
+            return ErpBillReport(bill_id=str(bill_id), state=ErpBillState.deleted)
+        balance, total = _dec(bill.get("Balance")), _dec(bill.get("TotalAmt"))
+        if balance is None or total is None or total <= 0:
+            state = ErpBillState.unknown
+        elif balance == 0:
+            state = ErpBillState.paid
+        elif balance < total:
+            state = ErpBillState.partially_paid
+        else:
+            state = ErpBillState.open
+        payments = [p for p in await self._bill_payments(bill) if not _is_voided_payment(p)]
+        ours = [p for p in payments if _payment_marker(p) is not None and not _ours_voided(p)]
+        external = [p for p in payments if _payment_marker(p) is None]
+        # Judged by the BALANCE, not by who made a payment: anything that took
+        # the bill down beyond what our own write-backs applied to it — a
+        # person's payment, a vendor credit applied in a $0 BillPayment, a
+        # journal entry — was done outside FeohLedger.
+        ours_applied = sum((_applied_to(p, str(bill.get("Id"))) for p in ours), Decimal(0))
+        reduced_outside = (
+            balance is not None and total is not None and (total - balance) > ours_applied
+        )
+        cash = [p for p in external if not _uses_vendor_credit(p)]
+        latest = max(cash, key=lambda p: str(p.get("TxnDate") or ""), default=None)
+        return ErpBillReport(
+            bill_id=str(bill.get("Id") or bill_id),
+            state=state,
+            correlation_id=_bill_correlation(bill),
+            paid_on=_txn_date(latest.get("TxnDate")) if latest else None,
+            payment_method=_PAY_TYPE_METHODS.get(str(latest.get("PayType"))) if latest else None,
+            external_payment_ids=tuple(str(p.get("Id")) for p in external if p.get("Id")),
+            paid_only_by_us=bool(ours) and not reduced_outside,
+            reduced_outside=reduced_outside,
+            # A credit took part, or nothing we can read paid it in cash: the
+            # bill was settled without (all) the money leaving.
+            settled_by_credit=reduced_outside
+            and (any(_uses_vendor_credit(p) for p in external) or not cash),
+        )
+
+    async def bills_for_payment(self, payment_id: str) -> list[str]:
+        record = await self._get_bill_payment(payment_id)
+        if record is None:
+            return []
+        return list(dict.fromkeys(_payment_bill_ids(record)))
+
+    async def changed_bills(self, since: datetime) -> list[str]:
+        """Bills changed since ``since``, directly or through a BillPayment,
+        from Intuit's change-data-capture (``GET cdc``). A full page for an
+        entity may have left changes out, so it raises rather than return part."""
+        changed = since.astimezone(UTC).isoformat(timespec="seconds")
+        resp = await self._request(
+            "GET",
+            "cdc",
+            params={"entities": "Bill,BillPayment", "changedSince": changed},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise QboRequestError(resp.status_code)
+        bills: list[str] = []
+        for block in _json(resp).get("CDCResponse") or []:
+            if not isinstance(block, dict):
+                continue
+            for query in block.get("QueryResponse") or []:
+                if not isinstance(query, dict):
+                    continue
+                for entity in ("Bill", "BillPayment"):
+                    rows = query.get(entity)
+                    if not isinstance(rows, list):
+                        continue
+                    if len(rows) >= _CDC_MAX_OBJECTS:
+                        raise ErpListingIncomplete(PROVIDER, f"cdc {entity}", ListingGap.truncated)
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        if entity == "Bill" and row.get("Id"):
+                            bills.append(str(row["Id"]))
+                        elif entity == "BillPayment":
+                            # A deleted BillPayment arrives as its id alone;
+                            # its bills' own change (balance back up) is what
+                            # the sync reads.
+                            bills.extend(_payment_bill_ids(row))
+        return list(dict.fromkeys(bills))
+
+    # -- payment write-back (decisions §295) --------------------------------
+
+    async def _our_bill_payment(self, bill: dict, payment_id: str) -> dict | None:
+        for record in await self._bill_payments(bill):
+            if _payment_marker(record) == str(payment_id).lower():
+                return record
+        return None
+
+    async def post_payment(self, payload: PaymentPayload) -> ErpPostResult:
+        """Apply a FeohLedger payment to its bill as a QuickBooks BillPayment.
+
+        Idempotent on ``payload.payment_id``, in two layers like
+        ``post_invoice``: the bill's own BillPayments are searched for our
+        marker (``PrivateNote: "FeohLedger payment <id>"``) before anything is
+        created, and the create carries ``requestid=<payment id>`` so Intuit
+        replays its original answer to a retry. A replay can name a payment
+        someone has since voided in QuickBooks, so the created record is read
+        back, and a voided one is refused (``bill_payment_voided``) rather than
+        reported as written.
+
+        Refused before any write: no mapped pay-from account
+        (``payment_account_not_mapped``), a bill no longer in QuickBooks
+        (``bill_not_in_erp``), another currency than the bill's
+        (``currency_mismatch``), or more than the bill still has open
+        (``payment_exceeds_balance`` — posting it would overpay the bill).
+        """
+        if not payload.bill_id:
+            return _nothing_posted(erp_refusal(PROVIDER, BILL_NOT_IN_ERP))
+        if not payload.pay_from_account_erp_id:
+            return _nothing_posted(erp_refusal(PROVIDER, PAYMENT_ACCOUNT_NOT_MAPPED))
+        try:
+            bill = await self._live_bill(payload.bill_id)
+            if bill is None:
+                return _nothing_posted(erp_refusal(PROVIDER, BILL_NOT_IN_ERP))
+            existing = await self._our_bill_payment(bill, payload.payment_id)
+            if existing is not None and not _ours_voided(existing):
+                return ErpPostResult(
+                    success=True,
+                    erp_document_id=str(existing.get("Id")),
+                    message="Already in QuickBooks Online (idempotent — found by PrivateNote)",
+                    bill_balance_after=_dec(bill.get("Balance")),
+                )
+            if existing is not None:
+                return erp_refusal(PROVIDER, BILL_PAYMENT_VOIDED)
+            bill_currency = str((bill.get("CurrencyRef") or {}).get("value") or "").upper()
+            if bill_currency and payload.currency and bill_currency != payload.currency.upper():
+                return _nothing_posted(erp_refusal(PROVIDER, CURRENCY_MISMATCH))
+            balance = _dec(bill.get("Balance"))
+            if balance is None or payload.amount > balance:
+                return _nothing_posted(erp_refusal(PROVIDER, PAYMENT_EXCEEDS_BALANCE))
+            vendor = payload.vendor_erp_id or (bill.get("VendorRef") or {}).get("value")
+            body: dict[str, Any] = {
+                "VendorRef": {"value": str(vendor)},
+                "TotalAmt": payload.amount,
+                "TxnDate": payload.paid_on.isoformat(),
+                "PrivateNote": _payment_note(payload.payment_id),
+                "Line": [
+                    {
+                        "Amount": payload.amount,
+                        "LinkedTxn": [{"TxnId": str(bill.get("Id")), "TxnType": "Bill"}],
+                    }
+                ],
+            }
+            account = {"value": str(payload.pay_from_account_erp_id)}
+            if payload.card:
+                body["PayType"] = "CreditCard"
+                body["CreditCardPayment"] = {"CCAccountRef": account}
+            else:
+                body["PayType"] = "Check"
+                body["CheckPayment"] = {"BankAccountRef": account}
+            if bill_currency:
+                body["CurrencyRef"] = {"value": bill_currency}
+            request_id = create_attempt_key(str(payload.payment_id), 1, REQUEST_ID_MAX)
+            resp = await self._request(
+                "POST", "billpayment", params={"requestid": request_id}, body=body
+            )
+            if resp.status_code != 200:
+                refused = self._payment_refusal(resp)
+                refused.not_posted = not erp_status_retryable(resp.status_code)
+                return refused
+            created = _json(resp).get("BillPayment") or {}
+            if created.get("Id") is None:
+                return ErpPostResult(
+                    success=False, message=f"{PROVIDER} post failed: bill_payment_unconfirmed"
+                )
+            record = await self._get_bill_payment(str(created["Id"]))
+            if record is None or _ours_voided(record):
+                return erp_refusal(PROVIDER, BILL_PAYMENT_VOIDED)
+            after = await self._live_bill(str(bill.get("Id")))
+            return ErpPostResult(
+                success=True,
+                erp_document_id=str(created["Id"]),
+                message="Bill payment posted to QuickBooks Online",
+                bill_balance_after=_dec(after.get("Balance")) if after else None,
+            )
+        except erp_oauth.ErpTokenRefreshError as exc:
+            return ErpPostResult(success=False, message=str(exc))
+        except erp_oauth.ErpNotConnectedError:
+            return erp_refusal(PROVIDER, NOT_CONNECTED)
+        except QboRequestError as exc:
+            return erp_http_failure(PROVIDER, exc.status_code)
+        except httpx.HTTPError:
+            return ErpPostResult(success=False, message=f"{PROVIDER} post failed: network_error")
+
+    def _payment_refusal(self, resp: httpx.Response) -> ErpPostResult:
+        """A refused BillPayment write, coded from Intuit's numeric Fault codes
+        on the bill's rules (never ``Message`` / ``Detail``, which echo it)."""
+        status = resp.status_code
+        errors = [] if erp_status_retryable(status) else _fault_errors(resp, _BILL_PAYMENT_FIELDS)
+        if not errors:
+            return erp_http_failure(PROVIDER, status)
+        codes = [code for code, _ in errors]
+        for code in codes:
+            if code in _FAULT_PERIOD_CLOSED:
+                return _fault_refusal(PERIOD_CLOSED, code)
+        if _FAULT_COMPANY_STATUS in codes:
+            return _fault_refusal(COMPANY_SUBSCRIPTION_INACTIVE, _FAULT_COMPANY_STATUS)
+        code, element = next(((c, e) for c, e in errors if c in _FAULT_BAD_REFERENCE), errors[0])
+        extra = {"element": element} if element else {}
+        reason = REFERENCE_INVALID if code in _FAULT_BAD_REFERENCE else INTUIT_FAULT
+        return _fault_refusal(reason, code, **extra)
+
+    async def void_payment(self, payload: PaymentPayload) -> ErpPostResult:
+        """Void the BillPayment :meth:`post_payment` wrote for this payment.
+
+        Found through the bill (our marker), so a payment that was never
+        written, or a bill already gone, is a success with nothing to do. The
+        void is QuickBooks' sparse update with ``include=void``, carrying the
+        current ``SyncToken``.
+        """
+        try:
+            bill = await self._live_bill(payload.bill_id) if payload.bill_id else None
+            if bill is None:
+                return ErpPostResult(success=True, message="No bill in QuickBooks Online")
+            record = await self._our_bill_payment(bill, payload.payment_id)
+            if record is None or _ours_voided(record):
+                return ErpPostResult(success=True, message="No bill payment of ours to void")
+            resp = await self._request(
+                "POST",
+                "billpayment",
+                params={"operation": "update", "include": "void"},
+                body={
+                    "Id": str(record.get("Id")),
+                    "SyncToken": str(record.get("SyncToken", "0")),
+                    "sparse": True,
+                },
+            )
+            if resp.status_code != 200:
+                return self._payment_refusal(resp)
+            return ErpPostResult(
+                success=True,
+                erp_document_id=str(record.get("Id")),
+                message="Bill payment voided in QuickBooks Online",
+            )
+        except erp_oauth.ErpTokenRefreshError as exc:
+            return ErpPostResult(success=False, message=str(exc))
+        except erp_oauth.ErpNotConnectedError:
+            return erp_refusal(PROVIDER, NOT_CONNECTED)
+        except QboRequestError as exc:
+            return erp_http_failure(PROVIDER, exc.status_code)
+        except httpx.HTTPError:
+            return ErpPostResult(success=False, message=f"{PROVIDER} void failed: network_error")
+
     # -- reads -------------------------------------------------------------
 
     async def test_connection(self) -> bool:
@@ -789,6 +1121,94 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         through the chart sync's code, when a consumer needs it.
         """
         return [_po_payload(p) for p in await self._query_all("PurchaseOrder")]
+
+
+#: QuickBooks BillPayment ``PayType`` → our ``Payment.method``. ``Check`` is
+#: any payment from a bank account (cheque, ACH, wire — QuickBooks does not
+#: say which), all 1099-reportable bank rails; ``CreditCard`` is a company
+#: card, which the card settlement entity reports on a 1099-K
+#: (``payment_methods.CARD_PAYMENT_METHODS``).
+_PAY_TYPE_METHODS = {"Check": "check", "CreditCard": "card"}
+
+_BILL_MARKER = re.compile(r"^FeohLedger ([0-9a-fA-F-]{36})(?:\s|$)")
+_PAYMENT_MARKER = re.compile(r"FeohLedger payment ([0-9a-fA-F-]{36})(?:\s|$)")
+
+
+def _payment_note(payment_id: str) -> str:
+    return f"FeohLedger payment {payment_id}"
+
+
+def _bill_correlation(bill: dict) -> str | None:
+    """The correlation id ``post_invoice`` wrote into the bill's PrivateNote."""
+    match = _BILL_MARKER.match(str(bill.get("PrivateNote") or ""))
+    return match.group(1).lower() if match else None
+
+
+def _payment_marker(record: dict) -> str | None:
+    """Our payment id, when this BillPayment is one ``post_payment`` wrote."""
+    match = _PAYMENT_MARKER.search(str(record.get("PrivateNote") or ""))
+    return match.group(1).lower() if match else None
+
+
+def _uses_vendor_credit(record: dict) -> bool:
+    """Does this BillPayment apply a vendor credit (QuickBooks records a credit
+    applied to a bill as a BillPayment line linked to the ``VendorCredit``)?"""
+    return any(
+        _linked_ids(line, "VendorCredit")
+        for line in record.get("Line") or []
+        if isinstance(line, dict)
+    )
+
+
+def _is_voided_payment(record: dict) -> bool:
+    """QuickBooks keeps a voided BillPayment, with a zero total and its note
+    prefixed "Voided". A zero total alone is NOT a void: a vendor credit that
+    covers the whole bill is a $0 BillPayment too."""
+    total = _dec(record.get("TotalAmt"))
+    if total is None or total != 0 or _uses_vendor_credit(record):
+        return False
+    return str(record.get("PrivateNote") or "").lower().startswith("voided")
+
+
+def _ours_voided(record: dict) -> bool:
+    """Is a BillPayment WE wrote voided? We never write a $0 one, so a zero
+    total on ours means QuickBooks voided it, whatever its note now says."""
+    total = _dec(record.get("TotalAmt"))
+    return total is not None and total == 0
+
+
+def _applied_to(record: dict, bill_id: str) -> Decimal:
+    """What this BillPayment applied to ``bill_id`` (its lines linked to it)."""
+    applied = Decimal(0)
+    for line in record.get("Line") or []:
+        if isinstance(line, dict) and bill_id in _linked_ids(line, "Bill"):
+            applied += _dec(line.get("Amount")) or Decimal(0)
+    return applied
+
+
+def _linked_ids(record: dict, txn_type: str) -> list[str]:
+    links = record.get("LinkedTxn") or []
+    return [
+        str(link.get("TxnId"))
+        for link in links
+        if isinstance(link, dict) and link.get("TxnType") == txn_type and link.get("TxnId")
+    ]
+
+
+def _payment_bill_ids(record: dict) -> list[str]:
+    """The bills a BillPayment's lines are applied to."""
+    out: list[str] = []
+    for line in record.get("Line") or []:
+        if isinstance(line, dict):
+            out.extend(_linked_ids(line, "Bill"))
+    return out
+
+
+def _txn_date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
 
 
 def _line_account_id(line: dict) -> object:
