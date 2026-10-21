@@ -359,7 +359,6 @@
 			await load();
 			onchange?.();
 		} catch (err) {
-			toast(e?.detail ?? e?.message ?? m('paymentRuns.runDetail.approveFailed'), 'error');
 			toast(errorMessage(err, m('paymentRuns.runDetail.approveFailed')), 'error');
 		} finally {
 			approving = false;
