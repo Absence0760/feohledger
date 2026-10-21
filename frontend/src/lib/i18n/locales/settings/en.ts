@@ -25,6 +25,10 @@ export const enSettings = {
 	'org.gettingStarted.approvals': 'Approval thresholds',
 	'org.gettingStarted.paymentRunSignoff': 'CFO sign-off for payment runs',
 	'org.gettingStarted.branding': 'Branding',
+	'org.gettingStarted.erp': 'ERP integration',
+	'org.gettingStarted.vendors': 'Vendors',
+	'org.gettingStarted.security': 'Sign-in security',
+	'org.gettingStarted.emailIntake': 'Email intake',
 	// Rail labels for the settings section picker (`ui/SettingsRail.svelte`).
 	// `org.section.*` stays the PANEL heading; the rail needs short labels, so
 	// only the one heading too long to sit in a 200px column gets its own key.

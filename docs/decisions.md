@@ -13826,3 +13826,79 @@ operator-set partner capability (a plan entitlement or an
 `organizations.is_partner` column, exposed on `/auth/me`) with the link-code
 minting moved to Organization settings, or accepting the row as is. Tracked in
 `docs/followups.md`.
+
+## 309. An admin's first run is a setup checklist ticked from facts the app already holds; emptiness is the workspace's (issue #635, 2026-10-21)
+
+Decided by the operator's delegate on #635 findings 9 and 38.
+
+**What was wrong.** A new workspace's dashboard offered one button, "Go to
+invoices". The `start-admin` guide says to configure first — company, users,
+sign-in security, ERP, vendors, the approval workflow — so a new admin's first
+invoice landed in an untuned default workflow with no vendors to match and no
+one else to approve it. The `/organization` "Getting started" panel had six
+static links with no progress and left out the ERP, vendors, security and email
+intake. Separately, the dashboard decided "brand-new workspace" from
+`total_invoices`, which is scoped to the selected entity, so an established
+customer that added a subsidiary was welcomed with "upload your first invoice"
+the moment they switched to it.
+
+**The rule.**
+
+- **An admin on a workspace with no invoices gets a setup checklist** in place
+  of the empty state: company details, invite the team, require two-factor
+  sign-in, connect the accounting system, add vendors, set up the approval
+  workflow, and uploading the first invoice last. Each step links to the panel
+  that owns it, and the list links the `start-admin` guide.
+- **A step is ticked only from a fact some other feature already owns,
+  derived on read** (`backend/app/services/onboarding.py`). There is no
+  tracking table and no "mark as done" write, so a step cannot be ticked by
+  visiting a page and cannot drift from the setting it names. Each fact is
+  narrow and named for what it reads: a Company Profile field beyond the name
+  signup sets; more than one active user; `mfa.required` or SSO switched on;
+  a non-`mock` ERP selected (the plan gate's own predicate); a vendor row; the
+  workflow saved since it was provisioned (a version, an edit, or a second
+  definition, because every tenant is provisioned with one); a live intake
+  address. "Reviewed the security panel" and "looked at the workflow" are not
+  knowable, so they are not claimed — the steps are worded as the change whose
+  saved result is the fact.
+- **A step with no fact behind it carries no done state at all.** The settings
+  panel's Invoice defaults, payment-run sign-off and Branding links are drawn
+  with their number only, never as unfinished: a blank defaults form is a valid
+  choice. A non-admin, or a progress read that fails, gets the same links with
+  no states rather than a row of empty boxes.
+- **One server field, one derivation, two readers.** `GET /api/dashboard`
+  carries `onboarding` (computed in the same request, only for an admin on an
+  empty workspace — everyone else gets `null` and pays for none of its
+  queries), and `GET /api/dashboard/onboarding` (admin-only) serves the same
+  `compute_onboarding` to `/organization` without computing a dashboard.
+  `frontend/src/lib/utils/onboarding.ts` is the one map from step to panel, so
+  the two surfaces cannot send a step to two places.
+- **The checklist retires itself** when the workspace has its first invoice:
+  the server stops sending `onboarding`. No dismiss control — it would need a
+  stored preference, and the condition that ends it is one every workspace
+  reaches on its first real day.
+- **Emptiness is decided org-wide** (`organization_has_invoices`, unscoped by
+  `X-Entity-ID`). An entity with nothing in it yet keeps its true zero KPI row
+  and says "No invoices for <entity> yet" in place of the charts; the
+  new-workspace welcome and the checklist never appear for it.
+- **Every other role on an empty workspace** keeps the empty state, fitted to
+  what it can do: a role that may add invoices is sent to `/invoices`; one that
+  may not (no system role today — a custom role can) is told what will appear,
+  with no button into a page whose upload would refuse it.
+
+**Not regressed.** The checklist, like the empty state before it, replaces the
+KPI row only once the response has landed (`isEmptyTenant` keys on `data`), so
+the loading → empty hand-off of §125 / §154 is unchanged.
+
+**Considered and rejected.** A per-step "mark done" store: it reintroduces the
+drift this avoids and makes the tick a claim about intent. Ticking security on
+the admin's *own* MFA enrolment: it says nothing about everyone else signing
+in. Counting "a workflow definition exists": always true since provisioning
+seeds one.
+
+Tests: `backend/tests/test_dashboard_onboarding.py` (each flag follows its
+owning data; admin-only; retires with the first invoice; an empty entity on an
+established workspace); `frontend/src/lib/utils/onboarding.test.ts`;
+`frontend/tests-e2e/dashboard/first-run.spec.ts` (checklist, done states,
+non-admin views, retirement and the entity case against the real backend, axe
+in both themes); `frontend/tests-e2e/organization/getting-started.spec.ts`.

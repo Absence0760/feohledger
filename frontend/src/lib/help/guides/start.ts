@@ -316,6 +316,10 @@ export const START_GUIDES: Guide[] = [
 					{
 						type: 'p',
 						text: 'Most settings live under {ui:nav.group.settings} in the sidebar. [[page:/organization]] opens on {ui:org.gettingStarted.title}, which links to the panels most organizations fill in first.'
+					},
+					{
+						type: 'p',
+						text: 'Until your organization has its first invoice, the [[page:/]] shows {ui:dashboard.setup.heading}: the steps below, in this order, ending with {ui:dashboard.setup.step.firstInvoice}. A step is ticked only once the setting it names is saved, for example when a second person has an account or a real ERP is selected, and the list goes away when the first invoice arrives. {ui:org.gettingStarted.title} ticks the same steps.'
 					}
 				]
 			},

@@ -1,12 +1,21 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
-	import { INVOICE_STATUS_LABEL_KEYS } from '#lib/types/invoice.ts';
+	import { INVOICE_ENTRY_ROLES, INVOICE_STATUS_LABEL_KEYS } from '#lib/types/invoice.ts';
 	import type { InvoiceStatus } from '#lib/types/invoice.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import SetupChecklist from '#lib/components/ui/SetupChecklist.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import {
+		DASHBOARD_SETUP_STEPS,
+		setupProgressCount,
+		setupStepDone,
+		setupStepHref
+	} from '#lib/utils/onboarding.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		formatMoney,
@@ -60,14 +69,54 @@
 		load();
 	});
 
-	// The response has LANDED and says this tenant has no invoices at all — the
-	// one state where the onboarding EmptyState replaces the KPI row rather than
-	// sitting beside it. Keyed on `data`, never on `total_invoices` alone, so it
+	// The response has LANDED and says this WORKSPACE has no invoices at all —
+	// the one state where the first-run block (setup checklist or empty state)
+	// replaces the KPI row rather than sitting beside it. Keyed on `data`, so it
 	// is false while the answer is still out: a row that vanished the moment the
 	// page started asking would be the collapse `docs/decisions.md` §125 exists
 	// to remove. One owner, because the markup tests it twice (the row's branch
 	// and the charts').
-	const isEmptyTenant = $derived(!!data && data.total_invoices === 0);
+	//
+	// Org-wide, not `total_invoices === 0`: the figures here are scoped to the
+	// selected entity, so a subsidiary added yesterday reads zero on a workspace
+	// with years of invoices — and was being welcomed as a brand-new one (#635).
+	const isEmptyTenant = $derived(!!data && !data.organization_has_invoices);
+
+	// An established workspace looking at an entity with nothing in it yet. Its
+	// zero KPIs are true and stay; the charts below have nothing to draw, so a
+	// line naming the entity says why instead of six empty cards.
+	const isEmptyEntity = $derived(!!data && !isEmptyTenant && data.total_invoices === 0);
+	$effect(() => {
+		if (isEmptyEntity) void entityStore.ensureLoaded();
+	});
+
+	// An admin on an empty workspace gets the setup checklist: the server sends
+	// `onboarding` to that reader and no other (`docs/decisions.md` §309).
+	const showSetup = $derived(isEmptyTenant && !!data?.onboarding);
+	const SETUP_STEP_LABEL: Record<(typeof DASHBOARD_SETUP_STEPS)[number], MessageKey> = {
+		company: 'dashboard.setup.step.company',
+		users: 'dashboard.setup.step.users',
+		security: 'dashboard.setup.step.security',
+		erp: 'dashboard.setup.step.erp',
+		vendors: 'dashboard.setup.step.vendors',
+		workflow: 'dashboard.setup.step.workflow',
+		first_invoice: 'dashboard.setup.step.firstInvoice'
+	};
+	const setupSteps = $derived(
+		DASHBOARD_SETUP_STEPS.map((id) => ({
+			id,
+			label: m(SETUP_STEP_LABEL[id]),
+			href: setupStepHref(id),
+			done: setupStepDone(id, data?.onboarding ?? null)
+		}))
+	);
+	const setupCount = $derived(setupProgressCount(DASHBOARD_SETUP_STEPS, data?.onboarding ?? null));
+
+	// Everyone else on an empty workspace: a role that can add invoices is sent
+	// to do so; one that cannot (every system role can — a custom role may not)
+	// is told what will appear, with no button into a page whose upload would
+	// refuse it.
+	const canEnterInvoices = $derived(auth.hasAnyRole(...INVOICE_ENTRY_ROLES));
 
 	// Every KPI and chart figure on this page is a tenant-wide rollup the
 	// backend denominated in ONE currency — `resolve_reporting_currency`'s
@@ -108,22 +157,11 @@
 		'payment_scheduled', 'paid', 'done', 'failed', 'rejected',
 	];
 
-	const PIPELINE_COLORS: Record<string, string> = {
-		new: '#638cff',
-		pending: '#d4940a',
-		ready_for_review: '#8b5cf6',
-		approved: '#1fa86a',
-		rejected: '#e04040',
-		sending_to_erp: '#638cff',
-		sent_to_erp: '#3b82f6',
-		posted_in_erp: '#1fa86a',
-		payment_scheduled: '#059669',
-		paid: '#047857',
-		done: '#6b7280',
-		failed: '#e04040',
-	};
-
-	const AGING_COLORS = ['#1fa86a', '#d4940a', '#f59e0b', '#ea580c', '#e04040'];
+	// Bar and band colours are CSS, keyed by `data-status` / `data-band` in the
+	// stylesheet below, from the palette tokens — not hex literals in script,
+	// which the token audit cannot see and which were tuned for the dark ground
+	// only (`docs/decisions.md` §289). Every bar sits beside its count or value
+	// in text, so the colour is never the only carrier (WCAG 1.4.1).
 
 	// Each band carries BOTH its money figure (`value`, rendered through
 	// `fmt` / `fmtFull`) and its chart geometry (`layout`). The five bands are
@@ -137,11 +175,11 @@
 	const agingBuckets = $derived(
 		data
 			? [
-				{ label: m('dashboard.aging.current'), value: data.aging_reporting.current, color: AGING_COLORS[0] },
-				{ label: m('dashboard.aging.days30'), value: data.aging_reporting.days_30, color: AGING_COLORS[1] },
-				{ label: m('dashboard.aging.days60'), value: data.aging_reporting.days_60, color: AGING_COLORS[2] },
-				{ label: m('dashboard.aging.days90'), value: data.aging_reporting.days_90, color: AGING_COLORS[3] },
-				{ label: m('dashboard.aging.days90plus'), value: data.aging_reporting.days_90_plus, color: AGING_COLORS[4] },
+				{ label: m('dashboard.aging.current'), value: data.aging_reporting.current, band: 0 },
+				{ label: m('dashboard.aging.days30'), value: data.aging_reporting.days_30, band: 1 },
+				{ label: m('dashboard.aging.days60'), value: data.aging_reporting.days_60, band: 2 },
+				{ label: m('dashboard.aging.days90'), value: data.aging_reporting.days_90, band: 3 },
+				{ label: m('dashboard.aging.days90plus'), value: data.aging_reporting.days_90_plus, band: 4 },
 			].map((b) => ({ ...b, layout: parseMoneyForLayout(b.value) }))
 			: []
 	);
@@ -202,13 +240,39 @@
 	     gating it on the answer, and it collapses the app's most-visited KPI row
 	     on every load of every tenant to spare the empty one a transition.
 	     `docs/decisions.md` §154. -->
-	{#if isEmptyTenant}
+	{#if showSetup}
+		<!-- An admin's first run: the setup the `start-admin` guide recommends,
+		     each step ticked only from a fact the server holds, uploading the
+		     first invoice last. It retires itself — the server stops sending
+		     `onboarding` once the workspace has an invoice (decisions §309). -->
+		<section class="setup chart-card" aria-labelledby="dashboard-setup-heading" data-testid="dashboard-setup">
+			<div class="setup-head">
+				<h2 id="dashboard-setup-heading">{m('dashboard.setup.heading')}</h2>
+				<p class="setup-progress" data-testid="dashboard-setup-progress">
+					{m('dashboard.setup.progress', { done: setupCount.done, total: setupCount.total })}
+				</p>
+			</div>
+			<p class="setup-intro">{m('dashboard.setup.intro')}</p>
+			<SetupChecklist
+				steps={setupSteps}
+				labelledby="dashboard-setup-heading"
+				testId="dashboard-setup-steps"
+			/>
+			<p class="setup-guide">
+				<a href="/help/guides/start-admin">{m('dashboard.setup.guide')}</a>
+			</p>
+		</section>
+	{:else if isEmptyTenant}
 		<EmptyState
 			icon="📄"
-			heading={m('emptyState.dashboard.heading')}
-			description={m('emptyState.dashboard.description')}
-			actionLabel={m('emptyState.dashboard.action')}
-			actionHref="/invoices"
+			heading={canEnterInvoices
+				? m('emptyState.dashboard.heading')
+				: m('emptyState.dashboard.readOnlyHeading')}
+			description={canEnterInvoices
+				? m('emptyState.dashboard.description')
+				: m('emptyState.dashboard.readOnlyDescription')}
+			actionLabel={canEnterInvoices ? m('emptyState.dashboard.action') : undefined}
+			actionHref={canEnterInvoices ? '/invoices' : undefined}
 			testId="dashboard-empty-state"
 		/>
 	{:else}
@@ -319,6 +383,18 @@
 		<LoadError message={m('dashboard.error.loadFailed')} onretry={load} testId="dashboard-error" />
 	{:else if loading}
 		<p class="loading">{m('common.loading')}</p>
+	{:else if isEmptyEntity}
+		<!-- An established workspace, a subsidiary with nothing in it yet. -->
+		<EmptyState
+			icon="📄"
+			heading={entityStore.selected
+				? m('dashboard.entityEmpty.heading', { entity: entityStore.selected.name })
+				: m('dashboard.entityEmpty.headingUnnamed')}
+			description={m('dashboard.entityEmpty.description')}
+			actionLabel={canEnterInvoices ? m('emptyState.dashboard.action') : undefined}
+			actionHref={canEnterInvoices ? '/invoices' : undefined}
+			testId="dashboard-entity-empty"
+		/>
 	{:else if data && !isEmptyTenant}
 
 		<!-- Each line NAMES the KPI it qualifies, because the two say opposite
@@ -360,7 +436,7 @@
 						<div class="pipeline-row">
 							<span class="pipeline-label">{m(INVOICE_STATUS_LABEL_KEYS[status])}</span>
 							<div class="pipeline-bar-bg">
-								<div class="pipeline-bar" style="width:{pct}%;background:{PIPELINE_COLORS[status] ?? '#888'}"></div>
+								<div class="pipeline-bar" data-status={status} style="width:{pct}%"></div>
 							</div>
 							<span class="pipeline-count">{count}</span>
 						</div>
@@ -434,7 +510,8 @@
 							{#if bucket.layout > 0}
 								<div
 									class="aging-segment"
-									style="width:{(bucket.layout / agingTotal * 100)}%;background:{bucket.color}"
+									data-band={bucket.band}
+									style="width:{(bucket.layout / agingTotal * 100)}%"
 									title="{bucket.label}: {fmtFull(bucket.value)}"
 								></div>
 							{/if}
@@ -443,7 +520,7 @@
 					<div class="aging-legend">
 						{#each agingBuckets as bucket}
 							<div class="aging-item">
-								<span class="aging-dot" style="background:{bucket.color}"></span>
+								<span class="aging-dot" data-band={bucket.band}></span>
 								<span class="aging-label">{bucket.label}</span>
 								<span class="aging-value">{fmt(bucket.value)}</span>
 							</div>
@@ -574,7 +651,10 @@
 										style="height:{maxTrendAmount > 0
 											? (parseMoneyForLayout(month.reporting_amount) / maxTrendAmount) * 100
 											: 0}%"
-										title="{fmt(month.reporting_amount)} ({month.count} invoices)"
+										title={m('dashboard.trend.barTitle', {
+											amount: fmt(month.reporting_amount),
+											n: month.count
+										})}
 									></div>
 								</div>
 								<span class="trend-label">{month.month.slice(5)}</span>
@@ -683,6 +763,42 @@
 		margin: 14px 0 0;
 	}
 
+	/* First-run setup checklist (admin, empty workspace). */
+	.setup {
+		max-width: 720px;
+	}
+
+	.setup-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 4px 16px;
+	}
+
+	.setup-head h2 {
+		margin: 0;
+		font-size: 1.05rem;
+	}
+
+	.setup-progress {
+		margin: 0;
+		color: var(--text-muted);
+		font-size: 0.85rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.setup-intro {
+		margin: 6px 0 8px;
+		color: var(--text-muted);
+		font-size: 0.88rem;
+	}
+
+	.setup-guide {
+		margin: 12px 0 0;
+		font-size: 0.85rem;
+	}
+
 	/* Exceptions KPI renders as a link, so it stays inline markup using the
 	   global .kpi classes plus this bespoke hover affordance. */
 	.kpi-link {
@@ -693,7 +809,9 @@
 
 	.kpi-link:hover {
 		transform: translateY(-2px);
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+		/* The palette's lifted-card shadow, tuned per theme — a black at 10%
+		   vanished on the dark ground. */
+		box-shadow: var(--shadow-card);
 	}
 
 	/* Charts Grid */
@@ -759,6 +877,39 @@
 		height: 100%;
 		border-radius: 4px;
 		transition: width 0.3s ease;
+		/* A status this map does not name still draws, in the neutral tone. */
+		background: var(--text-muted);
+	}
+
+	/* One hue per stage family, from the palette so both themes are tuned:
+	   intake blue, review violet, approval green, held amber, refused red,
+	   finished neutral. Within a family the bars may look alike (the light
+	   theme's base and -strong tokens are close); every row carries its
+	   status label and count in text, which is what is read. */
+	.pipeline-bar[data-status='new'],
+	.pipeline-bar[data-status='sending_to_erp'] {
+		background: var(--accent);
+	}
+	.pipeline-bar[data-status='sent_to_erp'] {
+		background: var(--accent-strong);
+	}
+	.pipeline-bar[data-status='pending'] {
+		background: var(--warning);
+	}
+	.pipeline-bar[data-status='ready_for_review'] {
+		background: var(--brand-violet);
+	}
+	.pipeline-bar[data-status='approved'],
+	.pipeline-bar[data-status='posted_in_erp'] {
+		background: var(--success);
+	}
+	.pipeline-bar[data-status='payment_scheduled'],
+	.pipeline-bar[data-status='paid'] {
+		background: var(--success-strong);
+	}
+	.pipeline-bar[data-status='rejected'],
+	.pipeline-bar[data-status='failed'] {
+		background: var(--danger);
 	}
 
 	.pipeline-count {
@@ -854,6 +1005,32 @@
 	.aging-segment {
 		transition: width 0.3s ease;
 		cursor: help;
+	}
+
+	/* A surface-coloured seam between bands: in the light theme the five
+	   tones sit at nearly the same luminance, so without it the bar reads as
+	   one block to anyone who cannot tell the hues apart (WCAG 1.4.11). */
+	.aging-segment + .aging-segment {
+		border-left: 2px solid var(--surface);
+	}
+
+	/* Five bands from current to most overdue: green, then amber deepening into
+	   red. The two middle steps are mixes of palette tokens, so they follow the
+	   theme with the tokens they are mixed from. */
+	[data-band='0'] {
+		background: var(--success);
+	}
+	[data-band='1'] {
+		background: var(--warning);
+	}
+	[data-band='2'] {
+		background: color-mix(in srgb, var(--warning) 60%, var(--danger));
+	}
+	[data-band='3'] {
+		background: color-mix(in srgb, var(--warning) 25%, var(--danger));
+	}
+	[data-band='4'] {
+		background: var(--danger);
 	}
 
 	.aging-legend {

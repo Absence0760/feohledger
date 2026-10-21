@@ -44,6 +44,9 @@
 	import { formatList } from '#lib/utils/list.ts';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import SetupChecklist from '#lib/components/ui/SetupChecklist.svelte';
+	import { setupStepDone, setupStepHref, type SetupStepId } from '#lib/utils/onboarding.ts';
+	import type { OnboardingResponse } from '#lib/types/analytics.ts';
 	import ErpConnectionPanel from '#lib/components/organization/ErpConnectionPanel.svelte';
 	import CommerceConnectionPanel from '#lib/components/organization/CommerceConnectionPanel.svelte';
 	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
@@ -412,6 +415,48 @@
 	 * re-run the moment `/me` resolves.
 	 */
 	const requestedPanels = new Set<string>();
+
+	/**
+	 * Getting started — the settings a new workspace configures first, each
+	 * ticked from the same server-side facts as the dashboard's setup checklist
+	 * (`GET /api/dashboard/onboarding`, `docs/decisions.md` §309). Read again
+	 * each time the panel is shown, so a step saved on another panel is ticked
+	 * on the way back. Admin-only: a non-admin, or a read that fails, gets the
+	 * same links with no done state at all — an unknown is never drawn as
+	 * unfinished.
+	 */
+	let onboarding = $state<OnboardingResponse | null>(null);
+	const GETTING_STARTED: { id: SetupStepId; labelKey: MessageKey }[] = [
+		{ id: 'company', labelKey: 'org.gettingStarted.company' },
+		{ id: 'defaults', labelKey: 'org.gettingStarted.defaults' },
+		{ id: 'users', labelKey: 'org.gettingStarted.users' },
+		{ id: 'security', labelKey: 'org.gettingStarted.security' },
+		{ id: 'erp', labelKey: 'org.gettingStarted.erp' },
+		{ id: 'vendors', labelKey: 'org.gettingStarted.vendors' },
+		// Invoice approval thresholds (auto-approve, CFO above, maximum) live on
+		// the workflow's approval step, not on this page; the Payments panel's
+		// only threshold is the CFO sign-off for a payment RUN, which is its own
+		// step (#635).
+		{ id: 'workflow', labelKey: 'org.gettingStarted.approvals' },
+		{ id: 'payments', labelKey: 'org.gettingStarted.paymentRunSignoff' },
+		{ id: 'email_intake', labelKey: 'org.gettingStarted.emailIntake' },
+		{ id: 'branding', labelKey: 'org.gettingStarted.branding' }
+	];
+	const gettingStartedSteps = $derived(
+		GETTING_STARTED.map(({ id, labelKey }) => ({
+			id,
+			label: m(labelKey),
+			href: setupStepHref(id, '/organization'),
+			done: setupStepDone(id, onboarding)
+		}))
+	);
+	$effect(() => {
+		if (section !== 'getting-started' || !userLoaded || !auth.isAdmin) return;
+		api.get<OnboardingResponse>('/api/dashboard/onboarding').then(
+			(res) => (onboarding = res),
+			() => (onboarding = null)
+		);
+	});
 
 	function once(slug: string, load: () => void) {
 		if (section !== slug || requestedPanels.has(slug)) return;
@@ -1659,24 +1704,17 @@
 			<fieldset class="sections" disabled={readOnly}>
 				{#if section === 'getting-started'}
 					<section class="getting-started card">
-						<h2>{m('org.gettingStarted.title')}</h2>
+						<h2 id="org-getting-started-heading">{m('org.gettingStarted.title')}</h2>
 						<p class="card-hint">{m('org.gettingStarted.intro')}</p>
 						<!-- These were `#org-*` anchors into one long scroll. They now name
 						     the panel that owns each step directly; the old anchors still
 						     resolve, via `LEGACY_HASH_SECTIONS`, for the copies of them
 						     that exist outside this repo. -->
-						<nav class="gs-links" aria-label={m('org.gettingStarted.title')}>
-							<a href="?section=company">{m('org.gettingStarted.company')}</a>
-							<a href="?section=defaults">{m('org.gettingStarted.defaults')}</a>
-							<a href="/admin">{m('org.gettingStarted.users')}</a>
-							<!-- Invoice approval thresholds (auto-approve, CFO above, maximum)
-							     live on the workflow's approval step, not on this page; the
-							     Payments panel's only threshold is the CFO sign-off for a
-							     payment RUN, which is its own link (#635). -->
-							<a href="/workflows">{m('org.gettingStarted.approvals')}</a>
-							<a href="?section=payments">{m('org.gettingStarted.paymentRunSignoff')}</a>
-							<a href="?section=branding">{m('org.gettingStarted.branding')}</a>
-						</nav>
+						<SetupChecklist
+							steps={gettingStartedSteps}
+							labelledby="org-getting-started-heading"
+							testId="org-getting-started-steps"
+						/>
 					</section>
 				{/if}
 
@@ -3372,23 +3410,6 @@
 	   configures first. Purely a shortcut; nothing is hidden. */
 	.getting-started {
 		border-color: var(--accent);
-	}
-
-	.gs-links {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px 18px;
-		margin-top: 4px;
-	}
-
-	.gs-links a {
-		font-size: 0.85rem;
-		color: var(--accent);
-		text-decoration: none;
-	}
-
-	.gs-links a:hover {
-		text-decoration: underline;
 	}
 
 	.form-grid {
