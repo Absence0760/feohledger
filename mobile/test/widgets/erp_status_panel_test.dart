@@ -12,7 +12,7 @@ Widget _host(Widget child) => MaterialApp(
       home: Scaffold(body: SingleChildScrollView(child: child)),
     );
 
-Invoice _inv(InvoiceStatus status) => Invoice(
+Invoice _inv(InvoiceStatus status, {String? erpDocumentId}) => Invoice(
       id: 'inv1',
       invoiceNumber: 'INV-001',
       vendorName: 'Acme',
@@ -20,6 +20,7 @@ Invoice _inv(InvoiceStatus status) => Invoice(
       currency: 'USD',
       status: status,
       createdAt: DateTime(2026, 1, 1),
+      erpDocumentId: erpDocumentId,
     );
 
 AuditEntry _entry(
@@ -84,11 +85,47 @@ void main() {
         _entry('invoice.erp_confirmed', details: {'erp_reference': 'ERP-555'}),
       ]);
       await tester.pumpWidget(_host(
-        ErpStatusPanel(invoice: _inv(InvoiceStatus.sentToErp), erpInfo: info),
+        ErpStatusPanel(
+          invoice: _inv(InvoiceStatus.sentToErp, erpDocumentId: 'ERP-555'),
+          erpInfo: info,
+        ),
       ));
       expect(find.text('ERP Status'), findsOneWidget);
       expect(find.text('ERP Reference'), findsOneWidget);
       expect(find.text('ERP-555'), findsOneWidget);
+    });
+
+    testWidgets('a done invoice names its bill from the invoice row',
+        (tester) async {
+      // Found live: after a confirmed push the newest ERP audit entry is
+      // `invoice.completed`, which carries no reference, and `done` is not an
+      // ERP-bound status, so a posted invoice showed nothing at all.
+      final info = ErpInfo.fromAuditLog([
+        _entry('invoice.erp_confirmed', details: {'erp_reference': 'BILL-1'}),
+        _entry('invoice.completed', at: DateTime(2026, 1, 2, 11)),
+      ]);
+      final parsed = Invoice.fromJson({
+        'id': 'inv1',
+        'status': 'done',
+        'created_at': '2026-01-01T00:00:00',
+        'erp_document_id': 'BILL-1',
+      });
+      expect(parsed.erpDocumentId, 'BILL-1');
+      await tester.pumpWidget(_host(
+        ErpStatusPanel(
+          invoice: _inv(InvoiceStatus.done, erpDocumentId: 'BILL-1'),
+          erpInfo: info,
+        ),
+      ));
+      expect(find.text('ERP Status'), findsOneWidget);
+      expect(find.text('BILL-1'), findsOneWidget);
+    });
+
+    testWidgets('a done invoice never posted shows no panel', (tester) async {
+      await tester.pumpWidget(_host(
+        ErpStatusPanel(invoice: _inv(InvoiceStatus.done), erpInfo: null),
+      ));
+      expect(find.text('ERP Status'), findsNothing);
     });
 
     testWidgets('shows on a failed status when ERP context exists',

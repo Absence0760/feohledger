@@ -4427,6 +4427,7 @@ export const en = {
 	'invoices.modal.contract.unlink': 'Unlink',
 	'invoices.modal.erp.documentId': 'Document ID',
 	'invoices.modal.erp.error': 'Error',
+	'invoices.modal.erp.opensInErp': '(opens the bill in the ERP in a new tab)',
 	'invoices.modal.erp.reference': 'ERP Reference',
 	'invoices.modal.erp.retrySend': 'Retry ERP Send',
 	'invoices.modal.erp.retrying': 'Retrying...',

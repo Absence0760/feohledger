@@ -70,10 +70,20 @@ class ErpStatusPanel extends StatelessWidget {
     InvoiceStatus.postedInErp,
   };
 
-  /// Whether to render at all — an ERP-bound status, or a failure that carries
-  /// ERP context (mirrors the web `isErpStatus || (status==='failed' && erpInfo)`).
+  /// The bill of record, from the invoice row. The audit trail cannot supply
+  /// it: after a confirmed push the newest ERP entry is `invoice.completed`,
+  /// which carries no reference, so a posted invoice showed none.
+  String? get _reference {
+    final id = invoice.erpDocumentId;
+    return id != null && id.isNotEmpty ? id : null;
+  }
+
+  /// Whether to render at all — an ERP-bound status, an invoice that names its
+  /// bill (it keeps it at `done`, and after a void), or a failure that carries
+  /// ERP context (mirrors the web modal's condition).
   bool get visible =>
       _erpStatuses.contains(invoice.status) ||
+      _reference != null ||
       (invoice.status == InvoiceStatus.failed && erpInfo != null);
 
   @override
@@ -82,9 +92,10 @@ class ErpStatusPanel extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final info = erpInfo;
 
+    final reference = _reference;
     final rows = <Widget>[];
-    if (info?.erpReference != null && info!.erpReference!.isNotEmpty) {
-      rows.add(_kv(l.erpStatusReference, info.erpReference!));
+    if (reference != null) {
+      rows.add(_kv(l.erpStatusReference, reference));
     }
     if (info?.erpDocumentId != null && info!.erpDocumentId!.isNotEmpty) {
       rows.add(_kv(l.erpStatusDocumentId, info.erpDocumentId!));
@@ -105,7 +116,7 @@ class ErpStatusPanel extends StatelessWidget {
     // One merged announcement for the whole panel.
     final summary = [
       l.erpStatusTitle,
-      if (info?.erpReference != null) '${l.erpStatusReference} ${info!.erpReference}',
+      if (reference != null) '${l.erpStatusReference} $reference',
       if (info?.erpDocumentId != null) '${l.erpStatusDocumentId} ${info!.erpDocumentId}',
       if (info?.lastError != null) '${l.erpStatusError} ${info!.lastError}',
     ].join(', ');

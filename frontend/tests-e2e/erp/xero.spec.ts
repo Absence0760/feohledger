@@ -30,6 +30,7 @@ import {
 	syncErpVendors,
 	testErpConnection
 } from './helpers';
+import type { Invoice } from '#lib/types/invoice.ts';
 
 /**
  * xero adapter e2e — the REAL Xero adapter
@@ -254,6 +255,46 @@ test.describe('/erp xero adapter against fake-erp', () => {
 			expect(bill.InvoiceNumber).toBe(inv.invoice_number);
 			expect(bill.CurrencyCode).toBe('ZAR');
 			expect(Number(bill.Total)).toBe(1150);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a posted invoice names its Xero bill and links to it', async ({ page, request }) => {
+		// Found live: FEOH-INV-001 was posted to Xero, but the bill's InvoiceID
+		// was kept only in workflow state_data and the audit row, so nothing a
+		// user reads led from the invoice to the bill.
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-XERO-REF',
+			invoiceDate: '2026-10-01',
+			dueDate: '2026-10-31',
+			amount: '1150.00',
+			taxAmount: '150.00',
+			currency: 'ZAR',
+			vendor: SUPPLIER,
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
+			const link = `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=${bill.InvoiceID}`;
+
+			const posted = (await getInvoice(page, inv.id)) as Inv &
+				Pick<Invoice, 'erp_document_id' | 'erp_document_url'>;
+			expect(posted.erp_document_id).toBe(bill.InvoiceID);
+			expect(posted.erp_document_url).toBe(link);
+
+			// The detail view at `done`, where the ERP section used to be hidden.
+			await page.goto(`/invoices?id=${inv.id}`);
+			await expect(page.getByTestId('erp-reference')).toContainText(bill.InvoiceID);
+			const anchor = page.getByTestId('erp-reference-link');
+			await expect(anchor).toHaveAttribute('href', link);
+			await expect(anchor).toHaveAttribute('target', '_blank');
+			await expect(anchor).toHaveAccessibleName(
+				`${bill.InvoiceID} (opens the bill in the ERP in a new tab)`
+			);
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}

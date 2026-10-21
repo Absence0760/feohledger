@@ -16,6 +16,7 @@ from app.services.erp_adapters import (
     get_erp_adapter,
 )
 from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, NOT_CONNECTED
+from app.services.erp_adapters.deep_links import erp_document_url
 from app.services.erp_export_gate import (
     blocked_export_message,
     blocked_export_refusal,
@@ -700,6 +701,16 @@ async def _call_erp(
         await db.commit()
     result = await adapter.post_invoice(payload)
     reference = result.erp_document_id or result.erp_document_number or "UNKNOWN"
+
+    if result.success:
+        # The bill of record, on the invoice row so the invoice can link to it
+        # (the UI reads neither state_data nor the audit row). Only the ERP's
+        # own id: a number is not addressable and "UNKNOWN" names nothing. A
+        # success with no id CLEARS the pair rather than keeping an earlier
+        # one, which may name another ERP's bill if the org has switched.
+        # Persisted by the caller's commit.
+        invoice.erp_document_id = result.erp_document_id or None
+        invoice.erp_document_url = erp_document_url(config, result.erp_document_id)
 
     if instance is not None:
         new_state = dict(state)
