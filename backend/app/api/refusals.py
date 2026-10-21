@@ -5,8 +5,9 @@ the employee and supplier-portal auth routers (`api/auth.py`,
 `api/portal_auth.py`), the approval path (`services/approval_chain.py`,
 `services/review.py`), the exception queue's segregation refusal
 (`services/exception_lifecycle.py`), credit-memo application
-(`api/credit_memos.py`), the invoice stale-edit 409 (`api/invoices.py`) and
-the shared rate limiter's 429 (`services/rate_limit.py`).
+(`api/credit_memos.py`), the invoice stale-edit 409 (`api/invoices.py`), self-service signup
+(`api/signup.py`), vendor merge (`services/vendor_merge.py`) and the shared
+rate limiter's 429 (`services/rate_limit.py`).
 A server-side catcher that turns one back into text reads it through
 `utils/http.detail_text`, never `str(exc.detail)`.
 """
