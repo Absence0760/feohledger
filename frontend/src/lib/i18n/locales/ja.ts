@@ -4180,6 +4180,7 @@ export const messages = {
 	'invoices.modal.contract.unlink': 'リンク解除',
 	'invoices.modal.erp.documentId': 'ドキュメント ID',
 	'invoices.modal.erp.error': 'エラー',
+	'invoices.modal.erp.opensInErp': '（ERP で請求書を新しいタブで開きます）',
 	'invoices.modal.erp.reference': 'ERP 参照',
 	'invoices.modal.erp.retrySend': 'ERP 送信を再試行',
 	'invoices.modal.erp.retrying': '再試行中...',

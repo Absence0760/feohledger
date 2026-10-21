@@ -110,6 +110,7 @@ export async function testErpConnection(
 
 export type Inv = { id: string; invoice_number: string; status: string };
 
+/** The invoice as `GET /api/invoices/{id}` returns it. */
 export async function getInvoice(page: Page, id: string): Promise<Inv> {
 	const resp = await page.request.get(`${API_BASE}/api/invoices/${id}`, {
 		headers: await authedTenantHeaders(page)
