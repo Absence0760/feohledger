@@ -8,6 +8,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, EntityMixin, TimestampMixin
 
+#: Terminal payment states — a payment in one of these no longer represents a
+#: LIVE claim on its invoice. The ONE statement of that rule (issue #575): the
+#: `uq_payments_one_live_per_invoice` predicate below is built from it, and the
+#: app-level live-payment guards (`api/payments`, `payment_runs`,
+#: `external_payment`), the Positive Pay check-issue file and the vendor card
+#: revocation all import it. A void hands the invoice back to `approved` to be
+#: re-paid; a failed / cancelled attempt must not block a fresh one. The order
+#: matters only for the index text, which must match migration 0074.
+LIVE_PAYMENT_TERMINAL_STATUSES: tuple[str, ...] = ("voided", "failed", "cancelled")
+_NOT_LIVE_SQL = ", ".join(f"'{s}'" for s in LIVE_PAYMENT_TERMINAL_STATUSES)
+
 
 class PaymentRun(Base, EntityMixin, TimestampMixin):
     __tablename__ = "payment_runs"
@@ -86,7 +97,7 @@ class Payment(Base, EntityMixin, TimestampMixin):
             "uq_payments_one_live_per_invoice",
             "invoice_id",
             unique=True,
-            postgresql_where=text("status NOT IN ('voided', 'failed', 'cancelled')"),
+            postgresql_where=text(f"status NOT IN ({_NOT_LIVE_SQL})"),
         ),
         # `GET /api/payments`'s default order + its status chips. Same shape and
         # same reasoning as `ix_invoices_created_at_id` — see migration 0092.

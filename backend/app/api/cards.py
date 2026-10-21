@@ -36,6 +36,7 @@ from app.schemas.virtual_card import (
     RebateResponse,
     RebateStatusBreakdown,
 )
+from app.services.card_issuance import CARD_SPENT_STATUSES
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.currency_conversion import (
     card_currency_sql,
@@ -401,7 +402,7 @@ async def card_dashboard(
     # Spend this month
     spend_q = apply_entity_scope(
         select(func.coalesce(func.sum(VirtualCard.amount_charged), 0)).where(
-            VirtualCard.status.in_(["charged", "completed"]),
+            VirtualCard.status.in_(CARD_SPENT_STATUSES),
             extract("month", VirtualCard.charged_at) == now.month,
             extract("year", VirtualCard.charged_at) == now.year,
             _card_ccy == reporting_currency,
@@ -895,7 +896,7 @@ async def cancel_card(
     card = result.scalar_one_or_none()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    if card.status in ("charged", "completed", "cancelled"):
+    if card.status in CARD_SPENT_STATUSES or card.status == "cancelled":
         raise HTTPException(status_code=409, detail=f"Cannot cancel card in '{card.status}' status")
 
     # Refuses (409) when the org names an unregistered provider — the mock's
