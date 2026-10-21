@@ -1048,9 +1048,10 @@ void main() {
     expect(find.text('+8.0% variance'), findsOneWidget);
   });
 
-  testWidgets('shows ERP status derived from the audit log', (tester) async {
+  testWidgets('shows ERP status: the bill from the invoice, the rest from the audit log',
+      (tester) async {
     await _arrange(_detailClient(
-      _invoiceJson('1', status: 'sent_to_erp'),
+      {..._invoiceJson('1', status: 'sent_to_erp'), 'erp_document_id': 'ERP-12345'},
       audit: [
         {
           'id': 'a1',
