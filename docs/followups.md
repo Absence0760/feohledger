@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — giving backend rules a single owner (issue #575 §3)
+**Last reconciled:** 2026-10-20 — the #575 money-path review (decisions §302)
+opened one (c) entry, the invoice currency that cannot be unknown, taking the
+file from 120 → 121. Before that, 2026-10-20 — giving backend rules a single owner (issue #575 §3)
 opened two (c) entries, the payment-schedule readers that join every row and the CSV
 importer's byte-exact duplicate skip, taking the file from 118 → 120. Before that,
 2026-10-20 — fixing signup's dead ends (decisions §292)
@@ -176,7 +178,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**120 open: 104 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**121 open: 105 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1678,6 +1680,31 @@ scope (§260) — do not fold them into any of these.
       match as a per-row import error naming the existing invoice (neither
       silently skipped nor imported). **Trigger:** the next change to the CSV
       importer's row validation.
+- [ ] **(c) An invoice cannot say "currency unknown", so a missing code reads
+      as `USD`.** `Invoice.currency` is `Mapped[str]` (NOT NULL, default
+      `"USD"`), and `POST /api/workflow/upload` creates the row with
+      `currency="USD"` before anything has read the document. So an extraction
+      whose model returns no currency field, and no code beside the amounts,
+      leaves a non-US invoice labelled USD, which is the default decisions
+      §160/§196/§200 forbid. Since §302 the printed code fills the gap when the
+      page has one; this entry is the case where it doesn't. Two readers then
+      stamp the same default again: `invoice_warnings` scopes the
+      statistical-anomaly history with `Invoice.currency == (invoice.currency
+      or "USD")`, and `extraction.resolve_gate_aggregate` passes
+      `currency=… or "USD"` to the structuring sum. Each `or "USD"` is
+      unreachable for a flushed row (the column is NOT NULL) and only mirrors
+      the column default, so removing them alone changes nothing. **Durable
+      fix:** make `invoices.currency` nullable (tenant migration; no backfill,
+      because no honest value exists for the rows already stamped), have the
+      upload create the row with `NULL`, and have every reader of an unknown
+      currency fail closed. That means the anomaly and structuring lookups
+      compare nothing and the approval gates read `GateAmount(expressible=False)`,
+      which `reporting_gate_amount` already supports. Schemas, the web and
+      mobile types, ERP push and payment-run building must then refuse or
+      label a NULL currency, which is why this is sized work rather than a
+      one-line fix. **Trigger:** the next change to the upload's invoice
+      construction, or the first tenant reporting a non-USD invoice extracted
+      as USD.
 
 ### Surfaced by replacing signup's temporary password (2026-10-19, decisions §283)
 
