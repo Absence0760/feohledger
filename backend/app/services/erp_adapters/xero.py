@@ -127,6 +127,24 @@ _UNBILLED_PO_STATUSES = ("DRAFT", "SUBMITTED", "AUTHORISED")
 #: ContactIDs per ``GET Contacts?IDs=`` request, to keep the URL short.
 _CONTACT_ID_BATCH = 50
 
+
+def map_bill_status(bill: dict) -> ErpInvoiceStatus:
+    """A bill's status from Xero's own ``Status`` and the payments on it.
+
+    Xero marks a bill ``PAID`` once nothing is owing, which a fully allocated
+    credit note achieves as well as a payment. So ``PAID`` is ``paid`` only
+    when the bill records money paid against it (``AmountPaid > 0``); a bill
+    settled wholly by credit is ``settled_no_payment`` (docs/decisions.md §303).
+    """
+    status = str(bill.get("Status") or "").upper()
+    amount_paid = _decimal(bill.get("AmountPaid")) or 0
+    if status == "AUTHORISED" and amount_paid > 0:
+        return ErpInvoiceStatus.partially_paid
+    if status == "PAID" and amount_paid <= 0:
+        return ErpInvoiceStatus.settled_no_payment
+    return _STATUS_MAP.get(status, ErpInvoiceStatus.unknown)
+
+
 _PO_STATUS_MAP = {
     "DRAFT": "open",
     "SUBMITTED": "open",
@@ -466,10 +484,7 @@ class XeroAdapter(OAuthErpAdapter):
             bill = await self._get_bill(client, headers, erp_document_id)
         if bill is None:
             return ErpInvoiceStatus.unknown
-        status = str(bill.get("Status") or "").upper()
-        if status == "AUTHORISED" and (_decimal(bill.get("AmountPaid")) or 0) > 0:
-            return ErpInvoiceStatus.partially_paid
-        return _STATUS_MAP.get(status, ErpInvoiceStatus.unknown)
+        return map_bill_status(bill)
 
     async def _live_bill(self, client, headers, erp_document_id: str) -> dict | None:
         """The bill when it is live; None only when Xero POSITIVELY reports it
