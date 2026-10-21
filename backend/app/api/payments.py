@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import case, exists, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +54,7 @@ from app.models.user import User
 from app.models.vendor import Vendor
 from app.models.virtual_card import CardRebate, VirtualCard
 from app.schemas.payment import (
+    RECORD_ONLY_PAYMENT_METHODS,
     PaymentCreate,
     PaymentListResponse,
     PaymentResponse,
@@ -1850,7 +1851,26 @@ async def void_payment(
 
     await _recompute_parent_run_status(db, payment)
 
+    # Decisions §295. A payment the ERP REPORTED goes back to `approved` while
+    # the ERP still shows the bill paid: hold it out of the runs until a person
+    # confirms. A settled FeohLedger payment may have been written back as a
+    # payment of its bill: record the pending ERP void in this transaction, so
+    # the status-sync sweep resumes it if the process dies before the task runs.
+    void_in_erp = False
+    if invoice is not None and previous_status == "completed":
+        from app.services.erp_payment_writeback import record_pending_erp_void
+        from app.services.erp_status_sync import flag_void_of_erp_reported_payment
+
+        await flag_void_of_erp_reported_payment(db, invoice=invoice, payment=payment, org_id=org.id)
+        void_in_erp = await record_pending_erp_void(db, invoice=invoice, payment=payment)
+
     await db.commit()
+    if void_in_erp:
+        # After the commit and off the response; a failure opens an
+        # `erp_reconciliation` exception rather than touching this void.
+        from app.services.erp_payment_writeback import dispatch_void_writeback
+
+        dispatch_void_writeback(org.id, payment.id)
     await db.refresh(payment)
     resp = PaymentResponse.from_db(payment, invoice)
     # Surface the two best-effort legs' outcomes so the operator (and the void
@@ -2747,6 +2767,11 @@ async def accept_settlement(
     )
 
     await db.commit()
+    # Paid here by a FeohLedger payment: write it back to an ERP whose bills
+    # sync (decisions §295), exactly as the sync pass does for a full one.
+    from app.services.erp_payment_writeback import dispatch_settled_writeback
+
+    dispatch_settled_writeback(org.id, payment.id)
     await db.refresh(payment)
     return PaymentResponse.from_db(payment, invoice)
 
@@ -3240,6 +3265,16 @@ async def list_payment_runs(
 class CreatePaymentRunItem(BaseModel):
     invoice_id: str
     method: str = "ach"  # ach, wire, check, virtual_card
+
+    @field_validator("method")
+    @classmethod
+    def _dispatchable(cls, v: str) -> str:
+        # `card` only RECORDS a payment made outside FeohLedger (decisions
+        # §295); a run would book it on a rail nothing dispatches, and off the
+        # 1099 as a card payment.
+        if v in RECORD_ONLY_PAYMENT_METHODS:
+            raise ValueError("card records a payment made outside FeohLedger; record it instead")
+        return v
 
 
 class CreatePaymentRunRequest(BaseModel):
@@ -3770,6 +3805,16 @@ async def _execute_single_payment(
     # `backend/docs/payments.md` § The invoice's payability is re-checked
     # before the adapter call.
     refusal = await dispatch_preflight(db, payment, invoice, as_of=now.date())
+    if refusal is None:
+        # The one fact no local row knows: is the bill still unpaid IN THE ERP
+        # right now? A bill paid in QuickBooks after this run was approved —
+        # or while an earlier item of this run was being sent — has not
+        # reached us yet, and paying it here pays it twice (decisions §296).
+        # A live read, still before any rail is called and still under the
+        # invoice lock; an unreadable bill holds the item rather than pay blind.
+        from app.services.erp_status_sync import erp_bill_dispatch_refusal
+
+        refusal = await erp_bill_dispatch_refusal(db, invoice=invoice, payment=payment, org=org)
     if refusal is not None:
         payment.status = "failed"
         payment.failure_reason = refusal
@@ -4766,6 +4811,35 @@ async def export_run_nacha(
         # invoice's state, which must not move until this request commits.
         invoice = await get_invoice_for_update(db, payment.invoice_id)
         refusal = await dispatch_preflight(db, payment, invoice, as_of=effective_date)
+        if refusal is None:
+            # The bank's upload of this file is the money moving: the same live
+            # read of the ERP bill as a rail dispatch (decisions §296).
+            from app.services.erp_status_sync import erp_bill_dispatch_refusal
+
+            erp_refusal = await erp_bill_dispatch_refusal(
+                db, invoice=invoice, payment=payment, org=org
+            )
+            if erp_refusal is not None and erp_refusal.startswith(
+                ("erp_bill_not_open", "erp_bill_unlinked")
+            ):
+                # Keep the exception the check just opened: the 409 below
+                # rolls the request back. Nothing else is dirty at this
+                # point — the loop only locks and reads until every check has
+                # passed, and the file and its audit row come after the loop —
+                # so this commits that exception alone (pinned by
+                # tests/test_erp_dispatch_check.py).
+                await db.commit()
+            if erp_refusal in ("erp_bill_unverified", "erp_bill_void_pending"):
+                # Nothing is wrong with the run; the bill could not be vouched
+                # for right now. Retrying the export is the fix, not re-staging.
+                raise _refuse(
+                    NACHA_PAYMENT_NOT_PAYABLE,
+                    "the bill in the ERP could not be checked just now "
+                    f"({erp_refusal}). Nothing was exported; try the export again shortly.",
+                    invoice,
+                    reason=erp_refusal,
+                )
+            refusal = erp_refusal
         if refusal is not None:
             raise _refuse(
                 NACHA_PAYMENT_NOT_PAYABLE,

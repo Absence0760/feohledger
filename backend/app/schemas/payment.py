@@ -24,6 +24,17 @@ class PaymentMethod(StrEnum):
     bacs = "bacs"
     faster_payments = "faster_payments"
     chaps = "chaps"
+    # A payment card used OUTSIDE FeohLedger's own card programme — a company
+    # credit card paying a bill in the ERP (QuickBooks `PayType: CreditCard`)
+    # or recorded as paid outside. Card rails are reported on a 1099-K by the
+    # settlement entity, so it is excluded from the 1099 like `virtual_card`
+    # (decisions §295). Recorded only — nothing dispatches on it.
+    card = "card"
+
+
+#: Rails that only ever describe a payment made OUTSIDE FeohLedger: no
+#: processor dispatches them, so a payment FeohLedger books never names one.
+RECORD_ONLY_PAYMENT_METHODS = frozenset({PaymentMethod.card})
 
 
 class PaymentRunStatus(StrEnum):
@@ -66,6 +77,14 @@ class PaymentCreate(BaseModel):
     amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
     method: PaymentMethod | None = None
     reference: str | None = Field(default=None, max_length=255)
+
+    @field_validator("method")
+    @classmethod
+    def _dispatchable(cls, v: PaymentMethod | None) -> PaymentMethod | None:
+        if v in RECORD_ONLY_PAYMENT_METHODS:
+            raise ValueError("card records a payment made outside FeohLedger; record it instead")
+        return v
+
     # No `payment_run_id`. It used to be accepted here and written straight to
     # the FK with no validation at all — the run was never checked to exist, to
     # be `draft`, or to belong to the caller's entity, and `run.total_amount` /

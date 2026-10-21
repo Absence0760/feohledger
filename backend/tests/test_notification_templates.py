@@ -93,6 +93,28 @@ def test_every_event_renders():
                 assert "2026-10" in rendered.title
                 assert rendered.body_text
             continue
+        if event_type == "erp_connection_expiring":
+            # The ERP connection's own context (decisions §295): an ERP name and
+            # the expiry date its provider reported, never an invoice's.
+            from app.services.notification_templates import (
+                ERP_NOTICE_EXPIRING,
+                ERP_NOTICE_RECONNECT,
+                render_erp_connection,
+            )
+
+            soon = render_erp_connection(
+                notice=ERP_NOTICE_EXPIRING,
+                erp_name="QuickBooks Online",
+                expires_on=date(2026, 11, 30),
+                days_left=7,
+            )
+            assert "2026-11-30" in soon.title and "7 days left" in soon.body_text
+            for reason, word in (("refresh_token_expired", "expired"), (None, "revoked")):
+                lost = render_erp_connection(
+                    notice=ERP_NOTICE_RECONNECT, erp_name="QuickBooks Online", reason=reason
+                )
+                assert "Reconnect" in lost.title and word in lost.body_text
+            continue
         rendered = render(event_type, _ctx())
         assert rendered.title
         assert rendered.body_text

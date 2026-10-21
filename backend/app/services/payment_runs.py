@@ -339,6 +339,18 @@ _RETRY_SAFE_FAILURE_PREFIXES = (
     # pays (`card_issuance.card_settlement_block`) — refused before anything
     # moved; a re-send after the card is cancelled mints one at the right figure.
     "card_limit_exceeds_payment",
+    # The live read of the invoice's ERP bill, immediately before the rail
+    # (decisions §296): the ERP shows it paid / part-paid / deleted
+    # (`erp_bill_not_open:<state>`, with a blocking exception that keeps
+    # `/retry-failed` skipping until a person clears it), or the read failed
+    # and the item was held rather than paid blind (`erp_bill_unverified`,
+    # which `/retry-failed` simply re-checks), or only our own write-back paid
+    # it and its QuickBooks void is still pending (`erp_bill_void_pending`).
+    # All before any rail call.
+    "erp_bill_not_open:",
+    "erp_bill_unverified",
+    "erp_bill_void_pending",
+    "erp_bill_unlinked:",
     # Another request held the invoice row lock past
     # `settings.payment_invoice_lock_timeout_ms`. `_lock_payment_invoice` is the
     # first thing dispatch does, so this is refused before any processor call.

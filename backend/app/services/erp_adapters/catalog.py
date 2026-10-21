@@ -137,6 +137,20 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
         "fields": [
             *_byo_app_fields(),
             _field("environment", options=["production", "sandbox"], placeholder="production"),
+            # The GL codes (our chart) of the accounts a FeohLedger payment is
+            # written back from as a QuickBooks BillPayment (decisions §295).
+            # Not required: without one, write-back refuses
+            # `payment_account_not_mapped` and the bill stays unpaid there.
+            _field(
+                "bill_payment_bank_account",
+                required=False,
+                help_key="org.erp.help.billPaymentBankAccount",
+            ),
+            _field(
+                "bill_payment_card_account",
+                required=False,
+                help_key="org.erp.help.billPaymentCardAccount",
+            ),
         ],
         "docs_url": "https://developer.intuit.com/app/developer/qbo/docs/get-started",
     },

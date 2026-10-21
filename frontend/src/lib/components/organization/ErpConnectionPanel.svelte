@@ -59,6 +59,7 @@
 		initialValues,
 		missingRequired,
 		OAUTH_ERROR_KEYS,
+		oauthAttentionKey,
 		oauthConnectionState,
 		optionLabelKey,
 		readOAuthReturn,
@@ -73,6 +74,7 @@
 		type StoredErpConfig
 	} from '#lib/types/erpConnection.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	let {
 		stored,
@@ -144,6 +146,9 @@
 	const connection = $derived(
 		provider ? oauthConnectionState(provider.key, oauthStatus) : 'not_connected'
 	);
+	// Why it must be reconnected, or that it expires soon (decisions §295).
+	const attentionKey = $derived(provider ? oauthAttentionKey(provider.key, oauthStatus) : null);
+	const expiresSoon = $derived(attentionKey === 'org.erp.oauth.expiresSoon');
 
 	function setStatus(text: string, tone: 'success' | 'failure' | null) {
 		statusMessage = text;
@@ -624,11 +629,19 @@
 										})
 									: m('org.erp.oauth.connected', { erp: providerLabel(provider) })}
 							{:else if connection === 'needs_reconnect'}
-								{m('org.erp.oauth.needsReconnect', { erp: providerLabel(provider) })}
+								{m(attentionKey ?? 'org.erp.oauth.needsReconnect', { erp: providerLabel(provider) })}
 							{:else}
 								{m('org.erp.oauth.notConnected', { erp: providerLabel(provider) })}
 							{/if}
 						</p>
+						{#if expiresSoon}
+							<p class="oauth-state failure-text" data-testid="erp-oauth-expiring">
+								{m('org.erp.oauth.expiresSoon', {
+									erp: providerLabel(provider),
+									date: formatDate(oauthStatus?.refresh_token_expires_at)
+								})}
+							</p>
+						{/if}
 						{#if oauthStatusFailed}
 							<p class="oauth-state failure-text">{m('org.erp.oauth.statusFailed')}</p>
 						{/if}
@@ -652,6 +665,18 @@
 								>
 									{testing ? m('org.common.testing') : m('org.common.testConnection')}
 								</button>
+								{#if expiresSoon}
+									<!-- A fresh consent replaces the expiring one in place
+									     (the callback writes a new connection). -->
+									<button
+										class="btn-test"
+										data-testid="erp-oauth-reconnect"
+										disabled={connecting || !provider.available}
+										onclick={connect}
+									>
+										{m('org.erp.oauth.reconnect', { erp: providerLabel(provider) })}
+									</button>
+								{/if}
 							{:else}
 								<button
 									class="btn-save-section"

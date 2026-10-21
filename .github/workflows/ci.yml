@@ -1274,7 +1274,7 @@ jobs:
   # backend's committed .env.development already points the adapters at the
   # fake (FEOH_ERP_MERGE_API_BASE / FEOH_ERP_NETSUITE_API_BASE /
   # FEOH_ERP_D365_API_BASE / FEOH_ERP_D365_TOKEN_URL), and `python main.py`
-  # loads that file — so no extra ERP env is set here. Single runner, not
+  # loads that file — so the only ERP env set here is status sync (below). Single runner, not
   # sharded: the suite is three small spec files.
   erp-e2e:
     name: ERP e2e (fake-erp)
@@ -1322,6 +1322,9 @@ jobs:
       FEOH_MAX_CONCURRENT_SESSIONS: "100"
       FEOH_E2E_TENANT_COUNT: "1"
       FEOH_E2E_USE_PREVIEW: "true"
+      # QuickBooks status sync-back on (decisions §295): a QuickBooks push lands
+      # payable at `posted_in_erp` and erp/quickbooks-status-sync.spec.ts runs.
+      FEOH_ERP_STATUS_SYNC_ENABLED: "true"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

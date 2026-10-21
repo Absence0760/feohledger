@@ -720,7 +720,7 @@ def test_list_vendors_filters_suppliers_and_maps_fields(token):
         client = _client(cm)
         client.get = AsyncMock(return_value=_resp(200, {"Contacts": [contact]}))
         vendors = _run(_adapter().list_vendors())
-    params = client.get.await_args.kwargs["params"]
+    params = client.get.await_args_list[0].kwargs["params"]
     assert params["where"] == "IsSupplier==true"
     # Archived contacts are asked for: Xero omits them otherwise, and a vendor
     # linked to one would look like a dead link (§284).
@@ -730,6 +730,63 @@ def test_list_vendors_filters_suppliers_and_maps_fields(token):
     assert v.phone == "27 215550100"
     assert v.payment_terms == "DAYSAFTERBILLDATE 30"
     assert v.active is True
+
+
+def _route_get(responses: dict):
+    """A `client.get` answering by (path, the one query value that varies)."""
+
+    async def get(url, params=None, headers=None):
+        path = url.rsplit("/", 1)[-1]
+        key = (path, (params or {}).get("Status") or (params or {}).get("IDs"))
+        return responses.get(key) or _resp(200, {path: []})
+
+    return AsyncMock(side_effect=get)
+
+
+def test_list_vendors_adds_contacts_only_ordered_from(token):
+    """Xero sets IsSupplier only once a contact has a bill, so a supplier
+    with only purchase orders so far is read from the unbilled POs."""
+    supplier = {"ContactID": "c-billed", "Name": "Billed Ltd"}
+    po_only = {"ContactID": "c-po", "Name": "Feoh Test Supplies Inc"}
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = _route_get(
+            {
+                ("Contacts", None): _resp(200, {"Contacts": [supplier]}),
+                ("PurchaseOrders", "AUTHORISED"): _resp(
+                    200,
+                    {
+                        "PurchaseOrders": [
+                            {"Contact": {"ContactID": "c-po"}},
+                            {"Contact": {"ContactID": "c-billed"}},
+                        ]
+                    },
+                ),
+                ("PurchaseOrders", "DRAFT"): _resp(
+                    200, {"PurchaseOrders": [{"Contact": {"ContactID": "c-po"}}]}
+                ),
+                ("Contacts", "c-po"): _resp(200, {"Contacts": [po_only]}),
+            }
+        )
+        vendors = _run(_adapter().list_vendors())
+    assert [v.erp_vendor_id for v in vendors] == ["c-billed", "c-po"]
+    statuses = [
+        c.kwargs["params"].get("Status")
+        for c in client.get.await_args_list
+        if c.args[0].endswith("/PurchaseOrders")
+    ]
+    # Only POs not yet billed: a billed PO's contact is already a supplier.
+    assert statuses == ["DRAFT", "SUBMITTED", "AUTHORISED"]
+
+
+def test_list_vendors_raises_when_the_po_contacts_cannot_be_read(token):
+    """The added contacts are evidence too: a failed PO read raises rather
+    than returning a pull the vendor sync would read as those vendors gone."""
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = _route_get({("PurchaseOrders", "SUBMITTED"): _resp(429, {})})
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_vendors())
+    assert exc.value.gap is ListingGap.fetch_failed
 
 
 def test_an_archived_supplier_is_emitted_inactive(token):
@@ -802,7 +859,7 @@ def test_list_gl_accounts_maps_class_and_emits_archived_inactive(token):
 def test_list_pos_maps_status_total_and_currency_exactly(token):
     po = {
         "PurchaseOrderNumber": "PO-0001",
-        "Contact": {"Name": "Acme Supplies"},
+        "Contact": {"ContactID": "c-123", "Name": "Acme Supplies"},
         "Total": 1250.10,
         "Status": "BILLED",
         "CurrencyCode": "ZAR",
@@ -815,6 +872,8 @@ def test_list_pos_maps_status_total_and_currency_exactly(token):
         _client(cm).get = AsyncMock(return_value=_resp(200, {"PurchaseOrders": [po]}))
         (row,) = _run(_adapter().list_pos())
     assert row.total == Decimal("1250.10")
+    # The supplier's ContactID — what the vendor sync stamps — links the PO.
+    assert (row.vendor_name, row.vendor_erp_id) == ("Acme Supplies", "c-123")
     assert row.status == "closed"
     assert row.currency == "ZAR"
     assert row.expected_delivery_date == date(2026, 11, 1)
@@ -1003,3 +1062,61 @@ def test_resolve_tenant_uses_the_operator_base_for_connections(monkeypatch):
     monkeypatch.setattr(settings, "erp_xero_api_base", "http://localhost:12112/xero/api.xro/2.0")
     _, seen = _resolve_xero([{"tenantId": "t", "tenantType": "ORGANISATION"}])
     assert str(seen[0].url) == "http://localhost:12112/xero/connections"
+
+
+# ---------------------------------------------------------------------------
+# Disconnect: revoking the grant at Xero
+# ---------------------------------------------------------------------------
+
+
+def _revoke_with(monkeypatch, response: httpx.Response, *, override: str = ""):
+    """Run `erp_oauth.revoke` for Xero and return (result, the request sent)."""
+    from app.services.erp_adapters.xero import XERO_OAUTH
+
+    monkeypatch.setattr(settings, "erp_xero_client_id", "xero-client")
+    monkeypatch.setattr(settings, "erp_xero_client_secret", "xero-secret")
+    monkeypatch.setattr(settings, "erp_xero_revoke_url", override)
+    sent = []
+
+    class _Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kw):
+            sent.append({"url": url, **kw})
+            return response
+
+    monkeypatch.setattr(erp_oauth.httpx, "AsyncClient", _Client)
+    oauth = {"refresh_token": "REFRESH-1", "access_token": "ACCESS-1", "client_source": "platform"}
+    result = _run(erp_oauth.revoke(XERO_OAUTH, {"type": "xero"}, oauth))
+    return result, sent
+
+
+def test_disconnect_revokes_the_refresh_token_at_xero(monkeypatch):
+    """Without a revoke URL, Disconnect only forgot our copy of the tokens: the
+    grant stayed live and the org stayed connected in Xero (seen in the live
+    Demo Company test as "Already connected" on the next consent)."""
+    revoked, (call,) = _revoke_with(monkeypatch, _resp(200))
+    assert revoked is True
+    assert call["url"] == "https://identity.xero.com/connect/revocation"
+    # RFC 7009 form body with HTTP Basic client auth — Xero's documented shape.
+    assert call["data"] == {"token": "REFRESH-1"} and "json" not in call
+    assert call["auth"]._auth_header == httpx.BasicAuth("xero-client", "xero-secret")._auth_header
+
+
+def test_a_refused_revoke_reports_not_revoked(monkeypatch):
+    revoked, _ = _revoke_with(monkeypatch, _resp(400, {"error": "invalid_client"}))
+    assert revoked is False
+
+
+def test_the_revoke_url_override_is_honoured(monkeypatch):
+    _, (call,) = _revoke_with(
+        monkeypatch, _resp(200), override="http://localhost:12112/xero/identity/connect/revocation"
+    )
+    assert call["url"] == "http://localhost:12112/xero/identity/connect/revocation"

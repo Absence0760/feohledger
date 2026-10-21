@@ -737,6 +737,18 @@ re-sent.
   booked with no longer applies today (its deadline passed), or one now applies
   that it was not booked with (§ An accepted early-payment discount is paid).
   Same rule as `net_amount_changed`: never re-priced here.
+- `erp_bill_not_open:<state>` / `erp_bill_unverified` / `erp_bill_void_pending` /
+  `erp_bill_unlinked:<why>` — the live read of the
+  invoice's QuickBooks bill immediately before the rail (decisions §296): the
+  ERP shows it paid, part-paid or deleted (a blocking `payment_reconciliation`
+  is opened with it, so the retry keeps skipping until a person clears it), or
+  the read failed and the item was held rather than paid blind (the retry just
+  re-reads), or only our own write-back paid it and its QuickBooks void is still
+  pending, or the bill can never be read under the current connection
+  (`unlinked`: no document id, no company, or another company — an
+  `erp_reconciliation` names the way out: record it as paid outside FeohLedger,
+  or re-post). All refused before any rail call, so all are retry-safe. A NACHA
+  export and `POST /api/cards/generate` run the same read.
 - `invoice_locked` is retry-safe and needs no skip rule: it only means another
   request held the invoice row past the bound when dispatch tried (§ Bounded
   wait for the invoice lock), so the retry simply re-attempts it.
@@ -2089,10 +2101,45 @@ proceeding would pay the supplier twice, so the flag is the **payment-blocking**
 `payment_reconciliation`, which `dispatch_preflight` refuses on; any other
 refusal opens the non-blocking `erp_reconciliation`. Both name the refusal code.
 Segregation of duties doesn't apply — there is no human actor. The payment is
-dated the day the report arrives, not the ERP's own payment date (the webhook
-carries none). `payment_erp_sync` skips `provider = "external"` payments, so a
-payment the customer made in its own ERP is never pushed back to it as a bill
-payment.
+dated by the ERP's own payment date and classified by its rail when the report
+states them — the generic webhook's optional `paid_on` / `payment_method`, or
+the paying BillPayment's `TxnDate` / `PayType` for QuickBooks (`CreditCard` →
+the `card` rail, off the payer's 1099) — validated, and falling back to the
+arrival date and NULL (reportable) only when absent (decisions §295).
+`payment_erp_sync` skips `provider = "external"` payments, so a payment the
+customer made in its own ERP is never pushed back to it as a bill payment.
+
+### QuickBooks: a bill paid there leaves the queue; a payment made here is written there
+
+Decisions §295 (`erp-integration.md` § QuickBooks status sync-back and payment
+write-back). With `FEOH_ERP_STATUS_SYNC_ENABLED` on, a QuickBooks push leaves
+the invoice payable at `posted_in_erp`. A bill then paid in QuickBooks reaches
+the path above and the invoice moves to `paid`, out of every run. A bill paid in
+QuickBooks while a FeohLedger payment is scheduled, part-paid there, or deleted
+there while payable here opens the payment-blocking `payment_reconciliation`,
+which the run builder and `dispatch_preflight` refuse on.
+
+The other direction: once `payment_erp_sync` moves a settled payment's invoice
+to `paid`, the payment is written back as a QuickBooks BillPayment against the
+bill (`services/erp_payment_writeback`) — after the commit, idempotent on the
+payment id, from the org's mapped pay-from account. A refusal never undoes the
+transition; it is audited (`payment.erp_post_failed`, coded) and flagged
+(`erp_reconciliation`), and `POST /api/payments/runs/{id}/sync-erp` retries it.
+A discount or credit taken here leaves the bill partly open in QuickBooks, which
+is flagged for the bookkeeper. An accepted short settlement
+(`/settlement/accept`) writes back what was settled. Voiding a settled payment
+voids its BillPayment; the intent is recorded in the void's own transaction
+(`erp_payment_voids_pending`) so the status-sync sweep finishes it if the
+process dies first. Voiding a payment the ERP REPORTED opens the blocking
+`payment_reconciliation` in the same transaction: the invoice is `approved`
+again while QuickBooks may still show the bill paid, and nothing about that
+bill would ever be reported again. A bill settled in QuickBooks by a vendor
+credit is never booked as a cash payment; it is flagged (blocking).
+
+The new `card` rail (`schemas/payment.PaymentMethod.card`) is a company card used
+OUTSIDE FeohLedger's card programme: recordable as paid outside, reported by
+the ERP, excluded from the 1099 like `virtual_card`, and refused on a payment
+FeohLedger would dispatch (`PaymentCreate`).
 
 ### Nothing else moves money on a record-only tenant
 

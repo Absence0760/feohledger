@@ -246,3 +246,46 @@ def render_ai_invoice_usage(
             f"included this month. {tail}"
         )
     return RenderedNotification(title=title, body_text=body, body_html=_html(body))
+
+
+#: The ERP connection notices (decisions §295).
+ERP_NOTICE_EXPIRING = "expiring"
+ERP_NOTICE_RECONNECT = "reconnect_required"
+
+
+def render_erp_connection(
+    *,
+    notice: str,
+    erp_name: str,
+    expires_on: date | None = None,
+    days_left: int | None = None,
+    reason: str | None = None,
+) -> RenderedNotification:
+    """Render an ERP-connection notice: the consent expires soon, or the
+    connection is gone and needs an admin's consent again.
+
+    Names only the ERP (a fixed display name) and a date; nothing PII-bearing.
+    """
+    where = "Organization → ERP integration"
+    if notice == ERP_NOTICE_RECONNECT:
+        title = f"Reconnect {erp_name}: the connection has stopped working"
+        cause = (
+            "its authorization expired"
+            if reason == "refresh_token_expired"
+            else "it was disconnected or revoked in " + erp_name
+        )
+        body = (
+            f"FeohLedger can no longer reach {erp_name}: {cause}. Until an administrator "
+            f"reconnects it ({where} → Reconnect), invoices are not posted to {erp_name}, "
+            f"and bills paid there are not reflected here."
+        )
+    else:
+        when = expires_on.isoformat() if expires_on else "soon"
+        left = f" ({days_left} day{'s' if days_left != 1 else ''} left)" if days_left else ""
+        title = f"Your {erp_name} connection expires on {when}"
+        body = (
+            f"The authorization that lets FeohLedger reach {erp_name} expires on "
+            f"{when}{left}. Reconnect it before then ({where} → Reconnect) so posting "
+            f"bills and syncing payments keep working."
+        )
+    return RenderedNotification(title=title, body_text=body, body_html=_html(body))

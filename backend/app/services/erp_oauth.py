@@ -588,6 +588,11 @@ def _parse_dt(value: Any) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
+#: Public name for reading a stored ISO-8601 timestamp of the OAuth block
+#: (``expires_at``, ``refresh_token_expires_at``) as an aware datetime.
+parse_timestamp = _parse_dt
+
+
 def _is_fresh(oauth: dict, *, rejected_token: str | None = None) -> bool:
     if rejected_token and oauth.get("access_token") == rejected_token:
         return False
@@ -773,8 +778,83 @@ async def realm_claim(provider: str, external_tenant_id: str) -> AsyncIterator[b
         await _release_lock(key, token)
 
 
+#: Why a connection needs the admin's consent again (``settings.erp.oauth.
+#: reconnect_reason``), recorded when the provider refuses the refresh token:
+#: past the expiry it last reported, or refused before it (revoked at the
+#: provider, or a lifetime cap it never reported).
+RECONNECT_EXPIRED = "refresh_token_expired"
+RECONNECT_REVOKED = "refresh_token_revoked"
+
+
+def reconnect_reason(oauth: dict, *, now: datetime | None = None) -> str:
+    """:data:`RECONNECT_EXPIRED` when the stored refresh-token expiry has
+    passed, else :data:`RECONNECT_REVOKED`."""
+    expires = _parse_dt(oauth.get("refresh_token_expires_at"))
+    moment = now or datetime.now(UTC)
+    return RECONNECT_EXPIRED if expires is not None and expires <= moment else RECONNECT_REVOKED
+
+
+async def update_connection_metadata(
+    spec_key: str, org_id: uuid.UUID, connection_id: str, updates: dict[str, Any]
+) -> bool:
+    """Merge NON-secret ``updates`` into ``settings.erp.oauth`` — only while
+    the stored connection is still ``connection_id`` for ``spec_key``. Under
+    the org row lock, like every settings writer. Returns whether it wrote.
+
+    For bookkeeping the connection-health sweep keeps (which expiry notice was
+    sent); never a token, and never a key the refresher or the connect flow
+    owns.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.database import control_session_factory
+    from app.models.organization import Organization
+
+    forbidden = set(updates) & {
+        "provider",
+        "connection_id",
+        "org_id",
+        "external_tenant_id",
+        "access_token",
+        "refresh_token",
+        "expires_at",
+        "refresh_token_expires_at",
+        "client_source",
+        "needs_reconnect",
+    }
+    if forbidden:
+        raise ValueError(f"not connection metadata this writer may set: {sorted(forbidden)}")
+    async with control_session_factory() as session:
+        org = (
+            await session.execute(
+                select(Organization).where(Organization.id == org_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        current = dict((org.settings if org else None) or {})
+        erp = dict(current.get("erp") or {})
+        oauth = erp.get("oauth")
+        if (
+            org is None
+            or not isinstance(oauth, dict)
+            or oauth.get("provider") != spec_key
+            or not hmac.compare_digest(str(oauth.get("connection_id") or ""), connection_id)
+        ):
+            await session.rollback()
+            return False
+        erp["oauth"] = {**oauth, **updates}
+        current["erp"] = erp
+        org.settings = current
+        flag_modified(org, "settings")
+        await session.commit()
+        return True
+
+
 async def get_access_token(
-    spec: OAuthProviderSpec, erp_config: dict, *, rejected_token: str | None = None
+    spec: OAuthProviderSpec,
+    erp_config: dict,
+    *,
+    rejected_token: str | None = None,
+    force_refresh: bool = False,
 ) -> str:
     """Return a valid access token for ``erp_config``'s connection to ``spec``.
 
@@ -792,6 +872,13 @@ async def get_access_token(
 
     org_id, connection_id = _identity(spec, erp_config)
     _, oauth = await _read_stored(spec, org_id, connection_id)
+    if force_refresh:
+        # Refresh now even though the access token is fresh — the
+        # connection-health sweep keeping a quiet connection's refresh token
+        # alive (§295). Treating the stored access token as the rejected one
+        # reuses the lock and compare-and-swap below unchanged: a refresh a
+        # concurrent caller already landed satisfies this one too.
+        rejected_token = str(oauth.get("access_token") or "") or None
     if _is_fresh(oauth, rejected_token=rejected_token):
         return str(oauth["access_token"])
 
@@ -808,6 +895,47 @@ async def get_access_token(
         if _is_fresh(oauth, rejected_token=rejected_token):
             return str(oauth["access_token"])
 
+    # From here — the provider's rotation and its persistence — runs as ONE
+    # shielded task. Intuit rotates the refresh token on every use, so a caller
+    # cancelled by its own timeout (the dispatch-time bill check, decisions
+    # §296) after Intuit answered but before the new token was stored would
+    # strand the connection. Shielded, the refresh completes and persists, and
+    # releases its lock, whatever happens to the caller.
+    return await _shielded(
+        _refresh_holding_lock(spec, org_id, connection_id, rejected_token, lock_key, lock)
+    )
+
+
+#: Strong references to in-flight shielded refreshes (asyncio holds only a
+#: weak one), each retrieving its own exception so a refresh whose caller gave
+#: up never logs "Task exception was never retrieved".
+_refresh_tasks: set = set()
+
+
+async def _shielded(coro):
+    import asyncio
+
+    task = asyncio.ensure_future(coro)
+    _refresh_tasks.add(task)
+
+    def _done(t) -> None:
+        _refresh_tasks.discard(t)
+        if not t.cancelled():
+            t.exception()
+
+    task.add_done_callback(_done)
+    return await asyncio.shield(task)
+
+
+async def _refresh_holding_lock(
+    spec: OAuthProviderSpec,
+    org_id: uuid.UUID,
+    connection_id: str,
+    rejected_token: str | None,
+    lock_key: str,
+    lock: str,
+) -> str:
+    """The refresh :func:`get_access_token` runs once it holds the lock."""
     try:
         # Re-read under the lock: the previous holder may have just refreshed.
         erp, oauth = await _read_stored(spec, org_id, connection_id)
@@ -829,8 +957,13 @@ async def get_access_token(
             if exc.invalid_grant:
                 # Revoked at the provider, or past its lifetime. Surface it as
                 # "reconnect required" instead of retrying a dead token forever.
+                reason = reconnect_reason(oauth)
                 await _compare_and_swap(
-                    spec, org_id, connection_id, spent, {"needs_reconnect": True}
+                    spec,
+                    org_id,
+                    connection_id,
+                    spent,
+                    {"needs_reconnect": True, "reconnect_reason": reason},
                 )
                 # Rotation is routine and unaudited; a connection going down is
                 # not. Best-effort, after the commit.
@@ -842,7 +975,7 @@ async def get_access_token(
                     action="organization.erp_reconnect_required",
                     entity_id=org_id,
                     entity_type="organization",
-                    details={"provider": spec.key},
+                    details={"provider": spec.key, "reason": reason},
                 )
                 logger.warning("erp_oauth: %s refresh refused for org %s", spec.key, org_id)
                 raise ErpNotConnectedError(spec.key) from None

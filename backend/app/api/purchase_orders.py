@@ -27,6 +27,7 @@ from app.models.vendor import Vendor
 from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_link_realm import connection_realm, legacy_links_trusted, link_is_live
 from app.services.goods_receipts import received_quantities
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
@@ -375,9 +376,26 @@ async def sync_pos_from_erp(
 
         raise erp_pull_failure(exc) from exc
 
-    # Vendor lookup map for linking POs to existing vendor rows.
+    # Vendor lookup maps for linking POs to existing vendor rows: the ERP's own
+    # supplier id first (what the vendor sync stamps), then the name. An id link
+    # counts only when it was made in the company this sync reads (the push's
+    # rule, services/erp_link_realm): QuickBooks reuses small ids across
+    # companies, so another company's "56" is a different supplier.
+    realm = connection_realm(erp_config)
+    trust_legacy = legacy_links_trusted(erp_config, realm)
     v_result = await db.execute(select(Vendor).where(Vendor.organization_id == org_id))
-    vendor_map = {v.name.lower(): v.id for v in v_result.scalars().all()}
+    vendors = v_result.scalars().all()
+    vendor_by_erp_id = {
+        v.erp_vendor_id: v.id
+        for v in vendors
+        if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
+    }
+    vendor_by_name = {v.name.lower(): v.id for v in vendors}
+
+    def resolve_vendor(erp_po) -> uuid.UUID | None:
+        if erp_po.vendor_erp_id and erp_po.vendor_erp_id in vendor_by_erp_id:
+            return vendor_by_erp_id[erp_po.vendor_erp_id]
+        return vendor_by_name.get(erp_po.vendor_name.lower()) if erp_po.vendor_name else None
 
     created = 0
     skipped = 0
@@ -447,6 +465,15 @@ async def sync_pos_from_erp(
             if erp_currency is not None and existing_po.currency != erp_currency:
                 existing_po.currency = erp_currency
                 changed = True
+            # A PO first synced before its supplier was (the vendor sync not
+            # yet run, or the supplier added since) gets linked now. Only a
+            # missing link is filled: a vendor already on the row — a person's
+            # correction or an earlier match — is never re-pointed by a sync.
+            if existing_po.vendor_id is None:
+                vendor_id = resolve_vendor(erp_po)
+                if vendor_id is not None:
+                    existing_po.vendor_id = vendor_id
+                    changed = True
 
             if changed:
                 updated += 1
@@ -454,7 +481,7 @@ async def sync_pos_from_erp(
                 skipped += 1
             continue
 
-        vendor_id = vendor_map.get(erp_po.vendor_name.lower()) if erp_po.vendor_name else None
+        vendor_id = resolve_vendor(erp_po)
 
         po = PurchaseOrder(
             po_number=erp_po.po_number,

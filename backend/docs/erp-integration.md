@@ -126,7 +126,20 @@ class ErpAdapter:
     async def test_connection(self) -> bool:
         """Verify the ERP connection is working."""
         ...
+
+    # Status sync-back + payment write-back (decisions §295). Only an adapter
+    # with `supports_status_sync = True` implements them (QuickBooks Online
+    # today); the base raises NotImplementedError and every caller checks the
+    # flag first.
+    supports_status_sync: bool = False
+    async def bill_report(self, bill_id: str) -> ErpBillReport: ...
+    async def bills_for_payment(self, payment_id: str) -> list[str]: ...
+    async def changed_bills(self, since: datetime) -> list[str]: ...
+    async def post_payment(self, payload: PaymentPayload) -> ErpPostResult: ...
+    async def void_payment(self, payload: PaymentPayload) -> ErpPostResult: ...
 ```
+
+See § QuickBooks status sync-back and payment write-back.
 
 ### Data Types
 
@@ -234,7 +247,7 @@ After sending an invoice to the ERP, the system needs to know when the ERP has p
 | Method | How it works | When to use |
 |---|---|---|
 | **Webhook** | ERP calls our endpoint when status changes | Preferred — real-time, no polling cost |
-| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** (below) |
+| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** for the generic case (below); QuickBooks Online has its change-data-capture sweep (§295) |
 
 **Webhook endpoint:** `POST /api/erp/webhook/{erp_type}`
 
@@ -278,7 +291,53 @@ only inbound path today. The intended design was a sweep every few minutes over
 `sent_to_erp` invoices that transitions on a changed status and fails one stuck
 past a timeout; before wiring it, three adapters' "balance 0 ⇒ paid" mapping has to
 change (it also matches a credited or zero-total bill). Tracked in
-`docs/followups.md` ("ERP status polling and void are unwired").
+`docs/followups.md` ("ERP status polling and void are unwired"). QuickBooks
+Online is the exception: its status comes back through its own webhook and a
+change-data-capture sweep (next section).
+
+**A paid report may carry the ERP's own payment date and rail.** The generic
+body accepts optional `paid_on` (`YYYY-MM-DD`) and `payment_method` (a
+`Payment.method` rail). They are validated like the user's own "paid outside
+FeohLedger" record — a real date not in the future, a recordable rail, never
+`virtual_card` — and an invalid or absent value falls back to the arrival date
+and NULL (1099-reportable) rather than refusing the report (decisions §295).
+
+### QuickBooks status sync-back and payment write-back
+
+Decisions §295; the phase-by-phase account is
+`quickbooks-online-adapter.md` § Phases 3–5 as built.
+
+- **Where a push lands.** `services/erp_status_sync.status_sync_active`: with
+  `FEOH_ERP_STATUS_SYNC_ENABLED` on and an adapter that `supports_status_sync`,
+  a confirmed push goes `sent_to_erp → posted_in_erp` — payable here, so a
+  payment made in the ERP can move it to `paid` and out of the queue. Otherwise
+  it closes at `done`, as every other adapter does (the ERP owns payment, and
+  nothing would tell us it paid). The push records `state_data.erp_realm`.
+- **Inbound.** `POST /api/erp/webhook/quickbooks` (Intuit CloudEvents, one app
+  verifier token, base64 HMAC over the raw body, dedupe by event id before the
+  204, work after it) and the `erp-status-sync` CDC sweep both end in
+  `apply_bill_report`, which records a bill paid by a person in QuickBooks
+  through the ERP-paid path (with QuickBooks' date and rail), and opens the
+  payment-blocking `payment_reconciliation` when FeohLedger would otherwise pay
+  a bill QuickBooks paid, part-paid or deleted. The tenant is found through the
+  control-plane realm index (`uq_organizations_erp_oauth_company`, migration
+  0117), which also makes "one tenant per QuickBooks company" a database rule.
+- **Outbound.** `payment_erp_sync` writes a settled payment back as a
+  BillPayment (`services/erp_payment_writeback`), idempotent on the payment id,
+  from the org's mapped pay-from account (`settings.erp.bill_payment_bank_account`
+  / `bill_payment_card_account`, our GL codes). Refusals are coded
+  (`payment_account_not_mapped`, `bill_not_in_erp`, `payment_exceeds_balance`,
+  `bill_payment_voided`, `currency_mismatch`, and the Intuit Fault codes) and
+  land on `payment.erp_post_failed` plus an `erp_reconciliation` exception. A
+  payment void voids the BillPayment too.
+- **Checked again at dispatch.** A bill paid in QuickBooks reaches us within
+  seconds by webhook, or by the next sweep — too late for a run already
+  executing. So every payment re-reads its bill from QuickBooks immediately
+  before its rail is called, under the invoice row lock
+  (`erp_status_sync.erp_bill_dispatch_refusal`, decisions §296): not open →
+  refused `erp_bill_not_open:<state>` with the blocking
+  `payment_reconciliation`; unreadable → held `erp_bill_unverified`, never paid
+  blind. The NACHA export runs the same read.
 
 ## Organization ERP Configuration
 
@@ -1232,7 +1291,14 @@ section). Reconnecting the OAuth consent
 to a different company also writes `organization.erp_realm_changed`.
 
 **Purchase orders link no ERP id the push resolves** (the bill carries
-`po_number` as text), so they need no realm. The QuickBooks PO sync also no
+`po_number` as text), so they need no realm. A synced PO is linked to its vendor
+by the ERP's supplier id (`PoPayload.vendor_erp_id`, matched against the
+`erp_vendor_id` the vendor sync stamps — Xero's `ContactID`, QuickBooks'
+`VendorRef`), falling back to the vendor name; an adapter that does not read
+the id uses the name alone. **Run the vendor sync before the PO sync** on a new
+connection. A PO synced first has no vendor, and the next PO sync fills that
+missing link once the vendor exists. It never re-points a PO that already has
+a vendor. The QuickBooks PO sync also no
 longer reads the chart to resolve PO-line accounts: nothing persists or reads a
 PO line's GL account, so lines carry none — never the `AccountRef` name.
 
@@ -1484,6 +1550,13 @@ workspace holds one `settings.erp`, so Free is one direct ERP that imports
    optionally enter your own app's client ID and secret, save, then click
    **Connect to <ERP>** and approve access in the ERP. You return to the ERP
    section with a connected status, and can **Disconnect** there
+6. QuickBooks Online only: pick the **Bill payments: bank account** (and card
+   account, if you pay by card) — accounts from your synced chart — so payments
+   made in FeohLedger are recorded against their bills in QuickBooks. Left
+   blank, payments are not written back and each one is flagged. When the
+   connection nears the end of its authorization the panel says so and offers
+   **Reconnect** (admins are also notified); once it has lapsed or been revoked
+   it says which, and Reconnect is the fix
 
 ### Other ERP via Merge.dev (Scale plan)
 
@@ -1715,9 +1788,9 @@ which apps created on or after 2026-03-02 must use.
 | Method | Xero call | Notes |
 |---|---|---|
 | `test_connection` | `GET Organisation` | |
-| `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False` |
+| `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False`. Xero sets `IsSupplier` only once a contact has a bill, so a supplier you have only sent purchase orders to is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone |
 | `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
-| `list_pos` | `GET PurchaseOrders` | `BILLED` → closed, `DELETED` → cancelled |
+| `list_pos` | `GET PurchaseOrders` | `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
 | `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
 | `void_invoice` | `POST Invoices/{id}` | DRAFT/SUBMITTED → `DELETED`; unpaid, uncredited AUTHORISED → `VOIDED`; anything with money applied → `False` |
@@ -2317,7 +2390,12 @@ token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
 or `body`. `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
 which documents that) instead of RFC 7009's form body; sent a form, Intuit may
 refuse it, and Disconnect would then leave the grant live behind a
-`revoked: false` the user never sees. An empty `scopes` sends no `scope`. Operator URL overrides
+`revoked: false` the user never sees. **Which providers revoke:** QuickBooks
+(JSON) and Xero (RFC 7009 form + Basic, `identity.xero.com/connect/revocation`;
+revoking the refresh token also removes the org's connection, so the next
+consent offers the org afresh instead of "Already connected"). Sage Accounting
+and Blackbaud FE NXT configure no revoke URL yet, so their Disconnect only
+forgets our copy of the tokens (`docs/followups.md`). An empty `scopes` sends no `scope`. Operator URL overrides
 (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
