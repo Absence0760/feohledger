@@ -61,29 +61,45 @@ def _load_local_settings() -> None:
         setattr(settings, name, getattr(fresh, name))
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def xero():
-    """The tenant's live Xero adapter, built the way a sync builds it."""
+    """The tenant's live Xero adapter, built the way a sync builds it.
+
+    Per test, on a NullPool engine bound to this test's event loop: every test
+    runs on its own loop, and a pooled asyncpg connection cannot cross loops.
+    `dispatch_engine_scope` points the adapter's own control-plane reads (the
+    token store) at the same engine.
+    """
     _load_local_settings()
     from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
 
-    from app.database import control_session_factory
+    from app.config import settings
+    from app.database import dispatch_engine_scope
     from app.models.organization import Organization
     from app.services.erp_adapters import get_erp_adapter
     from app.services.provider_credentials import provider_config
 
-    async with control_session_factory() as db:
-        org = (
-            await db.execute(select(Organization).where(Organization.slug == TENANT))
-        ).scalar_one_or_none()
-        assert org is not None, f"no local tenant '{TENANT}' (FEOH_XERO_LIVE_TENANT)"
-        config = await provider_config(org, "erp", db=db) or {}
-    # Opted in but not connected is a failure, not a skip: a green run must
-    # mean Xero was actually asked.
-    assert config.get("type") == "xero", (
-        f"tenant '{TENANT}' is not set to Xero — connect it under Organization → ERP Integration"
-    )
-    return get_erp_adapter(config)
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with dispatch_engine_scope(control_sessionmaker=sessions):
+            async with sessions() as db:
+                org = (
+                    await db.execute(select(Organization).where(Organization.slug == TENANT))
+                ).scalar_one_or_none()
+                assert org is not None, f"no local tenant '{TENANT}' (FEOH_XERO_LIVE_TENANT)"
+                config = await provider_config(org, "erp", db=db) or {}
+            # Opted in but not connected is a failure, not a skip: a green run
+            # must mean Xero was actually asked.
+            assert config.get("type") == "xero", (
+                f"tenant '{TENANT}' is not set to Xero — connect it under "
+                "Organization → ERP Integration"
+            )
+            yield get_erp_adapter(config)
+    finally:
+        await engine.dispose()
 
 
 async def _get(adapter, path: str, params: dict | None = None) -> dict:
