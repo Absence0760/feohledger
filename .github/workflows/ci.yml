@@ -197,6 +197,18 @@ jobs:
       - name: pytest-split baseline still describes the suite
         run: python scripts/check_test_durations.py
 
+      # Source-level checks on the migration chain: revision ids fit the
+      # version column, parents resolve, ONE head, and no two migrations share
+      # a number. Two PRs that each add the next migration are both green alone
+      # and fork the chain once both merge, which fails the deploy's
+      # `alembic upgrade head`. It needs no database, so it runs here, where a
+      # fork is reported in seconds rather than inside one of eight shards; the
+      # same file still runs in the shards as part of the suite. ci.yml also
+      # runs on every push to main, which is where two such PRs merged
+      # back to back are caught.
+      - name: Alembic migration chain has one head
+        run: python -m pytest -q tests/test_alembic_revision_ids.py
+
   # The backend pytest suite (~10,100 tests against a real Postgres/Redis/MinIO)
   # would run ~60 min as one serial job — the longest job in CI. It's sharded the
   # same way the Playwright e2e job below is: a matrix of runners, each booting
