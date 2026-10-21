@@ -776,6 +776,16 @@ async def _mint_one_locked(
     if decision.verdict != "allow":
         return None  # blocked/held vendor: skip, don't block the batch
 
+    # The last gate before a spendable card exists: is the bill still unpaid IN
+    # QUICKBOOKS right now (decisions §296)? Same live read as a rail dispatch,
+    # under the invoice lock this path already holds; a bill paid there opens
+    # the blocking exception (kept by the caller's per-invoice commit), and an
+    # unreadable one is skipped rather than minted blind.
+    from app.services.erp_status_sync import erp_bill_dispatch_refusal
+
+    if await erp_bill_dispatch_refusal(db, invoice=inv, org=org) is not None:
+        return None
+
     issue = await issue_card_for_invoice(
         db=db,
         invoice=inv,

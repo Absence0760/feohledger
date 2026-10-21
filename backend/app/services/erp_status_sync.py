@@ -524,6 +524,192 @@ async def _paid_through_feohledger(db: AsyncSession, invoice_id: uuid.UUID) -> b
     return (found.scalar() or 0) > 0
 
 
+#: Dispatch refusals of :func:`erp_bill_dispatch_refusal` (decisions §296).
+#: All are made before any rail is called, so all are retry-safe
+#: (`payment_runs._RETRY_SAFE_FAILURE_PREFIXES`).
+ERP_BILL_NOT_OPEN = "erp_bill_not_open"
+ERP_BILL_UNVERIFIED = "erp_bill_unverified"
+#: The bill reads paid only by OUR OWN write-back, whose QuickBooks void is
+#: still pending after a FeohLedger void: nothing outside us paid it, so no
+#: person needs to clear anything — hold until the void lands.
+ERP_BILL_VOID_PENDING = "erp_bill_void_pending"
+#: The bill can never be read under this connection — the push named no
+#: document, recorded no company, or the company is not the one connected now
+#: (a sandbox → production switch). Held like the others, but a retry cannot
+#: clear it, so a non-blocking ``erp_reconciliation`` gives it an owner.
+ERP_BILL_UNLINKED = "erp_bill_unlinked"
+
+#: After a read fails for an org, its further dispatch checks hold without
+#: reading for this long: a degraded QuickBooks would otherwise cost every
+#: item of a long run the full timeout, with its invoice row locked each time.
+_UNREACHABLE_HOLD_SECONDS = 60.0
+_unreachable_until: dict[uuid.UUID, float] = {}
+
+
+def _org_unreachable(org_id: uuid.UUID) -> bool:
+    import time
+
+    until = _unreachable_until.get(org_id)
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        _unreachable_until.pop(org_id, None)
+        return False
+    return True
+
+
+def _mark_unreachable(org_id: uuid.UUID) -> None:
+    import time
+
+    _unreachable_until[org_id] = time.monotonic() + _UNREACHABLE_HOLD_SECONDS
+
+
+async def _bounded_bill_report(adapter: ErpAdapter, bill_id: str) -> ErpBillReport:
+    """The bill, read within ``FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS`` as a
+    whole (the bill and its payments together). A token refresh inside it is
+    safe to cut short: ``erp_oauth.get_access_token`` runs the rotation and
+    its persistence as one shielded task."""
+    bound = max(1.0, float(settings.erp_dispatch_check_timeout_seconds))
+    return await asyncio.wait_for(adapter.bill_report(bill_id), timeout=bound)
+
+
+def _connection_level(exc: BaseException) -> bool:
+    """Does this failure say QuickBooks (or our connection to it) is down, as
+    opposed to something about this one bill? Only those trip the org-wide
+    hold; a 400 on one bill must not hold every other item of the run."""
+    import httpx
+
+    from app.services import erp_oauth
+
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError, httpx.TransportError)):
+        return True
+    if isinstance(exc, (erp_oauth.ErpNotConnectedError, erp_oauth.ErpTokenRefreshError)):
+        return True
+    status = getattr(exc, "status_code", None)
+    return isinstance(status, int) and (status >= 500 or status in (401, 408, 429))
+
+
+async def erp_bill_dispatch_refusal(
+    db: AsyncSession,
+    *,
+    invoice: Invoice,
+    org: Organization,
+    payment: Payment | None = None,
+) -> str | None:
+    """Why money must not move for ``invoice`` now because of its ERP bill —
+    or None. Decisions §296.
+
+    Called immediately before money moves, with the invoice row locked:
+    ``api/payments._execute_single_payment`` after ``dispatch_preflight`` and
+    before the rail adapter (every rail dispatch: execute, resume,
+    retry-failed, a standalone payment, compliance release, the virtual-card
+    leg), the NACHA export, and ``POST /api/cards/generate`` before it mints.
+    ``dispatch_preflight`` already re-confirmed the LOCAL facts in that lock.
+    This adds the one fact no local row can know: whether the bill is still
+    unpaid IN QUICKBOOKS right now. A bill paid there seconds ago — after the
+    run was approved, or between two items of one run — has not reached us yet
+    by webhook or sweep, and paying it here pays it twice.
+
+    Only for an ERP whose bills sync back (``status_sync_active``) and an
+    invoice posted there. Then a live ``bill_report``, bounded overall by
+    ``FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS``:
+
+    * **open** (nothing taken off it, by anyone) → None: pay.
+    * **taken down outside FeohLedger** (paid, part-paid, credited) or
+      **deleted**, or a state we cannot classify → ``erp_bill_not_open:<state>``,
+      and the payment-BLOCKING ``payment_reconciliation`` is opened in the
+      caller's transaction, so no later run or ``/retry-failed`` pays it until
+      a person clears it.
+    * **paid only by our own write-back** (a FeohLedger void whose QuickBooks
+      void is still pending) → ``erp_bill_void_pending``: held, no exception —
+      the pending-void sweep resolves it, and nothing outside us paid it.
+    * **unverifiable right now** — the read failed or timed out (and, after a
+      connection-level failure, every check of that org for a minute without
+      reading) → ``erp_bill_unverified``: HELD, never paid blind. No
+      exception: nothing is known to be wrong, and ``/retry-failed`` re-checks.
+    * **unreadable for good** under this connection — the push named no
+      document, recorded no company, or the bill is in a company other than
+      the one connected now → ``erp_bill_unlinked:<why>``: held, with a
+      non-blocking ``erp_reconciliation`` so the way out (record it as paid
+      outside, or re-post) has an owner.
+
+    Idempotent: a read, plus a de-duplicated exception. Never commits.
+    """
+    from app.services.erp_link_realm import connection_realm
+
+    erp_config = (org.settings or {}).get("erp")
+    if not status_sync_active(erp_config):
+        return None
+    state = (
+        await db.execute(
+            select(WorkflowInstance.state_data).where(WorkflowInstance.invoice_id == invoice.id)
+        )
+    ).scalar_one_or_none() or {}
+    bill_id = str(state.get("erp_reference") or "")
+    if not bill_id:
+        return None  # never posted to the ERP: no bill there to pay twice
+    recorded_realm = state.get("erp_realm")
+    unlinked = None
+    if bill_id == "UNKNOWN":
+        unlinked = "no_document"  # the push confirmed without naming its bill
+    elif not recorded_realm:
+        unlinked = "no_company"  # the push recorded no company
+    elif recorded_realm != connection_realm(erp_config):
+        unlinked = "other_company"  # e.g. pushed to the sandbox, now on production
+    if unlinked is not None:
+        # A bill may exist that we cannot find or read under this connection,
+        # and no retry changes that: hold, and give it an owner.
+        await open_erp_reconciliation_exception(
+            db,
+            invoice,
+            org_id=org.id,
+            description=(
+                "FeohLedger cannot check this invoice's bill in the ERP under the current "
+                f"connection ({unlinked}), so it will not pay it. Confirm in the ERP whether "
+                "it is still owed, then record it as paid outside FeohLedger or re-post it."
+            ),
+        )
+        return f"{ERP_BILL_UNLINKED}:{unlinked}"
+    adapter = _adapter_or_none(erp_config)
+    if adapter is None or _org_unreachable(org.id):
+        return ERP_BILL_UNVERIFIED
+    subject = payment.id if payment is not None else invoice.id
+    try:
+        report = await _bounded_bill_report(adapter, bill_id)
+    except Exception as exc:  # noqa: BLE001 — any failure to read is "unknown", never "open"
+        if _connection_level(exc):
+            _mark_unreachable(org.id)
+        logger.warning(
+            "[erp-dispatch-check] bill for %s unverified: %s", subject, exc.__class__.__name__
+        )
+        return ERP_BILL_UNVERIFIED
+    if report.state is ErpBillState.open and not report.reduced_outside:
+        return None
+    if (
+        report.state in (ErpBillState.paid, ErpBillState.partially_paid)
+        and not report.reduced_outside
+        and state.get("erp_payment_voids_pending")
+    ):
+        # Paid only by our own write-back, whose void a FeohLedger void has
+        # recorded and the sweep has not yet finished: nothing outside us paid
+        # it. Without a pending void, "paid only by us" is unexplained and
+        # falls through to the blocking flag below.
+        return ERP_BILL_VOID_PENDING
+    await open_erp_reconciliation_exception(
+        db,
+        invoice,
+        org_id=org.id,
+        exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
+        description=(
+            f"FeohLedger was about to pay this invoice, but the ERP shows its bill "
+            f"{report.state.value} (bill={bill_id}). It was stopped before any money moved "
+            f"({subject}). Confirm what is still owed before paying it; if a virtual card was "
+            "already issued for this invoice, cancel it."
+        ),
+    )
+    return f"{ERP_BILL_NOT_OPEN}:{report.state.value}"
+
+
 async def flag_void_of_erp_reported_payment(
     db: AsyncSession, *, invoice: Invoice, payment: Payment, org_id: uuid.UUID
 ) -> bool:

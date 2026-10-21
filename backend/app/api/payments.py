@@ -3802,6 +3802,16 @@ async def _execute_single_payment(
     # `backend/docs/payments.md` § The invoice's payability is re-checked
     # before the adapter call.
     refusal = await dispatch_preflight(db, payment, invoice, as_of=now.date())
+    if refusal is None:
+        # The one fact no local row knows: is the bill still unpaid IN THE ERP
+        # right now? A bill paid in QuickBooks after this run was approved —
+        # or while an earlier item of this run was being sent — has not
+        # reached us yet, and paying it here pays it twice (decisions §296).
+        # A live read, still before any rail is called and still under the
+        # invoice lock; an unreadable bill holds the item rather than pay blind.
+        from app.services.erp_status_sync import erp_bill_dispatch_refusal
+
+        refusal = await erp_bill_dispatch_refusal(db, invoice=invoice, payment=payment, org=org)
     if refusal is not None:
         payment.status = "failed"
         payment.failure_reason = refusal
@@ -4798,6 +4808,35 @@ async def export_run_nacha(
         # invoice's state, which must not move until this request commits.
         invoice = await get_invoice_for_update(db, payment.invoice_id)
         refusal = await dispatch_preflight(db, payment, invoice, as_of=effective_date)
+        if refusal is None:
+            # The bank's upload of this file is the money moving: the same live
+            # read of the ERP bill as a rail dispatch (decisions §296).
+            from app.services.erp_status_sync import erp_bill_dispatch_refusal
+
+            erp_refusal = await erp_bill_dispatch_refusal(
+                db, invoice=invoice, payment=payment, org=org
+            )
+            if erp_refusal is not None and erp_refusal.startswith(
+                ("erp_bill_not_open", "erp_bill_unlinked")
+            ):
+                # Keep the exception the check just opened: the 409 below
+                # rolls the request back. Nothing else is dirty at this
+                # point — the loop only locks and reads until every check has
+                # passed, and the file and its audit row come after the loop —
+                # so this commits that exception alone (pinned by
+                # tests/test_erp_dispatch_check.py).
+                await db.commit()
+            if erp_refusal in ("erp_bill_unverified", "erp_bill_void_pending"):
+                # Nothing is wrong with the run; the bill could not be vouched
+                # for right now. Retrying the export is the fix, not re-staging.
+                raise _refuse(
+                    NACHA_PAYMENT_NOT_PAYABLE,
+                    "the bill in the ERP could not be checked just now "
+                    f"({erp_refusal}). Nothing was exported; try the export again shortly.",
+                    invoice,
+                    reason=erp_refusal,
+                )
+            refusal = erp_refusal
         if refusal is not None:
             raise _refuse(
                 NACHA_PAYMENT_NOT_PAYABLE,

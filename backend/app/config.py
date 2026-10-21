@@ -371,6 +371,11 @@ class Settings(BaseSettings):
     # overlapping on purpose (applying a report twice is a no-op); Intuit's CDC
     # answers at most 30 days.
     erp_status_sync_lookback_hours: int = 72
+    # The live read of a QuickBooks bill immediately before one of our payments
+    # for it is handed to a rail (decisions §296). Bounded, because the invoice
+    # row lock is held across it; past the bound the item is HELD, never paid
+    # blind (`erp_bill_unverified`, retry-safe).
+    erp_dispatch_check_timeout_seconds: float = 10.0
     # OAuth connection health (Phase 5, decisions §295,
     # `services/erp_connection_health`): keeps a quiet connection's refresh
     # token alive, and tells admins (in-app + email) before it expires or as

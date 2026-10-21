@@ -895,6 +895,47 @@ async def get_access_token(
         if _is_fresh(oauth, rejected_token=rejected_token):
             return str(oauth["access_token"])
 
+    # From here — the provider's rotation and its persistence — runs as ONE
+    # shielded task. Intuit rotates the refresh token on every use, so a caller
+    # cancelled by its own timeout (the dispatch-time bill check, decisions
+    # §296) after Intuit answered but before the new token was stored would
+    # strand the connection. Shielded, the refresh completes and persists, and
+    # releases its lock, whatever happens to the caller.
+    return await _shielded(
+        _refresh_holding_lock(spec, org_id, connection_id, rejected_token, lock_key, lock)
+    )
+
+
+#: Strong references to in-flight shielded refreshes (asyncio holds only a
+#: weak one), each retrieving its own exception so a refresh whose caller gave
+#: up never logs "Task exception was never retrieved".
+_refresh_tasks: set = set()
+
+
+async def _shielded(coro):
+    import asyncio
+
+    task = asyncio.ensure_future(coro)
+    _refresh_tasks.add(task)
+
+    def _done(t) -> None:
+        _refresh_tasks.discard(t)
+        if not t.cancelled():
+            t.exception()
+
+    task.add_done_callback(_done)
+    return await asyncio.shield(task)
+
+
+async def _refresh_holding_lock(
+    spec: OAuthProviderSpec,
+    org_id: uuid.UUID,
+    connection_id: str,
+    rejected_token: str | None,
+    lock_key: str,
+    lock: str,
+) -> str:
+    """The refresh :func:`get_access_token` runs once it holds the lock."""
     try:
         # Re-read under the lock: the previous holder may have just refreshed.
         erp, oauth = await _read_stored(spec, org_id, connection_id)
