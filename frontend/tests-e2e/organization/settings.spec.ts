@@ -87,7 +87,8 @@ const PANELS = [
 	['sso', 'Single Sign-On'],
 	['fraud', 'Fraud Detection'],
 	['residency', 'Data Residency'],
-	['plan', 'Plan']
+	['plan', 'Plan'],
+	['close', 'Close this workspace']
 ] as const;
 
 /**
@@ -108,7 +109,9 @@ const ADMIN_ONLY_PANELS = [
 	['cards', 'Virtual Cards', 'cards-admin-only'],
 	['security', 'Security', 'security-admin-only'],
 	['sso', 'Single Sign-On', 'sso-admin-only'],
-	['fraud', 'Fraud Detection', 'fraud-admin-only']
+	['fraud', 'Fraud Detection', 'fraud-admin-only'],
+	// Closing the workspace is an admin act, so the panel is the hint alone.
+	['close', 'Close this workspace', 'close-workspace-admin-only']
 ] as const;
 
 /** The `section.card` carrying `heading`. */

@@ -69,7 +69,8 @@ const ORG_PANELS: [slug: string, heading: string][] = [
 	['sso', 'Single Sign-On'],
 	['fraud', 'Fraud Detection'],
 	['residency', 'Data Residency'],
-	['plan', 'Plan']
+	['plan', 'Plan'],
+	['close', 'Close this workspace']
 ];
 
 const AUTHED_ROUTES: { path: string; name: string; ready?: string }[] = [
