@@ -14,6 +14,7 @@ from app.api.deps import (
     ROLE_AP_MANAGER,
     ROLE_CFO,
     get_org_id,
+    holds_any_role,
     require_roles,
 )
 from app.api.invoices import _invoice_list_filters
@@ -28,6 +29,7 @@ from app.models.vendor import Vendor
 from app.schemas.credit_memo import (
     CreditMemoApply,
     CreditMemoCreate,
+    CreditMemoListItem,
     CreditMemoListResponse,
     CreditMemoResponse,
     CreditMemoStatusCounts,
@@ -283,6 +285,58 @@ def _assert_editable(memo: CreditMemo) -> None:
 _STRIPPED_WHITESPACE = " \t\n\r\x0b\x0c"
 
 
+CREDIT_MEMO_NOT_VOIDABLE = "credit_memo_not_voidable"
+
+
+def _assert_voidable(memo: CreditMemo) -> None:
+    """Only a memo that has neither reduced a payable nor been voided may be
+    voided. An applied memo is immutable for audit; a repeat void (double-click,
+    client retry, a second operator) used to succeed and stage a second
+    `credit_memo.voided` row, so the append-only trail recorded two rescissions
+    of one memo — the same answer `POST /api/payments/{id}/void` gives an
+    already-voided payment."""
+    if memo.status == "applied":
+        raise HTTPException(
+            status_code=409, detail="Applied credit memos cannot be voided (immutable for audit)"
+        )
+    if memo.status == "void":
+        raise HTTPException(status_code=409, detail="Credit memo is already void")
+
+
+#: Who may create, edit, apply or void a memo — those endpoints' dependency,
+#: and what `memo_action_refusals` asks.
+CREDIT_MEMO_MUTATE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
+
+
+def memo_action_refusals(memo: CreditMemo, user: User) -> dict:
+    """What ``POST /{id}/apply``, ``PATCH /{id}`` and ``POST /{id}/void`` would
+    answer ``user`` for this memo — each a coded refusal or ``None`` (issue
+    #575). Computed by RUNNING those endpoints' own gates
+    (:func:`_assert_applicable`, :func:`_assert_editable`,
+    :func:`_assert_voidable`) after their role dependency. Apply's pairing
+    gates (vendor / entity / currency / balance) depend on the invoice chosen;
+    ``/{id}/eligible-invoices`` answers those.
+    """
+    from app.api.refusals import refusal_of, role_not_permitted
+
+    if not holds_any_role(user, CREDIT_MEMO_MUTATE_ROLES):
+        return {action: role_not_permitted() for action in ("apply", "edit", "void")}
+    gates = {
+        "apply": (_assert_applicable, "credit_memo_not_applicable"),
+        "edit": (_assert_editable, "credit_memo_not_editable"),
+        "void": (_assert_voidable, CREDIT_MEMO_NOT_VOIDABLE),
+    }
+    out: dict = {}
+    for action, (gate, fallback) in gates.items():
+        try:
+            gate(memo)
+        except HTTPException as exc:
+            out[action] = refusal_of(exc, fallback_code=fallback)
+        else:
+            out[action] = None
+    return out
+
+
 def _assert_applicable(memo: CreditMemo) -> None:
     """Only an `open` memo can be applied — to anything.
 
@@ -503,7 +557,14 @@ async def list_credit_memos(
     )
     result = await db.execute(paged)
     items = [
-        _to_response(memo, vendor_name=vendor_name, invoice_number=invoice_number)
+        CreditMemoListItem(
+            **_to_response(
+                memo, vendor_name=vendor_name, invoice_number=invoice_number
+            ).model_dump(),
+            # The caller's verdict on Apply / Edit / Void, from the gates those
+            # endpoints run (`memo_action_refusals`).
+            actions=memo_action_refusals(memo, user),
+        )
         for memo, vendor_name, invoice_number in result.all()
     ]
     return CreditMemoListResponse(
@@ -689,7 +750,7 @@ async def _get_scoped_vendor(
 async def create_credit_memo(
     body: CreditMemoCreate,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*CREDIT_MEMO_MUTATE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -798,7 +859,7 @@ async def update_credit_memo(
     body: CreditMemoUpdate,
     db: AsyncSession = Depends(get_tenant_db),
     # Create's gate: an edit can rewrite everything create wrote.
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*CREDIT_MEMO_MUTATE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -870,7 +931,7 @@ async def apply_credit_memo(
     memo_id: uuid.UUID,
     body: CreditMemoApply,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*CREDIT_MEMO_MUTATE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -952,7 +1013,7 @@ async def apply_credit_memo(
 async def void_credit_memo(
     memo_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*CREDIT_MEMO_MUTATE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -960,16 +1021,7 @@ async def void_credit_memo(
     # racing on one open memo could both read `open`, and the later commit
     # would decide whether a credit that already reduced a payable reads void.
     memo = await _get_scoped_memo(db, memo_id, entity_id, for_update=True)
-    if memo.status == "applied":
-        raise HTTPException(
-            status_code=409, detail="Applied credit memos cannot be voided (immutable for audit)"
-        )
-    # A repeat void (double-click, client retry, a second operator) used to
-    # succeed and stage a second `credit_memo.voided` row, so the append-only
-    # trail recorded two rescissions of one memo. Same answer as
-    # `POST /api/payments/{id}/void` gives an already-voided payment.
-    if memo.status == "void":
-        raise HTTPException(status_code=409, detail="Credit memo is already void")
+    _assert_voidable(memo)
 
     memo.status = "void"
     await dispatch_audit(

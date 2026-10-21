@@ -64,7 +64,13 @@ async function mockHistory(page: import('@playwright/test').Page) {
 		r.fulfill({
 			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify({ items: [cardPayment()], total: 1, page: 1, page_size: 20 })
+			body: JSON.stringify({
+				// A History row carries the server's void verdict; `null` = voidable.
+				items: [cardPayment({ void_refusal: null })],
+				total: 1,
+				page: 1,
+				page_size: 20
+			})
 		})
 	);
 	await page.route('**/api/payments/counts**', (r) =>

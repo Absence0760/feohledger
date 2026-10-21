@@ -17,6 +17,12 @@
 	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
 	import { downloadRunNacha, recordRunOutside, voidRunNachaExport } from '#lib/api/payments.ts';
 	import {
+		isAllowed,
+		isOffered,
+		refusalText,
+		type ActionRefusal
+	} from '#lib/api/actionVerdicts.ts';
+	import {
 		NACHA_SEC_CODES,
 		canDispatchPayments,
 		canDownloadBankFile,
@@ -126,6 +132,12 @@
 		/** Early-payment discounts the run's active payments take — already
 		 *  deducted from `total_amount`. Exact Decimal string. */
 		discount_total?: string;
+		/** The CALLER's verdict on the three draft-run decisions — each `null`
+		 *  when its endpoint would accept them, else the coded refusal it would
+		 *  answer with (`api/payments.py::run_action_refusals`, from the gates
+		 *  `/approve`, `/execute` and `/cancel` raise from). The footer offers a
+		 *  control from this and never restates its rule (issue #575). */
+		actions: { approve: ActionRefusal; execute: ActionRefusal; cancel: ActionRefusal };
 		payments: RunPayment[];
 	}
 
@@ -166,7 +178,18 @@
 	// record is `payment.record_external`. Maker-checker and CFO sign-off apply
 	// server-side to all of them exactly as they do to Execute.
 	const canRecord = $derived(auth.can(PERM_PAYMENT_RECORD_EXTERNAL));
-	const showExecute = $derived(auth.can(PERM_PAYMENT_EXECUTE) && canDispatchPayments(executionMode));
+	// Execute: only where FeohLedger sends payments (the server's execution
+	// mode), and only as the server's verdict for THIS reader allows — the
+	// run's creator used to get an enabled Execute that could only 403.
+	const showExecute = $derived(
+		canDispatchPayments(executionMode) && isOffered(run?.actions?.execute)
+	);
+	// A refusal the pending-CFO note above the buttons does not already state.
+	const executeRefusal = $derived(
+		run?.actions?.execute && run.actions.execute.code !== 'payment_run_awaiting_cfo'
+			? run.actions.execute
+			: null
+	);
 	const showBankFile = $derived(
 		auth.can(PERM_PAYMENT_EXECUTE) && canDownloadBankFile(executionMode)
 	);
@@ -301,7 +324,7 @@
 	onMount(load);
 
 	async function execute() {
-		if (!run || run.status !== 'draft') return;
+		if (!run || !isAllowed(run.actions?.execute)) return;
 		executing = true;
 		try {
 			const result = await api.post<{ message: string }>(
@@ -327,7 +350,7 @@
 	let approving = $state(false);
 
 	async function approveCfo() {
-		if (!run || !run.requires_cfo_approval || run.cfo_approved_at) return;
+		if (!run || !isAllowed(run.actions?.approve)) return;
 		approving = true;
 		try {
 			await api.post(`/api/payments/runs/${runId}/approve`, {});
@@ -343,7 +366,7 @@
 	}
 
 	async function cancelDraft() {
-		if (!run || run.status !== 'draft') return;
+		if (!run || !isAllowed(run.actions?.cancel)) return;
 		cancelling = true;
 		try {
 			const result = await api.post<{ message: string; released_invoices: number }>(
@@ -790,26 +813,30 @@
 						>
 							{cancelling ? m('paymentRuns.runDetail.cancelling') : m('paymentRuns.runDetail.confirmCancel')}
 						</button>
-					{:else}
+					{:else if isOffered(run.actions?.cancel)}
 						<button
 							class="btn-discard"
-							disabled={cancelling || executing || approving}
+							disabled={cancelling || executing || approving || !isAllowed(run.actions?.cancel)}
 							onclick={() => arm('cancel')}
 						>
 							{m('paymentRuns.runDetail.cancelRun')}
 						</button>
 					{/if}
-					<!-- `hasRole('cfo')`, NOT `auth.isCfo` (= admin | cfo): the backend
-					     gate is `require_roles(ROLE_CFO)` and require_roles does not
-					     special-case admin, so an admin without the cfo role saw
-					     "Approve as CFO" and every click 403'd — while Execute stayed
-					     disabled on `pendingCfo`, leaving the run with no usable
-					     control at all. Widening the backend is not the fix: a CFO
-					     sign-off an admin can grant themselves is not a sign-off. -->
-					{#if pendingCfo && auth.hasRole('cfo')}
+					<!-- The server's verdict (`actions.approve`), never a role check
+					     here: the sign-off is `require_roles(ROLE_CFO)` (an admin is
+					     not a CFO — a sign-off one can grant themselves is not a
+					     sign-off), and maker-checker refuses the CFO who CREATED the
+					     run. That CFO used to see an enabled "Approve as CFO" that
+					     could only 403; they now see it disabled, with the reason.
+					     `pendingCfo` decides only whether the run HAS a CFO step to
+					     render a control for — a run that needs no sign-off shows no
+					     disabled "Approve as CFO"; whether it may be pressed is the
+					     verdict alone. -->
+					{#if pendingCfo && isOffered(run.actions?.approve)}
 						<button
 							class="btn-approve"
-							disabled={approving}
+							disabled={approving || !isAllowed(run.actions?.approve)}
+							aria-describedby={run.actions?.approve ? 'run-approve-refusal' : undefined}
 							onclick={approveCfo}
 						>
 							{approving ? m('paymentRuns.runDetail.approving') : m('paymentRuns.runDetail.approveAsCfo')}
@@ -829,7 +856,8 @@
 							     of on a timer. -->
 							<button
 								class="btn-execute armed"
-								disabled={executing || cancelling || pendingCfo}
+								disabled={executing || cancelling || !isAllowed(run.actions?.execute)}
+								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
 								onclick={execute}
 							>
 								{executing
@@ -841,7 +869,8 @@
 						{:else}
 							<button
 								class="btn-execute"
-								disabled={executing || cancelling || pendingCfo || recordingRun}
+								disabled={executing || cancelling || !isAllowed(run.actions?.execute) || recordingRun}
+								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
 								title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
 								onclick={() => {
 									recordOpen = false;
@@ -855,6 +884,19 @@
 						{/if}
 					{/if}
 				</div>
+				<!-- Why a control above is disabled, in the server's own words
+				     (localized from its code) — e.g. a colleague must sign off or
+				     execute a run this reader created. -->
+				{#if pendingCfo && isOffered(run.actions?.approve) && run.actions?.approve}
+					<p class="footer-note" id="run-approve-refusal" data-testid="run-approve-refusal">
+						{refusalText(run.actions.approve, m)}
+					</p>
+				{/if}
+				{#if showExecute && executeRefusal}
+					<p class="footer-note" id="run-execute-refusal" data-testid="run-execute-refusal">
+						{refusalText(executeRefusal, m)}
+					</p>
+				{/if}
 			{:else if run?.status === 'exported'}
 				<!-- Claimed by its bank file: no Execute, no Cancel run. The two
 				     exits — record as paid, or the bank rejected the file — are

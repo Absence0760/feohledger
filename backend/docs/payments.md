@@ -1067,10 +1067,36 @@ overwrite the same field and says why. The void now leaves `completed_at`
 alone whenever it is already set, records the void instant as
 `details.voided_at` on the append-only `payment.voided` audit row (alongside
 `details.settled_at`), and still stamps a terminal timestamp for a payment that
-never settled (`pending` / `submitted` / `processing` / `pending_compliance`),
-which has no settlement time to protect.
+never settled (`pending` with no run / `submitted` / `processing`), which has
+no settlement time to protect. (A run's `pending` leg and `pending_compliance`
+are no longer voidable — § Only money that has left can be voided.)
 
 **Tests:** `tests/test_payment_terminal_timestamps.py`.
+
+### Only money that has left can be voided
+
+`POST /api/payments/{id}/void` reverses money that has left, or is leaving,
+the rail: `submitted`, `processing`, `completed`. Everything else has a
+purpose-built exit and is refused (409, `payment_controls.payment_void_refusal`):
+
+- `voided` / `cancelled` — already terminal; `failed` — it never settled;
+- `pending_compliance` — nothing reached the processor; **Release** or
+  **Dismiss** resolve the hold *and* its `payment_compliance_hold` exception,
+  which a void used to leave open beside a re-queued invoice;
+- `pending` **on a run leg** — a leg of a run that has not been sent. On a
+  draft run the exit is **Cancel run** (which releases every leg; there is no
+  per-leg removal from a draft run); on an exported (NACHA) run it is **Bank
+  rejected the file** or **Record run as paid**. A per-leg void used to put the
+  invoice back in the queue while the uploaded bank file could still pay it — a
+  second payment of the same invoice.
+
+A `pending` payment with **no run** (booked by `POST /api/payments`) stays
+voidable: nothing will ever send it, it holds the invoice's one live-payment
+slot, and the void is its only undo.
+
+The History tab offers Void exactly when the row's `void_refusal` is `null` —
+the same function, so the button and the endpoint cannot disagree
+(`docs/decisions.md` §305; `tests/test_payment_action_verdicts.py`).
 
 ### A void re-flags the invoice if the vendor's bank details changed since
 
@@ -2194,7 +2220,7 @@ minted virtual card is spendable, so it is a payment by another door.
 | `GET` | `/api/payments/queue` | List invoices ready for payment — paginated (`page` / `page_size`, default 20). Response carries the whole-set `total` / `selectable_total` / `blocked_total` / `by_currency` + per-row `blocked` / `blocked_reason` / `required_method` — the verdict of `payment_runs.run_refusal_reasons`, the SAME predicate set the run builder enforces. See § The payment queue is paginated and § Financial-integrity exception gate → The queue reports every refusal the run builder enforces. |
 | `GET` | `/api/payments/queue/ids` | "Select all N matching" resolver — `{ids, total, truncated, currency, by_currency}` for the whole selectable set, capped at 5000. Same RBAC as `/queue`. |
 | `GET` | `/api/payments/summary` | KPIs: total paid, pending, queue count, rebates — every money figure in the org's reporting currency, with `unconverted_payment_count` / `excluded_rebate_count` reporting what each had to leave out. `CardRebate` is a **tenant** table (`decisions.md` §57), so the rebate figure is read from the tenant session and joins `virtual_cards` for its currency + entity; there is no `control_db` dependency and no try/except fallback — a DB failure is a 500, not a confident `0`. See § The payments KPIs are denominated, not just summed. |
-| `POST` | `/api/payments/{id}/void` | Void a pending/completed payment. Reverses a `virtual_card` payment's card at the provider too, and reports whether it managed to via `void_card_outcome` + `void_card_disposition` — see § Voiding a card payment cancels the card. |
+| `POST` | `/api/payments/{id}/void` | Void a `submitted` / `processing` / `completed` payment, or a standalone `pending` one (no run) — `payment_controls.payment_void_refusal`, the gate the History row's `void_refusal` is read from, refuses everything else (§ Only money that has left can be voided). Reverses a `virtual_card` payment's card at the provider too, and reports whether it managed to via `void_card_outcome` + `void_card_disposition` — see § Voiding a card payment cancels the card. |
 | `POST` | `/api/payments/{id}/void/retry-card-cancel` | Re-attempt ONLY the card close for an already-`voided` card payment, when the void's best-effort leg left the card live. `payment.void`-gated, idempotent, audited `payment.void_card_cancel_retried`; moves no money and re-asks no rail. 409 unless the payment is `voided` **and** `virtual_card`. See § The outcome is on the response, and so is the remedy. |
 | `POST` | `/api/payments/{id}/compliance/release` | Re-run compliance-then-adapter for a payment stuck `pending_compliance`. `payment.execute`-gated, 409 outside that status. See § Sanctions / compliance hold resolution. |
 | `POST` | `/api/payments/{id}/compliance/dismiss` | Give up on a payment stuck `pending_compliance` — flips it to `failed` with a required `{reason}`, never reaches the adapter. `payment.void`-gated, 409 outside that status. See § Sanctions / compliance hold resolution. |

@@ -61,7 +61,7 @@ route (which had the refusal but no route-level coverage of it):
   | `POST /api/positive-pay/ach-authorization` | 422 — no file, no row |
   | `POST /api/invoices/{id}/peppol-send` | 422 — resolved above the slot |
   |   | claim, so no `PeppolTransmission` row at all |
-  | `POST /api/peppol/inbound/{slug}` | bodyless **503** — our failure, not |
+  | `POST /api/peppol/inbound/{org}`  | bodyless **503** — our failure, not |
   |   | a decision (§37): ask the AP to redeliver rather than ack a drop |
   | `POST /api/international-tax/{rate,vat,gst}` | 409 — pure compute, |
   |   | nothing to unwind |
@@ -621,7 +621,7 @@ async def test_peppol_inbound_asks_for_redelivery_rather_than_acking(realdb, mon
 
     async with realdb.client(key=TENANT, role=None) as c:
         resp = await c.post(
-            f"/api/peppol/inbound/{realdb.info(TENANT).slug}",
+            f"/api/peppol/inbound/{realdb.info(TENANT).org_id}",
             content=body,
             headers={"X-Peppol-Signature": signature},
         )

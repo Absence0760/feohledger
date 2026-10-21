@@ -99,6 +99,12 @@ class Contract(Base, EntityMixin, TimestampMixin):
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date, index=True)
     signed_date: Mapped[date | None] = mapped_column(Date)
+    # When the contract first came into force — stamped on the first activation
+    # and never cleared, so a contract that was active and later cancelled still
+    # reads as one that bound the parties. `signed_date` is optional user input
+    # and cannot be relied on for that. Read by the workspace-closure guard
+    # (decisions §306); migration 0120 backfilled it from the audit trail.
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # --- Renewal config (drives services.contract_renewal) -----------------
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

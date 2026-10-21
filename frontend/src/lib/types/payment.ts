@@ -1,6 +1,7 @@
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { MoneyAmount } from '#lib/utils/money.ts';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 
 // Mirrors the statuses the backend actually persists on `payments.status`.
 // `pending_compliance` is the parking state the sanctions/KYC gate
@@ -268,6 +269,21 @@ export function paymentMethodLabelKey(method: string): MessageKey | null {
 
 export interface Payment {
 	id: string;
+	/**
+	 * The CALLER's verdict on voiding this payment, on History-list rows only
+	 * (`schemas/payment.py::PaymentListItem`): `null` when `POST /{id}/void`
+	 * would void it, else the coded refusal it would answer with — from the
+	 * endpoint's own gate (`payment_controls.payment_void_refusal`). Absent
+	 * (`undefined`) on any other payload, which offers no Void (fail closed).
+	 */
+	void_refusal?: ActionRefusal;
+	/** The same, for `POST /{id}/compliance/release` (`payment.execute` +
+	 *  `payment_controls.compliance_hold_refusal`). The page still withholds
+	 *  Release on a record-only tenant — org config, from `/execution-mode`. */
+	release_refusal?: ActionRefusal;
+	/** The same, for `POST /{id}/compliance/dismiss` (`payment.void` + the
+	 *  same hold gate). */
+	dismiss_refusal?: ActionRefusal;
 	correlation_id: string | null;
 	invoice_id: string;
 	payment_run_id: string | null;
