@@ -6,6 +6,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
 from app.api.pagination import PageMeta
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.expense import normalize_iso_currency
 from app.schemas.money import MoneyAmount
 
@@ -100,8 +101,25 @@ class CreditMemoResponse(BaseModel):
     created_at: str
 
 
+class CreditMemoActions(BaseModel):
+    """The caller's verdict on a memo's three row actions, each the coded
+    refusal the endpoint would answer with or ``None`` — from the endpoints' own
+    gates (``api/credit_memos.memo_action_refusals``, issue #575). Required,
+    not defaulted: a ``None`` nobody computed would read as "allowed"."""
+
+    apply: CodedRefusal | None
+    edit: CodedRefusal | None
+    void: CodedRefusal | None
+
+
+class CreditMemoListItem(CreditMemoResponse):
+    """A list row plus the caller's verdict on its three actions."""
+
+    actions: CreditMemoActions
+
+
 class CreditMemoListResponse(PageMeta):
-    items: list[CreditMemoResponse]
+    items: list[CreditMemoListItem]
     total: int
 
 
