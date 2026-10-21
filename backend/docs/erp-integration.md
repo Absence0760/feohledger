@@ -1793,6 +1793,45 @@ which apps created on or after 2026-03-02 must use.
 Tests: `backend/tests/test_erp_xero_adapter.py`. Fake surface:
 `tools/fake-erp/README.md` § Xero.
 
+### Live Xero contract check
+
+CI tests the adapter against `tools/fake-erp`, which is only as right as what we
+believe Xero does. `pnpm test:erp:xero-live` (`backend/tests/test_xero_live_contract.py`)
+checks those beliefs against real Xero. It is opt-in (`FEOH_XERO_LIVE=1`), and
+every other run skips it. It is read-only: every request is a GET.
+
+It asserts that Xero still:
+
+- honours the `IsSupplier==true` filter, and the `Status` filter on
+  `PurchaseOrders`;
+- returns contacts by `Contacts?IDs=`;
+- uses only PO, bill and account-class values the adapter maps (an unmapped PO
+  status would silently sync as `open`);
+- names a `ContactID` on every PO.
+
+**To run it:**
+
+1. Put a real Xero app's credentials in `backend/.env`, with the three
+   `FEOH_ERP_XERO_*_URL` / `_API_BASE` overrides blanked so real Xero is used.
+2. Connect the local `acme` tenant to a Xero org (a Demo Company is the
+   intended target) under Organization → ERP Integration. Set
+   `FEOH_XERO_LIVE_TENANT` to use another tenant.
+3. With the backend venv active, run the script.
+
+If you opt in without a connection, the module fails rather than skips, so a
+green run always means Xero was asked.
+
+It never runs in CI:
+
+- the connection needs an interactive OAuth consent;
+- Xero rotates refresh tokens;
+- a Demo Company resets every 28 days;
+- the repository is public.
+
+Run it before a release, and whenever the fake's Xero data changes. That data
+came from what the 2026-10-20 Demo Company test showed: a contact only sent
+purchase orders is not `IsSupplier`.
+
 ## Sage Business Cloud Accounting (direct, OAuth 2.0)
 
 `erp_adapters/sage_accounting.py`, `@register_adapter("sage_accounting")`,

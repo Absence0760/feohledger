@@ -43,7 +43,10 @@ Note new tables, columns, indexes, constraints, triggers, backfills and enum
 - **Chain.** `down_revision` names the current head on `main`
   (`git ls-tree --name-only origin/main backend/alembic/versions/ | sort | tail -3`).
   Two revisions sharing a `down_revision` is a fork that breaks `upgrade head` —
-  Critical; renumber onto the new head.
+  Critical; renumber onto the new head. CI enforces it: `tests/test_alembic_revision_ids.py`
+  fails on more than one head or a reused number, in the Backend lint job and on
+  every push to `main` — the post-merge run is what catches two PRs, each green
+  alone, that both added the next number.
 - **Id length.** `revision` fits `alembic_version.version_num VARCHAR(32)`
   (`tests/test_alembic_revision_ids.py`; migration 0086 shipped 33 characters and
   broke the shared dev env).

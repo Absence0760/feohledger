@@ -57,7 +57,7 @@ gh run list --branch main --limit 1 --json status,conclusion,workflowName,headSh
 
 `status=completed` and `conclusion=success` → green. Anything else → red ("CI on the head commit is `<status>/<conclusion>` — wait for green or investigate").
 
-Also check the most recent runs of `ci.yml`, `codeql.yml`, and `audit.yml` — if any of those have an open failed run, surface as an amber row (informational; doesn't block but worth knowing).
+Also check the most recent runs of `ci.yml` (which now includes CodeQL, Trivy and the bundle budget, via `security.yml` / `web-bundle-budget.yml`), the weekly scheduled `security.yml` run, and `audit.yml` — if any of those have an open failed run, surface as an amber row (informational; doesn't block but worth knowing).
 
 If the user has `gh` but isn't logged in, recommend `gh auth login` and skip — don't fail the whole report.
 

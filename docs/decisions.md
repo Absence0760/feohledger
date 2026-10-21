@@ -12810,6 +12810,137 @@ through Mailpit: the link opened again in a second tab after success, and an
 existing login's signup refused on first open and on reload, with the slug left
 free).
 
+## 293. SCIM writes are audited and last-admin guarded, the guard is serialized, and a deleted user's row says who they were (2026-10-20)
+
+An admin persona review found four gaps in how user accounts change, all in the
+same family: the record of a change, and the one invariant user management
+exists to keep.
+
+**SCIM wrote no audit row and had no last-admin guard.** Create, rename and
+every spelling of a deprovision (`PATCH active:false`, `PUT active:false`,
+`DELETE`) changed the account with nothing on the trail, never revoked the
+deprovisioned user's sessions, and skipped the guard `PATCH /api/admin/users`
+has applied since the sole-admin lockout fix. "Who offboarded Jane, and when?"
+had no answer for IdP-driven leavers, and an IdP misconfiguration could leave
+the org with no admin and no way back short of a database fix. Each SCIM user
+write now commits, revokes sessions on a deactivation, and writes the same
+`user.created` / `user.updated` row the admin API writes, with `via: "scim"`
+and a null `actor_id` (the bearer token is not a user; the group-role rows
+already used null). A failed revoke is recorded (`sessions_revoked: null`)
+rather than failing the request: the deactivation has committed, and a 5xx
+would only make the IdP retry a change that already happened. The SCIM rows are
+deliberately best-effort (`dispatch_auth_audit`), not write-first like the admin
+delete below: refusing a deprovision because the trail is unavailable would keep
+a leaver's account active, which is worse than a deactivation without its row.
+
+*What SCIM gets for the last admin.* `400` with `scimType: "mutability"`.
+RFC 7644 §3.12 defines `mutability` as a modification "not compatible with the
+target attribute's … current state", which is exactly this, and IdPs surface a
+400 to their admin rather than retrying it. A `409` was rejected: the RFC
+reserves it for uniqueness and version conflicts, and this codebase already
+answers `409 uniqueness` on SCIM, so an IdP reading the two alike would be
+reading a different problem. The refusal is audited
+(`user.deactivation_refused`), because an IdP that keeps pushing it is itself
+something an admin must see. The same guard covers a `/Groups` write that would
+revoke an IdP-managed `admin` role from the last admin
+(`auth.scim.role_revoke_refused`) — the same lockout reached through a group,
+which the finding did not name but the invariant does. It is checked before any
+role is touched, so the group write is refused whole rather than half-applied.
+
+**The guard is shared, not copied.** The rule moved out of `api/admin.py` into
+`services/admin_lockout`, which raises a domain exception both surfaces map to
+their own shape. Duplicating it into `scim.py` would have produced two rules
+that drift, and the serialization below would have had to be fixed twice.
+
+**The guard is serialized on the organization row.** It counted the org's other
+active admins and then acted, holding nothing between. Two admins demoting (or
+deleting) each other at the same moment each counted the other, both passed,
+and the org was left with none. The earlier docs called the third-party case "a
+no-op — acting on an admin already required the caller to be one", which holds
+only one request at a time. The guard now locks the organization row before it
+counts, held to the commit, so the second removal waits and then counts what
+the first left. Alternatives:
+
+- *Lock the admin `user_roles` rows* (`SELECT … FOR UPDATE` over the org's admin
+  set, as the review suggested). It does not close the race: each request locks
+  the rows that exist, and a demotion deletes the row the other request would
+  need to see. A row lock protects rows; this invariant is about a set.
+- *A `pg_advisory_xact_lock` keyed on the org.* Correct, but a second
+  serialization mechanism beside the one the codebase already uses for
+  per-org writes (`tenant.lock_organization`).
+- *`SERIALIZABLE` isolation for these requests.* Correct too, but it turns the
+  loser into a serialization failure every caller would need a retry loop for.
+
+The lock is `FOR NO KEY UPDATE`, not `lock_organization`'s `FOR UPDATE`: it
+still conflicts with every settings writer, but not with the `FOR KEY SHARE` an
+insert of a `users` row takes through its foreign key, so inviting a user is not
+made to wait behind a demotion. It is taken only when the write would actually
+remove an active admin. The delete paths gained the guard too: a single delete
+could already never remove the caller, but under concurrency the caller is
+exactly who another request is removing. `tests/test_admin_lockout.py` drives
+the race against Postgres (two sessions, the first holding its demotion open,
+the second observed blocked in `pg_stat_activity`) and fails without the lock.
+
+**A deleted user's audit row says who they were, and is never lost.**
+`user.deleted` carried only the id of a row that no longer exists. It now
+carries the `email`, `role_names` and `was_active` the account held — the
+address recorded the way every `auth.*` row already records it; `full_name`
+stays out, the rule `user.updated` has always followed. The single delete
+wrote its row after the commit with the swallow-everything
+`dispatch_auth_audit`, and the bulk delete did the same after its one commit,
+so a failed write lost the record while the delete stood. The audit row lives
+in the tenant database and the user in the control plane, so one transaction
+cannot hold both; the nearest equivalent, which `PUT /api/organization/sso` and
+the SSO break-glass already use, is to write the row first with
+`record_auth_audit_or_raise` and refuse the change if that fails. A commit
+failing afterwards leaves a row for a delete that did not land — the safe
+direction to be wrong in. The bulk delete does this per row inside a savepoint,
+so one unrecordable row fails as `audit_unavailable` and the rest of the batch
+still lands.
+
+`user.updated` recorded only the new role list. It now records each changed
+role list, active flag and address before and after (`services/user_audit`,
+shared with SCIM).
+
+**The vendor reads admit the vendor permissions.** `GET /api/vendors` (and
+`/ids`, `/counts`, `/{id}`) were `require_roles(admin, ap_manager, cfo)`, so a
+custom role holding only `vendor.manage` or `vendor.block` saw the Vendors page
+in no nav and got a 403 on the list its permission acts on. The payment and
+admin lists were fixed by moving to `require_permission` because their default
+permission holders were exactly the roles they already admitted; here `cfo`
+reads vendors without any vendor permission, so the same move would have taken
+the page from the CFO. `deps.require_role_or_permission` admits either, so the
+system roles keep exactly what they had, and the nav row ORs the same two
+permissions.
+
+## 294. The landing page stays dark as brand, not as a gap waiting for a light version (2026-10-20)
+
+**§289 left the marketing page dark for a reason of cost; this makes it the
+decision.** §289 kept the landing page on the dark palette because a light
+version is a design job (a re-render of the §180 tally on a light ground, new
+grain, new glass-panel and hero-card treatments), not a token swap. It did not
+say whether that job should ever be done, and without an answer the question
+comes back every time someone notices that a light-mode visitor sees a dark
+landing page and then a light sign-in page.
+
+**The answer is no, until evidence says otherwise.** The landing page is the
+one surface composed as a picture, and dark is its brand: the render, the grain
+and the panels were designed together on navy and have passed the accessibility
+audit as they stand. A visitor sees it once or twice before signing up, a dark
+marketing site in front of a light product is a common and unremarkable
+pairing, and a day spent on a second version moves nothing for the first pilot
+customer. Everything a reader spends time in already follows the theme (§289:
+the app, the auth shell, signup, the legal pages, the help centre, the supplier
+portal), so the theme preference is honoured wherever it matters.
+
+**What would reopen it:** measured drop-off of light-mode visitors between the
+landing page and sign-in or signup, or repeated feedback that the switch is
+jarring. Either is a reason to do the design job properly (a light render of
+the tally, panel treatments composed for a light ground, contrast re-measured),
+following the visitor's theme through the existing `data-theme-scope`
+mechanism rather than a page-local toggle. Not a reason: consistency for its
+own sake, or a token swap that leaves the dark-composed render on white.
+
 ## 300. Strings only some routes render load with those routes, as lazy catalogue slices in every locale (2026-10-20)
 
 (Numbered 300 because §292–§299 are held by pull requests still in flight.)
@@ -12910,3 +13041,69 @@ Tests: `frontend/src/lib/i18n/slices.test.ts`,
 `frontend/tests-e2e/i18n/catalogue-slices.spec.ts`, and the backend's
 `test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
 settings slice for the form labels they check.
+
+## 301. The bundle budget and the security scans gate merges through `CI gate`, called from ci.yml (2026-10-20)
+
+**What was wrong.** Branch protection on `main` requires one status check,
+`CI gate` (the `ci-gate` job in `ci.yml`), which fans in on every job in that
+file. Two workflows ran on pull requests from files of their own —
+`web-bundle-budget.yml` and `security.yml` (CodeQL Python, TypeScript/JavaScript
+and GitHub Actions, plus Trivy on the backend image) — so the gate never saw
+their results. A red one was advisory in practice: PR #611 merged with the
+budget red and left `main` failing it, though the budget file's own header said
+"a PR that pushes either metric over its budget fails".
+
+**Rejected: make them required checks too.** The budget is path-scoped. A
+required check whose workflow never triggers never reports, and GitHub holds
+the PR as "expected — waiting for status" forever. Every PR that leaves
+`frontend/` alone would have hung. That is the same reason `ci.yml` has no
+`paths-ignore` and does its scoping inside the run (the `changes` job).
+
+**The rule.** A check that lives in another workflow file gates merges only by
+being *called* from `ci.yml` (`on: workflow_call`), from a job `ci-gate` needs.
+Both files are now reusable workflows, and `ci.yml` calls them as
+`bundle-budget` and `security`.
+
+- **Path scoping moves into `changes`.** The budget's old `paths:` list
+  (`frontend/**`, its own workflow file) is the new `bundle` filter, plus
+  `ci.yml` like every other filter. An unrelated PR **skips** the caller job;
+  `ci-gate` counts `skipped` as a pass and anything else — `failure`,
+  `cancelled` — as a fail, unchanged. If `changes` itself fails, the caller is
+  skipped, but `ci-gate` needs `changes` directly, so the gate still fails.
+- **Security runs on every PR and every push to main, with no filter.** It
+  used to skip docs-only PRs (`paths-ignore`). Keeping that would need a
+  negated filter, and `dorny/paths-filter`'s default `some` quantifier cannot
+  express "anything except docs"; switching the quantifier would change every
+  other filter. CodeQL on a docs-only PR costs two minutes. Not worth a
+  second mechanism.
+- **Trivy comes along.** It is in the same file. It runs with `exit-code: 0`, so
+  only an image that fails to build (or a broken scan step) can turn it red, and
+  a backend image that does not build should block a merge.
+- **The weekly schedule stays in `security.yml`.** No commit starts a CI run on
+  Monday morning, and a full CI run to rescan for new CVEs would be waste. So
+  `security.yml` keeps `schedule` alongside `workflow_call`. Nothing else
+  triggers either file, so no job runs twice.
+- **Permissions are granted at the call site.** A called workflow's token is
+  capped by the calling job, and `ci.yml` defaults to `contents: read`, so the
+  `security` job grants `security-events: write` (SARIF upload) and
+  `actions: read` (CodeQL's workflow-run lookup) itself.
+- **The budget's steps, comments, ceilings and change log are untouched.**
+  Only the trigger changed, so the error messages that tell a contributor to
+  edit `web-bundle-budget.yml` still point at the right file.
+
+**CodeQL timeout: 10 → 20 minutes, no retries.** One CodeQL Python run hit
+the 10-minute timeout on 2026-10-20. Its log shows it was not hung. Extraction
+progressed the whole time, at about ten times the normal per-file cost: 943
+files in 8.5 minutes, where a healthy runner did 1431 in 83 seconds. Over the
+previous 60 runs the three CodeQL jobs took a median of 0.7–1.5 minutes and a
+maximum of 6.6. Ten minutes was about 2× a slow-but-healthy run, too little
+for a check that now blocks merges. Twenty absorbs a degraded runner and still
+stops a real hang long before GitHub's six-hour default. Retrying was
+rejected: a second attempt would hide a genuine hang instead of surfacing it.
+Trivy keeps 10 (median 0.9, max 3.8).
+
+**Transition note.** CodeQL keys an analysis by workflow file and job, so the
+first runs from `ci.yml` start a new configuration beside the old
+`security.yml` ones. The weekly schedule still runs from `security.yml`. Alerts
+are matched across configurations, so this changes which configuration an
+alert is reported under, not whether it is reported.

@@ -46,7 +46,12 @@ from app.schemas.admin import (
     UpdateRoleRequest,
     UpdateUserRequest,
 )
-from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.admin_lockout import (
+    LAST_ADMIN_MESSAGE,
+    LastAdminLockout,
+    guard_against_last_admin_lockout,
+)
+from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.email_adapters import EmailMessage, get_email_adapter
 from app.services.identity_provisioning import email_holder_org_id
 from app.services.rate_limit import (
@@ -56,6 +61,7 @@ from app.services.rate_limit import (
     record_auth_failure,
 )
 from app.services.session_management import revoke_user_sessions
+from app.services.user_audit import user_deleted_details, user_updated_details
 from app.utils.emails import normalize_email
 from app.utils.passwords import generate_temp_password, hash_password
 from app.utils.search import ilike_contains
@@ -476,27 +482,6 @@ async def _refuse_taken_email(
     raise HTTPException(status_code=409, detail=EMAIL_IN_OTHER_WORKSPACE_DETAIL)
 
 
-async def _org_has_other_active_admin(
-    db: AsyncSession, org_id: uuid.UUID, *, exclude_user_id: uuid.UUID
-) -> bool:
-    """Whether the org has an active system-``admin`` holder other than the
-    excluded user. Backs the last-admin lockout guard below."""
-    result = await db.execute(
-        select(func.count(func.distinct(User.id)))
-        .select_from(User)
-        .join(UserRole, UserRole.user_id == User.id)
-        .join(Role, Role.id == UserRole.role_id)
-        .where(
-            User.organization_id == org_id,
-            User.id != exclude_user_id,
-            User.is_active.is_(True),
-            Role.name == ROLE_ADMIN,
-            Role.organization_id.is_(None),
-        )
-    )
-    return (result.scalar() or 0) > 0
-
-
 async def _guard_against_last_admin_lockout(
     db: AsyncSession,
     *,
@@ -507,35 +492,34 @@ async def _guard_against_last_admin_lockout(
     new_is_active: bool,
     new_role_names: list[str],
 ) -> None:
-    """Refuse a mutation that would leave the org with zero active admins.
+    """Refuse (409) a mutation that would leave the org with zero active admins.
 
     `_authorize_target_mutation` only stops a caller from seizing authority
-    on SOMEONE ELSE's account — self-mutation always passes it (a user's own
-    permissions are trivially a subset of themselves), so it does nothing to
-    stop the org's sole admin from removing their own `admin` role or
-    deactivating their own account. Either is a one-way door: once the last
-    admin is gone, nothing short of a DB fix can create a new one (role
-    grants and reactivation both require `user.manage`, which only an admin
-    holds by default).
+    on SOMEONE ELSE's account — self-mutation always passes it, so it does
+    nothing to stop the org's sole admin from removing their own `admin` role
+    or deactivating their own account. Either is a one-way door: once the
+    last admin is gone, nothing short of a DB fix can create a new one.
 
-    Fires whenever the target is CURRENTLY an active admin and the mutation
-    would make them not one (demoted, deactivated, or both) — self or not —
-    and no OTHER active admin exists to undo it. For a caller acting on
-    someone else, `_authorize_target_mutation` already required the caller
-    to be an admin themselves, so the caller remains one and this is a
-    no-op; it only ever actually blocks the self-service case.
+    The rule and its serialization live in `services/admin_lockout`, shared
+    with SCIM; this wrapper only gives the refusal the admin API's shape. The
+    lock it takes is what makes the third-party case real too: two admins
+    demoting (or deleting) each other at the same moment each passed the old
+    unlocked count, and the org was left with none.
     """
-    is_admin_now = was_active and ROLE_ADMIN in previous_role_names
-    stays_admin = new_is_active and ROLE_ADMIN in new_role_names
-    if is_admin_now and not stays_admin:
-        if not await _org_has_other_active_admin(db, org_id, exclude_user_id=target.id):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Cannot remove the organization's last active admin. "
-                    "Promote another user to admin first."
-                ),
-            )
+    try:
+        await guard_against_last_admin_lockout(
+            db,
+            org_id=org_id,
+            target_id=target.id,
+            was_active=was_active,
+            previous_role_names=previous_role_names,
+            new_is_active=new_is_active,
+            new_role_names=new_role_names,
+        )
+    except LastAdminLockout:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=LAST_ADMIN_MESSAGE
+        ) from None
 
 
 #: `PATCH /admin/users/{id}` no longer sets a password (issue #566,
@@ -724,6 +708,7 @@ async def update_user(
     # Snapshot pre-state so we can decide whether to force-logout the target.
     previous_role_names = sorted(r.name for r in target.roles)
     was_active = target.is_active
+    previous_email = target.email
 
     # Refuse — before touching anything — a mutation that would leave the org
     # with zero active admins. Must run on the pre-mutation snapshot, not
@@ -816,11 +801,15 @@ async def update_user(
             actor_id=current_user.id,
             action="user.updated",
             entity_id=user_id,
-            details={
-                "changed_fields": changed_fields,
-                "role_names": sorted(r.name for r in target.roles) if roles_changed else None,
-                "is_active": target.is_active if "is_active" in changed_fields else None,
-            },
+            details=user_updated_details(
+                changed_fields,
+                previous_email=previous_email,
+                email=target.email,
+                previous_role_names=previous_role_names,
+                role_names=sorted(r.name for r in target.roles),
+                previous_is_active=was_active,
+                is_active=target.is_active,
+            ),
         )
 
     return _user_to_response(target)
@@ -1072,21 +1061,51 @@ async def delete_user(
             },
         )
 
+    role_names = [r.name for r in target.roles]
+    # The caller is an admin when the request starts, but a concurrent request
+    # can be deleting or demoting THEM at the same moment — the lock this takes
+    # is what stops the pair of them leaving the org with no admin.
+    await _guard_against_last_admin_lockout(
+        db,
+        org_id=org_id,
+        target=target,
+        was_active=target.is_active,
+        previous_role_names=role_names,
+        new_is_active=False,
+        new_role_names=[],
+    )
+    details = user_deleted_details(
+        email=target.email, role_names=role_names, was_active=target.is_active
+    )
+
     # Remove role assignments first
     await db.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
     await db.delete(target)
+    await db.flush()
+
+    # The record is written before the delete commits, and a failed write
+    # refuses the delete: once the row is gone this audit row is the only place
+    # that says who the account was. A commit failing after it leaves a row for
+    # a delete that did not land — the safe direction to be wrong in.
+    try:
+        await record_auth_audit_or_raise(
+            organization_id=org_id,
+            actor_id=current_user.id,
+            action="user.deleted",
+            entity_id=user_id,
+            details=details,
+        )
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="The deletion could not be recorded in the audit trail, so it was not made.",
+        ) from None
     await db.commit()
 
     # Deletion → revoke any active JWT so the tombstoned user can't keep
     # hitting the API until their token expires.
     await revoke_user_sessions(user_id)
-
-    await dispatch_auth_audit(
-        organization_id=org_id,
-        actor_id=current_user.id,
-        action="user.deleted",
-        entity_id=user_id,
-    )
 
 
 class BulkDeleteRequest(BaseModel):
@@ -1095,7 +1114,8 @@ class BulkDeleteRequest(BaseModel):
 
 class BulkDeleteFailure(BaseModel):
     user_id: str
-    reason: str  # "not_found" | "self" | "forbidden" | "blocked"
+    # "not_found" | "self" | "forbidden" | "blocked" | "last_admin" | "audit_unavailable"
+    reason: str
     references: UserDeleteConflict | None = None
 
 
@@ -1162,19 +1182,52 @@ async def bulk_delete_users(
             failed.append(BulkDeleteFailure(user_id=raw_id, reason="blocked", references=conflict))
             continue
 
+        role_names = [r.name for r in target.roles]
+        try:
+            await _guard_against_last_admin_lockout(
+                db,
+                org_id=org_id,
+                target=target,
+                was_active=target.is_active,
+                previous_role_names=role_names,
+                new_is_active=False,
+                new_role_names=[],
+            )
+        except HTTPException:
+            failed.append(BulkDeleteFailure(user_id=raw_id, reason="last_admin"))
+            continue
+        details = user_deleted_details(
+            email=target.email, role_names=role_names, was_active=target.is_active
+        )
+
+        # Each row's delete and its audit record stand or fall together, the
+        # same rule as the single delete: the delete is flushed inside a
+        # savepoint, the record is written while it is still open, and a failed
+        # write undoes just this row's delete. The rows used to be audited
+        # after the commit, so a failed write lost the record while the delete
+        # stood.
+        savepoint = await db.begin_nested()
         await db.execute(UserRole.__table__.delete().where(UserRole.user_id == user_uuid))
         await db.delete(target)
+        await db.flush()
+        try:
+            await record_auth_audit_or_raise(
+                organization_id=org_id,
+                actor_id=current_user.id,
+                action="user.deleted",
+                entity_id=user_uuid,
+                details=details,
+            )
+        except Exception:
+            await savepoint.rollback()
+            failed.append(BulkDeleteFailure(user_id=raw_id, reason="audit_unavailable"))
+            continue
+        await savepoint.commit()
         deleted.append(raw_id)
 
     await db.commit()
 
     for raw_id in deleted:
         await revoke_user_sessions(uuid.UUID(raw_id))
-        await dispatch_auth_audit(
-            organization_id=org_id,
-            actor_id=current_user.id,
-            action="user.deleted",
-            entity_id=uuid.UUID(raw_id),
-        )
 
     return BulkDeleteResponse(deleted=deleted, failed=failed)
