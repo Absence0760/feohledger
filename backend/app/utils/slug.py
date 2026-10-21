@@ -13,11 +13,13 @@ name (feoh_acme). Both places need strict rules:
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
+from app.models.workspace_closure import WorkspaceClosure
 
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{2,29}$")
 
@@ -99,6 +101,50 @@ class SlugError(ValueError):
     """Raised when a slug fails validation."""
 
 
+class SlugHeld(SlugError):
+    """The slug belonged to a workspace that was closed, and is not free yet.
+
+    Its own type so signup can state it (`signup_slug_held`) rather than the
+    bare "already taken": nobody holds the name, it is only resting.
+    """
+
+
+#: How long a closed workspace's slug stays unavailable, from its closure, even
+#: once an operator has removed its backups (decisions §306). The name lives on
+#: outside the platform — bookmarks of `<slug>.<domain>`, an IdP's registered
+#: redirect URI, invite and approval emails, an Access Point's configured
+#: endpoint — and a new owner must not inherit what points at it. Ninety days
+#: covers the backup dumps' own retention cycle, the longest residue the DPA
+#: discloses, and therefore exceeds its 60-day deletion window.
+CLOSED_SLUG_COOLDOWN = timedelta(days=90)
+
+
+async def ensure_slug_not_held(slug: str, db: AsyncSession) -> None:
+    """Raise `SlugHeld` while a closed workspace still holds `slug`.
+
+    Held until BOTH an operator has removed the closed workspace's backups (a
+    new workspace would reuse `feoh_<slug>`, and the two tenants' nightly dumps
+    would share one name, so removing the old one's would remove the new one's)
+    AND `CLOSED_SLUG_COOLDOWN` has passed since the closure. Called by
+    `ensure_slug_available` and by `provision_tenant` itself, so every
+    provisioning path — signup, partner, the operator CLI — gets it.
+    """
+    closed_at = func.coalesce(WorkspaceClosure.completed_at, WorkspaceClosure.started_at)
+    held = await db.execute(
+        select(WorkspaceClosure.id).where(
+            WorkspaceClosure.slug == slug,
+            or_(
+                WorkspaceClosure.backups_cleared_at.is_(None),
+                closed_at > datetime.now(UTC) - CLOSED_SLUG_COOLDOWN,
+            ),
+        )
+    )
+    if held.first() is not None:
+        raise SlugHeld(
+            f"'{slug}' belonged to a workspace that was closed recently and is not available yet."
+        )
+
+
 def validate_slug_format(slug: str) -> None:
     """Check structural rules. Raises SlugError on any violation."""
     if not slug:
@@ -122,3 +168,4 @@ async def ensure_slug_available(slug: str, db: AsyncSession) -> None:
     result = await db.execute(select(Organization.id).where(Organization.slug == slug))
     if result.scalar_one_or_none() is not None:
         raise SlugError(f"'{slug}' is already taken.")
+    await ensure_slug_not_held(slug, db)

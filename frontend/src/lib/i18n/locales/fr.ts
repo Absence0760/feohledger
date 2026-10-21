@@ -2991,6 +2991,7 @@ export const messages = {
 	'auth.login.signInWith': 'Se connecter avec {provider}',
 	'auth.login.forgotPassword': 'Mot de passe oublié ?',
 	'auth.login.signedOutOtherWorkspace': "Vous avez été déconnecté, car votre session appartenait à un autre espace de travail. Connectez-vous ici ou sur la page de votre propre espace de travail.",
+	'auth.login.workspaceClosed': "Cet espace de travail a été fermé et ses comptes supprimés. Leurs adresses e-mail peuvent désormais être utilisées dans un autre espace de travail.",
 	'auth.login.goToOwnWorkspace': "Aller à la page de connexion de votre espace de travail",
 	'auth.login.devAccounts.heading': 'Comptes de développement',
 	'auth.login.devAccounts.hint': 'Développement local uniquement. Choisissez un compte de démonstration pour remplir le formulaire.',
@@ -4732,8 +4733,15 @@ export const messages = {
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Cette adresse e-mail appartient déjà à un compte d’un autre espace de travail ; elle ne peut donc pas se connecter ici. Connectez-vous sur la page de votre propre espace de travail, ou demandez à l’administrateur de cet espace de travail que votre fournisseur d’identité utilise une autre adresse.",
 	'refusal.emailInThisWorkspace': "Un utilisateur avec cette adresse e-mail existe déjà dans cet espace de travail.",
-	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne.",
+	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne. Si cette personne n’utilise plus l’autre espace de travail, son administrateur peut le fermer, ce qui libère l’adresse.",
 	'refusal.emailCheckThrottled': "Trop d’adresses saisies récemment dans cet espace de travail appartenaient déjà à d’autres espaces de travail : l’ajout d’utilisateurs et la modification de leur e-mail sont suspendus pendant une heure au plus. Réessayez plus tard.",
+	'refusal.workspaceCloseConfirmationMismatch': "Saisissez l’adresse de cet espace de travail exactement comme affichée pour confirmer qu’il doit être fermé.",
+	'refusal.workspaceCloseRefused': "Cet espace de travail ne peut pas être fermé ici, car il contient des données qui doivent être conservées ou les comptes d’autres personnes. Contactez le support pour le fermer.",
+	'refusal.workspaceCloseActorNotAdmin': "Seul un administrateur actif de cet espace de travail peut le fermer.",
+	'refusal.signupSlugHeld': "Cette adresse appartenait à un espace de travail fermé récemment et n’est pas disponible pendant un certain temps. Choisissez une autre adresse.",
+	'refusal.workspaceCloseInProgress': "Cet espace de travail est déjà en cours de fermeture.",
+	'refusal.workspaceCloseAuditUnavailable': "L’espace de travail n’a pas pu être fermé pour le moment, car son enregistrement d’audit n’a pas pu être sauvegardé. Rien n’a été supprimé. Réessayez dans quelques minutes.",
+	'refusal.workspaceCloseIncomplete': "La fermeture de l’espace de travail n’a pas abouti. Réessayez ; en cas de nouvel échec, contactez le support.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Ce fournisseur n'existe pas encore dans {provider}. Synchronisez les fournisseurs depuis {provider} ou créez-le là-bas, puis réessayez.",

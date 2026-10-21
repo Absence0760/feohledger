@@ -403,7 +403,7 @@ ALTERNATE_AUTH: dict[tuple[str, str], AlternateGate] = {
         "the opaque per-tenant token embedded in the recipient address.",
         symbols=("verify_signature",),
     ),
-    ("POST", "/peppol/inbound/{tenant_slug}"): AlternateGate(
+    ("POST", "/peppol/inbound/{organization_id}"): AlternateGate(
         "Access Point HMAC over the raw body; dedupe is the DB uq_peppol_message_id index.",
         symbols=("verify_inbound_signature",),
     ),

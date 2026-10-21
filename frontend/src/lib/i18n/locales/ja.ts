@@ -2931,6 +2931,7 @@ export const messages = {
 	'auth.login.signInWith': '{provider}でサインイン',
 	'auth.login.forgotPassword': 'パスワードをお忘れですか？',
 	'auth.login.signedOutOtherWorkspace': "セッションが別のワークスペースのものだったため、サインアウトされました。ここで、またはご自身のワークスペースのページでサインインしてください。",
+	'auth.login.workspaceClosed': "このワークスペースは閉鎖され、そのアカウントは削除されました。それらのメールアドレスは別のワークスペースで使用できるようになりました。",
 	'auth.login.goToOwnWorkspace': "ご自身のワークスペースのサインインページへ",
 	'auth.login.devAccounts.heading': '開発用アカウント',
 	'auth.login.devAccounts.hint': 'ローカル開発専用です。シード済みのアカウントを選ぶとフォームに入力されます。',
@@ -4643,8 +4644,15 @@ export const messages = {
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "このメールアドレスは別のワークスペースのアカウントで既に使用されているため、ここではサインインできません。ご自身のワークスペースのページでサインインするか、このワークスペースの管理者に、ID プロバイダーが別のアドレスを使うよう依頼してください。",
 	'refusal.emailInThisWorkspace': "このメールアドレスのユーザーは、このワークスペースに既に存在します。",
-	'refusal.emailInOtherWorkspace': "このメールアドレスには別のワークスペースのアカウントが既にあります。1 つのアドレスは 1 つのワークスペースにしか所属できないため、この方には別のアドレスを使用してください。",
+	'refusal.emailInOtherWorkspace': "このメールアドレスには別のワークスペースのアカウントが既にあります。1 つのアドレスは 1 つのワークスペースにしか所属できないため、この方には別のアドレスを使用してください。その方がもう別のワークスペースを使用していない場合は、そのワークスペースの管理者が閉鎖するとアドレスが解放されます。",
 	'refusal.emailCheckThrottled': "このワークスペースで最近入力されたアドレスのうち、別のワークスペースに既に属していたものが多すぎるため、ユーザーの追加とメールアドレスの変更を最大 1 時間停止しています。しばらくしてからもう一度お試しください。",
+	'refusal.workspaceCloseConfirmationMismatch': "閉鎖することを確認するため、このワークスペースのアドレスを表示どおり正確に入力してください。",
+	'refusal.workspaceCloseRefused': "このワークスペースには保管が必要な記録または他のユーザーのアカウントがあるため、ここでは閉鎖できません。閉鎖するにはサポートにお問い合わせください。",
+	'refusal.workspaceCloseActorNotAdmin': "このワークスペースを閉鎖できるのは、有効な管理者だけです。",
+	'refusal.signupSlugHeld': "このワークスペースアドレスは最近閉鎖されたワークスペースのもので、しばらくの間使用できません。別のアドレスを選択してください。",
+	'refusal.workspaceCloseInProgress': "このワークスペースは既に閉鎖処理中です。",
+	'refusal.workspaceCloseAuditUnavailable': "監査記録を保存できなかったため、現在ワークスペースを閉鎖できませんでした。何も削除されていません。数分後にもう一度お試しください。",
+	'refusal.workspaceCloseIncomplete': "ワークスペースの閉鎖が完了しませんでした。もう一度お試しください。再び失敗する場合はサポートにお問い合わせください。",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "この取引先はまだ {provider} にありません。{provider} から取引先を同期するか、そちらで取引先を登録してから再試行してください。",

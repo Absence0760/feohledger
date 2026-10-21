@@ -2987,6 +2987,7 @@ export const messages = {
 	'auth.login.signInWith': 'Iniciar sesión con {provider}',
 	'auth.login.forgotPassword': '¿Olvidaste tu contraseña?',
 	'auth.login.signedOutOtherWorkspace': "Se cerró su sesión porque pertenecía a otro espacio de trabajo. Inicie sesión aquí o en la página de su propio espacio de trabajo.",
+	'auth.login.workspaceClosed': "Este espacio de trabajo se ha cerrado y sus cuentas se han eliminado. Sus direcciones de correo ya se pueden usar en otro espacio de trabajo.",
 	'auth.login.goToOwnWorkspace': "Ir a la página de inicio de sesión de su espacio de trabajo",
 	'auth.login.devAccounts.heading': 'Cuentas de desarrollo',
 	'auth.login.devAccounts.hint': 'Solo para desarrollo local. Elija una cuenta de prueba para rellenar el formulario.',
@@ -4725,8 +4726,15 @@ export const messages = {
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Esta dirección de correo ya pertenece a una cuenta de otro espacio de trabajo, por lo que no puede iniciar sesión aquí. Inicie sesión en la página de su propio espacio de trabajo o pida al administrador de este espacio de trabajo que su proveedor de identidad use otra dirección.",
 	'refusal.emailInThisWorkspace': "Ya existe un usuario con esta dirección de correo en este espacio de trabajo.",
-	'refusal.emailInOtherWorkspace': "Esta dirección de correo ya tiene una cuenta en otro espacio de trabajo. Una dirección solo puede pertenecer a un espacio de trabajo, así que use otra dirección para esta persona.",
+	'refusal.emailInOtherWorkspace': "Esta dirección de correo ya tiene una cuenta en otro espacio de trabajo. Una dirección solo puede pertenecer a un espacio de trabajo, así que use otra dirección para esta persona. Si ya no usa ese otro espacio de trabajo, su administrador puede cerrarlo, lo que libera la dirección.",
 	'refusal.emailCheckThrottled': "Demasiadas direcciones introducidas recientemente en este espacio de trabajo ya pertenecían a otros espacios de trabajo, así que añadir usuarios o cambiar su correo está en pausa durante un máximo de una hora. Vuelva a intentarlo más tarde.",
+	'refusal.workspaceCloseConfirmationMismatch': "Escriba la dirección de este espacio de trabajo exactamente como se muestra para confirmar que debe cerrarse.",
+	'refusal.workspaceCloseRefused': "Este espacio de trabajo no se puede cerrar aquí porque contiene registros que deben conservarse o cuentas de otras personas. Póngase en contacto con soporte para cerrarlo.",
+	'refusal.workspaceCloseActorNotAdmin': "Solo un administrador activo de este espacio de trabajo puede cerrarlo.",
+	'refusal.signupSlugHeld': "Esta dirección pertenecía a un espacio de trabajo que se cerró hace poco y no está disponible durante un tiempo. Elija otra dirección.",
+	'refusal.workspaceCloseInProgress': "Este espacio de trabajo ya se está cerrando.",
+	'refusal.workspaceCloseAuditUnavailable': "No se pudo cerrar el espacio de trabajo en este momento porque no se pudo guardar su registro de auditoría. No se eliminó nada. Vuelva a intentarlo en unos minutos.",
+	'refusal.workspaceCloseIncomplete': "El cierre del espacio de trabajo no terminó. Vuelva a intentarlo; si vuelve a fallar, póngase en contacto con soporte.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Este proveedor todavía no está en {provider}. Sincronice los proveedores desde {provider} o cree el proveedor allí y vuelva a intentarlo.",

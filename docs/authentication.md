@@ -822,9 +822,11 @@ access token does not carry it. An action whose *output* is the asset asks for
 more: `api/auth.require_sensitive_step_up` accepts only a current authenticator
 code or a passkey assertion (minted by `POST /auth/mfa/step-up/passkey` for that
 action's own operation), in every tenant — so the SSO-only case needs no special
-sentence, because the password is a proof here for nobody. Its one caller today
-is the unmasked-banking DSAR export (`POST /api/privacy/dsar` with
-`include_banking`, operation `dsar_unmasked_export`). Four coded refusals:
+sentence, because the password is a proof here for nobody. Its callers are the
+unmasked-banking DSAR export (`POST /api/privacy/dsar` with `include_banking`,
+operation `dsar_unmasked_export`) and closing a workspace (`POST
+/api/organization/close`, operation `workspace_close`, decisions §306). Four
+coded refusals:
 `sensitive_step_up_required` (`403`, no factor proof sent — the SPA's cue to
 collect one and resend; not throttled, not audited as a failure),
 `sensitive_step_up_failed` (`400`, a proof did not verify — throttled per account
@@ -2551,7 +2553,7 @@ behavioural suites cover (`test_slack_approvals`, `test_webhook_security`,
 | `POST /cards/webhook/{provider}`, `POST /erp/webhook/{erp_type}` | Per-tenant webhook signing secret (HMAC over the raw body) + Redis dedupe on the provider event id. |
 | `POST /payments/webhook/{tenant_slug}/{provider}`, `POST /billing/webhook/{provider}` | The adapter's `parse_webhook` verifies the processor HMAC, then event-id dedupe. |
 | `POST /email-intake/inbound/{provider}` | Process-level HMAC over the raw body plus the opaque per-tenant token in the recipient address. |
-| `POST /peppol/inbound/{tenant_slug}` | Access Point HMAC; dedupe is the DB `uq_peppol_message_id` index. |
+| `POST /peppol/inbound/{organization_id}` | Access Point HMAC; dedupe is the DB `uq_peppol_message_id` index. |
 | `POST /catalogs/punchout/return/{tenant_slug}` | Supplier shared-secret HMAC over the cart body, BuyerCookie-correlated to a pending session. |
 | `GET /invoices/email-action/{token}`, `POST .../confirm` | The signed single-action token in the URL IS the credential (re-verified on the acting request, never trusted from the confirm page). |
 | `POST /approvals/slack/interactivity`, `POST /approvals/teams/interactivity` | The provider request signature **and** the signed single-use action token in the button / card action. |
