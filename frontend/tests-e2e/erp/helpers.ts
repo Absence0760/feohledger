@@ -161,6 +161,7 @@ export async function syncErpGlAccounts(page: Page): Promise<void> {
 /** A PO as `GET /api/purchase-orders` lists it. */
 export type SyncedPo = {
 	po_number: string;
+	vendor_name: string | null;
 	total: number | string;
 	currency: string | null;
 	status: string;

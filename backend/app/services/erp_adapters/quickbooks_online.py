@@ -1389,6 +1389,7 @@ def _po_payload(raw: dict) -> PoPayload:
     return PoPayload(
         po_number=str(raw.get("DocNumber") or raw.get("Id")),
         vendor_name=(raw.get("VendorRef") or {}).get("name"),
+        vendor_erp_id=(raw.get("VendorRef") or {}).get("value") or None,
         total=_dec(raw.get("TotalAmt")) or Decimal("0"),
         status="closed" if status == "closed" else "open",
         line_items=lines,

@@ -39,9 +39,13 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main's Xero Disconnect fix into the
-QuickBooks status-sync branch; both sides' entries kept, taking the file to 119.
-Before that, 2026-10-20 — fixing Xero's Disconnect so it revokes the
+**Last reconciled:** 2026-10-21 — merging main (QuickBooks status sync, Xero
+Disconnect) into the PO vendor-link branch; both sides' entries kept, taking
+the file to 121. Before that, 2026-10-20 — the live Xero Demo Company test opened two
+(c) entries (unapproved ERP POs syncing as open, and the adapters that still
+link a PO's vendor by name only), taking the file from 117 → 119. Before that,
+2026-10-21 — merging main's Xero Disconnect fix into the QuickBooks status-sync
+branch kept both sides' entries. Before that, 2026-10-20 — fixing Xero's Disconnect so it revokes the
 grant opened one (c) entry (Sage Accounting and Blackbaud still don't), taking
 the file from 117 → 118. Before that, 2026-10-20 — QuickBooks Phases 3–5 (decisions §295)
 narrowed the QuickBooks entry to the header-only-tax product call, closed the
@@ -186,7 +190,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**119 open: 102 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**121 open: 104 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1880,6 +1884,34 @@ scope (§260) — do not fold them into any of these.
       from the login page's error states. **Trigger:** the first support
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
+
+### Surfaced by the live Xero Demo Company test (2026-10-20)
+
+Linking a synced purchase order to its vendor by the ERP's supplier id (and
+filling a missing link on a re-sync) landed with the test. Two gaps it exposed
+stay open.
+
+- [ ] **(c) An unapproved ERP purchase order syncs as `open` and can be
+      matched.** `PurchaseOrder.status` has three values (open / closed /
+      cancelled), so Xero's `DRAFT` and `SUBMITTED` and NetSuite's Pending
+      Supervisor Approval (`A`) all land as `open`. In the Demo Company, a
+      Draft PO showed as OPEN. An invoice can then pass 2/3-way match against
+      an order nobody in the ERP has approved. **Durable fix:** decide between
+      skipping not-yet-issued POs in each `list_pos` (they arrive once
+      approved, and the existing upsert refreshes the status) and adding an
+      unissued status that `po_matching` refuses. Both change the PO
+      vocabulary every adapter maps onto, so record the choice in
+      decisions.md. **Trigger:** before the first tenant matches invoices
+      against live Xero or NetSuite POs, or the next change to the PO status
+      vocabulary.
+- [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
+      Only Xero and QuickBooks fill `PoPayload.vendor_erp_id`. NetSuite,
+      Business Central, Merge.dev, Sage Intacct, Sage Accounting ZA, SYSPRO
+      and Blackbaud FE NXT fall back to `vendor_name`, which a rename on
+      either side breaks, and which picks the wrong row when two vendors share
+      a name. **Durable fix:** read each ERP's supplier id on the PO (the same
+      id its `list_vendors` reports) into `vendor_erp_id`. **Trigger:** the
+      next change to that adapter's `list_pos`.
 
 ### Surfaced by Xero's Disconnect leaving the grant live (2026-10-20)
 

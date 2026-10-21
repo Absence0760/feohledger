@@ -1437,6 +1437,10 @@ XERO_CONTACTS = [
         "PaymentTerms": {"Bills": {"Day": 30, "Type": "DAYSAFTERBILLDATE"}},
     },
     {"ContactID": "xero-contact-2", "Name": "Fake Xero Customer Co", "IsSupplier": False},
+    # Real Xero sets IsSupplier only once a contact has a bill, so a supplier
+    # that has only been sent purchase orders is NOT one (seen live in the
+    # Demo Company). The vendor sync must still find it, through its POs.
+    {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier", "IsSupplier": False},
 ]
 XERO_ACCOUNTS = [
     {
@@ -1483,6 +1487,32 @@ XERO_PURCHASE_ORDERS = [
                 "AccountCode": "6100",
             }
         ],
+    },
+    {
+        "PurchaseOrderID": "xero-po-3",
+        "PurchaseOrderNumber": "PO-XERO-403",
+        "Contact": {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier"},
+        "Total": 250.00,
+        "Status": "AUTHORISED",
+        "CurrencyCode": "ZAR",
+        "LineItems": [
+            {
+                "Description": "Paper and toner",
+                "Quantity": 10,
+                "UnitAmount": 25.00,
+                "LineAmount": 250.00,
+                "AccountCode": "6100",
+            }
+        ],
+    },
+    {
+        "PurchaseOrderID": "xero-po-4",
+        "PurchaseOrderNumber": "PO-XERO-404",
+        "Contact": {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier"},
+        "Total": 362.00,
+        "Status": "DRAFT",
+        "CurrencyCode": "ZAR",
+        "LineItems": [],
     },
     {
         "PurchaseOrderID": "xero-po-2",
@@ -1539,6 +1569,9 @@ async def xero_contacts(request: Request, page: int = 1) -> JSONResponse:
     rows = XERO_CONTACTS
     if request.query_params.get("where", "").replace(" ", "") == "IsSupplier==true":
         rows = [c for c in rows if c.get("IsSupplier")]
+    ids = {i for i in request.query_params.get("IDs", "").split(",") if i}
+    if ids:
+        rows = [c for c in rows if c["ContactID"] in ids]
     return _xero_response({"Contacts": copy.deepcopy(rows) if page == 1 else []})
 
 
@@ -1551,8 +1584,9 @@ async def xero_accounts(request: Request) -> JSONResponse:
 @xero.get("/PurchaseOrders")
 async def xero_purchase_orders(request: Request, page: int = 1) -> JSONResponse:
     _require_xero_auth(request)
-    rows = copy.deepcopy(XERO_PURCHASE_ORDERS) if page == 1 else []
-    return _xero_response({"PurchaseOrders": rows})
+    status = request.query_params.get("Status")
+    rows = [po for po in XERO_PURCHASE_ORDERS if not status or po.get("Status") == status]
+    return _xero_response({"PurchaseOrders": copy.deepcopy(rows) if page == 1 else []})
 
 
 @xero.get("/Invoices")
