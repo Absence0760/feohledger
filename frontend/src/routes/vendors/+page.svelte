@@ -28,6 +28,8 @@
 	import ImportCsvModal from '#lib/components/modals/ImportCsvModal.svelte';
 	import CreateVendorModal from '#lib/components/modals/CreateVendorModal.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import InviteVendorPortalUserModal from '#lib/components/modals/InviteVendorPortalUserModal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
@@ -52,6 +54,7 @@
 	} from '#lib/api/vendors.ts';
 	import { vendorSyncReportLines, type VendorSyncReport } from '#lib/utils/erpSyncReport.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
+	import { vendorErpSyncOffer, type VendorErpSyncOffer } from '#lib/utils/vendorErpSync.ts';
 
 	type BankDetails = VendorBankDetails;
 
@@ -62,10 +65,9 @@
 	// granular permission, not a role check (mirrors the backend gate).
 	let showConsolidation = $state(false);
 	// Day-0 CSV import — `POST /api/vendors/import-csv` is
-	// `require_roles(ADMIN, AP_MANAGER)`, the same plain-role gate as the ERP
-	// sync button above, so this reuses `auth.isManager` rather than the
-	// granular `vendor.manage` permission (which could diverge under a
-	// custom role split).
+	// `require_permission(vendor.manage)`, like the ERP sync, so both are gated
+	// on `canManageVendors`, not the role list (which diverges under a custom
+	// role split).
 	let showImportCsv = $state(false);
 	const canManageVendors = $derived(auth.can(PERM_VENDOR_MANAGE));
 	// "+ New Vendor" — `POST /api/vendors` is `require_permission(vendor.manage)`,
@@ -189,6 +191,11 @@
 	// First fetch landed (success or error) — gates the onboarding empty state
 	// so "Add your first vendor" doesn't flash during the initial load.
 	let loaded = $state(false);
+	// A list (not load-more) fetch is in flight. Starts true: the first fetch
+	// fires from the status effect on mount.
+	let loading = $state(true);
+	// The latest list fetch failed. The table is replaced by `LoadError` with a
+	// Retry rather than reading "No vendors yet" over a failure (#635).
 	let loadErrored = $state(false);
 	let hasMore = $derived(vendors.length < total);
 
@@ -299,6 +306,10 @@
 
 	async function fetchVendors(opts: { append?: boolean; nextPage?: number } = {}) {
 		const token = fetchSequence.start();
+		if (!opts.append) {
+			loading = true;
+			loadErrored = false;
+		}
 		try {
 			const nextPage = opts.nextPage ?? 1;
 			const params = new URLSearchParams({
@@ -339,11 +350,17 @@
 			// local edit still failed, and no newer request is coming to report
 			// it — only a newer *fetch* makes this one's outcome irrelevant.
 			if (fetchSequence.isCurrentRequest(token)) {
-				toast('Failed to load vendors', 'error');
-				loadErrored = true;
+				// A failed Load-more keeps the rows already shown, so a toast
+				// is enough; a failed list load has nothing true to show, so
+				// the page states it in place (`LoadError` below).
+				if (opts.append) toast(m('vendors.toast.loadMoreFailed'), 'error');
+				else loadErrored = true;
 			}
 		} finally {
-			if (fetchSequence.isCurrentRequest(token)) loaded = true;
+			if (fetchSequence.isCurrentRequest(token)) {
+				loaded = true;
+				if (!opts.append) loading = false;
+			}
 		}
 	}
 
@@ -581,26 +598,47 @@
 		{ key: 'active', label: m('vendors.filter.active') },
 		{ key: 'rejected', label: m('vendors.filter.rejected') }
 	]);
-	// Only the true "this tenant has zero vendors" state points at the CSV
-	// import CTA — a search/status filter that matches nothing gets the plain
-	// message, since "import a CSV" would be a non-sequitur when the tenant
-	// already has vendors and the filter is just narrow.
+	// The table's empty line, chosen by state — the invoices page's shape. A
+	// failed load never reaches it (`LoadError` replaces the table), and the
+	// genuinely fresh, unfiltered tenant gets the onboarding `EmptyState`
+	// instead; this covers the moment between (loading) and a filter that
+	// matched nothing. Only the unfiltered case points at the CSV import — "import
+	// a CSV" is a non-sequitur when the filter is just narrow.
+	let noActiveFilters = $derived(!search.trim() && statusFilter === 'all');
 	let emptyMessage = $derived(
-		vendors.length === 0 && !search.trim() && statusFilter === 'all'
-			? m('vendors.empty.fresh')
-			: m('vendors.empty')
+		loading ? m('common.loading') : noActiveFilters ? m('vendors.empty.fresh') : m('vendors.empty')
 	);
 	// A brand-new tenant with zero vendors and no active filter gets the rich
 	// onboarding CTA (mirrors the dashboard / `/invoices` EmptyState) instead of
 	// the bare "no vendors" cell — gated on `loaded` (not mid-load) and no error.
 	let showOnboarding = $derived(
-		loaded &&
-			!loadErrored &&
-			vendors.length === 0 &&
-			total === 0 &&
-			!search.trim() &&
-			statusFilter === 'all'
+		loaded && !loading && !loadErrored && vendors.length === 0 && total === 0 && noActiveFilters
 	);
+
+	// "Sync from ERP" is offered only where it can work: an ERP is configured
+	// and its route is on the plan (`utils/vendorErpSync.ts`). Read from
+	// `settings.erp` on `GET /api/organization` — the field the Organization →
+	// ERP panel reads. Only a `vendor.manage` holder (the sync endpoint's gate)
+	// sees any of it, so only they fetch. `null` while unknown: nothing renders
+	// rather than a button that may vanish. A failed read offers the button —
+	// the endpoint is the authority, and hiding a working sync over a transient
+	// read error would be the worse failure.
+	let erpOffer = $state<VendorErpSyncOffer | null>(null);
+	$effect(() => {
+		if (!canManageVendors || erpOffer) return;
+		let cancelled = false;
+		api
+			.get<{ settings?: { erp?: Record<string, unknown> | null } }>('/api/organization')
+			.then((org) => {
+				if (!cancelled) erpOffer = vendorErpSyncOffer(org.settings?.erp, (f) => auth.hasFeature(f));
+			})
+			.catch(() => {
+				if (!cancelled) erpOffer = { kind: 'sync' };
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 </script>
 
 <svelte:window
@@ -631,15 +669,20 @@
 				Merge duplicates
 			</button>
 		{/if}
-		{#if auth.isManager}
-			<!-- `POST /api/vendors/sync-erp` is require_roles(ADMIN, AP_MANAGER).
+		{#if canManageVendors && erpOffer?.kind === 'sync'}
+			<!-- `POST /api/vendors/sync-erp` is require_permission(vendor.manage).
 			     A CFO reaches this page (nav.ts admits them for the read) but
-			     holds neither role, so the button only ever 403'd. -->
+			     doesn't hold it, so the button only ever 403'd. -->
 			<button class="btn-outline" disabled={syncing} onclick={syncFromErp}>
 				{syncing ? m('vendors.action.syncing') : m('vendors.action.syncErp')}
 			</button>
+		{:else if auth.isAdmin && erpOffer?.kind === 'connect'}
+			<!-- No ERP yet: the way to one, for the role that can set it up. -->
+			<a class="btn-outline" href="/organization?section=erp" data-testid="vendors-connect-erp">
+				{m('vendors.action.connectErp')}
+			</a>
 		{/if}
-		{#if auth.isManager}
+		{#if canManageVendors}
 			<!-- Day-0 bulk load — `POST /api/vendors/import-csv`, same gate as
 			     the sync button above. See backend/docs/csv-import.md. -->
 			<button class="btn-outline" onclick={() => (showImportCsv = true)}>
@@ -653,14 +696,28 @@
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 	</div>
 
+	{#if canManageVendors && erpOffer?.kind === 'upgrade'}
+		<!-- An ERP is configured but its route isn't on the plan (Merge.dev
+		     needs Scale): say so instead of a Sync that answers 402. -->
+		<PlanUpgradeNotice feature={erpOffer.feature} testId="vendors-erp-upgrade" />
+	{/if}
+
 	{#if showOnboarding}
 		<EmptyState
 			icon="🏢"
 			testId="vendors-empty-state"
 			heading={m('vendors.onboarding.heading')}
-			description={m('vendors.onboarding.description')}
+			description={erpOffer?.kind === 'sync'
+				? m('vendors.onboarding.descriptionErp')
+				: m('vendors.onboarding.description')}
 			actionLabel={canManageVendors ? m('vendors.action.newVendor') : undefined}
 			onaction={canManageVendors ? () => (showCreateVendor = true) : undefined}
+		/>
+	{:else if loadErrored}
+		<LoadError
+			message={m('vendors.empty.errored')}
+			onretry={() => fetchVendors()}
+			testId="vendors-load-error"
 		/>
 	{:else}
 	<div class="vendor-table">
