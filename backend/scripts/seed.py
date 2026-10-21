@@ -49,10 +49,12 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 
 import asyncpg
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO
+from app.config import settings
 from app.database import _make_tenant_url, control_engine, control_session_factory
+from app.db_engine import connect_raw, create_async_engine
 from app.models import Base
 from app.models.billing import Plan
 from app.models.credit_memo import CreditMemo
@@ -83,11 +85,7 @@ from app.services.control_plane_bootstrap import SYSTEM_ROLE_DESCRIPTIONS
 from app.services.control_plane_bootstrap import (
     create_control_tables as bootstrap_control_tables,
 )
-from app.services.tenant_provisioning import (
-    CONTROL_TABLES,
-    _parse_maintenance_dsn,
-    asyncpg_connect_kwargs,
-)
+from app.services.tenant_provisioning import CONTROL_TABLES
 from app.utils.passwords import pwd_context
 
 # Canonical role set, owned by `control_plane_bootstrap` — a production control
@@ -180,7 +178,7 @@ def _make_portal_user(vendor: "Vendor") -> "VendorUser":
 async def create_database(db_name: str) -> None:
     """Create a PostgreSQL database if it doesn't exist."""
     # Same parse (and TLS handling) as the production provisioning path.
-    conn = await asyncpg.connect(**_parse_maintenance_dsn())
+    conn = await connect_raw(settings.database_url, database="postgres")
     try:
         exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", db_name)
         if not exists:
@@ -257,7 +255,7 @@ async def create_tenant_tables(db_name: str):
 
     # ALTER TYPE ... ADD VALUE cannot run inside a transaction, so use a separate connection
     try:
-        conn = await asyncpg.connect(**asyncpg_connect_kwargs(tenant_url))
+        conn = await connect_raw(tenant_url)
         try:
             for val in ("done", "posted_in_erp", "payment_scheduled", "paid"):
                 await conn.execute(f"ALTER TYPE invoicestatus ADD VALUE IF NOT EXISTS '{val}'")

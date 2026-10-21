@@ -3,10 +3,10 @@ import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.config import settings
+from app.db_engine import create_async_engine
 from app.models import Base
 from app.tenant_url import make_tenant_url
 
@@ -52,11 +52,11 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Through the app's one engine factory, so a migration authenticates the
+    # way the app does (FEOH_DATABASE_IAM_AUTH: a fresh IAM token per connection)
+    # — `async_engine_from_config` would bypass it. `url` is the unescaped value
+    # set above; the ini copy exists for offline mode and `alembic` itself.
+    connectable = create_async_engine(url, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

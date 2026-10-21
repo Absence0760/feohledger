@@ -24,10 +24,11 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
+from app.db_engine import create_async_engine
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.payment import Payment

@@ -86,9 +86,10 @@ async def _run_local(
 ) -> None:
     """Run ERP send in-process with its own DB session and engine."""
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url
+    from app.db_engine import create_async_engine
     from app.models.invoice import Invoice
     from app.models.organization import Organization
     from app.services.credential_crypto import CredentialCryptoError

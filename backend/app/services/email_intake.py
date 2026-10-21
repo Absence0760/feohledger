@@ -385,9 +385,10 @@ async def _process_for_org(org: Organization, payload: InboundEmail) -> IntakeRe
         return result
 
     # Open a short-lived tenant session to create the invoice rows.
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url
+    from app.db_engine import create_async_engine
     from app.services.extraction_dispatch import dispatch_extraction
 
     tenant_engine = None

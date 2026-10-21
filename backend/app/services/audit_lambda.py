@@ -22,7 +22,9 @@ import json
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.db_engine import create_async_engine
 
 # `app.tenant_url` imports nothing (bar `os`), so it is safe on this
 # dotenv-free path where `app.database` — which reaches `app.config` — is not.
