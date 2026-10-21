@@ -5,8 +5,8 @@ import { expect, test } from '../fixtures/helpers';
  *
  * It is the route's DEFAULT panel now (`?section=` absent or unrecognised lands
  * here), and its links are the page's own section navigation rather than
- * anchors into one long scroll: four `?section=` links plus `/admin`, which
- * leaves the page entirely. So this spec is a navigation test — it asserts that
+ * anchors into one long scroll: four `?section=` links plus `/admin` and
+ * `/workflows`, which leave the page entirely. So this spec is a navigation test — it asserts that
  * activating each link actually shows the panel it names, not merely that the
  * href reads right.
  *
@@ -19,7 +19,11 @@ import { expect, test } from '../fixtures/helpers';
 const PANEL_LINKS = [
 	['Company profile', 'company', 'Company Profile'],
 	['Invoice defaults', 'defaults', 'Invoice Defaults'],
-	['Approval thresholds', 'payments', 'Payments (ACH / Wire / RTP)'],
+	// The Payments panel's one threshold is the CFO sign-off for a payment RUN,
+	// so that is what this link is called. It used to be labelled "Approval
+	// thresholds", which sent an admin looking for invoice approval limits to
+	// the payment rails (#635).
+	['CFO sign-off for payment runs', 'payments', 'Payments (ACH / Wire / RTP)'],
 	['Branding', 'branding', 'Branding']
 ] as const;
 
@@ -28,13 +32,13 @@ function strip(page: import('@playwright/test').Page) {
 }
 
 test.describe('/organization getting-started strip', () => {
-	test('is the default panel, and offers the five first-run destinations', async ({ page }) => {
+	test('is the default panel, and offers the six first-run destinations', async ({ page }) => {
 		await page.goto('/organization');
 
 		await expect(strip(page).getByRole('heading', { name: 'Getting started' })).toBeVisible();
 
 		const links = strip(page).getByRole('link');
-		await expect(links).toHaveCount(5);
+		await expect(links).toHaveCount(6);
 
 		// Each panel link names its section; the relative href keeps any other
 		// query parameter the page is carrying.
@@ -49,6 +53,11 @@ test.describe('/organization getting-started strip', () => {
 		await expect(strip(page).getByRole('link', { name: 'Users & roles' })).toHaveAttribute(
 			'href',
 			'/admin'
+		);
+		// Invoice approval thresholds are set on the workflow's approval step.
+		await expect(strip(page).getByRole('link', { name: 'Approval thresholds' })).toHaveAttribute(
+			'href',
+			'/workflows'
 		);
 	});
 
@@ -83,5 +92,17 @@ test.describe('/organization getting-started strip', () => {
 
 		await expect(page.getByRole('heading', { name: 'Users & Roles', exact: true })).toBeVisible();
 		await expect(page).toHaveURL(/\/admin$/);
+	});
+
+	test('"Approval thresholds" leaves for /workflows, where invoice thresholds are set', async ({
+		page
+	}) => {
+		await page.goto('/organization');
+		await expect(strip(page).getByRole('heading', { name: 'Getting started' })).toBeVisible();
+
+		await strip(page).getByRole('link', { name: 'Approval thresholds' }).click();
+
+		await expect(page.getByRole('heading', { name: 'Workflows', exact: true })).toBeVisible();
+		await expect(page).toHaveURL(/\/workflows$/);
 	});
 });

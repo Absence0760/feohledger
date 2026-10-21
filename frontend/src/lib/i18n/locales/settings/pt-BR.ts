@@ -26,6 +26,7 @@ export const messages = {
 	'org.gettingStarted.defaults': 'Padrões de nota fiscal',
 	'org.gettingStarted.users': 'Usuários e funções',
 	'org.gettingStarted.approvals': 'Limites de aprovação',
+	'org.gettingStarted.paymentRunSignoff': 'Aprovação do CFO para lotes de pagamento',
 	'org.gettingStarted.branding': 'Identidade visual',
 	'org.rail.label': 'Seção de configurações',
 	'org.rail.group.company': 'Empresa',

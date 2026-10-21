@@ -23,6 +23,7 @@ export const enSettings = {
 	'org.gettingStarted.defaults': 'Invoice defaults',
 	'org.gettingStarted.users': 'Users & roles',
 	'org.gettingStarted.approvals': 'Approval thresholds',
+	'org.gettingStarted.paymentRunSignoff': 'CFO sign-off for payment runs',
 	'org.gettingStarted.branding': 'Branding',
 	// Rail labels for the settings section picker (`ui/SettingsRail.svelte`).
 	// `org.section.*` stays the PANEL heading; the rail needs short labels, so

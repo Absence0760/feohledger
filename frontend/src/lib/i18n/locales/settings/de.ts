@@ -26,6 +26,7 @@ export const messages = {
 	'org.gettingStarted.defaults': 'Rechnungsvorgaben',
 	'org.gettingStarted.users': 'Benutzer & Rollen',
 	'org.gettingStarted.approvals': 'Freigabegrenzen',
+	'org.gettingStarted.paymentRunSignoff': 'CFO-Freigabe für Zahlungsläufe',
 	'org.gettingStarted.branding': 'Branding',
 	'org.rail.label': 'Einstellungsbereich',
 	'org.rail.group.company': 'Unternehmen',

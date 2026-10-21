@@ -26,6 +26,7 @@ export const messages = {
 	'org.gettingStarted.defaults': 'Valeurs par défaut des factures',
 	'org.gettingStarted.users': 'Utilisateurs et rôles',
 	'org.gettingStarted.approvals': 'Seuils d\'approbation',
+	'org.gettingStarted.paymentRunSignoff': 'Validation CFO des lots de paiement',
 	'org.gettingStarted.branding': 'Personnalisation',
 	'org.rail.label': 'Section des paramètres',
 	'org.rail.group.company': 'Entreprise',

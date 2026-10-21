@@ -25,6 +25,7 @@ export const messages = {
 	'org.gettingStarted.defaults': '請求書の既定値',
 	'org.gettingStarted.users': 'ユーザーと役割',
 	'org.gettingStarted.approvals': '承認しきい値',
+	'org.gettingStarted.paymentRunSignoff': '支払いランのCFO承認',
 	'org.gettingStarted.branding': 'ブランディング',
 	'org.rail.label': '設定セクション',
 	'org.rail.group.company': '会社',

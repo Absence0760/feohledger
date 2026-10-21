@@ -1662,7 +1662,12 @@
 							<a href="?section=company">{m('org.gettingStarted.company')}</a>
 							<a href="?section=defaults">{m('org.gettingStarted.defaults')}</a>
 							<a href="/admin">{m('org.gettingStarted.users')}</a>
-							<a href="?section=payments">{m('org.gettingStarted.approvals')}</a>
+							<!-- Invoice approval thresholds (auto-approve, CFO above, maximum)
+							     live on the workflow's approval step, not on this page; the
+							     Payments panel's only threshold is the CFO sign-off for a
+							     payment RUN, which is its own link (#635). -->
+							<a href="/workflows">{m('org.gettingStarted.approvals')}</a>
+							<a href="?section=payments">{m('org.gettingStarted.paymentRunSignoff')}</a>
 							<a href="?section=branding">{m('org.gettingStarted.branding')}</a>
 						</nav>
 					</section>
