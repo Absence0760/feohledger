@@ -31,6 +31,8 @@ test.describe('sign out', () => {
 		await signOut(page);
 
 		await page.goto('/invoices');
-		await page.waitForURL(/\/login$/, { timeout: 5_000 });
+		// The auth wall carries the page as ?next= (post-login-redirect.spec.ts).
+		await page.waitForURL((url) => url.pathname === '/login', { timeout: 5_000 });
+		expect(new URL(page.url()).searchParams.get('next')).toBe('/invoices');
 	});
 });

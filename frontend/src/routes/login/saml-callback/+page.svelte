@@ -5,6 +5,7 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { postLoginTarget, takeNextForSso, withNext } from '#lib/utils/postLoginRedirect.ts';
 
 	interface SAMLExchangeResponse {
 		access_token: string;
@@ -15,8 +16,13 @@
 
 	let phase = $state<'working' | 'error'>('working');
 	let message = $state(m('auth.callback.signingIn'));
+	// The page the user set out for, stashed by /login before the IdP round
+	// trip. Taken (and cleared) up front, success or not, so it can never
+	// steer a later sign-in in this tab.
+	let next = $state<string | null>(null);
 
 	onMount(async () => {
+		next = takeNextForSso();
 		// The backend ACS 303-redirected here with a one-time handoff code. We
 		// exchange it for the JWT in the response BODY — the token never rides
 		// in the URL (no fragment, no query), so it can't leak via history /
@@ -39,7 +45,11 @@
 			const resp = await api.post<SAMLExchangeResponse>('/api/auth/saml/exchange', { code });
 			setToken(resp.access_token);
 			await auth.fetchUser();
-			goto(resp.must_change_password ? '/change-password' : '/');
+			goto(
+				resp.must_change_password
+					? withNext('/change-password', next)
+					: postLoginTarget(next)
+			);
 		} catch (e) {
 			phase = 'error';
 			message = e instanceof Error ? e.message : m('auth.callback.failed');
@@ -59,7 +69,7 @@
 		{:else}
 			<h1>{m('auth.callback.failedHeading')}</h1>
 			<p class="error" role="alert">{message}</p>
-			<a href="/login">{m('auth.callback.backToSignIn')}</a>
+			<a href={withNext('/login', next)}>{m('auth.callback.backToSignIn')}</a>
 		{/if}
 	</div>
 </div>

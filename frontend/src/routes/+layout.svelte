@@ -6,6 +6,7 @@
 	import Toast from '#lib/components/ui/Toast.svelte';
 	import UnsavedChangesDialog from '#lib/components/ui/UnsavedChangesDialog.svelte';
 	import ConsentBanner from '#lib/components/ConsentBanner.svelte';
+	import AccountLoadState from '#lib/components/layout/AccountLoadState.svelte';
 	import { sidebar } from '#lib/stores/sidebar.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { brand } from '#lib/stores/brand.svelte.ts';
@@ -16,6 +17,7 @@
 	import { browser } from '$app/env';
 	import { initLocale, m } from '#lib/i18n/store.svelte.ts';
 	import { theme } from '#lib/stores/theme.svelte.ts';
+	import { withNext } from '#lib/utils/postLoginRedirect.ts';
 
 	// Tri-state: `undefined` until the browser resolves it (render nothing, no
 	// flash), then true/false. This asks "does this host carry a tenant at all",
@@ -77,13 +79,22 @@
 		// data subject with no account is a dead end, not a detour.
 		if (path.startsWith(LEGAL_PREFIX)) return;
 
+		// The page asked for, carried through sign-in as `?next=` so the user
+		// lands back on it (a notification email's /invoices/{id} link) rather
+		// than on the dashboard. `withNext` drops anything that is not a safe
+		// same-origin path, and `/` itself.
+		const here = path + page.url.search;
+
 		if (!auth.loggedIn && !path.startsWith('/login')) {
-			goto('/login');
+			goto(withNext('/login', here), { replace: true });
 			return;
 		}
 
+		// Start loading the account once; the shell's AccountLoadState shows
+		// the load in flight, and a failure waits for the user's Retry rather
+		// than looping here.
 		if (auth.loggedIn && !auth.user) {
-			auth.fetchUser();
+			if (auth.userStatus === 'idle') auth.fetchUser();
 			return;
 		}
 
@@ -92,7 +103,7 @@
 			auth.user?.must_change_password &&
 			path !== '/change-password'
 		) {
-			goto('/change-password');
+			goto(withNext('/change-password', here), { replace: true });
 		}
 	});
 
@@ -185,6 +196,13 @@
 			<slot />
 		</main>
 	</div>
+{:else if auth.loggedIn && !auth.user}
+	<!-- Signed in, account not loaded yet (or it failed): never a blank page. -->
+	<AccountLoadState
+		status={auth.userStatus}
+		onretry={() => auth.fetchUser()}
+		onlogout={() => auth.logout()}
+	/>
 {/if}
 
 <Toast />

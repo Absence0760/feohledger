@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 
+import { expectNoA11yViolations } from '../a11y/axe-helper';
 import { API_BASE, currentTenantSlug, expect, signIn, TENANT_ROOT_URL, test } from '../fixtures/helpers';
 
 /**
@@ -230,6 +231,126 @@ test.describe('/login/mfa — challenge UI (sessionStorage-seeded)', () => {
 		} else {
 			await expect(page.locator('.error')).toBeVisible({ timeout: 5_000 });
 		}
+	});
+});
+
+test.describe('/login/mfa — focus, recovery and code entry (issue #635)', () => {
+	test.use({ storageState: { cookies: [], origins: [] } });
+
+	async function gotoChallenge(
+		page: import('@playwright/test').Page,
+		challenge: ReturnType<typeof fakeChallenge>,
+		query = ''
+	) {
+		await page.goto('/login');
+		await page.evaluate(
+			([key, value]) => sessionStorage.setItem(key, value),
+			[CHALLENGE_KEY, JSON.stringify(challenge)] as const
+		);
+		await page.goto('/login/mfa' + query);
+	}
+
+	const codeField = (page: import('@playwright/test').Page) =>
+		page.locator('input[autocomplete="one-time-code"]');
+
+	test('the code field is focused on arrival', async ({ page }) => {
+		await gotoChallenge(page, fakeChallenge({ methods: ['totp', 'email'] }));
+		await expect(codeField(page)).toBeFocused();
+	});
+
+	test('switching method moves focus to the new method, never to <body>', async ({ page }) => {
+		await gotoChallenge(page, fakeChallenge({ methods: ['totp', 'email'] }));
+
+		// The clicked "Use …" button removes itself; focus lands on what replaced it.
+		await page.getByRole('button', { name: 'Use email instead' }).click();
+		await expect(page.getByRole('button', { name: 'Email me a code' })).toBeFocused();
+
+		await page.getByRole('button', { name: 'Use authenticator app' }).click();
+		await expect(codeField(page)).toBeFocused();
+	});
+
+	test('Email me a code is busy while sending, sends once, then focuses the code field', async ({
+		page
+	}) => {
+		let sends = 0;
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		await page.route(
+			(url) => url.pathname === '/api/auth/mfa/challenge/email',
+			async (route) => {
+				sends += 1;
+				await held;
+				await route.fulfill({ status: 204, body: '' });
+			}
+		);
+		await gotoChallenge(page, fakeChallenge({ methods: ['email'] }));
+
+		const send = page.getByRole('button', { name: 'Email me a code' });
+		await send.click();
+		// In flight: relabelled and aria-disabled (it keeps focus), and a
+		// second click does not send again.
+		const busy = page.getByRole('button', { name: 'Sending…' });
+		await expect(busy).toHaveAttribute('aria-disabled', 'true');
+		// It kept focus, so Enter is a second activation (Playwright's own
+		// click refuses an aria-disabled target).
+		await expect(busy).toBeFocused();
+		await page.keyboard.press('Enter');
+
+		release();
+		await expect(codeField(page)).toBeFocused();
+		await expect(page.getByRole('status')).toContainText('Code sent. Check your email.');
+		expect(sends).toBe(1);
+	});
+
+	test('a failed send leaves focus on the send button, not <body>', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/auth/mfa/challenge/email',
+			(route) => route.fulfill({ status: 500, json: { detail: 'Mail is down' } })
+		);
+		await gotoChallenge(page, fakeChallenge({ methods: ['email'] }));
+
+		const send = page.getByRole('button', { name: 'Email me a code' });
+		await expect(send).toBeFocused();
+		await page.keyboard.press('Enter');
+		await expect(page.locator('.error')).toBeVisible();
+		await expect(send).toBeFocused();
+	});
+
+	test('the challenge page has no axe violations', async ({ page }) => {
+		await gotoChallenge(page, fakeChallenge({ methods: ['passkey', 'totp', 'email'] }));
+		await expect(page.getByRole('link', { name: 'Back to sign in' })).toBeVisible();
+		await expectNoA11yViolations(page);
+	});
+
+	test('a pasted code keeps only its digits', async ({ page }) => {
+		await gotoChallenge(page, fakeChallenge({ methods: ['totp'] }));
+
+		const field = codeField(page);
+		await field.fill('123 456');
+		await expect(field).toHaveValue('123456');
+		await expect(page.getByRole('button', { name: /Verify/ })).toBeEnabled();
+
+		// Longer text around the code is not truncated before the digits are
+		// kept (the field has no maxlength for exactly this reason).
+		await field.fill('Your code: 654-321');
+		await expect(field).toHaveValue('654321');
+
+		// Full-width digits (a Japanese IME in full-width mode) are folded to ASCII.
+		await field.fill('１２３４５６');
+		await expect(field).toHaveValue('123456');
+	});
+
+	test('Back to sign in abandons the challenge and returns to /login', async ({ page }) => {
+		await gotoChallenge(page, fakeChallenge({ methods: ['totp'] }));
+
+		await page.getByRole('link', { name: 'Back to sign in' }).click();
+		await expect(page).toHaveURL(/\/login$/);
+		await expect(page.locator('input[type="password"]')).toBeVisible();
+		expect(await page.evaluate((k) => sessionStorage.getItem(k), CHALLENGE_KEY)).toBeNull();
+
+		// With the challenge gone, the MFA page no longer resumes it.
+		await page.goto('/login/mfa');
+		await expect(page).toHaveURL(/\/login$/);
 	});
 });
 

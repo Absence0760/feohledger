@@ -300,6 +300,11 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   which walks every route under `src/routes` — so every grouped route renders
   this bar under the 320px measurement, rather than the two a hand-kept list
   happened to name.
+- `AccountLoadState.svelte` — what the root layout draws in the shell's place
+  while the signed-in account is not loaded: a polite loading line, or — when
+  `/api/auth/me` failed for a reason other than the session ending — a panel with
+  Try again / Log out, focus on its heading. `<AccountLoadState status={auth.userStatus} onretry onlogout />`.
+  `docs/authentication.md` § When the account cannot be loaded.
 - `NotificationBell.svelte` — bell + unread badge in the sidebar header with a
   recent-notifications popover (replaced the old Notifications nav row; the full
   `/notifications` page is the "View all" target). Closes on Esc / backdrop.

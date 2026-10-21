@@ -11,6 +11,12 @@
 	import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { SSO_PROVIDER_LABELS } from '#lib/types/ssoSettings.ts';
+	import {
+		nextFromParams,
+		postLoginTarget,
+		rememberNextForSso,
+		withNext
+	} from '#lib/utils/postLoginRedirect.ts';
 
 	interface SSOConfigPublic {
 		enabled: boolean;
@@ -36,6 +42,10 @@
 	// When the tenant requires SSO, hide the password form entirely. Only ever
 	// true alongside an enabled config, so a broken IdP can't lock everyone out.
 	let ssoOnly = $state(false);
+
+	// The page the user was sent here from (the auth wall, an ended session),
+	// already validated as a same-origin path; `null` means the dashboard.
+	const next = $derived(nextFromParams(page.url.searchParams));
 
 	// Shared with the `/organization` SSO panel's picker, so an admin can only
 	// pick a provider this page knows how to label.
@@ -91,12 +101,17 @@
 		// `getApiBase()`, not the build-time `PUBLIC_API_URL`: on a vanity host
 		// it resolves to same-origin, which is the ONLY way the vanity hostname
 		// reaches the backend in the `Host` header it resolves the tenant from.
+		//
+		// The IdP round trip cannot carry `next`, so it waits in sessionStorage
+		// for the callback page (`#lib/utils/postLoginRedirect.ts`).
+		rememberNextForSso(next);
 		window.location.href = `${getApiBase()}/api/auth/sso/authorize${ssoQuery()}`;
 	}
 
 	function signInWithSAML() {
 		// Full page nav to the backend SAML login endpoint — it builds the
 		// AuthnRequest and 302s onward to the IdP (same reason as OIDC).
+		rememberNextForSso(next);
 		window.location.href = `${getApiBase()}/api/auth/saml/login${ssoQuery()}`;
 	}
 
@@ -113,10 +128,10 @@
 				// pick it up. sessionStorage clears on tab close — won't outlive
 				// the login attempt.
 				sessionStorage.setItem('mfa_challenge', JSON.stringify(result.challenge));
-				goto('/login/mfa');
+				goto(withNext('/login/mfa', next));
 				return;
 			}
-			goto('/');
+			goto(postLoginTarget(next));
 		} catch (err) {
 			error = err instanceof Error ? err.message : m('auth.login.failed');
 			ownWorkspaceUrl =

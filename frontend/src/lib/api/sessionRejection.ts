@@ -16,6 +16,7 @@
  * effects.
  */
 import type { MessageKey } from '#lib/i18n/messages.ts';
+import { withNext } from '#lib/utils/postLoginRedirect.ts';
 
 /** `backend/app/api/refusals.py::TOKEN_TENANT_MISMATCH`. */
 export const TOKEN_TENANT_MISMATCH = 'token_tenant_mismatch';
@@ -76,12 +77,16 @@ export function revokeRejectedSession(
 	}
 }
 
-/** Where to send the user once the session has been cleared. An expired
- *  session is the plain `/login` it always was. */
-export function loginPathFor(rejection: SessionRejection): string {
-	return rejection === 'other_workspace'
-		? `/login?${LOGIN_REASON_PARAM}=${REASON_OTHER_WORKSPACE}`
-		: '/login';
+/** Where to send the user once the session has been cleared: `/login`, with
+ *  the reason for `other_workspace`, and `next` — the page they were on, so
+ *  signing in again returns them there (`#lib/utils/postLoginRedirect.ts`,
+ *  which drops anything that is not a safe same-origin path). */
+export function loginPathFor(rejection: SessionRejection, next?: string | null): string {
+	const base =
+		rejection === 'other_workspace'
+			? `/login?${LOGIN_REASON_PARAM}=${REASON_OTHER_WORKSPACE}`
+			: '/login';
+	return withNext(base, next);
 }
 
 /** The notice `/login` shows for the reason in its URL, or `null`. Only a

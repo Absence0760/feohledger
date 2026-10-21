@@ -1,4 +1,6 @@
-import { api, setToken, clearToken, hasToken } from '#lib/api.ts';
+import { api, ApiError, setToken, clearToken, hasToken } from '#lib/api.ts';
+import { sessionRejection } from '#lib/api/sessionRejection.ts';
+import { rememberNextForSso } from '#lib/utils/postLoginRedirect.ts';
 import { performAuthentication, performRegistration } from '#lib/webauthn.ts';
 
 export interface Passkey {
@@ -96,9 +98,29 @@ type LoginResult =
 	| { kind: 'ok' }
 	| { kind: 'mfa'; challenge: MFAChallenge };
 
+/**
+ * Where loading the signed-in account (`GET /api/auth/me`) stands. The root
+ * layout renders the app shell only once `user` is set, so it reads this to
+ * draw something honest in the meantime: a loading state while `/me` is in
+ * flight, and a Retry / Log out panel when it failed. Before this, a 5xx or a
+ * network failure left `loggedIn` true and `user` null, which drew nothing at
+ * all — a blank page with no way out.
+ *
+ * - `idle` — never asked (or signed out); the layout starts the load.
+ * - `loading` — a request is in flight.
+ * - `ready` — `user` holds the account.
+ * - `error` — the last load failed for a reason other than the session ending.
+ */
+export type UserStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 function createAuthStore() {
 	let user = $state<User | null>(null);
 	let loggedIn = $state(hasToken());
+	let userStatus = $state<UserStatus>('idle');
+	// The layout, `login()`, a factor change and a Retry can each ask for
+	// `/me`; only the most recent request's answer is applied, so an older
+	// one (sent with a token since replaced) can never land last.
+	let latestLoad = 0;
 
 	async function login(email: string, password: string): Promise<LoginResult> {
 		const res = await api.post<TokenResponse | MFAChallenge>('/api/auth/login', {
@@ -228,16 +250,55 @@ function createAuthStore() {
 		return res.revoked;
 	}
 
-	async function fetchUser() {
+	/**
+	 * Load (or refresh) the signed-in account. Never throws — the outcome is in
+	 * `userStatus`. A refresh that fails keeps the account already loaded: a
+	 * passing outage while re-reading it after a factor change must not tear
+	 * the whole app down to an error panel.
+	 */
+	async function fetchUser(): Promise<void> {
+		const load = ++latestLoad;
+		const hadToken = hasToken();
+		userStatus = 'loading';
 		try {
-			user = await api.get<User>('/api/auth/me');
+			const me = await api.get<User>('/api/auth/me');
+			if (load !== latestLoad) return;
+			user = me;
 			// A successful /me means the token is good — keep `loggedIn` in sync.
 			// The SSO callback (and any flow that obtains a token without going
 			// through login()/completeMfa()) relies on this to flip the flag,
 			// otherwise the layout sees `!loggedIn` and bounces back to /login.
 			loggedIn = true;
-		} catch {
-			user = null;
+			userStatus = 'ready';
+		} catch (err) {
+			if (load !== latestLoad) return;
+			const ended =
+				err instanceof ApiError && sessionRejection(err.status, err.code) !== null;
+			if (hadToken && ended && !hasToken()) {
+				// The session is over (a 401, or a token for another workspace):
+				// `api.ts::endSessionIfRejected` cleared the token and is already
+				// navigating to /login with the reason and the page in its URL.
+				// Stay on the loading state for the moment that takes rather than
+				// flash an error panel, or race that navigation with our own.
+				user = null;
+				return;
+			}
+			if (!hasToken()) {
+				// No token any more and nothing navigating (another tab signed
+				// out, before or during the request): a signed-out visitor, and
+				// the layout's auth wall takes it from here.
+				user = null;
+				loggedIn = false;
+				userStatus = 'idle';
+				return;
+			}
+			// A 5xx, a timeout, the network: the token is still held, so this is
+			// still a signed-in session (the SSO callbacks reach here having set
+			// a token without `login()`). Keep a loaded account; otherwise say it
+			// failed so the layout can offer Retry / Log out instead of bouncing
+			// a valid session to /login.
+			loggedIn = true;
+			userStatus = user ? 'ready' : 'error';
 		}
 	}
 
@@ -248,8 +309,13 @@ function createAuthStore() {
 			// Proceed with client-side logout even if server call fails
 		}
 		clearToken();
+		// A /me still in flight must not land after this and sign the page
+		// back in; nor may an abandoned SSO attempt's destination outlive it.
+		latestLoad++;
+		rememberNextForSso(null);
 		user = null;
 		loggedIn = false;
+		userStatus = 'idle';
 		window.location.href = '/login';
 	}
 
@@ -283,6 +349,7 @@ function createAuthStore() {
 	return {
 		get user() { return user; },
 		get loggedIn() { return loggedIn; },
+		get userStatus() { return userStatus; },
 		get isAdmin() { return hasRole('admin'); },
 		get isManager() { return hasAnyRole('admin', 'ap_manager'); },
 		get isCfo() { return hasAnyRole('admin', 'cfo'); },

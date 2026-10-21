@@ -53,6 +53,24 @@ describe('the /login round trip', () => {
 		);
 	});
 
+	it('carries the page the user was on, beside the reason (decisions §288)', () => {
+		expect(loginPathFor('expired', '/invoices/42?tab=activity')).toBe(
+			'/login?next=%2Finvoices%2F42%3Ftab%3Dactivity'
+		);
+		const path = loginPathFor('other_workspace', '/payments');
+		const params = new URL(`http://x${path}`).searchParams;
+		expect(loginNoticeKey(params)).toBe('auth.login.signedOutOtherWorkspace');
+		expect(params.get('next')).toBe('/payments');
+	});
+
+	it('drops a destination that is not a safe same-origin path', () => {
+		expect(loginPathFor('expired', '//evil.example')).toBe('/login');
+		expect(loginPathFor('expired', '/login/mfa')).toBe('/login');
+		expect(loginPathFor('other_workspace', 'https://evil.example')).toBe(
+			'/login?reason=other_workspace'
+		);
+	});
+
 	it('honours only a reason it set', () => {
 		expect(loginNoticeKey(new URLSearchParams('reason=something_else'))).toBeNull();
 	});

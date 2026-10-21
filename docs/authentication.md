@@ -153,7 +153,8 @@ surfaces, through the HTTP login route).
 9. On a 401, or a 403 coded `token_tenant_mismatch` (a token for another
    workspace than the page's), the token is cleared and the user is redirected
    to `/login` — with `?reason=other_workspace` for the second, which the page
-   states (§ Signing in on another workspace's page is refused)
+   states (§ Signing in on another workspace's page is refused) — and with
+   `?next=` naming the page they were on (§ Sign-in returns to the page asked for)
 
 ## Backend Implementation
 
@@ -1020,7 +1021,57 @@ pins the page, beside `profile-sso-only-step-up.spec.ts` for the org-level case.
 - Auth state is managed in `src/lib/stores/auth.svelte.ts` (Svelte 5 runes)
 - Tenant slug is extracted by `src/lib/tenant.ts` from the subdomain
 - API client (`src/lib/api.ts`) automatically attaches both the Bearer token and the `X-Tenant-Slug` header to every request
-- The root `+layout.svelte` guards all routes — unauthenticated users are redirected to `/login`
+- The root `+layout.svelte` guards all routes — unauthenticated users are redirected to `/login?next=<the page>`
+
+### Sign-in returns to the page asked for
+
+A link into the app — a notification email's `/invoices/{id}`, a bookmarked
+filtered list — used to cost the reader their destination: the auth wall sent
+them to a bare `/login` and every sign-in path ended in `goto('/')`. Now the
+path and query they were opening travel as `?next=`:
+
+- **Set by** the root layout's auth wall, and by `api.ts::endSessionIfRejected`
+  (`sessionRejection.loginPathFor(rejection, next)`), beside `?reason=other_workspace`
+  when that applies (decisions §288 is unchanged — the reason and the notice it
+  drives are independent of `next`). A deliberate Log out does not carry one.
+- **Carried by** each step a sign-in can take: `/login` → `/login/mfa?next=` →
+  the forced `/change-password?next=` (the layout adds it when it redirects a
+  `must_change_password` account), whose submit then lands there. The OIDC /
+  SAML round trip cannot carry a parameter of ours, so `/login` stashes it in
+  `sessionStorage['auth_next']` before leaving for the IdP; the callback page
+  takes and clears it on arrival, success or failure, and a new SSO attempt
+  always overwrites or clears it, so an abandoned one cannot steer a later one.
+  An MFA enrolment the org forces (`must_enroll`) still goes to `/profile`.
+- **Honoured only as a same-origin relative path.** `next` comes from the URL,
+  so anyone can craft one; `frontend/src/lib/utils/postLoginRedirect.ts::safeNextPath`
+  is the one gate every reader and writer goes through. It accepts a string
+  starting with exactly one `/`, with no scheme, no backslash and no control
+  character, that resolves to the origin it was resolved against and whose
+  resolved path does not begin `//` (dot segments can collapse to one). It
+  refuses anything under `/login` (a loop) and `/` itself (the default). Refused
+  values are dropped, never rewritten — the user lands on the dashboard. The
+  value read back from `sessionStorage` is re-validated. Tests:
+  `postLoginRedirect.test.ts` (every refused shape), `sessionRejection.test.ts`,
+  and end to end `tests-e2e/auth/post-login-redirect.spec.ts`.
+
+### When the account cannot be loaded
+
+The app shell needs the signed-in account (`GET /api/auth/me` — its roles drive
+the nav), so it renders only once that has answered. `auth.userStatus`
+(`idle` → `loading` → `ready` | `error`) says where the load stands, and the
+layout draws `layout/AccountLoadState.svelte` in the shell's place until it is
+`ready`: a polite "Loading your workspace…" status while `/me` is in flight
+(faded in after a beat, so a fast answer never flashes it), and on a failure
+that is not the session ending — a 5xx, a timeout, the network — a panel with
+**Try again** and **Log out**, focus moved to its heading. Before this, such a
+failure left `loggedIn` true and `user` null and the page was blank with no way
+out. The layout starts one load from `idle` and never retries on its own; Retry
+is the user's. A refresh that fails while an account is already loaded (after a
+factor change, say) keeps that account rather than tearing the app down. A 401
+or a token for another workspace is still `api.ts`'s to handle — the store sees
+its token gone, stays on the loading state, and lets that navigation to
+`/login` happen. Only the most recent `/me` request's answer is applied. Test:
+`tests-e2e/auth/account-load-error.spec.ts`.
 - If no tenant subdomain is detected, a "no tenant" page is shown instead
 - The login page has its own layout without the sidebar
 

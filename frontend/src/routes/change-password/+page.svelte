@@ -4,7 +4,9 @@
 	import { api } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { nextFromParams, postLoginTarget } from '#lib/utils/postLoginRedirect.ts';
 
 	interface UserResponse {
 		id: string;
@@ -49,7 +51,9 @@
 				new_password: newPassword,
 			});
 			await auth.fetchUser();
-			goto('/');
+			// The forced change after sign-in carries the page the user was
+			// opening (the root layout passes it as `?next=`).
+			goto(postLoginTarget(nextFromParams(page.url.searchParams)));
 		} catch (err) {
 			error = err instanceof Error ? err.message : m('auth.changePassword.failed');
 		} finally {
