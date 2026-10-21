@@ -993,6 +993,39 @@ export async function loadMoreUntilRow(page: Page, row: Locator): Promise<void> 
 }
 
 /**
+ * The first invoice in the worker tenant's payment queue that a payment run
+ * will ACCEPT on the default rail — never a row the queue lists as blocked.
+ *
+ * The queue lists blocked rows too (an unverified vendor, an open
+ * payment-blocking exception, a fully-credited invoice), so "take `items[0]`"
+ * is only correct while no blocked row sorts first. With no due dates the
+ * queue tie-breaks on the random invoice UUID, so one blocked row anywhere in
+ * the tenant made those specs fail a fraction of the time, with a 409 from
+ * `POST /api/payments/runs` far from its cause. `GET /api/payments/queue/ids`
+ * is the server's own selectable set (the one "select all N matching"
+ * resolves), so it answers the question directly instead of restating the
+ * refusal rules here.
+ *
+ * Fails, naming the reason, when the tenant has no payable invoice at all —
+ * every caller's next step would fail anyway, less legibly.
+ */
+export async function firstPayableQueueInvoice(
+	page: Page
+): Promise<{ id: string; invoice_number: string; status: string }> {
+	const headers = await authedTenantHeaders(page);
+	const idsResp = await page.request.get(`${_API_BASE}/api/payments/queue/ids`, { headers });
+	expect(idsResp.status(), 'GET /api/payments/queue/ids').toBe(200);
+	const { ids } = (await idsResp.json()) as { ids: string[] };
+	expect(
+		ids.length,
+		`tenant ${currentTenantSlug()} has no payable (non-blocked) invoice in its payment queue`
+	).toBeGreaterThan(0);
+	const invResp = await page.request.get(`${_API_BASE}/api/invoices/${ids[0]}`, { headers });
+	expect(invResp.status(), `GET /api/invoices/${ids[0]}`).toBe(200);
+	return (await invResp.json()) as { id: string; invoice_number: string; status: string };
+}
+
+/**
  * Choose a vendor in the shared `ui/VendorPicker` combobox.
  *
  * Every vendor-choosing surface (`/catalogs`, `ContractModal`,

@@ -795,6 +795,16 @@ Reach for these instead of duplicating boilerplate per spec:
   delete rows in those three tables. See "Row teardown" above; a source guard
   fails the suite if a spec issues its own `DELETE FROM`. Note the third takes a
   name prefix, not a predicate.
+- `firstPayableQueueInvoice(page)` — the first invoice a payment run will
+  accept, from `GET /api/payments/queue/ids` (the server's selectable set).
+  Never take `queue.items[0]`: the queue lists BLOCKED rows too, and with no
+  due dates its order is the random invoice id, so one blocked row anywhere in
+  the tenant makes that pick fail some of the time with a 409. In the UI, pick
+  a row whose checkbox is enabled, not `tbody tr` `.first()`.
+- A spec that places a row in a payable status (`approved`, `posted_in_erp`,
+  `payment_scheduled`) must remove it in `afterEach`. A leaked one stays in that
+  tenant's payment queue for every later spec on the worker
+  (`invoices/delete-gate.spec.ts` leaked BLOCKED rows that way for weeks).
 - `API_BASE`, `ACME_BASE`, `TECHFLOW_BASE`, `NO_TENANT_BASE`,
   `tenantBase(slug)` — the same origins everyone was redeclaring inline, all
   derived from `E2E_WEB_ORIGIN` / `PUBLIC_API_URL` (see "Running from a

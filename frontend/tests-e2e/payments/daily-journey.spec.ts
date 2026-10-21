@@ -2,6 +2,7 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	expect,
+	firstPayableQueueInvoice,
 	signInAndWait,
 	tenantPsql,
 	test
@@ -40,18 +41,7 @@ async function patchOrg(page: import('@playwright/test').Page, partial: object):
  * PATCH endpoint refuses, mirroring `execute.spec.ts`.
  */
 
-interface QueueItem {
-	id: string;
-	invoice_number: string;
-	amount: number;
-}
-
-async function getQueue(page: import('@playwright/test').Page): Promise<QueueItem[]> {
-	const resp = await page.request.get(`${API_BASE}/api/payments/queue`, {
-		headers: await authedTenantHeaders(page)
-	});
-	return ((await resp.json()) as { items: QueueItem[] }).items;
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 async function getInvoiceStatus(
 	page: import('@playwright/test').Page,
@@ -72,12 +62,19 @@ async function createDraftRun(
 		headers: await authedTenantHeaders(page),
 		data: { items: [{ invoice_id: invoiceId, method }] }
 	});
-	expect(resp.status()).toBe(201);
-	return ((await resp.json()) as { id: string }).id;
+	expect(resp.status(), `POST /api/payments/runs: ${await resp.text()}`).toBe(201);
+	const runId = ((await resp.json()) as { id: string }).id;
+	expect(runId).toMatch(UUID_RE);
+	return runId;
 }
 
 /** Hard-purge a run + its payments (no void-run API by design). */
 function deletePaymentRun(runId: string): void {
+	// Refuse rather than run `WHERE payment_run_id='undefined'`, which matches
+	// nothing, succeeds, and hides whatever left the id unset.
+	if (!UUID_RE.test(runId)) {
+		throw new Error(`deletePaymentRun: not a run id: ${String(runId)}`);
+	}
 	tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`);
 	tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`);
 }
@@ -118,10 +115,10 @@ test.describe('/payments pay-run daily journey (Runs tab)', () => {
 		await page.goto('/payments');
 		await expect(page.locator('.tab', { hasText: 'Queue' })).toBeVisible();
 
-		const queue = await getQueue(page);
-		expect(queue.length).toBeGreaterThan(0);
-		const target = queue[0];
-		const sourceStatus = await getInvoiceStatus(page, target.id);
+		// A row a run will accept — the queue lists blocked rows too, and
+		// `items[0]` may be one (see `firstPayableQueueInvoice`).
+		const target = await firstPayableQueueInvoice(page);
+		const sourceStatus = target.status;
 
 		let runId: string | null = null;
 		try {
