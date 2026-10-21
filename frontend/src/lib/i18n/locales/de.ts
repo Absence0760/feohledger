@@ -80,6 +80,10 @@ export const messages = {
 	'shell.expandSidebar': 'Seitenleiste ausklappen',
 	'shell.collapseSidebar': 'Seitenleiste einklappen',
 	'shell.collapse': 'Einklappen',
+	'shell.accountLoad.loading': 'Ihr Arbeitsbereich wird geladen…',
+	'shell.accountLoad.errorHeading': 'Ihr Konto konnte nicht geladen werden',
+	'shell.accountLoad.errorBody':
+		'Der Server hat nicht geantwortet. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut, oder melden Sie sich ab und wieder an.',
 
 	// Common buttons / states
 	'common.save': 'Speichern',
@@ -94,6 +98,7 @@ export const messages = {
 	'common.loading': 'Wird geladen …',
 	'common.tryAgain': 'Erneut versuchen',
 	'common.retrying': 'Wird erneut versucht…',
+	'common.retry': 'Erneut versuchen',
 	'common.loadFailed': 'Diese Liste konnte nicht geladen werden. Zum erneuten Versuch aktualisieren.',
 	'common.amountInvalid': 'Geben Sie den Betrag als einfache Zahl ein, z. B. 1200 oder 1200.50',
 	'common.reportingCurrencyUnresolved': 'Berichtswährung',
@@ -422,7 +427,6 @@ export const messages = {
 	'dashboard.aging.days90plus': 'über 90 Tage',
 	'dashboard.overdue': 'Überfällig',
 	'dashboard.error.loadFailed': 'Dashboard konnte nicht geladen werden.',
-	'dashboard.error.retry': 'Erneut versuchen',
 	'emptyState.dashboard.heading': 'Willkommen – erfassen wir Ihre erste Rechnung',
 	'emptyState.dashboard.description':
 		'Sobald Sie Rechnungen hochladen oder importieren, erscheinen hier Ihre Ausgaben-, Fälligkeits- und Cashflow-Kennzahlen.',
@@ -3071,6 +3075,9 @@ export const messages = {
 	'auth.mfa.usePasskey': 'Passkey verwenden',
 	'auth.mfa.useTotp': 'Authenticator-App verwenden',
 	'auth.mfa.useEmail': 'Stattdessen E-Mail verwenden',
+	'auth.mfa.sendingEmail': 'Wird gesendet…',
+	'auth.mfa.emailSent': 'Code gesendet. Bitte prüfen Sie Ihre E-Mails.',
+	'auth.mfa.backToSignIn': 'Zurück zur Anmeldung',
 	'auth.mfa.error.passkey': 'Passkey-Verifizierung fehlgeschlagen',
 	'auth.mfa.error.emailSend': 'E-Mail-Code konnte nicht gesendet werden',
 	'auth.mfa.error.verify': 'Verifizierung fehlgeschlagen',
@@ -3115,6 +3122,7 @@ export const messages = {
 	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
 	// "what happens next" steps and the login panel line.
 	'auth.shell.tagline': 'Von der Rechnung bis zur Zahlung – jede Rechnung abgeglichen.',
+	'auth.shell.homeLink': 'FeohLedger-Startseite',
 	'auth.login.panelBody': 'Erfassung, Freigaben, Abgleich und Zahlungen – an einem Ort.',
 	'auth.signup.nextHeading': 'So geht es weiter',
 	'auth.signup.step1Title': 'Erzählen Sie uns von Ihrem Unternehmen',

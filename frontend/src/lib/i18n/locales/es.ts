@@ -80,6 +80,10 @@ export const messages = {
 	'shell.expandSidebar': 'Expandir barra lateral',
 	'shell.collapseSidebar': 'Contraer barra lateral',
 	'shell.collapse': 'Contraer',
+	'shell.accountLoad.loading': 'Cargando su espacio de trabajo…',
+	'shell.accountLoad.errorHeading': 'No pudimos cargar su cuenta',
+	'shell.accountLoad.errorBody':
+		'El servidor no respondió. Compruebe su conexión e inténtelo de nuevo, o cierre sesión y vuelva a iniciarla.',
 
 	// Common buttons / states
 	'common.save': 'Guardar',
@@ -94,6 +98,7 @@ export const messages = {
 	'common.loading': 'Cargando…',
 	'common.tryAgain': 'Reintentar',
 	'common.retrying': 'Reintentando…',
+	'common.retry': 'Reintentar',
 	'common.loadFailed': 'No se pudo cargar esta lista. Actualiza para volver a intentarlo.',
 	'common.amountInvalid': 'Introduce el importe como un número simple, p. ej. 1200 o 1200.50',
 	'common.reportingCurrencyUnresolved': 'moneda de informe',
@@ -424,7 +429,6 @@ export const messages = {
 	'dashboard.aging.days90plus': 'más de 90 días',
 	'dashboard.overdue': 'Vencida',
 	'dashboard.error.loadFailed': 'No se pudo cargar el panel.',
-	'dashboard.error.retry': 'Reintentar',
 	'emptyState.dashboard.heading': 'Bienvenido: registremos tu primera factura',
 	'emptyState.dashboard.description':
 		'Cuando subas o importes facturas, aquí aparecerán tus métricas de gasto, antigüedad y flujo de caja.',
@@ -3067,6 +3071,9 @@ export const messages = {
 	'auth.mfa.usePasskey': 'Usar una clave de acceso',
 	'auth.mfa.useTotp': 'Usar app de autenticación',
 	'auth.mfa.useEmail': 'Usar correo en su lugar',
+	'auth.mfa.sendingEmail': 'Enviando…',
+	'auth.mfa.emailSent': 'Código enviado. Revise su correo.',
+	'auth.mfa.backToSignIn': 'Volver al inicio de sesión',
 	'auth.mfa.error.passkey': 'Error al verificar la clave de acceso',
 	'auth.mfa.error.emailSend': 'No se pudo enviar el código por correo',
 	'auth.mfa.error.verify': 'Error de verificación',
@@ -3111,6 +3118,7 @@ export const messages = {
 	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
 	// "what happens next" steps and the login panel line.
 	'auth.shell.tagline': 'De la factura al pago, cada factura conciliada.',
+	'auth.shell.homeLink': 'Inicio de FeohLedger',
 	'auth.login.panelBody': 'Extracción, aprobaciones, conciliación y pagos, en un solo lugar.',
 	'auth.signup.nextHeading': 'Qué pasa después',
 	'auth.signup.step1Title': 'Cuéntanos sobre tu empresa',

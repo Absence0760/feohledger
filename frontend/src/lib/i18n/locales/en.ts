@@ -91,6 +91,10 @@ export const en = {
 	'shell.expandSidebar': 'Expand sidebar',
 	'shell.collapseSidebar': 'Collapse sidebar',
 	'shell.collapse': 'Collapse',
+	'shell.accountLoad.loading': 'Loading your workspace…',
+	'shell.accountLoad.errorHeading': 'We couldn\'t load your account',
+	'shell.accountLoad.errorBody':
+		'The server didn\'t answer. Check your connection and try again, or log out and sign in again.',
 
 	// Common buttons / states (reused across surfaces)
 	'common.save': 'Save',
@@ -105,6 +109,7 @@ export const en = {
 	'common.loading': 'Loading…',
 	'common.tryAgain': 'Try again',
 	'common.retrying': 'Retrying…',
+	'common.retry': 'Retry',
 	'common.loadFailed': 'Couldn’t load this list. Refresh to try again.',
 	'common.amountInvalid': 'Enter the amount as a plain number, e.g. 1200 or 1200.50',
 	'common.reportingCurrencyUnresolved': 'reporting currency',
@@ -489,7 +494,6 @@ export const en = {
 	'dashboard.aging.days90plus': '90+ days',
 	'dashboard.overdue': 'Overdue',
 	'dashboard.error.loadFailed': 'Couldn’t load the dashboard.',
-	'dashboard.error.retry': 'Retry',
 
 	// Onboarding empty states (ui/EmptyState.svelte)
 	'emptyState.dashboard.heading': 'Welcome — let’s get your first invoice in',
@@ -3248,6 +3252,9 @@ export const en = {
 	'auth.mfa.usePasskey': 'Use a passkey',
 	'auth.mfa.useTotp': 'Use authenticator app',
 	'auth.mfa.useEmail': 'Use email instead',
+	'auth.mfa.sendingEmail': 'Sending…',
+	'auth.mfa.emailSent': 'Code sent. Check your email.',
+	'auth.mfa.backToSignIn': 'Back to sign in',
 	'auth.mfa.error.passkey': 'Passkey verification failed',
 	'auth.mfa.error.emailSend': 'Failed to send email code',
 	'auth.mfa.error.verify': 'Verification failed',
@@ -3292,6 +3299,7 @@ export const en = {
 	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
 	// "what happens next" steps and the login panel line.
 	'auth.shell.tagline': 'Invoice to payment, every bill matched.',
+	'auth.shell.homeLink': 'FeohLedger home',
 	'auth.login.panelBody': 'Extraction, approvals, matching and payments — in one place.',
 	'auth.signup.nextHeading': 'What happens next',
 	'auth.signup.step1Title': 'Tell us about your company',

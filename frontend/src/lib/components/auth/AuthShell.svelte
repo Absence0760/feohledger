@@ -127,6 +127,18 @@
 	}
 
 	/* ------------------------------- panel -------------------------------- */
+	/* `overflow: hidden` is for the DECORATION only: the art below is drawn
+	   wider than the panel and bleeds off its right edge on purpose, and the
+	   backdrop's corners must follow the radius. Text must never reach that
+	   clip (issue #635 reported step 3 of signup's panel cut mid-word at
+	   ~1000px; a word too long for its line is the case that reproduces it).
+	   Two things keep it out: the panel has no height of its own (a grid item,
+	   sized by its content, so nothing is cut at the bottom), and every line
+	   in `.panel-inner` can wrap — `min-width: 0` down the flex chain and
+	   `overflow-wrap: anywhere`, which also lowers the min-content width, so
+	   even an unbroken token (a long compound word, an address) wraps inside
+	   the box instead of running under the clip. Guard:
+	   `tests-e2e/signup/panel-layout.spec.ts`. */
 	.panel {
 		position: relative;
 		overflow: hidden;
@@ -143,9 +155,14 @@
 		position: relative;
 		z-index: 1;
 		height: 100%;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 		padding: 44px 48px 36px;
+		overflow-wrap: anywhere;
+	}
+	.panel-inner > * {
+		min-width: 0;
 	}
 	.panel-brand {
 		display: inline-flex;

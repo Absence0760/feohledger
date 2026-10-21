@@ -82,6 +82,10 @@ export const messages = {
 	'shell.expandSidebar': 'Expandir barra lateral',
 	'shell.collapseSidebar': 'Recolher barra lateral',
 	'shell.collapse': 'Recolher',
+	'shell.accountLoad.loading': 'Carregando seu espaço de trabalho…',
+	'shell.accountLoad.errorHeading': 'Não foi possível carregar sua conta',
+	'shell.accountLoad.errorBody':
+		'O servidor não respondeu. Verifique sua conexão e tente novamente, ou saia e entre de novo.',
 
 	// Common buttons / states
 	'common.save': 'Salvar',
@@ -96,6 +100,7 @@ export const messages = {
 	'common.loading': 'Carregando…',
 	'common.tryAgain': 'Tentar novamente',
 	'common.retrying': 'Tentando novamente…',
+	'common.retry': 'Tentar novamente',
 	'common.loadFailed': 'Não foi possível carregar esta lista. Atualize para tentar novamente.',
 	'common.amountInvalid': 'Informe o valor como um número simples, por exemplo 1200 ou 1200.50',
 	'common.reportingCurrencyUnresolved': 'moeda de relatório',
@@ -426,7 +431,6 @@ export const messages = {
 	'dashboard.aging.days90plus': 'mais de 90 dias',
 	'dashboard.overdue': 'Vencida',
 	'dashboard.error.loadFailed': 'Não foi possível carregar o painel.',
-	'dashboard.error.retry': 'Tentar novamente',
 	'emptyState.dashboard.heading': 'Boas-vindas — vamos registrar sua primeira nota fiscal',
 	'emptyState.dashboard.description':
 		'Depois que você enviar ou importar notas fiscais, suas métricas de gastos, prazos e fluxo de caixa aparecerão aqui.',
@@ -3070,6 +3074,9 @@ export const messages = {
 	'auth.mfa.usePasskey': 'Usar uma chave de acesso',
 	'auth.mfa.useTotp': 'Usar app autenticador',
 	'auth.mfa.useEmail': 'Usar e-mail em vez disso',
+	'auth.mfa.sendingEmail': 'Enviando…',
+	'auth.mfa.emailSent': 'Código enviado. Verifique seu e-mail.',
+	'auth.mfa.backToSignIn': 'Voltar ao login',
 	'auth.mfa.error.passkey': 'Falha na verificação da chave de acesso',
 	'auth.mfa.error.emailSend': 'Falha ao enviar o código por e-mail',
 	'auth.mfa.error.verify': 'Falha na verificação',
@@ -3114,6 +3121,7 @@ export const messages = {
 	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
 	// "what happens next" steps and the login panel line.
 	'auth.shell.tagline': 'Da fatura ao pagamento, cada fatura conciliada.',
+	'auth.shell.homeLink': 'Página inicial do FeohLedger',
 	'auth.login.panelBody': 'Extração, aprovações, conciliação e pagamentos — em um só lugar.',
 	'auth.signup.nextHeading': 'O que acontece depois',
 	'auth.signup.step1Title': 'Conte-nos sobre sua empresa',

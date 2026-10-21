@@ -81,6 +81,10 @@ export const messages = {
 	'shell.expandSidebar': 'Déplier la barre latérale',
 	'shell.collapseSidebar': 'Replier la barre latérale',
 	'shell.collapse': 'Replier',
+	'shell.accountLoad.loading': 'Chargement de votre espace de travail…',
+	'shell.accountLoad.errorHeading': 'Impossible de charger votre compte',
+	'shell.accountLoad.errorBody':
+		'Le serveur n\'a pas répondu. Vérifiez votre connexion et réessayez, ou déconnectez-vous puis reconnectez-vous.',
 
 	// Common buttons / states
 	'common.save': 'Enregistrer',
@@ -95,6 +99,7 @@ export const messages = {
 	'common.loading': 'Chargement…',
 	'common.tryAgain': 'Réessayer',
 	'common.retrying': 'Nouvelle tentative…',
+	'common.retry': 'Réessayer',
 	'common.loadFailed': 'Impossible de charger cette liste. Actualisez pour réessayer.',
 	'common.amountInvalid': 'Saisissez le montant sous forme de nombre simple, p. ex. 1200 ou 1200.50',
 	'common.reportingCurrencyUnresolved': 'devise de reporting',
@@ -425,7 +430,6 @@ export const messages = {
 	'dashboard.aging.days90plus': 'plus de 90 jours',
 	'dashboard.overdue': 'En retard',
 	'dashboard.error.loadFailed': 'Impossible de charger le tableau de bord.',
-	'dashboard.error.retry': 'Réessayer',
 	'emptyState.dashboard.heading': 'Bienvenue – ajoutons votre première facture',
 	'emptyState.dashboard.description':
 		'Une fois vos factures téléversées ou importées, vos indicateurs de dépenses, d’ancienneté et de trésorerie apparaîtront ici.',
@@ -445,8 +449,8 @@ export const messages = {
 	'invoices.toast.uploadFailed': "Échec de l’importation de {name} : {reason}",
 	'invoices.toast.uploadFailedUnknown': "Échec de l’importation de {name}",
 	'invoices.toast.uploaded': "Facture importée avec succès",
-	'invoices.toast.uploadedBatch': "{succeeded} sur {total, plural, one {# facture importée} other {# factures importées}}",
-	'invoices.toast.uploadedBatchPartial': "{succeeded} sur {total, plural, one {# facture importée} other {# factures importées}} ({failed} en échec)",
+	'invoices.toast.uploadedBatch': "Factures importées : {succeeded} sur {total, plural, other {#}}",
+	'invoices.toast.uploadedBatchPartial': "Factures importées : {succeeded} sur {total, plural, other {#}} ({failed} en échec)",
 	'invoices.toast.uploadedRefreshFailed': "Importé, mais la liste n’a pas pu être actualisée : {error}",
 	'invoices.toast.uploadedRefreshFailedPlain': "Importé, mais la liste n’a pas pu être actualisée",
 	'invoices.toast.notFound': "Facture introuvable",
@@ -3073,6 +3077,9 @@ export const messages = {
 	'auth.mfa.usePasskey': 'Utiliser une clé d\'accès',
 	'auth.mfa.useTotp': 'Utiliser l\'application d\'authentification',
 	'auth.mfa.useEmail': 'Utiliser l\'e-mail à la place',
+	'auth.mfa.sendingEmail': 'Envoi…',
+	'auth.mfa.emailSent': 'Code envoyé. Consultez vos e-mails.',
+	'auth.mfa.backToSignIn': 'Retour à la connexion',
 	'auth.mfa.error.passkey': 'Échec de la vérification de la clé d\'accès',
 	'auth.mfa.error.emailSend': 'Échec de l\'envoi du code par e-mail',
 	'auth.mfa.error.verify': 'Échec de la vérification',
@@ -3117,6 +3124,7 @@ export const messages = {
 	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
 	// "what happens next" steps and the login panel line.
 	'auth.shell.tagline': 'De la facture au paiement, chaque facture rapprochée.',
+	'auth.shell.homeLink': 'Accueil FeohLedger',
 	'auth.login.panelBody': 'Extraction, validations, rapprochement et paiements — au même endroit.',
 	'auth.signup.nextHeading': 'Et ensuite ?',
 	'auth.signup.step1Title': 'Présentez votre entreprise',

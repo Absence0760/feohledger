@@ -84,6 +84,10 @@ export const messages = {
 	'shell.expandSidebar': 'サイドバーを展開',
 	'shell.collapseSidebar': 'サイドバーを折りたたむ',
 	'shell.collapse': '折りたたむ',
+	'shell.accountLoad.loading': 'ワークスペースを読み込んでいます…',
+	'shell.accountLoad.errorHeading': 'アカウントを読み込めませんでした',
+	'shell.accountLoad.errorBody':
+		'サーバーから応答がありません。接続を確認して再試行するか、ログアウトしてからもう一度サインインしてください。',
 
 	// Common buttons / states
 	'common.save': '保存',
@@ -98,6 +102,7 @@ export const messages = {
 	'common.loading': '読み込み中…',
 	'common.tryAgain': '再試行',
 	'common.retrying': '再試行中…',
+	'common.retry': '再試行',
 	'common.loadFailed': 'このリストを読み込めませんでした。更新して再試行してください。',
 	'common.amountInvalid': '金額は 1200 や 1200.50 のような数値で入力してください',
 	'common.reportingCurrencyUnresolved': '報告通貨',
@@ -417,7 +422,6 @@ export const messages = {
 	'dashboard.aging.days90plus': '90日以上',
 	'dashboard.overdue': '期限超過',
 	'dashboard.error.loadFailed': 'ダッシュボードを読み込めませんでした。',
-	'dashboard.error.retry': '再試行',
 	'emptyState.dashboard.heading': 'ようこそ — 最初の請求書を取り込みましょう',
 	'emptyState.dashboard.description':
 		'請求書をアップロードまたはインポートすると、支出・エイジング・キャッシュフローの指標がここに表示されます。',
@@ -3011,6 +3015,9 @@ export const messages = {
 	'auth.mfa.usePasskey': 'パスキーを使用',
 	'auth.mfa.useTotp': '認証アプリを使用',
 	'auth.mfa.useEmail': '代わりにメールを使用',
+	'auth.mfa.sendingEmail': '送信中…',
+	'auth.mfa.emailSent': 'コードを送信しました。メールをご確認ください。',
+	'auth.mfa.backToSignIn': 'サインインに戻る',
 	'auth.mfa.error.passkey': 'パスキーの認証に失敗しました',
 	'auth.mfa.error.emailSend': 'メールコードの送信に失敗しました',
 	'auth.mfa.error.verify': '認証に失敗しました',
@@ -3055,6 +3062,7 @@ export const messages = {
 	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
 	// "what happens next" steps and the login panel line.
 	'auth.shell.tagline': '請求書から支払いまで、すべての請求を照合。',
+	'auth.shell.homeLink': 'FeohLedger ホーム',
 	'auth.login.panelBody': 'データ抽出、承認、照合、支払いをひとつの場所で。',
 	'auth.signup.nextHeading': '次のステップ',
 	'auth.signup.step1Title': '会社情報を入力',

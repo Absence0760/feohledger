@@ -1,6 +1,6 @@
 <script lang="ts">
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
-	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
 	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 	import IconMail from '~icons/material-symbols/mark-email-unread-outline';
 	import IconCheck from '~icons/material-symbols/check-circle';
@@ -284,7 +284,7 @@
 		     which would 404 (docs/decisions.md §193). -->
 		<div class="auth-stack">
 			<div class="head">
-				<BrandMark size={40} />
+				<AuthBrandMark />
 				<h1>{m('auth.signup.closedHeading')}</h1>
 			</div>
 			<p class="sub">{m('auth.signup.closedBody')}</p>
@@ -307,7 +307,7 @@
 	{:else}
 		<form class="signup-form" onsubmit={onSubmit}>
 			<div class="head">
-				<BrandMark size={40} />
+				<AuthBrandMark />
 				<h1>{m('auth.signup.heading')}</h1>
 				<p class="sub">{m('auth.signup.subtitle')}</p>
 			</div>
@@ -661,9 +661,12 @@
 		font-size: 0.78rem;
 		font-weight: 700;
 	}
+	/* `min-width: 0`: a flex item will not shrink below its longest word
+	   otherwise, and the panel clips what overflows (AuthShell § .panel). */
 	.step-text {
 		display: flex;
 		flex-direction: column;
+		min-width: 0;
 		gap: 2px;
 		padding-top: 3px;
 	}
