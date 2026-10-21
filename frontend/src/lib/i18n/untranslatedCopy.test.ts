@@ -51,6 +51,23 @@ const TRANSLATED = [
 	'/src/routes/exceptions/+page.svelte'
 ];
 
+/**
+ * Surfaces whose `toast(…)` messages are fully extracted too.
+ *
+ * The template scan above never reaches a toast: its text is built in
+ * `<script>`, so a page could pass that check while every piece of feedback it
+ * gave was English. `/invoices` did — "Uploading 3 of 5...", "Uploaded 4 of 5
+ * invoices (1 failed)", "Deleted 2 invoice(s)" — with a hand-built `(s)` plural
+ * no translator could reach (#635). Listing a file here holds every word a
+ * `toast()` call can show to `m()`, including the fallback in
+ * `err instanceof Error ? err.message : 'Bulk delete failed'`.
+ *
+ * The two rosters are independent — a page can finish its toasts before its
+ * template (`/invoices` still renders the CSV / JSON / XML format names and the
+ * RAG·n priors chip as literals, so it is not on `TRANSLATED`).
+ */
+const TOASTS_TRANSLATED = ['/src/routes/invoices/+page.svelte'];
+
 /** Attributes a human reads. `class` / `role` / `type` are not copy. */
 const COPY_ATTRS = new Set(['aria-label', 'aria-description', 'title', 'placeholder', 'alt']);
 
@@ -154,6 +171,67 @@ function literalCopyAttrs(source: string): string[] {
 	return out;
 }
 
+/**
+ * Latin-letter string literals inside the first argument of every `toast(…)`
+ * call in the component's instance script — what a toast can show that did not
+ * come from `m()`.
+ *
+ * Walks the parsed ESTree rather than matching text, for the reason
+ * `walkFragment` gives. An `m('key', {…})` call is skipped whole, so its key
+ * and its params are not mistaken for copy; the second argument (the toast's
+ * tone, `'error'` / `'success'`) is never read. A message assembled in a local
+ * first (`const msg = …; toast(msg)`) is out of reach — key it at the point it
+ * is built, which is what `m()` at the toast call already makes the easy path.
+ */
+function literalToastCopy(source: string): string[] {
+	const ast = parse(source, { modern: true }) as unknown as { instance?: { content: unknown } };
+	const out: string[] = [];
+	const seen = new Set<unknown>();
+	function isCall(node: Record<string, unknown>, name: string): boolean {
+		const callee = node.callee as Record<string, unknown> | undefined;
+		return node.type === 'CallExpression' && callee?.type === 'Identifier' && callee.name === name;
+	}
+	function collect(node: unknown): void {
+		if (node === null || typeof node !== 'object' || seen.has(node)) return;
+		seen.add(node);
+		if (Array.isArray(node)) {
+			for (const child of node) collect(child);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		if (isCall(record, 'm')) return;
+		if (record.type === 'Literal' && typeof record.value === 'string' && IS_COPY.test(record.value)) {
+			out.push(record.value);
+		}
+		if (record.type === 'TemplateElement') {
+			const cooked = (record.value as { cooked?: string } | undefined)?.cooked ?? '';
+			if (IS_COPY.test(cooked)) out.push(cooked);
+		}
+		for (const [key, value] of Object.entries(record)) {
+			if (key === 'loc' || key === 'start' || key === 'end') continue;
+			collect(value);
+		}
+	}
+	const visited = new Set<unknown>();
+	(function walk(node: unknown): void {
+		if (node === null || typeof node !== 'object' || visited.has(node)) return;
+		visited.add(node);
+		if (Array.isArray(node)) {
+			for (const child of node) walk(child);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		if (isCall(record, 'toast')) {
+			collect((record.arguments as unknown[] | undefined)?.[0]);
+		}
+		for (const [key, value] of Object.entries(record)) {
+			if (key === 'loc') continue;
+			walk(value);
+		}
+	})(ast.instance?.content);
+	return out;
+}
+
 describe('translated surfaces carry no literal copy', () => {
 	it('reads the component tree', () => {
 		expect(Object.keys(RAW).length).toBeGreaterThan(50);
@@ -190,6 +268,29 @@ describe('translated surfaces carry no literal copy', () => {
 		expect(literalCopyAttrs(sample)).toEqual(['aria-label="Cookie and privacy consent"']);
 	});
 
+	it('detects literal toast copy, and only toast copy', () => {
+		// The four shapes /invoices shipped: a bare literal, a template literal
+		// with a hand-built plural, and an English fallback behind
+		// `err.message` — beside a keyed toast, the tone argument, and an API
+		// path that is a string literal but not a toast message.
+		const sample = [
+			'<script lang="ts">',
+			"\tconst path = `/api/invoices/${id}`;",
+			"\ttoast('Invoice deleted', 'success');",
+			"\ttoast(`Deleted ${n} invoice(s)`, 'success');",
+			"\ttoast(err instanceof Error ? err.message : 'Bulk delete failed', 'error');",
+			"\ttoast(m('invoices.toast.deleted', { n, label: 'not copy' }), 'success');",
+			'</script>',
+			'<p>{m(\'x\')}</p>'
+		].join('\n');
+		expect(literalToastCopy(sample)).toEqual([
+			'Invoice deleted',
+			'Deleted ',
+			' invoice(s)',
+			'Bulk delete failed'
+		]);
+	});
+
 	for (const path of TRANSLATED) {
 		it(`${path} renders every word through m()`, () => {
 			const source = RAW[path];
@@ -203,6 +304,17 @@ describe('translated surfaces carry no literal copy', () => {
 				`${path} has a hardcoded human-readable attribute. An aria-label is read aloud; key it like any other string.`
 			).toEqual([]);
 			expect(source, `${path} should call m()`).toMatch(/\bm\(/);
+		});
+	}
+
+	for (const path of TOASTS_TRANSLATED) {
+		it(`${path} puts every toast through m()`, () => {
+			const source = RAW[path];
+			expect(source, `${path} not found through import.meta.glob`).toBeTypeOf('string');
+			expect(
+				literalToastCopy(source),
+				`${path} shows a literal in a toast. Key it (all six catalogues) and pass m(…) — use an ICU plural, never a hand-built "(s)".`
+			).toEqual([]);
 		});
 	}
 });

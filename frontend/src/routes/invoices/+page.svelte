@@ -156,7 +156,10 @@
 
 		for (let i = 0; i < total; i += BATCH) {
 			const batch = Array.from(files).slice(i, i + BATCH);
-			uploadProgress = total > 1 ? `Uploading ${Math.min(i + BATCH, total)} of ${total}...` : 'Uploading...';
+			uploadProgress =
+				total > 1
+					? m('invoices.action.uploadingProgress', { done: Math.min(i + BATCH, total), total })
+					: m('invoices.action.uploading');
 			const results = await Promise.allSettled(
 				batch.map((file) => api.upload<{ id: string; status: string }>('/api/invoices/upload', file))
 			);
@@ -168,7 +171,12 @@
 				} else {
 					failed++;
 					const reason = (results[j] as PromiseRejectedResult).reason;
-					toast(`Failed to upload ${batch[j].name}: ${reason instanceof Error ? reason.message : 'Unknown error'}`, 'error');
+					toast(
+						reason instanceof Error
+							? m('invoices.toast.uploadFailed', { name: batch[j].name, reason: reason.message })
+							: m('invoices.toast.uploadFailedUnknown', { name: batch[j].name }),
+						'error'
+					);
 				}
 			}
 		}
@@ -183,16 +191,21 @@
 			await invoiceStore.fetchCounts(buildParams());
 
 			if (total === 1 && succeeded === 1) {
-				toast('Invoice uploaded successfully', 'success');
+				toast(m('invoices.toast.uploaded'), 'success');
 			} else if (total > 1) {
-				toast(`Uploaded ${succeeded} of ${total} invoice${total > 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`, succeeded > 0 ? 'success' : 'error');
+				toast(
+					failed
+						? m('invoices.toast.uploadedBatchPartial', { succeeded, total, failed })
+						: m('invoices.toast.uploadedBatch', { succeeded, total }),
+					succeeded > 0 ? 'success' : 'error'
+				);
 			}
 		} catch (err) {
 			// The upload itself succeeded — say so, and say the list is stale.
 			toast(
 				err instanceof Error
-					? `Uploaded, but the list could not be refreshed: ${err.message}`
-					: 'Uploaded, but the list could not be refreshed',
+					? m('invoices.toast.uploadedRefreshFailed', { error: err.message })
+					: m('invoices.toast.uploadedRefreshFailedPlain'),
 				'error'
 			);
 		} finally {
@@ -464,7 +477,7 @@
 		api
 			.get<Invoice>(`/api/invoices/${id}`)
 			.then((inv) => (editing = inv))
-			.catch(() => toast('Invoice not found', 'error'));
+			.catch(() => toast(m('invoices.toast.notFound'), 'error'));
 	});
 
 	/**
@@ -692,14 +705,14 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('invoices.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching invoice(s)`, 'success');
+				toast(m('invoices.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Failed to select all matching', 'error');
+			toast(err instanceof Error ? err.message : m('invoices.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -714,11 +727,11 @@
 			selected = new Set();
 			selectedAllMatching = false;
 			const msg = res.skipped?.length
-				? `Deleted ${res.deleted}, skipped ${res.skipped.length} (immutable)`
-				: `Deleted ${res.deleted} invoice(s)`;
+				? m('invoices.toast.deletedSkipped', { deleted: res.deleted, skipped: res.skipped.length })
+				: m('invoices.toast.deleted', { n: res.deleted });
 			toast(msg, 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk delete failed', 'error');
+			toast(err instanceof Error ? err.message : m('invoices.toast.bulkDeleteFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -761,14 +774,20 @@
 			if (res.skipped?.length) {
 				const uniqueReasons = [...new Set(res.skipped.map((s) => s.reason))];
 				const reasonText =
-					uniqueReasons.length === 1 ? uniqueReasons[0] : `${uniqueReasons.length} different reasons`;
-				msg = `Updated ${res.updated}, skipped ${res.skipped.length} (${reasonText})`;
+					uniqueReasons.length === 1
+						? uniqueReasons[0]
+						: m('invoices.toast.differentReasons', { n: uniqueReasons.length });
+				msg = m('invoices.toast.updatedSkipped', {
+					updated: res.updated,
+					skipped: res.skipped.length,
+					reason: reasonText
+				});
 			} else {
-				msg = `Updated ${res.updated} invoice(s)`;
+				msg = m('invoices.toast.updated', { n: res.updated });
 			}
 			toast(msg, 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk status change failed', 'error');
+			toast(err instanceof Error ? err.message : m('invoices.toast.bulkStatusFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -799,9 +818,9 @@
 			} else {
 				triggerDownload(blob, `invoices-export.${format}`);
 			}
-			toast(`Exported ${selected.size} invoice(s)`, 'success');
+			toast(m('invoices.toast.exported', { n: selected.size }), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk export failed', 'error');
+			toast(err instanceof Error ? err.message : m('invoices.toast.bulkExportFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -826,9 +845,9 @@
 			await api.delete(`/api/invoices/${id}`);
 			await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 			await invoiceStore.fetchCounts(buildParams());
-			toast('Invoice deleted', 'success');
+			toast(m('invoices.toast.deletedOne'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Delete failed', 'error');
+			toast(err instanceof Error ? err.message : m('invoices.toast.deleteFailed'), 'error');
 		} finally {
 			deletingId = null;
 			confirmDeleteId = null;
