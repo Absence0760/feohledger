@@ -215,6 +215,15 @@ statement line**. Invoice numbers are normalised for matching via
 `normalize_invoice_number` — strip, upper-case, drop every non-alphanumeric
 char, so `"INV-001"`, `"inv 001"` and `"#INV001"` all collapse to `"INV001"`.
 
+This is deliberately **not** the duplicate gate's
+`invoice_warnings.normalize_invoice_number`, despite the shared name. The gate
+keeps separator positions (`INV-1-2` ≠ `INV-12`) and drops leading zeros
+(`INV-001` = `INV-1`), because a false match there blocks or approves a payment
+(decisions §77). Here a match only pairs a statement line with a ledger row,
+each consumed at most once, and a miss falls through to amount + date — so the
+wider separator-blind match is the safer choice. Changing either function does
+not change the other (issue #575 audited the pair).
+
 For each statement line:
 
 1. **Leg 1 — invoice number first.** Exact normalised invoice-number match
