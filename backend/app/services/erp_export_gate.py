@@ -27,7 +27,7 @@ segregation check refuses anyone implicated in the invoice. Nothing here
 bypasses that: the gate only reads the exceptions.
 
 **FeohLedger already paying the invoice refuses the push too** (decisions
-§306). Staging a payment run books a live ``Payment`` (``pending``; an
+§309). Staging a payment run books a live ``Payment`` (``pending``; an
 ``exported`` NACHA file is the same) and minting a virtual card books a live
 ``VirtualCard``, and neither moves the invoice off ``approved``. A bill pushed
 then is payable in the ERP as well, so it could be paid twice: once by our
@@ -159,7 +159,7 @@ async def erp_export_refusal(
 ) -> ExportRefusal | None:
     """Every reason this invoice may not be pushed now, or None. The first wins:
     an open duplicate / fraud exception (§286), then a live payment or card
-    (§306). Both the HTTP doors and ``erp._call_erp`` ask this one function."""
+    (§309). Both the HTTP doors and ``erp._call_erp`` ask this one function."""
     exception_type = await erp_export_blocking_exception(db, invoice_id)
     if exception_type is not None:
         return ExportRefusal(

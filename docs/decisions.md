@@ -13562,7 +13562,7 @@ run and a bulk approve each dispatch once), `tests/test_erp_dispatch.py` and
 and `frontend/tests-e2e/erp/xero.spec.ts` (approving reaches fake Xero as a bill
 with no click; with the flag off nothing is posted until the click).
 
-## 306. The ERP push refuses an invoice FeohLedger is already paying (2026-10-21)
+## 309. The ERP push refuses an invoice FeohLedger is already paying (2026-10-21)
 
 **The gap.** The run builder and the card mint each refuse an invoice the
 other rail already holds (`uq_payments_one_live_per_invoice`,

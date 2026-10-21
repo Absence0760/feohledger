@@ -885,7 +885,7 @@ any adapter, so a push queued before the run was staged is stopped too. A
 voided, failed or cancelled payment and a cancelled card release it. With an
 ERP the supported order is push first, then pay: a payment against a
 `posted_in_erp` invoice never meets this gate. See `erp-integration.md`
-§ An invoice FeohLedger is already paying refuses the push, and decisions §306.
+§ An invoice FeohLedger is already paying refuses the push, and decisions §309.
 
 **Tests:** `tests/test_erp_export_blocking_exceptions.py`.
 

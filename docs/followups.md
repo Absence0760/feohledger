@@ -40,12 +40,12 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-21 — refusing the ERP push for an invoice
-already being paid (decisions §306) opened one (c) entry (the run builder's
+already being paid (decisions §309) opened one (c) entry (the run builder's
 unlocked invoice read), taking the file from 126 → 127. Before that,
-2026-10-21 — storing the ERP document id on the invoice
-(decisions §302) opened two (c) entries, the deep link not choosing the ERP
-organisation/company and the ERP webhook's id-only path, taking the file from
-124 → 126. Before that, 2026-10-21 — auto-sending an approved invoice to the ERP
+2026-10-21 — storing the ERP document id on the invoice (decisions §302) opened
+two (c) entries, the deep link not choosing the ERP organisation/company and the
+ERP webhook's id-only path, taking the file from 124 → 126. Before that,
+2026-10-21 — auto-sending an approved invoice to the ERP
 (decisions §304) opened one (c) entry, an approval whose post-commit push never
 ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
 true` before deploying it, taking the file from 122 → 124. Before that, 2026-10-21 — the adapters' honest paid read (decisions
@@ -1961,7 +1961,7 @@ providers still have the same gap.
       the provider. **Trigger:** the next change to either adapter's OAuth
       spec, or before either provider's platform app goes live.
 
-### Surfaced by refusing the ERP push for an invoice already being paid (2026-10-21, decisions §306)
+### Surfaced by refusing the ERP push for an invoice already being paid (2026-10-21, decisions §309)
 
 - [ ] **(c) The run builder reads its invoices without a lock, so it can race
       an ERP send.** `create_payment_run_for_invoices` loads the run's invoices

@@ -56,7 +56,7 @@ goes to [decisions.md](decisions.md).
 ## The run builder reads a missing invoice currency as USD
 
 **Found 2026-10-21**, in the money-path review of the ERP push gate (decisions
-§306); diagnosed from the code, not reproduced. `services/payment_runs.create_payment_run_for_invoices`
+§309); diagnosed from the code, not reproduced. `services/payment_runs.create_payment_run_for_invoices`
 refuses a run spanning more than one currency with
 `currencies = {invoices[iid].currency or "USD" for iid in invoice_ids}`. An
 invoice with no currency therefore counts as USD: a run of one USD invoice and
