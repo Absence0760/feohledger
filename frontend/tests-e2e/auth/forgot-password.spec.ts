@@ -169,6 +169,64 @@ test.describe('/login/reset-password', () => {
 		);
 	});
 
+	test('a link that dies between loading and submitting switches to the request-a-new-link screen', async ({
+		page
+	}) => {
+		// The load-time check passed, then the token was spent (another tab, the
+		// welcome-email copy of a set-password link) or expired before submit.
+		// The redemption answers the same opaque 400 the check would have; the
+		// page used to banner it over a form that could never succeed.
+		await stubCheck(page, 'late@acme.example');
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) =>
+				route.fulfill({ status: 400, json: { detail: 'Invalid or expired reset link.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token&mode=set');
+
+		await page.locator('input[type="password"]').first().fill('BrandNewPassw0rd!42');
+		await page.locator('input[type="password"]').nth(1).fill('BrandNewPassw0rd!42');
+		await page.getByRole('button', { name: 'Set password' }).click();
+
+		// The dead-link screen, focused so it is announced (the focused submit
+		// button went with the form) — with the set-mode hint and the way on.
+		// One focus target holds both the reason and the set-mode next step, and
+		// it is not also an alert (that would be read twice).
+		const focused = page.locator(':focus');
+		await expect(focused).toContainText(
+			'This reset link is invalid or has expired. Please request a new one.'
+		);
+		await expect(focused).toContainText(/set-password links work once and expire/i);
+		await expect(focused).not.toHaveAttribute('role', 'alert');
+		await expect(page.getByRole('link', { name: /Reset your password/i })).toHaveAttribute(
+			'href',
+			'/login/forgot-password'
+		);
+		await expect(page.locator('input[type="password"]')).toHaveCount(0);
+		// Not ALSO the server's English in the banner over it.
+		await expect(page.getByText('Invalid or expired reset link.', { exact: true })).toHaveCount(0);
+	});
+
+	test('a refusal that is not about the link keeps the form, with the reason', async ({
+		page
+	}) => {
+		await stubCheck(page, 'weak@acme.example');
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) =>
+				route.fulfill({ status: 429, json: { detail: 'Too many requests. Slow down.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+
+		await page.locator('input[type="password"]').first().fill('BrandNewPassw0rd!42');
+		await page.locator('input[type="password"]').nth(1).fill('BrandNewPassw0rd!42');
+		await page.getByRole('button', { name: /Reset password/i }).click();
+
+		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
+		await expect(page.locator('input[type="password"]')).toHaveCount(2);
+		await expect(page.getByText(/invalid or has expired/i)).toHaveCount(0);
+	});
+
 	test('set mode: a password manager can save the new password under the account', async ({
 		page
 	}) => {

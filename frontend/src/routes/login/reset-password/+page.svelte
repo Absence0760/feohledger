@@ -23,6 +23,11 @@
 	let error = $state('');
 	let submitting = $state(false);
 	let successEl = $state<HTMLParagraphElement | null>(null);
+	let invalidEl = $state<HTMLDivElement | null>(null);
+	// The link died on submit rather than on load: the explanation is then
+	// focused (the submit button went with the form), and focus is what
+	// announces it — a `role="alert"` as well would read it twice.
+	let invalidOnSubmit = $state(false);
 
 	onMount(async () => {
 		token = page.url.searchParams.get('token') ?? '';
@@ -48,6 +53,7 @@
 			// says nothing about the link, so telling the visitor to request a
 			// new one would be wrong: say what happened and let them retry.
 			if (err instanceof ApiError && err.status === 400) {
+				invalidOnSubmit = true;
 				phase = 'invalid';
 			} else {
 				error = err instanceof Error ? err.message : m('auth.resetPassword.checkFailed');
@@ -95,11 +101,23 @@
 			await tick();
 			successEl?.focus();
 		} catch (err) {
-			// A token spent or expired since the page loaded surfaces as the
-			// backend's own opaque "Invalid or expired reset link." (the cases are
-			// indistinguishable by design — services/password_reset.py); anything
-			// else (weak password, rate limit) rides the backend's own detail text.
-			error = err instanceof Error ? err.message : m('auth.resetPassword.invalidToken');
+			// A 400 is the link refusing (spent, expired or its account since
+			// deactivated, folded together by design — services/password_reset.py),
+			// the same status the load-time check answers. A token that died after
+			// the page loaded is the same dead link, so it gets the same screen and
+			// its way forward, a fresh link — not a banner over a form that can
+			// never succeed. Anything else (a 422 weak password, a 429) rides the
+			// backend's own detail text and leaves the form to retry.
+			if (err instanceof ApiError && err.status === 400) {
+				invalidOnSubmit = true;
+				phase = 'invalid';
+				// The focused submit button went with the form; land focus on the
+				// explanation so it is announced (as the success branch does).
+				await tick();
+				invalidEl?.focus();
+			} else {
+				error = err instanceof Error ? err.message : m('auth.resetPassword.invalidToken');
+			}
 		} finally {
 			submitting = false;
 		}
@@ -178,12 +196,21 @@
 			</button>
 		</form>
 	{:else if phase === 'invalid'}
-		<p class="explain" role="alert">
-			{token ? m('auth.resetPassword.invalidToken') : m('auth.resetPassword.missingToken')}
-		</p>
-		{#if setMode}
-			<p class="explain">{m('auth.resetPassword.setExpiredHint')}</p>
-		{/if}
+		<!-- One focus target for the explanation AND the set-mode hint, so a
+		     screen reader hears what to do next, not only what went wrong. -->
+		<div
+			class="invalid"
+			role={invalidOnSubmit ? undefined : 'alert'}
+			tabindex="-1"
+			bind:this={invalidEl}
+		>
+			<p class="explain">
+				{token ? m('auth.resetPassword.invalidToken') : m('auth.resetPassword.missingToken')}
+			</p>
+			{#if setMode}
+				<p class="explain">{m('auth.resetPassword.setExpiredHint')}</p>
+			{/if}
+		</div>
 		<a class="link-btn" href="/login/forgot-password">{m('auth.forgotPassword.heading')}</a>
 	{:else if phase === 'unavailable'}
 		<!-- The failure itself is in AuthCard's error banner. -->
@@ -203,6 +230,11 @@
 	}
 	.strength li.ok {
 		color: var(--success);
+	}
+	.invalid {
+		display: flex;
+		flex-direction: column;
+		gap: inherit;
 	}
 	.explain {
 		margin: 0;
