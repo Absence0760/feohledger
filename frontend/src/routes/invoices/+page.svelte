@@ -874,11 +874,6 @@
 <PageHeader title={m('invoices.title')}>
 	{#snippet actions()}
 		<input type="file" accept={INVOICE_FILE_ACCEPT} multiple bind:this={fileInput} onchange={handleUpload} hidden />
-		{#if auth.isAdmin}
-			<button class="btn-secondary" onclick={() => (showBulkRecode = true)}>
-				{m('invoices.action.bulkRecode')}
-			</button>
-		{/if}
 		{#if canEnterInvoices}
 			<button class="btn-secondary" onclick={() => (showCreate = true)}>
 				{m('invoices.action.create')}
@@ -900,6 +895,15 @@
 			     backend/docs/csv-import.md. -->
 			<button class="btn-secondary" onclick={() => (showImportCsv = true)}>
 				{m('invoices.action.importCsv')}
+			</button>
+		{/if}
+		<!-- Last: re-coding is maintenance, so it does not lead the bar ahead of
+		     the ways to add an invoice (#635). Not hidden on an empty list — that
+		     list is scoped to the selected entity, and the tool rewrites cached
+		     vendor GL codes, which matter whether or not this entity has invoices. -->
+		{#if auth.isAdmin}
+			<button class="btn-secondary" onclick={() => (showBulkRecode = true)}>
+				{m('invoices.action.bulkRecode')}
 			</button>
 		{/if}
 	{/snippet}
