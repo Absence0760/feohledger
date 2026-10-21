@@ -228,6 +228,19 @@ All backend variables are prefixed with `FEOH_` and loaded via `pydantic-setting
 
 The `FEOH_DATABASE_URL` points to the **control-plane database** (`feohledger`). Tenant database URLs are derived automatically by replacing the database name with `<FEOH_TENANT_DB_PREFIX><slug>` (e.g., `feoh_acme`) — and only the name: the driver, credentials, host, port and any query string carry over (`app/tenant_url.make_tenant_url`, which Alembic's per-tenant run uses too).
 
+**`FEOH_DATABASE_IAM_AUTH`** (default `false`). On, every connection signs in
+with an RDS IAM auth token minted per new connection, off the event loop, from
+the process's AWS credentials (the VM's instance profile), instead of a
+password in the URL. Every engine, raw connection, Alembic run and Lambda
+handler goes through `app/db_engine.py`, so it applies to all of them. With it
+on, `FEOH_DATABASE_URL` must name the user and host with **no password**
+(`postgresql+asyncpg://feoh_app@<endpoint>:5432/feohledger`) and `PGSSLMODE`
+must be `verify-full`. The API refuses to boot otherwise, every engine refuses
+to build, and `deploy/decrypt-env.sh` refuses first. An AWS region must resolve
+(`AWS_REGION` / `AWS_DEFAULT_REGION`). Off is local dev and CI: password auth
+against the local container, unchanged. The production role, cutover and
+rollback: `deploy/README.md` § Database role, `docs/decisions.md` §304.
+
 **Database TLS is not a `FEOH_` variable.** asyncpg (every engine, and the raw connections tenant provisioning opens) and libpq (`pg_dump` and friends) both read the standard `PGSSLMODE` / `PGSSLROOTCERT` when the URL names no TLS option, so that is how a deployment sets it: the backend image sets `PGSSLROOTCERT` to the RDS CA bundle it carries, and the deployment sets `PGSSLMODE=verify-full` for RDS. Unset, asyncpg's default is `prefer` — what local dev uses. `docs/minimal-deployment.md` § Database TLS.
 
 ### Alembic

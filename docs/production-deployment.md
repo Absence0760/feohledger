@@ -122,7 +122,10 @@ The FastAPI app uses `pydantic-settings` (`backend/app/config.py`) with the `FEO
 
 ```env
 # Database
-FEOH_DATABASE_URL=postgresql+asyncpg://user:pass@rds-host:5432/feohledger
+# The app role with no password: IAM auth mints a token per connection
+# (docs/decisions.md §304). The task role needs rds-db:connect on feoh_app.
+FEOH_DATABASE_URL=postgresql+asyncpg://feoh_app@rds-host:5432/feohledger
+FEOH_DATABASE_IAM_AUTH=true
 FEOH_TENANT_DB_PREFIX=feoh_
 # Database TLS — unprefixed, read by asyncpg and libpq alike. The image already
 # sets PGSSLROOTCERT to the RDS CA bundle (backend/Dockerfile); every task and

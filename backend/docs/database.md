@@ -37,6 +37,30 @@ Tenant connections are derived automatically:
 postgresql+asyncpg://postgres:postgres@localhost:5432/feoh_acme
 ```
 
+**Every connection is made by `app/db_engine.py`.** Import
+`create_async_engine` from there (a drop-in for SQLAlchemy's), and open a raw
+connection (CREATE / DROP DATABASE, a one-off probe) with
+`connect_raw(url, database=...)`, never a bare `asyncpg.connect`.
+`tests/test_db_engine_chokepoint.py` fails on any other way in, under `app/`,
+`scripts/` or `alembic/`. The reason is `FEOH_DATABASE_IAM_AUTH`: in production
+the app signs in as the `feoh_app` role with an RDS IAM token the factory mints
+per new connection, off the event loop, and the URL carries no password. A
+connection opened around the factory would have nothing to sign in with
+(`docs/environment.md`, `../../docs/decisions.md` §304).
+
+**The production role owns everything, but is not a superuser.** The app signs
+in as `feoh_app` and every session acts as `feoh_owner` (its `role` default),
+which holds `CREATEDB` and owns the control plane, every tenant database and
+every object in them. Neither role is in `rds_superuser` or can create roles or
+untrusted extensions. `DROP DATABASE … WITH (FORCE)` needs `SET ROLE NONE`
+first, as `tenant_provisioning._drop_postgres_database` does, because only the
+signing-in role may terminate its own other sessions. pgvector comes from `template1`, where the master created
+it once, so `CREATE EXTENSION IF NOT EXISTS vector` is a no-op the role may run.
+**A new migration must not need more than owner rights.** Creating an untrusted
+extension, `ALTER SYSTEM`, or a role change would fail in production as the app
+role. Such a step is a master (break-glass) operation, done by hand
+(`../../deploy/README.md` § Database role).
+
 ## Data Models
 
 ### Numeric column types — the guard is opt-out

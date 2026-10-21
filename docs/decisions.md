@@ -13376,3 +13376,157 @@ No caller under `app/` reads `get_invoice_status` today, so nothing changes at
 runtime.
 
 Guards: `tests/test_erp_{quickbooks_online,xero,sage_accounting_za,syspro,sage_intacct,blackbaud}_adapter.py`.
+
+## 304. The app signs in to RDS as a least-privilege role with an IAM token, and the master password leaves the VM (2026-10-21)
+
+**The problem.** Production connected as the RDS master user `postgres`, whose
+password sat in `FEOH_DATABASE_URL` in the VM's deploy env. A leaked env file,
+a backup of the VM disk, or a shell on the box was therefore a full,
+long-lived login to every tenant database, as a member of `rds_superuser`.
+IAM database authentication was already enabled on the instance and used by
+nothing. This had to close before the first paying customer's data landed.
+
+**What changed.**
+
+- **Two roles, created by the master once** with `deploy/db-role-cutover.sh`
+  (the SQL is in `deploy/sql/db-role-{cluster,database}.sql`):
+  - `feoh_owner` is `NOLOGIN`, `CREATEDB`, and a member of nothing. It owns the
+    control plane, every `feoh_<slug>` database, and everything in them.
+  - `feoh_app` is `LOGIN` with no password. It is a member of `rds_iam` and of
+    `feoh_owner`, and nothing else. Its `role` defaults to `feoh_owner`, so
+    every session acts as the owner and every object the app creates is owned
+    by the owner too.
+  - Neither role has `CREATEROLE`, membership in `rds_superuser`, or superuser.
+  - The cutover verifies all of this (attributes and an allowlist of
+    memberships) on every run, not only when it creates the roles.
+- **A token per new connection.** `backend/app/db_engine.py` is now where every
+  engine and every raw asyncpg connection is made. `create_async_engine` there
+  is a drop-in for SQLAlchemy's; `connect_raw` replaces bare `asyncpg.connect`.
+  With `FEOH_DATABASE_IAM_AUTH` on, both pass asyncpg a callable `password`
+  that signs a fresh RDS auth token. asyncpg calls it once per connection
+  attempt and awaits an awaitable result, so the 15-minute token lifetime
+  never matters to a pooled engine (minting once per process would break the
+  first reconnect after a quarter of an hour). The same callable works through
+  SQLAlchemy 2's asyncpg dialect (`connect_args` reach `asyncpg.connect`
+  unchanged), so no `do_connect` event is needed, and a single mechanism covers
+  engines, raw connections, Alembic and the Lambda handlers.
+- **Off the event loop.** `generate_db_auth_token` signs locally, but it needs
+  credentials, and botocore resolves and refreshes instance-profile credentials
+  with a synchronous IMDS call. The callable is a coroutine that runs every
+  boto3 step in `asyncio.to_thread`. The one RDS client is created lazily, in
+  that worker thread, under a lock.
+- **Fail closed.** With the flag on, a URL that still carries a password, a
+  URL with no user or host, or TLS short of `verify-full` is refused: at boot
+  (`Settings`), at every engine construction, and by `decrypt-env.sh` before a
+  deploy. A token is a bearer credential for its 15 minutes, so `require`
+  (which accepts any certificate) is not enough. The flag defaults off, so a
+  laptop and CI keep password auth against the local container (guard rail 7).
+- **Deploy tooling.** `deploy/lib.sh` accepts the password-less IAM URL. Each
+  `pgtools` run (`psql.sh`, `backup.sh`) mints its own token on the VM with
+  `aws rds generate-db-auth-token` and passes it as `PGPASSWORD` through the
+  environment, never an argv. The instance role holds `rds-db:connect` on
+  exactly `dbuser:<resource id>/feoh_app` (`infra/compute.tf`). `feoh_owner`
+  cannot sign in at all. The master
+  password lives only in `infra-secrets` (`terraform.sops.yaml`), for
+  break-glass.
+
+**pgvector is not a trusted extension on RDS.** The AWS list of extensions a
+non-`rds_superuser` holding `CREATE` may install does not include `vector`
+(verified against the RDS user guide's "PostgreSQL trusted extensions" list,
+2026-10-21; the pgvector image's control file says the same locally). So the
+cutover creates it once in `template1`, as the master. Every database the app
+creates afterwards is copied from `template1` and already has it, and the
+`CREATE EXTENSION IF NOT EXISTS vector` in provisioning and migration 0003 is
+a permitted no-op. PostgreSQL checks for an existing extension before it checks
+privilege, which was verified against a non-superuser role. The extension (and
+its member objects) stays owned by the master. Ownership cannot be transferred
+anyway, and updating pgvector is a master operation.
+
+**No separate provisioning role.** The earlier follow-up proposed "a separate,
+narrower path for `CREATE DATABASE`" (`feoh_owner` is not that: it exists for
+the master's sake, and the app always acts as it). A provisioning role would add
+no isolation. Self-service
+signup and partner provisioning run `CREATE DATABASE` inside the running API,
+so a second role's credential would have to be reachable from the same process
+(and the same instance profile). Anyone who compromised the API would hold both
+roles. What `CREATEDB` adds on top of owning every tenant database already is
+only the ability to create more databases. The real reductions are the ones
+made here: no `rds_superuser`, no `CREATEROLE`, and no password to steal.
+
+**Explicit `ALTER … OWNER`, not `REASSIGN OWNED`.** `REASSIGN OWNED BY postgres`
+also reassigns shared objects the master owns (the `postgres` maintenance
+database, any database outside the app's set) and extension ownership, in one
+statement whose reach cannot be read off the page. Here everything moves to
+`feoh_owner`. The per-database SQL names
+what it moves: schemas, relations (owned sequences follow their table), types,
+and routines. It then fails if `pg_shdepend` shows anything else outside
+extensions still owned by the master. An object class it does not handle stops
+the run, so nothing is quietly left behind.
+
+**Why two roles, and why the master never joins the login role.** RDS signs a
+member of `rds_iam` in by token only, and AWS documents that inherited
+membership counts. The master has to stay a password login, because it is the
+rollback and the break-glass path. It also has to be able to `SET` to the
+owner, since a non-superuser may transfer ownership only to such a role, and to
+inherit the owner's privileges, which is what makes the rollback work. One role
+cannot both carry `rds_iam` and be joined by the master. So ownership sits on
+`feoh_owner`, which has no `rds_iam` and which the master joins
+`WITH INHERIT TRUE, SET TRUE`. The master is never made a member of `feoh_app`
+beyond the ADMIN-only grant PG16 gives a role's creator, the same link AWS's own
+"`CREATE USER …; GRANT rds_iam …`" procedure leaves. The cutover refuses to
+finish if the master is a member of `feoh_app` with INHERIT or SET. (The first
+draft made the master an inheriting member of a single `feoh_app`. The security
+review caught that this could make the master IAM-only on RDS, part-way through
+the cutover itself.)
+
+One consequence: `DROP DATABASE … WITH (FORCE)` terminates the database's other
+sessions. Postgres allows that only to a role holding the privileges of the role
+that *signed those sessions in*, and `feoh_owner` does not hold `feoh_app`'s.
+`tenant_provisioning._drop_postgres_database` therefore runs `SET ROLE NONE`
+first. As the session user, `feoh_app`, it has both its own sessions and the
+owner's privileges. `RESET ROLE` would not do this, because it returns to the
+role default, `feoh_owner`. Locally the statement is a no-op.
+
+**The cutover's own queries resolve names from the catalog only.** After the
+cutover the app owns `public` in every app database. A `public.format(text,
+text, text)` planted there would match more exactly than
+`pg_catalog.format(text, VARIADIC "any")`, and so it would run with the master's
+privileges on the next re-run (the CVE-2018-1058 shape). Both SQL files set
+`search_path = pg_catalog, pg_temp`, and the script passes the same setting to
+every psql it runs through `PGOPTIONS`. A test plants exactly that function.
+
+**Rollback is trivial by construction.** The master inherits the owner's
+privileges. Pointing `FEOH_DATABASE_URL` back at the master, with
+`FEOH_DATABASE_IAM_AUTH` off, just works, migrations and tenant provisioning
+included. Objects created during that window belong to the master, and
+re-running the cutover hands them back.
+
+**What stays with the master (break-glass).** A logical `restore.sh` recreates
+each database from `template0`, which has no pgvector, so it refuses in IAM mode
+and runs with the master URL, followed by a re-run of the cutover. A
+point-in-time restore keeps the roles, and is still the first choice. The
+`rds-db:connect` ARN names the instance's resource id, so a PITR into a new
+instance needs the grant re-applied. Rotating the master password no longer
+touches the VM.
+
+**No migration.** Roles and database ownership are cluster-level. Nothing in any
+schema changes, so there is no Alembic revision.
+
+**Verified.** Every engine site moved to the factory, and
+`tests/test_db_engine_chokepoint.py` fails on a new direct
+`create_async_engine` / `async_engine_from_config` / `asyncpg.connect` under
+`app/`, `scripts/` or `alembic/`. `tests/test_db_engine.py` covers the factory:
+a token per new connection against the real local Postgres with the generator
+stubbed, minted off the loop, and the fail-closed rules.
+`tests/test_db_role_cutover.py` runs the cutover SQL as a non-superuser
+master-like role on throwaway databases, and covers the script's wiring.
+Deploy-side coverage is in `test_deploy_db_mode.py` and
+`test_deploy_decrypt_env.py`. End to end against a throwaway pgvector cluster,
+with a non-superuser master: the deploy migration and a tenant provisioned as
+the master, then the cutover, then a second run (a no-op), then, as `feoh_app`
+(acting as `feoh_owner`), the migration step, a new tenant, downgrade and
+upgrade of a pre-cutover tenant, DDL and queries, and `delete_tenant.py` with
+another app session open on the database (the `WITH (FORCE)` path). For the
+rollback, the master downgraded, migrated and provisioned a tenant, and the next
+cutover run handed that tenant over. The
+operator rollout is `deploy/README.md` § Database role.
