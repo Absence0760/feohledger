@@ -315,15 +315,14 @@ _STATUS_MAP: dict[str, ErpInvoiceStatus] = {
 
 
 def map_invoice_status(record: dict) -> ErpInvoiceStatus:
-    status = _STATUS_MAP.get(str(record.get("status") or "").lower(), ErpInvoiceStatus.unknown)
-    if status is ErpInvoiceStatus.open:
-        # An approved invoice with nothing left owing has been paid in full,
-        # even if the status word has not caught up.
-        balance = _decimal_or_none(record.get("balance"))
-        amount = _decimal_or_none(record.get("amount"))
-        if balance is not None and amount and balance == 0:
-            return ErpInvoiceStatus.paid
-    return status
+    """FE NXT's own ``status`` word, and nothing else.
+
+    A zero ``balance`` on an ``Approved`` invoice is not read as paid: a credit
+    zeroes it as well, and only FE NXT's ``Paid`` says money went out
+    (docs/decisions.md §293). An invoice whose status lags its payment reads
+    ``open`` until the word catches up, and the next poll sees it.
+    """
+    return _STATUS_MAP.get(str(record.get("status") or "").lower(), ErpInvoiceStatus.unknown)
 
 
 #: ``PurchaseOrderStatus`` → our PO status. ``DeletedOrder`` is skipped.

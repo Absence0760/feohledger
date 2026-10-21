@@ -301,12 +301,21 @@ def split_doc_id(erp_document_id: str) -> tuple[str, str] | None:
 
 
 def map_invoice_status(row: dict[str, str]) -> ErpInvoiceStatus:
+    """Open / partly settled / settled, from the balance against the original value.
+
+    Never ``paid``: an ``ApInvoice`` row states only a balance, which a credit
+    note or a write-off zeroes as readily as a cheque, and it carries no paid
+    status of its own. A zero balance is ``settled_no_payment`` — the status
+    sweep flags it for a person instead of recording a payment nobody can see
+    (docs/decisions.md §293). A SYSPRO bill reaches ``paid`` in FeohLedger by a
+    person recording the payment, or by the ERP webhook.
+    """
     original = _decimal(row.get("OrigInvValue"))
     balance = _decimal(row.get("MthInvBal1"))
     if original is None or balance is None:
         return ErpInvoiceStatus.unknown
     if balance == 0:
-        return ErpInvoiceStatus.paid
+        return ErpInvoiceStatus.settled_no_payment
     if abs(balance) < abs(original):
         return ErpInvoiceStatus.partially_paid
     return ErpInvoiceStatus.open

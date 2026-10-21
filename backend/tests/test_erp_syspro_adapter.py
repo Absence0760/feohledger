@@ -455,7 +455,10 @@ def test_operator_override_skips_the_guard(monkeypatch):
     [
         ({"OrigInvValue": "100.00", "MthInvBal1": "100.00"}, ErpInvoiceStatus.open),
         ({"OrigInvValue": "100.00", "MthInvBal1": "40.00"}, ErpInvoiceStatus.partially_paid),
-        ({"OrigInvValue": "100.00", "MthInvBal1": "0.00"}, ErpInvoiceStatus.paid),
+        # A zero balance is never read as paid: ApInvoice cannot tell a payment
+        # from a credit note or write-off (decisions §293).
+        ({"OrigInvValue": "100.00", "MthInvBal1": "0.00"}, ErpInvoiceStatus.settled_no_payment),
+        ({"OrigInvValue": "0.00", "MthInvBal1": "0.00"}, ErpInvoiceStatus.settled_no_payment),
         ({"OrigInvValue": "100.00", "MthInvBal1": ""}, ErpInvoiceStatus.unknown),
         ({}, ErpInvoiceStatus.unknown),
     ],
@@ -468,7 +471,7 @@ def test_get_invoice_status_queries_by_document_key():
     fake = FakeSyspro()
     fake.query_tables["ApInvoice"] = [{"Invoice": "INV|9", "OrigInvValue": "5", "MthInvBal1": "0"}]
     status = _run(fake, lambda: SysproAdapter(CONFIG).get_invoice_status("0000001|INV|9"))
-    assert status is ErpInvoiceStatus.paid
+    assert status is ErpInvoiceStatus.settled_no_payment
     query = _xml(fake.of("/Query/Query")[0], "XmlIn")
     assert [e.findtext("Value") for e in query.findall("Where/Expression")] == [
         "0000001",

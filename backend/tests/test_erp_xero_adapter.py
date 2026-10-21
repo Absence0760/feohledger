@@ -631,7 +631,14 @@ def test_not_connected_propagates_the_fixed_message(token):
         ({"Status": "SUBMITTED"}, ErpInvoiceStatus.draft),
         ({"Status": "AUTHORISED", "AmountPaid": 0}, ErpInvoiceStatus.open),
         ({"Status": "AUTHORISED", "AmountPaid": 10.5}, ErpInvoiceStatus.partially_paid),
-        ({"Status": "PAID"}, ErpInvoiceStatus.paid),
+        ({"Status": "PAID", "AmountPaid": 100}, ErpInvoiceStatus.paid),
+        # PAID with nothing paid is a bill settled by credit note, not a
+        # payment (decisions §293); a missing AmountPaid reads the same way.
+        (
+            {"Status": "PAID", "AmountPaid": 0, "AmountCredited": 100},
+            ErpInvoiceStatus.settled_no_payment,
+        ),
+        ({"Status": "PAID"}, ErpInvoiceStatus.settled_no_payment),
         ({"Status": "VOIDED"}, ErpInvoiceStatus.cancelled),
         ({"Status": "DELETED"}, ErpInvoiceStatus.cancelled),
         ({"Status": "SOMETHING_NEW"}, ErpInvoiceStatus.unknown),

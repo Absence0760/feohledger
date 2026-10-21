@@ -262,7 +262,13 @@ def test_split_inclusive_always_adds_back_to_the_gross(gross, pct, exclusive, ta
     [
         ({"Total": 115, "AmountDue": 115}, ErpInvoiceStatus.open),
         ({"Total": 115, "AmountDue": 15}, ErpInvoiceStatus.partially_paid),
-        ({"Total": 115, "AmountDue": 0}, ErpInvoiceStatus.paid),
+        # Paid only on Sage's own Paid flag, and never for a zero total
+        # (decisions §293); nothing due without it is not a payment.
+        ({"Total": 115, "AmountDue": 0, "Paid": True}, ErpInvoiceStatus.paid),
+        ({"Total": 115, "AmountDue": 0}, ErpInvoiceStatus.settled_no_payment),
+        ({"Total": 115, "AmountDue": 0, "Paid": False}, ErpInvoiceStatus.settled_no_payment),
+        ({"Total": 0, "AmountDue": 0, "Paid": True}, ErpInvoiceStatus.settled_no_payment),
+        ({"Total": 115, "AmountDue": 15, "Paid": True}, ErpInvoiceStatus.partially_paid),
         ({"Total": 115}, ErpInvoiceStatus.unknown),
     ],
 )
@@ -635,7 +641,14 @@ def test_operator_override_skips_the_guard(monkeypatch):
 def test_get_invoice_status_reads_amount_due():
     fake = FakeSage()
     fake.invoices = [
-        {"ID": 77, "Reference": CORR, "DocumentNumber": "INV-1", "Total": 115, "AmountDue": 0}
+        {
+            "ID": 77,
+            "Reference": CORR,
+            "DocumentNumber": "INV-1",
+            "Total": 115,
+            "AmountDue": 0,
+            "Paid": True,
+        }
     ]
     adapter = SageAccountingZaAdapter(CONFIG)
     assert _run(fake, lambda: adapter.get_invoice_status("77")) is ErpInvoiceStatus.paid

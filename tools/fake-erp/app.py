@@ -2981,14 +2981,21 @@ async def qbo_get_bill(request: Request, realm: str, bill_id: str) -> dict:
 
 @app.post("/__qbo/set-balance")
 async def qbo_set_balance(body: dict) -> dict:
-    """Test hook: set a bill's Balance (0 = paid) so an e2e can drive status.
+    """Test hook: set a bill's Balance so an e2e can drive status.
 
-    Body: {"id": "<bill Id>", "balance": <number>}.
+    Body: {"id": "<bill Id>", "balance": <number>, "payment"?: true}.
+    A zero balance alone reads as settled with no payment; ``payment: true``
+    also links a ``BillPaymentCheck``, which is what the backend reads as paid
+    (docs/decisions.md §293).
     """
     bill = _qbo()["bills"].get(str(body.get("id", "")))
     if bill is None:
         raise ProviderError(404, {"detail": "unknown bill"})
     bill["Balance"] = body.get("balance", 0)
+    if body.get("payment"):
+        linked = bill.setdefault("LinkedTxn", [])
+        txn_id = f"pay-{bill['Id']}-{len(linked) + 1}"
+        linked.append({"TxnId": txn_id, "TxnType": "BillPaymentCheck"})
     bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
     return {"status": "ok"}
 

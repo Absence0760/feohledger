@@ -127,16 +127,15 @@ _UNDELETABLE_STATES = frozenset({"partiallypaid", "paid", "reversed", "reversal"
 
 
 def map_bill_status(record: dict) -> ErpInvoiceStatus:
+    """The bill's own ``state``, and nothing else.
+
+    A posted bill with nothing left due is NOT read as paid: an applied credit
+    zeroes the due amount too, and only Intacct's ``paid`` state says money
+    went out (docs/decisions.md §293). A bill whose state lags its payment is
+    reported ``open`` until the state catches up, and the next poll sees it.
+    """
     state = str(record.get("state") or "").replace("_", "").replace(" ", "").lower()
-    status = _BILL_STATE_MAP.get(state, ErpInvoiceStatus.unknown)
-    if status is ErpInvoiceStatus.open:
-        # A posted bill with nothing left due has been paid in full, even when
-        # the tenant's state vocabulary hasn't caught up.
-        due = _decimal_or_none(record.get("totalTxnAmountDue"))
-        total = _decimal_or_none(record.get("totalTxnAmount"))
-        if due is not None and total and due == 0:
-            return ErpInvoiceStatus.paid
-    return status
+    return _BILL_STATE_MAP.get(state, ErpInvoiceStatus.unknown)
 
 
 @register_adapter("sage_intacct")

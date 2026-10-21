@@ -199,7 +199,9 @@ body starting `ERROR`, as SYSPRO's are.
 - The `XmlIn` / `XmlParameters` documents are parsed with `defusedxml`, so a
   DTD or entity declaration is refused rather than expanded.
 - `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
-  `{"supplier", "invoice", "balance"}` (`"0"` = paid).
+  `{"supplier", "invoice", "balance"}`. `"0"` reads as settled with no
+  payment: SYSPRO's `ApInvoice` has no paid status, so the backend never reads
+  a zero balance as paid (docs/decisions.md §293).
 ## Xero (`/xero/api.xro/2.0`)
 
 Backs `erp_adapters/xero.py`. Auth is shape-only: any non-empty
@@ -228,7 +230,9 @@ otherwise). Point the backend at it with
   (bearer must be one it issued) lists the one organisation, tenant
   `fake-xero-tenant-1`. Wired up by the committed `FEOH_ERP_XERO_*` dev values.
 - Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
-  "amount_paid"?}`. `POST /__reset` clears this state too.
+  "amount_paid"?}`. The backend reads `PAID` as paid only with `amount_paid`
+  above zero; `PAID` with nothing paid is a bill settled by credit note
+  (docs/decisions.md §293). `POST /__reset` clears this state too.
 
 ## Sage Business Cloud Accounting (`/sage/v3.1`)
 
@@ -307,6 +311,11 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   (`/__set-status` with `"pendingApproval"`).
 
 ## QuickBooks Online (`/qbo`)
+
+**Status hook:** `POST /__qbo/set-balance {"id", "balance", "payment"?}`.
+A zero balance alone reads as settled with no payment; `"payment": true` also
+links a `BillPaymentCheck` to the bill, which is what the backend reads as paid
+(docs/decisions.md §293).
 
 **Validation Faults** (off until a spec turns them on): `POST
 /__qbo/validation` with any of `{"closed_through": "YYYY-MM-DD",
