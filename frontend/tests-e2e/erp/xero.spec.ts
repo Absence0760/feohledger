@@ -11,6 +11,10 @@ import {
 } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
+	markSeededWorkflowVersions,
+	purgeSeededWorkflowVersions
+} from '../workflows/seededWorkflowVersions';
+import {
 	FAKE_ERP_BASE,
 	type Inv,
 	createApprovedInvoice,
@@ -123,6 +127,9 @@ async function withAutoSend(page: Page, on: boolean, body: () => Promise<void>):
 	const wf = workflows.find((w) => w.is_default && w.entity_id === null) ?? workflows.find((w) => w.is_default);
 	expect(wf, 'the tenant has a default workflow').toBeTruthy();
 	const before = wf!.steps_config.steps;
+	// Each PATCH of the seeded default's steps snapshots a `workflow_versions`
+	// row no name sweep can reach (decisions §127); remove exactly ours after.
+	const seededVersions = markSeededWorkflowVersions();
 	const steps = before.map((s) =>
 		s.type === 'erp_export' ? { ...s, config: { ...s.config, auto_send_on_approval: on } } : s
 	);
@@ -138,6 +145,7 @@ async function withAutoSend(page: Page, on: boolean, body: () => Promise<void>):
 			headers,
 			data: { steps: before }
 		});
+		purgeSeededWorkflowVersions(seededVersions);
 	}
 }
 
