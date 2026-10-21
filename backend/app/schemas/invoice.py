@@ -244,6 +244,12 @@ class InvoiceResponse(BaseModel):
     # `services.invoice_warnings.refresh_warnings`. Null when the invoice has
     # no `po_number`. The invoice modal renders this as a PO Match panel.
     po_match: dict | None = None
+    # The bill this invoice was posted as in the ERP (a Xero InvoiceID, a
+    # QuickBooks Bill Id, ...) and the provider's deep link to it. Null until a
+    # push is confirmed; the URL is null too for a provider with no stable deep
+    # link (`services/erp_adapters/deep_links.py`). Set only by `services/erp`.
+    erp_document_id: str | None = None
+    erp_document_url: str | None = None
     # Summary counts from the latest extraction's priors_metadata — feeds the
     # small "priors applied" indicator on the invoice-list row. Null when no
     # extraction ran or no priors fired.
@@ -311,6 +317,8 @@ class InvoiceResponse(BaseModel):
             file_url=invoice_file_url(inv.file_key) if inv.file_key else inv.file_url,
             warnings=inv.warnings,
             po_match=inv.po_match,
+            erp_document_id=inv.erp_document_id,
+            erp_document_url=inv.erp_document_url,
             priors_summary=_priors_summary(inv),
         )
 

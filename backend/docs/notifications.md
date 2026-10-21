@@ -32,6 +32,14 @@ commits**, not inside it. `notify_event` and
 then hand a closure to `services/post_commit.enqueue_post_commit`, which fires
 it from SQLAlchemy's `after_commit` event.
 
+**Savepoints are not commits.** SQLAlchemy fires `after_commit` when a SAVEPOINT
+is released and `after_rollback` when one rolls back. The queue ignores a
+release (the outer transaction is still open) and, on a savepoint rollback,
+drops only the jobs queued inside that savepoint. Before this, bulk approve
+(one savepoint per row) sent its emails at the first row's release, inside the
+open transaction, and a skipped row's rollback dropped whatever had been queued since
+(`docs/decisions.md` §304).
+
 Why it had to move: `transition_invoice` awaited the whole fan-out — one email
 per recipient, serially, then a chat POST with a 10-second `httpx` timeout —
 while the caller's transaction was still open. Two call sites make that

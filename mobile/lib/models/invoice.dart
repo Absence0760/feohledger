@@ -325,6 +325,11 @@ class Invoice {
   final List<InvoiceWarning> warnings;
   final PoMatch? poMatch;
 
+  /// The bill this invoice was posted as in the ERP (a Xero InvoiceID, a
+  /// QuickBooks Bill Id), set only by a confirmed push; null before one.
+  /// `InvoiceResponse.erp_document_id` (backend decisions §302).
+  final String? erpDocumentId;
+
   Invoice({
     required this.id,
     this.invoiceNumber,
@@ -344,6 +349,7 @@ class Invoice {
     this.updatedAt,
     this.warnings = const [],
     this.poMatch,
+    this.erpDocumentId,
   });
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
@@ -379,6 +385,7 @@ class Invoice {
       poMatch: rawPoMatch is Map<String, dynamic>
           ? PoMatch.fromJson(rawPoMatch)
           : null,
+      erpDocumentId: json['erp_document_id'] as String?,
     );
   }
 
