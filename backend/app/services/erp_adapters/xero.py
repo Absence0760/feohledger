@@ -89,6 +89,9 @@ XERO_OAUTH = register_oauth_provider(
         display_name="Xero",
         authorize_url="https://login.xero.com/identity/connect/authorize",
         token_url="https://identity.xero.com/connect/token",
+        # Revoking the refresh token also removes every connection it holds,
+        # so Disconnect leaves no live grant at Xero. Form body + Basic auth.
+        revoke_url="https://identity.xero.com/connect/revocation",
         # Granular scopes: `accounting.invoices` covers invoices (bills) and
         # purchase orders; `accounting.settings.read` covers Organisation,
         # Accounts and TaxRates. `offline_access` yields the refresh token.
@@ -103,6 +106,7 @@ XERO_OAUTH = register_oauth_provider(
         client_secret_setting="erp_xero_client_secret",
         authorize_url_setting="erp_xero_authorize_url",
         token_url_setting="erp_xero_token_url",
+        revoke_url_setting="erp_xero_revoke_url",
     )
 )
 

@@ -1003,3 +1003,61 @@ def test_resolve_tenant_uses_the_operator_base_for_connections(monkeypatch):
     monkeypatch.setattr(settings, "erp_xero_api_base", "http://localhost:12112/xero/api.xro/2.0")
     _, seen = _resolve_xero([{"tenantId": "t", "tenantType": "ORGANISATION"}])
     assert str(seen[0].url) == "http://localhost:12112/xero/connections"
+
+
+# ---------------------------------------------------------------------------
+# Disconnect: revoking the grant at Xero
+# ---------------------------------------------------------------------------
+
+
+def _revoke_with(monkeypatch, response: httpx.Response, *, override: str = ""):
+    """Run `erp_oauth.revoke` for Xero and return (result, the request sent)."""
+    from app.services.erp_adapters.xero import XERO_OAUTH
+
+    monkeypatch.setattr(settings, "erp_xero_client_id", "xero-client")
+    monkeypatch.setattr(settings, "erp_xero_client_secret", "xero-secret")
+    monkeypatch.setattr(settings, "erp_xero_revoke_url", override)
+    sent = []
+
+    class _Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kw):
+            sent.append({"url": url, **kw})
+            return response
+
+    monkeypatch.setattr(erp_oauth.httpx, "AsyncClient", _Client)
+    oauth = {"refresh_token": "REFRESH-1", "access_token": "ACCESS-1", "client_source": "platform"}
+    result = _run(erp_oauth.revoke(XERO_OAUTH, {"type": "xero"}, oauth))
+    return result, sent
+
+
+def test_disconnect_revokes_the_refresh_token_at_xero(monkeypatch):
+    """Without a revoke URL, Disconnect only forgot our copy of the tokens: the
+    grant stayed live and the org stayed connected in Xero (seen in the live
+    Demo Company test as "Already connected" on the next consent)."""
+    revoked, (call,) = _revoke_with(monkeypatch, _resp(200))
+    assert revoked is True
+    assert call["url"] == "https://identity.xero.com/connect/revocation"
+    # RFC 7009 form body with HTTP Basic client auth — Xero's documented shape.
+    assert call["data"] == {"token": "REFRESH-1"} and "json" not in call
+    assert call["auth"]._auth_header == httpx.BasicAuth("xero-client", "xero-secret")._auth_header
+
+
+def test_a_refused_revoke_reports_not_revoked(monkeypatch):
+    revoked, _ = _revoke_with(monkeypatch, _resp(400, {"error": "invalid_client"}))
+    assert revoked is False
+
+
+def test_the_revoke_url_override_is_honoured(monkeypatch):
+    _, (call,) = _revoke_with(
+        monkeypatch, _resp(200), override="http://localhost:12112/xero/identity/connect/revocation"
+    )
+    assert call["url"] == "http://localhost:12112/xero/identity/connect/revocation"

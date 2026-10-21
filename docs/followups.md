@@ -39,7 +39,11 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — QuickBooks Phases 3–5 (decisions §295)
+**Last reconciled:** 2026-10-21 — merging main's Xero Disconnect fix into the
+QuickBooks status-sync branch; both sides' entries kept, taking the file to 119.
+Before that, 2026-10-20 — fixing Xero's Disconnect so it revokes the
+grant opened one (c) entry (Sage Accounting and Blackbaud still don't), taking
+the file from 117 → 118. Before that, 2026-10-20 — QuickBooks Phases 3–5 (decisions §295)
 narrowed the QuickBooks entry to the header-only-tax product call, closed the
 "ERP-reported payment is dated the day the webhook arrives" (c) entry, and
 opened one (c) (a bill paid in QuickBooks while a run is already executing) and
@@ -182,7 +186,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**118 open: 101 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**119 open: 102 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1876,6 +1880,24 @@ scope (§260) — do not fold them into any of these.
       from the login page's error states. **Trigger:** the first support
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
+
+### Surfaced by Xero's Disconnect leaving the grant live (2026-10-20)
+
+Xero's adapter had no revoke URL, so Disconnect cleared our tokens and audited
+`revoked: false` while the org stayed connected at Xero. The live Demo Company
+showed it "Already connected" on the next consent. Xero now revokes; two
+providers still have the same gap.
+
+- [ ] **(c) Sage Accounting and Blackbaud FE NXT do not revoke on Disconnect.**
+      Their `OAuthProviderSpec` has no `revoke_url`, so `erp_oauth.revoke`
+      returns False without calling out: the refresh token stays valid at the
+      provider until it expires, and the tenant still lists the app as
+      connected there. **Durable fix:** set each provider's documented
+      revocation endpoint (and a `*_revoke_url` override for fake-erp, with a
+      fake revocation route), or record in the spec that the provider has
+      none and make the Disconnect message say the grant must be removed at
+      the provider. **Trigger:** the next change to either adapter's OAuth
+      spec, or before either provider's platform app goes live.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
