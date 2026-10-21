@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
+**Last reconciled:** 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+(c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
+that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
 2026-10-21 — merging main (§306 workspace closure, #624, #632) into the
 first-client UX branch (issue #635); both sides' entries kept, this branch's decisions renumbered
@@ -224,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**138 open: 119 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**139 open: 120 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2199,6 +2201,24 @@ providers still have the same gap.
       moved to Organization settings (any admin may consent to adoption), and
       the nav row gated on the capability. **Trigger:** the product decision on
       who may act as a partner, or the next partner/reseller onboarding.
+
+### Surfaced by fixing the payments-spec data leak (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) Some e2e spec leaks draft payment runs, and `queue.spec` leaks a vendor.**
+      After `delete-gate.spec` stopped leaking blocked invoices (16d74798), a
+      check of the local e2e tenants found 20 draft payment runs on e2e2 dated
+      2026-09-05..07 that no spec removes. A draft run holding live payments
+      keeps those invoices out of the payment queue, which is the same
+      cross-spec interference that broke `execute.spec`.
+      `payments/queue.spec.ts`'s `createApprovedInvoice` also leaves its
+      auto-created `E2E Pluralization Vendor` behind. It has no invoices, so it
+      is inert today. **Durable fix:** find the spec that creates draft runs
+      (grep `payment-runs` POSTs without a matching `deletePaymentRun` in an
+      `afterEach`) and give it prefix-scoped cleanup. Remove the pluralization
+      vendor in `queue.spec`'s teardown, and extend `meta/teardown-guard` to
+      catch a spec that creates a payment run or vendor without removing it.
+      **Trigger:** the next payments e2e flake, or the next pass over
+      `meta/teardown-guard`.
 
 ### Surfaced by removing `transition: all` (2026-10-21, issue #635, PR #636)
 
