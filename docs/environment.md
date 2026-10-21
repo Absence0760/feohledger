@@ -254,6 +254,9 @@ always `backend/app/config.py`.
 | `FEOH_COMMERCE_SYNC_ENABLED` | `false` | The commerce push retry sweep (`services/commerce_sync`, sweep `commerce-sync`). Off by default: a receipt's push runs post-commit on its own, and an admin can retry by hand. Flip on in deployed envs once a tenant connects a platform. Adjusts shelf stock only — never moves money |
 | `FEOH_COMMERCE_SYNC_INTERVAL_SECONDS` | `300` | Its tick |
 | `FEOH_COMMERCE_SYNC_MAX_ATTEMPTS` | `8` | Attempts before the sweep stops retrying a retryable failure (backoff 1, 2, 4 … min, capped at 6 h); a manual retry still works |
+| `FEOH_ERP_STATUS_SYNC_ENABLED` | `false` | The ERP status sweep (`services/erp_status_sync`, sweep `erp-status-sync`, decisions §303): polls the connected ERP for every pushed bill still awaiting its outcome and records the ERP's payment the way the ERP webhook does. Off by default like every sweep; **on in `backend/.env.development`**, safe there because the `mock` ERP answers every poll `open`. Flip on in deployed envs — without it (or the webhook) a bill paid in the ERP never reaches FeohLedger. Records only — never moves money |
+| `FEOH_ERP_STATUS_SYNC_INTERVAL_SECONDS` | `900` | Its tick (`.env.development`: `300`) |
+| `FEOH_ERP_STATUS_SYNC_BATCH_SIZE` | `200` | Keyset page size per tenant — a page, not a cap: every candidate is polled each tick |
 | `FEOH_ERP_NETSUITE_API_BASE` | (empty) | NetSuite REST base override — empty derives the per-account URL from `account_id`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_API_BASE` | (empty) | Dynamics 365 BC OData base override — empty → admin-config `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty) | D365 OAuth token URL override — empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value targets fake-erp |

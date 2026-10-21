@@ -210,31 +210,42 @@ approved
     v
 sending_to_erp          (adapter.post_invoice() called)
     |
-    ├── success ──> sent_to_erp    (ERP accepted, document ID stored)
+    ├── success ──> sent_to_erp    (the ERP holds the bill — RESTS here, not payable in FeohLedger)
     |                   |
+    |                   |  the ERP reports it paid (webhook, status sweep, or a person's record)
     |                   v
-    |               posted_in_erp  (ERP confirmed posting — webhook or poll)
-    |                   |
-    |                   v
-    |               payment_scheduled  (payment date set)
-    |                   |
-    |                   v
-    |               paid            (payment executed and confirmed)
-    |                   |
-    |                   v
-    |               done            (fully complete)
+    |               posted_in_erp → payment_scheduled → paid
+    |                   (one transaction, through services/external_payment)
     |
     └── failure ──> failed          (retry available)
 ```
 
+**A pushed invoice rests at `sent_to_erp` until the ERP pays it** (decisions
+§303). It used to walk straight on to `done`, which is terminal, so the ERP's
+later payment had nowhere to land. `sent_to_erp` is deliberately outside
+`api/payments.PAYABLE_INVOICE_STATUSES`: a bill the ERP holds is the ERP's to pay,
+and resting there keeps it out of FeohLedger's payment queue, runs, NACHA file,
+standalone payments and cards. When the ERP reports it paid, the payment is
+recorded as one made outside FeohLedger, walking `sent_to_erp → posted_in_erp →
+payment_scheduled → paid` in one transaction. Invoices pushed before this
+change stay `done` (terminal; not backfilled).
+
+The push records where the bill lives on `WorkflowInstance.state_data`:
+`erp_reference` (the ERP's id), `erp_adapter` (the adapter key) and `erp_realm`
+(the ERP company, decisions §284).
+
 ### Status Sync: Webhook vs Polling
 
-After sending an invoice to the ERP, the system needs to know when the ERP has posted it.
+After sending an invoice to the ERP, FeohLedger needs to know when the ERP has
+paid (or cancelled) it.
 
 | Method | How it works | When to use |
 |---|---|---|
-| **Webhook** | ERP calls our endpoint when status changes | Preferred — real-time, no polling cost |
-| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** (below) |
+| **Webhook** | ERP calls our endpoint when status changes | Real-time, but needs an ERP (or middleware) that can send our signed body |
+| **Polling** | The ERP status sweep asks every connected ERP about each pushed bill on a timer; `POST /api/invoices/{id}/sync-erp-status` asks for one now | Every ERP — Xero's native webhooks, a laptop behind NAT (decisions §303) |
+
+Both apply a report through `services/erp_reported_status`, so they cannot
+disagree about what a status means.
 
 **Webhook endpoint:** `POST /api/erp/webhook/{erp_type}`
 
@@ -252,10 +263,11 @@ payment behind it), so a `Paid` report for an `approved` / `sent_to_erp` /
 `posted_in_erp` invoice used to be a silent no-op — which left the ERP-led path
 of the no-rail pilot (issue #517) with no way to reach `paid`. The handler now
 records the ERP's payment through `services/external_payment` (a `completed`
-`provider="external"` payment, reference = the ERP document id), moving a
-`sent_to_erp` invoice to `posted_in_erp` first. A refusal — an open
-payment-blocking exception, a live FeohLedger payment or card — opens an
-`erp_reconciliation` exception naming the refusal code instead. See
+`provider="external"` payment, reference = the ERP document id), walking a
+`sent_to_erp` invoice through `posted_in_erp` once every gate has passed. A
+refusal — an open payment-blocking exception, a live FeohLedger payment or card —
+opens the payment-blocking `payment_reconciliation` exception naming the refusal
+code instead, and leaves a pushed invoice at `sent_to_erp`. See
 `backend/docs/payments.md` § The ERP reports an invoice paid that FeohLedger never paid.
 
 **Dedup key is `event_id` only — no fallback to `erp_document_id` /
@@ -269,16 +281,67 @@ integration that omits a per-delivery `event_id` instead hits
 path, which is the correct trade-off: no dedup at all beats false dedup on a
 different event.
 
-**Polling job — not built.** Every adapter implements
-`get_invoice_status(erp_document_id)` (and fake-erp's `__set-status` /
-`__set-balance` hooks can drive it), but **nothing under `app/` calls it**: there is
-no background sweep, so an ERP without a webhook never reports a status change
-back, and nothing times a stuck `sent_to_erp` invoice out. The webhook above is the
-only inbound path today. The intended design was a sweep every few minutes over
-`sent_to_erp` invoices that transitions on a changed status and fails one stuck
-past a timeout; before wiring it, three adapters' "balance 0 ⇒ paid" mapping has to
-change (it also matches a credited or zero-total bill). Tracked in
-`docs/followups.md` ("ERP status polling and void are unwired").
+**`OPEN` / `posted` for a pushed invoice is acknowledged, not applied.**
+`sent_to_erp → posted_in_erp` is a legal edge, but `posted_in_erp` is payable in
+FeohLedger, so applying it would put a bill the ERP is about to pay into our
+payment queue as well. A pushed invoice stays at `sent_to_erp` until paid.
+
+### The ERP status sweep (`services/erp_status_sync`)
+
+Off by default (`FEOH_ERP_STATUS_SYNC_ENABLED`, `_INTERVAL_SECONDS` default 900,
+`_BATCH_SIZE` default 200 — a keyset page, not a cap); on in
+`backend/.env.development`, where the `mock` ERP answers every poll `open`. Sweep
+name `erp-status-sync` in `GET /api/health/sweeps`. Each tick, for every tenant
+with a `settings.erp` (credentials opened through `provider_credentials`, the
+adapter resolved exactly as the push resolves it):
+
+1. Keyset-pages invoices at `sent_to_erp` / `posted_in_erp` whose
+   `WorkflowInstance.state_data` carries an `erp_reference`.
+2. Skips any whose recorded `erp_adapter` / `erp_realm` is not the connection
+   the tenant has now — an ERP id means nothing in another company, and
+   QuickBooks reuses small integers across companies.
+3. Calls `get_invoice_status(erp_reference)` with no lock and no transaction
+   open, then locks the invoice, re-checks it is still awaiting the ERP under the
+   same reference, and applies:
+
+| ERP status | What happens |
+|---|---|
+| `paid` | Recorded as a payment made outside FeohLedger (`record_erp_reported_payment`, the webhook's path). A refusal opens the blocking `payment_reconciliation` once and retries each tick, so it lands once the cause is cleared. |
+| `cancelled` | `erp_reconciliation` exception (money may be in flight); the invoice is not transitioned. Raised once per reported status. |
+| `settled_no_payment` | `erp_reconciliation` exception: nothing is owing but the ERP records no payment (a credit note, a write-off). Nothing is recorded. Raised once per reported status. |
+| `open`, `partially_paid`, `draft`, `unknown` | Nothing. Partial payments are not recorded. |
+
+"Once per reported status" is remembered on
+`state_data["erp_status_flagged"]`, so a person resolving the flag is not answered
+by the same flag on the next tick. One failing invoice counts
+`invoice_failures`, one failing tenant `failures`; neither stops the rest. The
+sweep never moves money.
+
+**`paid` means money moved.** Each adapter reports `paid` only on the ERP's own
+paid status or a payment it records against the bill — never on a zero balance
+alone, which a credit note or a zero-total bill also produces:
+
+| Adapter | `paid` when | Zero balance otherwise |
+|---|---|---|
+| QuickBooks Online | `Balance == 0`, `TotalAmt != 0` and a `BillPaymentCheck` / `BillPaymentCreditCard` `LinkedTxn` | `settled_no_payment` |
+| Xero | `Status == PAID` and `AmountPaid > 0` | `settled_no_payment` (PAID by credit note) |
+| Sage Accounting ZA | `AmountDue == 0`, Sage's `Paid` flag, non-zero `Total` | `settled_no_payment` |
+| SYSPRO | never — `ApInvoice` has no paid status | `settled_no_payment` (record by hand or via webhook) |
+| Sage Intacct | `state == paid` | `open` until the state catches up |
+| Blackbaud FE NXT | `status == Paid` | `open` until the status catches up |
+| NetSuite / Business Central / Sage Accounting / Merge.dev | the ERP's own paid status | — |
+
+**On demand:** `POST /api/invoices/{id}/sync-erp-status` (admin / ap_manager /
+cfo, entity-scoped) runs the same poll and apply for one invoice and returns
+`{id, status, erp_status, outcome}`; 409 `erp_status_not_awaiting` /
+`erp_status_not_pushed_here`, 400 `erp_status_not_configured`, 502 when the ERP
+can't be reached. Neither the sweep nor the route is plan-gated: they post
+nothing.
+
+The ERP's id is read from `state_data["erp_reference"]`; once
+`invoices.erp_document_id` exists the candidate query can read the column.
+Voiding or recalling a bill already in the ERP is still unwired — tracked in
+`docs/followups.md`.
 
 ## Organization ERP Configuration
 

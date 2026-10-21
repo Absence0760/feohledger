@@ -258,6 +258,7 @@ new → pending → ready_for_review → approved → sending_to_erp → sent_to
                                                                           ↑ (void) ←──────────────────────────────┘
 ```
 
+A successful ERP push RESTS at `sent_to_erp` (not payable in FeohLedger — the ERP pays it) until the ERP reports it paid, via the ERP webhook or the ERP status sweep, which records the payment and walks it `posted_in_erp → payment_scheduled → paid` in one go (`docs/decisions.md` §303).
 Terminal state: `done`. Step types: `extraction`, `approval`, `erp_export`, `done`.
 Workflow definitions are snapshotted per-invoice — editing a definition does not affect in-flight invoices.
 The void-payment path (`POST /api/payments/{id}/void`) takes `payment_scheduled` or `paid` back to `approved` so the invoice re-enters the queue. Authoritative graph: `backend/app/services/workflow_engine.py::VALID_TRANSITIONS`.

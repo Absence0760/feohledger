@@ -2076,21 +2076,38 @@ same invoice-before-payment order as the single record.
 ### The ERP reports an invoice paid that FeohLedger never paid
 
 `posted_in_erp → paid` is not an edge of the state machine — a `paid` invoice
-needs a payment behind it — so an ERP `Paid` webhook for an `approved`,
-`sent_to_erp` or `posted_in_erp` invoice used to be dropped silently. It is now
-recorded through the same service (`source: "erp"`, method unknown → NULL, which
-counts as 1099-reportable; reference = the ERP document id; paid on the day the
-report arrives). A `sent_to_erp` invoice is first moved to `posted_in_erp`, since
-the ERP can only have paid a bill it holds. A refusal (an open payment-blocking
-exception, a live FeohLedger payment or card) is never silent. When FeohLedger
-still holds its own claim on paying the invoice — a live payment, a draft or
-exported run, a live card (`erp_webhook.DOUBLE_PAY_REFUSALS`) — that claim
-proceeding would pay the supplier twice, so the flag is the **payment-blocking**
-`payment_reconciliation`, which `dispatch_preflight` refuses on; any other
-refusal opens the non-blocking `erp_reconciliation`. Both name the refusal code.
-Segregation of duties doesn't apply — there is no human actor. The payment is
-dated the day the report arrives, not the ERP's own payment date (the webhook
-carries none). `payment_erp_sync` skips `provider = "external"` payments, so a
+needs a payment behind it — so an ERP `Paid` for an `approved`, `sent_to_erp` or
+`posted_in_erp` invoice used to be dropped silently. It is now recorded through
+the same service (`source: "erp"`, method unknown → NULL, which counts as
+1099-reportable; reference = the ERP document id; paid on the day the report
+arrives), by `services/erp_reported_status.record_erp_reported_payment` — the
+one function both the ERP webhook and the ERP status sweep
+(`services/erp_status_sync`, `POST /api/invoices/{id}/sync-erp-status`) call, so
+the two can't disagree (decisions §303).
+
+**A pushed invoice is the ERP's to pay.** A successful push rests at
+`sent_to_erp` (it used to walk on to the terminal `done`, where no payment could
+ever land). `sent_to_erp` is outside `PAYABLE_INVOICE_STATUSES`, so a pushed bill
+is never in the payment queue, a run, the NACHA file, a standalone payment or a
+card: FeohLedger cannot pay what the ERP will. It IS recordable
+(`external_payment.recordable_statuses()` = payable ∪ `sent_to_erp`), so the
+ERP's payment — or a person's `POST /record-outside` — lands. The record walks it
+`sent_to_erp → posted_in_erp → payment_scheduled → paid`, the posting applied
+only after every gate passed, so a refused record leaves the invoice at the
+non-payable `sent_to_erp`. An ERP `OPEN` / `posted` report for a pushed invoice
+is acknowledged and not applied, because `posted_in_erp` is payable.
+
+A refusal (an open payment-blocking exception, a live FeohLedger payment, run or
+card, a credit we can't net) is never silent, and **every** refusal opens the
+**payment-blocking** `payment_reconciliation`, naming the refusal code, which
+`dispatch_preflight` and the run builder refuse on. Once the ERP says it paid,
+any later FeohLedger payment is a second one — including one the refusal's own
+cause would reopen when a person clears it. (Before §303 only the three refusals
+where FeohLedger itself still claimed the payment blocked; the rest opened the
+non-blocking `erp_reconciliation`.) Segregation of duties doesn't apply — there
+is no human actor. The payment is dated the day the report arrives, not the
+ERP's own payment date (neither the webhook nor `get_invoice_status` carries
+one). `payment_erp_sync` skips `provider = "external"` payments, so a
 payment the customer made in its own ERP is never pushed back to it as a bill
 payment.
 

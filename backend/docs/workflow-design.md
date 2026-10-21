@@ -23,8 +23,8 @@ Each invoice carries a **correlation ID** (UUID) that is propagated to every wor
 | `approved`          | Reviewer approved, ready for ERP push                              | Between 2 and 3    |
 | `rejected`          | Reviewer rejected, needs edits/re-upload                           | Stage 2 (branch)   |
 | `sending_to_erp`    | Async ERP submission in flight                                     | Stage 3: ERP Send  |
-| `sent_to_erp`       | ERP confirmed receipt                                              | Stage 4 (start)    |
-| `posted_in_erp`     | ERP posted/booked the invoice (set via inbound ERP webhook)        | Stage 4            |
+| `sent_to_erp`       | ERP holds the bill — a push RESTS here until the ERP pays it; not payable in FeohLedger (decisions §303) | Stage 4 |
+| `posted_in_erp`     | Waypoint on the way to `paid` when the ERP's payment is recorded (payable — never a resting place for a pushed invoice) | Stage 4 |
 | `payment_scheduled` | Added to a payment run, awaiting execution                         | Stage 5 (payments) |
 | `paid`              | Payment executed                                                   | Stage 5            |
 | `done`              | Workflow complete — terminal state, invoice is now immutable       | Final              |
@@ -52,8 +52,8 @@ approved ─────────> payment_scheduled        (direct schedule 
 approved ─────────> done                     (no further steps → terminal)
 sending_to_erp ───> sent_to_erp              (ERP confirmed)
 sending_to_erp ───> failed                   (ERP rejected or timed out)
-sent_to_erp ──────> posted_in_erp            (ERP webhook confirms post)
-sent_to_erp ──────> done                     (terminal — workflow complete)
+sent_to_erp ──────> posted_in_erp            (ERP reports it paid — recorded through external_payment, same transaction walks on to paid)
+sent_to_erp ──────> done                     (legal edge; nothing takes it since §303)
 posted_in_erp ────> payment_scheduled        (payment run picks up the invoice)
 posted_in_erp ────> done                     (no payment step in workflow)
 payment_scheduled > paid                     (processor settles the payment)
@@ -464,15 +464,25 @@ JSONB column does not track in-place edits. It keeps `erp_pending_job_id` and
 the orphan ids, so an asynchronous ERP polls its earlier job before posting
 again. Detail: `erp-integration.md` § Retry Logic.
 
-## Stage 4: Done
+## Stage 4: The ERP holds the bill
 
-`done` is the terminal state. When the ERP confirms receipt:
+When the ERP confirms receipt:
 
 1. Complete the `erp_export` WorkflowStep.
 2. Create a final WorkflowStep (`type=done`, `action=completed`).
-3. Transition `sent_to_erp → done`.
+3. Transition `sending_to_erp → sent_to_erp` and **stop there** (decisions §303).
 4. Set `WorkflowInstance.state = "completed"`.
-5. Write audit log (`invoice.erp_confirmed`).
+5. Write audit log (`invoice.erp_confirmed`), and record `erp_reference`,
+   `erp_adapter` and `erp_realm` on `state_data`.
+
+The invoice no longer walks on to `done`: `done` is terminal, and a pushed
+invoice must still accept the ERP's payment. `sent_to_erp` is not payable in
+FeohLedger, so the bill is the ERP's to pay. When the ERP reports it paid — the
+ERP webhook, the ERP status sweep (`services/erp_status_sync`) or
+`POST /api/invoices/{id}/sync-erp-status` — the payment is recorded as one made
+outside FeohLedger and the invoice walks `sent_to_erp → posted_in_erp →
+payment_scheduled → paid` in one transaction. See `erp-integration.md` § The
+ERP status sweep.
 
 The invoice is **immutable** in the later half of the lifecycle. PATCH and DELETE reject requests when the invoice is in `sending_to_erp`, `sent_to_erp`, `posted_in_erp`, `payment_scheduled`, `paid`, or `done` (the `IMMUTABLE_STATUSES` set in `app/api/invoices.py`).
 
