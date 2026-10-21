@@ -365,6 +365,18 @@ async def test_refuses_an_unexpected_membership(cluster) -> None:
         await _exec(c.su(), f"DROP ROLE {c.owner}_extra")
 
 
+async def test_refuses_a_third_member_of_the_owner(cluster) -> None:
+    """Anyone else in feoh_owner would inherit every tenant's data."""
+    c = cluster
+    await _cutover(c)
+    await _exec(c.su(), f"CREATE ROLE {c.owner}_peer NOLOGIN; GRANT {c.owner} TO {c.owner}_peer")
+    try:
+        with pytest.raises(asyncpg.RaiseError, match="unexpected role membership"):
+            await _exec(c.as_role(c.master, c.password, c.control), c.settings_sql() + CLUSTER_SQL)
+    finally:
+        await _exec(c.su(), f"DROP ROLE {c.owner}_peer")
+
+
 async def test_refuses_a_master_inheriting_the_login_role(cluster) -> None:
     """The design's key invariant: RDS makes any (inherited) rds_iam member
     IAM-only, so the master must never be a real member of the login role."""
@@ -418,6 +430,7 @@ env > "$STUB_DIR/env"
 cat > "$STUB_DIR/stdin.$n"
 case "$*" in
 *"SELECT datname"*) printf 'feoh_acme\\nfeohledger\\n' ;;
+*"session_user"*) printf '%s\\n' "${WHO:-feoh_app|feoh_owner|false}" ;;
 esac
 """
 
@@ -588,6 +601,17 @@ def test_verify_login_reports_a_failed_mint(script: Script) -> None:
     assert result.returncode != 0
     assert "rds-db:connect" in result.stderr
     assert script.calls() == []
+
+
+@pytest.mark.parametrize(
+    "who", ["feoh_app|feoh_app|false", "feoh_app|feoh_owner|true", "postgres|postgres|true"]
+)
+def test_verify_login_fails_unless_the_app_acts_as_the_owner(script: Script, who: str) -> None:
+    """Signing in is not enough: the role default must have applied, and the
+    role acted as must hold nothing privileged."""
+    result = script.run(MASTER_DOTENV, "--verify-login", env={"WHO": who})
+    assert result.returncode != 0
+    assert "expected feoh_app|feoh_owner|false" in result.stderr
 
 
 def test_verify_login_needs_a_region(script: Script) -> None:

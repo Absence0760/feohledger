@@ -84,7 +84,11 @@ BEGIN
     INTO extra
     FROM pg_auth_members m
     WHERE (m.member = to_regrole(app) AND m.roleid NOT IN (to_regrole(iam), to_regrole(owner)))
-       OR (m.member = to_regrole(owner));
+       OR (m.member = to_regrole(owner))
+       -- ...and nobody else holds them: a third member of feoh_owner would
+       -- inherit every tenant's data.
+       OR (m.roleid IN (to_regrole(owner), to_regrole(app))
+           AND m.member NOT IN (to_regrole(app), to_regrole(current_user)));
     IF extra IS NOT NULL THEN
         RAISE EXCEPTION 'unexpected role membership: % — revoke it by hand before continuing', extra;
     END IF;

@@ -88,9 +88,13 @@ if [ "$MODE" = verify ]; then
 	# decrypt-env.sh will insist once prod.sops.yaml is switched.
 	[ "${PGSSLMODE:-$(feoh_env PGSSLMODE)}" = verify-full ] ||
 		die "PGSSLMODE is not verify-full; an IAM token is only ever sent to a verified server (and the app would refuse to boot without it)."
-	feoh_pg psql -X -At -v ON_ERROR_STOP=1 -d "$FEOH_PGDATABASE" -c \
-		"SELECT 'signed in as ' || session_user || ', acting as ' || current_user || ', superuser=' || rolsuper || ', createrole=' || rolcreaterole FROM pg_roles WHERE rolname = session_user" ||
+	who=$(feoh_pg psql -X -At -v ON_ERROR_STOP=1 -d "$FEOH_PGDATABASE" -c \
+		"SELECT session_user || '|' || current_user || '|' || (SELECT rolsuper OR rolcreaterole FROM pg_roles WHERE rolname = current_user)") ||
 		die "${APP_ROLE} could not sign in with an IAM token — check the instance role's rds-db:connect grant (terraform apply), that ./db-role-cutover.sh has run, and PGSSLMODE."
+	# Proves the role default took effect too: the app must act as the owner.
+	[ "$who" = "${APP_ROLE}|${OWNER_ROLE}|false" ] ||
+		die "signed in, but as '${who}' (session|current|privileged) — expected ${APP_ROLE}|${OWNER_ROLE}|false. Re-run ./db-role-cutover.sh and --check."
+	echo "==> signed in as ${APP_ROLE}, acting as ${OWNER_ROLE}"
 	echo "db-role-cutover.sh: ${APP_ROLE} signs in with an IAM token. Switch prod.sops.yaml next (deploy/README.md § Database role)."
 	exit 0
 fi

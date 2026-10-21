@@ -97,6 +97,10 @@ if feoh_is_true "$(feoh_env FEOH_DATABASE_IAM_AUTH)"; then
 	BREAK_GLASS=1
 fi
 if [ "$DB_MODE" = external ]; then
+	# The master replays dumps of databases the app owns: resolve the queries'
+	# names from the catalog only (as db-role-cutover.sh does), never from a
+	# schema the app could have planted a function in.
+	export PGOPTIONS="-c search_path=pg_catalog,pg_temp"
 	OWNERSHIP=(--no-owner --no-acl)
 	LIST_DB="$FEOH_PGDATABASE"
 else
