@@ -21,9 +21,11 @@ vendored in https://github.com/nook-io/python-sage/blob/HEAD/openapi.json):
   sales-invoice DELETE only; purchase invoices carry a ``void_reason``
   attribute, so the adapter sends it on the purchase DELETE too.
 
-**Region coverage.** v3.1 serves Canada, Germany, Spain, France, the UK,
-Ireland and the US (the "Endpoint Availability" list on every operation in the
-Swagger). It does **not** serve Sage Business Cloud Accounting **South
+**Region coverage.** v3.1 serves Canada, Germany, Spain, France, the UK and
+Ireland (the "Endpoint Availability" list on every operation in the Swagger
+also names the US, but Sage retired the US product on 2024-12-31 and ended
+access on 2025-01-31: https://www.sage.com/en-us/sage-business-cloud/sage-accounting/).
+It does **not** serve Sage Business Cloud Accounting **South
 Africa**, which is a separate product with its own API
 (``https://accounting.sageone.co.za/api/2.0.0``, not OAuth). See
 https://developer-community.sage.com/articles.html/supporting-you/does-the-sage-business-cloud-accounting-api-work-for-south-africa-r6/

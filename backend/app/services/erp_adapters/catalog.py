@@ -172,10 +172,13 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
         "docs_url": "https://developer.xero.com/documentation/getting-started-guide/",
     },
     {
-        # Sage's v3.1 API: US, UK, IE and CA, not South Africa (see below).
+        # Sage's v3.1 API: the UK, Ireland, Canada and the EU countries it lists.
+        # Not the US, where Sage retired the product on 2024-12-31, and not
+        # South Africa (a separate product, below). Outside both region groups,
+        # so the picker lists it under "Other".
         "key": "sage_accounting",
         "label": "Sage Business Cloud Accounting",
-        "regions": ["US"],
+        "regions": ["GB"],
         "auth": "oauth",
         "fields": [
             *_byo_app_fields(),

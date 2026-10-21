@@ -441,12 +441,51 @@ A rejection counter is tracked in `WorkflowInstance.state_data`. After a configu
 
 **Endpoint:** `POST /api/invoices/{id}/send-to-erp`
 
-Can be triggered manually by the user or automatically after approval.
+Triggered by a person ("Send to ERP": this endpoint, or `POST /complete` on an
+approved invoice) or by approval itself when the workflow says so. Every
+trigger runs one sequence, `services/erp_send.start_erp_send`:
 
-1. Validate invoice status is `approved`.
-2. Transition to `sending_to_erp`.
-3. Create a WorkflowStep (`type=erp_export`).
-4. Dispatch async ERP call. The invoice's `correlation_id` is sent as an idempotency key to prevent duplicate records in the ERP system.
+1. The plan gate (a live ERP needs the plan, decisions §258), then the export
+   gate (an open duplicate / fraud flag refuses, §286). Either refuses before
+   anything moves.
+2. Transition `approved → sending_to_erp` under the row lock, with an
+   `invoice.erp_submitted` audit row.
+3. Commit, then dispatch the async ERP call. The invoice's `correlation_id` is
+   sent as an idempotency key to prevent duplicate records in the ERP system.
+
+### Auto-send on approval (`auto_send_on_approval`)
+
+The `erp_export` step's `config.auto_send_on_approval` (the builder's
+"Auto-send on approval" switch) makes approval start the push (decisions §304).
+It applies when **all** of these hold:
+
+- the invoice's frozen **snapshot** (`WorkflowInstance.steps_config_snapshot`,
+  never the live definition) has an enabled `erp_export` step whose config holds
+  `auto_send_on_approval: true` exactly. A missing key is off, which is what the
+  builder shows for it, and so is the schema default a save fills in; an
+  invoice with no workflow instance never auto-sends;
+- the approval **finalised** the invoice: `review.approve_invoice`'s last level
+  (single, bulk, email / Slack / Teams, mobile, the exception agents),
+  `/complete`'s amount-floor auto-approve, or the extraction worker's
+  auto-approve. A partial chain approval does not;
+- the org has a **live** ERP. No ERP, or the `mock` ERP, does nothing.
+
+The push runs in a transaction of its own **after the approval commits** (a
+post-commit job on the request loop; the extraction worker calls it directly
+once its commit returns, and awaits the send, holding that worker until it
+finishes). It re-locks the invoice and acts only on `approved`,
+so a manual send or a payment schedule that got there first wins and nothing is
+dispatched twice. A gate refusal does not touch the approval: the invoice stays
+`approved` (payable, and sendable by hand), and an
+`invoice.erp_auto_send_refused` audit row carries the refusal
+(`{trigger, status_code, refusal: {code, params}}`, PII-free). The approver's
+response says `approved` either way. The `invoice.erp_submitted` row an
+auto-send writes carries `details.trigger = "auto_send_on_approval"`.
+
+A successful push ends the invoice at `done`, which is not payable here (the
+bill is paid from the ERP). With the switch on, an approved invoice therefore
+leaves the payment queue moments after approval; tenants that pay through
+FeohLedger runs keep it off. The builder says so under the switch.
 
 ### Retry Logic
 
