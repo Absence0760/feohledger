@@ -108,6 +108,7 @@ const Map<String, String> _actionLabels = {
   'invoice.resubmitted': 'Resubmitted for review',
   'invoice.assigned_for_review': 'Assigned for review',
   'invoice.erp_submitted': 'Sent to ERP',
+  'invoice.erp_auto_send_refused': 'Not sent to ERP automatically',
   'invoice.extraction_dispatched': 'Extraction started',
   'invoice.extraction_reset': 'Extraction reset',
   'invoice.extraction_triggered': 'Extraction triggered manually',

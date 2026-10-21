@@ -1102,8 +1102,19 @@ reasoning).
 - **What the user does:** resolve or dismiss the exception in Exceptions, then
   send again. Clearing it goes through `exception_lifecycle.record_decision`,
   so someone implicated in the invoice cannot clear it for themselves.
-- **Approval never pushes.** Approving advances the workflow's step pointer
-  only; the push is always one of the three requests above.
+- **Approval pushes only when the workflow says so** (decisions §304). With
+  the snapshot's `erp_export.auto_send_on_approval` on and a live ERP, approval
+  starts the push after it commits, through the same gates
+  (`services/erp_send.start_erp_send`, shared with the three doors above). A
+  refusal there is not a 409 to the approver: the invoice stays `approved` and
+  an `invoice.erp_auto_send_refused` audit row records the coded refusal. With
+  the flag off (or absent), approving advances the step pointer only. The push
+  is post-commit work: a process that dies between the approval and the job
+  skips it without a trace (tracked in `docs/followups.md`).
+- **A hand-off that raises lands at `failed`.** When `dispatch_erp` raises after
+  the `sending_to_erp` commit (an SQS send), `start_erp_send` moves the invoice
+  to `failed` with an `invoice.erp_failed` row (`error: "ERP send could not be
+  queued"`), so `/retry-erp` can take it.
 
 The browser states the code from either place (`api/erpRefusals.ts`, also used
 by `codedRefusals.ts` for the 409). Tests:

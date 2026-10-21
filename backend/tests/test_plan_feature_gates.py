@@ -712,8 +712,8 @@ async def test_saving_a_live_erp_needs_the_erp_feature(realdb):
 async def test_free_connects_a_direct_erp_and_pushes_to_it(realdb, monkeypatch):
     """§281: Free is one direct ERP that imports and pushes. The save and the
     push both pass the gate on the Free plan itself."""
-    from app.api import workflow as workflow_api
     from app.models.invoice import InvoiceStatus
+    from app.services import erp_send
 
     dispatched: list[uuid.UUID] = []
 
@@ -721,7 +721,7 @@ async def test_free_connects_a_direct_erp_and_pushes_to_it(realdb, monkeypatch):
         dispatched.append(invoice_id)
 
     # The adapter call behind the push is not this test's subject; the gate is.
-    monkeypatch.setattr(workflow_api, "dispatch_erp", _record)
+    monkeypatch.setattr(erp_send, "dispatch_erp", _record)
 
     await realdb.subscribe("a", "free")
     async with realdb.client(key="a") as c:
@@ -1086,14 +1086,14 @@ async def _failed_invoice(realdb, prefix: str) -> uuid.UUID:
 
 
 def _record_dispatch(monkeypatch) -> list[uuid.UUID]:
-    from app.api import workflow as workflow_api
+    from app.services import erp_send
 
     dispatched: list[uuid.UUID] = []
 
     async def _record(invoice_id, *_args, **_kwargs):
         dispatched.append(invoice_id)
 
-    monkeypatch.setattr(workflow_api, "dispatch_erp", _record)
+    monkeypatch.setattr(erp_send, "dispatch_erp", _record)
     return dispatched
 
 

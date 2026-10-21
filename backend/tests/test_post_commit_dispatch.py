@@ -105,6 +105,43 @@ async def test_job_is_dropped_when_the_transaction_rolls_back(realdb):
     assert ran == []
 
 
+async def test_a_savepoint_rollback_drops_only_the_jobs_queued_inside_it(realdb):
+    """SQLAlchemy fires `after_rollback` (and `after_commit`, on release) for a
+    SAVEPOINT too. Bulk approve skips a
+    refused row by rolling back its savepoint; that used to drain every queued
+    job, so the rows approved before it committed with no email, no chat post
+    and no ERP auto-send."""
+    ran: list[str] = []
+
+    def _job(label: str):
+        async def _run() -> None:
+            ran.append(label)
+
+        return _run
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        enqueue_post_commit(s, _job("outer"), name="unit-outer")
+        async with s.begin_nested():
+            enqueue_post_commit(s, _job("kept-savepoint"), name="unit-kept")
+        # Releasing a savepoint fires `after_commit` too, but nothing has
+        # committed: the queue must not run inside the open outer transaction.
+        await drain_post_commit()
+        assert ran == []
+        try:
+            async with s.begin_nested():
+                enqueue_post_commit(s, _job("rolled-back"), name="unit-rolled")
+                async with s.begin_nested():
+                    enqueue_post_commit(s, _job("rolled-back-child"), name="unit-child")
+                raise RuntimeError("refused row")
+        except RuntimeError:
+            pass
+        enqueue_post_commit(s, _job("after"), name="unit-after")
+        await s.commit()
+    await drain_post_commit()
+    assert sorted(ran) == ["after", "kept-savepoint", "outer"]
+
+
 async def test_a_failing_job_never_propagates(realdb):
     async def _boom() -> None:
         raise RuntimeError("smtp down")
