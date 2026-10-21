@@ -366,6 +366,32 @@ async def assign_reviewer(
     return InvoiceResponse.from_db(invoice)
 
 
+@router.get("/{invoice_id}/review-actions")
+async def review_actions(
+    invoice_id: uuid.UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Would ``POST /approve`` / ``POST /reject`` accept the CALLER on this
+    invoice right now? ``{"approve": refusal | null, "reject": refusal |
+    null}`` — each refusal the coded ``{code, message, params}`` the endpoint
+    would answer with (``review.review_refusals`` runs the endpoint's own
+    gates). The invoice modal offers a decision exactly when its verdict is
+    ``null`` and states the refusal otherwise, so it never restates a rule.
+
+    Any signed-in reader of the invoice may ask: the answer is about the caller
+    and names nobody else, and a caller who may not approve gets
+    ``role_not_permitted``.
+    """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
+    invoice = await db.get(Invoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return await review_svc.review_refusals(db, invoice, actor=user, org_settings=org.settings)
+
+
 @router.post("/{invoice_id}/approve", response_model=InvoiceResponse)
 async def approve_invoice(
     invoice_id: uuid.UUID,
@@ -377,6 +403,11 @@ async def approve_invoice(
 ):
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+    # The review stage, as the email / Slack / Teams doors already required:
+    # without it this door approved a `new` draft straight past review (the
+    # state machine allows `new → approved` for bulk status), which the modal
+    # never offered and the verdict below would have had to restate.
+    review_svc.refuse_unless_in_review(invoice)
     corrections = body.model_dump(exclude_unset=True) if body else {}
     # The version the approver loaded, compared under the row lock above: an
     # edit that landed after they read the invoice is refused, not signed
@@ -422,6 +453,7 @@ async def reject_invoice(
 ):
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+    review_svc.refuse_unless_in_review(invoice)
 
     await review_svc.reject_invoice(
         db,

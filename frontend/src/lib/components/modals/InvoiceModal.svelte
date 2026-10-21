@@ -8,7 +8,6 @@
 		inInvoiceEntryWindow,
 		extractionAllowed
 	} from '#lib/types/invoice.ts';
-	import { PERM_INVOICE_APPROVE } from '#lib/types/admin.ts';
 	import { formatMoney, isNegativeAmount, isPositiveAmount, moneyInputText, type MoneyAmount } from '#lib/utils/money.ts';
 	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
@@ -40,7 +39,13 @@
 		getInvoiceSuggestions,
 		type FieldSuggestion,
 	} from '#lib/api/enrichment.ts';
-	import { routeIntercompany } from '#lib/api/invoices.ts';
+	import { getReviewActions, routeIntercompany } from '#lib/api/invoices.ts';
+	import {
+		isAllowed,
+		isOffered,
+		refusalText,
+		type ActionRefusal
+	} from '#lib/api/actionVerdicts.ts';
 	import { listInvoiceChart } from '#lib/api/glAccounts.ts';
 	import { glAccountOptionLabel, type GlAccountOption } from '#lib/types/glAccount.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
@@ -654,12 +659,44 @@
 	let extracting = $state(false);
 	let canManageFile = $derived(canWrite && status !== 'done');
 	let isReadyForReview = $derived(status === 'ready_for_review');
-	// `/approve` and `/reject` are `require_permission(invoice.approve)` — keyed
-	// on the permission, not on "clerk only", so a custom role that enters but
-	// cannot approve is not handed two buttons that 403.
-	let canReview = $derived(isReadyForReview && auth.can(PERM_INVOICE_APPROVE) && (
-		!invoice.assigned_to_id || invoice.assigned_to_id === auth.user?.id
-	));
+	// Whether to offer Approve / Reject is the SERVER's verdict
+	// (`GET /api/invoices/{id}/review-actions` → `review.review_refusals`, run
+	// from the very gates `/approve` and `/reject` enforce), never a rule
+	// restated here. The page used to check only the status and the
+	// `invoice.approve` permission, so the uploader, a non-named approver and an
+	// ap_manager over the CFO limit were all shown an Approve that could only
+	// 403 (issue #575). `undefined` = not yet answered = offer nothing.
+	let reviewActions = $state<{ approve: ActionRefusal; reject: ActionRefusal } | undefined>(
+		undefined
+	);
+	const reviewActionsSequence = createRequestSequencer();
+	async function loadReviewActions() {
+		const ticket = reviewActionsSequence.start();
+		reviewActions = undefined;
+		try {
+			const verdict = await getReviewActions(invoice.id);
+			if (reviewActionsSequence.canCommit(ticket)) reviewActions = verdict;
+		} catch {
+			// Unknown stays unknown: no decision is offered on a verdict the
+			// server never gave.
+		}
+	}
+	$effect(() => {
+		if (isReadyForReview && invoice.id) void loadReviewActions();
+		else reviewActions = undefined;
+	});
+	// The assignee clause is presentation, not a server rule: the endpoint
+	// accepts any approver, and docs/followups.md tracks deciding whether
+	// assignment should be enforced there or dropped here.
+	let isAssignedElsewhere = $derived(
+		!!invoice.assigned_to_id && invoice.assigned_to_id !== auth.user?.id
+	);
+	let canReview = $derived(
+		isReadyForReview &&
+			!isAssignedElsewhere &&
+			(isOffered(reviewActions?.approve) || isOffered(reviewActions?.reject))
+	);
+	let approveRefusal = $derived(reviewActions?.approve ?? null);
 	// `POST /{id}/complete`: a manager advances `new` and `approved`; an
 	// entry-only caller only submits a `new` invoice for review — and only
 	// where the workflow has an approval step (the server refuses otherwise).
@@ -2769,15 +2806,38 @@
 								</div>
 							{:else}
 								<div class="review-actions">
-									<button type="button" class="btn-approve" disabled={reviewing} onclick={handleApprove}>
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-										{reviewing ? m('invoices.modal.review.approving') : m('invoices.modal.review.approve')}
-									</button>
-									<button type="button" class="btn-reject-outline" disabled={reviewing} onclick={() => (showRejectForm = true)}>
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-										{m('invoices.modal.review.reject')}
-									</button>
+									{#if isOffered(reviewActions?.approve)}
+										<button
+											type="button"
+											class="btn-approve"
+											disabled={reviewing || !isAllowed(reviewActions?.approve)}
+											aria-describedby={approveRefusal ? 'approve-refusal' : undefined}
+											onclick={handleApprove}
+										>
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+											{reviewing ? m('invoices.modal.review.approving') : m('invoices.modal.review.approve')}
+										</button>
+									{/if}
+									{#if isOffered(reviewActions?.reject)}
+										<button
+											type="button"
+											class="btn-reject-outline"
+											disabled={reviewing || !isAllowed(reviewActions?.reject)}
+											onclick={() => (showRejectForm = true)}
+										>
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+											{m('invoices.modal.review.reject')}
+										</button>
+									{/if}
 								</div>
+								{#if approveRefusal}
+									<!-- The server's own reason, localized from its code: the
+									     reader learns WHO must approve instead of meeting a
+									     403 after the click. -->
+									<p class="review-refusal" id="approve-refusal" data-testid="approve-refusal">
+										{refusalText(approveRefusal, m)}
+									</p>
+								{/if}
 							{/if}
 						</div>
 					{:else if isReadyForReview && invoice.assigned_to}
@@ -4564,6 +4624,12 @@
 		font-size: 0.82rem;
 		color: var(--text-muted);
 		margin: 0;
+	}
+
+	.review-refusal {
+		font-size: 0.82rem;
+		color: var(--text-muted);
+		margin: 0.5rem 0 0;
 	}
 
 	.save-error {

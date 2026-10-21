@@ -37,7 +37,11 @@ test.describe('/vendors verify/reject', () => {
 		await page.goto('/vendors');
 	});
 
-	test('row actions cell shows Verify + Reject only for unverified', async ({
+	// The row offers what the server's `status_actions` verdict allows (issue
+	// #575): Verify only from `unverified`; Reject from `unverified` OR `active`,
+	// which `/reject` and bulk status have always accepted — the row used to
+	// hide it on an active vendor.
+	test('Verify is offered only for unverified; Reject for unverified and active', async ({
 		page
 	}) => {
 		const unverified = await findVendorByStatus(page, 'unverified');
@@ -52,8 +56,10 @@ test.describe('/vendors verify/reject', () => {
 		await expect(unverifiedRow.getByRole('button', { name: 'Reject' })).toBeVisible();
 
 		const activeRow = page.locator('table tbody tr', { hasText: active!.name });
+		// Positive anchor before the absence check, so it cannot pass against a
+		// half-rendered row.
+		await expect(activeRow.getByRole('button', { name: 'Reject' })).toBeVisible();
 		await expect(activeRow.getByRole('button', { name: 'Verify' })).toHaveCount(0);
-		await expect(activeRow.getByRole('button', { name: 'Reject' })).toHaveCount(0);
 	});
 
 	test('Verify flips an unverified vendor to active', async ({ page }) => {
@@ -91,7 +97,10 @@ test.describe('/vendors verify/reject', () => {
 					r.url().includes(`/api/vendors/${target!.id}/reject`) &&
 					r.request().method() === 'POST'
 			);
+			// Armed two-click: the first click only arms (it would stop an active
+			// vendor's payments), the confirm sends it.
 			await row.getByRole('button', { name: 'Reject' }).click();
+			await row.getByRole('button', { name: 'Confirm reject' }).click();
 			const resp = await rejected;
 			expect(resp.status()).toBe(200);
 

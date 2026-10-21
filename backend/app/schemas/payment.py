@@ -282,8 +282,22 @@ class PaymentResponse(BaseModel):
         )
 
 
+class PaymentListItem(PaymentResponse):
+    """A History-tab row: the payment plus the caller's verdict on voiding it.
+
+    ``void_refusal`` is the coded refusal ``POST /api/payments/{id}/void``
+    would answer the caller with (``{code, message, params}``), or ``None``
+    when it would void. Computed from the endpoint's own gate
+    (``payment_controls.payment_void_refusal``) — the page offers Void exactly
+    when it is ``None`` (issue #575). Required, not defaulted: a ``None``
+    nobody computed would read as "allowed".
+    """
+
+    void_refusal: dict | None
+
+
 class PaymentListResponse(BaseModel):
-    items: list[PaymentResponse]
+    items: list[PaymentListItem]
     total: int
     page: int
     page_size: int

@@ -179,9 +179,10 @@ test.describe('/vendors/change-requests — dual-control bank-change approvals',
 			// account number.
 			await expect(queueRow).toContainText('8888');
 			await expect(queueRow).toContainText('Pending');
-			// Segregation of duties, said on the row rather than as a button that
-			// can only fail.
-			await expect(queueRow).toContainText('You requested this');
+			// Segregation of duties, said on the row — in the server's own words, from
+			// the row's `approve_refusal` verdict — rather than as a button that can
+			// only fail.
+			await expect(queueRow).toContainText('You cannot approve a bank-detail change you requested.');
 			await expect(queueRow.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
 
 			// …and the server refuses the proposer regardless — the UI is not the

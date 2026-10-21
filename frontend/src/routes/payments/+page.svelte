@@ -56,6 +56,7 @@
 		PERM_PAYMENT_RECORD_EXTERNAL,
 		PERM_PAYMENT_VOID
 	} from '#lib/types/admin.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import {
 		acceptPaymentSettlement,
 		getExecutionMode,
@@ -892,18 +893,13 @@
 	}
 
 	function canVoid(p: Payment): boolean {
-		// Server-side gate: require_permission(payment.void) — defaults to
-		// admin/cfo, but a custom role can be granted it. Status: anything that
-		// isn't already terminal-by-failure.
-		//
-		// `pending_compliance` is deliberately NOT offered here: nothing ever
-		// reached the processor, so there is no rail to reverse. Its purpose-built
-		// exits are Release / Dismiss below, which also close the
-		// `payment_compliance_hold` exception the hold opened — a void would not.
-		if (auth.user && auth.can(PERM_PAYMENT_VOID)) {
-			return p.status === 'completed' || p.status === 'submitted' || p.status === 'processing';
-		}
-		return false;
+		// The server's verdict for this reader (`void_refusal`, from the gate
+		// `POST /{id}/void` raises from — `payment_controls.payment_void_refusal`),
+		// never a status list restated here (issue #575). That gate voids only
+		// money that has left or is leaving the rail; a `pending_compliance`
+		// payment's exits are Release / Dismiss below, and a `pending` leg's are
+		// its run's (cancel, or the bank-file exits).
+		return isAllowed(p.void_refusal);
 	}
 
 	// --- Compliance hold (pending_compliance) --------------------------------

@@ -34,6 +34,13 @@ APPROVAL_MAX_AMOUNT_EXCEEDED = "approval_max_amount_exceeded"
 APPROVAL_MAX_AMOUNT_MISCONFIGURED = "approval_max_amount_misconfigured"
 APPROVAL_CFO_REQUIRED = "approval_cfo_required"
 
+#: Approve or reject asked of an invoice that is not awaiting review. The
+#: single in-app doors (`POST /api/invoices/{id}/approve|reject`) refuse it with
+#: this code — the email / Slack / Teams doors already refused it — and the
+#: review verdict (:func:`review_refusals`) states it, so the invoice modal can
+#: never offer a decision on an invoice that is not in review.
+INVOICE_NOT_IN_REVIEW = "invoice_not_in_review"
+
 
 async def _fetch_invoice_bytes(invoice: Invoice) -> bytes | None:
     """Best-effort S3 fetch of the invoice file for RAG embedding.
@@ -295,6 +302,199 @@ async def _enforce_approval_thresholds(
         )
 
 
+# ── The approval gates ─────────────────────────────────────────────────────
+#
+# `approve_invoice` and `review_refusals` (the verdict the invoice modal reads
+# before it offers Approve) run THESE functions, so the page and the endpoint
+# cannot disagree on who may approve what (issue #575 § One rule, one place).
+# Each raises the coded HTTPException the endpoint answers with.
+
+
+def refuse_unless_in_review(invoice: Invoice) -> None:
+    """409 ``invoice_not_in_review`` unless ``invoice`` awaits a review decision.
+
+    The single in-app approve / reject doors call it first. The email, Slack
+    and Teams doors check the same status themselves; bulk status does not
+    reach here, because a bulk ``new → approved`` is a manager's direct
+    approval of a draft, which the state machine allows.
+    """
+    from fastapi import HTTPException, status
+
+    if invoice.status != InvoiceStatus.ready_for_review:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=coded_refusal(
+                INVOICE_NOT_IN_REVIEW,
+                "This invoice is not awaiting review, so it cannot be approved or rejected.",
+            ),
+        )
+
+
+async def _identity_gates(invoice: Invoice, actor_id: uuid.UUID, approval_config: dict) -> None:
+    """The gates read BEFORE any correction: segregation of duties (the
+    invoice's implicated actors may not approve it) and the single-level
+    named-approver gate."""
+    from app.services.approval_chain import check_level_approver, check_segregation
+
+    check_segregation(invoice, actor_id, approval_config)
+    # "specific" restricts this step to the listed approver_ids (or their active
+    # delegate) — the coarse require_permission(PERM_INVOICE_APPROVE) RBAC gate
+    # on the endpoint only confirms the actor holds an approving role, not that
+    # they are one of the named approvers.
+    if approval_config.get("approver_strategy") == "specific":
+        specific_ids = approval_config.get("approver_ids") or (
+            [approval_config["approver_id"]] if approval_config.get("approver_id") else []
+        )
+        await check_level_approver(specific_ids, actor_id)
+
+
+async def _figure_gates(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    actor_id: uuid.UUID,
+    actor_roles: set[str],
+    approval_config: dict,
+    org_settings: dict | None,
+    receipt_recorders: Collection[str] | None,
+) -> None:
+    """The gates read AFTER any correction: receiving ≠ approving, then the
+    max-amount and CFO money gates.
+
+    Receiving: whoever hand-recorded a live goods receipt on the invoice's PO
+    may not approve it (decisions §267) — after the corrections, so a
+    ``po_number`` correction cannot re-point the invoice at a PO the approver
+    received and slip past a set read for the old one. Not looked up at all when
+    the step opted out of segregation. ``receipt_recorders`` is a set resolved
+    up front (bulk approve), or ``None`` to look it up here.
+    """
+    from app.services.approval_chain import check_receiving_segregation
+    from app.services.approval_chain import receipt_recorders as lookup_receipt_recorders
+
+    if approval_config.get("require_segregation", True) is not False:
+        if receipt_recorders is None:
+            receipt_recorders = await lookup_receipt_recorders(db, invoice)
+        check_receiving_segregation(actor_id, receipt_recorders, approval_config)
+    await _enforce_approval_thresholds(
+        db,
+        invoice,
+        actor_roles,
+        org_settings=org_settings,
+        approval_config=approval_config,
+    )
+
+
+async def _chain_level_gate(
+    instance,
+    invoice: Invoice,
+    actor_id: uuid.UUID,
+    approval_config: dict,
+    *,
+    org_settings: dict | None,
+) -> int:
+    """Route ``instance``'s chain against the invoice as it now stands and
+    refuse an actor who is not the current level's named approver. Returns the
+    current level's index.
+
+    Initialises the chain on first approval — or, when the escalation sweep
+    initialised it and nobody has approved yet, re-routes it against the
+    CORRECTED invoice (``approval_chain.ensure_chain_routed``). No applicable
+    level → single-level. Without the named-approver check, any actor holding
+    the coarse RBAC permission could clear a level meant for a specific person
+    (e.g. the named CFO), collapsing the SoD control the chain exists for.
+    """
+    from app.services.approval_chain import (
+        check_level_approver,
+        ensure_chain_routed,
+        get_chain_progress,
+    )
+
+    ensure_chain_routed(instance, invoice, approval_config, org_settings=org_settings)
+    chain_state = get_chain_progress(instance)
+    levels = chain_state.get("levels", [])
+    current = chain_state.get("current_level", 0)
+    if current < len(levels):
+        await check_level_approver(levels[current].get("approver_ids", []), actor_id)
+    return current
+
+
+async def review_refusals(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    actor,
+    org_settings: dict | None,
+) -> dict[str, dict | None]:
+    """What ``POST /approve`` and ``POST /reject`` would answer ``actor`` for
+    ``invoice`` right now: ``{"approve": refusal | None, "reject": refusal |
+    None}``, each refusal the coded ``{code, message, params}`` detail the
+    endpoint would refuse with.
+
+    The invoice modal reads this to decide whether to offer — and, when not,
+    why not — the two review decisions, instead of restating any of their rules
+    (issue #575). It is computed by running the gates the endpoint runs, in the
+    endpoint's order, on an approval with no corrections (the modal's own
+    corrections are submitted with the approval and re-gated there):
+
+    * the permission ``require_permission(invoice.approve)`` checks;
+    * :func:`refuse_unless_in_review`;
+    * :func:`_identity_gates`, :func:`_figure_gates`;
+    * for a chain, :func:`_chain_level_gate` and
+      ``approval_chain.advance_approval_chain`` (level reuse) on a SCRATCH copy
+      of the workflow instance's state, so reading the verdict writes nothing.
+
+    Deliberately NOT covered: the optimistic-concurrency check (it compares the
+    version the page loaded, which this read IS), and a correction's own
+    refusals (GL chart, applied-credit stranding), which depend on what the
+    reviewer types.
+
+    Reject has no segregation or threshold gate on the server — a reviewer may
+    always send an invoice back — so its verdict is the permission and the
+    review stage only.
+    """
+    import copy
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.api.deps import holds_any_permission
+    from app.api.permissions import PERM_INVOICE_APPROVE
+    from app.api.refusals import refusal_of, role_not_permitted
+    from app.services.approval_chain import advance_approval_chain
+
+    if not holds_any_permission(actor, {PERM_INVOICE_APPROVE}):
+        return {"approve": role_not_permitted(), "reject": role_not_permitted()}
+    try:
+        refuse_unless_in_review(invoice)
+    except HTTPException as exc:
+        refused = refusal_of(exc, fallback_code=INVOICE_NOT_IN_REVIEW)
+        return {"approve": refused, "reject": refused}
+
+    instance = await get_workflow_instance(db, invoice.id)
+    approval_config = await resolve_approval_config(db, invoice, instance)
+    actor_roles = {r.name for r in actor.roles} if actor.roles else set()
+    try:
+        await _identity_gates(invoice, actor.id, approval_config)
+        await _figure_gates(
+            db,
+            invoice,
+            actor_id=actor.id,
+            actor_roles=actor_roles,
+            approval_config=approval_config,
+            org_settings=org_settings,
+            receipt_recorders=None,
+        )
+        if approval_config.get("approver_strategy") == "chain" and instance:
+            scratch = SimpleNamespace(state_data=copy.deepcopy(instance.state_data or {}))
+            await _chain_level_gate(
+                scratch, invoice, actor.id, approval_config, org_settings=org_settings
+            )
+            advance_approval_chain(scratch, actor.id)
+    except HTTPException as exc:
+        return {"approve": refusal_of(exc, fallback_code="approval_refused"), "reject": None}
+    return {"approve": None, "reject": None}
+
+
 async def approve_invoice(
     db: AsyncSession,
     invoice: Invoice,
@@ -315,16 +515,7 @@ async def approve_invoice(
     looks it up here. Either way it is re-read after a correction, which can
     re-point the invoice at another PO.
     """
-    from app.services.approval_chain import (
-        advance_approval_chain,
-        check_level_approver,
-        check_receiving_segregation,
-        check_segregation,
-        get_chain_progress,
-    )
-    from app.services.approval_chain import (
-        receipt_recorders as lookup_receipt_recorders,
-    )
+    from app.services.approval_chain import advance_approval_chain
 
     # Read the approval config: the invoice's frozen snapshot, falling back —
     # fail-CLOSED — to the org's active definition when it has none. See
@@ -334,19 +525,9 @@ async def approve_invoice(
     instance = await get_workflow_instance(db, invoice.id)
     approval_config: dict = await resolve_approval_config(db, invoice, instance)
 
-    # Segregation of duties: uploader cannot approve
-    check_segregation(invoice, actor_id, approval_config)
-
-    # Single-level named-approver gate. "specific" restricts this step to the
-    # listed approver_ids (or their active delegate) — the coarse
-    # require_permission(PERM_INVOICE_APPROVE) RBAC gate on the endpoint only
-    # confirms the actor holds an approving role, not that they are one of the
-    # named approvers.
-    if approval_config.get("approver_strategy") == "specific":
-        specific_ids = approval_config.get("approver_ids") or (
-            [approval_config["approver_id"]] if approval_config.get("approver_id") else []
-        )
-        await check_level_approver(specific_ids, actor_id)
+    # Segregation of duties + the single-level named-approver gate, before any
+    # correction lands (`_identity_gates`, shared with `review_refusals`).
+    await _identity_gates(invoice, actor_id, approval_config)
 
     # Apply any field corrections FIRST, capturing a per-field before/after diff
     # for the audit trail (SOX change-history requirement). Money fields
@@ -449,25 +630,17 @@ async def approve_invoice(
         except Exception as exc:  # noqa: BLE001
             _log.warning("refresh_warnings after corrections failed for %s: %s", invoice.id, exc)
 
-    # Receiving ≠ approving: whoever hand-recorded a live goods receipt on the
-    # invoice's PO may not approve it (decisions §267). After the corrections,
-    # so a `po_number` correction cannot re-point the invoice at a PO the
-    # approver received and slip past a set read for the old one.
-    # (Not looked up at all when the step opted out of segregation.)
-    if approval_config.get("require_segregation", True) is not False:
-        if receipt_recorders is None or corrections:
-            receipt_recorders = await lookup_receipt_recorders(db, invoice)
-        check_receiving_segregation(actor_id, receipt_recorders, approval_config)
-
-    # Threshold enforcement — runs against the now-corrected invoice amount, and
-    # against the SAME approval config the segregation / named-approver gates
-    # above read.
-    await _enforce_approval_thresholds(
+    # Receiving segregation + the money gates, against the now-corrected invoice
+    # (`_figure_gates`, shared with `review_refusals`). A correction can re-point
+    # the invoice at another PO, so a batch-resolved recorder set is re-read.
+    await _figure_gates(
         db,
         invoice,
-        actor_roles or set(),
-        org_settings=org_settings,
+        actor_id=actor_id,
+        actor_roles=actor_roles or set(),
         approval_config=approval_config,
+        org_settings=org_settings,
+        receipt_recorders=None if corrections else receipt_recorders,
     )
 
     # Upsert the RAG embedding using the invoice's NOW-correct fields.
@@ -485,36 +658,23 @@ async def approve_invoice(
     if approval_config.get("approver_strategy") == "chain" and instance:
         # Lock the workflow instance row to prevent concurrent approval races
         from app.models.workflow import WorkflowInstance
-        from app.services.approval_chain import ensure_chain_routed
 
         locked_result = await db.execute(
             select(WorkflowInstance).where(WorkflowInstance.id == instance.id).with_for_update()
         )
         instance = locked_result.scalar_one()
 
-        # Initialize chain state on first approval if not yet initialized — or,
-        # when the escalation sweep initialised it and nobody has approved yet,
-        # re-route it against the CORRECTED invoice: routing is decided here, on
-        # the post-correction figures (`approval_chain.ensure_chain_routed`). No
-        # applicable level → treat as single-level, fall through.
-        ensure_chain_routed(instance, invoice, approval_config, org_settings=org_settings)
+        # Route the chain against the corrected invoice and refuse an actor who
+        # is not this level's named approver (`_chain_level_gate`, shared with
+        # `review_refusals`). The level index is read BEFORE advancing —
+        # advance_approval_chain bumps current_level once the level is
+        # satisfied — for the partial-approval audit row below.
+        approved_level = await _chain_level_gate(
+            instance, invoice, actor_id, approval_config, org_settings=org_settings
+        )
 
-        # The level index this approval is being recorded against — read BEFORE
-        # advancing (advance_approval_chain bumps current_level once the level
-        # is satisfied). Used for the partial-approval audit row below.
-        chain_state = get_chain_progress(instance)
-        chain_levels = chain_state.get("levels", [])
-        approved_level = chain_state.get("current_level", 0)
-
-        # Named-approver gate for this level. Without it, any actor holding
-        # the coarse role-based RBAC permission can clear a level meant for a
-        # specific person (e.g. the named CFO), collapsing the SoD control the
-        # chain exists to enforce.
-        if approved_level < len(chain_levels):
-            await check_level_approver(
-                chain_levels[approved_level].get("approver_ids", []), actor_id
-            )
-
+        # Records the approval; refuses an approver who already signed another
+        # level (`approval_level_reuse`).
         chain_complete = advance_approval_chain(instance, actor_id)
         if not chain_complete:
             # More levels needed — stay in ready_for_review, record partial.

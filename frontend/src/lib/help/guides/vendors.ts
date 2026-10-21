@@ -152,7 +152,7 @@ export const VENDOR_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'caution',
-						text: 'You can\'t approve a change you requested yourself; your row shows {ui:vendors.changeRequests.row.youRequested}. You also can\'t approve a portal request from a supplier login that you invited or whose password you reset, because you could have made that request yourself. Another approver has to sign it off. This is deliberate: one person alone should never be able to redirect where money goes.'
+						text: 'You can\'t approve a change you requested yourself: {ui:vendors.changeRequests.row.approve} is disabled on that row, with the reason beside it. You also can\'t approve a portal request from a supplier login that you invited or whose password you reset, because you could have made that request yourself. Another approver has to sign it off. This is deliberate: one person alone should never be able to redirect where money goes.'
 					}
 				]
 			},

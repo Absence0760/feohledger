@@ -32,6 +32,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import { PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { importVendorsCsv, type PortalInviteResult } from '#lib/api/vendors.ts';
@@ -517,6 +518,9 @@
 		}
 	}
 
+	/** The row whose Reject is armed (one click from committing), or null. */
+	let rejectArmedId = $state<string | null>(null);
+
 	async function rejectVendor(id: string) {
 		try {
 			const rejected = await rejectVendorRequest(id);
@@ -726,9 +730,30 @@
 					     it works too. -->
 					<td class="actions">
 						{#if canManageVendors}
-							{#if v.status === 'unverified'}
+							<!-- Offered exactly when the server's verdict allows it
+							     (`status_actions`, from the table `/verify`, `/reject`
+							     and bulk status share) — Reject used to be hidden on an
+							     `active` vendor every one of them accepts (issue #575). -->
+							{#if isAllowed(v.status_actions?.verify)}
 								<RowAction variant="success" onclick={() => verifyVendor(v.id)}>{m('vendors.row.verify')}</RowAction>
-								<RowAction variant="danger" onclick={() => rejectVendor(v.id)}>{m('vendors.row.reject')}</RowAction>
+							{/if}
+							{#if isAllowed(v.status_actions?.reject)}
+								<!-- Armed two-click: rejecting an ACTIVE vendor stops its
+								     payments and revokes its live cards, so the first click
+								     only arms (the shape the change-request queue uses). -->
+								<RowAction
+									variant="danger"
+									armed={rejectArmedId === v.id}
+									onclick={(e) => {
+										e.stopPropagation();
+										if (rejectArmedId === v.id) {
+											rejectArmedId = null;
+											rejectVendor(v.id);
+										} else rejectArmedId = v.id;
+									}}
+								>
+									{rejectArmedId === v.id ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
+								</RowAction>
 							{/if}
 							<RowAction onclick={() => openBankEditor(v)}>
 								{v.bank_details?.counterparty_id ? m('vendors.row.bankSet') : m('vendors.row.bank')}
