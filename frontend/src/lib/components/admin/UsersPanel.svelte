@@ -164,6 +164,8 @@
 	function describeBulkFailure(f: { reason: string; references: { open_invoice_assignments: number; pending_approval_steps: number; active_workflow_approver_in: number } | null }): string {
 		if (f.reason === 'self') return m('admin.users.fail.self');
 		if (f.reason === 'not_found') return m('admin.users.fail.notFound');
+		if (f.reason === 'last_admin') return m('admin.users.fail.lastAdmin');
+		if (f.reason === 'audit_unavailable') return m('admin.users.fail.auditUnavailable');
 		if (f.reason === 'blocked' && f.references) {
 			const parts: string[] = [];
 			if (f.references.open_invoice_assignments) parts.push(m('admin.users.fail.openInvoices', { n: f.references.open_invoice_assignments }));

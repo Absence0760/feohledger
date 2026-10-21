@@ -593,6 +593,8 @@ export const enSettings = {
 	'admin.users.fail.openInvoices': '{n, plural, one {# open invoice} other {# open invoices}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# pending approval} other {# pending approvals}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, one {# active workflow} other {# active workflows}}',
+	'admin.users.fail.lastAdmin': 'the organization’s last active admin',
+	'admin.users.fail.auditUnavailable': 'not recorded in the audit trail, so not deleted',
 	'admin.users.modal.invite.aria': 'Invite user',
 	'admin.users.modal.invite.heading': 'Invite User',
 	'admin.users.modal.invite.hint': 'A temporary password will be generated automatically.',
