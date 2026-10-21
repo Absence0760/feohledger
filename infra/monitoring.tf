@@ -50,6 +50,16 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 resource "aws_sns_topic" "pager" {
   provider = aws.us_east_1
   name     = "${var.project}-${var.environment}-pager"
+
+  # db_storage (below) uses the default provider and publishes here, which only
+  # works while the default region is this topic's region. frontend.tf refuses
+  # any other aws_region too; this says so where the dependency is.
+  lifecycle {
+    precondition {
+      condition     = var.aws_region == "us-east-1"
+      error_message = "The pager topic is in us-east-1 and alarms on the default provider publish to it; an alarm can only notify a topic in its own region, so aws_region must be us-east-1."
+    }
+  }
 }
 
 resource "aws_sns_topic_subscription" "pager_sms" {
@@ -76,9 +86,11 @@ resource "aws_sns_sms_preferences" "pager" {
 
 # A text that SNS could not deliver fails silently: no bounce, no retry the
 # operator sees. The usual causes are this account's own limits (the toll-free
-# number not registered yet, the number not verified in the SMS sandbox, the
-# monthly SMS spend limit reached), so say so by email the first time a page is
-# lost.
+# number not registered yet, the number not verified in the SMS sandbox), so say
+# so by email the first time a page is lost. NumberOfNotificationsFailed on the
+# topic counts an SMS once SNS stops trying to deliver it (AWS's SNS metrics
+# reference). A carrier dropping a text SNS handed over is beyond any metric
+# here, which is why the README's test-fire step exists.
 resource "aws_cloudwatch_metric_alarm" "pager_delivery_failed" {
   count    = local.pager_phone_configured ? 1 : 0
   provider = aws.us_east_1
@@ -93,6 +105,27 @@ resource "aws_cloudwatch_metric_alarm" "pager_delivery_failed" {
   evaluation_periods  = 1
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+}
+
+# SNS stops sending SMS within minutes once the month's spend would pass the
+# account's SMS spend limit (USD 1 for a new account), and from then until the
+# 1st every page is lost. Warn by email at 80% so there is time to raise it.
+resource "aws_cloudwatch_metric_alarm" "pager_sms_spend" {
+  count    = local.pager_phone_configured ? 1 : 0
+  provider = aws.us_east_1
+
+  alarm_name          = "${var.project}-${var.environment}-pager-sms-spend"
+  alarm_description   = "This month's SMS spend is near the account's SMS spend limit (USD 1 by default); past it SNS stops texting pages until next month. Raise the limit in the SNS console (Text messaging preferences), with a quota request if needed."
+  namespace           = "AWS/SNS"
+  metric_name         = "SMSMonthToDateSpentUSD"
+  statistic           = "Maximum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 0.8
+  comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.alerts.arn]
   ok_actions          = [aws_sns_topic.alerts.arn]

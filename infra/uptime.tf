@@ -63,7 +63,7 @@ locals {
       }
     },
     {
-      for slug in var.uptime_tenant_slug == null ? [] : [var.uptime_tenant_slug] : "tenant" => {
+      for slug in(var.uptime_tenant_slug == null ? [] : [var.uptime_tenant_slug]) : "tenant" => {
         fqdn          = "${slug}.${var.domain_name}"
         resource_path = "/"
         search_string = null

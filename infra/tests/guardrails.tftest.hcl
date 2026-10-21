@@ -1001,8 +1001,8 @@ run "no_phone_number_means_no_sms_subscription" {
   command = plan
 
   assert {
-    condition     = length(aws_sns_topic_subscription.pager_sms) == 0 && length(aws_sns_sms_preferences.pager) == 0 && length(aws_cloudwatch_metric_alarm.pager_delivery_failed) == 0
-    error_message = "With alert_phone_number unset, nothing may be subscribed by SMS, the account's SMS settings stay untouched, and there is no delivery alarm to watch."
+    condition     = length(aws_sns_topic_subscription.pager_sms) == 0 && length(aws_sns_sms_preferences.pager) == 0 && length(aws_cloudwatch_metric_alarm.pager_delivery_failed) == 0 && length(aws_cloudwatch_metric_alarm.pager_sms_spend) == 0
+    error_message = "With alert_phone_number unset, nothing may be subscribed by SMS, the account's SMS settings stay untouched, and there are no SMS alarms to watch."
   }
 }
 
@@ -1031,6 +1031,11 @@ run "a_phone_number_subscribes_the_pager_topic_by_sms" {
   assert {
     condition     = aws_cloudwatch_metric_alarm.pager_delivery_failed[0].metric_name == "NumberOfNotificationsFailed" && aws_cloudwatch_metric_alarm.pager_delivery_failed[0].dimensions["TopicName"] == "feohledger-prod-pager" && toset(aws_cloudwatch_metric_alarm.pager_delivery_failed[0].alarm_actions) == toset(["arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"])
     error_message = "A text SNS could not deliver must be reported by email, never through the pager it failed on."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.pager_sms_spend[0].metric_name == "SMSMonthToDateSpentUSD" && aws_cloudwatch_metric_alarm.pager_sms_spend[0].threshold == 0.8 && toset(aws_cloudwatch_metric_alarm.pager_sms_spend[0].alarm_actions) == toset(["arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"])
+    error_message = "Nearing the USD 1 default SMS spend limit, after which SNS stops texting, must be reported by email."
   }
 }
 
@@ -1071,4 +1076,16 @@ run "certificate_expiry_backstops_acm_renewal" {
     condition     = toset(aws_cloudwatch_metric_alarm.platform_certificate_expiry.alarm_actions) == toset(["arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"])
     error_message = "A month's warning emails; it does not page."
   }
+}
+
+# The alarms on the default provider (db_storage) publish to the pager topic on
+# the us-east-1 alias; that only works while the two are the same region.
+run "pager_refuses_a_region_its_default_provider_alarms_cannot_reach" {
+  command = plan
+
+  variables {
+    aws_region = "eu-west-1"
+  }
+
+  expect_failures = [aws_sns_topic.pager, aws_s3_bucket.frontend]
 }
