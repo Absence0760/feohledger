@@ -39,9 +39,11 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (§306 workspace closure, #624, #632) into the
+**Last reconciled:** 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
+entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
+2026-10-21 — merging main (§306 workspace closure, #624, #632) into the
 first-client UX branch (issue #635); both sides' entries kept, this branch's decisions renumbered
-§311–§314, taking the file to 137. Before that, 2026-10-21 — coding the shared rate limiter's 429 (issue
+§312–§315, taking the file to 137. Before that, 2026-10-21 — coding the shared rate limiter's 429 (issue
 #635) opened one (c) entry, the assistant stream reading every 429 as a budget
 error, taking the file from 131 → 132. Before that, 2026-10-21 — the sidebar renames (issue #635 #23,
 decisions §314) opened one (c) entry, hiding Partner Admin from non-partners,
@@ -222,7 +224,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**137 open: 118 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**138 open: 119 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2197,6 +2199,23 @@ providers still have the same gap.
       moved to Organization settings (any admin may consent to adoption), and
       the nav row gated on the capability. **Trigger:** the product decision on
       who may act as a partner, or the next partner/reseller onboarding.
+
+### Surfaced by removing `transition: all` (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) Three pages hand-roll a button the shared library already owns.**
+      `routes/invoices/+page.svelte` (`.bulk-delete-btn`) and
+      `InvoiceModal.svelte` (`.btn-delete-outline`) restyle the destructive
+      bulk/delete button instead of rendering `ui/BulkDeleteButton.svelte`.
+      `routes/cash-flow/+page.svelte` (`.prompt-btn`) restyles the example-prompt
+      chips instead of rendering `assistant/ExamplePrompts.svelte`. The copies
+      drift: narrowing `transition: all` (commits f5efe887, 2f25ef56)
+      had to find and fix each one by hand, and one copy was missed in the first
+      sweep. **Durable fix:** render the shared components at those three sites,
+      extending their props if a site needs a variant (guard rail 9), and delete
+      the copied CSS. Cover each with the existing page specs (bulk delete on
+      `/invoices`, the invoice modal's delete, the cash-flow prompt chips).
+      **Trigger:** the next change to any of those buttons, or the next
+      component-library pass.
 
 ### Surfaced by coding the shared rate limiter's 429 (2026-10-21, issue #635, PR #636)
 
