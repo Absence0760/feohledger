@@ -8,10 +8,11 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { en } from '../i18n/locales/en';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import { messages as de } from '../i18n/locales/de';
 import { interpolate } from '../i18n/interpolate';
 import { setActiveFormatLocale } from '../i18n/formatLocale';
-import type { MessageKey } from '../i18n/messages';
+import type { MainMessageKey, MessageKey } from '../i18n/messages';
 import {
 	CODED_REFUSAL_CODES,
 	INVOICE_REQUIRED_FIELDS_MISSING,
@@ -101,7 +102,7 @@ describe('codedRefusalText', () => {
 		['email_in_this_workspace', 'refusal.emailInThisWorkspace'],
 		['email_in_other_workspace', 'refusal.emailInOtherWorkspace'],
 		['email_check_throttled', 'refusal.emailCheckThrottled']
-	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
+	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
 
@@ -239,10 +240,10 @@ describe('codedRefusalText', () => {
 
 	it('names a status by its label, and an unknown one verbatim', () => {
 		expect(codedRefusalText('credit_memo_invoice_settled', { status: 'paid' }, enT)).toContain(
-			`The invoice is ${en['invoices.status.paid']}:`
+			`The invoice is ${EN_ALL['invoices.status.paid']}:`
 		);
 		expect(codedRefusalText('credit_memo_not_applicable', { status: 'void' }, enT)).toContain(
-			en['creditMemos.status.void']
+			EN_ALL['creditMemos.status.void']
 		);
 		expect(
 			codedRefusalText('credit_memo_not_editable', { status: 'from_the_future' }, enT)
@@ -265,8 +266,8 @@ describe('codedRefusalText', () => {
 			{ fields: ['vendor', 'amount'] },
 			enT
 		);
-		expect(out).toContain(en['invoices.col.vendor']);
-		expect(out).toContain(en['invoices.col.amount']);
+		expect(out).toContain(EN_ALL['invoices.col.vendor']);
+		expect(out).toContain(EN_ALL['invoices.col.amount']);
 	});
 
 	it.each([
@@ -296,14 +297,14 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['external_payment_paid_on_future', 'refusal.externalPaymentPaidOnFuture'],
 		['nacha_requires_record_only', 'refusal.nachaRequiresRecordOnly'],
 		['nacha_already_exported', 'refusal.nachaAlreadyExported']
-	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
+	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
 
 	it('states the record-only refusal whatever the reason it resolved for', () => {
 		for (const reason of ['configured', 'unknown_mode', 'no_processor_in_deployed_environment']) {
 			expect(codedRefusalText('payments_record_only', { reason }, enT)).toBe(
-				en['refusal.paymentsRecordOnly']
+				EN_ALL['refusal.paymentsRecordOnly']
 			);
 		}
 	});
@@ -311,13 +312,13 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 	it('names the invoice status, the payment status and the exception type by their labels', () => {
 		expect(
 			codedRefusalText('external_payment_not_payable', { status: 'paid' }, enT)
-		).toContain(`(this one is ${en['invoices.status.paid']})`);
+		).toContain(`(this one is ${EN_ALL['invoices.status.paid']})`);
 		expect(
 			codedRefusalText('external_payment_payment_live', { payment_status: 'submitted' }, enT)
-		).toContain(`(${en['payments.status.submitted']})`);
+		).toContain(`(${EN_ALL['payments.status.submitted']})`);
 		expect(
 			codedRefusalText('external_payment_blocking_exception', { exception_type: 'duplicate' }, enT)
-		).toContain(`unresolved ${en['exceptions.type.duplicate']} exception`);
+		).toContain(`unresolved ${EN_ALL['exceptions.type.duplicate']} exception`);
 		// A type this build predates renders readably rather than falling back.
 		expect(
 			codedRefusalText('external_payment_blocking_exception', { exception_type: 'brand_new_kind' }, enT)
@@ -393,7 +394,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 			['nacha_amount_too_large', 'refusal.nachaAmountTooLarge'],
 			// `params.reason` is a dispatcher machine code — never shown.
 			['nacha_payment_not_payable', 'refusal.nachaPaymentNotPayable']
-		] as [string, MessageKey][]) {
+		] as [string, MainMessageKey][]) {
 			expect(
 				codedRefusalText(code, { invoice_number: 'INV-9', reason: 'invoice_blocked:fraud_flag' }, deT)
 			).toBe(
@@ -408,8 +409,8 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 			{ missing: ['company_id', 'odfi_routing', 'a_field_from_the_future'] },
 			enT
 		);
-		expect(out).toContain(en['org.payments.nachaField.companyId']);
-		expect(out).toContain(en['org.payments.nachaField.odfiRouting']);
+		expect(out).toContain(EN_ALL['org.payments.nachaField.companyId']);
+		expect(out).toContain(EN_ALL['org.payments.nachaField.odfiRouting']);
 		expect(out).toContain('a_field_from_the_future');
 	});
 
@@ -536,7 +537,7 @@ describe('the ERP send refused for an open duplicate or fraud exception (§286)'
 				enT
 			)
 		).toBe(
-			`This invoice has an open ${en['exceptions.type.duplicate']} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.`
+			`This invoice has an open ${EN_ALL['exceptions.type.duplicate']} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.`
 		);
 		expect(
 			codedRefusalText('exception_blocks_erp_export', { exception_type: 'fraud_flag' }, deT)

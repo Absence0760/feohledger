@@ -9,7 +9,7 @@ import {
 	recurringStatusLabelKey,
 	skipReasonKey
 } from './recurring';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 describe('skipReasonKey', () => {
 	it('names every reason code the backend sweep can emit', () => {
@@ -18,7 +18,7 @@ describe('skipReasonKey', () => {
 			expect(key, `no message key for reason "${code}"`).toBeTruthy();
 			// The key must actually exist in the catalogue, or `m()` would fall
 			// back to rendering the raw key string in the badge tooltip.
-			expect(Object.keys(en)).toContain(key as string);
+			expect(Object.keys(EN_ALL)).toContain(key as string);
 		}
 	});
 
@@ -45,8 +45,8 @@ describe('STATUS_LABEL_KEYS', () => {
 		for (const status of RECURRING_STATUSES) {
 			const key = STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key]).not.toBe(status);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key]).not.toBe(status);
 		}
 	});
 
@@ -63,7 +63,7 @@ describe('CADENCE_LABEL_KEYS', () => {
 		for (const cadence of RECURRING_CADENCES) {
 			const key = CADENCE_LABEL_KEYS[cadence];
 			expect(key, `${cadence} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${cadence} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${cadence} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 

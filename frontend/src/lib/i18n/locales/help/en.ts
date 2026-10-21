@@ -61,7 +61,6 @@ export const enHelp = {
 	'help.note.role': 'Who can do this',
 	'help.glossary.title': 'Glossary',
 	'help.glossary.intro': 'The accounts-payable terms used across {product}, and what each one means here.',
-	'help.glossary.topic': 'Topic',
 	'help.glossary.allTopics': 'All topics',
 	'help.glossary.aliases': 'Also called:',
 	'help.glossary.related': 'See also:',

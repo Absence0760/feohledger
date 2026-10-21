@@ -8,7 +8,7 @@ import {
 	intakeStatusLabelKey,
 	intakeTypeLabelKey
 } from './intake';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Map-completeness guard for the intake label maps.
@@ -28,13 +28,13 @@ describe('INTAKE_STATUS_LABEL_KEYS', () => {
 		for (const status of INTAKE_STATUSES) {
 			const key = INTAKE_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 
 	it('never uses the raw enum value as its own label', () => {
 		for (const status of INTAKE_STATUSES) {
-			expect(en[INTAKE_STATUS_LABEL_KEYS[status]]).not.toBe(status);
+			expect(EN_ALL[INTAKE_STATUS_LABEL_KEYS[status]]).not.toBe(status);
 		}
 	});
 
@@ -54,7 +54,7 @@ describe('INTAKE_TYPE_LABEL_KEYS', () => {
 		for (const type of INTAKE_TYPES) {
 			const key = INTAKE_TYPE_LABEL_KEYS[type];
 			expect(key, `${type} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${type} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${type} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 
@@ -69,7 +69,7 @@ describe('INTAKE_FORM_FIELDS', () => {
 		for (const type of INTAKE_TYPES) {
 			for (const field of INTAKE_FORM_FIELDS[type]) {
 				expect(
-					Object.keys(en),
+					Object.keys(EN_ALL),
 					`${type}.${field.key} → "${field.labelKey}" is not in the catalogue`
 				).toContain(field.labelKey);
 			}
