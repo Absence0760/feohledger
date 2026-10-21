@@ -30,21 +30,29 @@ on:
     - cron: '0 6 * * 1'
 
 permissions:
-  # When called from ci.yml these are capped by the CALLING job's
-  # `permissions:` block (ci.yml's `security` job grants exactly these three);
-  # a called workflow can only narrow the token, never widen it.
+  # Read-only at the top: every write grant is made per job, on the four
+  # jobs, all of which upload SARIF. A top-level `security-events: write` reached
+  # every job in the file and is what Scorecard's Token-Permissions check
+  # scores 0; at job level it is accepted because this file runs
+  # `codeql-action/analyze` / `upload-sarif`.
+  #
+  # When called from ci.yml every grant below is also capped by the CALLING
+  # job's `permissions:` block (ci.yml's `security` job grants exactly these
+  # three); a called workflow can only narrow the token, never widen it.
   #
   # SARIF upload requires `security-events: write`. `actions: read` is
   # needed by the CodeQL analyze step's telemetry / workflow-run lookup
   # (without it you get "Resource not accessible by integration" which
   # fails the whole job even when the analysis itself succeeded).
   contents: read
-  security-events: write
-  actions: read
 
 jobs:
   codeql-python:
     name: CodeQL (Python)
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     runs-on: ubuntu-latest
     # 20 minutes, not the 10 this had. A healthy run takes 1-4 minutes
     # (measured over the last 60 runs: Python median 1.4 / max 4.4,
@@ -77,6 +85,10 @@ jobs:
 
   codeql-javascript:
     name: CodeQL (TypeScript/JavaScript)
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     runs-on: ubuntu-latest
     # See codeql-python: 20, from measured run times.
     timeout-minutes: 20
@@ -93,6 +105,10 @@ jobs:
 
   codeql-actions:
     name: CodeQL (GitHub Actions)
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     runs-on: ubuntu-latest
     # See codeql-python: 20, from measured run times.
     timeout-minutes: 20
@@ -111,6 +127,10 @@ jobs:
 
   trivy-backend-image:
     name: Trivy (backend container)
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

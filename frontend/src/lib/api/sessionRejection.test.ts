@@ -6,7 +6,8 @@ import {
 	ownWorkspaceSignInUrl,
 	revokeRejectedSession,
 	sessionRejection,
-	TOKEN_TENANT_MISMATCH
+	TOKEN_TENANT_MISMATCH,
+	WORKSPACE_CLOSED_LOGIN_PATH
 } from './sessionRejection.ts';
 
 describe('sessionRejection', () => {
@@ -50,6 +51,12 @@ describe('the /login round trip', () => {
 		const path = loginPathFor('other_workspace');
 		expect(loginNoticeKey(new URL(`http://x${path}`).searchParams)).toBe(
 			'auth.login.signedOutOtherWorkspace'
+		);
+	});
+
+	it('says the workspace is gone after an administrator closed it', () => {
+		expect(loginNoticeKey(new URL(`http://x${WORKSPACE_CLOSED_LOGIN_PATH}`).searchParams)).toBe(
+			'auth.login.workspaceClosed'
 		);
 	});
 

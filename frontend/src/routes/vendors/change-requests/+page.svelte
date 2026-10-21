@@ -23,6 +23,7 @@
 	import { api, ApiError } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
+	import { isAllowed, isOffered, refusalText } from '#lib/api/actionVerdicts.ts';
 	import type {
 		VendorChangeRequest,
 		VendorChangeRequestCounts,
@@ -158,9 +159,19 @@
 		return status;
 	}
 
-	/** True when the signed-in user is the AP requester — the backend's 403. */
+	/** True when the signed-in user is the AP requester — used only to LABEL
+	 *  the requester column "You". Whether Approve is offered is the server's
+	 *  `approve_refusal`, which also refuses the approver whose own provisioned
+	 *  portal login staged the change — an axis this page never checked, so
+	 *  that approver used to get an enabled Approve that 403'd (issue #575). */
 	function isOwnRequest(r: VendorChangeRequest): boolean {
 		return !!r.requested_by_user_id && r.requested_by_user_id === auth.user?.id;
+	}
+
+	/** The reader holds the approve permission but the server refuses THIS
+	 *  reader on this request — a colleague must approve it. */
+	function approveBlockedForMe(r: VendorChangeRequest): boolean {
+		return isOffered(r.approve_refusal) && !isAllowed(r.approve_refusal);
 	}
 
 	function requesterLabel(r: VendorChangeRequest): string {
@@ -454,17 +465,17 @@
 					</td>
 					<td class="actions">
 						{#if r.status === 'pending'}
-							{#if isOwnRequest(r)}
-								<span class="sod-note">{m('vendors.changeRequests.row.youRequested')}</span>
+							{#if approveBlockedForMe(r)}
+								<span class="sod-note">{refusalText(r.approve_refusal ?? null, m)}</span>
 							{/if}
 							<RowAction
 								variant={approveArmedId === r.id ? 'danger' : 'success'}
 								armed={approveArmedId === r.id}
-								disabled={busyId === r.id || !canApprove || isOwnRequest(r)}
+								disabled={busyId === r.id || !isAllowed(r.approve_refusal)}
 								title={!canApprove
 									? m('vendors.changeRequests.row.needsPermission')
-									: isOwnRequest(r)
-										? m('vendors.changeRequests.toast.sod')
+									: r.approve_refusal
+										? refusalText(r.approve_refusal, m)
 										: undefined}
 								onclick={(e) => {
 									e.stopPropagation();
@@ -593,9 +604,9 @@
 				></textarea>
 			</label>
 
-			{#if isOwnRequest(selected)}
+			{#if approveBlockedForMe(selected)}
 				<p class="sod-block" data-testid="sod-block">
-					{m('vendors.changeRequests.toast.sod')}
+					{refusalText(selected.approve_refusal ?? null, m)}
 				</p>
 			{:else if !canApprove}
 				<p class="sod-block">{m('vendors.changeRequests.noPermissionNote')}</p>
@@ -634,7 +645,7 @@
 					type="button"
 					class="btn-decide approve"
 					class:armed={approveArmedId === current.id}
-					disabled={busyId === current.id || !canApprove || isOwnRequest(current)}
+					disabled={busyId === current.id || !isAllowed(current.approve_refusal)}
 					onclick={(e) => {
 						e.stopPropagation();
 						if (approveArmedId === current.id) decide(current, 'approve');

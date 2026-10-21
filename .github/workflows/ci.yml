@@ -1586,6 +1586,13 @@ jobs:
   # file's default is `contents: read` only, so the grant the SARIF uploads
   # need is made here: `security-events: write` to upload, `actions: read` for
   # CodeQL's workflow-run lookup (see the note in security.yml).
+  #
+  # Scorecard's Token-Permissions check flags this grant and always will: it
+  # accepts a job-level `security-events: write` only in a file that itself
+  # runs a SARIF-uploading action, and it does not follow a `uses:` job into
+  # the workflow it calls. The jobs inside security.yml carry their own
+  # job-level grants and pass; backend/tests/test_workflow_token_permissions.py
+  # follows this call and checks them.
   security:
     name: Security
     permissions:

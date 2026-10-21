@@ -4,11 +4,12 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import ROLE_ADMIN, ROLE_AP_MANAGER, require_roles
+from app.api.deps import ROLE_ADMIN, ROLE_AP_MANAGER, holds_any_role, require_roles
 from app.api.pagination import (
     MAX_SELECT_ALL_IDS,
     MatchingIdsResponse,
@@ -16,6 +17,7 @@ from app.api.pagination import (
     paginated,
     pagination_params,
 )
+from app.api.refusals import ActionRefusal
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.exception import Exception as APException
@@ -59,6 +61,50 @@ EXCEPTION_TYPE_LABELS = {
     "payment_compliance_hold": "Compliance Hold",
     "payment_reconciliation": "Payment Reconciliation",
 }
+
+
+#: Who may act on the queue — the dependency on every `/api/exceptions`
+#: mutation, and what `decision_refusals` asks.
+EXCEPTION_DECIDE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
+EXCEPTION_NOT_ACTIONABLE = "exception_not_actionable"
+
+
+def actionable_refusal(exc: APException) -> ActionRefusal | None:
+    """``POST /{id}/resolve``'s status gate: only an open or escalated row can
+    be resolved, escalated or dismissed."""
+    if exc.status in ACTIONABLE_STATUSES:
+        return None
+    return ActionRefusal(
+        EXCEPTION_NOT_ACTIONABLE,
+        f"Cannot resolve from '{exc.status}' status",
+        http_status.HTTP_409_CONFLICT,
+    )
+
+
+def decision_refusals(
+    exc: APException, inv: Invoice | None, user: User, org_settings: dict | None
+) -> dict:
+    """What ``POST /{id}/resolve`` would answer ``user`` for each action on
+    this row — ``{"resolve", "dismiss", "escalate"}``, each a coded refusal or
+    ``None`` (issue #575). The endpoint's own gates, in its order: the role
+    dependency, :func:`actionable_refusal`, then
+    ``exception_lifecycle.segregation_refusal`` — the predicate
+    ``record_decision`` raises from. The queue used to check only the status,
+    so the uploader of a duplicate invoice was offered a Resolve that 403s.
+    """
+    from app.api.refusals import coded_refusal, role_not_permitted
+    from app.services.exception_lifecycle import refusal_message
+
+    if not holds_any_role(user, EXCEPTION_DECIDE_ROLES):
+        return {action: role_not_permitted() for action in RESOLUTION_ACTIONS}
+    state = actionable_refusal(exc)
+    if state is not None:
+        return {action: state.verdict() for action in RESOLUTION_ACTIONS}
+    out: dict = {}
+    for action in RESOLUTION_ACTIONS:
+        code = segregation_refusal(exc, inv, user.id, action=action, org_settings=org_settings)
+        out[action] = coded_refusal(code, refusal_message(code)) if code else None
+    return out
 
 
 def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
@@ -219,6 +265,7 @@ async def list_exceptions(
     sort: SortParams = Depends(sort_params),
     pagination: PaginationParams = Depends(pagination_params),
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -257,7 +304,16 @@ async def list_exceptions(
     result = await db.execute(query)
     rows = result.all()
 
-    return paginated([_exception_dict(exc, inv) for exc, inv in rows], int(total), pagination)
+    items = [
+        {
+            **_exception_dict(exc, inv),
+            # The caller's verdict on Resolve / Dismiss / Escalate for this row,
+            # from the gates the resolve endpoint runs (`decision_refusals`).
+            "decision_refusals": decision_refusals(exc, inv, user, org.settings),
+        }
+        for exc, inv in rows
+    ]
+    return paginated(items, int(total), pagination)
 
 
 # Registered BEFORE the parametric `/{exception_id}` route — same reason
@@ -533,8 +589,9 @@ async def resolve_exception(
         raise HTTPException(status_code=404, detail="Exception not found")
     exc, inv = row
 
-    if exc.status not in ACTIONABLE_STATUSES:
-        raise HTTPException(status_code=409, detail=f"Cannot resolve from '{exc.status}' status")
+    refusal = actionable_refusal(exc)
+    if refusal is not None:
+        raise refusal.http()
 
     # The segregation 403 is raised by `record_decision` — the chokepoint every
     # caller shares — and propagates untouched (it is an HTTPException, not the

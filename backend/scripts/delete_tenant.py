@@ -61,7 +61,7 @@ def _print_plan(plan) -> None:
 
 async def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Delete a tenant: documents, database, and control-plane records."
+        description="Delete a tenant: database, documents, and control-plane records."
     )
     parser.add_argument("--slug", required=True, help="Tenant slug, e.g. 'acme'")
     parser.add_argument(

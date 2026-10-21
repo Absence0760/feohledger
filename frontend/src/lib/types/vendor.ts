@@ -41,6 +41,13 @@ export interface VendorBankDetails {
 
 export interface Vendor {
 	id: string;
+	/**
+	 * On `GET /api/vendors` rows only: the CALLER's verdict on the row's Verify
+	 * and Reject — each `null` when `POST /{id}/verify|reject` would accept,
+	 * else the coded refusal (`api/vendors.py::vendor_status_actions`, from the
+	 * table both endpoints and bulk status read). Absent = unknown = neither.
+	 */
+	status_actions?: { verify: ActionRefusal; reject: ActionRefusal };
 	name: string;
 	code: string | null;
 	email: string | null;
@@ -300,6 +307,7 @@ export interface VendorMergeResponse {
 
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 
 /**
  * Badge tone per vendor lifecycle status (`Vendor.status`).
@@ -571,6 +579,14 @@ export interface VendorChangeRequest {
 	reviewed_at: string | null;
 	review_note: string | null;
 	created_at: string;
+	/**
+	 * On queue rows only (`GET /api/vendors/change-requests`): the CALLER's
+	 * verdict on approving — `null` when `POST /change-requests/{id}/approve`
+	 * would accept them, else the coded refusal it would answer with
+	 * (`api/vendors.py::change_request_approve_refusal`). Absent = unknown =
+	 * no Approve.
+	 */
+	approve_refusal?: ActionRefusal;
 }
 
 /** `GET /api/vendors/change-requests` — the paginated queue envelope. */

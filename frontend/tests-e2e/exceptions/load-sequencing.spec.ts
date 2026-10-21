@@ -40,7 +40,10 @@ function exceptionRow(n: number, status: 'open' | 'escalated' = 'open') {
 		due_at: null,
 		is_overdue: false,
 		time_to_resolution_hours: null,
-		created_at: '2026-01-01T00:00:00Z'
+		created_at: '2026-01-01T00:00:00Z',
+		// The caller's verdict per decision (`decision_refusals`) — all open, so
+		// the row offers Resolve and is selectable.
+		decision_refusals: { resolve: null, dismiss: null, escalate: null }
 	};
 }
 

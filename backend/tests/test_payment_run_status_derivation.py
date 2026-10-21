@@ -120,6 +120,14 @@ def _user(uid: uuid.UUID):
     return SimpleNamespace(id=uid, full_name="Run Status Tester", roles=["admin"])
 
 
+def _role_user(uid: uuid.UUID):
+    """`_user` with Role-shaped roles — `GET /runs/{id}`'s `actions` reads the
+    caller's roles the way `require_roles` does (`role.name`)."""
+    return SimpleNamespace(
+        id=uid, full_name="Run Status Tester", roles=[SimpleNamespace(name="admin")]
+    )
+
+
 def _org(org_id: uuid.UUID):
     return SimpleNamespace(
         id=org_id,
@@ -194,7 +202,8 @@ async def test_dismissing_the_last_held_payment_unsticks_the_run(realdb):
         detail = await get_payment_run(
             run_id=run_id,
             db=db,
-            user=_user(info.users["admin"]),
+            org=_org(info.org_id),
+            user=_role_user(info.users["admin"]),
             entity_id=None,
         )
     assert detail["status"] == "submitted"
@@ -216,7 +225,8 @@ async def test_dismissing_the_last_held_payment_unsticks_the_run(realdb):
         detail = await get_payment_run(
             run_id=run_id,
             db=db,
-            user=_user(info.users["admin"]),
+            org=_org(info.org_id),
+            user=_role_user(info.users["admin"]),
             entity_id=None,
         )
     assert detail["status"] == "failed"

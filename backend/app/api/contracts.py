@@ -10,6 +10,7 @@ See ``backend/docs/contracts.md``.
 import csv
 import io
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -557,6 +558,9 @@ async def _transition(
         )
     target = _LIFECYCLE_TARGET[action]
     contract.status = target
+    if target == ContractStatus.active and contract.activated_at is None:
+        # Evidence the contract bound the parties; outlives a later cancel.
+        contract.activated_at = datetime.now(UTC)
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),

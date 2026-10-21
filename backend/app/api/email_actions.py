@@ -322,10 +322,12 @@ async def _apply_action(
     same decision as approving in-app, so it has to read the same org
     ``fraud_rules`` / ``matching`` tolerances / structuring window. Omitting it
     reverted all of them to the platform default for this one door."""
+    from app.services.review import awaiting_review
     from app.services.workflow_engine import get_invoice_for_update
 
     invoice = await get_invoice_for_update(db, decoded.invoice_id)
-    if invoice.status != InvoiceStatus.ready_for_review:
+    # The one review-stage predicate every decision door reads.
+    if not awaiting_review(invoice):
         return _ActionResult(
             False,
             _info_page(
