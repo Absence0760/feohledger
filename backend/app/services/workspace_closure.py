@@ -242,7 +242,7 @@ TENANT_CHECKS: tuple[TenantCheck, ...] = (
     TenantCheck(
         BLOCKER_ACTIVE_CONTRACTS,
         "contracts",
-        # `activated_at` (migration 0119) is the evidence: a contract active and
+        # `activated_at` (migration 0120) is the evidence: a contract active and
         # then cancelled still bound the parties, and its status no longer says so.
         _any_row(
             "contracts", "activated_at IS NOT NULL OR status IN ('active', 'expired', 'terminated')"

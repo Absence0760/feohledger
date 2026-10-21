@@ -22,8 +22,8 @@ plane, fanned out by ``scripts/migrate_all_tenants.py``. Fresh tenants get the
 column from ``create_all`` (``app/models/contract.py``). Idempotent (``IF NOT
 EXISTS``, and the backfill only fills NULLs).
 
-Revision ID: 0119_contract_activated_at
-Revises: 0118_workspace_closures
+Revision ID: 0120_contract_activated_at
+Revises: 0119_workspace_closures
 Create Date: 2026-10-21
 
 26 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
@@ -33,8 +33,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "0119_contract_activated_at"
-down_revision = "0118_workspace_closures"
+revision = "0120_contract_activated_at"
+down_revision = "0119_workspace_closures"
 branch_labels = None
 depends_on = None
 

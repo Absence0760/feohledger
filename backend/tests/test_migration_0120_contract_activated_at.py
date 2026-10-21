@@ -1,4 +1,4 @@
-"""Migration 0119 runs against a real tenant database: down, up, up again.
+"""Migration 0120 runs against a real tenant database: down, up, up again.
 
 The realdb harness builds tenants with ``create_all``, so
 ``contracts.activated_at`` exists there without the revision ever executing.
@@ -22,11 +22,11 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.models.workflow import AuditLog
 from tests.test_workspace_closure import _insert_row
 
-REVISION = Path(__file__).resolve().parents[1] / "alembic/versions/0119_contract_activated_at.py"
+REVISION = Path(__file__).resolve().parents[1] / "alembic/versions/0120_contract_activated_at.py"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("_mig_0119", REVISION)
+    spec = importlib.util.spec_from_file_location("_mig_0120", REVISION)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -55,7 +55,7 @@ async def _activated(engine, contract_id):
 
 
 @pytest.mark.asyncio
-async def test_0119_adds_and_backfills_activated_at(realdb):
+async def test_0120_adds_and_backfills_activated_at(realdb):
     from app.database import _make_tenant_url
 
     org_id = realdb.info("a").org_id
@@ -96,7 +96,7 @@ async def test_0119_adds_and_backfills_activated_at(realdb):
 
 
 @pytest.mark.asyncio
-async def test_0119_is_a_no_op_on_the_control_plane(realdb):
+async def test_0120_is_a_no_op_on_the_control_plane(realdb):
     mig = _load()
     engine = create_async_engine(realdb.control_db_url())
     try:

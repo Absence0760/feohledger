@@ -53,9 +53,12 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 # Key under which the pending jobs live on `Session.info`. A list of
-# `(name, factory)`; `factory` is a zero-arg callable returning the coroutine to
-# run. Deliberately a FACTORY, not a coroutine object: a queued coroutine that
-# is dropped (rollback) would emit a "coroutine was never awaited" warning.
+# `(name, factory, savepoint)`; `factory` is a zero-arg callable returning the
+# coroutine to run, and `savepoint` is the nested transaction (SAVEPOINT) that
+# was open when it was queued, or None. A savepoint that rolls back drops only
+# the jobs queued inside it (see `_on_after_rollback`). Deliberately a FACTORY,
+# not a coroutine object: a queued coroutine that is dropped (rollback) would
+# emit a "coroutine was never awaited" warning.
 _JOBS_KEY = "_feoh_post_commit_jobs"
 
 # Strong references to in-flight tasks. Without this the only reference is the
@@ -82,12 +85,34 @@ def enqueue_post_commit(
     except Exception:  # noqa: BLE001 — a caller with no usable session
         logger.warning("post-commit: session has no info mapping; dropping job=%s", name)
         return
-    info.setdefault(_JOBS_KEY, []).append((name, factory))
+    info.setdefault(_JOBS_KEY, []).append((name, factory, _open_savepoint(session)))
+
+
+def _open_savepoint(session):
+    """The innermost open SAVEPOINT of `session`, or None."""
+    sync = getattr(session, "sync_session", session)
+    getter = getattr(sync, "get_nested_transaction", None)
+    if getter is None:
+        return None
+    try:
+        return getter()
+    except Exception:  # noqa: BLE001 — a stand-in session with no transaction API
+        return None
+
+
+def _within(savepoint, rolled_back) -> bool:
+    """Was `savepoint` opened inside (or is it) the one that rolled back?"""
+    tx = savepoint
+    while tx is not None:
+        if tx is rolled_back:
+            return True
+        tx = tx.parent
+    return False
 
 
 def _drain(session: Session) -> list[tuple[str, Callable[[], Awaitable[None]]]]:
     jobs = session.info.pop(_JOBS_KEY, None)
-    return list(jobs) if jobs else []
+    return [(name, factory) for name, factory, _savepoint in jobs] if jobs else []
 
 
 async def _guarded(name: str, factory: Callable[[], Awaitable[None]]) -> None:
@@ -134,6 +159,13 @@ def _run_jobs(jobs: list[tuple[str, Callable[[], Awaitable[None]]]]) -> None:
 
 @event.listens_for(Session, "after_commit")
 def _on_after_commit(session: Session) -> None:
+    # SQLAlchemy fires this when a SAVEPOINT is released too. Nothing is
+    # committed then: the outer transaction is still open, holding its locks,
+    # and can still roll back. Running the queue here sent bulk approve's
+    # emails (and anything else queued so far) from inside that transaction,
+    # one savepoint at a time. The jobs wait for the real commit.
+    if session.in_nested_transaction():
+        return
     jobs = _drain(session)
     if jobs:
         _run_jobs(jobs)
@@ -142,6 +174,19 @@ def _on_after_commit(session: Session) -> None:
 @event.listens_for(Session, "after_rollback")
 def _on_after_rollback(session: Session) -> None:
     # The transition never happened — do not tell anyone it did.
+    #
+    # SQLAlchemy fires this for a SAVEPOINT rollback too, not only the outer
+    # one. Bulk approve runs each row in a savepoint and skips a refused row by
+    # rolling just that savepoint back; draining everything here dropped the
+    # emails, chat posts and ERP auto-sends of every row approved before it,
+    # although their changes still committed. Only the jobs queued inside the
+    # rolled-back savepoint go.
+    if session.in_nested_transaction():
+        rolled_back = session.get_nested_transaction()
+        jobs = session.info.get(_JOBS_KEY)
+        if jobs:
+            session.info[_JOBS_KEY] = [job for job in jobs if not _within(job[2], rolled_back)]
+        return
     _drain(session)
 
 

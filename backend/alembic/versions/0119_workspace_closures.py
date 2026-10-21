@@ -18,8 +18,8 @@ by design: both rows it names are deleted by the closure it records.
 
 Idempotent (``IF NOT EXISTS``).
 
-Revision ID: 0118_workspace_closures
-Revises: 0117_erp_oauth_company_index
+Revision ID: 0119_workspace_closures
+Revises: 0118_invoice_erp_document
 Create Date: 2026-10-20
 
 23 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
@@ -29,8 +29,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "0118_workspace_closures"
-down_revision = "0117_erp_oauth_company_index"
+revision = "0119_workspace_closures"
+down_revision = "0118_invoice_erp_document"
 branch_labels = None
 depends_on = None
 

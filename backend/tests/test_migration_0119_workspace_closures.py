@@ -1,9 +1,9 @@
-"""Migration 0118 runs against a real control plane: up, up again, and a
+"""Migration 0119 runs against a real control plane: up, up again, and a
 downgrade that deliberately keeps the table.
 
 The realdb harness builds its control plane with ``create_all``, so
 ``workspace_closures`` exists there without the revision ever executing.
-Nothing else proves 0118 creates it on a control plane at the previous schema,
+Nothing else proves 0119 creates it on a control plane at the previous schema,
 re-runs harmlessly, keeps its rows on a downgrade, and no-ops on a tenant
 database. Always left
 upgraded so later tests see the current schema. Whole-schema equality with the
@@ -19,11 +19,11 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-REVISION = Path(__file__).resolve().parents[1] / "alembic/versions/0118_workspace_closures.py"
+REVISION = Path(__file__).resolve().parents[1] / "alembic/versions/0119_workspace_closures.py"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("_mig_0118", REVISION)
+    spec = importlib.util.spec_from_file_location("_mig_0119", REVISION)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -57,7 +57,7 @@ async def _table_exists(engine) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_0118_creates_the_table_on_a_control_plane_at_the_previous_schema(realdb):
+async def test_0119_creates_the_table_on_a_control_plane_at_the_previous_schema(realdb):
     mig = _load()
     engine = create_async_engine(realdb.control_db_url())
     try:
@@ -97,7 +97,7 @@ async def test_0118_creates_the_table_on_a_control_plane_at_the_previous_schema(
 
 
 @pytest.mark.asyncio
-async def test_0118_downgrade_keeps_the_closure_records(realdb):
+async def test_0119_downgrade_keeps_the_closure_records(realdb):
     """Each row is the only evidence a deleted workspace's closure was asked
     for, and the operator's backup queue: a downgrade must not drop them."""
     mig = _load()
@@ -112,7 +112,7 @@ async def test_0118_downgrade_keeps_the_closure_records(realdb):
 
 
 @pytest.mark.asyncio
-async def test_0118_is_a_no_op_on_a_tenant(realdb):
+async def test_0119_is_a_no_op_on_a_tenant(realdb):
     from app.database import _make_tenant_url
 
     mig = _load()

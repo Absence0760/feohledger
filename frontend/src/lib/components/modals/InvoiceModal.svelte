@@ -159,6 +159,7 @@
 		'invoice.resubmitted': 'invoices.modal.action.resubmitted',
 		'invoice.assigned_for_review': 'invoices.modal.action.assignedForReview',
 		'invoice.erp_submitted': 'invoices.modal.action.erpSubmitted',
+		'invoice.erp_auto_send_refused': 'invoices.modal.action.erpAutoSendRefused',
 		'invoice.extraction_dispatched': 'invoices.modal.action.extractionStarted',
 		'invoice.extraction_reset': 'invoices.modal.action.extractionReset',
 		'invoice.extraction_triggered': 'invoices.modal.action.extractionTriggered',
@@ -1504,7 +1505,6 @@
 		if (erpActions.length === 0) return null;
 		const latest = erpActions[erpActions.length - 1];
 		return {
-			erp_reference: (latest.details as Record<string, unknown>)?.erp_reference as string | undefined,
 			erp_document_id: (latest.details as Record<string, unknown>)?.erp_document_id as string | undefined,
 			last_error: (latest.details as Record<string, unknown>)?.error as string | undefined,
 			// `{code, params}` for a refusal (`services/erp.erp_refusal_record`):
@@ -2318,17 +2318,35 @@
 						/>
 					{/if}
 
-					{#if isErpStatus || (status === 'failed' && erpInfo)}
+					<!-- A posted invoice keeps its bill of record after it moves on
+					     (`done`, or voided back to `approved`), so the column, not the
+					     status, decides whether there is a reference to show. -->
+					{#if isErpStatus || invoice.erp_document_id || (status === 'failed' && erpInfo)}
 						<div class="erp-section">
 							<div class="help-row erp-title-row">
 								<div class="erp-title">{m('invoices.modal.erp.title')}</div>
 								<HelpTip term="erp-sync" />
 							</div>
 							<div class="erp-details">
-								{#if erpInfo?.erp_reference}
-									<div class="erp-row">
+								{#if invoice.erp_document_id}
+									<!-- The URL is the backend's (`erp_adapters/deep_links.py`,
+									     the one provider → URL mapping); none is built here. -->
+									<div class="erp-row" data-testid="erp-reference">
 										<span class="erp-label">{m('invoices.modal.erp.reference')}</span>
-										<code class="erp-value">{erpInfo.erp_reference}</code>
+										{#if invoice.erp_document_url}
+											<a
+												class="erp-value erp-link"
+												href={invoice.erp_document_url}
+												target="_blank"
+												rel="noopener noreferrer"
+												data-testid="erp-reference-link"
+											>
+												<code>{invoice.erp_document_id}</code>
+												<span class="visually-hidden">{m('invoices.modal.erp.opensInErp')}</span>
+											</a>
+										{:else}
+											<code class="erp-value">{invoice.erp_document_id}</code>
+										{/if}
 									</div>
 								{/if}
 								{#if erpInfo?.erp_document_id}
@@ -4377,6 +4395,17 @@
 		font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
 		font-size: 0.78rem;
 		color: var(--text);
+	}
+
+	.erp-link {
+		color: var(--accent);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		overflow-wrap: anywhere;
+	}
+
+	.erp-link code {
+		font: inherit;
 	}
 
 	.erp-error .erp-value {
