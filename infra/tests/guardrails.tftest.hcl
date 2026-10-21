@@ -9,7 +9,8 @@
 # instance, one sha-shaped parameter; and the SPA stack (frontend.tf): a bucket
 # only this distribution reads, the platform certificate on the apex + wildcard,
 # a publish grant scoped to that bucket and distribution, and DNS that stays on
-# the VM until frontend_on_cloudfront moves it — with api. on the VM regardless.
+# the VM until frontend_on_cloudfront moves it — with api. on the VM regardless;
+# and the VM's database grant: rds-db:connect on the app role alone.
 
 mock_provider "aws" {
   # A mocked policy document renders a random string, which the KMS key and
@@ -37,6 +38,20 @@ mock_provider "aws" {
   mock_data "aws_ssm_parameter" {
     defaults = {
       value = "ami-0123456789abcdef0"
+    }
+  }
+
+  # The RDS IAM-auth grant's ARN is built from these; mocked values would be
+  # random strings the assertion could not name.
+  mock_data "aws_region" {
+    defaults = {
+      region = "us-east-1"
+    }
+  }
+
+  mock_data "aws_caller_identity" {
+    defaults = {
+      account_id = "000000000000"
     }
   }
 }
@@ -158,6 +173,16 @@ override_resource {
     id             = "E0123456789ABC"
     domain_name    = "d0123456789abc.cloudfront.net"
     hosted_zone_id = "Z2FDTNDATAQYW2"
+  }
+}
+
+# The RDS resource id (db-XXXX) is what an rds-db:connect ARN names; a mock
+# leaves it unknown at plan time.
+override_resource {
+  target          = aws_db_instance.main
+  override_during = plan
+  values = {
+    resource_id = "db-TESTRESOURCEID0000000000"
   }
 }
 
@@ -567,6 +592,26 @@ run "database_accepts_connections_from_the_app_vm_only" {
   assert {
     condition     = aws_vpc_security_group_ingress_rule.db_from_app.cidr_ipv4 == null
     error_message = "The database must be reachable from the app VM's security group, never from a CIDR range."
+  }
+}
+
+run "app_vm_signs_in_to_the_database_as_the_app_role_only" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.app_permissions.statement : tolist(s.resources)
+      if contains(s.actions, "rds-db:connect")
+    ])) == toset(["arn:aws:rds-db:us-east-1:000000000000:dbuser:db-TESTRESOURCEID0000000000/feoh_app"])
+    error_message = "rds-db:connect must name exactly the feoh_app user on this instance — never dbuser:*, another instance, or the master user (docs/decisions.md §304)."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.app_permissions.statement :
+      !contains(s.actions, "rds-db:connect") || length(s.actions) == 1
+    ])
+    error_message = "The database-connect grant is its own statement, so its resource scope cannot widen another action's."
   }
 }
 

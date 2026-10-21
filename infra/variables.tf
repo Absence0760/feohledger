@@ -212,7 +212,7 @@ variable "db_multi_az" {
 }
 
 variable "db_master_password" {
-  description = "RDS master password. Ephemeral and write-only: it is passed to RDS but never stored in Terraform state or plans. Supply it from the private infra-secrets repo at apply time (README.md § Workload stack) — the same value goes into FEOH_DATABASE_URL in the sops env. URL-safe characters only (e.g. `openssl rand -hex 24`), since it is embedded in a connection URL."
+  description = "RDS master password. Ephemeral and write-only: it is passed to RDS but never stored in Terraform state or plans. Supply it from the private infra-secrets repo at apply time (README.md § Workload stack). Break-glass only: the app signs in as feoh_app with an IAM token, so this is not in the VM's sops env (docs/decisions.md §304). URL-safe characters only (e.g. `openssl rand -hex 24`), since the break-glass URL embeds it."
   type        = string
   sensitive   = true
   ephemeral   = true
@@ -220,7 +220,7 @@ variable "db_master_password" {
 
   validation {
     condition     = length(var.db_master_password) >= 24 && can(regex("^[A-Za-z0-9]+$", var.db_master_password))
-    error_message = "db_master_password must be at least 24 alphanumeric characters (URL-safe; it is embedded in FEOH_DATABASE_URL)."
+    error_message = "db_master_password must be at least 24 alphanumeric characters (URL-safe; the break-glass FEOH_DATABASE_URL embeds it)."
   }
 }
 
