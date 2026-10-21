@@ -491,7 +491,11 @@ below or in `## Project invariants` — this is the index.)
    is the part a narrow selection misses, and it is what makes the narrow
    selection safe). Reach for a full local suite only when you are changing
    something with no bounded caller set — a conftest, a base model, a
-   cross-cutting serializer — and say so when you do.
+   cross-cutting serializer — and say so when you do. The
+   `.claude/hooks/test-scope-guard.py` PreToolUse hook enforces this for every
+   session and subagent: a bare `pytest`, an unscoped `playwright test` and
+   `pnpm test` / `test:backend` / `test:frontend` / `test:e2e` are refused; prefix
+   `FEOH_FULL_SUITE=1` for the no-bounded-caller-set case.
 
 ## Git workflow
 
