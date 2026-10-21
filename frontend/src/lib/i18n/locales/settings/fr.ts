@@ -289,6 +289,10 @@ export const messages = {
 	'org.erp.option.AUTHORISED': 'Approuvée (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Brouillon',
 	'org.erp.help.xeroBillStatus': 'Le statut avec lequel les factures sont créées dans Xero. Une facture brouillon doit être approuvée dans Xero avant de pouvoir être payée.',
+	'org.erp.field.bill_payment_bank_account': "Paiements de factures : compte bancaire",
+	'org.erp.help.billPaymentBankAccount': "Le compte de votre plan comptable (synchronisé depuis QuickBooks) à partir duquel les paiements FeohLedger par virement ou chèque sont enregistrés lorsqu'ils sont reportés dans QuickBooks comme paiements de factures. Laissez-le vide et les paiements ne seront pas reportés.",
+	'org.erp.field.bill_payment_card_account': "Paiements de factures : compte de carte",
+	'org.erp.help.billPaymentCardAccount': "Le compte de carte de crédit de votre plan comptable à partir duquel les paiements par carte FeohLedger sont enregistrés dans QuickBooks.",
 	'org.erp.help.sageZaUsername': 'L\'adresse e-mail avec laquelle vous vous connectez à Sage.',
 	'org.erp.help.sageZaBaseUrl': 'Uniquement pour un point de terminaison partenaire Sage. Laissez vide pour utiliser l\'API sud-africaine de Sage.',
 	'org.erp.help.byoApp': 'Uniquement si vous avez enregistré votre propre application auprès de l\'ERP.',
@@ -380,6 +384,9 @@ export const messages = {
 	'org.commerce.removeMapping': "Supprimer",
 	'org.erp.oauth.needsReconnect': 'La connexion à {erp} a expiré. Reconnectez-vous pour continuer à envoyer les factures.',
 	'org.erp.oauth.reconnect': 'Se reconnecter à {erp}',
+	'org.erp.oauth.expiresSoon': "La connexion à {erp} expire le {date}. Reconnectez-la avant cette date pour continuer à envoyer les factures et à synchroniser les paiements.",
+	'org.erp.oauth.needsReconnectExpired': "La connexion à {erp} a expiré. Reconnectez-la pour continuer à envoyer les factures et à synchroniser les paiements.",
+	'org.erp.oauth.needsReconnectRevoked': "La connexion à {erp} a été déconnectée ou révoquée dans {erp}. Reconnectez-la pour continuer à envoyer les factures et à synchroniser les paiements.",
 	'org.erp.oauth.disconnectConfirm': 'Confirmer la déconnexion',
 	'org.section.payments': 'Paiements (ACH / Virement / RTP)',
 	'org.section.paymentsSaved': 'Paiements',
@@ -576,6 +583,8 @@ export const messages = {
 	'admin.users.fail.openInvoices': '{n, plural, one {# facture ouverte} other {# factures ouvertes}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# approbation en attente} other {# approbations en attente}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, one {# flux de travail actif} other {# flux de travail actifs}}',
+	'admin.users.fail.lastAdmin': 'dernier administrateur actif de l’organisation',
+	'admin.users.fail.auditUnavailable': 'impossible à consigner dans le journal d’audit, donc non supprimé',
 	'admin.users.modal.invite.aria': 'Inviter un utilisateur',
 	'admin.users.modal.invite.heading': 'Inviter un utilisateur',
 	'admin.users.modal.invite.hint': 'Un mot de passe temporaire sera généré automatiquement.',
@@ -1103,7 +1112,7 @@ export const messages = {
 	'org.payments.nachaHint': "Facultatif. Permet de télécharger un lot en brouillon sous forme de fichier ACH NACHA à déposer auprès de votre banque. Votre banque vous fournit ces valeurs : un nom de société (16 caractères maximum), un identifiant de société de 10 caractères (généralement 1 suivi de votre EIN), le numéro de routage à 9 chiffres de votre banque et, si besoin, le nom de la banque (23 caractères maximum).",
 	'org.payments.nachaInvalid': "Vérifiez les informations du fichier bancaire : {fields}.",
 
-	// Closing a workspace (Organization → Close workspace, decisions §301)
+	// Closing a workspace (Organization → Close workspace, decisions §303)
 	'org.close.title': "Fermer cet espace de travail",
 	'org.close.intro': "Fermer un espace de travail le supprime définitivement : ses factures, fournisseurs, documents et paramètres, ainsi que tous les comptes utilisateur qu’il contient. Utilisez cette option pour un espace de travail dont vous n’avez plus besoin, par exemple un essai que vous n’avez pas poursuivi. Sa fermeture libère les adresses e-mail de ses utilisateurs, qui peuvent alors être ajoutées à un autre espace de travail.",
 	'org.close.checking': "Vérification de la possibilité de fermer cet espace de travail…",

@@ -57,6 +57,7 @@ pnpm stripe:up                # Stripe API mock (stripe-mock :12111, opt-in `pay
 pnpm mail:up                  # Mailpit SMTP sink + web inbox (:1025/:8025, opt-in `mail` profile) for the smtp email adapter
 pnpm erp:up                   # fake ERP server (fake-erp :12112, opt-in `erp` profile) for merge_dev/netsuite/dynamics_365_bc adapter e2e (erp:down / erp:logs too)
 pnpm test:erp                 # ERP adapter e2e (tests-e2e/erp/) — real HTTP against fake-erp; skips if it's down
+pnpm test:erp:xero-live       # opt-in, read-only contract check against REAL Xero (connected acme tenant); local only, never CI
 pnpm commerce:up              # fake commerce platforms (fake-commerce :12113, opt-in `commerce` profile) for the commerce adapters (commerce:down / commerce:logs too)
 pnpm test:commerce            # commerce e2e (tests-e2e/commerce/) — mock path always; provider specs skip if fake-commerce is down
 pnpm day-one:up               # day-one rehearsal (#575): EMPTY Postgres → deploy's own migration step → production-shaped API → add-tenant → re-run must be a no-op (own ports; day-one:down / day-one:logs)
@@ -172,7 +173,7 @@ before changing any router; the summaries below are only an index.
 | `/scim/v2` | SCIM 2.0 user provisioning (Okta/Entra/Authentik), per-tenant bearer auth |
 | `/portal`, `/portal/auth` | Supplier portal — VendorUser auth, invoice submit/resubmit, payments, self-service, MFA |
 | `/admin` | User CRUD, role assignment |
-| `/organization` | Org settings, connection tests, SSO config (`/organization/sso`, the one audited writer of `settings.sso`), provider credentials (`/organization/credentials` — ERP / payment / card secrets, KMS-sealed, write-only), SCIM token, branding, custom domains, data residency, closing an unused workspace (`/organization/close`, fail-closed guards + second-factor step-up, decisions §301) |
+| `/organization` | Org settings, connection tests, SSO config (`/organization/sso`, the one audited writer of `settings.sso`), provider credentials (`/organization/credentials` — ERP / payment / card secrets, KMS-sealed, write-only), SCIM token, branding, custom domains, data residency, closing an unused workspace (`/organization/close`, fail-closed guards + second-factor step-up, decisions §303) |
 | `/entities` | Multi-entity admin (legal entities / subsidiaries — the `entity_id` scope target) |
 | `/partner` | Partner / reseller multi-tenant admin — child tenants, link codes, provision |
 | `/invoices` | Invoice CRUD, upload, extraction, approve/reject, line items, e-invoice, email approval |
@@ -204,7 +205,7 @@ before changing any router; the summaries below are only an index.
 | `/dashboard` | KPI aggregates (pipeline, aging, spend, trends) |
 | `/billing` | Platform billing & metering — the AP platform's OWN customer billing (control-plane) |
 | `/commerce` | Commerce platform connection (admin), location + SKU mapping, per-receipt inventory push status + retry |
-| `/erp`, `/email-intake`, `/peppol` | Inbound webhooks — ERP status, email-to-invoice, PEPPOL AS4 receive |
+| `/erp`, `/email-intake`, `/peppol` | Inbound webhooks — ERP status (incl. QuickBooks CloudEvents, `/erp/webhook/quickbooks`), email-to-invoice, PEPPOL AS4 receive |
 | `/approvals/slack`, `/approvals/teams` | Interactive approval from a chat message — public, HMAC + single-use action token |
 | `/organization/email-intake`, `/signup` | Per-tenant intake address; self-service tenant signup |
 | `/v1`, `/api-keys`, `/webhooks` | Public Developer API (`X-API-Key`) + published OpenAPI; API-key mgmt; outbound webhooks |

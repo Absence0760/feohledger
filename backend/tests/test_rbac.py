@@ -389,6 +389,11 @@ ALTERNATE_AUTH: dict[tuple[str, str], AlternateGate] = {
         "refused outright); dedupe is on the processor event id.",
         symbols=("parse_webhook", "is_event_already_processed"),
     ),
+    ("POST", "/erp/webhook/quickbooks"): AlternateGate(
+        "The Intuit app's verifier token (base64 HMAC over the raw body), then "
+        "event-id dedupe; the company in each event picks the tenant.",
+        symbols=("verify_hmac_sha256_base64", "claim_qbo_events"),
+    ),
     ("POST", "/erp/webhook/{erp_type}"): AlternateGate(
         "Per-tenant ERP webhook signing secret, then event-id dedupe.",
         symbols=("verify_hmac_sha256", "is_event_already_processed"),

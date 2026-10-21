@@ -289,6 +289,10 @@ export const messages = {
 	'org.erp.option.AUTHORISED': 'Genehmigt (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Entwurf',
 	'org.erp.help.xeroBillStatus': 'Der Status, mit dem Rechnungen in Xero angelegt werden. Entwürfe müssen in Xero genehmigt werden, bevor sie bezahlt werden können.',
+	'org.erp.field.bill_payment_bank_account': "Rechnungszahlungen: Bankkonto",
+	'org.erp.help.billPaymentBankAccount': "Das Konto in Ihrem Kontenplan (aus QuickBooks synchronisiert), von dem FeohLedger-Zahlungen per Überweisung oder Scheck verbucht werden, wenn sie als Rechnungszahlungen an QuickBooks zurückgeschrieben werden. Leer lassen, dann werden Zahlungen nicht zurückgeschrieben.",
+	'org.erp.field.bill_payment_card_account': "Rechnungszahlungen: Kartenkonto",
+	'org.erp.help.billPaymentCardAccount': "Das Kreditkartenkonto in Ihrem Kontenplan, von dem FeohLedger-Kartenzahlungen in QuickBooks verbucht werden.",
 	'org.erp.help.sageZaUsername': 'Die E-Mail-Adresse, mit der Sie sich bei Sage anmelden.',
 	'org.erp.help.sageZaBaseUrl': 'Nur für einen Sage-Partner-Endpunkt. Leer lassen, um die südafrikanische API von Sage zu verwenden.',
 	'org.erp.help.byoApp': 'Nur wenn Sie eine eigene App beim ERP registriert haben.',
@@ -380,6 +384,9 @@ export const messages = {
 	'org.commerce.removeMapping': "Entfernen",
 	'org.erp.oauth.needsReconnect': 'Die Verbindung zu {erp} ist abgelaufen. Verbinden Sie sich erneut, um weiter Rechnungen zu senden.',
 	'org.erp.oauth.reconnect': 'Erneut mit {erp} verbinden',
+	'org.erp.oauth.expiresSoon': "Die Verbindung zu {erp} läuft am {date} ab. Verbinden Sie sie vorher neu, damit Rechnungen weiter gesendet und Zahlungen abgeglichen werden.",
+	'org.erp.oauth.needsReconnectExpired': "Die Verbindung zu {erp} ist abgelaufen. Verbinden Sie sie neu, damit Rechnungen weiter gesendet und Zahlungen abgeglichen werden.",
+	'org.erp.oauth.needsReconnectRevoked': "Die Verbindung zu {erp} wurde in {erp} getrennt oder widerrufen. Verbinden Sie sie neu, damit Rechnungen weiter gesendet und Zahlungen abgeglichen werden.",
 	'org.erp.oauth.disconnectConfirm': 'Trennen bestätigen',
 	'org.section.payments': 'Zahlungen (ACH / Überweisung / RTP)',
 	'org.section.paymentsSaved': 'Zahlungen',
@@ -576,6 +583,8 @@ export const messages = {
 	'admin.users.fail.openInvoices': '{n, plural, one {# offene Rechnung} other {# offene Rechnungen}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# ausstehende Genehmigung} other {# ausstehende Genehmigungen}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, one {# aktiver Workflow} other {# aktive Workflows}}',
+	'admin.users.fail.lastAdmin': 'letzter aktiver Administrator der Organisation',
+	'admin.users.fail.auditUnavailable': 'nicht im Prüfprotokoll erfasst, daher nicht gelöscht',
 	'admin.users.modal.invite.aria': 'Benutzer einladen',
 	'admin.users.modal.invite.heading': 'Benutzer einladen',
 	'admin.users.modal.invite.hint': 'Ein temporäres Passwort wird automatisch generiert.',
@@ -1103,7 +1112,7 @@ export const messages = {
 	'org.payments.nachaHint': "Optional. Damit können Sie einen Entwurfslauf als NACHA-ACH-Datei herunterladen und bei Ihrer Bank hochladen. Ihre Bank nennt Ihnen diese Werte: einen Firmennamen (bis zu 16 Zeichen), eine 10-stellige Firmen-ID (meist 1 gefolgt von Ihrer EIN), die 9-stellige Routing-Nummer Ihrer Bank und optional den Namen der Bank (bis zu 23 Zeichen).",
 	'org.payments.nachaInvalid': "Prüfen Sie die Angaben für die Bankdatei: {fields}.",
 
-	// Closing a workspace (Organization → Close workspace, decisions §301)
+	// Closing a workspace (Organization → Close workspace, decisions §303)
 	'org.close.title': "Diesen Workspace schließen",
 	'org.close.intro': "Wenn Sie einen Workspace schließen, wird er dauerhaft gelöscht: seine Rechnungen, Lieferanten, Dokumente und Einstellungen sowie alle Benutzerkonten darin. Nutzen Sie dies für einen Workspace, den Sie nicht mehr benötigen, etwa eine Testphase, die Sie nicht fortgesetzt haben. Danach sind die E-Mail-Adressen seiner Benutzer wieder frei und können einem anderen Workspace hinzugefügt werden.",
 	'org.close.checking': "Es wird geprüft, ob dieser Workspace geschlossen werden kann …",

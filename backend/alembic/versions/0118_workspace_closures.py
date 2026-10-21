@@ -3,7 +3,7 @@
 Why
 ---
 An administrator can now close their own workspace (`POST
-/api/organization/close`, `docs/decisions.md` §301). The closure deletes the
+/api/organization/close`, `docs/decisions.md` §303). The closure deletes the
 tenant database, the organisation row and the user rows, so nothing the
 tenant held can record that it happened. This table is the record that
 outlives it: who asked (a user id, no address), with which step-up proof, and
@@ -18,8 +18,8 @@ by design: both rows it names are deleted by the closure it records.
 
 Idempotent (``IF NOT EXISTS``).
 
-Revision ID: 0117_workspace_closures
-Revises: 0116_exception_fingerprint
+Revision ID: 0118_workspace_closures
+Revises: 0117_erp_oauth_company_index
 Create Date: 2026-10-20
 
 23 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
@@ -29,8 +29,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "0117_workspace_closures"
-down_revision = "0116_exception_fingerprint"
+revision = "0118_workspace_closures"
+down_revision = "0117_erp_oauth_company_index"
 branch_labels = None
 depends_on = None
 

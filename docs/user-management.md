@@ -196,7 +196,7 @@ workspace's side:
   The administrator types the workspace's slug back and, where MFA is on,
   confirms a code or a passkey (a password alone is not enough, and an account
   with no second factor enrolls one first). `POST /api/organization/close`;
-  reasoning and the full guard list: [`decisions.md`](decisions.md) §301.
+  reasoning and the full guard list: [`decisions.md`](decisions.md) §303.
 
 Neither one reveals anything about the other workspace to the inviter; the
 refusal's sentence only says that its administrator can close it.
@@ -263,10 +263,11 @@ Users cannot change their own email or roles.
 | GET | `/api/admin/roles` | List all available roles — the picker `role_names` is chosen from (`user.manage`) |
 | GET | `/api/admin/permissions` | The granular-permission catalog, key + label (`user.manage`) |
 | POST | `/api/admin/users` | Create a user (returns temp password) (`user.manage`) |
-| PATCH | `/api/admin/users/:id` | Update user name, email, roles or active status (`user.manage`). A field resent at its current value is not a change: it is not applied and not named in the `user.updated` audit row. A `password` field is refused (`422 admin_password_field_removed`) |
+| PATCH | `/api/admin/users/:id` | Update user name, email, roles or active status (`user.manage`). A field resent at its current value is not a change: it is not applied and not named in the `user.updated` audit row, which records each changed role list, active flag and address before and after. A `password` field is refused (`422 admin_password_field_removed`). Removing the org's last active admin (demote or deactivate, self or not) is `409`, serialized on the organization row so two admins demoting each other cannot both pass |
 | POST | `/api/admin/users/:id/reset-password` | Reset to a generated temp the user must change at next sign-in; revokes their sessions; returns the temp once (`user.manage`, org-scoped, out-rank guarded, not self, audited `user.password_reset`) |
 | POST | `/api/admin/users/:id/revoke-sessions` | Force-log-out a user without changing their account (`user.manage`, org-scoped, idempotent, audited) |
-| DELETE | `/api/admin/users/:id` | Permanently delete a user (cannot delete yourself) (`user.manage`) |
+| DELETE | `/api/admin/users/:id` | Permanently delete a user (cannot delete yourself; never the last active admin — `409`) (`user.manage`). Audited `user.deleted` with the account's `email`, `role_names` and `was_active`, written before the delete commits: if the record cannot be written the delete is refused (`503`) |
+| POST | `/api/admin/users/bulk-delete` | The same delete per id, best-effort (`user.manage`). Each row's delete and its `user.deleted` record stand or fall together (a savepoint per row); per-row failure reasons: `not_found`, `self`, `forbidden`, `blocked` (still referenced), `last_admin`, `audit_unavailable` |
 
 `user.manage` defaults to `admin` only — identical to the four endpoints'
 prior `require_roles(ROLE_ADMIN)` gate — but an org can grant it to a custom
@@ -360,7 +361,19 @@ organizations
 - **Token revocation**: Redis-backed blocklist (tokens are blocklisted on logout)
 - **Password hashing**: Bcrypt
 
-## Future Considerations
+## Users managed by an IdP (SCIM)
 
-- **Email invitations**: Send invite emails with a magic link or temp password via SMTP (admins currently hand temp passwords to invitees out-of-band)
-- **SCIM `/Groups`**: map IdP groups to our `Role` rows (`/Users` is shipped; group sync is not)
+An org on a plan with SCIM can let its IdP (Okta, Entra, Authentik) create,
+rename and deprovision users and map IdP groups onto roles —
+[`authentication.md` § SCIM 2.0](authentication.md#scim-20-user-provisioning-from-okta--entra).
+Those writes follow the admin rules above:
+
+- **They are on the trail.** `user.created` / `user.updated` with
+  `via: "scim"`, the same before-and-after shape as an admin edit, and a null
+  actor (the IdP's token is not a user).
+- **A deprovision signs the person out** — every session revoked, as an admin
+  deactivation does.
+- **The IdP cannot remove the last active admin.** A deprovision of that user,
+  or a group change that would take `admin` from them, is refused with a SCIM
+  `400 mutability` the IdP shows its admin, and audited. Make someone else an
+  admin here first.

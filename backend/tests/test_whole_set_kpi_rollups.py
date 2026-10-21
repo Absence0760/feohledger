@@ -435,6 +435,7 @@ def test_a_counts_endpoint_does_not_take_the_dimension_it_tallies(pair):
 _GATE_CALLABLES = (
     "require_roles",
     "require_permission",
+    "require_role_or_permission",
     "require_entitlement",
     "require_api_scope",
     "get_current_user",
@@ -454,11 +455,24 @@ def _auth_gates(module_source: str, fn_name: str) -> tuple[str, ...] | None:
     spelling difference between endpoints that must agree. Sorted so parameter
     ORDER is not mistaken for a difference.
 
+    A gate built once at module level and named (`_VENDOR_READ =
+    require_role_or_permission(...)`, then `Depends(_VENDOR_READ)`) is expanded
+    to the call it names before comparing, so two endpoints sharing the alias
+    still compare equal and one that drifts to a different spelling does not.
+
     Returns `None` when the function is not found at all — distinct from `()`
     for a function that exists but declares no gate; the caller reports those
     as different problems.
     """
     tree = ast.parse(module_source)
+    aliases = {
+        target.id: ast.unparse(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+        and any(gate in ast.unparse(node.value) for gate in _GATE_CALLABLES)
+    }
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
@@ -469,11 +483,24 @@ def _auth_gates(module_source: str, fn_name: str) -> tuple[str, ...] | None:
         ]
         gates = [
             expr
-            for expr in (ast.unparse(d) for d in defaults)
+            for expr in (_expand_alias(d, aliases) for d in defaults)
             if "Depends(" in expr and any(gate in expr for gate in _GATE_CALLABLES)
         ]
         return tuple(sorted(gates))
     return None
+
+
+def _expand_alias(default: ast.expr, aliases: dict[str, str]) -> str:
+    """`Depends(<name>)` with `<name>` a module-level gate, spelled as the call."""
+    if (
+        isinstance(default, ast.Call)
+        and ast.unparse(default.func) == "Depends"
+        and len(default.args) == 1
+        and isinstance(default.args[0], ast.Name)
+        and default.args[0].id in aliases
+    ):
+        return f"Depends({aliases[default.args[0].id]})"
+    return ast.unparse(default)
 
 
 _API_DIR = pathlib.Path(__file__).resolve().parents[1] / "app" / "api"

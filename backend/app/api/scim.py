@@ -45,8 +45,16 @@ from app.schemas.scim import (
     SCIMUserCreate,
 )
 from app.services import scim_groups
+from app.services.admin_lockout import (
+    LastAdminLockout,
+    guard_against_last_admin_lockout,
+    role_names_for,
+)
+from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.identity_provisioning import email_holder_org_id
+from app.services.session_management import revoke_user_sessions
 from app.services.sso import hash_scim_token
+from app.services.user_audit import user_updated_details
 from app.tenant import lock_organization
 from app.utils.emails import email_matches, normalize_email
 
@@ -277,6 +285,135 @@ def _extract_full_name(name: SCIMName | None, email: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Lifecycle bookkeeping — the audit row, the forced logout and the last-admin
+# guard every user write here shares with the admin API (`api/admin.py`).
+# ---------------------------------------------------------------------------
+
+#: The `via` every SCIM-written `user.*` audit row carries. Its `actor_id` is
+#: null: the IdP's bearer token is not a user (the group-role rows' convention).
+SCIM_VIA = "scim"
+
+#: Shown to the IdP admin when a deprovision would leave the org without an admin.
+LAST_ADMIN_SCIM_DETAIL = (
+    "This user is the organization's last active admin and cannot be deactivated. "
+    "Make another user an admin in FeohLedger first, then retry."
+)
+
+
+def _snapshot(user: User) -> dict:
+    """The fields a SCIM write can change, under their audit names."""
+    return {
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_active": user.is_active,
+        "external_id": user.sso_provider_id,
+    }
+
+
+async def _refuse_if_last_admin(
+    db: AsyncSession, org: Organization, user: User, *, operation: str
+) -> None:
+    """Refuse a SCIM deactivation of the org's last active admin.
+
+    The admin API has refused this since the sole-admin lockout fix; SCIM did
+    not, so an IdP misconfiguration — a leaver rule matching the wrong person, an
+    app unassigned from the wrong group — could strand the org with no admin and
+    no way back short of a database fix. Same guard and same lock as the admin
+    path (`services/admin_lockout`).
+
+    The answer is a `400` with `scimType: "mutability"`: RFC 7644 §3.12 defines
+    it as a modification "not compatible with the target attribute's … current
+    state", which is exactly this, and IdPs surface a 400 to their admin rather
+    than retrying it. A 409 was rejected because the RFC reserves it for
+    uniqueness and version conflicts. The refusal is audited, since an IdP that
+    keeps pushing the deprovision is itself something an admin needs to see.
+    """
+    user_id, org_id = user.id, org.id  # read before a rollback expires them
+    roles = await role_names_for(db, user_id)
+    try:
+        await guard_against_last_admin_lockout(
+            db,
+            org_id=org_id,
+            target_id=user_id,
+            was_active=user.is_active,
+            previous_role_names=roles,
+            new_is_active=False,
+            new_role_names=roles,
+        )
+    except LastAdminLockout:
+        await db.rollback()
+        await dispatch_auth_audit(
+            organization_id=org_id,
+            actor_id=None,
+            action="user.deactivation_refused",
+            entity_id=user_id,
+            details={"via": SCIM_VIA, "operation": operation, "reason": "last_active_admin"},
+        )
+        raise _scim_http_error(400, LAST_ADMIN_SCIM_DETAIL, "mutability") from None
+
+
+async def _commit_user_change(
+    db: AsyncSession, org: Organization, user: User, before: dict, *, operation: str
+) -> None:
+    """Commit a SCIM user write, then end its sessions and audit it.
+
+    Mirrors the admin PATCH: the change commits first, a deactivation then
+    revokes every session the account holds, and a `user.updated` row records
+    each changed field before and after. Without this an IdP-driven leaver was
+    shut out (`get_current_user` checks `is_active`) with nothing on the trail
+    saying who or when, and their tokens stayed on the active-session list.
+
+    A failed revoke never fails the request — the deactivation has committed,
+    and a 5xx would only make the IdP retry a change that already happened — so
+    it is recorded on the row (`sessions_revoked: null`) instead, the way the
+    admin password reset records it. An unchanged write audits nothing, like a
+    resent field on the admin path.
+
+    The row is best-effort (`dispatch_auth_audit`), unlike the admin delete's
+    write-first `record_auth_audit_or_raise`, on purpose: refusing a deprovision
+    because the trail is down would keep a leaver's account active, which is
+    worse than an unrecorded deactivation. A failed write is logged.
+    """
+    user_id, org_id = user.id, org.id
+    after = _snapshot(user)
+    changed = [field for field in after if after[field] != before[field]]
+    await db.commit()
+    # `updated_at` is a server-side onupdate the flush expired; reload it here,
+    # in the async context, before the response serializer reads it.
+    await db.refresh(user)
+    if not changed:
+        return
+
+    extra: dict = {"operation": operation}
+    if "external_id" in changed:
+        extra["previous_external_id"] = before["external_id"]
+        extra["external_id"] = after["external_id"]
+    if before["is_active"] and not after["is_active"]:
+        try:
+            extra["sessions_revoked"] = len(await revoke_user_sessions(user_id))
+        except Exception:  # noqa: BLE001
+            logger.exception("Session revoke after SCIM deactivation failed for user %s", user_id)
+            extra["sessions_revoked"] = None
+    await dispatch_auth_audit(
+        organization_id=org_id,
+        actor_id=None,
+        action="user.updated",
+        entity_id=user_id,
+        details=user_updated_details(
+            changed,
+            previous_email=before["email"],
+            email=after["email"],
+            previous_role_names=[],
+            role_names=[],
+            previous_is_active=before["is_active"],
+            is_active=after["is_active"],
+            via=SCIM_VIA,
+            **extra,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Filter parser — SCIM filters are their own mini-language; we support the
 # subset Okta + Entra actually use for user provisioning. Anything else
 # returns a 400 so the IdP shows a clear error to the admin.
@@ -402,7 +539,18 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
-    logger.info("SCIM provisioned user %s in org %s", email, org.slug)
+    await db.commit()
+    await db.refresh(user)
+    logger.info("SCIM provisioned user %s in org %s", user.id, org.slug)
+    # Account creation by a bearer token gets the same `user.created` row an
+    # admin invite writes, so the trail says when and by what it appeared.
+    await dispatch_auth_audit(
+        organization_id=org.id,
+        actor_id=None,
+        action="user.created",
+        entity_id=user.id,
+        details={"role_names": [], "via": SCIM_VIA, "is_active": user.is_active},
+    )
     return _user_to_scim(user, request)
 
 
@@ -425,6 +573,7 @@ async def replace_user(
     if user is None:
         raise _scim_http_error(404, f"User {user_id} not found.")
 
+    before = _snapshot(user)
     if not await _org_has_scim(db, org):
         if body.active:
             await require_scim_entitlement(db, org)  # raises the SCIM-shaped 402
@@ -432,9 +581,10 @@ async def replace_user(
         # deprovisions. Without the feature ONLY that deactivation is applied —
         # the rest of the resource is not written — so a leaver is still shut
         # out after a downgrade (see `require_scim_entitlement`).
+        await _refuse_if_last_admin(db, org, user, operation="put")
         user.is_active = False
         await db.flush()
-        await db.refresh(user)
+        await _commit_user_change(db, org, user, before, operation="put")
         return _user_to_scim(user, request)
 
     email = normalize_email(_extract_primary_email(body.emails, body.userName))
@@ -442,15 +592,17 @@ async def replace_user(
     # userName. Platform-wide — see `_refuse_taken_username`.
     await _refuse_taken_username(db, org, email, exclude_user_id=user.id)
 
+    if not body.active:
+        await _refuse_if_last_admin(db, org, user, operation="put")
     user.email = email
     user.full_name = _extract_full_name(body.name, email)
     if body.externalId is not None:
         user.sso_provider_id = body.externalId
     user.is_active = body.active
     await db.flush()
-    # Same `updated_at` onupdate-expiry guard as patch_user — reload before
-    # serializing so we don't trip a sync lazy-load in the async handler.
-    await db.refresh(user)
+    # `_commit_user_change` reloads the row before we serialize — the same
+    # `updated_at` onupdate-expiry guard as patch_user.
+    await _commit_user_change(db, org, user, before, operation="put")
     return _user_to_scim(user, request)
 
 
@@ -484,7 +636,14 @@ async def patch_user(
     if not _is_deactivation_only(body):
         await require_scim_entitlement(db, org)
 
+    before = _snapshot(user)
+    # Every op is staged and nothing touches `user` until the whole PATCH is
+    # known to be allowed, so a refused rename or a refused deprovision of the
+    # last admin cannot leave a half-applied op on the session.
     new_email: str | None = None
+    new_active: bool | None = None
+    new_external_id: str | None = None
+    new_full_name: str | None = None
 
     for op in body.Operations:
         action = (op.op or "").lower()
@@ -496,24 +655,24 @@ async def patch_user(
             continue
 
         if path.lower() == "active":
-            user.is_active = _scim_active(value) if action != "remove" else False
+            new_active = _scim_active(value) if action != "remove" else False
         elif path == "userName" and action in ("replace", "add"):
             if isinstance(value, str):
                 new_email = normalize_email(value)
         elif path == "externalId" and action in ("replace", "add"):
             if isinstance(value, str):
-                user.sso_provider_id = value
+                new_external_id = value
         elif path == "" and isinstance(value, dict) and action == "replace":
             # Bulk replace on the root — common from Okta for status changes
             if "active" in value:
-                user.is_active = _scim_active(value["active"])
+                new_active = _scim_active(value["active"])
             if "userName" in value and isinstance(value["userName"], str):
                 new_email = normalize_email(value["userName"])
             if "externalId" in value and isinstance(value["externalId"], str):
-                user.sso_provider_id = value["externalId"]
+                new_external_id = value["externalId"]
             if "name" in value and isinstance(value["name"], dict):
                 name = value["name"]
-                user.full_name = _extract_full_name(SCIMName(**name), new_email or user.email)
+                new_full_name = _extract_full_name(SCIMName(**name), new_email or user.email)
         else:
             # Silently ignore unsupported ops — SCIM lets the server do this,
             # and IdPs sometimes push ops we don't model (phoneNumbers etc.)
@@ -521,14 +680,25 @@ async def patch_user(
 
     if new_email is not None and new_email != user.email:
         await _refuse_taken_username(db, org, new_email, exclude_user_id=user.id)
+    if new_active is False:
+        await _refuse_if_last_admin(db, org, user, operation="patch")
+
+    if new_email is not None:
         user.email = new_email
+    if new_active is not None:
+        user.is_active = new_active
+    if new_external_id is not None:
+        user.sso_provider_id = new_external_id
+    if new_full_name is not None:
+        user.full_name = new_full_name
 
     await db.flush()
     # The UPDATE fires `updated_at`'s server-side `onupdate=func.now()`, which
-    # SQLAlchemy then marks expired. Reload it here, inside the async context,
-    # so building the SCIM response (which reads `updated_at` for meta.lastModified)
-    # doesn't trip a sync lazy-load → MissingGreenlet → 500 on the deprovision path.
-    await db.refresh(user)
+    # SQLAlchemy then marks expired. `_commit_user_change` reloads it inside the
+    # async context, so building the SCIM response (which reads `updated_at` for
+    # meta.lastModified) doesn't trip a sync lazy-load → MissingGreenlet → 500
+    # on the deprovision path.
+    await _commit_user_change(db, org, user, before, operation="patch")
     return _user_to_scim(user, request)
 
 
@@ -539,15 +709,20 @@ async def delete_user(
     db: AsyncSession = Depends(get_control_db),
 ):
     """Soft delete — SCIM DELETE deactivates rather than hard-deletes, so
-    we preserve the audit trail."""
+    we preserve the audit trail. It is the same deactivation a PATCH
+    `active: false` makes: last-admin guarded, sessions revoked, and audited
+    `user.updated` with `operation: "delete"`."""
     result = await db.execute(
         select(User).where(User.id == user_id, User.organization_id == org.id)
     )
     user = result.scalar_one_or_none()
     if user is None:
         raise _scim_http_error(404, f"User {user_id} not found.")
+    before = _snapshot(user)
+    await _refuse_if_last_admin(db, org, user, operation="delete")
     user.is_active = False
     await db.flush()
+    await _commit_user_change(db, org, user, before, operation="delete")
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +763,36 @@ async def _valid_member_ids(db: AsyncSession, org_id, ids) -> list[str]:
             seen.add(sid)
             out.append(sid)
     return out
+
+
+async def _reconcile_group_roles(db: AsyncSession, org: Organization, member_ids: set) -> None:
+    """Reconcile the affected members' roles, refusing to strip the last admin.
+
+    When `admin` is an IdP-managed role in `scim_group_role_map`, removing the
+    org's only admin from the mapped group (or deleting the group) used to
+    revoke the role like any other — the same lockout as a deprovision, reached
+    through a group. It is refused the same way, before any role or group state
+    changes: rolled back, audited, and answered `400 mutability`.
+    """
+    org_id = org.id  # read before a rollback expires it
+    try:
+        await scim_groups.reconcile_members(db, org, member_ids)
+    except LastAdminLockout:
+        await db.rollback()
+        await dispatch_auth_audit(
+            organization_id=org_id,
+            actor_id=None,
+            action="auth.scim.role_revoke_refused",
+            entity_type="organization",
+            entity_id=org_id,
+            details={"role": "admin", "source": "scim_group", "reason": "last_active_admin"},
+        )
+        raise _scim_http_error(
+            400,
+            "This change would remove the admin role from the organization's last active "
+            "admin. Make another user an admin in FeohLedger first, then retry.",
+            "mutability",
+        ) from None
 
 
 def _group_to_scim(group_id: str, data: dict, request: Request, emails: dict) -> SCIMGroup:
@@ -683,7 +888,7 @@ async def create_group(
     }
     scim_groups.write_groups(org, groups)
     await db.flush()
-    await scim_groups.reconcile_members(db, org, set(members))
+    await _reconcile_group_roles(db, org, set(members))
     logger.info("SCIM created group %s in org %s", body.displayName, org.slug)
     emails = await _emails_for(db, org.id, members)
     return _group_to_scim(group_id, groups[group_id], request, emails)
@@ -716,7 +921,7 @@ async def replace_group(
     groups[group_id] = data
     scim_groups.write_groups(org, groups)
     await db.flush()
-    await scim_groups.reconcile_members(db, org, old_members | set(new_members))
+    await _reconcile_group_roles(db, org, old_members | set(new_members))
     emails = await _emails_for(db, org.id, new_members)
     return _group_to_scim(group_id, data, request, emails)
 
@@ -747,7 +952,7 @@ async def patch_group(
     groups[group_id] = data
     scim_groups.write_groups(org, groups)
     await db.flush()
-    await scim_groups.reconcile_members(db, org, set(old_members) | set(members))
+    await _reconcile_group_roles(db, org, set(old_members) | set(members))
     emails = await _emails_for(db, org.id, members)
     return _group_to_scim(group_id, data, request, emails)
 
@@ -772,7 +977,7 @@ async def delete_group(
     await db.flush()
     # The group is gone, so reconciliation revokes its mapped role from former
     # members (unless another group still grants it).
-    await scim_groups.reconcile_members(db, org, former_members)
+    await _reconcile_group_roles(db, org, former_members)
     logger.info("SCIM deleted group %s in org %s", data.get("displayName"), org.slug)
 
 

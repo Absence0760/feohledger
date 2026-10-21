@@ -219,6 +219,7 @@ export const en = {
 	'profile.notifications.event.chatMessage': 'New supplier chat message',
 	'profile.notifications.event.cashShortfallProjected': 'Projected cash shortfall',
 	'profile.notifications.event.aiInvoiceUsage': 'AI-read invoice usage',
+	'profile.notifications.event.erpConnectionExpiring': "ERP connection needs reconnecting",
 	'profile.notifications.inAppFor': 'In-app notifications for {event}',
 	'profile.notifications.emailFor': 'Email notifications for {event}',
 
@@ -732,6 +733,7 @@ export const en = {
 	'payments.method.bacs': 'BACS',
 	'payments.method.fasterPayments': 'Faster Payments',
 	'payments.method.chaps': 'CHAPS',
+	'payments.method.card': "Card (outside FeohLedger)",
 
 	// Corridor quote comparison — advisory only (POST /api/payments/corridor-quotes)
 	'payments.quotes.open': 'Compare routes',
@@ -4957,6 +4959,10 @@ export const en = {
 	'erpRefusal.referenceInvalid': "{provider} refused this bill because it refers to a vendor or account it doesn't accept (Intuit error {code}). Check that the vendor and every account on the bill exist and are active in {provider}, sync them again, then retry.",
 	'erpRefusal.companySubscriptionInactive': "{provider} refused this bill because the company's subscription has ended, was cancelled or has a billing problem. Resolve it in {provider}, then retry.",
 	'erpRefusal.intuitFault': "{provider} refused this bill (Intuit error {code}). Check the bill's details against {provider} and correct them, then retry. If it keeps failing, give an administrator the error code.",
+	'erpRefusal.paymentAccountNotMapped': "{provider} was not told about this payment: no account to record it from is set. Choose the bill-payment account under Organization → ERP integration, then retry the payment sync.",
+	'erpRefusal.billNotInErp': "{provider} no longer has the bill this payment was for (it was deleted there), so the payment was not recorded there. Check the bill in {provider}.",
+	'erpRefusal.paymentExceedsBalance': "{provider} shows less still owed on this bill than this payment, so recording it would overpay the bill. Check what was already paid in {provider}.",
+	'erpRefusal.billPaymentVoided': "This payment was recorded in {provider} and then voided there, so it is not recorded again. Decide in {provider} whether the bill is paid.",
 	'erpRefusal.exceptionBlocksExport': "This invoice has an open {type} exception. Resolve or dismiss it in Exceptions, then send it to the ERP.",
 	'erpRefusal.exceptionBlocksExportPossiblyPosted': "This invoice has an open {type} exception, and an earlier attempt may already have created the bill in the ERP. Check the ERP before anyone pays it, then resolve or dismiss the exception in Exceptions.",
 	'glAccounts.toast.synced': "Synced {created} new and {updated} updated accounts.",

@@ -193,6 +193,7 @@ export const messages = {
 	'profile.notifications.event.chatMessage': 'Nova mensagem no chat com o fornecedor',
 	'profile.notifications.event.cashShortfallProjected': 'Déficit de caixa previsto',
 	'profile.notifications.event.aiInvoiceUsage': 'Uso de notas lidas por IA',
+	'profile.notifications.event.erpConnectionExpiring': "A conexão com o ERP precisa ser refeita",
 	'profile.notifications.inAppFor': 'Notificações no aplicativo para “{event}”',
 	'profile.notifications.emailFor': 'Notificações por e-mail para “{event}”',
 
@@ -651,6 +652,7 @@ export const messages = {
 	'payments.method.bacs': 'BACS',
 	'payments.method.fasterPayments': 'Faster Payments',
 	'payments.method.chaps': 'CHAPS',
+	'payments.method.card': "Cartão (fora do FeohLedger)",
 
 	'payments.quotes.open': 'Comparar rotas',
 	'payments.quotes.openAria': '{action} para a fatura {invoice}',
@@ -4770,6 +4772,10 @@ export const messages = {
 	'erpRefusal.referenceInvalid': "O {provider} recusou esta conta porque ela se refere a um fornecedor ou a uma conta que ele não aceita (erro Intuit {code}). Verifique se o fornecedor e todas as contas da fatura existem e estão ativos no {provider}, sincronize-os novamente e tente outra vez.",
 	'erpRefusal.companySubscriptionInactive': "O {provider} recusou esta conta porque a assinatura da empresa terminou, foi cancelada ou tem um problema de cobrança. Resolva isso no {provider} e tente novamente.",
 	'erpRefusal.intuitFault': "O {provider} recusou esta conta (erro Intuit {code}). Confira os dados da conta no {provider}, corrija-os e tente novamente. Se continuar falhando, informe o código de erro a um administrador.",
+	'erpRefusal.paymentAccountNotMapped': "O {provider} não foi informado deste pagamento: nenhuma conta de lançamento está definida. Escolha a conta de pagamentos de contas em Organização → Integração com ERP e sincronize os pagamentos novamente.",
+	'erpRefusal.billNotInErp': "A conta a que este pagamento se referia não existe mais no {provider} (foi excluída lá), então o pagamento não foi lançado. Verifique a conta no {provider}.",
+	'erpRefusal.paymentExceedsBalance': "O {provider} mostra um saldo em aberto menor que este pagamento; lançá-lo pagaria a conta a mais. Confira o que já foi pago no {provider}.",
+	'erpRefusal.billPaymentVoided': "Este pagamento foi lançado no {provider} e depois anulado lá, então não é lançado de novo. Decida no {provider} se a conta está paga.",
 	'erpRefusal.exceptionBlocksExport': "Esta fatura tem uma exceção aberta ({type}). Resolva-a ou descarte-a em Exceções e, depois, envie a fatura ao ERP.",
 	'erpRefusal.exceptionBlocksExportPossiblyPosted': "Esta fatura tem uma exceção aberta ({type}), e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP antes que alguém a pague e, depois, resolva ou descarte a exceção em Exceções.",
 	'glAccounts.toast.synced': "{created} contas novas e {updated} atualizadas sincronizadas.",

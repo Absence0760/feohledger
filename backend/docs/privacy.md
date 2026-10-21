@@ -284,7 +284,7 @@ that knows a document's storage key, so committing the null first and then
 failing the delete would orphan the object beyond any future reach — the same
 argument `services/tenant_deletion` makes for keeping the control-plane row
 (which names the storage prefix) until the documents are gone. (For a whole
-tenant the database now goes before the documents — decisions §301 — because
+tenant the database now goes before the documents — decisions §303 — because
 there the prefix is the org id, which outlives the drop.)
 
 A pointer is nulled only for a key that actually went. A failed delete therefore

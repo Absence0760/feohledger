@@ -191,6 +191,7 @@ export const messages = {
 	'profile.notifications.event.chatMessage': 'Nuevo mensaje del chat con el proveedor',
 	'profile.notifications.event.cashShortfallProjected': 'Déficit de tesorería previsto',
 	'profile.notifications.event.aiInvoiceUsage': 'Uso de facturas leídas por IA',
+	'profile.notifications.event.erpConnectionExpiring': "La conexión con el ERP debe renovarse",
 	'profile.notifications.inAppFor': 'Notificaciones en la aplicación para «{event}»',
 	'profile.notifications.emailFor': 'Notificaciones por correo electrónico para «{event}»',
 
@@ -649,6 +650,7 @@ export const messages = {
 	'payments.method.bacs': 'BACS',
 	'payments.method.fasterPayments': 'Faster Payments',
 	'payments.method.chaps': 'CHAPS',
+	'payments.method.card': "Tarjeta (fuera de FeohLedger)",
 
 	'payments.quotes.open': 'Comparar rutas',
 	'payments.quotes.openAria': '{action} para la factura {invoice}',
@@ -4769,6 +4771,10 @@ export const messages = {
 	'erpRefusal.referenceInvalid': "{provider} rechazó esta factura porque hace referencia a un proveedor o una cuenta que no acepta (error de Intuit {code}). Compruebe que el proveedor y todas las cuentas de la factura existan y estén activos en {provider}, vuelva a sincronizarlos y vuelva a intentarlo.",
 	'erpRefusal.companySubscriptionInactive': "{provider} rechazó esta factura porque la suscripción de la empresa ha finalizado, se canceló o tiene un problema de facturación. Resuélvalo en {provider} y vuelva a intentarlo.",
 	'erpRefusal.intuitFault': "{provider} rechazó esta factura (error de Intuit {code}). Compare los datos de la factura con {provider}, corríjalos y vuelva a intentarlo. Si sigue fallando, comunique el código de error a un administrador.",
+	'erpRefusal.paymentAccountNotMapped': "No se informó a {provider} de este pago: no hay ninguna cuenta definida desde la que registrarlo. Elija la cuenta de pagos de facturas en Organización → Integración ERP y vuelva a sincronizar los pagos.",
+	'erpRefusal.billNotInErp': "La factura a la que correspondía este pago ya no existe en {provider} (se eliminó allí), por lo que el pago no se registró. Revise la factura en {provider}.",
+	'erpRefusal.paymentExceedsBalance': "{provider} muestra un saldo pendiente menor que este pago, por lo que registrarlo pagaría de más la factura. Compruebe lo que ya se pagó en {provider}.",
+	'erpRefusal.billPaymentVoided': "Este pago se registró en {provider} y luego se anuló allí, por lo que no se vuelve a registrar. Decida en {provider} si la factura está pagada.",
 	'erpRefusal.exceptionBlocksExport': "Esta factura tiene una excepción abierta ({type}). Resuélvala o descártela en Excepciones y, después, envíela al ERP.",
 	'erpRefusal.exceptionBlocksExportPossiblyPosted': "Esta factura tiene una excepción abierta ({type}) y es posible que un intento anterior ya haya creado la factura en el ERP. Compruebe el ERP antes de que nadie la pague y, después, resuelva o descarte la excepción en Excepciones.",
 	'glAccounts.toast.synced': "Se sincronizaron {created} cuentas nuevas y {updated} actualizadas.",

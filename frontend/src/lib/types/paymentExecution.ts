@@ -49,7 +49,8 @@ export const EXTERNAL_PAYMENT_METHODS: readonly PaymentMethod[] = [
 	'check',
 	'bacs',
 	'faster_payments',
-	'chaps'
+	'chaps',
+	'card'
 ];
 
 /** `Payment.provider` on a payment recorded as made outside FeohLedger. */

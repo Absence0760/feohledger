@@ -50,6 +50,27 @@ def verify_hmac_sha256(secret: str, raw_body: bytes, provided_hex: str | None) -
     return hmac.compare_digest(expected, provided_hex)
 
 
+def verify_hmac_sha256_base64(secret: str, raw_body: bytes, provided_b64: str | None) -> bool:
+    """:func:`verify_hmac_sha256` for a provider that sends the digest base64
+    encoded (Intuit's ``intuit-signature``) rather than hex.
+
+    Compares the raw digests, so padding or a re-encoding of the signature
+    cannot make two different digests compare equal. Same fail-closed rules:
+    an empty secret or signature, or one that is not base64, is False.
+    """
+    import base64
+    import binascii
+
+    if not secret or not provided_b64:
+        return False
+    try:
+        provided = base64.b64decode(provided_b64.strip(), validate=True)
+        expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+    except (binascii.Error, ValueError):
+        return False
+    return hmac.compare_digest(expected, provided)
+
+
 async def is_event_already_processed(
     provider: str, event_id: str, *, ttl_seconds: int = DEFAULT_DEDUP_TTL_SECONDS
 ) -> bool:

@@ -1,6 +1,6 @@
 """Self-service workspace closure — an administrator deletes an UNUSED workspace.
 
-Why it exists (`docs/decisions.md` §301): `users.email` is globally unique and
+Why it exists (`docs/decisions.md` §303): `users.email` is globally unique and
 one address is one account in one workspace (§291). Someone who signs up with
 an address, abandons the trial and is later added to another workspace with
 the same address is refused `email_in_other_workspace`, and before this the
@@ -242,7 +242,7 @@ TENANT_CHECKS: tuple[TenantCheck, ...] = (
     TenantCheck(
         BLOCKER_ACTIVE_CONTRACTS,
         "contracts",
-        # `activated_at` (migration 0118) is the evidence: a contract active and
+        # `activated_at` (migration 0119) is the evidence: a contract active and
         # then cancelled still bound the parties, and its status no longer says so.
         _any_row(
             "contracts", "activated_at IS NOT NULL OR status IN ('active', 'expired', 'terminated')"

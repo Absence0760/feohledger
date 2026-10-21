@@ -222,6 +222,8 @@ async def lifespan(app: FastAPI):
     from app.services.commerce_sync import run_commerce_sync_loop
     from app.services.contract_renewal import run_renewal_loop
     from app.services.discount_auto_trigger import run_discount_optimization_loop
+    from app.services.erp_connection_health import run_connection_health_loop
+    from app.services.erp_status_sync import run_status_sync_loop
     from app.services.extraction_reaper import run_reaper_loop
     from app.services.payment_reconciler import run_reconciler_loop
     from app.services.qms_sync import run_qms_sync_loop
@@ -335,6 +337,20 @@ async def lifespan(app: FastAPI):
     commerce_task: asyncio.Task | None = None
     if settings.commerce_sync_enabled:
         commerce_task = start_sweep(run_commerce_sync_loop(), name="commerce-sync")
+    # QuickBooks status sync-back (decisions §295). Disabled by default; the
+    # same flag makes a QuickBooks push leave the invoice payable at
+    # `posted_in_erp`, so the change-data-capture backstop runs whenever that
+    # can happen. Records what the ERP did — never moves money.
+    status_sync_task: asyncio.Task | None = None
+    if settings.erp_status_sync_enabled:
+        status_sync_task = start_sweep(run_status_sync_loop(), name="erp-status-sync")
+    # OAuth ERP connection health (decisions §295): keeps a quiet connection's
+    # refresh token alive and tells admins before it expires. Disabled by default.
+    connection_health_task: asyncio.Task | None = None
+    if settings.erp_connection_health_enabled:
+        connection_health_task = start_sweep(
+            run_connection_health_loop(), name="erp-connection-health"
+        )
 
     try:
         yield
@@ -356,6 +372,8 @@ async def lifespan(app: FastAPI):
             shortfall_alerts_task,
             ai_overage_task,
             commerce_task,
+            status_sync_task,
+            connection_health_task,
         ):
             if task is not None:
                 task.cancel()
@@ -534,7 +552,7 @@ app.include_router(organization_sso.router, prefix="/api")
 # ERP / payment / card secrets (services/provider_credentials).
 app.include_router(organization_credentials.router, prefix="/api")
 # Hangs off /api/organization/close — an administrator closing an unused
-# workspace (services/workspace_closure, decisions §301).
+# workspace (services/workspace_closure, decisions §303).
 app.include_router(organization_close.router, prefix="/api")
 app.include_router(partner.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")

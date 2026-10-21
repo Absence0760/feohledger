@@ -295,6 +295,10 @@ export const enSettings = {
 	'org.erp.option.AUTHORISED': 'Approved (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Draft',
 	'org.erp.help.xeroBillStatus': 'The status bills are created with in Xero. Draft bills need approving in Xero before they can be paid.',
+	'org.erp.field.bill_payment_bank_account': "Bill payments: bank account",
+	'org.erp.help.billPaymentBankAccount': "The account in your chart (synced from QuickBooks) that FeohLedger payments by bank transfer or cheque are recorded from, when they are written back to QuickBooks as bill payments. Leave it blank and payments are not written back.",
+	'org.erp.field.bill_payment_card_account': "Bill payments: card account",
+	'org.erp.help.billPaymentCardAccount': "The credit-card account in your chart that FeohLedger card payments are recorded from in QuickBooks.",
 	'org.erp.help.sageZaUsername': 'The email address you sign in to Sage with.',
 	'org.erp.help.sageZaBaseUrl': 'Only for a Sage partner endpoint. Leave blank to use Sage\'s South African API.',
 	'org.erp.help.byoApp': 'Only if you registered your own app with the ERP.',
@@ -386,6 +390,9 @@ export const enSettings = {
 	'org.commerce.removeMapping': "Remove",
 	'org.erp.oauth.needsReconnect': 'The connection to {erp} has expired. Reconnect to keep sending invoices.',
 	'org.erp.oauth.reconnect': 'Reconnect to {erp}',
+	'org.erp.oauth.expiresSoon': "The connection to {erp} expires on {date}. Reconnect before then to keep sending invoices and syncing payments.",
+	'org.erp.oauth.needsReconnectExpired': "The connection to {erp} has expired. Reconnect to keep sending invoices and syncing payments.",
+	'org.erp.oauth.needsReconnectRevoked': "The connection to {erp} was disconnected or revoked in {erp}. Reconnect to keep sending invoices and syncing payments.",
 	'org.erp.oauth.disconnectConfirm': 'Confirm disconnect',
 	'org.section.payments': 'Payments (ACH / Wire / RTP)',
 	'org.section.paymentsSaved': 'Payments',
@@ -594,6 +601,8 @@ export const enSettings = {
 	'admin.users.fail.openInvoices': '{n, plural, one {# open invoice} other {# open invoices}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# pending approval} other {# pending approvals}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, one {# active workflow} other {# active workflows}}',
+	'admin.users.fail.lastAdmin': 'the organization’s last active admin',
+	'admin.users.fail.auditUnavailable': 'not recorded in the audit trail, so not deleted',
 	'admin.users.modal.invite.aria': 'Invite user',
 	'admin.users.modal.invite.heading': 'Invite User',
 	'admin.users.modal.invite.hint': 'A temporary password will be generated automatically.',
@@ -1121,7 +1130,7 @@ export const enSettings = {
 	'org.payments.nachaHint': "Optional. Lets you download a draft run as a NACHA ACH file to upload to your bank. Your bank provides these values: a company name (up to 16 characters), a 10-character company ID (usually 1 followed by your EIN), your bank's 9-digit routing number, and optionally the bank's name (up to 23 characters).",
 	'org.payments.nachaInvalid': "Check the bank-file details: {fields}.",
 
-	// Closing a workspace (Organization → Close workspace, decisions §301)
+	// Closing a workspace (Organization → Close workspace, decisions §303)
 	'org.close.title': "Close this workspace",
 	'org.close.intro': "Closing a workspace permanently deletes it: its invoices, vendors, documents and settings, and every user account in it. Use this for a workspace you no longer need, such as a trial you set up and did not continue. Closing it frees its users' email addresses, so they can be added to another workspace.",
 	'org.close.checking': "Checking whether this workspace can be closed…",

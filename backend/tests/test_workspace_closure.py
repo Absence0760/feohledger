@@ -4,7 +4,7 @@
 signed up, abandoned the trial, and was later added to another workspace with
 the same address met `email_in_other_workspace` with no way out but support,
 because deleting a workspace was operator-only. `POST /api/organization/close`
-(decisions §301) lets the abandoned workspace's administrator close it; it is
+(decisions §303) lets the abandoned workspace's administrator close it; it is
 refused, fail-closed, for any workspace that holds something that must be kept.
 
 Layers:
@@ -412,7 +412,7 @@ async def test_closing_an_abandoned_trial_releases_its_address(realdb, trial):
     org_id = trial["result"].organization_id
     assert not await _org_exists(realdb, org_id)
     assert not await _database_exists(trial["result"].db_name)
-    # The database first, then two document passes (decisions §301).
+    # The database first, then two document passes (decisions §303).
     assert [c.args for c in trial["swept"].await_args_list] == [(f"{org_id}/",)] * 2
     async with realdb.control_sessionmaker()() as s:
         left = (await s.execute(select(User.id).where(User.organization_id == org_id))).all()

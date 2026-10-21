@@ -9,7 +9,7 @@ raw body (verified via :func:`peppol_receive.verify_inbound_signature` +
 path — each tenant configures its own inbound URL with the Access Point, so a
 leaked URL only affects that one tenant (mirrors the payment webhook).
 
-**The path names the organisation's id, never its slug** (decisions §301). The
+**The path names the organisation's id, never its slug** (decisions §303). The
 signing key is platform-wide, so the path is the only thing binding a delivery to
 a tenant, and a slug can change hands: once a closed workspace's slug has rested
 (`utils/slug.CLOSED_SLUG_COOLDOWN`) a new workspace may take it, and an Access

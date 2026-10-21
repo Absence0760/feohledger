@@ -1,7 +1,7 @@
 """Workspaces their administrators closed, and what is still owed on them.
 
 A self-service closure (`POST /api/organization/close`, `docs/decisions.md`
-§301) deletes the tenant's database, documents and control-plane rows, but not
+§303) deletes the tenant's database, documents and control-plane rows, but not
 its nightly backup dumps: those are in the operator's backup bucket, which the
 API has no access to. `/legal/dpa` § 13 promises they go within 60 days, so
 each closure is a task:

@@ -15,9 +15,11 @@ defusedxml for the request-supplied XML the SYSPRO routes parse.
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import os
 import re
+import time
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 from typing import Any
@@ -156,6 +158,31 @@ class FakeOAuthApp:
             "token_type": "Bearer",
             "expires_in": st["lifetime"],
         }
+
+    async def revoke(self, request: Request) -> Response:
+        """RFC 7009 revocation (HTTP Basic client auth, form ``token``).
+
+        Revoking the live refresh token ends the consent: it and every access
+        token issued under it stop working. An unknown token is still a 200, as
+        RFC 7009 requires, so a revoke never reveals which tokens exist.
+        """
+        import base64
+
+        header = request.headers.get("authorization", "")
+        try:
+            decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
+        except Exception:  # noqa: BLE001
+            decoded = ""
+        cid, _, secret = decoded.partition(":")
+        if (cid, secret) != (self.client_id, self.client_secret):
+            raise ProviderError(401, {"error": "invalid_client"})
+        raw = (await request.body()).decode("utf-8", errors="replace")
+        token = (parse_qs(raw).get("token") or [""])[0]
+        st = self._state()
+        if token and token == st["refresh_token"]:
+            st["refresh_token"] = None
+            st["issued"].clear()
+        return Response(status_code=200)
 
     def issued(self, request: Request) -> bool:
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
@@ -1410,6 +1437,10 @@ XERO_CONTACTS = [
         "PaymentTerms": {"Bills": {"Day": 30, "Type": "DAYSAFTERBILLDATE"}},
     },
     {"ContactID": "xero-contact-2", "Name": "Fake Xero Customer Co", "IsSupplier": False},
+    # Real Xero sets IsSupplier only once a contact has a bill, so a supplier
+    # that has only been sent purchase orders is NOT one (seen live in the
+    # Demo Company). The vendor sync must still find it, through its POs.
+    {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier", "IsSupplier": False},
 ]
 XERO_ACCOUNTS = [
     {
@@ -1456,6 +1487,32 @@ XERO_PURCHASE_ORDERS = [
                 "AccountCode": "6100",
             }
         ],
+    },
+    {
+        "PurchaseOrderID": "xero-po-3",
+        "PurchaseOrderNumber": "PO-XERO-403",
+        "Contact": {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier"},
+        "Total": 250.00,
+        "Status": "AUTHORISED",
+        "CurrencyCode": "ZAR",
+        "LineItems": [
+            {
+                "Description": "Paper and toner",
+                "Quantity": 10,
+                "UnitAmount": 25.00,
+                "LineAmount": 250.00,
+                "AccountCode": "6100",
+            }
+        ],
+    },
+    {
+        "PurchaseOrderID": "xero-po-4",
+        "PurchaseOrderNumber": "PO-XERO-404",
+        "Contact": {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier"},
+        "Total": 362.00,
+        "Status": "DRAFT",
+        "CurrencyCode": "ZAR",
+        "LineItems": [],
     },
     {
         "PurchaseOrderID": "xero-po-2",
@@ -1512,6 +1569,9 @@ async def xero_contacts(request: Request, page: int = 1) -> JSONResponse:
     rows = XERO_CONTACTS
     if request.query_params.get("where", "").replace(" ", "") == "IsSupplier==true":
         rows = [c for c in rows if c.get("IsSupplier")]
+    ids = {i for i in request.query_params.get("IDs", "").split(",") if i}
+    if ids:
+        rows = [c for c in rows if c["ContactID"] in ids]
     return _xero_response({"Contacts": copy.deepcopy(rows) if page == 1 else []})
 
 
@@ -1524,8 +1584,9 @@ async def xero_accounts(request: Request) -> JSONResponse:
 @xero.get("/PurchaseOrders")
 async def xero_purchase_orders(request: Request, page: int = 1) -> JSONResponse:
     _require_xero_auth(request)
-    rows = copy.deepcopy(XERO_PURCHASE_ORDERS) if page == 1 else []
-    return _xero_response({"PurchaseOrders": rows})
+    status = request.query_params.get("Status")
+    rows = [po for po in XERO_PURCHASE_ORDERS if not status or po.get("Status") == status]
+    return _xero_response({"PurchaseOrders": copy.deepcopy(rows) if page == 1 else []})
 
 
 @xero.get("/Invoices")
@@ -1649,6 +1710,11 @@ async def xero_authorize(
 @app.post("/xero/identity/connect/token")
 async def xero_token(request: Request) -> dict:
     return await XERO_OAUTH.token(request, client_auth="basic")
+
+
+@app.post("/xero/identity/connect/revocation")
+async def xero_revocation(request: Request) -> Response:
+    return await XERO_OAUTH.revoke(request)
 
 
 @app.get("/xero/connections")
@@ -2680,6 +2746,15 @@ QBO_CLIENT_ID = "fake-qbo-client"
 QBO_CLIENT_SECRET = "fake-qbo-secret"
 QBO_REALM = "fake-realm-1"
 
+# QuickBooks never reuses a transaction Id within a company, so this sequence
+# lives outside STATE and survives `/__reset`, and starts from the clock so it
+# survives a restarted container too. An e2e tenant keeps the invoices earlier
+# runs posted (a bill posted to the ERP is not deletable here), and a restarted
+# sequence handed a new bill the Id an old invoice already names: two invoices
+# on one bill, which the status sync rightly refuses to guess between
+# (decisions §295). Every other piece of QuickBooks state still clears.
+_QBO_TXN_IDS = itertools.count(int(time.time() * 1000))
+
 
 
 def _qbo() -> dict[str, Any]:
@@ -2692,6 +2767,11 @@ def _qbo() -> dict[str, Any]:
             "requestids": {},
             "counter": 0,
             "token_counter": 0,
+            # Status sync-back + BillPayment write-back (decisions §295).
+            "payments": {},
+            "payment_requestids": {},
+            "deleted_bills": {},  # Id -> deletion time, for CDC
+            "refresh_lifetime": 8726400,
         }
     return STATE["qbo"]
 
@@ -2728,7 +2808,9 @@ def _qbo_issue() -> dict:
         "refresh_token": refresh,
         "token_type": "bearer",
         "expires_in": 3600,
-        "x_refresh_token_expires_in": 8726400,
+        # Settable through POST /__qbo/token-lifetime, so an e2e can stand a
+        # connection near its expiry (the Phase 5 notice).
+        "x_refresh_token_expires_in": st["refresh_lifetime"],
     }
 
 
@@ -2951,6 +3033,7 @@ async def qbo_create_bill(request: Request, realm: str) -> dict:
         if str(body.get("SyncToken")) != bill["SyncToken"]:
             raise _qbo_fault(400, "5010", "Stale Object Error")
         del st["bills"][bill["Id"]]
+        st["deleted_bills"][bill["Id"]] = _qbo_now()
         return {"Bill": {"Id": bill["Id"], "status": "Deleted"}}
 
     request_id = request.query_params.get("requestid")
@@ -2959,10 +3042,11 @@ async def qbo_create_bill(request: Request, realm: str) -> dict:
     if not (body.get("VendorRef") or {}).get("value"):
         raise _qbo_fault(400, "2020", "Required param missing: VendorRef")
     _qbo_validate_bill(body)
-    st["counter"] += 1
     total = float(sum(Decimal(str(line.get("Amount") or 0)) for line in body.get("Line") or []))
-    bill = {**body, "Id": str(500 + st["counter"]), "SyncToken": "0", "TotalAmt": total}
+    bill = {**body, "Id": str(next(_QBO_TXN_IDS)), "SyncToken": "0", "TotalAmt": total}
     bill["Balance"] = total
+    bill["LinkedTxn"] = []
+    _qbo_touch(bill)
     st["bills"][bill["Id"]] = bill
     response = {"Bill": copy.deepcopy(bill)}
     if request_id:
@@ -2990,7 +3074,180 @@ async def qbo_set_balance(body: dict) -> dict:
         raise ProviderError(404, {"detail": "unknown bill"})
     bill["Balance"] = body.get("balance", 0)
     bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
+    _qbo_touch(bill)
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online — bill payments, change-data-capture, status test hooks
+# (decisions §295)
+# ---------------------------------------------------------------------------
+#
+# What the backend's status sync-back and BillPayment write-back call:
+#   POST /qbo/v3/company/{realm}/billpayment?requestid=…  create (replayed per
+#        requestid, like Intuit), refused 400 when it would overpay the bill
+#   POST …/billpayment?operation=update&include=void       void (sparse, SyncToken)
+#   GET  …/billpayment/{id}                                read (610 when unknown)
+#   GET  …/cdc?entities=Bill,BillPayment&changedSince=…    changes since a time
+# and the test hooks that play a person working in QuickBooks:
+#   POST /__qbo/pay-bill      {"id", "amount"?, "pay_type"?, "txn_date"?}
+#   POST /__qbo/delete-bill   {"id"}
+#   POST /__qbo/token-lifetime {"seconds"} — x_refresh_token_expires_in from now on
+
+
+def _qbo_now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat(timespec="microseconds")
+
+
+def _qbo_touch(record: dict) -> None:
+    record["MetaData"] = {"LastUpdatedTime": _qbo_now()}
+
+
+def _qbo_apply_payment(bill: dict, amount, *, note: str, pay_type: str, txn_date: str) -> dict:
+    from decimal import Decimal
+
+    st = _qbo()
+    pid = str(next(_QBO_TXN_IDS))
+    amount = Decimal(str(amount))
+    record = {
+        "Id": pid,
+        "SyncToken": "0",
+        "PayType": pay_type,
+        "TxnDate": txn_date,
+        "TotalAmt": float(amount),
+        "PrivateNote": note,
+        "VendorRef": copy.deepcopy(bill.get("VendorRef") or {}),
+        "Line": [{"Amount": float(amount), "LinkedTxn": [{"TxnId": bill["Id"], "TxnType": "Bill"}]}],
+    }
+    _qbo_touch(record)
+    st["payments"][pid] = record
+    bill["Balance"] = float(Decimal(str(bill["Balance"])) - amount)
+    bill.setdefault("LinkedTxn", []).append({"TxnId": pid, "TxnType": "BillPayment"})
+    bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
+    _qbo_touch(bill)
+    return record
+
+
+@qbo.post("/v3/company/{realm}/billpayment")
+async def qbo_bill_payment(request: Request, realm: str) -> dict:
+    from decimal import Decimal
+
+    _require_qbo_auth(request, realm)
+    st = _qbo()
+    body = await request.json()
+    if request.query_params.get("include") == "void":
+        record = st["payments"].get(str(body.get("Id")))
+        if record is None:
+            raise _qbo_fault(400, "610", "Object Not Found")
+        if str(body.get("SyncToken")) != record["SyncToken"]:
+            raise _qbo_fault(400, "5010", "Stale Object Error")
+        bill = st["bills"].get(record["Line"][0]["LinkedTxn"][0]["TxnId"])
+        if bill is not None:
+            bill["Balance"] = float(Decimal(str(bill["Balance"])) + Decimal(str(record["TotalAmt"])))
+            bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
+            _qbo_touch(bill)
+        record["TotalAmt"] = 0
+        record["PrivateNote"] = f"Voided - {record['PrivateNote']}"
+        record["SyncToken"] = str(int(record["SyncToken"]) + 1)
+        _qbo_touch(record)
+        return {"BillPayment": copy.deepcopy(record)}
+
+    request_id = request.query_params.get("requestid")
+    if request_id and request_id in st["payment_requestids"]:
+        return copy.deepcopy(st["payment_requestids"][request_id])
+    lines = body.get("Line") or []
+    links = (lines[0].get("LinkedTxn") or []) if lines else []
+    bill = st["bills"].get(str(links[0].get("TxnId"))) if links else None
+    if bill is None:
+        raise _qbo_fault(400, "2500", "Invalid Reference Id")
+    amount = Decimal(str(body.get("TotalAmt")))
+    if amount > Decimal(str(bill["Balance"])):
+        raise _qbo_fault(400, "6000", "A business validation error has occurred")
+    record = _qbo_apply_payment(
+        bill,
+        amount,
+        note=body.get("PrivateNote") or "",
+        pay_type=body.get("PayType") or "Check",
+        txn_date=body.get("TxnDate") or _qbo_now()[:10],
+    )
+    response = {"BillPayment": copy.deepcopy(record)}
+    if request_id:
+        st["payment_requestids"][request_id] = response
+    return response
+
+
+@qbo.get("/v3/company/{realm}/billpayment/{payment_id}")
+async def qbo_get_bill_payment(request: Request, realm: str, payment_id: str) -> dict:
+    _require_qbo_auth(request, realm)
+    record = _qbo()["payments"].get(payment_id)
+    if record is None:
+        raise _qbo_fault(400, "610", "Object Not Found")
+    return {"BillPayment": copy.deepcopy(record)}
+
+
+@qbo.get("/v3/company/{realm}/cdc")
+async def qbo_cdc(request: Request, realm: str, entities: str, changedSince: str) -> dict:
+    _require_qbo_auth(request, realm)
+    st = _qbo()
+    wanted = {e.strip() for e in entities.split(",")}
+
+    def changed(record: dict) -> bool:
+        return (record.get("MetaData") or {}).get("LastUpdatedTime", "") >= changedSince
+
+    blocks = []
+    if "Bill" in wanted:
+        bills = [copy.deepcopy(b) for b in st["bills"].values() if changed(b)]
+        bills += [
+            {"Id": i, "status": "Deleted", "MetaData": {"LastUpdatedTime": at}}
+            for i, at in st["deleted_bills"].items()
+            if at >= changedSince
+        ]
+        blocks.append({"Bill": bills})
+    if "BillPayment" in wanted:
+        blocks.append(
+            {"BillPayment": [copy.deepcopy(p) for p in st["payments"].values() if changed(p)]}
+        )
+    return {"CDCResponse": [{"QueryResponse": blocks}]}
+
+
+@app.post("/__qbo/pay-bill")
+async def qbo_pay_bill(body: dict) -> dict:
+    """Test hook: a person pays a bill in QuickBooks (not FeohLedger).
+
+    Body: {"id": "<bill Id>", "amount"?: number (default: the whole balance),
+    "pay_type"?: "Check" | "CreditCard", "txn_date"?: "YYYY-MM-DD"}.
+    """
+    bill = _qbo()["bills"].get(str(body.get("id", "")))
+    if bill is None:
+        raise ProviderError(404, {"detail": "unknown bill"})
+    record = _qbo_apply_payment(
+        bill,
+        body.get("amount", bill["Balance"]),
+        note="",
+        pay_type=body.get("pay_type") or "Check",
+        txn_date=body.get("txn_date") or _qbo_now()[:10],
+    )
+    return {"payment_id": record["Id"]}
+
+
+@app.post("/__qbo/delete-bill")
+async def qbo_delete_bill_hook(body: dict) -> dict:
+    """Test hook: a person deletes a bill in QuickBooks. Body: {"id"}."""
+    st = _qbo()
+    bill_id = str(body.get("id", ""))
+    if st["bills"].pop(bill_id, None) is None:
+        raise ProviderError(404, {"detail": "unknown bill"})
+    st["deleted_bills"][bill_id] = _qbo_now()
+    return {"status": "ok"}
+
+
+@app.post("/__qbo/token-lifetime")
+async def qbo_token_lifetime(body: dict) -> dict:
+    """Test hook: the x_refresh_token_expires_in later token responses carry."""
+    _qbo()["refresh_lifetime"] = int(body.get("seconds", 8726400))
+    return {"refresh_lifetime": _qbo()["refresh_lifetime"]}
 
 
 # ---------------------------------------------------------------------------

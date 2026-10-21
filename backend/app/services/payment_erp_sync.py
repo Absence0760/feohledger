@@ -381,13 +381,14 @@ async def _sync_one_leg(
                 )
             ).scalar_one_or_none()
 
-        # In production, this would call `adapter.post_payment()` — the
-        # `adapter` resolved above is the one it would use, and a leg with no
-        # ERP configured skips that call entirely. For now, log and mark as
-        # synced. Amount is not PII; goes through the module logger so it
-        # reaches the same aggregation/redaction pipeline as the rest of the
-        # sync. The provider NAME is logged so an operator reading the strand
-        # can see which ERP the leg was aimed at (or that there was none).
+        # An adapter that supports status sync (QuickBooks Online) gets the
+        # payment written back once the invoice is `paid` (below, after the
+        # commit); every other adapter keeps the log-only leg, and a leg with
+        # no ERP configured skips the ERP entirely. Amount is not PII; goes
+        # through the module logger so it reaches the same aggregation /
+        # redaction pipeline as the rest of the sync. The provider NAME is
+        # logged so an operator reading the strand can see which ERP the leg
+        # was aimed at (or that there was none).
         logger.info(
             "[payment-sync] syncing payment %s via %s: invoice=%s, amount=%s, method=%s",
             payment.id,
@@ -454,6 +455,39 @@ async def _sync_one_leg(
             moved = True
 
         await db.commit()
+
+        # Phase 4 (decisions §295): an ERP whose bills sync back is told about
+        # the payment too — the bill reads paid there, so nobody pays it again
+        # from inside the ERP. After the commit above, so no invoice lock is
+        # held across the ERP call; idempotent on the payment id, so a re-run
+        # of this pass (the `/sync-erp` retry) never writes it twice. A refusal
+        # is recorded and flagged by the write-back itself and never undoes the
+        # transition: the money moved.
+        if (
+            adapter is not None
+            and getattr(adapter, "supports_status_sync", False) is True
+            and invoice is not None
+            and invoice.status.value == "paid"
+        ):
+            from app.models.workflow import WorkflowInstance
+            from app.services.erp_payment_writeback import write_back_payment
+
+            state = (
+                await db.execute(
+                    select(WorkflowInstance.state_data).where(
+                        WorkflowInstance.invoice_id == invoice.id
+                    )
+                )
+            ).scalar_one_or_none()
+            await db.commit()
+            await write_back_payment(
+                db,
+                adapter=adapter,
+                erp_config=erp_config or {},
+                payment=payment,
+                invoice=invoice,
+                state_data=state,
+            )
         return _SYNCED, moved
 
     except Exception as exc:

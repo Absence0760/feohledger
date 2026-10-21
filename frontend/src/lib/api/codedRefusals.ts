@@ -472,7 +472,7 @@ const BUILDERS: Record<string, Builder> = {
 	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
 	// The admin path's other-workspace budget is spent (`api/admin.py`).
 	email_check_throttled: fixed('refusal.emailCheckThrottled'),
-	// Closing a workspace (`api/organization_close.py`, decisions §301). The
+	// Closing a workspace (`api/organization_close.py`, decisions §303). The
 	// refusal's blockers are listed by the page itself; the toast is the
 	// fixed sentence, and a blocker list this build cannot read falls back.
 	workspace_close_confirmation_mismatch: fixed('refusal.workspaceCloseConfirmationMismatch'),
@@ -480,7 +480,7 @@ const BUILDERS: Record<string, Builder> = {
 		refusalBlockers(p) === null ? null : t('refusal.workspaceCloseRefused'),
 	workspace_close_in_progress: fixed('refusal.workspaceCloseInProgress'),
 	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
-	// A slug resting after a workspace closure (`api/signup.py`, decisions §301).
+	// A slug resting after a workspace closure (`api/signup.py`, decisions §303).
 	signup_slug_held: fixed('refusal.signupSlugHeld'),
 	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
 	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete')

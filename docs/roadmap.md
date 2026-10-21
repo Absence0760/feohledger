@@ -42,7 +42,7 @@ SOC 2 Type I (design) → Type II (operating over time) is the table-stakes secu
 - [x] Access reviews — `backend/scripts/access_review.py` exports every user × role × org as CSV (quarterly)
 - [x] Backup + DR runbook — `docs/backup-disaster-recovery.md` with RTO/RPO + restore procedures
 - [x] Secrets rotation runbook — `docs/secrets-rotation.md` (cadence + procedure for every secret)
-- [x] Vulnerability scanning in CI — Dependabot (shipped) + CodeQL SAST (Python + JS) + Trivy on the backend container, weekly + on push (`.github/workflows/security.yml`)
+- [x] Vulnerability scanning in CI — Dependabot (shipped) + CodeQL SAST (Python + JS) + Trivy on the backend container, weekly + on every PR and push, gating merges through `CI gate` (`.github/workflows/security.yml`, called from `ci.yml`)
 - [x] RBAC enforcement at API layer (separate roadmap item — already done)
 - [x] MFA support + org-level enforcement (separate roadmap item — already done)
 - [x] Session management — per-user concurrent session cap (Redis sorted set, `FEOH_MAX_CONCURRENT_SESSIONS`), forced logout on role change / deactivation (`services.session_management.revoke_user_sessions`), standalone admin force-logout (`POST /api/admin/users/{id}/revoke-sessions`), and self-service session visibility + revocation (`GET /api/auth/sessions`, `DELETE .../{jti}`, `POST .../revoke-others` + the `/profile` Signed-in devices card)

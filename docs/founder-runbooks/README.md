@@ -52,7 +52,7 @@ DO ANYTIME (parallel)
 ```
 
 `workspace-closure.md` is recurring: an administrator can close an unused
-workspace themselves (decisions §301), but its backup dumps are yours to
+workspace themselves (decisions §303), but its backup dumps are yours to
 remove within the DPA's 60 days. Check the queue weekly.
 
 `sso-break-glass.md` is per-incident too: the verified, audited way to

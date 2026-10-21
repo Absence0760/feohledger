@@ -153,7 +153,8 @@ Only when the operator says so:
    `CI gate`, and a red job goes through `/fix-ci` (`/flake-doctor` for a
    flaky e2e spec). Read the open code-scanning alerts on the PR
    (`gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/<pr>/merge&state=open"`;
-   CodeQL runs in `.github/workflows/security.yml`) and fix or justify each.
+   CodeQL runs in `.github/workflows/security.yml`, called from `ci.yml`, so a
+   red CodeQL job also fails `CI gate`) and fix or justify each.
    Resolve every review conversation, since `main` requires it. Don't merge;
    that's the operator's call.
 6. Report the link, the list of fixes, and anything the operator needs to

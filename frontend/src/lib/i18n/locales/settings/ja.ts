@@ -288,6 +288,10 @@ export const messages = {
 	'org.erp.option.AUTHORISED': '承認済み（AUTHORISED）',
 	'org.erp.option.DRAFT': '下書き',
 	'org.erp.help.xeroBillStatus': 'Xero で請求書を作成するときのステータスです。下書きの請求書は、支払う前に Xero で承認が必要です。',
+	'org.erp.field.bill_payment_bank_account': "請求書の支払い: 銀行口座",
+	'org.erp.help.billPaymentBankAccount': "振込または小切手による FeohLedger の支払いを、請求書の支払いとして QuickBooks に書き戻すときに使う勘定科目です (QuickBooks から同期した勘定科目表から選びます)。空欄の場合、支払いは書き戻されません。",
+	'org.erp.field.bill_payment_card_account': "請求書の支払い: カード勘定",
+	'org.erp.help.billPaymentCardAccount': "FeohLedger のカード支払いを QuickBooks に記録するときに使う、勘定科目表のクレジットカード勘定です。",
 	'org.erp.help.sageZaUsername': 'Sage へのサインインに使うメールアドレスです。',
 	'org.erp.help.sageZaBaseUrl': 'Sage パートナーのエンドポイントを使う場合のみ入力します。空欄の場合は Sage の南アフリカ向け API を使用します。',
 	'org.erp.help.byoApp': 'ERP に独自のアプリを登録した場合のみ入力してください。',
@@ -379,6 +383,9 @@ export const messages = {
 	'org.commerce.removeMapping': "削除",
 	'org.erp.oauth.needsReconnect': '{erp} との接続の有効期限が切れました。請求書の送信を続けるには再接続してください。',
 	'org.erp.oauth.reconnect': '{erp} に再接続',
+	'org.erp.oauth.expiresSoon': "{erp} との接続は {date} に期限切れになります。請求書の送信と支払いの同期を続けるには、それまでに再接続してください。",
+	'org.erp.oauth.needsReconnectExpired': "{erp} との接続の有効期限が切れました。請求書の送信と支払いの同期を続けるには再接続してください。",
+	'org.erp.oauth.needsReconnectRevoked': "{erp} との接続は {erp} 側で切断または取り消されました。請求書の送信と支払いの同期を続けるには再接続してください。",
 	'org.erp.oauth.disconnectConfirm': '切断を確定',
 	'org.section.payments': '支払（ACH / 電信送金 / RTP）',
 	'org.section.paymentsSaved': '支払',
@@ -568,6 +575,8 @@ export const messages = {
 	'admin.users.fail.openInvoices': '{n, plural, other {未処理の請求書 # 件}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, other {保留中の承認 # 件}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, other {アクティブなワークフロー # 件}}',
+	'admin.users.fail.lastAdmin': '組織で最後の有効な管理者です',
+	'admin.users.fail.auditUnavailable': '監査ログに記録できなかったため削除されていません',
 	'admin.users.modal.invite.aria': 'ユーザーを招待',
 	'admin.users.modal.invite.heading': 'ユーザーを招待',
 	'admin.users.modal.invite.hint': '仮パスワードが自動的に生成されます。',
@@ -1095,7 +1104,7 @@ export const messages = {
 	'org.payments.nachaHint': "任意。下書きのバッチを NACHA ACH ファイルとしてダウンロードし、銀行にアップロードできるようにします。値は銀行から提供されます：会社名（16 文字以内）、10 文字の会社 ID（通常は 1 に続けて EIN）、銀行の 9 桁のルーティング番号、および任意で銀行名（23 文字以内）。",
 	'org.payments.nachaInvalid': "銀行ファイルの情報を確認してください：{fields}。",
 
-	// Closing a workspace (Organization → Close workspace, decisions §301)
+	// Closing a workspace (Organization → Close workspace, decisions §303)
 	'org.close.title': "このワークスペースを閉鎖",
 	'org.close.intro': "ワークスペースを閉鎖すると、請求書、仕入先、ドキュメント、設定、そしてその中のすべてのユーザーアカウントが完全に削除されます。作成したものの継続しなかった試用版など、不要になったワークスペースに使用してください。閉鎖すると、そのユーザーのメールアドレスが解放され、別のワークスペースに追加できるようになります。",
 	'org.close.checking': "このワークスペースを閉鎖できるか確認しています…",

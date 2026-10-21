@@ -901,6 +901,7 @@ def test_list_pos_is_exact(token, no_override):
     (got,) = _run_with(qbo, lambda: _adapter().list_pos())
     assert got.po_number == "PO-1" and got.status == "closed" and got.currency == "USD"
     assert got.total == Decimal("250.10")
+    assert (got.vendor_name, got.vendor_erp_id) == ("Acme", "56")
     (line,) = got.line_items
     assert line.unit_price == Decimal("83.3666") and line.quantity == Decimal("3")
 

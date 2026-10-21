@@ -2,7 +2,7 @@
 
 Why
 ---
-A self-service workspace closure (decisions §301) is refused while the
+A self-service workspace closure (decisions §303) is refused while the
 workspace holds a contract that bound the parties. Status alone cannot say
 that: `POST /api/contracts/{id}/cancel` is allowed from `active`, so a contract
 that was in force and then cancelled reads exactly like a draft that never was.
@@ -22,8 +22,8 @@ plane, fanned out by ``scripts/migrate_all_tenants.py``. Fresh tenants get the
 column from ``create_all`` (``app/models/contract.py``). Idempotent (``IF NOT
 EXISTS``, and the backfill only fills NULLs).
 
-Revision ID: 0118_contract_activated_at
-Revises: 0117_workspace_closures
+Revision ID: 0119_contract_activated_at
+Revises: 0118_workspace_closures
 Create Date: 2026-10-21
 
 26 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
@@ -33,8 +33,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "0118_contract_activated_at"
-down_revision = "0117_workspace_closures"
+revision = "0119_contract_activated_at"
+down_revision = "0118_workspace_closures"
 branch_labels = None
 depends_on = None
 

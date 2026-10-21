@@ -402,7 +402,7 @@ async def provision_tenant(
     validate_slug_format(slug)
     # A closed workspace's slug is held here, at the one chokepoint every
     # provisioning path shares — signup, partner, and the operator CLI behind
-    # `deploy/add-tenant.sh` alike (decisions §301).
+    # `deploy/add-tenant.sh` alike (decisions §303).
     async with control_session_factory() as session:
         await ensure_slug_not_held(slug, session)
     db_name = f"{settings.tenant_db_prefix}{slug}"

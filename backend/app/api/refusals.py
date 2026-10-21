@@ -180,7 +180,7 @@ EMAIL_CHECK_THROTTLED_DETAIL = coded_refusal(
 )
 
 
-# --- Closing a workspace (`api/organization_close.py`, decisions §301) --------
+# --- Closing a workspace (`api/organization_close.py`, decisions §303) --------
 
 #: The typed confirmation did not match the workspace's slug. A 400; nothing
 #: was checked or changed.

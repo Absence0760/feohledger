@@ -8,6 +8,7 @@ import {
 	groupProviders,
 	initialValues,
 	missingRequired,
+	oauthAttentionKey,
 	oauthConnectionState,
 	optionLabelKey,
 	withoutOAuthReturn,
@@ -346,6 +347,46 @@ describe('oauthConnectionState', () => {
 		// Connected to a different ERP is not connected to this one.
 		expect(oauthConnectionState('quickbooks_online', connected)).toBe('not_connected');
 		expect(oauthConnectionState('xero', null)).toBe('not_connected');
+	});
+});
+
+describe('oauthAttentionKey', () => {
+	it('names why a lost connection must be reconnected (decisions §295)', () => {
+		const revoked = status({
+			provider: 'quickbooks_online',
+			needs_reconnect: true,
+			reconnect_reason: 'refresh_token_revoked'
+		});
+		expect(oauthAttentionKey('quickbooks_online', revoked)).toBe(
+			'org.erp.oauth.needsReconnectRevoked'
+		);
+		const expired = status({
+			provider: 'quickbooks_online',
+			needs_reconnect: true,
+			reconnect_reason: 'refresh_token_expired'
+		});
+		expect(oauthAttentionKey('quickbooks_online', expired)).toBe(
+			'org.erp.oauth.needsReconnectExpired'
+		);
+		// A reason this build does not know keeps the generic sentence.
+		const other = status({ provider: 'quickbooks_online', needs_reconnect: true });
+		expect(oauthAttentionKey('quickbooks_online', other)).toBe('org.erp.oauth.needsReconnect');
+	});
+
+	it('warns before expiry only for a live connection with a stated expiry', () => {
+		const soon = status({
+			provider: 'quickbooks_online',
+			connected: true,
+			expires_soon: true,
+			refresh_token_expires_at: '2026-11-01T00:00:00+00:00'
+		});
+		expect(oauthAttentionKey('quickbooks_online', soon)).toBe('org.erp.oauth.expiresSoon');
+		expect(
+			oauthAttentionKey('quickbooks_online', { ...soon, refresh_token_expires_at: null })
+		).toBeNull();
+		expect(oauthAttentionKey('quickbooks_online', { ...soon, expires_soon: false })).toBeNull();
+		// Another ERP's connection says nothing about this one.
+		expect(oauthAttentionKey('xero', soon)).toBeNull();
 	});
 });
 

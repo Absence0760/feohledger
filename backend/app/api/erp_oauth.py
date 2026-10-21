@@ -37,6 +37,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -48,6 +49,7 @@ from app.models.user import User
 from app.services import erp_oauth, provider_credentials
 from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_connection_health import expiring_soon
 from app.services.erp_link_realm import connection_realm
 from app.tenant import get_tenant, lock_organization
 from app.utils.tenant_urls import tenant_base_url
@@ -81,6 +83,13 @@ class OAuthStatusResponse(BaseModel):
     external_tenant_id: str | None = None
     expires_at: str | None = None
     refresh_token_expires_at: str | None = None
+    #: Inside the first expiry-notice lead time (``FEOH_ERP_CONNECTION_EXPIRY_
+    #: NOTICE_DAYS``): the settings page offers Reconnect from then on.
+    expires_soon: bool = False
+    #: Why ``needs_reconnect``: ``refresh_token_expired`` or
+    #: ``refresh_token_revoked`` (``erp_oauth.reconnect_reason``), so the page
+    #: can say which; None while connected.
+    reconnect_reason: str | None = None
     connected_at: str | None = None
     #: The redirect URI to register on a bring-your-own provider app.
     redirect_uri: str
@@ -160,6 +169,12 @@ async def oauth_status(
         external_tenant_id=oauth.get("external_tenant_id"),
         expires_at=oauth.get("expires_at"),
         refresh_token_expires_at=oauth.get("refresh_token_expires_at"),
+        expires_soon=not needs_reconnect and expiring_soon(oauth),
+        reconnect_reason=(
+            str(oauth.get("reconnect_reason") or erp_oauth.reconnect_reason(oauth))
+            if needs_reconnect
+            else None
+        ),
         connected_at=oauth.get("connected_at"),
         **common,
     )
@@ -474,7 +489,14 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
             # The audit row could not be written, so nothing was linked.
             await db.rollback()
             return fail("audit_unavailable")
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # The control-plane unique index on (provider, company) — migration
+            # 0117 — caught a second tenant linking the same company: the
+            # database's answer to the race the Redis claim narrows.
+            await db.rollback()
+            return fail("already_linked")
 
     return _home(slug, org.settings, erp_connected=spec.key)
 

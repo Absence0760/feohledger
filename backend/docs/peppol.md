@@ -262,7 +262,7 @@ The route mirrors the payment webhook (`/api/payments/webhook/{tenant_slug}/…`
 no JWT, no `X-Tenant-Slug` header — the tenant is the URL path segment, so each
 tenant configures its own inbound URL with the Access Point and a leaked URL
 only affects that one tenant. **The segment is the organisation's id, never its
-slug** (decisions §301): the signing key is platform-wide, so the path is the only
+slug** (decisions §303): the signing key is platform-wide, so the path is the only
 binding, and a slug can pass to a new workspace after a closure's cooldown — an
 Access Point still configured with a slug URL would hand the closed tenant's
 supplier invoices to the new owner. An id is never reused. A slug or any other
