@@ -12809,3 +12809,57 @@ carried), and `frontend/tests-e2e/signup/flow.spec.ts` (both states stubbed, plu
 through Mailpit: the link opened again in a second tab after success, and an
 existing login's signup refused on first open and on reload, with the slug left
 free).
+
+## 293. The invoice carries its ERP bill id, and the deep link is built once, at push time, by the backend (2026-10-20)
+
+**Found live against Xero.** FEOH-INV-001 was posted and Xero returned its
+InvoiceID, but the id went only to `workflow_instances.state_data
+["erp_reference"]` and the `invoice.erp_confirmed` audit row. The invoice modal
+read its ERP reference off the *latest* ERP audit row, which on a success is
+`invoice.completed` (no reference), and hid the ERP section at `done` anyway. A
+user had no way from the invoice to the bill.
+
+**The rule.** `invoices.erp_document_id` (migration 0117) holds the bill of
+record, written by `services/erp._call_erp` beside the existing state_data
+write — the one place a push is confirmed. It takes the adapter's
+`erp_document_id` only: a document *number* is not addressable (no deep link,
+no API lookup), and `"UNKNOWN"` names nothing. A payment void does not clear it
+(the bill is still in the ERP), and every later confirmed push overwrites the
+pair. A push that confirms without reporting an id CLEARS both columns rather
+than keeping the earlier pair. Keeping it was the first draft, on the grounds
+that the push idempotency resolves a re-push to the same bill, but that only
+holds within one ERP. After an org switches ERP, the kept pair would link a
+money record to another system's bill. A failed push never writes it: a bill a
+failure left behind is the `erp_orphan_document_id` state, not the bill of
+record.
+
+**The deep link is stored, not derived on read.** `invoices.erp_document_url`
+comes from `erp_adapters/deep_links.py`, the one provider → URL mapping, at
+push time. Rejected: a frontend helper over a stored provider name. The link
+depends on the adapter config that posted the bill — QuickBooks sandbox and
+production companies are on different hosts — which only the backend holds,
+and an org may change ERP after posting, so deriving it on read from the
+*current* config would point an old bill at the wrong system. Mobile and any
+other client also get the link with no copy of the mapping. Only Xero and
+QuickBooks Online have one; Merge.dev's id is Merge's own, and the other
+adapters' web UIs are not addressable by the id alone, so they show the id with
+no link. Both URLs are documented by neither vendor: Xero's
+`AccountsPayable/View.aspx?InvoiceID=` matches the page Xero's own MCP server
+targets (which wraps it in an organisation-choosing redirect; not done here —
+`docs/followups.md`), and QuickBooks' `app/bill?txnId=` is the bill page's own
+URL.
+
+**Backfill.** 0117 copies `state_data->>'erp_reference'` where the invoice has
+exactly one workflow instance and the value is not `UNKNOWN`. That value is the
+adapter's id on every adapter that returns one; only a success with a number
+and no id stored the number, which cannot be told apart afterwards and is
+accepted. The URL is not backfilled: the tenant database does not record which
+adapter posted the bill.
+
+**Where it is shown.** Both columns are on `InvoiceResponse`, which the web
+invoice modal and the mobile ERP panel read. Each shows the reference at `done`,
+and after a void, as well as at the ERP statuses. Mobile shows the id without a
+link (`docs/followups.md`). The supplier portal's invoice schema and the public
+`/api/v1` contract deliberately leave both out. The ERP bill is our ledger's
+record, not the supplier's, and adding a field to `/v1` is a published-contract
+change that needs its own decision.
