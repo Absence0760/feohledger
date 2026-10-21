@@ -39,10 +39,12 @@ env:
   # IMPORTANT: the total counts lazily-imported chunks too. Code-splitting a
   # dependency therefore does NOT lower this number — only removing weight
   # does. The one exception is the lazy locale catalogues: a visitor fetches at
-  # most one, so only the largest is counted (see the 2026-09-15 entry) — and,
-  # since 2026-10-08, likewise only the largest help-centre slice. The
-  # total is summed in bytes and rounded once, so the number of chunks has no
-  # effect on it.
+  # most one of each KIND — the main catalogue and each slice (help since
+  # 2026-10-08, settings and portal since 2026-10-20) — so only the largest
+  # file of each kind is counted (see the 2026-09-15 entry). The kinds are read
+  # off the locales/ subdirectories, so a new slice is counted without editing
+  # this step. The total is summed in bytes and rounded once, so the number of
+  # chunks has no effect on it.
   #
   # ── Ceiling change log — append a dated entry with the measurement + reason ──
   # 2026-08-06 — initial: total 850, largest 100. Baseline 747 / 43.
@@ -145,6 +147,26 @@ env:
   # 92 KB, largest help slice 10 KB, total 1005 KB of 1075. The total now adds
   # the largest help slice the way it adds the largest catalogue — a visitor
   # downloads at most one of each.
+  # 2026-10-20 — no ceiling change: the same fix, taken further. The ja
+  # catalogue measured 100 KB on main, at the per-chunk ceiling, and fix PR
+  # #611 (five keys) took it to 101 KB. Behind it the ENGLISH chunk — English
+  # main is static, so it shares a chunk with the i18n runtime — was ~97 KB,
+  # so splitting non-English catalogues alone would have bought two weeks.
+  # Two more slices per locale (decisions §300), chosen by measuring gzipped
+  # bytes per top-level key namespace in ja and en and keeping the ones a
+  # bounded set of routes renders:
+  #   - settings: org / orgSso / admin / billing / sweepHealth, 1,023 keys,
+  #     ~20% of the catalogue; loaded by /organization, /admin/**, /billing
+  #     and /help (whose guides name those controls);
+  #   - portal: portal.*, 295 keys, ~5%; loaded by /portal/**.
+  # Unlike help, both are lazy in English too (the route awaits them before it
+  # renders), which is what takes the English chunk down with the rest.
+  # Measured locally on main + the split: largest main catalogue 77 KB (ja),
+  # largest chunk 77 KB (the English one), largest settings slice 21 KB,
+  # largest portal slice 6 KB, help unchanged at 10 KB; total 1034 KB of 1075
+  # (was 1050). With #611 merged on top: largest catalogue 77, largest chunk
+  # 78, total 1034. The measurement now counts one file per catalogue kind,
+  # derived from the locales/ subdirectories, rather than naming help.
   MAX_TOTAL_KB: 1075
   MAX_LARGEST_CHUNK_KB: 100
 
@@ -183,6 +205,7 @@ jobs:
         run: |
           set -euo pipefail
           BUILD_DIR=frontend/build
+          LOCALES_SRC=frontend/src/lib/i18n/locales
           # Vite's client manifest maps each hashed chunk back to its source. It
           # is the only reliable way to tell a locale catalogue from any other
           # chunk.
@@ -196,52 +219,52 @@ jobs:
             exit 1
           fi
 
-          # The lazily imported locale catalogues (src/lib/i18n/catalogues.ts).
-          # English is a static import, so it sits in the entry chunks and is
-          # counted like any other code. There are two lazy slices per locale —
-          # the main catalogue (locales/<l>.ts) and the help-centre slice
-          # (locales/help/<l>.ts, decisions §261) — and a visitor downloads at
-          # most one of EACH, so each slice adds only its largest file.
-          declare -A catalogue=()
-          declare -A help_catalogue=()
-          while IFS= read -r file; do
+          # The lazily imported locale catalogues (src/lib/i18n/catalogues.ts),
+          # grouped by KIND: the main catalogue (locales/<l>.ts) and each slice
+          # (locales/<slice>/<l>.ts — help, settings, portal; decisions §261,
+          # §300). A visitor downloads at most one file of each kind, their own
+          # locale's, so each kind adds only its largest file to the total.
+          # English main is a static import, so it sits in the entry chunks and
+          # is counted like any other code; so is the help slice's English (its
+          # static fallback), while the route-scoped slices are lazy in English
+          # too and are measured here with the rest of their kind.
+          declare -A kind_of=()
+          while IFS=$'\t' read -r src file; do
             if [ ! -f "$BUILD_DIR/$file" ]; then
               echo "::error::$MANIFEST names $file, which is not in $BUILD_DIR: the manifest and the build disagree."
               exit 1
             fi
-            help_catalogue["$BUILD_DIR/$file"]=1
+            rel=${src#src/lib/i18n/locales/}
+            if [[ "$rel" == */* ]]; then kind=${rel%%/*}; else kind=main; fi
+            kind_of["$BUILD_DIR/$file"]=$kind
           done < <(jq -r 'to_entries[]
             | select(.value.isDynamicEntry == true)
-            | select((.value.src // .key) | test("^src/lib/i18n/locales/help/[^/]+\\.ts$"))
-            | .value.file' "$MANIFEST")
-          while IFS= read -r file; do
-            if [ ! -f "$BUILD_DIR/$file" ]; then
-              echo "::error::$MANIFEST names $file, which is not in $BUILD_DIR: the manifest and the build disagree."
+            | (.value.src // .key) as $src
+            | select($src | test("^src/lib/i18n/locales/([^/]+/)?[^/]+\\.ts$"))
+            | [$src, .value.file] | @tsv' "$MANIFEST")
+
+          # Every kind the source tree has must show up as lazy chunks; if one
+          # stopped being lazy (or moved), the one-per-kind rule no longer
+          # describes a visitor.
+          expected=(main)
+          while IFS= read -r d; do expected+=("$(basename "$d")"); done < <(find "$LOCALES_SRC" -mindepth 1 -maxdepth 1 -type d | sort)
+          for k in "${expected[@]}"; do
+            found=0
+            for f in "${!kind_of[@]}"; do [ "${kind_of[$f]}" = "$k" ] && found=1 && break; done
+            if [ "$found" -eq 0 ]; then
+              echo "::error::No lazy '$k' locale catalogue found in $MANIFEST. If it moved or stopped being lazy, the one-per-kind rule below no longer describes a visitor; update this step."
               exit 1
             fi
-            catalogue["$BUILD_DIR/$file"]=1
-          done < <(jq -r 'to_entries[]
-            | select(.value.isDynamicEntry == true)
-            | select((.value.src // .key) | test("^src/lib/i18n/locales/[^/]+\\.ts$"))
-            | .value.file' "$MANIFEST")
-          if [ "${#catalogue[@]}" -eq 0 ]; then
-            echo "::error::No lazy locale catalogue found in $MANIFEST. If the catalogues moved or stopped being lazy, the one-catalogue rule below no longer describes a visitor; update this step."
-            exit 1
-          fi
-          if [ "${#help_catalogue[@]}" -eq 0 ]; then
-            echo "::error::No lazy help-centre catalogue found in $MANIFEST. If locales/help/ moved or stopped being lazy, the one-slice rule below no longer describes a visitor; update this step."
-            exit 1
-          fi
+          done
 
           shipped_bytes=0    # every JS + CSS file the build emits
-          counted_bytes=0    # every file except the catalogues...
-          catalogue_bytes=0  # ...plus the largest catalogue, added after the loop
-          catalogue_path=""
-          help_bytes=0       # ...plus the largest help-centre slice
-          help_path=""
+          counted_bytes=0    # every file except the lazy catalogues...
+          declare -A kind_bytes=()  # ...plus the largest file of each kind
+          declare -A kind_path=()
           largest_bytes=0
           largest_path=""
           file_count=0
+          catalogue_count=0
 
           while IFS= read -r -d '' f; do
             gz_bytes=$(gzip -c "$f" | wc -c)
@@ -251,21 +274,18 @@ jobs:
               largest_bytes="$gz_bytes"
               largest_path="$f"
             fi
-            if [ -n "${help_catalogue[$f]:-}" ]; then
-              if [ "$gz_bytes" -gt "$help_bytes" ]; then
-                help_bytes="$gz_bytes"
-                help_path="$f"
-              fi
-            elif [ -n "${catalogue[$f]:-}" ]; then
-              if [ "$gz_bytes" -gt "$catalogue_bytes" ]; then
-                catalogue_bytes="$gz_bytes"
-                catalogue_path="$f"
+            k="${kind_of[$f]:-}"
+            if [ -n "$k" ]; then
+              catalogue_count=$(( catalogue_count + 1 ))
+              if [ "$gz_bytes" -gt "${kind_bytes[$k]:-0}" ]; then
+                kind_bytes["$k"]="$gz_bytes"
+                kind_path["$k"]="$f"
               fi
             else
               counted_bytes=$(( counted_bytes + gz_bytes ))
             fi
           done < <(find "$BUILD_DIR" \( -name '*.js' -o -name '*.css' \) -print0)
-          counted_bytes=$(( counted_bytes + catalogue_bytes + help_bytes ))
+          for k in "${!kind_bytes[@]}"; do counted_bytes=$(( counted_bytes + kind_bytes[$k] )); done
 
           # Summed in bytes, rounded up once. Rounding each file up first added
           # up to 1 KB per file, so splitting code into more chunks raised the
@@ -273,14 +293,14 @@ jobs:
           kb() { echo $(( ($1 + 1023) / 1024 )); }
           total_kb=$(kb "$counted_bytes")
           shipped_kb=$(kb "$shipped_bytes")
-          catalogue_kb=$(kb "$catalogue_bytes")
           largest_kb=$(kb "$largest_bytes")
 
-          echo "Files measured:       ${file_count}, ${#catalogue[@]} of them lazy locale catalogues"
-          echo "Total gzipped JS+CSS: ${total_kb} KB (budget ${MAX_TOTAL_KB} KB): every chunk, one catalogue"
+          echo "Files measured:       ${file_count}, ${catalogue_count} of them lazy locale catalogues"
+          echo "Total gzipped JS+CSS: ${total_kb} KB (budget ${MAX_TOTAL_KB} KB): every chunk, one catalogue of each kind"
           echo "Shipped, not gated:   ${shipped_kb} KB: every chunk, every catalogue"
-          echo "Largest catalogue:    ${catalogue_kb} KB — ${catalogue_path}"
-          echo "Largest help slice:   $(kb "$help_bytes") KB — ${help_path:-none}"
+          for k in "${expected[@]}"; do
+            printf 'Largest %-13s %s KB — %s\n' "${k}:" "$(kb "${kind_bytes[$k]}")" "${kind_path[$k]}"
+          done
           echo "Largest chunk:        ${largest_kb} KB — ${largest_path} (budget ${MAX_LARGEST_CHUNK_KB} KB)"
 
           {
@@ -288,10 +308,13 @@ jobs:
             echo ""
             echo "| Metric | Size | Budget |"
             echo "|---|---|---|"
-            echo "| Total gzipped JS+CSS (every chunk, one locale catalogue) | ${total_kb} KB | ${MAX_TOTAL_KB} KB |"
+            echo "| Total gzipped JS+CSS (every chunk, one locale catalogue of each kind) | ${total_kb} KB | ${MAX_TOTAL_KB} KB |"
             echo "| Largest single chunk | ${largest_kb} KB | ${MAX_LARGEST_CHUNK_KB} KB |"
+            for k in "${expected[@]}"; do
+              echo "| Largest \`${k}\` catalogue | $(kb "${kind_bytes[$k]}") KB | — |"
+            done
             echo "| Shipped (every catalogue) | ${shipped_kb} KB | not gated |"
-            echo "| Files measured | ${file_count} (${#catalogue[@]} lazy catalogues) | — |"
+            echo "| Files measured | ${file_count} (${catalogue_count} lazy catalogues) | — |"
             echo ""
             echo "Largest chunk: \`${largest_path#"$BUILD_DIR"/}\`"
           } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -302,7 +325,7 @@ jobs:
             failed=1
           fi
           if [ "$largest_kb" -gt "$MAX_LARGEST_CHUNK_KB" ]; then
-            echo "::error::Largest chunk ${largest_path#"$BUILD_DIR"/} is ${largest_kb} KB, over the ${MAX_LARGEST_CHUNK_KB} KB per-chunk budget. This usually means a single heavyweight dependency landed in one chunk — check whether it is really needed before raising the ceiling."
+            echo "::error::Largest chunk ${largest_path#"$BUILD_DIR"/} is ${largest_kb} KB, over the ${MAX_LARGEST_CHUNK_KB} KB per-chunk budget. This usually means a single heavyweight dependency landed in one chunk — check whether it is really needed before raising the ceiling. If it is a locale catalogue, move route-scoped keys into a lazy slice (decisions §261, §300) rather than raising it."
             failed=1
           fi
           exit "$failed"

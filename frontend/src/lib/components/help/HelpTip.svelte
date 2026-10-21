@@ -46,16 +46,16 @@
 	 * and follows it on scroll and resize.
 	 */
 	import { tick } from 'svelte';
-	import { m, currentLocale, ensureHelpCatalogue } from '#lib/i18n/store.svelte.ts';
+	import { m, currentLocale, ensureSlices } from '#lib/i18n/store.svelte.ts';
 	import { termHref, termKey, termShortKey } from '#lib/help/terms.ts';
 
 	let { term }: { term: string } = $props();
 
 	// The term's name and definition live in the help-centre catalogue slice,
 	// which loads on demand (decisions §261); English shows until it lands.
-	$effect(() => {
-		void ensureHelpCatalogue();
-	});
+	// Asked for as the tip initialises, before its first `m()` read, not from
+	// an effect that runs after it — a tip owns the slice it renders (§300).
+	void ensureSlices('help');
 
 	type Reading = { id: string; title: string }[];
 	let reading = $state<Reading>([]);

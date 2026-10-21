@@ -1217,7 +1217,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       **Fired 2026-10-08, deliberately not taken:** the help-catalogue split
       (decisions §261) changed the workflow only to count one help slice like
       one catalogue; the total measured 1005 of 1075, so the every-chunk sum is
-      not binding and this stays the next budget change's job.
+      not binding and this stays the next budget change's job. **Fired again
+      2026-10-20, again not taken:** the settings and portal slices (§300)
+      generalised that to one file per catalogue kind; the total measured 1034
+      of 1075 (down from 1050), still not binding, and the change was scoped to
+      the per-chunk ceiling that was.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
