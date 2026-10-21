@@ -650,6 +650,24 @@ jobs:
           printf '  %s\n' "${scripts[@]}"
           shellcheck "${scripts[@]}"
 
+  # deploy/compose.prod.yml, rendered by the compose the VM runs, in both
+  # database modes (#575 § Environment parity). #569's POSTGRES_PASSWORD
+  # warning was printed only by the VM's compose, in RDS mode, and no CI job
+  # ran compose against deploy/ at all. The version is read from
+  # deploy/bootstrap-vm.sh's COMPOSE_VERSION — never written here, so bumping
+  # the VM's pin is what moves this job (tests/test_deploy_compose_parity.py
+  # fails on a pin restated in a workflow). Not path-filtered: seconds.
+  deploy-compose:
+    name: Deploy compose config (the VM's compose, both DB modes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the compose version deploy/bootstrap-vm.sh pins
+        run: scripts/install_vm_compose.sh
+      - name: Render compose.prod.yml in local and external mode; any warning fails
+        run: scripts/check_deploy_compose_config.sh
+
   e2e:
     # Shard the Playwright suite across 14 parallel GitHub runners with
     # `workers=1` inside each shard. Each shard boots its own Postgres +
@@ -1564,6 +1582,7 @@ jobs:
       - mobile-ios-build
       - brand-assets
       - shellcheck
+      - deploy-compose
       - e2e
       - service-e2e
       - erp-e2e
