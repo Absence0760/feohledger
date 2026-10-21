@@ -38,6 +38,25 @@ type Params = Record<string, unknown>;
  *  module. */
 export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
 
+/** FeohLedger is already paying the invoice — a live payment or virtual card —
+ *  so the push was refused before any adapter ran (same module, decisions
+ *  §306). `params.claim` names the rail (`payment` / `virtual_card`), and
+ *  `possibly_posted: true` appears as on the exception refusal. Also a 409 the
+ *  send doors answer with. */
+export const PAYMENT_BLOCKS_ERP_EXPORT = 'payment_blocks_erp_export';
+
+/** The sentence per `claim`, plain and possibly-posted. */
+const CLAIM_KEYS: Record<string, { plain: MessageKey; posted: MessageKey }> = {
+	payment: {
+		plain: 'erpRefusal.paymentBlocksExport',
+		posted: 'erpRefusal.paymentBlocksExportPossiblyPosted'
+	},
+	virtual_card: {
+		plain: 'erpRefusal.cardBlocksExport',
+		posted: 'erpRefusal.cardBlocksExportPossiblyPosted'
+	}
+};
+
 /** The refusals raised outside an adapter, which name no provider. */
 const PROVIDERLESS = new Set([
 	'not_connected',
@@ -89,6 +108,7 @@ const KEYS: Record<string, MessageKey> = {
 	job_unconfirmed: 'erpRefusal.jobUnconfirmed',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
+	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',
 	// A FeohLedger payment written back to the ERP (decisions §295)
 	payment_account_not_mapped: 'erpRefusal.paymentAccountNotMapped',
 	bill_not_in_erp: 'erpRefusal.billNotInErp',
@@ -135,6 +155,12 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 				? 'erpRefusal.exceptionBlocksExportPossiblyPosted'
 				: key;
 		return t(sentence, { type: label ? t(label) : exceptionTypeFallback(type) });
+	}
+	if (refusal.code === PAYMENT_BLOCKS_ERP_EXPORT) {
+		const claim = refusal.params.claim;
+		const keys = typeof claim === 'string' ? CLAIM_KEYS[claim] : undefined;
+		if (!keys) return null;
+		return t(refusal.params.possibly_posted === true ? keys.posted : keys.plain);
 	}
 	// The adapter's fixed literal ("QuickBooks Online"). Every other sentence
 	// names it, so a refusal recorded without one is stated by the server.
