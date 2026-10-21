@@ -1,20 +1,32 @@
-"""ERP webhook endpoint — receives status callbacks from ERPs and Merge.dev."""
+"""ERP webhook endpoints — status callbacks from ERPs, Merge.dev and QuickBooks."""
 
+import json
 import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.database import control_session_factory, get_tenant_engine
-from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.services.credential_crypto import CredentialCryptoError
-from app.services.exception_service import create_exception
+from app.services.erp_status_sync import (
+    DOUBLE_PAY_REFUSALS,
+    ERP_PAID_RECORDABLE,
+    ERP_RECONCILIATION_EXCEPTION_TYPE,
+    reported_paid_on,
+    reported_payment_method,
+)
+from app.services.erp_status_sync import (
+    open_erp_reconciliation_exception as _open_erp_reconciliation_exception,
+)
+from app.services.erp_status_sync import (
+    record_erp_reported_payment as _record_erp_reported_payment,
+)
 from app.services.payment_settlement import settlement_coverage
 from app.services.provider_credentials import provider_config
 from app.services.webhook_security import (
@@ -33,11 +45,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/erp", tags=["erp"])
 
-# Exception type opened when the ERP reports an invoice void/cancel we can no
-# longer safely auto-apply (the invoice already advanced past the point where
-# ``→ failed`` is a legal transition). Free-form ``Exception.exception_type``
-# string — no migration. See the § Exception types list in backend/CLAUDE.md.
-ERP_RECONCILIATION_EXCEPTION_TYPE = "erp_reconciliation"
+# `ERP_RECONCILIATION_EXCEPTION_TYPE`, `ERP_PAID_RECORDABLE`,
+# `DOUBLE_PAY_REFUSALS` and the two helpers aliased above live in
+# `services/erp_status_sync`, which QuickBooks' status sync-back shares; they
+# are re-exported here, under their old names, for this module and its tests.
+__all__ = [
+    "DOUBLE_PAY_REFUSALS",
+    "ERP_PAID_RECORDABLE",
+    "ERP_RECONCILIATION_EXCEPTION_TYPE",
+    "erp_webhook",
+    "quickbooks_webhook",
+]
 
 
 def _retry_please() -> Response:
@@ -80,6 +98,73 @@ ERP_STATUS_MAP = {
 }
 
 
+# ---------------------------------------------------------------------------
+# QuickBooks Online — CloudEvents webhooks (decisions §295)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/webhook/quickbooks", status_code=status.HTTP_204_NO_CONTENT)
+async def quickbooks_webhook(request: Request):
+    """Intuit's CloudEvents webhook for every connected QuickBooks company.
+
+    Declared before ``/webhook/{erp_type}`` so it is matched first. Intuit
+    sends neither a tenant nor a per-tenant secret, so this route differs from
+    the generic one in exactly those two places:
+
+    * the delivery is signed with the Intuit app's ONE verifier token
+      (``FEOH_ERP_QBO_WEBHOOK_VERIFIER_TOKEN``): ``intuit-signature`` is the
+      base64 HMAC-SHA256 of the RAW body, checked before anything is parsed.
+      An empty token means webhooks are off, and every delivery is refused;
+    * each event names its company (``intuitaccountid``), which the
+      control-plane realm index maps to the one tenant connected to it.
+
+    Every path answers a bodyless 204 — a bad signature, a malformed body, an
+    unknown company, a duplicate — so nothing enumerates tenants. A verified
+    delivery's events are claimed (dedupe by event id) and applied after the
+    response (``erp_status_sync.dispatch_qbo_events``): Intuit wants an answer
+    within seconds, an event costs reads of the company, and the
+    change-data-capture sweep is the backstop for anything lost.
+    """
+    from app.services.erp_status_sync import (
+        claim_qbo_events,
+        dispatch_qbo_events,
+        parse_qbo_events,
+    )
+    from app.services.webhook_security import verify_hmac_sha256_base64
+
+    token = settings.erp_qbo_webhook_verifier_token
+    if not token:
+        logger.debug("QuickBooks webhook refused: no verifier token configured")
+        return
+    max_bytes = settings.erp_webhook_max_bytes
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_bytes:
+                return
+        except ValueError:
+            return
+    raw_body = await request.body()
+    if len(raw_body) > max_bytes:
+        return
+    signature = extract_signature_header(dict(request.headers), "intuit-signature")
+    if not verify_hmac_sha256_base64(token, raw_body, signature):
+        return
+    try:
+        body = json.loads(raw_body)
+    except ValueError:
+        return
+    # Dedupe by event id before answering: a replay is dropped here, and a
+    # dedup store we cannot reach is our failure, answered 503 so Intuit
+    # redelivers rather than 2xx for work nobody claimed.
+    try:
+        claimed = await claim_qbo_events(parse_qbo_events(body))
+    except Exception as exc:  # noqa: BLE001 — Redis unreachable
+        logger.warning("QuickBooks webhook: dedup unavailable (%s)", exc.__class__.__name__)
+        return _retry_please()
+    dispatch_qbo_events(claimed)
+
+
 @router.post("/webhook/{erp_type}", status_code=status.HTTP_204_NO_CONTENT)
 async def erp_webhook(
     erp_type: str,
@@ -100,8 +185,16 @@ async def erp_webhook(
         "erp_document_id": "string" | null,
         "event_id": "string" | null,
         "status": "Open" | "posted" | "paid" | ...,
+        "paid_on": "YYYY-MM-DD" | null,      // optional, for a paid report
+        "payment_method": "check" | ... | null,  // optional, for a paid report
         "details": { ... }  // optional extra data
     }
+
+    ``paid_on`` / ``payment_method`` date and classify a payment the ERP
+    made (decisions §295): validated like the user's own record (a real
+    date not in the future; a recordable rail, never ``virtual_card``), and
+    an invalid or absent value falls back to the arrival date / NULL rather
+    than refusing the report.
 
     For Merge.dev webhooks, the body structure may differ — we normalize it.
     """
@@ -158,6 +251,8 @@ async def erp_webhook(
     # already has a real "missing event id -> always process" path — let a
     # genuinely absent event_id hit that instead of a fabricated one.
     event_id = body.get("event_id")
+    paid_on = reported_paid_on(body.get("paid_on"))
+    payment_method = reported_payment_method(body.get("payment_method"))
 
     if not tenant_slug:
         return  # silent — body didn't name a tenant
@@ -295,6 +390,8 @@ async def erp_webhook(
                         erp_type=erp_type,
                         erp_document_id=erp_document_id,
                         event_id=event_id,
+                        paid_on=paid_on,
+                        method=payment_method,
                     )
                     await db.commit()
                 return  # silent 204 on every forbidden-transition path
@@ -398,150 +495,6 @@ async def erp_webhook(
             # redeliver. Bodyless — no diagnostic detail in the response.
             logger.exception("ERP webhook: processing failed for erp_type=%s", erp_type)
             return _retry_please()
-
-
-#: Invoice statuses from which an ERP `Paid` report is RECORDED as a payment
-#: made outside FeohLedger rather than dropped. `payment_scheduled` is absent on
-#: purpose: it already has a FeohLedger payment behind it, and the legal
-#: `payment_scheduled → paid` edge (with its settlement-coverage hold) handles it.
-ERP_PAID_RECORDABLE = frozenset(
-    {InvoiceStatus.approved, InvoiceStatus.sent_to_erp, InvoiceStatus.posted_in_erp}
-)
-
-
-#: Refusals meaning FeohLedger still holds its own claim on paying the invoice
-#: (`services/external_payment`). Raised as the BLOCKING `payment_reconciliation`
-#: type, because that claim proceeding after the ERP paid is a double payment.
-DOUBLE_PAY_REFUSALS = frozenset(
-    {
-        "external_payment_in_run",
-        "external_payment_payment_live",
-        "external_payment_card_live",
-    }
-)
-
-
-async def _record_erp_reported_payment(
-    db: AsyncSession,
-    invoice: Invoice,
-    *,
-    org: Organization,
-    erp_type: str,
-    erp_document_id: str | None,
-    event_id: str | None,
-) -> None:
-    """Book the ERP's `Paid` as a payment made outside FeohLedger.
-
-    Through `services/external_payment.record_invoice_paid_outside` — the same
-    gates a user's record goes through, minus segregation of duties (no human
-    actor). A refusal (an open payment-blocking exception, a live FeohLedger
-    payment or card that would make this a double payment, a credit we can't
-    net) is never silent: it opens an `erp_reconciliation` exception naming the
-    refusal code, so a human decides. Never commits.
-    """
-    from app.services.external_payment import (
-        ExternalPaymentRefused,
-        record_invoice_paid_outside,
-    )
-    from app.utils.dates import utc_today
-
-    if invoice.status == InvoiceStatus.sent_to_erp:
-        # The ERP can only have paid a bill it holds: the `posted_in_erp` report
-        # was lost or arrived out of order. Apply it first so the trail reads in
-        # the order things happened.
-        await transition_invoice(
-            db,
-            invoice,
-            InvoiceStatus.posted_in_erp,
-            action_name="invoice.erp_status_posted_in_erp",
-            details={
-                "erp_type": erp_type,
-                "erp_status": "implied_by_paid",
-                "erp_document_id": erp_document_id,
-                "event_id": event_id,
-            },
-        )
-
-    reference = (erp_document_id or (f"erp-event:{event_id}" if event_id else None) or erp_type)[
-        :255
-    ]
-    try:
-        await record_invoice_paid_outside(
-            db,
-            org=org,
-            invoice=invoice,
-            method=None,
-            reference=reference,
-            paid_on=utc_today(),
-            actor_id=None,
-            source="erp",
-        )
-    except ExternalPaymentRefused as exc:
-        # When FeohLedger itself still has a claim on paying this invoice — a
-        # live payment, a draft/exported run, a live card — the ERP has just
-        # paid it, so letting that claim proceed pays the supplier TWICE.
-        # `erp_reconciliation` is not payment-blocking, so for those refusals
-        # the flag is the blocking `payment_reconciliation`, which the run
-        # builder and every dispatch (`dispatch_preflight`) refuse on. Any other
-        # refusal is a question for a human, not a double-pay risk.
-        double_pay = exc.refusal.code in DOUBLE_PAY_REFUSALS
-        await _open_erp_reconciliation_exception(
-            db,
-            invoice,
-            org_id=org.id,
-            exception_type=(
-                "payment_reconciliation" if double_pay else ERP_RECONCILIATION_EXCEPTION_TYPE
-            ),
-            description=(
-                f"ERP reported 'Paid' via {erp_type} for an invoice FeohLedger has not "
-                f"paid, but it could not be recorded ({exc.refusal.code}). Resolve the "
-                f"cause, then record it via POST /api/payments/record-outside "
-                f"(erp_document_id={erp_document_id or '-'}, event={event_id or '-'})."
-            ),
-        )
-
-
-async def _open_erp_reconciliation_exception(
-    db: AsyncSession,
-    invoice: Invoice,
-    *,
-    org_id,
-    description: str,
-    exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
-) -> None:
-    """Open ONE ``erp_reconciliation`` Exception for human review, PII-free.
-
-    **Idempotent.** The webhook already dedupes redeliveries by event id, but
-    two DISTINCT ERP events for the same invoice must not pile up duplicate
-    reconciliation exceptions — so we skip if an OPEN ``erp_reconciliation``
-    exception already exists for this invoice.
-
-    ``description`` must carry only safe routing identifiers and status —
-    never the raw ERP ``details`` payload (which may include vendor bank / tax
-    / address fields).
-    """
-    existing = await db.execute(
-        select(func.count()).where(
-            APException.invoice_id == invoice.id,
-            APException.exception_type == exception_type,
-            APException.status.in_(("open", "escalated")),
-        )
-    )
-    if (existing.scalar() or 0) > 0:
-        return  # already flagged for this invoice — don't duplicate
-
-    await create_exception(
-        db,
-        exception_type=exception_type,
-        severity="error",
-        description=description,
-        status="open",
-        organization_id=org_id,
-        invoice=invoice,
-        # Raised from an inbound ERP webhook — the caller is the tenant's ERP,
-        # authenticated by HMAC, not a control-plane user.
-        raised_by_user_id=None,
-    )
 
 
 async def _raise_erp_reconciliation_exception(

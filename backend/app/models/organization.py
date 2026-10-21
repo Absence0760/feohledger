@@ -22,6 +22,19 @@ class Organization(Base, TimestampMixin):
             unique=True,
             postgresql_where=text("scim_bearer_hash IS NOT NULL"),
         ),
+        # The realm index (migration 0117, decisions §295): one tenant per
+        # OAuth ERP company. QuickBooks' webhooks name the company alone, and
+        # this is how they find the tenant; two tenants on one company would
+        # post into each other's books, so the database refuses the second.
+        Index(
+            "uq_organizations_erp_oauth_company",
+            text("((settings -> 'erp' -> 'oauth') ->> 'provider')"),
+            text("((settings -> 'erp' -> 'oauth') ->> 'external_tenant_id')"),
+            unique=True,
+            postgresql_where=text(
+                "(((settings -> 'erp' -> 'oauth') ->> 'external_tenant_id') IS NOT NULL)"
+            ),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

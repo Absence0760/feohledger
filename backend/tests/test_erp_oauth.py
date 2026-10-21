@@ -950,6 +950,55 @@ async def test_fresh_token_is_returned_without_a_refresh(realdb, platform_app, p
     assert await erp_oauth.get_access_token(QBO_OAUTH, _config(block)) == "ACCESS-SECRET-1"
 
 
+async def test_force_refresh_rotates_a_fresh_token_and_records_the_new_expiry(
+    realdb, platform_app, provider
+):
+    """The connection-health sweep's keep-alive (§295): a refresh even though
+    the access token is fresh, persisting the expiry Intuit returns NOW."""
+    block = _connected_block(realdb.info("a").org_id)
+    block["refresh_token_expires_at"] = (datetime.now(UTC) + timedelta(days=20)).isoformat()
+    await _set_settings(realdb, {"erp": _config(block)})
+    provider.handler = lambda url, data: _resp(200, _token_body(2))
+
+    token = await erp_oauth.get_access_token(QBO_OAUTH, _config(block), force_refresh=True)
+
+    assert token == "ACCESS-SECRET-2"
+    assert len(provider.calls) == 1
+    stored = (await _org_settings(realdb))["erp"]["oauth"]
+    expires = erp_oauth.parse_timestamp(stored["refresh_token_expires_at"])
+    # 8726400 s ≈ 101 days from now, not the 20 left before the refresh.
+    assert expires - datetime.now(UTC) > timedelta(days=100)
+
+
+async def test_a_refusal_past_the_reported_expiry_reads_as_expired(realdb, platform_app, provider):
+    block = _connected_block(realdb.info("a").org_id, expires_in=-10)
+    block["refresh_token_expires_at"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    await _set_settings(realdb, {"erp": _config(block)})
+    provider.handler = lambda url, data: _resp(400, {"error": "invalid_grant"})
+
+    with pytest.raises(erp_oauth.ErpNotConnectedError):
+        await erp_oauth.get_access_token(QBO_OAUTH, _config(block))
+    stored = (await _org_settings(realdb))["erp"]["oauth"]
+    assert stored["reconnect_reason"] == erp_oauth.RECONNECT_EXPIRED
+
+
+async def test_connection_metadata_writer_refuses_owned_keys_and_stale_connections(realdb):
+    block = _connected_block(realdb.info("a").org_id)
+    await _set_settings(realdb, {"erp": _config(block)})
+    org_id = realdb.info("a").org_id
+    with pytest.raises(ValueError):
+        await erp_oauth.update_connection_metadata(
+            PROVIDER, org_id, "conn-abc", {"refresh_token_expires_at": "x"}
+        )
+    assert not await erp_oauth.update_connection_metadata(
+        PROVIDER, org_id, "another-connection", {"expiry_notice": {"lead_days": 7}}
+    )
+    assert await erp_oauth.update_connection_metadata(
+        PROVIDER, org_id, "conn-abc", {"expiry_notice": {"lead_days": 7}}
+    )
+    assert (await _org_settings(realdb))["erp"]["oauth"]["expiry_notice"] == {"lead_days": 7}
+
+
 async def test_expiring_token_is_refreshed_and_rotation_persisted(realdb, platform_app, provider):
     block = _connected_block(realdb.info("a").org_id, expires_in=30)  # inside the margin
     await _set_settings(realdb, {"erp": _config(block)})
@@ -1073,12 +1122,15 @@ async def test_refused_refresh_marks_reconnect_required(realdb, platform_app, pr
         await erp_oauth.get_access_token(QBO_OAUTH, _config(block))
     assert not isinstance(exc.value, erp_oauth.ErpTokenRefreshError)
     assert "SECRET" not in str(exc.value)
-    assert (await _org_settings(realdb))["erp"]["oauth"]["needs_reconnect"] is True
+    stored = (await _org_settings(realdb))["erp"]["oauth"]
+    assert stored["needs_reconnect"] is True
+    # Refused before the expiry it last reported: revoked, not expired (§295).
+    assert stored["reconnect_reason"] == erp_oauth.RECONNECT_REVOKED
     # The connection going down is on the audit trail (rotation is not).
     (row,) = [
         r for r in await _audit_actions(realdb) if r.action == "organization.erp_reconnect_required"
     ]
-    assert row.details == {"provider": PROVIDER}
+    assert row.details == {"provider": PROVIDER, "reason": erp_oauth.RECONNECT_REVOKED}
 
     # Now reported as such, and never retried against the dead token.
     provider.calls.clear()

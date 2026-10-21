@@ -44,6 +44,9 @@ Rail-by-rail:
 ``chaps``             reportable   UK CHAPS — same-day high-value domestic bank credit.
 ``virtual_card``      EXCLUDED     Payment card. The card network / issuer is the
                                    settlement entity and files the 1099-K.
+``card``              EXCLUDED     A company payment card used outside FeohLedger
+                                   (an ERP-reported or recorded payment); same
+                                   1099-K reasoning. Never dispatched.
 ===================== ============ ===============================================
 
 An unknown or ``NULL`` rail counts as **reportable**. That is deliberate:
@@ -67,7 +70,7 @@ from sqlalchemy import ColumnElement, func
 
 # Card rails: excluded from 1099-NEC/1099-MISC (the settlement entity files
 # a 1099-K for these).
-CARD_PAYMENT_METHODS: frozenset[str] = frozenset({"virtual_card"})
+CARD_PAYMENT_METHODS: frozenset[str] = frozenset({"virtual_card", "card"})
 
 # Non-card rails: the payer reports these on the 1099.
 IRS_1099_REPORTABLE_METHODS: frozenset[str] = frozenset(
@@ -127,6 +130,9 @@ DOMESTIC_PAYMENT_METHODS: frozenset[str] = frozenset(
         "wire",
         "rtp",
         "virtual_card",
+        # A company card used outside FeohLedger (recorded only, decisions
+        # §295): never routed by the corridor selector.
+        "card",
         # UK domestic rails — money stays inside the UK banking system, no FX,
         # no KYC-corridor risk. `pick_corridor` routes a same-currency GBP/GB
         # payment onto `faster_payments`; `bacs` / `chaps` are override-only.
