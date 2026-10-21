@@ -9,9 +9,15 @@
 	 *
 	 * `status` is `auth.userStatus`; the callbacks are the store's `fetchUser`
 	 * and `logout`, passed in so this stays presentational.
+	 *
+	 * The failure itself is `ui/LoadError` in its titled shape — the one
+	 * error-and-retry primitive — with Log out passed as its extra action. This
+	 * component owns only what is particular to the shell: the brand frame, the
+	 * loading line, and keeping the panel up through a retry.
 	 */
 	import { tick } from 'svelte';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type { UserStatus } from '#lib/stores/auth.svelte.ts';
 
@@ -23,7 +29,7 @@
 
 	let { status, onretry, onlogout }: Props = $props();
 
-	let heading = $state<HTMLHeadingElement | null>(null);
+	let errorBlock = $state<LoadError | null>(null);
 	let loggingOut = $state(false);
 	// Once a load has failed, a Retry keeps the panel on screen (its button
 	// reading "Retrying…") instead of swapping it for the loading view: the
@@ -50,15 +56,8 @@
 	$effect(() => {
 		if (status !== 'error') return;
 		failedOnce = true;
-		void tick().then(() => heading?.focus());
+		void tick().then(() => errorBlock?.focusHeading());
 	});
-
-	function retry() {
-		// aria-disabled, not disabled: a focused button that becomes disabled
-		// throws keyboard focus to <body>.
-		if (retrying) return;
-		onretry();
-	}
 
 	function logout() {
 		if (loggingOut) return;
@@ -73,26 +72,24 @@
 		<span class="announcement-text">{announcement}</span>
 	</p>
 	{#if showPanel}
-		<section class="panel" aria-labelledby="account-load-heading">
+		<div class="panel">
 			<BrandMark size={36} />
-			<h1 id="account-load-heading" tabindex="-1" bind:this={heading}>
-				{m('shell.accountLoad.errorHeading')}
-			</h1>
-			<p class="body">{m('shell.accountLoad.errorBody')}</p>
-			<div class="actions">
-				<button
-					type="button"
-					class="btn-primary"
-					onclick={retry}
-					aria-disabled={retrying}
-				>
-					{retrying ? m('common.retrying') : m('common.tryAgain')}
-				</button>
-				<button type="button" class="btn-cancel" onclick={logout} aria-disabled={loggingOut}>
-					{m('shell.logOut')}
-				</button>
-			</div>
-		</section>
+			<LoadError
+				bind:this={errorBlock}
+				heading={m('shell.accountLoad.errorHeading')}
+				headingLevel={1}
+				message={m('shell.accountLoad.errorBody')}
+				retryLabel={m('common.tryAgain')}
+				{retrying}
+				{onretry}
+			>
+				{#snippet actions()}
+					<button type="button" class="btn-cancel" onclick={logout} aria-disabled={loggingOut}>
+						{m('shell.logOut')}
+					</button>
+				{/snippet}
+			</LoadError>
+		</div>
 	{/if}
 </div>
 
@@ -115,24 +112,6 @@
 		align-items: flex-start;
 		gap: 12px;
 	}
-	h1 {
-		margin: 4px 0 0;
-		font-size: 1.25rem;
-		font-weight: 700;
-		color: var(--text);
-	}
-	.body {
-		margin: 0;
-		font-size: 0.93rem;
-		line-height: 1.55;
-		color: var(--text-muted);
-	}
-	.actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 10px;
-		margin-top: 8px;
-	}
 	/* The loading line: the region itself stays at full opacity (only its
 	   text arrives late); the visual line fades in after a beat so a fast /me
 	   never flashes it. Rests visible (Motion rule 1); app.css's
@@ -147,7 +126,7 @@
 		font-size: 0.93rem;
 		animation: account-load-in 0.2s ease-out 0.4s 1 both;
 	}
-	.panel button[aria-disabled='true'] {
+	.btn-cancel[aria-disabled='true'] {
 		cursor: progress;
 	}
 	@keyframes account-load-in {
