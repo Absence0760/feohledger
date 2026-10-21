@@ -21,6 +21,7 @@ token per connection attempt; these tests pin:
 
 from __future__ import annotations
 
+import logging
 import pathlib
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -389,9 +390,13 @@ def test_alembic_migrates_through_the_factory_with_a_token(monkeypatch) -> None:
         return local.password
 
     ini = str(pathlib.Path(db_engine.__file__).resolve().parents[1] / "alembic.ini")
+    preexisting = logging.getLogger("app.test_db_engine.preexisting")
     with (
         patch("app.db_engine.validate_iam_database_url"),
         patch("app.db_engine.generate_auth_token", side_effect=_stub),
     ):
         command.current(Config(ini))
     assert calls == [(local.host, local.port or 5432, local.username)]
+    # An in-process Alembic run must not silence loggers that already exist
+    # (fileConfig's default does, and it emptied caplog for later tests).
+    assert not preexisting.disabled

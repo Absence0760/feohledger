@@ -27,8 +27,12 @@ else:
 # syntax" before any migration ran. Doubling it is configparser's escape.
 config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
 
+# disable_existing_loggers=False: fileConfig's default disables every logger
+# that already exists, so an in-process run (a test driving alembic.command, or
+# any caller importing the app first) silenced the app's loggers for the rest of
+# the process, which the log-redaction tests then read as empty output.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
