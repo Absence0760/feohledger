@@ -25,8 +25,9 @@
  *    or fraud exception (stated by `api/erpRefusals.ts`), an ERP sync
  *    refused because the connection is gone or the listing is incomplete,
  *    and every self-service signup refusal (the workspace address, the
- *    email and name checks, the captcha, the verification link), and the
- *    shared rate limiter's 429 on every surface it guards;
+ *    email and name checks, the captcha, the verification link), the
+ *    shared rate limiter's 429 on every surface it guards, and every vendor
+ *    merge refusal (self-merge, cross-entity, a payments-blocked duplicate);
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -543,7 +544,17 @@ const BUILDERS: Record<string, Builder> = {
 	// The admin path's other-workspace budget is spent (`api/admin.py`).
 	email_check_throttled: fixed('refusal.emailCheckThrottled'),
 	// Any 429 from the shared limiter (`services/rate_limit.py`).
-	[RATE_LIMITED]: rateLimited
+	[RATE_LIMITED]: rateLimited,
+	// A refused vendor merge (`services/vendor_merge.py`; the malformed-id 422
+	// is raised by its endpoint, `api/enrichment.py`). No params — the
+	// sentence never names a vendor, its tax id or its bank.
+	vendor_merge_self: fixed('refusal.vendorMergeSelf'),
+	vendor_merge_no_duplicates: fixed('refusal.vendorMergeNoDuplicates'),
+	vendor_merge_canonical_not_found: fixed('refusal.vendorMergeCanonicalNotFound'),
+	vendor_merge_duplicate_not_found: fixed('refusal.vendorMergeDuplicateNotFound'),
+	vendor_merge_invalid_id: fixed('refusal.vendorMergeInvalidId'),
+	vendor_merge_cross_entity: fixed('refusal.vendorMergeCrossEntity'),
+	vendor_merge_blocked_duplicate: fixed('refusal.vendorMergeBlockedDuplicate')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

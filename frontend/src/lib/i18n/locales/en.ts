@@ -5065,6 +5065,15 @@ export const en = {
 	'refusal.emailInThisWorkspace': "A user with this email address already exists in this workspace.",
 	'refusal.emailInOtherWorkspace': "This email address already has an account in another workspace. An address can belong to only one workspace, so use a different address for this person.",
 	'refusal.emailCheckThrottled': "Too many addresses entered in this workspace recently already belonged to other workspaces, so adding users or changing their email is paused for up to an hour. Try again later.",
+	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`). No
+	// params: the vendors are already on the steward's screen.
+	'refusal.vendorMergeSelf': "A vendor can't be merged into itself. Choose a different canonical vendor.",
+	'refusal.vendorMergeNoDuplicates': "Choose at least one duplicate to merge.",
+	'refusal.vendorMergeCanonicalNotFound': "The canonical vendor no longer exists. Close this dialog and open it again.",
+	'refusal.vendorMergeDuplicateNotFound': "One of the duplicates no longer exists. Close this dialog and open it again.",
+	'refusal.vendorMergeInvalidId': "One of these vendors couldn't be identified. Close this dialog and open it again.",
+	'refusal.vendorMergeCrossEntity': "These vendors belong to different entities, and a merge can't move one subsidiary's spend to another.",
+	'refusal.vendorMergeBlockedDuplicate': "A duplicate has its payments blocked and the canonical vendor doesn't, so merging would release its held invoices. Resolve the block in its screening review first, or leave it out of this merge.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "This vendor isn't in {provider} yet. Sync vendors from {provider}, or add the vendor there, then retry.",

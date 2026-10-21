@@ -4884,6 +4884,14 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "Un utilisateur avec cette adresse e-mail existe déjà dans cet espace de travail.",
 	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne.",
 	'refusal.emailCheckThrottled': "Trop d’adresses saisies récemment dans cet espace de travail appartenaient déjà à d’autres espaces de travail : l’ajout d’utilisateurs et la modification de leur e-mail sont suspendus pendant une heure au plus. Réessayez plus tard.",
+	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
+	'refusal.vendorMergeSelf': "Un fournisseur ne peut pas être fusionné avec lui-même. Choisissez un autre fournisseur de référence.",
+	'refusal.vendorMergeNoDuplicates': "Choisissez au moins un doublon à fusionner.",
+	'refusal.vendorMergeCanonicalNotFound': "Le fournisseur de référence n’existe plus. Fermez cette fenêtre et rouvrez-la.",
+	'refusal.vendorMergeDuplicateNotFound': "L’un des doublons n’existe plus. Fermez cette fenêtre et rouvrez-la.",
+	'refusal.vendorMergeInvalidId': "L’un de ces fournisseurs n’a pas pu être identifié. Fermez cette fenêtre et rouvrez-la.",
+	'refusal.vendorMergeCrossEntity': "Ces fournisseurs appartiennent à des entités différentes, et une fusion ne peut pas transférer les dépenses d’une filiale vers une autre.",
+	'refusal.vendorMergeBlockedDuplicate': "Les paiements d’un doublon sont bloqués, mais pas ceux du fournisseur de référence : la fusion libérerait ses factures retenues. Levez d’abord le blocage dans son examen de filtrage, ou excluez-le de cette fusion.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Ce fournisseur n'existe pas encore dans {provider}. Synchronisez les fournisseurs depuis {provider} ou créez-le là-bas, puis réessayez.",

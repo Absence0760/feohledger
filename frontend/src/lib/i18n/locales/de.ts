@@ -4884,6 +4884,14 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "In diesem Workspace gibt es bereits einen Benutzer mit dieser E-Mail-Adresse.",
 	'refusal.emailInOtherWorkspace': "Diese E-Mail-Adresse hat bereits ein Konto in einem anderen Workspace. Eine Adresse kann nur zu einem Workspace gehören; verwenden Sie für diese Person eine andere Adresse.",
 	'refusal.emailCheckThrottled': "Zu viele kürzlich in diesem Workspace eingegebene Adressen gehörten bereits zu anderen Workspaces. Das Hinzufügen von Benutzern und das Ändern ihrer E-Mail-Adresse ist daher für bis zu eine Stunde pausiert. Versuchen Sie es später erneut.",
+	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
+	'refusal.vendorMergeSelf': "Ein Lieferant kann nicht mit sich selbst zusammengeführt werden. Wählen Sie einen anderen maßgeblichen Lieferanten.",
+	'refusal.vendorMergeNoDuplicates': "Wählen Sie mindestens ein Duplikat zum Zusammenführen aus.",
+	'refusal.vendorMergeCanonicalNotFound': "Der maßgebliche Lieferant existiert nicht mehr. Schließen Sie diesen Dialog und öffnen Sie ihn erneut.",
+	'refusal.vendorMergeDuplicateNotFound': "Eines der Duplikate existiert nicht mehr. Schließen Sie diesen Dialog und öffnen Sie ihn erneut.",
+	'refusal.vendorMergeInvalidId': "Einer dieser Lieferanten konnte nicht erkannt werden. Schließen Sie diesen Dialog und öffnen Sie ihn erneut.",
+	'refusal.vendorMergeCrossEntity': "Diese Lieferanten gehören zu unterschiedlichen Einheiten, und eine Zusammenführung kann keine Ausgaben von einer Tochtergesellschaft auf eine andere verschieben.",
+	'refusal.vendorMergeBlockedDuplicate': "Für ein Duplikat sind Zahlungen gesperrt, für den maßgeblichen Lieferanten nicht. Eine Zusammenführung würde dessen zurückgehaltene Rechnungen freigeben. Heben Sie die Sperre zuerst in der Screening-Prüfung auf oder lassen Sie das Duplikat bei dieser Zusammenführung weg.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Dieser Lieferant ist noch nicht in {provider}. Synchronisieren Sie die Lieferanten aus {provider} oder legen Sie den Lieferanten dort an und versuchen Sie es dann erneut.",

@@ -87,9 +87,12 @@
 		return c.members.filter((member) => member.vendor_id !== c.canonical_vendor_id);
 	}
 
+	// The thrown `ApiError`'s message is already the reader's-language sentence
+	// for a coded merge refusal (`api/codedRefusals.ts`), and the server's
+	// English for anything this build cannot state. Never `err.detail`: that is
+	// the raw body — a `{code, message, params}` object, not text.
 	function errMsg(err: unknown, fallback: string): string {
-		const e = err as { detail?: string; message?: string } | null;
-		return e?.detail ?? e?.message ?? fallback;
+		return err instanceof Error && err.message ? err.message : fallback;
 	}
 
 	async function doMerge(c: VendorCluster) {
@@ -114,7 +117,8 @@
 			clusters = clusters.filter((x) => x.cluster_id !== c.cluster_id);
 			onmerged();
 		} catch (err) {
-			// Surface the backend's 4xx reason (self-merge / cross-entity / unknown).
+			// Surface the backend's 4xx reason (self-merge / cross-entity / blocked
+			// duplicate / unknown), in the reader's language.
 			toast(errMsg(err, m('vendors.consolidation.toast.mergeFailed')), 'error');
 		} finally {
 			mergingId = null;

@@ -4877,6 +4877,14 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "Ya existe un usuario con esta dirección de correo en este espacio de trabajo.",
 	'refusal.emailInOtherWorkspace': "Esta dirección de correo ya tiene una cuenta en otro espacio de trabajo. Una dirección solo puede pertenecer a un espacio de trabajo, así que use otra dirección para esta persona.",
 	'refusal.emailCheckThrottled': "Demasiadas direcciones introducidas recientemente en este espacio de trabajo ya pertenecían a otros espacios de trabajo, así que añadir usuarios o cambiar su correo está en pausa durante un máximo de una hora. Vuelva a intentarlo más tarde.",
+	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
+	'refusal.vendorMergeSelf': "Un proveedor no se puede combinar consigo mismo. Elija otro proveedor principal.",
+	'refusal.vendorMergeNoDuplicates': "Elija al menos un duplicado para combinar.",
+	'refusal.vendorMergeCanonicalNotFound': "El proveedor principal ya no existe. Cierre este cuadro de diálogo y vuelva a abrirlo.",
+	'refusal.vendorMergeDuplicateNotFound': "Uno de los duplicados ya no existe. Cierre este cuadro de diálogo y vuelva a abrirlo.",
+	'refusal.vendorMergeInvalidId': "No se pudo identificar uno de estos proveedores. Cierre este cuadro de diálogo y vuelva a abrirlo.",
+	'refusal.vendorMergeCrossEntity': "Estos proveedores pertenecen a entidades distintas, y una combinación no puede trasladar el gasto de una filial a otra.",
+	'refusal.vendorMergeBlockedDuplicate': "Un duplicado tiene los pagos bloqueados y el proveedor principal no, así que combinarlos liberaría sus facturas retenidas. Resuelva primero el bloqueo en su revisión de control o déjelo fuera de esta combinación.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Este proveedor todavía no está en {provider}. Sincronice los proveedores desde {provider} o cree el proveedor allí y vuelva a intentarlo.",

@@ -4795,6 +4795,14 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "このメールアドレスのユーザーは、このワークスペースに既に存在します。",
 	'refusal.emailInOtherWorkspace': "このメールアドレスには別のワークスペースのアカウントが既にあります。1 つのアドレスは 1 つのワークスペースにしか所属できないため、この方には別のアドレスを使用してください。",
 	'refusal.emailCheckThrottled': "このワークスペースで最近入力されたアドレスのうち、別のワークスペースに既に属していたものが多すぎるため、ユーザーの追加とメールアドレスの変更を最大 1 時間停止しています。しばらくしてからもう一度お試しください。",
+	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
+	'refusal.vendorMergeSelf': "取引先を自分自身に統合することはできません。別の正規の取引先を選択してください。",
+	'refusal.vendorMergeNoDuplicates': "統合する重複を 1 件以上選択してください。",
+	'refusal.vendorMergeCanonicalNotFound': "正規の取引先は既に存在しません。このダイアログを閉じて、もう一度開いてください。",
+	'refusal.vendorMergeDuplicateNotFound': "重複のいずれかが既に存在しません。このダイアログを閉じて、もう一度開いてください。",
+	'refusal.vendorMergeInvalidId': "これらの取引先のいずれかを特定できませんでした。このダイアログを閉じて、もう一度開いてください。",
+	'refusal.vendorMergeCrossEntity': "これらの取引先は異なるエンティティに属しています。統合によって、ある子会社の支出を別の子会社に移すことはできません。",
+	'refusal.vendorMergeBlockedDuplicate': "重複の一方は支払いがブロックされていますが、正規の取引先はブロックされていないため、統合すると保留中の請求書が支払可能になってしまいます。先にスクリーニング審査でブロックを解決するか、この取引先を統合から除外してください。",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "この取引先はまだ {provider} にありません。{provider} から取引先を同期するか、そちらで取引先を登録してから再試行してください。",

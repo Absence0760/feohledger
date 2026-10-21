@@ -193,6 +193,91 @@ test.describe('/vendors consolidation suggestions fail to load', () => {
 	});
 });
 
+test.describe('/vendors consolidation merge refused, in German', () => {
+	test('the coded refusal is stated in the reader’s language, not the server’s English', async ({
+		page
+	}) => {
+		await page.addInitScript(() => {
+			try {
+				localStorage.setItem('feoh_consent_choice', 'accepted');
+				localStorage.setItem('feoh_locale', 'de');
+			} catch {
+				/* about:blank — ignore */
+			}
+		});
+		const canonId = '00000000-0000-0000-0000-00000000c001';
+		const dupeId = '00000000-0000-0000-0000-00000000d001';
+		const member = (vendor_id: string, name: string, is_canonical: boolean) => ({
+			vendor_id,
+			name,
+			code: null,
+			tax_id_masked: '***6789',
+			status: 'active',
+			invoice_count: 0,
+			is_canonical
+		});
+		await page.route(
+			(url) => url.pathname === '/api/enrichment/vendors/consolidation-suggestions',
+			(route) =>
+				route.fulfill({
+					json: {
+						clusters: [
+							{
+								cluster_id: 1,
+								members: [
+									member(canonId, 'Stub Holdings Co', true),
+									member(dupeId, 'Stub Holdings Company', false)
+								],
+								canonical_vendor_id: canonId,
+								score: '1',
+								reasons: ['same_tax_id']
+							}
+						],
+						vendor_count: 2,
+						cluster_count: 1,
+						truncated: false,
+						generated_at: '2026-10-21T00:00:00Z'
+					}
+				})
+		);
+		// Exactly what `services/vendor_merge.py` answers for a payments-blocked
+		// duplicate folded into an unblocked canonical.
+		const english =
+			'Cannot merge a payments-blocked vendor into an unblocked canonical — resolve the ' +
+			"block first (see the vendor's screening review) or exclude it from this merge.";
+		await page.route(
+			(url) => url.pathname === '/api/enrichment/vendors/consolidation/merge',
+			(route) =>
+				route.fulfill({
+					status: 422,
+					json: {
+						detail: { code: 'vendor_merge_blocked_duplicate', message: english, params: {} }
+					}
+				})
+		);
+
+		await page.goto('/vendors');
+		await page.getByRole('button', { name: 'Duplikate zusammenführen' }).click();
+		const modal = page.getByRole('dialog', { name: 'Lieferantenkonsolidierung' });
+		const cluster = modal.locator('li.cluster', { hasText: 'Stub Holdings Co' });
+		await cluster
+			.getByRole('button', { name: 'Gruppe in Stub Holdings Co zusammenführen' })
+			.click();
+		await cluster.getByRole('button', { name: 'Zusammenführen bestätigen' }).click();
+
+		const toasts = page.locator('.toast-text');
+		await expect(
+			toasts.filter({
+				hasText:
+					'Für ein Duplikat sind Zahlungen gesperrt, für den maßgeblichen Lieferanten nicht.'
+			})
+		).toBeVisible();
+		await expect(toasts.filter({ hasText: 'payments-blocked' })).toHaveCount(0);
+		// Refused, so the cluster stays to be acted on.
+		await expect(cluster).toBeVisible();
+	});
+});
+
 test.describe('/vendors consolidation (clerk has no access)', () => {
 	test.use({ storageState: { cookies: [], origins: [] } });
 

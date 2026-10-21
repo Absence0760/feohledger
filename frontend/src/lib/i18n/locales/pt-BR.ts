@@ -4878,6 +4878,14 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "Já existe um usuário com este endereço de e-mail neste espaço de trabalho.",
 	'refusal.emailInOtherWorkspace': "Este endereço de e-mail já tem uma conta em outro espaço de trabalho. Um endereço só pode pertencer a um espaço de trabalho; use outro endereço para esta pessoa.",
 	'refusal.emailCheckThrottled': "Muitos endereços inseridos recentemente neste espaço de trabalho já pertenciam a outros espaços de trabalho, então adicionar usuários ou alterar o e-mail deles está pausado por até uma hora. Tente novamente mais tarde.",
+	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
+	'refusal.vendorMergeSelf': "Um fornecedor não pode ser mesclado com ele mesmo. Escolha outro fornecedor principal.",
+	'refusal.vendorMergeNoDuplicates': "Escolha pelo menos um duplicado para mesclar.",
+	'refusal.vendorMergeCanonicalNotFound': "O fornecedor principal não existe mais. Feche esta caixa de diálogo e abra-a novamente.",
+	'refusal.vendorMergeDuplicateNotFound': "Um dos duplicados não existe mais. Feche esta caixa de diálogo e abra-a novamente.",
+	'refusal.vendorMergeInvalidId': "Não foi possível identificar um desses fornecedores. Feche esta caixa de diálogo e abra-a novamente.",
+	'refusal.vendorMergeCrossEntity': "Esses fornecedores pertencem a entidades diferentes, e uma mesclagem não pode transferir os gastos de uma subsidiária para outra.",
+	'refusal.vendorMergeBlockedDuplicate': "Um duplicado tem os pagamentos bloqueados e o fornecedor principal não, então a mesclagem liberaria as faturas retidas dele. Resolva primeiro o bloqueio na análise de triagem ou deixe-o fora desta mesclagem.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Este fornecedor ainda não está no {provider}. Sincronize os fornecedores do {provider} ou cadastre o fornecedor lá e tente novamente.",

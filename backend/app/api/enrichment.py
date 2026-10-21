@@ -36,6 +36,7 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.permissions import PERM_VENDOR_MANAGE
+from app.api.refusals import coded_refusal
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.organization import Organization
@@ -77,7 +78,7 @@ from app.services.vendor_enrichment import (
     detect_price_variance,
     suggest_fields,
 )
-from app.services.vendor_merge import VendorMergeError, merge_vendors
+from app.services.vendor_merge import VENDOR_MERGE_INVALID_ID, VendorMergeError, merge_vendors
 from app.services.vendor_screening import screen_best_effort
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 
@@ -626,8 +627,10 @@ async def merge_vendor_consolidation(
     re-deactivates nothing (200 with empty counts). **Audited** — writes a
     PII-free ``vendor.merged`` audit row (canonical id + duplicate ids + the
     per-table reassigned counts; no ``tax_id`` / bank / address). Refuses
-    self-merge, an empty duplicate set, an unknown vendor (404), and a
-    cross-entity merge (422).
+    self-merge, an empty duplicate set, an unknown vendor (404), a
+    cross-entity merge and a payments-blocked duplicate into an unblocked
+    canonical (422) — each a coded refusal (``services/vendor_merge``'s
+    ``VENDOR_MERGE_*``) a client states in the reader's language.
 
     RBAC: ``vendor.manage`` (admin / ap_manager by default) — vendor master-data
     control is a splittable SoD duty. Tenant-scoped via ``get_tenant_db`` +
@@ -638,7 +641,10 @@ async def merge_vendor_consolidation(
         canonical_id = uuid.UUID(str(body.canonical_vendor_id))
         duplicate_ids = [uuid.UUID(str(d)) for d in body.duplicate_vendor_ids]
     except (ValueError, AttributeError) as exc:
-        raise HTTPException(status_code=422, detail="Invalid vendor id.") from exc
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(VENDOR_MERGE_INVALID_ID, "Invalid vendor id."),
+        ) from exc
 
     try:
         result = await merge_vendors(
@@ -647,7 +653,7 @@ async def merge_vendor_consolidation(
             duplicate_vendor_ids=duplicate_ids,
         )
     except VendorMergeError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     # Append-only audit row — a vendor merge re-homes spend + retires vendors, a
     # material master-data change (invariant #3). PII-free: ids + counts only.

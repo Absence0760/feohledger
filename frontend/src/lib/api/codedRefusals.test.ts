@@ -696,3 +696,42 @@ describe('the shared rate limiter’s 429 (`rate_limited`)', () => {
 		);
 	});
 });
+
+describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
+	const MERGE: [string, MainMessageKey][] = [
+		['vendor_merge_self', 'refusal.vendorMergeSelf'],
+		['vendor_merge_no_duplicates', 'refusal.vendorMergeNoDuplicates'],
+		['vendor_merge_canonical_not_found', 'refusal.vendorMergeCanonicalNotFound'],
+		['vendor_merge_duplicate_not_found', 'refusal.vendorMergeDuplicateNotFound'],
+		['vendor_merge_invalid_id', 'refusal.vendorMergeInvalidId'],
+		['vendor_merge_cross_entity', 'refusal.vendorMergeCrossEntity'],
+		['vendor_merge_blocked_duplicate', 'refusal.vendorMergeBlockedDuplicate']
+	];
+
+	it.each(MERGE)('%s is the fixed sentence %s in every shipped locale', (code, key) => {
+		expect(CODED_REFUSAL_CODES).toContain(code);
+		for (const [locale, messages] of [
+			['en', en],
+			['de', de],
+			['fr', fr],
+			['es', es],
+			['pt-BR', ptBR],
+			['ja', ja]
+		] as const) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
+			expect(text, `${locale} ${code}`).toBeTruthy();
+		}
+	});
+
+	it('reaches the transport from the raw merge detail, in the reader’s language', () => {
+		const raw = detail(
+			'vendor_merge_blocked_duplicate',
+			{},
+			'Cannot merge a payments-blocked vendor into an unblocked canonical — resolve the ' +
+				"block first (see the vendor's screening review) or exclude it from this merge."
+		);
+		expect(localizeApiDetail(raw, deT)).toBe(de['refusal.vendorMergeBlockedDuplicate']);
+		expect(localizeApiDetail(raw, deT)).not.toContain('payments-blocked');
+	});
+});
