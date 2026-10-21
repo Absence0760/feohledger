@@ -42,7 +42,10 @@ a GitHub issue only when one warrants its own thread.
 **Last reconciled:** 2026-10-21 — auto-sending an approved invoice to the ERP
 (decisions §304) opened one (c) entry, an approval whose post-commit push never
 ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
-true` before deploying it, taking the file from 121 → 123. Before that, 2026-10-21 — merging main (QuickBooks status sync, Xero
+true` before deploying it, taking the file from 122 → 124. Before that, 2026-10-21 — the adapters' honest paid read (decisions
+§303) split the "ERP status polling and void are unwired" (c) entry into the
+non-QuickBooks status sync-back gap and the void/recall gap, taking the file
+from 121 → 122. Before that, 2026-10-21 — merging main (QuickBooks status sync, Xero
 Disconnect) into the PO vendor-link branch; both sides' entries kept, taking
 the file to 121. Before that, 2026-10-20 — the live Xero Demo Company test opened two
 (c) entries (unapproved ERP POs syncing as open, and the adapters that still
@@ -193,7 +196,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**123 open: 105 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**124 open: 106 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1492,13 +1495,31 @@ scope (§260) — do not fold them into any of these.
       fix:** key the id by ERP (a `vendor_erp_links` table, or `{erp_type: id}`)
       and resolve by the active ERP. **Trigger:** the first tenant that
       switches ERP.
-- [ ] **(c) ERP status polling and void are unwired, and three adapters read a
-      zero balance as paid.** `get_invoice_status` / `void_invoice` have no
-      callers under `app/`. When they are wired in, SYSPRO, Sage SA and
-      QuickBooks map balance 0 to `paid`, which also catches a credited or
-      zero-total bill. **Durable fix:** map paid only on a recorded payment
-      (or the ERP's own paid status), before wiring the poll. **Trigger:**
-      wiring the ERP status poll or void into any flow.
+- [ ] **(c) A bill paid in any ERP but QuickBooks never reaches FeohLedger.**
+      Status sync-back (§295) covers adapters with `supports_status_sync`,
+      which today means QuickBooks only. For every other ERP a push still closes
+      at `done`, and `done` is terminal, so the ERP's later payment cannot be
+      recorded. The webhook's `Paid` and "record payment made outside" both
+      skip a `done` invoice. This is what the live Xero Demo Company test hit:
+      FEOH-INV-001 was paid in Xero and still reads `done`. The adapter
+      reads are now honest about paid versus credited (§303).
+      **Durable fix:** extend §295 per adapter: implement `bill_report` (and
+      `changed_bills` or a keyset poll where the ERP has no change feed) plus
+      `post_payment`, so `supports_status_sync` can be true and the push lands
+      at `posted_in_erp` under §296's dispatch-time read. Xero first. A design
+      that instead rests a pushed bill at the non-payable `sent_to_erp` was
+      built and is kept on the `feat/erp-status-sync` branch. It contradicts
+      §295's "either place may pay" decision and needs a product call before
+      reuse. **Trigger:** the first Xero tenant, or the live Xero re-test.
+- [ ] **(c) A bill already posted to the ERP can't be voided or recalled from
+      FeohLedger.** `void_invoice` has no caller under `app/` beyond
+      `posted_total`'s cleanup of a mismatched bill, and no user action voids
+      or recalls a pushed bill. **Durable fix:** a `POST /api/invoices/{id}/
+      void-erp` (the push's roles) that calls `void_invoice` and refuses a bill
+      the ERP shows paid or part-paid. On success it walks the invoice through
+      an audited edge back to `approved`, so it can be corrected and re-pushed
+      or paid. **Trigger:** the first customer who needs to recall a pushed
+      bill, or the live void test now pending.
 - [ ] **(c) Business Central's vendor sync stores `paymentTermsId` (a GUID) as
       the payment-terms text, and NetSuite's PO sync pulls no lines.**
       **Durable fix:** resolve BC's `paymentTerms` code; pull NetSuite PO lines

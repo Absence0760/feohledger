@@ -188,6 +188,39 @@ def _dec(value: Any) -> Decimal | None:
         return None
 
 
+#: ``LinkedTxn.TxnType`` values naming a bill payment QuickBooks recorded
+#: against the bill (a cheque or a credit-card bill payment).
+_BILL_PAYMENT_TXN_TYPES = frozenset({"BillPaymentCheck", "BillPaymentCreditCard"})
+
+
+def _has_bill_payment(bill: dict) -> bool:
+    linked = bill.get("LinkedTxn") or []
+    return any(isinstance(t, dict) and t.get("TxnType") in _BILL_PAYMENT_TXN_TYPES for t in linked)
+
+
+def map_bill_status(bill: dict) -> ErpInvoiceStatus:
+    """A bill's status from its ``Balance`` and the payments linked to it.
+
+    A Bill has no status field, only ``Balance`` against ``TotalAmt``. A zero
+    balance is ``paid`` only when QuickBooks links a bill payment to the bill
+    (``LinkedTxn`` of type ``BillPaymentCheck`` / ``BillPaymentCreditCard``)
+    and there was something to pay. A zero balance with no payment linked — a
+    zero-total bill, or one cleared some other way — is ``settled_no_payment``,
+    never recorded as a payment (docs/decisions.md §303).
+    """
+    balance = _dec(bill.get("Balance"))
+    total = _dec(bill.get("TotalAmt"))
+    if balance is None or total is None:
+        return ErpInvoiceStatus.unknown
+    if balance == 0:
+        if total != 0 and _has_bill_payment(bill):
+            return ErpInvoiceStatus.paid
+        return ErpInvoiceStatus.settled_no_payment
+    if 0 < balance < total:
+        return ErpInvoiceStatus.partially_paid
+    return ErpInvoiceStatus.open
+
+
 def _object_not_found(resp: httpx.Response) -> bool:
     """True when Intuit's ``Fault`` names code 610 (the object is deleted)."""
     try:
@@ -741,15 +774,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         bill = await self._get_bill(erp_document_id)
         if not bill:
             return ErpInvoiceStatus.unknown
-        balance = _dec(bill.get("Balance"))
-        total = _dec(bill.get("TotalAmt"))
-        if balance is None or total is None:
-            return ErpInvoiceStatus.unknown
-        if balance == 0:
-            return ErpInvoiceStatus.paid
-        if 0 < balance < total:
-            return ErpInvoiceStatus.partially_paid
-        return ErpInvoiceStatus.open
+        return map_bill_status(bill)
 
     async def void_invoice(self, erp_document_id: str) -> bool:
         """QuickBooks has no bill void, only delete — and a delete with a payment

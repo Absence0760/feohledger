@@ -9,10 +9,24 @@ from decimal import Decimal
 
 
 class ErpInvoiceStatus(enum.StrEnum):
+    """What ``get_invoice_status`` read about a posted bill.
+
+    ``paid`` is a claim that money left the customer: an adapter returns it only
+    on the ERP's own paid status or a payment the ERP records against the bill,
+    never on a zero balance alone (docs/decisions.md §303). A credit note, a
+    write-off or a zero-total bill also leaves nothing owing, and recording one
+    of those as a payment would book money that never moved.
+    ``settled_no_payment`` is that case: nothing is owing, but the read shows no
+    payment, so a caller must flag it for a person rather than record a
+    payment. (QuickBooks' status sync-back reads bills through ``bill_report``,
+    which judges the same question from the balance, §295.)
+    """
+
     draft = "draft"
     open = "open"
     partially_paid = "partially_paid"
     paid = "paid"
+    settled_no_payment = "settled_no_payment"
     cancelled = "cancelled"
     unknown = "unknown"
 
