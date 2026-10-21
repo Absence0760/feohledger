@@ -629,7 +629,9 @@ def test_failure_message_never_echoes_the_response_body():
     [
         ({"status": "Pending", "amount": 10, "balance": 10}, ErpInvoiceStatus.draft),
         ({"status": "Approved", "amount": 10, "balance": 10}, ErpInvoiceStatus.open),
-        ({"status": "Approved", "amount": 10, "balance": 0}, ErpInvoiceStatus.paid),
+        # A zero balance under "Approved" is not a payment until FE NXT says
+        # "Paid": a credit zeroes it too (decisions §303).
+        ({"status": "Approved", "amount": 10, "balance": 0}, ErpInvoiceStatus.open),
         ({"status": "PartiallyPaid", "amount": 10, "balance": 4}, ErpInvoiceStatus.partially_paid),
         ({"status": "Paid", "amount": 10, "balance": 0}, ErpInvoiceStatus.paid),
         ({"status": "Deleted"}, ErpInvoiceStatus.cancelled),

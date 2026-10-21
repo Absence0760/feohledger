@@ -1070,7 +1070,7 @@ slot, and the void is its only undo.
 
 The History tab offers Void exactly when the row's `void_refusal` is `null` —
 the same function, so the button and the endpoint cannot disagree
-(`docs/decisions.md` §303; `tests/test_payment_action_verdicts.py`).
+(`docs/decisions.md` §304; `tests/test_payment_action_verdicts.py`).
 
 ### A void re-flags the invoice if the vendor's bank details changed since
 

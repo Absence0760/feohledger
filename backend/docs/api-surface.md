@@ -109,7 +109,7 @@ verdict carries the same sentence.
 | `GET /api/vendors` | `status_actions.{verify,reject}` | `POST /vendors/{id}/verify`, `/reject` (and `/bulk/status`) | `vendor_status_refusal` |
 | `GET /api/vendors/change-requests` | `approve_refusal` | `POST /change-requests/{id}/approve` | `change_request_approve_refusal` (both SoD axes) |
 
-Two behaviour changes rode in with the shared gates (`docs/decisions.md` §303):
+Two behaviour changes rode in with the shared gates (`docs/decisions.md` §304):
 `POST /api/invoices/{id}/approve|reject` refuse an invoice that is not
 `ready_for_review` (409 `invoice_not_in_review`, as the email / Slack / Teams
 doors already did — bulk status keeps the manager's `new → approved`), and
