@@ -83,3 +83,37 @@ downgraded plan, is `backend/docs/billing.md` § Entitlement gating
 | `/api-keys` | API-key management (admin, JWT + RBAC) — `POST` mint (returns the plaintext key EXACTLY once + metadata), `GET` list (prefix + metadata only, never hash/plaintext), `GET {id}/usage` (per-key request totals — all-time + trailing-window + per-day, counts only), `DELETE {id}` soft-revoke (idempotent). Keys stored as `sha256(full_key)` + indexed `key_prefix` (NOT bcrypt — high-entropy tokens need indexed lookup; constant-time compare), control-plane `ApiKey` model + migration 0055. **Per-key usage metering**: every authenticated `/api/v1` request bumps the control-plane `ApiKeyUsage` aggregate (`(api_key_id, usage_date)` → `request_count`, migration 0058) via a best-effort upsert on the auth path — a meter failure never breaks the request, logs PII-free. Every mint/revoke writes a PII-free `api_key.created`/`api_key.revoked` audit row. See `backend/docs/public-api.md` |
 | `/webhooks` | **Outbound webhook management** (admin, JWT + RBAC) — the push counterpart of `/api/v1`. `POST` create a subscription (target URL + subscribed event types; returns the HMAC signing secret EXACTLY once, like an API-key mint), `GET` list (metadata only — never the full secret), `PATCH {id}`, `POST {id}/rotate-secret` (mint a replacement signing secret, returned ONCE, **keeping the subscription id and its whole delivery history** — delete-and-recreate CASCADEs the delivery log away, so recovering from a leak used to mean destroying the record of what was delivered; optional `{overlap_minutes}`, default 60 / max 1440 / `0` = hard cutover, during which the retiring secret also signs a second `X-Webhook-Signature-Previous` header so a receiver accepting either header rotates with zero dropped deliveries — the primary header is ALWAYS the current secret. `webhooks/rotation.previous_secret_if_live` is the single expiry rule both the dispatcher and the API read, so a half-written or uncleaned row can't leave a retired key signing; audited `webhook_subscription.secret_rotated` recording prefix + window, never either secret; migration 0084), `DELETE {id}` (CASCADEs its deliveries), `GET /deliveries` (org-scoped, filter `status`/`subscription_id`, paginated), `POST /deliveries/{id}/redeliver` (re-enqueue a `failed`/`dead` delivery, 409 on an already-`delivered` one). Control-plane `WebhookSubscription`/`WebhookDelivery` models + migrations 0057/0084 (both in `CONTROL_TABLES`). Dispatch (`services/webhooks/`) signs the frozen payload, POSTs with bounded retries + exponential backoff → dead-letter, dedupes on `(subscription, event_id)`; emits `invoice.approved` + `payment.settled` from the `transition_invoice` chokepoint (best-effort, never breaks the transition). Payloads are PII-free (money as exact string). Every mutation audited. `FEOH_WEBHOOKS_ENABLED` kill switch. See `backend/docs/public-api.md` § Outbound webhooks |
 | `/health` | Health check (public-by-design, static `ok` — deliberately says nothing about sweep health, so a misconfigured sink can't drive a rolling restart) + `GET /health/sweeps` (**admin-gated**) — per-sweep state / last-run timestamps / outcome / consecutive-failure streak / error class, plus an aggregate, from the in-process `services/sweep_health.py` registry every background sweep now runs its loop body through. See `backend/docs/background-sweeps.md` |
+
+## Action verdicts on list rows (issue #575)
+
+Several reads carry, per row, **the caller's verdict on that row's actions**:
+`null` when the mutating endpoint would accept the caller right now, else the
+coded refusal (`{code, message, params}`) it would answer with. Each verdict is
+computed by running the endpoint's own permission predicate
+(`api/deps.holds_any_role` / `holds_any_permission`, the predicates
+`require_roles` / `require_permission` enforce) and then the gate function the
+endpoint itself raises from, so a page that offers a control exactly when the
+verdict is `null` can never offer one that 403s / 409s, nor hide one that works.
+`role_not_permitted` is the coded form of the dependency's plain 403. The
+endpoints keep their existing `detail` shape (mobile reads it as text); the
+verdict carries the same sentence.
+
+| Read | Field | Endpoint(s) judged | Gate |
+|---|---|---|---|
+| `GET /api/payments/queue` | `record_outside_refusal` | `POST /payments/record-outside` | `external_payment.record_outside_refusals` (#573) |
+| `GET /api/payments` | `void_refusal`, `release_refusal`, `dismiss_refusal` | `POST /payments/{id}/void`, `/compliance/release`, `/compliance/dismiss` | `payment_controls.payment_void_refusal`, `.compliance_hold_refusal` |
+| `GET /api/payments/runs/{id}` | `actions.{approve,execute,cancel}` | `POST /runs/{id}/approve`, `/execute`, `/cancel` | `payment_controls.run_{approve,execute,cancel}_refusal` (status, maker-checker, CFO sign-off) |
+| `GET /api/invoices/{id}/review-actions` (new; any signed-in reader in entity scope) | `{approve, reject}` | `POST /invoices/{id}/approve`, `/reject` | `review.review_refusals` — review stage, segregation, named approver, receiving segregation, max-amount / CFO gates and the chain level, on a scratch copy (writes nothing) |
+| `GET /api/exceptions` | `decision_refusals.{resolve,dismiss,escalate}` | `POST /exceptions/{id}/resolve` | `actionable_refusal` + `exception_lifecycle.segregation_refusal` |
+| `GET /api/credit-memos` | `actions.{apply,edit,void}` | `POST /{id}/apply`, `PATCH /{id}`, `POST /{id}/void` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` (apply's pairing gates depend on the chosen invoice: `/{id}/eligible-invoices`) |
+| `GET /api/vendors` | `status_actions.{verify,reject}` | `POST /vendors/{id}/verify`, `/reject` (and `/bulk/status`) | `vendor_status_refusal` |
+| `GET /api/vendors/change-requests` | `approve_refusal` | `POST /change-requests/{id}/approve` | `change_request_approve_refusal` (both SoD axes) |
+
+Two behaviour changes rode in with the shared gates (`docs/decisions.md` §305):
+`POST /api/invoices/{id}/approve|reject` refuse an invoice that is not
+`ready_for_review` (409 `invoice_not_in_review`, as the email / Slack / Teams
+doors already did — bulk status keeps the manager's `new → approved`), and
+`POST /api/payments/{id}/void` refuses a run's `pending` leg and a
+`pending_compliance` payment (their exits are the run's Cancel / bank-file
+exits, and Release / Dismiss); a standalone `pending` payment stays voidable. Parity tests: `tests/test_payment_action_verdicts.py`,
+`tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`.

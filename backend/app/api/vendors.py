@@ -20,6 +20,7 @@ from app.api.deps import (
     ROLE_CFO,
     ensure_live_erp_entitled,
     get_org_id,
+    holds_any_permission,
     require_permission,
     require_role_or_permission,
     require_roles,
@@ -36,7 +37,7 @@ from app.api.permissions import (
     PERM_VENDOR_BLOCK,
     PERM_VENDOR_MANAGE,
 )
-from app.api.refusals import erp_pull_failure
+from app.api.refusals import ActionRefusal, erp_pull_failure
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.contract import Contract
@@ -543,7 +544,15 @@ async def list_vendors(
             ).all()
         }
 
-    items = [VendorResponse.from_db(v, invoice_counts.get(v.id, 0)) for v in vendors]
+    items = [
+        {
+            **VendorResponse.from_db(v, invoice_counts.get(v.id, 0)).model_dump(mode="json"),
+            # The caller's verdict on the row's Verify / Reject, from the gate
+            # those endpoints raise from (`vendor_status_actions`).
+            "status_actions": vendor_status_actions(v, user),
+        }
+        for v in vendors
+    ]
 
     return paginated(items, total, pagination)
 
@@ -579,14 +588,46 @@ async def list_vendor_ids(
     return MatchingIdsResponse(ids=ids, total=total, truncated=total > len(ids))
 
 
-# Vendor targets a bulk `status` change may legitimately drive — the same two
-# the single-row `POST /{vendor_id}/verify` / `/reject` endpoints support.
-# Each starting status is enforced per-row below, mirroring those endpoints'
-# own 409s, so a bulk call can't reach a state the single-row path refuses.
-_VENDOR_BULK_STATUS_STARTING: dict[str, set[str]] = {
-    "active": {"unverified"},
-    "rejected": {"unverified", "active"},
+# The statuses a vendor may be verified (→ `active`) or rejected (→ `rejected`)
+# from. ONE table, read by `POST /{vendor_id}/verify` / `/reject`, the bulk
+# status endpoint and the list rows' `status_actions` verdict, so none of the
+# four can offer or perform a move another refuses (issue #575 — the list page
+# hid Reject on an active vendor that both endpoints accept).
+_VENDOR_STATUS_STARTING: dict[str, frozenset[str]] = {
+    "active": frozenset({"unverified"}),
+    "rejected": frozenset({"unverified", "active"}),
 }
+VENDOR_STATUS_NOT_ALLOWED = "vendor_status_not_allowed"
+_VENDOR_STATUS_REFUSAL_MESSAGES = {
+    "active": "Vendor is not in unverified status",
+    "rejected": "Vendor cannot be rejected from this status",
+}
+
+
+def vendor_status_refusal(vendor, target: str) -> ActionRefusal | None:
+    """Why moving ``vendor`` to ``target`` (``active`` = verify, ``rejected``)
+    would be refused, or ``None``."""
+    if vendor.status in _VENDOR_STATUS_STARTING[target]:
+        return None
+    return ActionRefusal(
+        VENDOR_STATUS_NOT_ALLOWED,
+        _VENDOR_STATUS_REFUSAL_MESSAGES[target],
+        status.HTTP_409_CONFLICT,
+    )
+
+
+def vendor_status_actions(vendor, user: User) -> dict:
+    """The caller's verdict on Verify and Reject for one vendor row — the
+    endpoints' permission (``vendor.manage``), then :func:`vendor_status_refusal`."""
+    from app.api.refusals import role_not_permitted
+
+    if not holds_any_permission(user, {PERM_VENDOR_MANAGE}):
+        return {"verify": role_not_permitted(), "reject": role_not_permitted()}
+    out = {}
+    for action, target in (("verify", "active"), ("reject", "rejected")):
+        refusal = vendor_status_refusal(vendor, target)
+        out[action] = refusal.verdict() if refusal is not None else None
+    return out
 
 
 @router.post("/bulk/status", response_model=VendorBulkStatusResponse)
@@ -608,7 +649,7 @@ async def bulk_vendor_status(
     writes, same audit actions) so a bulk call can't do anything the
     single-row endpoints wouldn't.
     """
-    starting = _VENDOR_BULK_STATUS_STARTING[body.status]
+    starting = _VENDOR_STATUS_STARTING[body.status]
     updated = 0
     skipped: list[VendorBulkStatusSkip] = []
     card_revocations: list[VendorCardRevocationResponse] = []
@@ -623,7 +664,7 @@ async def bulk_vendor_status(
         if vendor is None:
             skipped.append(VendorBulkStatusSkip(id=raw, reason="not found"))
             continue
-        if vendor.status not in starting:
+        if vendor_status_refusal(vendor, body.status) is not None:
             skipped.append(
                 VendorBulkStatusSkip(
                     id=raw, reason=f"vendor is in '{vendor.status}' status, not {sorted(starting)}"
@@ -954,11 +995,29 @@ async def list_change_requests(
 
     # One batched name lookup for the page, not one per staged request.
     names = await _vendor_names(db, [r.vendor_id for r in rows])
+    may_approve = holds_any_permission(user, {PERM_VENDOR_BANK_CHANGE_APPROVE})
     items = [
-        VendorChangeRequestResponse.from_db(r, vendor_name=names.get(r.vendor_id), reveal=False)
+        {
+            **VendorChangeRequestResponse.from_db(
+                r, vendor_name=names.get(r.vendor_id), reveal=False
+            ).model_dump(mode="json"),
+            # What `POST /change-requests/{id}/approve` would answer the CALLER:
+            # its permission, then `change_request_approve_refusal` — the gate
+            # the endpoint raises from (issue #575).
+            "approve_refusal": _change_request_approve_verdict(r, user, may_approve),
+        }
         for r in rows
     ]
     return paginated(items, total, pagination)
+
+
+def _change_request_approve_verdict(req, user: User, may_approve: bool) -> dict | None:
+    from app.api.refusals import role_not_permitted
+
+    if not may_approve:
+        return role_not_permitted()
+    refusal = change_request_approve_refusal(req, user.id)
+    return refusal.verdict() if refusal is not None else None
 
 
 # ---------- Sanctions / risk screening ----------
@@ -1612,12 +1671,21 @@ async def verify_vendor(
     await ensure_in_entity_scope(
         db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
     )
-    result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
+    # Locked, so two concurrent clicks cannot both pass the status gate and
+    # each write a status-change audit row; the second re-reads the first's
+    # commit and is refused by `vendor_status_refusal`.
+    result = await db.execute(
+        select(Vendor)
+        .where(Vendor.id == vendor_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     vendor = result.scalar_one_or_none()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
-    if vendor.status != "unverified":
-        raise HTTPException(status_code=409, detail="Vendor is not in unverified status")
+    refusal = vendor_status_refusal(vendor, "active")
+    if refusal is not None:
+        raise refusal.http()
 
     vendor.status = "active"
     vendor.verified_by = user.full_name
@@ -1653,12 +1721,21 @@ async def reject_vendor(
     await ensure_in_entity_scope(
         db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
     )
-    result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
+    # Locked, so two concurrent clicks cannot both pass the status gate and
+    # each write a status-change audit row; the second re-reads the first's
+    # commit and is refused by `vendor_status_refusal`.
+    result = await db.execute(
+        select(Vendor)
+        .where(Vendor.id == vendor_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     vendor = result.scalar_one_or_none()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
-    if vendor.status not in ("unverified", "active"):
-        raise HTTPException(status_code=409, detail="Vendor cannot be rejected from this status")
+    refusal = vendor_status_refusal(vendor, "rejected")
+    if refusal is not None:
+        raise refusal.http()
 
     prev_status = vendor.status
     vendor.status = "rejected"
@@ -2263,8 +2340,38 @@ async def approve_change_request(
     409 — the lock + status check makes the apply exactly-once.
     """
     req = await _get_scoped_change_request_for_update(db, request_id, entity_id)
+    # Pending, and not proposed by this approver on either axis — the ONE
+    # definition the review queue's `approve_refusal` is read from.
+    refusal = change_request_approve_refusal(req, user.id)
+    if refusal is not None:
+        raise refusal.http()
+
+    vendor = (
+        await db.execute(select(Vendor).where(Vendor.id == req.vendor_id))
+    ).scalar_one_or_none()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return await _apply_approved_change(db, org, user, req, vendor, body)
+
+
+CHANGE_REQUEST_NOT_PENDING = "vendor_change_not_pending"
+CHANGE_REQUEST_SELF_REQUESTED = "vendor_change_self_requested"
+CHANGE_REQUEST_SELF_PROVISIONED = "vendor_change_self_provisioned"
+
+
+def change_request_approve_refusal(req, actor_id: uuid.UUID) -> ActionRefusal | None:
+    """Why ``POST /change-requests/{id}/approve`` would refuse ``actor_id``
+    (who holds ``vendor.bank_change.approve``), or ``None`` — raised by the
+    endpoint and read as ``approve_refusal`` by the review queue (issue #575).
+
+    The queue used to compare only ``requested_by_user_id`` with the reader, so
+    an approver whose own provisioned portal login staged the change was shown
+    an Approve that could only 403.
+    """
     if req.status != "pending":
-        raise HTTPException(status_code=409, detail="Change request already resolved")
+        return ActionRefusal(
+            CHANGE_REQUEST_NOT_PENDING, "Change request already resolved", status.HTTP_409_CONFLICT
+        )
     # Segregation of duties, on BOTH axes an AP actor can be the proposer.
     #
     # (1) AP-initiated: the user named on `requested_by_user_id` staged it.
@@ -2290,29 +2397,27 @@ async def approve_change_request(
     # own credential has a NULL provisioner, and a request provisioned by a
     # DIFFERENT AP user still has a real second pair of eyes, which is all dual
     # control asks for.
-    self_requested = req.requested_by_user_id is not None and req.requested_by_user_id == user.id
-    self_provisioned = (
-        req.requester_provisioned_by_user_id is not None
-        and req.requester_provisioned_by_user_id == user.id
-    )
-    if self_requested or self_provisioned:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "You cannot approve a bank-detail change you requested."
-                if self_requested
-                else (
-                    "You cannot approve a change submitted by a supplier-portal "
-                    "login you provisioned. Another approver must review it."
-                )
-            ),
+    if req.requested_by_user_id is not None and req.requested_by_user_id == actor_id:
+        return ActionRefusal(
+            CHANGE_REQUEST_SELF_REQUESTED,
+            "You cannot approve a bank-detail change you requested.",
+            status.HTTP_403_FORBIDDEN,
         )
+    if (
+        req.requester_provisioned_by_user_id is not None
+        and req.requester_provisioned_by_user_id == actor_id
+    ):
+        return ActionRefusal(
+            CHANGE_REQUEST_SELF_PROVISIONED,
+            "You cannot approve a change submitted by a supplier-portal "
+            "login you provisioned. Another approver must review it.",
+            status.HTTP_403_FORBIDDEN,
+        )
+    return None
 
-    vendor = (
-        await db.execute(select(Vendor).where(Vendor.id == req.vendor_id))
-    ).scalar_one_or_none()
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+
+async def _apply_approved_change(db, org, user, req, vendor, body):
+    """Apply an approval that has passed :func:`change_request_approve_refusal`."""
 
     last4: str | None = None
     if req.change_type == "bank_details":

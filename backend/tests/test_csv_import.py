@@ -647,7 +647,7 @@ async def test_import_then_self_approve_is_blocked_by_segregation(realdb):
     """
     from sqlalchemy import select
 
-    from app.models.invoice import Invoice
+    from app.models.invoice import Invoice, InvoiceStatus
 
     csv_bytes = (
         b"invoice_number,vendor_name,amount,status\nIMP-SOD-2,SoD Import Vendor 2,900.00,new\n"
@@ -662,9 +662,15 @@ async def test_import_then_self_approve_is_blocked_by_segregation(realdb):
 
         mk = realdb.sessionmaker("a")
         async with mk() as s:
-            invoice_id = (
-                await s.execute(select(Invoice.id).where(Invoice.invoice_number == "IMP-SOD-2"))
+            invoice = (
+                await s.execute(select(Invoice).where(Invoice.invoice_number == "IMP-SOD-2"))
             ).scalar_one()
+            invoice_id = invoice.id
+            # Into review, where the approve door accepts a decision at all
+            # (`review.refuse_unless_in_review`) — so the 403 below is the
+            # segregation gate, not the stage.
+            invoice.status = InvoiceStatus.ready_for_review
+            await s.commit()
 
         resp = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
     assert resp.status_code == 403, resp.text

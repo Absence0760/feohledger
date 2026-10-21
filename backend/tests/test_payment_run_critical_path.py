@@ -581,7 +581,11 @@ async def test_get_run_detail_serialises_money_as_strings_not_floats():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[run_res, pay_res])
 
-    result = await get_payment_run(run_id=run.id, db=db, user=_user())
+    # `actions` reads the caller's roles as Role rows and the org's payment settings.
+    user = SimpleNamespace(
+        id=uuid.uuid4(), full_name="Tester", roles=[SimpleNamespace(name="admin")]
+    )
+    result = await get_payment_run(run_id=run.id, db=db, org=_org(), user=user)
 
     assert result["total_amount"] == "250.00"
     assert isinstance(result["total_amount"], str)

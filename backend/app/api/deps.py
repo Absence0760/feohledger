@@ -157,6 +157,22 @@ def get_org_id(user: User = Depends(get_current_user)) -> uuid.UUID:
     return user.organization_id
 
 
+def holds_any_role(user: User, allowed) -> bool:
+    """Whether ``user`` holds at least one of ``allowed`` (role names).
+
+    The predicate :func:`require_roles` enforces, exposed so an action verdict
+    (a ``*_refusal`` field a page reads before offering a control) asks the
+    SAME question instead of restating a role list.
+    """
+    return bool({r.name for r in (user.roles or [])} & frozenset(allowed))
+
+
+def holds_any_permission(user: User, needed) -> bool:
+    """Whether ``user``'s effective permissions include any of ``needed`` —
+    the predicate :func:`require_permission` enforces, for action verdicts."""
+    return bool(getattr(user, "effective_permissions", frozenset()) & frozenset(needed))
+
+
 def require_roles(*allowed: str):
     """Dependency factory — restricts an endpoint to users holding ANY of the
     given roles. 403 on miss.
@@ -192,9 +208,9 @@ def require_roles(*allowed: str):
         request: Request,
         user: User = Depends(get_current_user),
     ) -> User:
-        held = {r.name for r in user.roles}
-        if held & allowed_set:
+        if holds_any_role(user, allowed_set):
             return user
+        held = {r.name for r in user.roles}
         logger.warning(
             "RBAC denied: user=%s org=%s roles=%s required_any=%s %s %s",
             user.id,
@@ -250,9 +266,9 @@ def require_permission(*needed: str):
         request: Request,
         user: User = Depends(get_current_user),
     ) -> User:
-        held = getattr(user, "effective_permissions", frozenset())
-        if held & needed_set:
+        if holds_any_permission(user, needed_set):
             return user
+        held = getattr(user, "effective_permissions", frozenset())
         logger.warning(
             "RBAC denied (permission): user=%s org=%s perms=%s required_any=%s %s %s",
             user.id,

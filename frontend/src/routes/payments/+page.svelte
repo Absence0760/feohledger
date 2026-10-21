@@ -51,11 +51,8 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
-	import {
-		PERM_PAYMENT_EXECUTE,
-		PERM_PAYMENT_RECORD_EXTERNAL,
-		PERM_PAYMENT_VOID
-	} from '#lib/types/admin.ts';
+	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import {
 		acceptPaymentSettlement,
 		getExecutionMode,
@@ -892,18 +889,13 @@
 	}
 
 	function canVoid(p: Payment): boolean {
-		// Server-side gate: require_permission(payment.void) — defaults to
-		// admin/cfo, but a custom role can be granted it. Status: anything that
-		// isn't already terminal-by-failure.
-		//
-		// `pending_compliance` is deliberately NOT offered here: nothing ever
-		// reached the processor, so there is no rail to reverse. Its purpose-built
-		// exits are Release / Dismiss below, which also close the
-		// `payment_compliance_hold` exception the hold opened — a void would not.
-		if (auth.user && auth.can(PERM_PAYMENT_VOID)) {
-			return p.status === 'completed' || p.status === 'submitted' || p.status === 'processing';
-		}
-		return false;
+		// The server's verdict for this reader (`void_refusal`, from the gate
+		// `POST /{id}/void` raises from — `payment_controls.payment_void_refusal`),
+		// never a status list restated here (issue #575). That gate voids only
+		// money that has left or is leaving the rail; a `pending_compliance`
+		// payment's exits are Release / Dismiss below, and a `pending` leg's are
+		// its run's (cancel, or the bank-file exits).
+		return isAllowed(p.void_refusal);
 	}
 
 	// --- Compliance hold (pending_compliance) --------------------------------
@@ -913,8 +905,10 @@
 	//                money, so `payment.execute` (mirrors POST .../execute).
 	//   * dismiss  → gives up, flips to `failed`, moves nothing, so
 	//                `payment.void` (mirrors POST .../void).
-	// Both 409 outside `pending_compliance`; hiding them elsewhere keeps the row
-	// honest, and the backend enforces regardless.
+	// Whether each is offered is the server's verdict on the row
+	// (`release_refusal` / `dismiss_refusal`, from the permission and the
+	// `payment_controls.compliance_hold_refusal` gate those endpoints raise
+	// from — issue #575), never the status + permission restated here.
 	type ComplianceMode = 'release' | 'dismiss';
 	let complianceTarget = $state<Payment | null>(null);
 	let complianceMode = $state<ComplianceMode>('release');
@@ -924,18 +918,14 @@
 	function canReleaseHold(p: Payment): boolean {
 		// Release re-runs the gate AND dispatches, so a record-only tenant —
 		// or one whose mode hasn't resolved yet (fail closed) — is never offered
-		// it: the server 409s `payments_record_only`. Dismiss stays, because it
-		// moves nothing.
-		return (
-			p.status === 'pending_compliance' &&
-			!!auth.user &&
-			auth.can(PERM_PAYMENT_EXECUTE) &&
-			canDispatchPayments(executionMode)
-		);
+		// it: the server 409s `payments_record_only`. That is org configuration
+		// the server states once (`GET /execution-mode`), not a row verdict.
+		// Dismiss stays, because it moves nothing.
+		return isAllowed(p.release_refusal) && canDispatchPayments(executionMode);
 	}
 
 	function canDismissHold(p: Payment): boolean {
-		return p.status === 'pending_compliance' && !!auth.user && auth.can(PERM_PAYMENT_VOID);
+		return isAllowed(p.dismiss_refusal);
 	}
 
 	function openCompliance(p: Payment, mode: ComplianceMode) {

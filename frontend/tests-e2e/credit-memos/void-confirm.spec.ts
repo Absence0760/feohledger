@@ -32,7 +32,9 @@ test.describe('credit-memo void confirmation', () => {
 							currency: 'USD',
 							issued_date: '2026-06-01',
 							invoice_number: null,
-							status: 'open'
+							status: 'open',
+							// The caller's verdicts (`memo_action_refusals`): all open.
+							actions: { apply: null, edit: null, void: null }
 						}
 					],
 					total: 1
