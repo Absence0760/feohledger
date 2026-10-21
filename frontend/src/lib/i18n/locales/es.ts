@@ -5658,6 +5658,7 @@ export const messages = {
 	'invoices.modal.contract.unlink': 'Desvincular',
 	'invoices.modal.erp.documentId': 'Id. del documento',
 	'invoices.modal.erp.error': 'Error',
+	'invoices.modal.erp.opensInErp': '(abre la factura en el ERP en una pestaña nueva)',
 	'invoices.modal.erp.reference': 'Referencia ERP',
 	'invoices.modal.erp.retrySend': 'Reintentar envío al ERP',
 	'invoices.modal.erp.retrying': 'Reintentando...',

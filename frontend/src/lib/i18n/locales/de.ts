@@ -5635,6 +5635,7 @@ export const messages = {
 	'invoices.modal.contract.unlink': 'Trennen',
 	'invoices.modal.erp.documentId': 'Dokument-ID',
 	'invoices.modal.erp.error': 'Fehler',
+	'invoices.modal.erp.opensInErp': '(öffnet die Rechnung im ERP in einem neuen Tab)',
 	'invoices.modal.erp.reference': 'ERP-Referenz',
 	'invoices.modal.erp.retrySend': 'ERP-Versand wiederholen',
 	'invoices.modal.erp.retrying': 'Wird wiederholt...',
