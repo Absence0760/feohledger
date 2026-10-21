@@ -42,7 +42,10 @@ a GitHub issue only when one warrants its own thread.
 **Last reconciled:** 2026-10-21 — storing the ERP document id on the invoice
 (decisions §302) opened two (c) entries, the deep link not choosing the ERP
 organisation/company and the ERP webhook's id-only path, taking the file from
-122 → 124. Before that, 2026-10-21 — the adapters' honest paid read (decisions
+124 → 126. Before that, 2026-10-21 — auto-sending an approved invoice to the ERP
+(decisions §304) opened one (c) entry, an approval whose post-commit push never
+ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
+true` before deploying it, taking the file from 122 → 124. Before that, 2026-10-21 — the adapters' honest paid read (decisions
 §303) split the "ERP status polling and void are unwired" (c) entry into the
 non-QuickBooks status sync-back gap and the void/recall gap, taking the file
 from 121 → 122. Before that, 2026-10-21 — merging main (QuickBooks status sync, Xero
@@ -196,7 +199,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**124 open: 107 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**126 open: 108 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1955,6 +1958,22 @@ providers still have the same gap.
       the provider. **Trigger:** the next change to either adapter's OAuth
       spec, or before either provider's platform app goes live.
 
+### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §304)
+
+- [ ] **(c) An approval whose auto-send never ran is not noticed.** The push
+      after an approval is post-commit work, so a process that dies between the
+      approval's commit and the job (a deploy, an OOM) leaves the invoice at
+      `approved` with neither `invoice.erp_submitted` nor
+      `invoice.erp_auto_send_refused` on its trail. It is still payable and
+      sendable by hand, so nothing is lost, but the configured automation was
+      skipped silently. **Durable fix:** a sweep that finds `approved` invoices
+      whose snapshot has `erp_export.auto_send_on_approval` on, approved more
+      than a few minutes ago with no auto-send row of either kind since that
+      approval, and runs `erp_send.send_after_approval` for them (it already
+      re-locks and acts only on `approved`). **Trigger:** the first tenant that
+      relies on auto-send in production, or the first report of an approved
+      invoice that did not reach the ERP.
+
 ### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §302)
 
 - [ ] **(c) The ERP deep link opens in whichever organisation / company the
@@ -2227,3 +2246,16 @@ from that work is the one entry below.
       `positive_pay_files_expired`. **Trigger:** the first deployment that
       generates a Positive Pay file, and the SOC 2 records-management evidence
       request either way.
+- [ ] **(b) Confirm every stored `auto_send_on_approval: true` before deploying
+      decisions §304.** The flag did nothing until §304, and every workflow save
+      used to store `true` through the schema default, so a stored `true` may be
+      a choice or an accident. Once deployed, a tenant with one and a live ERP
+      sends each approved invoice to the ERP on approval, and it leaves the
+      payment queue. **Durable fix:** before the deploy, list the default and
+      active workflow definitions (`steps_config`) holding
+      `erp_export.config.auto_send_on_approval = true` in every tenant with a
+      live ERP, confirm each with the tenant's admin, and set the rest to
+      `false` through `PATCH /api/workflows/{id}`. Invoices already created
+      keep the snapshot they froze, so the same check covers the unapproved
+      invoices under such a definition. **Trigger:** the first deploy carrying
+      decisions §304 to an environment with a tenant on a live ERP.

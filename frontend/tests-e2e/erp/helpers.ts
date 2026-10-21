@@ -126,7 +126,7 @@ export async function getInvoice(page: Page, id: string): Promise<Inv> {
  *  cannot also approve — see `services/approval_chain.py`). `page` is
  *  always signed in as the tenant admin (`signInAndWait(page)`), so `cfo`
  *  is guaranteed distinct. */
-async function loginAsSecondActor(page: Page): Promise<Record<string, string>> {
+export async function loginAsSecondActor(page: Page): Promise<Record<string, string>> {
 	const slug = currentTenantSlug();
 	const resp = await page.request.post(`${API_BASE}/api/auth/login`, {
 		headers: { 'X-Tenant-Slug': slug, 'Content-Type': 'application/json' },

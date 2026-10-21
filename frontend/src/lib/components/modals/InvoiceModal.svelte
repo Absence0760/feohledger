@@ -159,6 +159,7 @@
 		'invoice.resubmitted': 'invoices.modal.action.resubmitted',
 		'invoice.assigned_for_review': 'invoices.modal.action.assignedForReview',
 		'invoice.erp_submitted': 'invoices.modal.action.erpSubmitted',
+		'invoice.erp_auto_send_refused': 'invoices.modal.action.erpAutoSendRefused',
 		'invoice.extraction_dispatched': 'invoices.modal.action.extractionStarted',
 		'invoice.extraction_reset': 'invoices.modal.action.extractionReset',
 		'invoice.extraction_triggered': 'invoices.modal.action.extractionTriggered',

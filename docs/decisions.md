@@ -13430,3 +13430,134 @@ No caller under `app/` reads `get_invoice_status` today, so nothing changes at
 runtime.
 
 Guards: `tests/test_erp_{quickbooks_online,xero,sage_accounting_za,syspro,sage_intacct,blackbaud}_adapter.py`.
+
+## 304. Approval sends to the ERP when the workflow says so, and a refusal leaves the invoice approved (2026-10-20)
+
+**Found live.** In a Xero test, tenant `acme`'s default workflow had the ERP
+export step's `auto_send_on_approval: true`, the builder's "Auto-send on
+approval" switch showed it on, and a manager approved FEOH-INV-001. It sat at
+`approved` until someone clicked "Send to ERP". The flag was in the schema, the
+templates and the builder, and nothing in the backend read it; §286 had even
+written "approval never pushes" down as the rule.
+
+**The rule.** An approval that finalises an invoice starts its ERP push when
+three things hold: the invoice's frozen snapshot (never the live definition, as
+for every other step) has an enabled `erp_export` step whose config holds
+`auto_send_on_approval` as the literal `true`; the org has a live ERP; and the
+same gates a person's "Send to ERP" meets let it through. Every approval door
+counts: `review.approve_invoice`'s final level (in-app single and bulk, email,
+Slack, Teams, mobile, the exception agents), `/complete`'s amount-floor
+auto-approve, and the extraction worker's auto-approve. A partial chain
+approval is not a final one and does not send.
+
+**One sequence for every push.** `services/erp_send.start_erp_send` is the plan
+gate (§258/§281), the export gate (§286), the `approved → sending_to_erp`
+transition with its audit row, the commit, and then `dispatch_erp`, in that
+order. `/send-to-erp`, `/retry-erp`, `/complete` and the auto-send all call it,
+so the auto path cannot skip a gate the manual one applies or apply them in
+another order.
+
+**After the approval commits, in a transaction of its own.** The approval
+doors queue the push as post-commit work (`services/post_commit`); the
+extraction worker calls `send_after_approval` itself once its own commit
+returns, because there post-commit work runs inline while the committing
+session still holds the worker's single connection. Either way the push opens
+its own session, re-locks the invoice and acts only on `approved`. Two things
+follow:
+
+- **A refusal cannot undo the approval.** The approval has already committed.
+  The invoice stays `approved`, which is still payable and still sendable by
+  hand, and the refusal is recorded as an `invoice.erp_auto_send_refused` audit
+  row carrying `{trigger, status_code, refusal: {code, params}}`, the same coded
+  refusal the manual door would have answered with. The approver's response
+  says `approved` and is never a 402 or 409 for a push they did not ask for.
+  Rejected: running the gates inside the approval transaction and failing the
+  approval on a refusal. An open duplicate would then make an invoice
+  unapprovable rather than unpostable, and the plan gate would turn a downgrade
+  into a block on approving. Also rejected: transitioning to `sending_to_erp`
+  in the approval transaction. Every caller that reads the status after
+  `approve_invoice` (the email, Slack and Teams doors tell a partial chain
+  approval from a final one that way) would have seen a status that was not
+  `approved`.
+- **It cannot dispatch twice.** Approval leaves `ready_for_review` and happens
+  once. A retried job, or a manual send or payment schedule that got there
+  first, finds a status other than `approved` under the row lock and does
+  nothing. The `approved → sending_to_erp` transition under that lock is the
+  single guard, as it already was for the manual doors. A bulk approve queues
+  one job per transaction and sends its invoices one after another.
+
+**A missing key is off, and so is the schema default.** The seeded and
+provisioned definitions carry no `auto_send_on_approval` key, and the builder
+renders a missing key as the switch off with the "users must manually trigger
+Send to ERP" warning, so only the literal `true` counts. The schema default for
+`ErpExportStepConfig.auto_send_on_approval` was `true`, and every definition
+save runs each step through that model and stores the dump: an admin who
+changed an approval threshold on a workflow showing the switch off stored
+`true` without seeing it. The default is now `false`. A builder-added step and
+the templates still set it on explicitly, where the switch shows it.
+
+**Stored `true` values are not rewritten.** Before this change the flag did
+nothing, so a `true` saved through the old default cannot be told from one an
+admin chose. Rewriting them to `false` would undo real choices (`acme`'s, the
+one that found this); leaving them means a tenant whose admin saved a workflow
+since the schema existed starts auto-sending on deploy. That is an operator
+call per tenant, tracked as a (b) entry in `docs/followups.md`: before
+deploying, list the definitions holding `true` and confirm each with its
+admin.
+
+**What auto-send hands over.** A successful push ends the invoice at `done`,
+live ERP or mock, by hand or automatically (`erp.send_to_erp_internal`), and
+`done` is not payable here: the bill is paid from the ERP. With an ERP's status
+sync on (QuickBooks, §295) the push lands at `posted_in_erp` instead, still
+payable here, and auto-send changes nothing about that. That is the existing
+meaning of "Send to ERP"; auto-send makes it happen at approval, so with the
+switch on an approved invoice leaves FeohLedger's payment queue moments after
+approval, before anyone can schedule it directly. The builder says so under the
+switch, and `backend/docs/payments.md` notes it. Tenants that pay through
+FeohLedger runs keep the switch off.
+
+**Why the mock ERP is skipped.** For the same reason, applied to tenants with no
+real ledger: the mock is the local-first stand-in (guard rail 7), and every dev
+and e2e tenant runs on it. Auto-sending there would empty the payment queue
+those tenants and the payment specs depend on, with no ERP to pay from. A person
+can still send to it by hand.
+
+**No person behind it.** An extraction auto-approval of an emailed invoice has
+no actor, so `dispatch_erp` and the Lambda worker now carry a null `actor_id`
+instead of the string `"None"`.
+
+**The extraction worker awaits the send.** Its loop (in-process, or the
+Lambda handler's) closes when the job returns, so a local-mode send started as
+a task there would be abandoned at `sending_to_erp`. It passes
+`inline_dispatch=True`, and the send holds that worker until it finishes,
+retries included.
+
+**`post_commit` was running at savepoint boundaries.** SQLAlchemy fires
+`after_commit` when a SAVEPOINT is released and `after_rollback` when one rolls
+back. Bulk approve runs each row in a savepoint, so every queued job (the
+approval emails and chat posts, and now the auto-send) ran at the first row's
+release, inside the still-open outer transaction, and a skipped row's rollback
+then dropped whatever was queued after. A release now leaves the queue alone,
+and a savepoint rollback drops only the jobs queued inside that savepoint.
+
+**A hand-off that fails lands at `failed`.** If `dispatch_erp` raises after the
+`sending_to_erp` commit (an SQS send in lambda mode), nothing will ever run that
+push and `/retry-erp` takes only `failed`. `start_erp_send` now moves it there
+with an `invoice.erp_failed` row, for the manual doors too, which used to
+answer 500 and leave the invoice stranded at `sending_to_erp`.
+
+**Not done here** (`docs/followups.md`): the auto-send is post-commit work, so
+a process that dies between the approval's commit and the job leaves the
+invoice `approved` with neither an `erp_submitted` nor an
+`erp_auto_send_refused` row. Nothing is lost (it is payable and sendable by
+hand), but nothing notices either; a reconciliation sweep is the durable fix.
+
+Guards: `backend/tests/test_erp_auto_send_on_approval.py` (sends with the flag
+on; not with it off, absent, the step disabled, no instance, no ERP or the mock
+ERP; the snapshot decides in both directions; the floor and extraction
+auto-approvals; a partial chain; an open duplicate and the plan each recorded
+with the invoice left approved; a rolled-back approval sends nothing; a second
+run and a bulk approve each dispatch once), `tests/test_erp_dispatch.py` and
+`tests/test_erp_lambda.py` (inline dispatch in a worker scope, the null actor),
+and `frontend/tests-e2e/erp/xero.spec.ts` (approving reaches fake Xero as a bill
+with no click; with the flag off nothing is posted until the click).

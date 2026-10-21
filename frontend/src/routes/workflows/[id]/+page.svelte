@@ -692,6 +692,8 @@
 							</div>
 							{#if !cfg.auto_send_on_approval}
 								<p class="field-hint warning">{m('workflows.builder.erp.noAutoSendWarning')}</p>
+							{:else}
+								<p class="field-hint">{m('workflows.builder.erp.autoSendHint')}</p>
 							{/if}
 
 							{#if erpMethod === 'direct'}

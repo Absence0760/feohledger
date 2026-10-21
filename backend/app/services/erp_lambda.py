@@ -29,7 +29,9 @@ def handler(event, context):
 async def _process_message(body: dict) -> None:
     invoice_id = uuid.UUID(body["invoice_id"])
     org_id = uuid.UUID(body["org_id"])
-    actor_id = uuid.UUID(body["actor_id"])
+    # Null when no person started the push (an auto-send after a system
+    # auto-approval, decisions §304).
+    actor_id = uuid.UUID(body["actor_id"]) if body.get("actor_id") else None
 
     db_url = control_url_from_env()
 

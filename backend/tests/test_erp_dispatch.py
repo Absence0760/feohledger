@@ -118,3 +118,35 @@ def test_send_to_sqs_message_body_and_group_id_shape(monkeypatch):
         "org_id": str(org_id),
         "actor_id": str(actor_id),
     }
+
+
+async def test_dispatch_erp_inline_awaits_the_send_on_a_worker_loop(monkeypatch):
+    """The extraction worker auto-sends an invoice it auto-approved (decisions
+    §304) from its own short-lived loop, in-process or in Lambda, which closes
+    the moment the job returns. A task started there would be abandoned
+    mid-send, so the caller asks for the send to be awaited inline."""
+    monkeypatch.setattr(settings, "erp_mode", "local")
+    finished: list[tuple] = []
+
+    async def _fake_run_local(invoice_id, org_id, actor_id):
+        await asyncio.sleep(0)
+        finished.append((invoice_id, org_id, actor_id))
+
+    ids = (uuid.uuid4(), uuid.uuid4(), None)
+    with patch.object(erp_dispatch, "_run_local", _fake_run_local):
+        await erp_dispatch.dispatch_erp(*ids, inline=True)
+        # Done by the time dispatch_erp returns: nothing left in flight.
+        assert finished == [ids]
+        assert erp_dispatch._dispatch_tasks == set()
+
+
+def test_send_to_sqs_carries_a_null_actor(monkeypatch):
+    """No person started an auto-send after a system auto-approval: the message
+    says so with a JSON null, never the string "None" the Lambda cannot parse."""
+    monkeypatch.setattr(settings, "sqs_erp_queue_url", "http://q/erp.fifo")
+    client = MagicMock()
+    with patch.object(erp_dispatch.boto3, "client", MagicMock(return_value=client)):
+        erp_dispatch._send_to_sqs(uuid.uuid4(), uuid.uuid4(), None)
+
+    body = json.loads(client.send_message.call_args.kwargs["MessageBody"])
+    assert body["actor_id"] is None
