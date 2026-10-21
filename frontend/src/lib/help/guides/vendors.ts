@@ -46,7 +46,7 @@ export const VENDOR_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'tip',
-						text: 'If the same supplier ends up on the list twice, **Merge duplicates** folds them into one record, so their spend and invoices aren\'t split across two.'
+						text: 'If the same supplier ends up on the list twice, {ui:vendors.mergeDuplicates} folds them into one record, so their spend and invoices aren\'t split across two.'
 					}
 				]
 			},
