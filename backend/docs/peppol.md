@@ -61,7 +61,7 @@ Each caller decides what the refusal means:
 | Call site | On refusal |
 |---|---|
 | `POST /api/invoices/{id}/peppol-send` | The adapter is resolved in step 5-6, **above** the step-7 slot claim, so a `PeppolSendError("peppol_provider_not_configured")` → **422** with no `PeppolTransmission` row at all and the live slot still free. The body carries the PII-free code, never the admin's raw settings value. |
-| `POST /api/peppol/inbound/{tenant_slug}` | **Bodyless 503**, not the route's usual 204. This is OUR failure, not a decision about the document (`decisions.md` §37): the message is still unprocessed work and a redelivery after the setting is fixed would succeed, so acking it drops a supplier's invoice permanently behind a log line. Bodyless keeps the detail and the tenant out of the response, and it narrows the enumeration surface to "while this tenant is already misconfigured" — the trade §37 accepted for email intake. |
+| `POST /api/peppol/inbound/{organization_id}` | **Bodyless 503**, not the route's usual 204. This is OUR failure, not a decision about the document (`decisions.md` §37): the message is still unprocessed work and a redelivery after the setting is fixed would succeed, so acking it drops a supplier's invoice permanently behind a log line. Bodyless keeps the detail and the tenant out of the response, and it narrows the enumeration surface to "while this tenant is already misconfigured" — the trade §37 accepted for email intake. |
 | `peppol_receive.receive_peppol_message` | Defence in depth (the route resolved the same adapter to parse): a soft `ReceiveResult(reason="peppol_provider_not_configured")` before the tenant engine opens, so no invoice, no transmission row, no S3 object — and never a 500 on a public webhook. |
 
 Guard: `tests/test_adapter_registry_fail_closed.py`.
@@ -255,13 +255,18 @@ provider HMAC signature.
 **Route (public-by-design, signature-gated, tenant in path):**
 
 ```
-POST /api/peppol/inbound/{tenant_slug}      → always 204 No Content
+POST /api/peppol/inbound/{organization_id}      → always 204 No Content
 ```
 
 The route mirrors the payment webhook (`/api/payments/webhook/{tenant_slug}/…`):
 no JWT, no `X-Tenant-Slug` header — the tenant is the URL path segment, so each
 tenant configures its own inbound URL with the Access Point and a leaked URL
-only affects that one tenant. **Every** path — success and every rejection —
+only affects that one tenant. **The segment is the organisation's id, never its
+slug** (decisions §294): the signing key is platform-wide, so the path is the only
+binding, and a slug can pass to a new workspace after a closure's cooldown — an
+Access Point still configured with a slug URL would hand the closed tenant's
+supplier invoices to the new owner. An id is never reused. A slug or any other
+non-id segment is the silent 204 of an unknown tenant. **Every** path — success and every rejection —
 returns `204` silently with a PII-free `logger.warning` (reason code only); a
 distinct 4xx would enumerate which slugs / signing secrets / payload shapes are
 accepted, and the supplier's participant value / tax id / payload never enters a

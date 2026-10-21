@@ -856,7 +856,7 @@ class Settings(BaseSettings):
     # PEPPOL AS4 INBOUND receive (the receiver-corner C4 webhook the Access
     # Point posts inbound documents to). Master switch — mirrors
     # ``email_intake_domain`` / ``audit_shipping_enabled`` gating: the public
-    # ``POST /api/peppol/inbound/{tenant_slug}`` route is a no-op 204 until this
+    # ``POST /api/peppol/inbound/{organization_id}`` route is a no-op 204 until this
     # is on, so the surface is closed by default. The signing secret is the
     # HMAC-SHA256 key the Access Point signs the inbound POST body with; it has
     # NO hardcoded secret fallback (the boot guard refuses to start a deployed

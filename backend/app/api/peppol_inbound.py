@@ -1,6 +1,6 @@
 """PEPPOL AS4 inbound receive webhook (the receiver corner, C4).
 
-``POST /api/peppol/inbound/{tenant_slug}`` — PUBLIC, no JWT.
+``POST /api/peppol/inbound/{organization_id}`` — PUBLIC, no JWT.
 
 Called by the receiver's Access Point (C3) when it delivers an inbound BIS
 Billing 3.0 document to us. Security is the provider's HMAC signature over the
@@ -8,6 +8,14 @@ raw body (verified via :func:`peppol_receive.verify_inbound_signature` +
 ``webhook_security.extract_signature_header``). The tenant is encoded in the URL
 path — each tenant configures its own inbound URL with the Access Point, so a
 leaked URL only affects that one tenant (mirrors the payment webhook).
+
+**The path names the organisation's id, never its slug** (decisions §294). The
+signing key is platform-wide, so the path is the only thing binding a delivery to
+a tenant, and a slug can change hands: once a closed workspace's slug has rested
+(`utils/slug.CLOSED_SLUG_COOLDOWN`) a new workspace may take it, and an Access
+Point still configured with the old URL would deliver the closed tenant's
+supplier invoices to the new owner. An organisation id is never reused, so a
+URL for a closed tenant resolves to nothing, for ever.
 
 Every rejection path returns ``204`` silently with a PII-free ``logger.warning``
 naming only a reason code — never a 4xx (which would enumerate which tenant
@@ -18,6 +26,7 @@ participant value / tax id / payload in the log or body.
 from __future__ import annotations
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
@@ -35,9 +44,9 @@ logger = logging.getLogger(__name__)
 public_router = APIRouter(prefix="/peppol", tags=["peppol"])
 
 
-@public_router.post("/inbound/{tenant_slug}", status_code=status.HTTP_204_NO_CONTENT)
+@public_router.post("/inbound/{organization_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def peppol_inbound_webhook(
-    tenant_slug: str,
+    organization_id: str,
     request: Request,
     ctrl_db: AsyncSession = Depends(get_control_db),
 ) -> Response:
@@ -86,9 +95,16 @@ async def peppol_inbound_webhook(
         logger.warning("PEPPOL inbound signature rejected")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    # 3. Resolve the tenant from the URL path. Never reveal which slugs exist.
+    # 3. Resolve the tenant from the URL path — its id, which no later tenant
+    #    can ever hold. A malformed id is the same silent 204 as an unknown one
+    #    (a 422 would tell a prober the shape is wrong).
+    try:
+        org_uuid = uuid.UUID(organization_id)
+    except ValueError:
+        logger.warning("PEPPOL inbound: unknown tenant")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     org = (
-        await ctrl_db.execute(select(Organization).where(Organization.slug == tenant_slug))
+        await ctrl_db.execute(select(Organization).where(Organization.id == org_uuid))
     ).scalar_one_or_none()
     if org is None:
         logger.warning("PEPPOL inbound: unknown tenant")
@@ -122,7 +138,7 @@ async def peppol_inbound_webhook(
 
     # 5. Hand off to the receive service. 204 regardless of the result —
     #    accepted, duplicate, and every soft-reject are all silent 204.
-    result = await receive_peppol_message(ctrl_db, tenant_slug=org.slug, message=message)
+    result = await receive_peppol_message(ctrl_db, organization_id=org.id, message=message)
 
     if not result.accepted:
         logger.warning("PEPPOL inbound not accepted: %s", result.reason or "unknown")

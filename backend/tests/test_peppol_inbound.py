@@ -123,13 +123,13 @@ async def _count(mk, model, **where) -> int:
 @pytest.mark.asyncio
 async def test_valid_inbound_creates_invoice_and_transmission(realdb):
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     message_id = f"as4-{uuid.uuid4().hex}"
     body = _envelope(message_id=message_id, payload=_ubl_bytes())
 
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=body,
             headers={"X-Peppol-Signature": _sign(body)},
         )
@@ -188,17 +188,17 @@ async def test_valid_inbound_creates_invoice_and_transmission(realdb):
 @pytest.mark.asyncio
 async def test_redelivery_is_deduped_no_second_invoice(realdb):
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     message_id = f"as4-{uuid.uuid4().hex}"
     body = _envelope(message_id=message_id, payload=_ubl_bytes())
     sig = _sign(body)
 
     async with realdb.client(key="a", role=None) as c:
         first = await c.post(
-            f"/api/peppol/inbound/{slug}", content=body, headers={"X-Peppol-Signature": sig}
+            f"/api/peppol/inbound/{ref}", content=body, headers={"X-Peppol-Signature": sig}
         )
         second = await c.post(
-            f"/api/peppol/inbound/{slug}", content=body, headers={"X-Peppol-Signature": sig}
+            f"/api/peppol/inbound/{ref}", content=body, headers={"X-Peppol-Signature": sig}
         )
 
     assert first.status_code == 204
@@ -222,7 +222,7 @@ async def test_concurrent_redelivery_race_one_invoice(realdb):
     from app.services.peppol_receive import InboundPeppolMessage, receive_peppol_message
 
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     org_id = realdb.info("a").org_id
     message_id = f"as4-race-{uuid.uuid4().hex}"
 
@@ -269,7 +269,7 @@ async def test_concurrent_redelivery_race_one_invoice(realdb):
         payload=_ubl_bytes(),
     )
     async with control_session_factory() as ctrl_db:
-        result = await receive_peppol_message(ctrl_db, tenant_slug=slug, message=message)
+        result = await receive_peppol_message(ctrl_db, organization_id=ref, message=message)
 
     assert result.duplicate is True
     assert result.invoice_id is None
@@ -295,7 +295,7 @@ async def test_concurrent_receive_integrityerror_one_invoice(realdb, monkeypatch
 
     mk = realdb.sessionmaker("a")
     ctrl_mk = realdb.control_sessionmaker()
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     message_id = f"as4-ie-{uuid.uuid4().hex}"
 
     # Neuter the fast-path SELECT so BOTH receives reach the transmission flush.
@@ -328,10 +328,10 @@ async def test_concurrent_receive_integrityerror_one_invoice(realdb, monkeypatch
 
     # First receive commits the winner (its flush claims the slot).
     async with ctrl_mk() as ctrl1:
-        r1 = await receive_peppol_message(ctrl1, tenant_slug=slug, message=_msg())
+        r1 = await receive_peppol_message(ctrl1, organization_id=ref, message=_msg())
     # Second receive passes the (neutered) SELECT, then its flush hits the index.
     async with ctrl_mk() as ctrl2:
-        r2 = await receive_peppol_message(ctrl2, tenant_slug=slug, message=_msg())
+        r2 = await receive_peppol_message(ctrl2, organization_id=ref, message=_msg())
 
     assert r1.accepted is True
     assert r2.accepted is False
@@ -350,16 +350,16 @@ async def test_concurrent_receive_integrityerror_one_invoice(realdb, monkeypatch
 @pytest.mark.asyncio
 async def test_bad_signature_returns_204_no_invoice(realdb):
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     body = _envelope(message_id=f"as4-{uuid.uuid4().hex}", payload=_ubl_bytes())
 
     async with realdb.client(key="a", role=None) as c:
         bad = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=body,
             headers={"X-Peppol-Signature": "deadbeef"},
         )
-        missing = await c.post(f"/api/peppol/inbound/{slug}", content=body)
+        missing = await c.post(f"/api/peppol/inbound/{ref}", content=body)
 
     assert bad.status_code == 204
     assert missing.status_code == 204
@@ -384,6 +384,26 @@ async def test_unknown_tenant_returns_204(realdb):
     assert "does-not-exist" not in resp.text
 
 
+@pytest.mark.asyncio
+async def test_a_slug_never_addresses_a_tenant(realdb):
+    """The path takes the organisation id, never the slug (decisions §294): a
+    slug can pass to a new workspace after a closure, and an Access Point still
+    configured with the old URL must not deliver the closed tenant's supplier
+    invoices to it. A delivery addressed by slug — even a live tenant's — is
+    the same silent 204 as an unknown tenant, and creates nothing."""
+    mk = realdb.sessionmaker("a")
+    before = await _count(mk, Invoice)
+    body = _envelope(message_id=f"as4-{uuid.uuid4().hex}", payload=_ubl_bytes())
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(
+            f"/api/peppol/inbound/{realdb.info('a').slug}",
+            content=body,
+            headers={"X-Peppol-Signature": _sign(body)},
+        )
+    assert resp.status_code == 204
+    assert await _count(mk, Invoice) == before
+
+
 # ---------------------------------------------------------------------------
 # Malformed document
 # ---------------------------------------------------------------------------
@@ -392,14 +412,14 @@ async def test_unknown_tenant_returns_204(realdb):
 @pytest.mark.asyncio
 async def test_malformed_document_returns_204_no_invoice(realdb):
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     body = _envelope(
         message_id=f"as4-{uuid.uuid4().hex}", payload=b"<not-an-invoice>garbage</not-an-invoice>"
     )
 
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=body,
             headers={"X-Peppol-Signature": _sign(body)},
         )
@@ -420,13 +440,13 @@ async def test_unparseable_envelope_returns_204_no_invoice(realdb):
     JSON envelope → no MessageId → can't dedupe) hits the route's parse_inbound
     None guard: 204, no invoice, no transmission — exercised end-to-end."""
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     # Raw UBL with no dev JSON envelope wrapper → mock adapter returns None.
     body = b'<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"/>'
 
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=body,
             headers={"X-Peppol-Signature": _sign(body)},
         )
@@ -449,7 +469,7 @@ async def test_oversized_body_returns_204_no_invoice(realdb, monkeypatch):
 
     monkeypatch.setattr(settings, "peppol_inbound_max_bytes", 1024)
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     # A valid signed envelope, but larger than the 1 KB test cap.
     body = _envelope(
         message_id=f"as4-{uuid.uuid4().hex}",
@@ -459,7 +479,7 @@ async def test_oversized_body_returns_204_no_invoice(realdb, monkeypatch):
 
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=body,
             headers={"X-Peppol-Signature": _sign(body)},
         )
@@ -480,12 +500,12 @@ async def test_disabled_master_switch_204(realdb, monkeypatch):
 
     monkeypatch.setattr(settings, "peppol_inbound_enabled", False)
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     body = _envelope(message_id=f"as4-{uuid.uuid4().hex}", payload=_ubl_bytes())
 
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=body,
             headers={"X-Peppol-Signature": _sign(body)},
         )
@@ -501,7 +521,7 @@ async def test_disabled_master_switch_204(realdb, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_pii_in_logs_or_response(realdb, caplog):
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     good = _envelope(message_id=f"as4-{uuid.uuid4().hex}", payload=_ubl_bytes())
     bad_payload = _envelope(message_id=f"as4-{uuid.uuid4().hex}", payload=b"<garbage/>")
 
@@ -509,15 +529,15 @@ async def test_no_pii_in_logs_or_response(realdb, caplog):
     async with realdb.client(key="a", role=None) as c:
         # success
         r_ok = await c.post(
-            f"/api/peppol/inbound/{slug}", content=good, headers={"X-Peppol-Signature": _sign(good)}
+            f"/api/peppol/inbound/{ref}", content=good, headers={"X-Peppol-Signature": _sign(good)}
         )
         # bad signature
         r_sig = await c.post(
-            f"/api/peppol/inbound/{slug}", content=good, headers={"X-Peppol-Signature": "nope"}
+            f"/api/peppol/inbound/{ref}", content=good, headers={"X-Peppol-Signature": "nope"}
         )
         # malformed
         r_mal = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=bad_payload,
             headers={"X-Peppol-Signature": _sign(bad_payload)},
         )
@@ -604,13 +624,13 @@ async def test_inbound_invoice_gets_a_frozen_workflow_instance(realdb):
     from app.models.workflow import WorkflowInstance
 
     mk = realdb.sessionmaker("a")
-    slug = realdb.info("a").slug
+    ref = realdb.info("a").org_id
     message_id = f"as4-{uuid.uuid4().hex}"
     body = _envelope(message_id=message_id, payload=_ubl_bytes())
 
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
-            f"/api/peppol/inbound/{slug}",
+            f"/api/peppol/inbound/{ref}",
             content=body,
             headers={"X-Peppol-Signature": _sign(body)},
         )
