@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { enMarketing } from '#lib/i18n/locales/marketing/en.ts';
 
 // The link-preview card (Slack, LinkedIn, X, iMessage unfurls) is plain markup
 // in `src/app.html`. It cannot live in a `<svelte:head>`: this is an
@@ -23,14 +24,6 @@ function readOne(glob: Record<string, string>, label: string): string {
 const TEMPLATE = readOne(
 	import.meta.glob('/src/app.html', { query: '?raw', import: 'default', eager: true }),
 	'src/app.html',
-);
-const LANDING = readOne(
-	import.meta.glob('/src/lib/components/marketing/Landing.svelte', {
-		query: '?raw',
-		import: 'default',
-		eager: true,
-	}),
-	'Landing.svelte',
 );
 const ENV_DEVELOPMENT = readOne(
 	import.meta.glob('/.env.development', {
@@ -157,10 +150,11 @@ describe('social preview card in src/app.html', () => {
 	});
 
 	it('carries the landing page copy, so the card and the page cannot drift', () => {
-		const eyebrow = LANDING.match(/<span class="eyebrow">([^<]+)<\/span>/)?.[1].trim();
-		const lede = LANDING.match(/<p class="lede">([\s\S]*?)<\/p>/)?.[1].replace(/\s+/g, ' ').trim();
-		expect(eyebrow, 'Landing.svelte eyebrow not found').toBeTruthy();
-		expect(lede, 'Landing.svelte lede not found').toBeTruthy();
+		// The landing page's words live in the marketing catalogue slice; the
+		// card is English (crawlers run no script and send no language), so it
+		// is held to the English hero.
+		const eyebrow = enMarketing['marketing.hero.eyebrow'];
+		const lede = enMarketing['marketing.hero.lede'];
 
 		expect(meta('og:title')).toBe(`FeohLedger — ${eyebrow}`);
 		expect(meta('og:description')).toBe(lede);

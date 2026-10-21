@@ -374,12 +374,15 @@ test.describe('light theme — the public no-tenant origin', () => {
 	test('at 320px the landing header holds the mark, the CTA and the theme switch without overflow', async ({
 		page
 	}) => {
-		// 1.4.10 at the criterion's own width: the switch is the third thing in
-		// a row that had room for two (Landing.svelte's 400px rule).
+		// 1.4.10 at the criterion's own width. Below 760px the theme switch
+		// sits in the header's menu with the section links (#635 finding 25),
+		// so it is measured with the menu open — the bar beside it holds the
+		// mark, the CTA and the menu toggle.
 		await page.setViewportSize({ width: 320, height: 800 });
 		await page.goto('/');
 		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 		const header = page.locator('header');
+		await header.getByRole('button', { name: 'Menu' }).click();
 		await expect(header.getByRole('group', { name: 'Theme' })).toBeVisible();
 		await expect(header.getByRole('link', { name: 'Start free' })).toBeInViewport({ ratio: 1 });
 		const last = header.locator('label', { has: page.getByRole('radio', { name: 'Dark' }) });

@@ -1,9 +1,10 @@
-// Type-only imports: the settings and portal slices are lazy in every locale,
+// Type-only imports: the settings, portal and marketing slices are lazy in every locale,
 // English included, so nothing here may pull them into the entry chunk.
 import type { en } from './locales/en';
 import type { enHelp } from './locales/help/en';
 import type { enPortal } from './locales/portal/en';
 import type { enSettings } from './locales/settings/en';
+import type { enMarketing } from './locales/marketing/en';
 
 // The catalogue shape: every locale module is `... satisfies Messages`,
 // so a missing or extra key is a compile error. Values are plain strings
@@ -18,12 +19,14 @@ export type Messages = typeof en;
 export type HelpMessages = typeof enHelp;
 export type SettingsMessages = typeof enSettings;
 export type PortalMessages = typeof enPortal;
+export type MarketingMessages = typeof enMarketing;
 
 /** Each slice's shape, by name. Adding a slice starts here. */
 export type SliceMessages = {
 	help: HelpMessages;
 	settings: SettingsMessages;
 	portal: PortalMessages;
+	marketing: MarketingMessages;
 };
 
 export type SliceName = keyof SliceMessages;

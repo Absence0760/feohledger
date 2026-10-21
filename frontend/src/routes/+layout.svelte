@@ -65,6 +65,19 @@
 		}
 	});
 
+	// The apex has no sign-in form: each company signs in at its own workspace
+	// host. `/find-workspace` asks which one (#635 finding 4), and an apex
+	// `/login` — a bookmark, a typed URL, a legal page's "Sign in" — goes
+	// there instead of quietly showing the marketing page.
+	const FIND_WORKSPACE = '/find-workspace';
+	const isLoginPath = (path: string) => path === '/login' || path.startsWith('/login/');
+
+	$effect(() => {
+		if (hasTenant === false && isLoginPath(page.url.pathname)) {
+			goto(FIND_WORKSPACE, { replace: true });
+		}
+	});
+
 	$effect(() => {
 		if (!hasTenant) return;
 
@@ -176,6 +189,10 @@
 	<slot />
 {:else if PUBLIC_PATHS.includes(page.url.pathname)}
 	<slot />
+{:else if hasTenant === false && page.url.pathname === FIND_WORKSPACE}
+	<slot />
+{:else if hasTenant === false && isLoginPath(page.url.pathname)}
+	<!-- Apex /login: on its way to /find-workspace (above); nothing to flash. -->
 {:else if hasTenant === false}
 	<Landing />
 {:else if page.url.pathname.startsWith('/login') || page.url.pathname === '/change-password'}

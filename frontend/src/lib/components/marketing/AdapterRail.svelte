@@ -1,10 +1,13 @@
 <script lang="ts">
+	import { m } from '#lib/i18n/store.svelte.ts';
+
 	/**
 	 * The row of shipped adapters.
 	 *
 	 * **It names adapters, not customers.** Every entry is a provider this repo
 	 * has a registered adapter for — the families listed in `backend/CLAUDE.md`
-	 * § Adapter patterns — under a heading that says so. A rail of logos under a
+	 * § Adapter patterns — under a heading that says so ("Built-in
+	 * integrations": a finance buyer's word for an adapter). A rail of logos under a
 	 * vaguer heading is the standard marketing move and it is a claim about who
 	 * uses the product, which would be false. If an adapter is removed, remove
 	 * it here in the same change.
@@ -13,6 +16,11 @@
 	 * and one SAML flow (`services/sso.py`, `api/auth_saml.py`), which Okta and Entra both work
 	 * with, but neither has an adapter of its own — naming them here would
 	 * assert a per-vendor integration the code does not have.
+	 *
+	 * **One name per provider**, the same one the landing copy uses — a buyer
+	 * reading "Textract" in one place and "AWS Textract" in another, or a model
+	 * name beside a company name, has to wonder whether they are two things.
+	 * The names are proper nouns and stay as written in every locale.
 	 *
 	 * Word marks as text rather than logo files: a third party's logo is their
 	 * trademark, and using one implies an endorsement none of these have given.
@@ -27,7 +35,7 @@
 	 */
 	const adapters = [
 		'NetSuite',
-		'Dynamics 365 BC',
+		'Dynamics 365 Business Central',
 		'Merge.dev',
 		'Modern Treasury',
 		'Stripe Treasury',
@@ -48,7 +56,7 @@
 </script>
 
 <div class="rail">
-	<p class="rail-head">Ships with adapters for</p>
+	<p class="rail-head">{m('marketing.adapters.heading')}</p>
 	<ul class="set">
 		{#each adapters as adapter}
 			<li>{adapter}</li>
@@ -92,10 +100,7 @@
 		font-size: 0.86rem;
 		font-weight: 500;
 		white-space: nowrap;
-		transition: color 0.2s, border-color 0.2s;
 	}
-	.set li:hover {
-		color: var(--text);
-		border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-	}
+	/* No hover state: a name is not a link, and a pill that lights up under the
+	   cursor says it is (#635 finding 30). */
 </style>

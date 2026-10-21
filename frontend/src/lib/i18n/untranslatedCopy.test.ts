@@ -47,13 +47,17 @@ const TRANSLATED = [
 	'/src/lib/components/ConsentBanner.svelte',
 	'/src/lib/components/auth/NewPasswordFields.svelte',
 	'/src/lib/components/auth/PasswordInput.svelte',
+	'/src/lib/components/marketing/AdapterRail.svelte',
+	'/src/lib/components/marketing/HeroPipeline.svelte',
+	'/src/lib/components/marketing/Landing.svelte',
 	'/src/lib/components/marketing/Pricing.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
 	'/src/lib/components/ui/InvoicePicker.svelte',
 	'/src/lib/components/ui/PlanUpgradeNotice.svelte',
 	'/src/lib/components/ui/VendorPicker.svelte',
 	'/src/routes/credit-memos/+page.svelte',
-	'/src/routes/exceptions/+page.svelte'
+	'/src/routes/exceptions/+page.svelte',
+	'/src/routes/find-workspace/+page.svelte'
 ];
 
 /**

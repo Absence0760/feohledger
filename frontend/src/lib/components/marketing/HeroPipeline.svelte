@@ -4,6 +4,9 @@
 	import IconApprove from '~icons/material-symbols/fact-check-outline';
 	import IconPay from '~icons/material-symbols/payments-outline';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	/**
 	 * The hero's moving part: one invoice walking the pipeline the product
@@ -33,21 +36,29 @@
 	 * as a stream of half-written numbers.
 	 */
 
-	// Staggered via a CSS custom property rather than seven near-identical rules.
-	const fields = [
-		{ label: 'Vendor', value: 'Northwind Suppliers Ltd', confidence: 98 },
-		{ label: 'Invoice no.', value: 'INV-2026-00418', confidence: 99 },
-		{ label: 'Amount', value: '$12,480.00', confidence: 96 },
-		{ label: 'Due', value: 'Apr 29, 2026', confidence: 94 },
-		{ label: 'GL code', value: '5200 · Cost of goods', confidence: 91 }
-	];
+	// The sample invoice. Its vendor and number are invented proper nouns and
+	// stay as written; everything a reader would see differently in their own
+	// language — the labels, the amount, the date — is localized, because this
+	// is the first picture of the product a German or Japanese visitor sees.
+	// Read inside `$derived`, so a language switch redraws it.
+	const fields = $derived([
+		{ label: m('marketing.demo.vendor'), value: 'Northwind Suppliers Ltd', confidence: 98 },
+		{ label: m('marketing.demo.invoiceNo'), value: 'INV-2026-00418', confidence: 99 },
+		{ label: m('marketing.demo.amount'), value: formatMoney('12480.00', { currency: 'USD' }), confidence: 96 },
+		{
+			label: m('marketing.demo.due'),
+			value: formatDate('2026-04-29', '—', { year: 'numeric', month: 'short', day: 'numeric' }),
+			confidence: 94
+		},
+		{ label: m('marketing.demo.glCode'), value: `5200 · ${m('marketing.demo.glName')}`, confidence: 91 }
+	]);
 
-	const stages = [
-		{ icon: IconUpload, label: 'Capture' },
-		{ icon: IconBolt, label: 'Extract' },
-		{ icon: IconApprove, label: 'Approve' },
-		{ icon: IconPay, label: 'Pay' }
-	];
+	const stages = $derived([
+		{ icon: IconUpload, label: m('marketing.demo.stage.capture') },
+		{ icon: IconBolt, label: m('marketing.demo.stage.extract') },
+		{ icon: IconApprove, label: m('marketing.demo.stage.approve') },
+		{ icon: IconPay, label: m('marketing.demo.stage.pay') }
+	]);
 </script>
 
 <div class="stage" aria-hidden="true">
@@ -57,8 +68,8 @@
 
 	<div class="card">
 		<div class="card-head">
-			<Badge tone="success">Ready for review</Badge>
-			<span class="conf">3-way matched</span>
+			<Badge tone="success">{m('marketing.demo.status')}</Badge>
+			<span class="conf">{m('marketing.demo.matched')}</span>
 		</div>
 
 		<div class="doc">
@@ -75,7 +86,7 @@
 		</div>
 
 		<div class="card-foot">
-			<span class="stamp">Approved · Paid via virtual card</span>
+			<span class="stamp">{m('marketing.demo.stamp')}</span>
 		</div>
 	</div>
 

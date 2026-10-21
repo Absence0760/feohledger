@@ -227,13 +227,10 @@
 		background: color-mix(in srgb, var(--surface) 62%, transparent);
 		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
-		transition: border-color 0.2s, transform 0.2s, background 0.2s;
 	}
-	.plan:hover {
-		border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-		background: color-mix(in srgb, var(--surface) 82%, transparent);
-		transform: translateY(-3px);
-	}
+	/* The card does not react to the pointer: only its button does. A card
+	   that lifts under the cursor reads as one big link, and clicking it did
+	   nothing (#635 finding 30). */
 	/* The featured plan gets a gradient BORDER rather than a flat accent one: a
 	   masked pseudo-element painting only the 1px ring, so the card's own
 	   translucent fill still shows the page behind it. */
