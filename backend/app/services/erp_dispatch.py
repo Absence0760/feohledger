@@ -17,15 +17,30 @@ _dispatch_tasks: set[asyncio.Task] = set()
 async def dispatch_erp(
     invoice_id: uuid.UUID,
     org_id: uuid.UUID,
-    actor_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+    *,
+    inline: bool = False,
 ) -> None:
-    """Trigger ERP send via the configured mode (local or lambda)."""
+    """Trigger ERP send via the configured mode (local or lambda).
+
+    ``inline`` awaits the local send instead of scheduling it on this loop.
+    ``actor_id`` is None when no person started the push: an extraction
+    auto-approval of an invoice that arrived by email, auto-sent on approval
+    (decisions §293).
+    """
     if settings.erp_mode == "lambda":
         # Off the event loop: boto3 is synchronous, so the client build (which
         # resolves the credential chain, possibly via IMDS) plus the SQS round
         # trip would occupy the loop for their full duration on a request path.
         # See `extraction_dispatch.dispatch_extraction` for the same call.
         await asyncio.to_thread(_send_to_sqs, invoice_id, org_id, actor_id)
+    elif inline:
+        # The caller is on a worker loop that closes the moment its job returns
+        # (the extraction worker, in-process or in Lambda, auto-sending an
+        # invoice it auto-approved): a task started there would be abandoned
+        # mid-send. `_run_local` builds its own engines, so it is valid on any
+        # loop. It holds that worker for the whole send, retries included.
+        await _run_local(invoice_id, org_id, actor_id)
     else:
         # Scheduled on the CALLER's loop, deliberately not a detached thread
         # running a second one. The send reaches `transition_invoice`, whose
@@ -48,7 +63,7 @@ async def dispatch_erp(
 def _send_to_sqs(
     invoice_id: uuid.UUID,
     org_id: uuid.UUID,
-    actor_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
 ) -> None:
     """Put ERP job on SQS for Lambda to pick up.
 
@@ -72,7 +87,7 @@ def _send_to_sqs(
             {
                 "invoice_id": str(invoice_id),
                 "org_id": str(org_id),
-                "actor_id": str(actor_id),
+                "actor_id": str(actor_id) if actor_id is not None else None,
             }
         ),
         MessageGroupId=str(invoice_id),
@@ -82,7 +97,7 @@ def _send_to_sqs(
 async def _run_local(
     invoice_id: uuid.UUID,
     org_id: uuid.UUID,
-    actor_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
 ) -> None:
     """Run ERP send in-process with its own DB session and engine."""
     from sqlalchemy import select

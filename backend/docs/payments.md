@@ -125,6 +125,12 @@ Shows invoices in payable statuses (`approved`, `sent_to_erp`, `posted_in_erp`, 
 - Shows payment terms per invoice
 - Count shown in the tab badge
 
+An invoice sent to the ERP leaves this queue: a successful push ends at `done`,
+and the bill is paid from the ERP. With the workflow's **Auto-send on approval**
+switch on (and a live ERP connected) that happens moments after approval, so
+such an invoice never waits here (`docs/decisions.md` §302). Tenants that pay
+through FeohLedger runs keep the switch off.
+
 ### History Tab
 
 All payments across all methods in one table.

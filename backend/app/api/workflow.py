@@ -11,7 +11,6 @@ from app.api.deps import (
     ROLE_ADMIN,
     ROLE_AP_MANAGER,
     ROLE_CFO,
-    ensure_live_erp_entitled,
     get_current_user,
     get_org_id,
     require_permission,
@@ -48,10 +47,8 @@ from app.schemas.workflow import (
     RejectRequest,
     WorkflowInstanceResponse,
 )
-from app.services import erp as erp_svc
 from app.services import review as review_svc
-from app.services.erp_dispatch import dispatch_erp
-from app.services.erp_export_gate import refuse_blocked_erp_export
+from app.services.erp_send import schedule_auto_send, start_erp_send
 from app.services.extraction_dispatch import dispatch_extraction
 from app.services.invoice_warnings import refresh_warnings
 from app.services.storage import upload_invoice_file
@@ -465,29 +462,20 @@ async def send_to_erp(
     org: Organization = Depends(get_tenant),
     control_db: AsyncSession = Depends(get_control_db),
 ):
-    # Pushing to a LIVE ERP is plan-gated, Merge.dev on Scale only (decisions
-    # §258/§281); the local-first `mock` ERP and an org with no ERP configured
-    # are never gated.
-    await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
-    invoice = await get_invoice_for_update(db, invoice_id)
-    # An open duplicate / fraud exception refuses the push (decisions §286).
-    # Here, synchronously, so the invoice stays `approved` and the user is told
-    # what to do, rather than queueing a push the dispatcher would refuse.
-    await refuse_blocked_erp_export(db, invoice.id)
-
-    # Transition to sending_to_erp before dispatching
-    await transition_invoice(
+    # The plan gate (a LIVE ERP needs the plan, decisions §258/§281), the row
+    # lock, the export gate (an open duplicate / fraud flag, §286), the
+    # transition, the commit, then the dispatch — the sequence every push
+    # shares, approval's auto-send included (`services/erp_send`, §293). A
+    # refusal is a 402 / 409 with the invoice still `approved`.
+    invoice = await start_erp_send(
         db,
-        invoice,
-        InvoiceStatus.sending_to_erp,
+        org_id=org.id,
+        org_settings=org.settings,
+        invoice_id=invoice_id,
         actor_id=user.id,
-        action_name="invoice.erp_submitted",
+        control_db=control_db,
     )
-    await db.commit()
-
-    # Dispatch ERP call — local background task or SQS depending on config
-    await dispatch_erp(invoice.id, org_id, user.id)
 
     return {
         "id": str(invoice.id),
@@ -506,20 +494,17 @@ async def retry_erp(
     org: Organization = Depends(get_tenant),
     control_db: AsyncSession = Depends(get_control_db),
 ):
-    # Pushing to a LIVE ERP is plan-gated, Merge.dev on Scale only (decisions
-    # §258/§281); the local-first `mock` ERP and an org with no ERP configured
-    # are never gated.
-    await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
-    invoice = await get_invoice_for_update(db, invoice_id)
-    # Same gate as send-to-erp; the invoice stays `failed` (decisions §286).
-    await refuse_blocked_erp_export(db, invoice.id)
-
-    await erp_svc.retry_erp(db, invoice, actor_id=user.id)
-    await db.commit()
-
-    # Dispatch the retried ERP call
-    await dispatch_erp(invoice.id, org_id, user.id)
+    # Same gates as send-to-erp; on a refusal the invoice stays `failed`.
+    invoice = await start_erp_send(
+        db,
+        org_id=org.id,
+        org_settings=org.settings,
+        invoice_id=invoice_id,
+        actor_id=user.id,
+        control_db=control_db,
+        retry=True,
+    )
 
     return {
         "id": str(invoice.id),
@@ -689,6 +674,9 @@ async def complete_invoice(
             )
             if instance:
                 await advance_workflow(db, instance, "erp_push", action="auto_approved")
+            # The workflow may say "send to the ERP on approval" (decisions
+            # §293): queued for after this commit, in its own transaction.
+            schedule_auto_send(db, invoice, instance, actor_id=user.id)
             await db.commit()
             await db.refresh(invoice)
             return {
@@ -726,24 +714,20 @@ async def complete_invoice(
         }
 
     if invoice.status == InvoiceStatus.approved and erp_enabled:
-        # A live ERP push needs the plan (§258). Refused BEFORE the transition,
-        # so the invoice stays `approved` — still payable directly — rather
-        # than parking in `sending_to_erp` for a push that will never run.
-        await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
-        # The modal's "Send to ERP". Same gate as send-to-erp, and after
-        # `refresh_warnings` above, so a duplicate it found just now refuses
-        # too (decisions §286).
-        await refuse_blocked_erp_export(db, invoice.id)
-        # Trigger ERP dispatch
-        await transition_invoice(
+        # The modal's "Send to ERP": the same gates as send-to-erp, refused
+        # BEFORE the transition so the invoice stays `approved` (still payable
+        # directly). After `refresh_warnings` above, so a duplicate it found
+        # just now refuses too (decisions §286).
+        # The row is already locked here; `start_erp_send` re-takes the same
+        # lock in this transaction, which is a no-op.
+        await start_erp_send(
             db,
-            invoice,
-            InvoiceStatus.sending_to_erp,
+            org_id=org.id,
+            org_settings=org.settings,
+            invoice_id=invoice.id,
             actor_id=user.id,
-            action_name="invoice.erp_submitted",
+            control_db=control_db,
         )
-        await db.commit()
-        await dispatch_erp(invoice.id, org_id, user.id)
         return {
             "id": str(invoice.id),
             "correlation_id": str(invoice.correlation_id),

@@ -29,6 +29,7 @@ from app.services.erp_link_realm import (
 from app.services.gl_chart import resolve_erp_account_ids
 from app.services.workflow_engine import (
     complete_workflow,
+    get_invoice_for_update,
     get_workflow_instance,
     transition_invoice,
 )
@@ -545,13 +546,43 @@ async def send_to_erp_internal(
                 return
 
 
+#: The `invoice.erp_failed` reason when a push was committed at `sending_to_erp`
+#: and then could not be handed to the dispatcher (an SQS send that raised).
+ERP_DISPATCH_FAILED = "ERP send could not be queued"
+
+
+async def fail_erp_send_not_dispatched(
+    db: AsyncSession, invoice_id: uuid.UUID, *, actor_id: uuid.UUID | None
+) -> None:
+    """Land a committed `sending_to_erp` at `failed` when its dispatch raised.
+
+    Nothing will ever run that push, and `POST /{id}/retry-erp` takes only
+    `failed`, so leaving it at `sending_to_erp` would strand it. Re-locked here:
+    the caller already committed, and the row is only moved if it is still
+    where the caller left it.
+    """
+    invoice = await get_invoice_for_update(db, invoice_id)
+    if invoice.status != InvoiceStatus.sending_to_erp:
+        await db.rollback()
+        return
+    await transition_invoice(
+        db,
+        invoice,
+        InvoiceStatus.failed,
+        actor_id=actor_id,
+        action_name="invoice.erp_failed",
+        details={"error": ERP_DISPATCH_FAILED, "retries": 0},
+    )
+    await db.commit()
+
+
 #: The `invoice.erp_failed` reason when the org's sealed ERP credentials could
 #: not be opened (`services/provider_credentials`). A code, never the error text.
 ERP_CREDENTIALS_UNAVAILABLE = "erp_credentials_unavailable"
 
 
 async def fail_erp_send_without_credentials(
-    db: AsyncSession, invoice: Invoice, *, actor_id: uuid.UUID
+    db: AsyncSession, invoice: Invoice, *, actor_id: uuid.UUID | None
 ) -> None:
     """Land an in-flight send at `failed` because its credentials can't be opened.
 

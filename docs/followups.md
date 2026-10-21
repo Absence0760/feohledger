@@ -39,7 +39,10 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — fixing signup's dead ends (decisions §292)
+**Last reconciled:** 2026-10-20 — auto-sending an approved invoice to the ERP
+(decisions §293) opened one (c) entry, an approval whose post-commit push never
+ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
+true` before deploying it, taking the file from 118 → 120. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
@@ -173,7 +176,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**118 open: 102 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**120 open: 103 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1873,6 +1876,22 @@ scope (§260) — do not fold them into any of these.
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
 
+### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §293)
+
+- [ ] **(c) An approval whose auto-send never ran is not noticed.** The push
+      after an approval is post-commit work, so a process that dies between the
+      approval's commit and the job (a deploy, an OOM) leaves the invoice at
+      `approved` with neither `invoice.erp_submitted` nor
+      `invoice.erp_auto_send_refused` on its trail. It is still payable and
+      sendable by hand, so nothing is lost, but the configured automation was
+      skipped silently. **Durable fix:** a sweep that finds `approved` invoices
+      whose snapshot has `erp_export.auto_send_on_approval` on, approved more
+      than a few minutes ago with no auto-send row of either kind since that
+      approval, and runs `erp_send.send_after_approval` for them (it already
+      re-locks and acts only on `approved`). **Trigger:** the first tenant that
+      relies on auto-send in production, or the first report of an approved
+      invoice that did not reach the ERP.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
@@ -2099,3 +2118,16 @@ from that work is the one entry below.
       `positive_pay_files_expired`. **Trigger:** the first deployment that
       generates a Positive Pay file, and the SOC 2 records-management evidence
       request either way.
+- [ ] **(b) Confirm every stored `auto_send_on_approval: true` before deploying
+      decisions §293.** The flag did nothing until §293, and every workflow save
+      used to store `true` through the schema default, so a stored `true` may be
+      a choice or an accident. Once deployed, a tenant with one and a live ERP
+      sends each approved invoice to the ERP on approval, and it leaves the
+      payment queue. **Durable fix:** before the deploy, list the default and
+      active workflow definitions (`steps_config`) holding
+      `erp_export.config.auto_send_on_approval = true` in every tenant with a
+      live ERP, confirm each with the tenant's admin, and set the rest to
+      `false` through `PATCH /api/workflows/{id}`. Invoices already created
+      keep the snapshot they froze, so the same check covers the unapproved
+      invoices under such a definition. **Trigger:** the first deploy carrying
+      decisions §293 to an environment with a tenant on a live ERP.

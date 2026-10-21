@@ -1170,6 +1170,25 @@ async def run_extraction(
 
         await db.commit()
 
+        if auto_approved:
+            # "Send to the ERP on approval" (decisions §293), in a transaction of
+            # its own now the approval has committed. Called here rather than
+            # queued post-commit: this runs on the extraction worker's loop,
+            # whose single-connection pool the committing session still holds
+            # while post-commit work runs; here it has been handed back. Its own
+            # session, so `invoice` is not expired under the caller. Never raises.
+            from app.services.erp_send import send_after_approval
+
+            await send_after_approval(
+                db.bind,
+                invoice_id=invoice_id,
+                org_id=invoice_org_id,
+                org_settings=org_settings,
+                actor_id=actor_id,
+                # This loop closes when the extraction job returns.
+                inline_dispatch=True,
+            )
+
         # Billing follow-ups for a read that counted (decisions §253): report
         # any new overage to the billing provider and send a newly reached
         # 80% / 100% / cap notice. AFTER the commit, so the count includes this
