@@ -1,6 +1,6 @@
 /**
  * Reading a `workspace_close_refused` refusal's blocker codes
- * (`backend/app/api/refusals.py`, decisions §294).
+ * (`backend/app/api/refusals.py`, decisions §301).
  *
  * Its own module, and deliberately free of catalogue keys: `api/codedRefusals.ts`
  * needs it, and that registry is reachable from every route, while the

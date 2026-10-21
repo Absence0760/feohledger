@@ -1103,7 +1103,7 @@ export const messages = {
 	'org.payments.nachaHint': "Facultatif. Permet de télécharger un lot en brouillon sous forme de fichier ACH NACHA à déposer auprès de votre banque. Votre banque vous fournit ces valeurs : un nom de société (16 caractères maximum), un identifiant de société de 10 caractères (généralement 1 suivi de votre EIN), le numéro de routage à 9 chiffres de votre banque et, si besoin, le nom de la banque (23 caractères maximum).",
 	'org.payments.nachaInvalid': "Vérifiez les informations du fichier bancaire : {fields}.",
 
-	// Closing a workspace (Organization → Close workspace, decisions §294)
+	// Closing a workspace (Organization → Close workspace, decisions §301)
 	'org.close.title': "Fermer cet espace de travail",
 	'org.close.intro': "Fermer un espace de travail le supprime définitivement : ses factures, fournisseurs, documents et paramètres, ainsi que tous les comptes utilisateur qu’il contient. Utilisez cette option pour un espace de travail dont vous n’avez plus besoin, par exemple un essai que vous n’avez pas poursuivi. Sa fermeture libère les adresses e-mail de ses utilisateurs, qui peuvent alors être ajoutées à un autre espace de travail.",
 	'org.close.checking': "Vérification de la possibilité de fermer cet espace de travail…",

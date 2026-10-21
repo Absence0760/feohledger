@@ -3,7 +3,7 @@ import type { ClosurePreflight } from '#lib/types/workspaceClosure.ts';
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 
 /**
- * /organization → Close workspace (`docs/decisions.md` §294).
+ * /organization → Close workspace (`docs/decisions.md` §301).
  *
  * The closure itself is destructive and irreversible, and the e2e tenants are
  * shared by every spec on a worker, so the two routes are STUBBED here and the

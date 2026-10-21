@@ -110,7 +110,7 @@ class SlugHeld(SlugError):
 
 
 #: How long a closed workspace's slug stays unavailable, from its closure, even
-#: once an operator has removed its backups (decisions §294). The name lives on
+#: once an operator has removed its backups (decisions §301). The name lives on
 #: outside the platform — bookmarks of `<slug>.<domain>`, an IdP's registered
 #: redirect URI, invite and approval emails, an Access Point's configured
 #: endpoint — and a new owner must not inherit what points at it. Ninety days

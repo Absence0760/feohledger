@@ -3,7 +3,7 @@
 Why
 ---
 An administrator can now close their own workspace (`POST
-/api/organization/close`, `docs/decisions.md` §294). The closure deletes the
+/api/organization/close`, `docs/decisions.md` §301). The closure deletes the
 tenant database, the organisation row and the user rows, so nothing the
 tenant held can record that it happened. This table is the record that
 outlives it: who asked (a user id, no address), with which step-up proof, and

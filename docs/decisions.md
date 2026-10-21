@@ -12911,7 +12911,7 @@ Tests: `frontend/src/lib/i18n/slices.test.ts`,
 `test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
 settings slice for the form labels they check.
 
-## 294. An administrator can close an unused workspace, which releases its addresses; anything that must be kept goes to support (migrations 0117, 0118, 2026-10-20)
+## 301. An administrator can close an unused workspace, which releases its addresses; anything that must be kept goes to support (migrations 0117, 0118, 2026-10-20)
 
 **The dead end.** Since §291 an address names one account in one workspace.
 Someone who signs up with an address, abandons the trial, and is later added to
@@ -13121,7 +13121,7 @@ blocker list through the key-free `types/workspaceClosureRefusal.ts`, never
 `types/workspaceClosure.ts`, so the registry every route imports names no slice
 key (`i18n/slices.test.ts`).
 
-#611 landed as §292. §293 is reserved for #612, still open.
+Numbered §301, after #616's §300: #611 landed as §292, and the open #612 and #613 claim §293 and §294.
 
 Tests: `backend/tests/test_workspace_closure.py` (each record class through a
 real row built from the model; what must not block; the table classification;

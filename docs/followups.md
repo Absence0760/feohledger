@@ -40,9 +40,9 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-20 — the workspace-closure review (decisions
-§294) opened one (c) entry, `lambda` audit mode refusing a self-service close,
+§301) opened one (c) entry, `lambda` audit mode refusing a self-service close,
 taking the file from 119 → 120. Before that, 2026-10-20 — self-service workspace
-closure (decisions §294) opened one (c) entry, abandoned workspaces kept forever
+closure (decisions §301) opened one (c) entry, abandoned workspaces kept forever
 unless someone closes them, taking the file from 118 → 119. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
@@ -1881,10 +1881,10 @@ scope (§260) — do not fold them into any of these.
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
 
-### Surfaced by self-service workspace closure (2026-10-20, decisions §294)
+### Surfaced by self-service workspace closure (2026-10-20, decisions §301)
 
 - [ ] **(c) An abandoned workspace is kept forever unless someone closes it.**
-      §294 lets an administrator close an unused workspace (which releases its
+      §301 lets an administrator close an unused workspace (which releases its
       addresses), and rejected an unattended sweep, because nothing in the code
       records a trial as ended: signup binds the free plan as `active` with no
       `trial_end`, and "idle" is not a customer's instruction. So a workspace
@@ -1903,7 +1903,7 @@ scope (§260) — do not fold them into any of these.
       self-service.** In that mode an audit row may still be in SQS, not yet in
       the tenant's `audit_log`, when the closure flushes the trail and drops the
       database, and nothing can see or drain one tenant's messages, so the
-      closure refuses (`audit_queue_unverifiable`, decisions §294) and support
+      closure refuses (`audit_queue_unverifiable`, decisions §301) and support
       closes it. **Durable fix:** a per-tenant drain the closure can wait on —
       e.g. the Lambda writer stamping a per-tenant high-water mark the closure
       compares with what it enqueued, or a FIFO queue with a tenant message

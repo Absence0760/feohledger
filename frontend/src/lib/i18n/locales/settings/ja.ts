@@ -1095,7 +1095,7 @@ export const messages = {
 	'org.payments.nachaHint': "任意。下書きのバッチを NACHA ACH ファイルとしてダウンロードし、銀行にアップロードできるようにします。値は銀行から提供されます：会社名（16 文字以内）、10 文字の会社 ID（通常は 1 に続けて EIN）、銀行の 9 桁のルーティング番号、および任意で銀行名（23 文字以内）。",
 	'org.payments.nachaInvalid': "銀行ファイルの情報を確認してください：{fields}。",
 
-	// Closing a workspace (Organization → Close workspace, decisions §294)
+	// Closing a workspace (Organization → Close workspace, decisions §301)
 	'org.close.title': "このワークスペースを閉鎖",
 	'org.close.intro': "ワークスペースを閉鎖すると、請求書、仕入先、ドキュメント、設定、そしてその中のすべてのユーザーアカウントが完全に削除されます。作成したものの継続しなかった試用版など、不要になったワークスペースに使用してください。閉鎖すると、そのユーザーのメールアドレスが解放され、別のワークスペースに追加できるようになります。",
 	'org.close.checking': "このワークスペースを閉鎖できるか確認しています…",

@@ -10,7 +10,7 @@ Mounted at `/api/organization/close`. Two routes, both admin-only:
   `services/workspace_closure.close_workspace`, which re-checks the blockers
   under locks, writes the audit record that outlives the tenant, and deletes it.
 
-Why it exists, and why it refuses so much: `docs/decisions.md` §294. A
+Why it exists, and why it refuses so much: `docs/decisions.md` §301. A
 refusal names its blockers by stable code (`params.blockers`); every refusal of
 a guard is audited into the tenant's own log (which still exists, since
 nothing was deleted). The success path's record is the closure service's

@@ -2,7 +2,7 @@
 
 Control plane, and deliberately OUTSIDE the tenant deletion it records: a
 self-service closure (`services/workspace_closure.py`, `docs/decisions.md`
-§294) destroys the tenant database, so an audit row written only there would
+§301) destroys the tenant database, so an audit row written only there would
 go with it, and the organisation and user rows it would point at are deleted
 too. This row is what is left — the evidence that the closure was asked for,
 by whom (a user id that no longer resolves, never an address), which proof

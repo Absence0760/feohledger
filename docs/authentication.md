@@ -820,7 +820,7 @@ action's own operation), in every tenant — so the SSO-only case needs no speci
 sentence, because the password is a proof here for nobody. Its callers are the
 unmasked-banking DSAR export (`POST /api/privacy/dsar` with `include_banking`,
 operation `dsar_unmasked_export`) and closing a workspace (`POST
-/api/organization/close`, operation `workspace_close`, decisions §294). Four
+/api/organization/close`, operation `workspace_close`, decisions §301). Four
 coded refusals:
 `sensitive_step_up_required` (`403`, no factor proof sent — the SPA's cue to
 collect one and resend; not throttled, not audited as a failure),

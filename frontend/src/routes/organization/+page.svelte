@@ -339,7 +339,7 @@
 			items: [
 				{ slug: 'plan', labelKey: 'org.section.plan' },
 				// Deleting an unused workspace, which frees its addresses
-				// (decisions §294). Last: the one irreversible panel.
+				// (decisions §301). Last: the one irreversible panel.
 				{ slug: 'close', labelKey: 'org.section.close' }
 			]
 		}

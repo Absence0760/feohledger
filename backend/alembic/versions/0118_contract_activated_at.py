@@ -2,7 +2,7 @@
 
 Why
 ---
-A self-service workspace closure (decisions §294) is refused while the
+A self-service workspace closure (decisions §301) is refused while the
 workspace holds a contract that bound the parties. Status alone cannot say
 that: `POST /api/contracts/{id}/cancel` is allowed from `active`, so a contract
 that was in force and then cancelled reads exactly like a draft that never was.

@@ -17,7 +17,7 @@ makes a tenant reachable. Doing so is unrecoverable. Every object key is
 delete it and then fail on the sweep, and there is no longer any way to find
 the documents that were supposed to go (decisions §179).
 
-The database goes before the documents (decisions §294, which reversed the
+The database goes before the documents (decisions §301, which reversed the
 original documents-first order). Both steps are irreversible, but only one
 order leaves a coherent state when the other fails: a database that would not
 drop after its documents were swept was a LIVE workspace whose invoices pointed
@@ -138,7 +138,7 @@ CONTROL_TABLES_EXEMPT: dict[str, str] = {
     ),
     "workspace_closures": (
         "The record that a tenant was closed by its own administrator "
-        "(services/workspace_closure.py, decisions §294). It exists to outlive "
+        "(services/workspace_closure.py, decisions §301). It exists to outlive "
         "the deletion it describes: the tenant's own audit log goes with its "
         "database, so this row is the evidence that the closure was asked for, "
         "by whom and with which proof, and the operator's queue for the backup "

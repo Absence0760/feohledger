@@ -1103,7 +1103,7 @@ export const messages = {
 	'org.payments.nachaHint': "Optional. Damit können Sie einen Entwurfslauf als NACHA-ACH-Datei herunterladen und bei Ihrer Bank hochladen. Ihre Bank nennt Ihnen diese Werte: einen Firmennamen (bis zu 16 Zeichen), eine 10-stellige Firmen-ID (meist 1 gefolgt von Ihrer EIN), die 9-stellige Routing-Nummer Ihrer Bank und optional den Namen der Bank (bis zu 23 Zeichen).",
 	'org.payments.nachaInvalid': "Prüfen Sie die Angaben für die Bankdatei: {fields}.",
 
-	// Closing a workspace (Organization → Close workspace, decisions §294)
+	// Closing a workspace (Organization → Close workspace, decisions §301)
 	'org.close.title': "Diesen Workspace schließen",
 	'org.close.intro': "Wenn Sie einen Workspace schließen, wird er dauerhaft gelöscht: seine Rechnungen, Lieferanten, Dokumente und Einstellungen sowie alle Benutzerkonten darin. Nutzen Sie dies für einen Workspace, den Sie nicht mehr benötigen, etwa eine Testphase, die Sie nicht fortgesetzt haben. Danach sind die E-Mail-Adressen seiner Benutzer wieder frei und können einem anderen Workspace hinzugefügt werden.",
 	'org.close.checking': "Es wird geprüft, ob dieser Workspace geschlossen werden kann …",

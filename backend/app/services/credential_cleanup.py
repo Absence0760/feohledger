@@ -1,6 +1,6 @@
 """Forget what deleted accounts left in Redis.
 
-When a workspace is closed (`services/workspace_closure`, decisions §294) its
+When a workspace is closed (`services/workspace_closure`, decisions §301) its
 user rows are deleted, which already makes every token and link they held inert:
 each resolves to a user that no longer exists. What stays behind until its TTL
 is the per-user bookkeeping — the live-session set and its metadata hash (IP,

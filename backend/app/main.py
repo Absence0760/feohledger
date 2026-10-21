@@ -534,7 +534,7 @@ app.include_router(organization_sso.router, prefix="/api")
 # ERP / payment / card secrets (services/provider_credentials).
 app.include_router(organization_credentials.router, prefix="/api")
 # Hangs off /api/organization/close — an administrator closing an unused
-# workspace (services/workspace_closure, decisions §294).
+# workspace (services/workspace_closure, decisions §301).
 app.include_router(organization_close.router, prefix="/api")
 app.include_router(partner.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")
