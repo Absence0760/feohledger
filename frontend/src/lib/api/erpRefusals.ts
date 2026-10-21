@@ -40,7 +40,7 @@ export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
 
 /** FeohLedger is already paying the invoice — a live payment or virtual card —
  *  so the push was refused before any adapter ran (same module, decisions
- *  §306). `params.claim` names the rail (`payment` / `virtual_card`), and
+ *  §309). `params.claim` names the rail (`payment` / `virtual_card`), and
  *  `possibly_posted: true` appears as on the exception refusal. Also a 409 the
  *  send doors answer with. */
 export const PAYMENT_BLOCKS_ERP_EXPORT = 'payment_blocks_erp_export';

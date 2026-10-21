@@ -1152,7 +1152,7 @@ async def test_voiding_a_payment_made_after_the_bank_change_raises_nothing(reald
 
 
 # ---------------------------------------------------------------------------
-# FeohLedger already paying the invoice refuses the push (decisions §306)
+# FeohLedger already paying the invoice refuses the push (decisions §309)
 # ---------------------------------------------------------------------------
 #
 # Staging a run books a live `pending` payment and leaves the invoice

@@ -575,7 +575,7 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_excepti
 
     * the export gate (`erp_export_gate`, decisions §286) — `open_exceptions`,
       `(invoice_id, exception_type)` rows; none by default, so the push goes on,
-      and then its live payment / card reads (§306), always empty here (the
+      and then its live payment / card reads (§309), always empty here (the
       gate's own SQL is proven against a real tenant in
       `test_erp_export_blocking_exceptions.py`);
     * `_fetch_line_items` — the given rows, in the order given (mirrors the
@@ -599,7 +599,7 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_excepti
         if "FROM exceptions" in sql:
             db.calls.append("exceptions")
             return SimpleNamespace(all=lambda: list(open_exceptions))
-        # The gate's live-claim reads (decisions §306): no live payment, no
+        # The gate's live-claim reads (decisions §309): no live payment, no
         # live card, so the push goes on.
         if "JOIN payments" in sql:
             db.calls.append("payments")

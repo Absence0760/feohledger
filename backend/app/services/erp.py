@@ -665,7 +665,7 @@ async def _call_erp(
     # before any adapter is built, and once a person clears the flag the next
     # push's own idempotency lookup finds that bill instead of posting another.
     # The same gate refuses an invoice FeohLedger is already paying (a live
-    # payment or virtual card, decisions §306): posted now, the bill would be
+    # payment or virtual card, decisions §309): posted now, the bill would be
     # payable from the ERP as well. Asked here as well as at the HTTP doors, so
     # a push queued before the run was staged is stopped at the last moment.
     refused = await erp_export_refusal(db, invoice.id, possibly_posted=possibly_posted(state))

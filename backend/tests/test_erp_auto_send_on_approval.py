@@ -494,7 +494,7 @@ async def test_an_open_duplicate_refuses_the_auto_send_and_the_invoice_stays_app
 
 @pytest.mark.plan("growth")
 async def test_a_live_card_refuses_the_auto_send_and_the_invoice_stays_approved(realdb, dispatched):
-    """Decisions §306 reaches the auto path through the same gate: an invoice
+    """Decisions §309 reaches the auto path through the same gate: an invoice
     FeohLedger is already paying (here a live virtual card, written directly
     since no rail mints before approval) is not pushed on approval."""
     from app.models.virtual_card import VirtualCard

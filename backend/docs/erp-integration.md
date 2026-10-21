@@ -1130,7 +1130,7 @@ payment** (`payment_runs.live_payment_invoices`: any status outside
 `api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`) or a **live virtual card**
 (`card_issuance.live_card_invoice_ids`: any card not `cancelled`). Those are
 the predicates the run builder and the card mint refuse each other with, so
-the three cannot disagree about what is live (decisions §306).
+the three cannot disagree about what is live (decisions §309).
 
 - **One answer, two places.** `erp_export_gate.erp_export_refusal` is asked by
   `_call_erp` (before any adapter, every attempt) and by the three HTTP doors
