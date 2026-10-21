@@ -12913,6 +12913,34 @@ the page from the CFO. `deps.require_role_or_permission` admits either, so the
 system roles keep exactly what they had, and the nav row ORs the same two
 permissions.
 
+## 294. The landing page stays dark as brand, not as a gap waiting for a light version (2026-10-20)
+
+**§289 left the marketing page dark for a reason of cost; this makes it the
+decision.** §289 kept the landing page on the dark palette because a light
+version is a design job (a re-render of the §180 tally on a light ground, new
+grain, new glass-panel and hero-card treatments), not a token swap. It did not
+say whether that job should ever be done, and without an answer the question
+comes back every time someone notices that a light-mode visitor sees a dark
+landing page and then a light sign-in page.
+
+**The answer is no, until evidence says otherwise.** The landing page is the
+one surface composed as a picture, and dark is its brand: the render, the grain
+and the panels were designed together on navy and have passed the accessibility
+audit as they stand. A visitor sees it once or twice before signing up, a dark
+marketing site in front of a light product is a common and unremarkable
+pairing, and a day spent on a second version moves nothing for the first pilot
+customer. Everything a reader spends time in already follows the theme (§289:
+the app, the auth shell, signup, the legal pages, the help centre, the supplier
+portal), so the theme preference is honoured wherever it matters.
+
+**What would reopen it:** measured drop-off of light-mode visitors between the
+landing page and sign-in or signup, or repeated feedback that the switch is
+jarring. Either is a reason to do the design job properly (a light render of
+the tally, panel treatments composed for a light ground, contrast re-measured),
+following the visitor's theme through the existing `data-theme-scope`
+mechanism rather than a page-local toggle. Not a reason: consistency for its
+own sake, or a token swap that leaves the dark-composed render on white.
+
 ## 300. Strings only some routes render load with those routes, as lazy catalogue slices in every locale (2026-10-20)
 
 (Numbered 300 because §292–§299 are held by pull requests still in flight.)
