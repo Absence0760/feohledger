@@ -1040,7 +1040,7 @@ reasoning).
 - **What the user does:** resolve or dismiss the exception in Exceptions, then
   send again. Clearing it goes through `exception_lifecycle.record_decision`,
   so someone implicated in the invoice cannot clear it for themselves.
-- **Approval pushes only when the workflow says so** (decisions §293). With
+- **Approval pushes only when the workflow says so** (decisions §302). With
   the snapshot's `erp_export.auto_send_on_approval` on and a live ERP, approval
   starts the push after it commits, through the same gates
   (`services/erp_send.start_erp_send`, shared with the three doors above). A

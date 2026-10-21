@@ -44,7 +44,7 @@ def _body(**overrides) -> dict:
 
 async def test_process_message_accepts_a_null_actor():
     """An auto-send after a system auto-approval has no person behind it
-    (decisions §293); the worker sends with `actor_id=None` rather than failing
+    (decisions §302); the worker sends with `actor_id=None` rather than failing
     to parse the message and leaving the invoice at `sending_to_erp`."""
     body = _body(actor_id=None)
     invoice = SimpleNamespace(id=uuid.UUID(body["invoice_id"]))

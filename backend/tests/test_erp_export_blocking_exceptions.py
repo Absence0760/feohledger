@@ -28,7 +28,7 @@ Pinned here, on real Postgres over real HTTP:
 * approval does not push while the step's `auto_send_on_approval` is off (an
   absent key reads as off); with it on, approval's auto-send meets the same
   gate and leaves the invoice `approved` (`test_erp_auto_send_on_approval.py`,
-  decisions §293).
+  decisions §302).
 """
 
 from __future__ import annotations
@@ -594,7 +594,7 @@ async def test_a_new_fraud_finding_is_still_raised_after_another_was_dismissed(r
 
 async def test_approval_does_not_push_with_auto_send_off(realdb, dispatched):
     """`_ERP_ON` enables the step without `auto_send_on_approval`, which reads as
-    off (decisions §293): approval advances the step pointer only and the push
+    off (decisions §302): approval advances the step pointer only and the push
     is a separate, gated request. So an approved invoice with an open duplicate
     sits at `approved` until someone sends it, and that send is refused."""
     info = realdb.info(TENANT)

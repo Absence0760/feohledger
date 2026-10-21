@@ -40,7 +40,7 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-20 — auto-sending an approved invoice to the ERP
-(decisions §293) opened one (c) entry, an approval whose post-commit push never
+(decisions §302) opened one (c) entry, an approval whose post-commit push never
 ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
 true` before deploying it, taking the file from 118 → 120. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
@@ -1880,7 +1880,7 @@ scope (§260) — do not fold them into any of these.
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
 
-### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §293)
+### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §302)
 
 - [ ] **(c) An approval whose auto-send never ran is not noticed.** The push
       after an approval is post-commit work, so a process that dies between the
@@ -2123,7 +2123,7 @@ from that work is the one entry below.
       generates a Positive Pay file, and the SOC 2 records-management evidence
       request either way.
 - [ ] **(b) Confirm every stored `auto_send_on_approval: true` before deploying
-      decisions §293.** The flag did nothing until §293, and every workflow save
+      decisions §302.** The flag did nothing until §302, and every workflow save
       used to store `true` through the schema default, so a stored `true` may be
       a choice or an accident. Once deployed, a tenant with one and a live ERP
       sends each approved invoice to the ERP on approval, and it leaves the
@@ -2134,4 +2134,4 @@ from that work is the one entry below.
       `false` through `PATCH /api/workflows/{id}`. Invoices already created
       keep the snapshot they froze, so the same check covers the unapproved
       invoices under such a definition. **Trigger:** the first deploy carrying
-      decisions §293 to an environment with a tenant on a live ERP.
+      decisions §302 to an environment with a tenant on a live ERP.

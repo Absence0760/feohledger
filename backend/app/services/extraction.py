@@ -1171,7 +1171,7 @@ async def run_extraction(
         await db.commit()
 
         if auto_approved:
-            # "Send to the ERP on approval" (decisions §293), in a transaction of
+            # "Send to the ERP on approval" (decisions §302), in a transaction of
             # its own now the approval has committed. Called here rather than
             # queued post-commit: this runs on the extraction worker's loop,
             # whose single-connection pool the committing session still holds

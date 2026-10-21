@@ -456,7 +456,7 @@ trigger runs one sequence, `services/erp_send.start_erp_send`:
 ### Auto-send on approval (`auto_send_on_approval`)
 
 The `erp_export` step's `config.auto_send_on_approval` (the builder's
-"Auto-send on approval" switch) makes approval start the push (decisions §293).
+"Auto-send on approval" switch) makes approval start the push (decisions §302).
 It applies when **all** of these hold:
 
 - the invoice's frozen **snapshot** (`WorkflowInstance.steps_config_snapshot`,

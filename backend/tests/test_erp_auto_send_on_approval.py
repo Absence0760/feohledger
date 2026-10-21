@@ -1,4 +1,4 @@
-"""Approval sends the invoice to the ERP when its workflow says so (decisions §293).
+"""Approval sends the invoice to the ERP when its workflow says so (decisions §302).
 
 Found live against Xero: tenant `acme`'s default workflow had the ERP export
 step's `auto_send_on_approval: true`, a manager approved an invoice, and it sat
@@ -94,7 +94,7 @@ async def test_saving_a_workflow_without_the_flag_stores_it_off(realdb):
     """Every save runs a step through `ErpExportStepConfig` and stores the dump,
     so the schema default IS what an unset switch becomes. It was `True`: an
     admin who changed an approval threshold on a workflow the builder showed
-    with the switch off armed the push without seeing it (decisions §293)."""
+    with the switch off armed the push without seeing it (decisions §302)."""
     steps = [
         {"number": 2, "type": "approval", "name": "Approval", "enabled": True, "config": {}},
         {
