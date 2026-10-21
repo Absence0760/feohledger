@@ -18,8 +18,12 @@ import {
  *
  * `stored` is `settings.erp` from `GET /api/organization`. A non-admin reads a
  * projection holding only `integration_method` (`org_settings_view`), which the
- * ERP form always writes, so this reads the ROUTE from it and never needs the
- * `type`. The route rule mirrors the backend's `dispatcher.resolve_adapter_key`:
+ * ERP form always writes, so the ROUTE is read from it. `type` is consulted
+ * only to recognise the never-gated `mock` adapter, which a non-admin cannot
+ * see — for them a direct route counts as live and gated on
+ * `erp_integrations`, which every plan holds. An ERP block written without
+ * `integration_method` (by hand or an older client) is invisible to a
+ * non-admin, who then sees no sync offer at all. The route rule mirrors the backend's `dispatcher.resolve_adapter_key`:
  * `integration_method` defaults to `merge_dev`, and `merge_dev` wins whatever
  * the type; a direct `mock` is never plan-gated.
  */

@@ -1,3 +1,5 @@
+import type { NotificationListResponse } from '#lib/types/notification.ts';
+
 import { expect, test } from '../fixtures/helpers';
 
 /**
@@ -16,6 +18,26 @@ import { expect, test } from '../fixtures/helpers';
  */
 
 const LIST = (url: URL) => url.pathname === '/api/notifications';
+
+/** One already-read contract notification — it navigates nowhere when opened. */
+const CONTRACT_ITEM: NotificationListResponse = {
+	items: [
+		{
+			id: '00000000-0000-0000-0000-00000000b311',
+			event_type: 'contract_renewal_due',
+			entity_type: 'contract',
+			entity_id: null,
+			title: 'Renewal due: bell spec contract',
+			body: null,
+			read_at: '2026-01-01T00:00:00Z',
+			created_at: '2026-01-01T00:00:00Z'
+		}
+	],
+	total: 1,
+	unread: 0,
+	page: 1,
+	page_size: 20
+};
 
 test.describe('notification bell popover', () => {
 	test('a failed load says so and offers Retry, not "No notifications yet"', async ({ page }) => {
@@ -83,5 +105,55 @@ test.describe('notification bell popover', () => {
 		await expect(popover.getByRole('link', { name: 'Alle anzeigen' })).toBeVisible();
 		await expect(popover.getByText('Mark all read')).toHaveCount(0);
 		await expect(popover.getByText('View all')).toHaveCount(0);
+	});
+
+	test('a failed refresh over earlier rows keeps them and says they are not current', async ({
+		page
+	}) => {
+		let fail = false;
+		await page.route(LIST, (route) =>
+			fail
+				? route.fulfill({ status: 500, json: { detail: 'boom' } })
+				: route.fulfill({ json: CONTRACT_ITEM })
+		);
+		await page.goto('/');
+		const bell = page.locator('.bell-btn');
+		const popover = page.getByRole('dialog', { name: 'Notifications' });
+
+		await bell.click();
+		await expect(popover.getByText('Renewal due: bell spec contract')).toBeVisible();
+		await page.keyboard.press('Escape');
+
+		fail = true;
+		await bell.click();
+		await expect(popover.getByTestId('bell-error')).toBeVisible();
+		await expect(popover.getByText('Renewal due: bell spec contract')).toBeVisible();
+	});
+
+	test('opening an item that navigates nowhere returns focus to the bell', async ({ page }) => {
+		await page.route(LIST, (route) => route.fulfill({ json: CONTRACT_ITEM }));
+		await page.goto('/');
+		const bell = page.locator('.bell-btn');
+		await bell.click();
+		await page.getByRole('button', { name: /Renewal due: bell spec contract/ }).click();
+		await expect(page.getByRole('dialog', { name: 'Notifications' })).toHaveCount(0);
+		await expect(bell).toBeFocused();
+	});
+
+	test('tabbing out of the popover closes it', async ({ page }) => {
+		await page.route(LIST, (route) => route.fulfill({ json: CONTRACT_ITEM }));
+		await page.goto('/');
+		await page.locator('.bell-btn').click();
+		const popover = page.getByRole('dialog', { name: 'Notifications' });
+		const viewAll = popover.getByRole('link', { name: 'View all', exact: true });
+		await expect(popover.getByText('Renewal due: bell spec contract')).toBeVisible();
+		await viewAll.focus();
+		// The next stop after "View all" is the bell itself (the popover precedes
+		// it in the DOM), so step past the bell to leave both.
+		await page.keyboard.press('Tab');
+		await expect(page.locator('.bell-btn')).toBeFocused();
+		await expect(popover).toBeVisible();
+		await page.keyboard.press('Tab');
+		await expect(popover).toHaveCount(0);
 	});
 });

@@ -251,12 +251,16 @@ The current build implements:
   repeated error replaces its earlier copy rather than stacking. The toast
   region is named "Status messages", so it is not a second landmark called
   "Notifications" beside the sidebar bell. A failed page load is stated in
-  place with a Retry (`ui/LoadError`), never by a toast alone. Guarded by
-  `frontend/src/lib/utils/toastQueue.test.ts`.
+  place with a Retry (`ui/LoadError`), never by a toast alone. Persistent
+  errors rise above a showing bulk-action bar and the consent banner rather
+  than covering them (SC 2.4.11). Guarded by
+  `frontend/src/lib/utils/toastQueue.test.ts` (the rules) and
+  `frontend/tests-e2e/a11y/toast-timing.spec.ts` (the wiring in a page).
 - **Popovers that are dialogs take focus** — the sidebar notification bell's
   popover (`role="dialog"`, labelled by its heading) moves focus to that
-  heading on open and back to the bell on Escape or an outside click; a failed
-  load inside it says so with a Retry rather than "No notifications yet".
+  heading on open and back to the bell on Escape, an outside click or opening
+  an item; tabbing out of it closes it. A failed load inside it says so with a
+  Retry rather than "No notifications yet" — above any older rows too.
   Guarded by `frontend/tests-e2e/notifications/bell.spec.ts`.
 - **Disclosure toggles state what they control** — e.g. the consent banner's
   Manage button carries `aria-expanded` and `aria-controls` naming the details

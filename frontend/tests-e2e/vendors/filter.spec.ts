@@ -14,8 +14,9 @@ test.describe('/vendors status filter (acme admin)', () => {
 	test('Unverified chip narrows to vendors in unverified status', async ({ page }) => {
 		// `count()` does not auto-wait, and this baseline is what the narrowed
 		// count is compared against — so anchor on the unfiltered list being on
-		// screen first rather than on a quiet network.
-		await expect(page.locator('table tbody tr').first()).toBeVisible();
+		// screen first rather than on a quiet network — a real vendor row, not
+		// the table's one-row "Loading…" placeholder.
+		await expect(page.locator('table tbody td.vendor-name').first()).toBeVisible();
 		const beforeRows = await page.locator('table tbody tr').count();
 
 		const filtered = page.waitForResponse(

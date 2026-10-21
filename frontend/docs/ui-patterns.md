@@ -941,6 +941,8 @@ the `ui/` primitive in the Source column.
 | Money / currency | `<Money>` / `formatMoney` | `ui/Money.svelte` / `utils/money.ts` |
 | Field-level advisory | `.field-warning` (`role="status"`) | `ui/FieldWarning.svelte` |
 | Zero-data onboarding block | `.empty-state` (+ `data-testid`) | `ui/EmptyState.svelte` |
+| Setup steps with done states | `.setup-checklist` (`li[data-done]`) | `ui/SetupChecklist.svelte` |
+| Failed load + Retry (page, or whole screen) | `.load-error` (`role="alert"` in a page) | `ui/LoadError.svelte` |
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
 
@@ -1075,8 +1077,13 @@ inherit it for free. Reuse these; don't re-solve them per page.
   while the pointer is over a toast or focus is inside the region**, and runs
   on with the time it had left. At most three errors stay on screen (the
   oldest goes), and the same error text arriving again replaces its old copy —
-  a fresh insertion, so it is announced again. Dismissing from the button moves
-  focus to the next toast's dismiss, or to `<main>` when it was the last. The
+  a fresh insertion, so it is announced again. When a focused toast leaves
+  (dismissed, evicted by the cap, replaced), focus moves to the next toast's
+  dismiss, or back to where it came from when it was the last (`<main>` if that
+  element is gone). The region rises above a showing bulk-action bar
+  (`.bulk-bar`) and the consent banner, and a toast is never wider than
+  `100vw − 32px` (2.4.11, 1.4.10). Browser guard:
+  `tests-e2e/a11y/toast-timing.spec.ts` (Playwright clock, no sleeps). The
   rules are the pure `utils/toastQueue.ts` (unit-tested with fake timers).
   **A toast is never the only sign of a failed LOAD**: a page whose data did not
   arrive says so in place with `ui/LoadError` and a Retry (the vendors list and

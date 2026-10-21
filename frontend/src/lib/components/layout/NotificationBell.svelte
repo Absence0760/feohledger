@@ -67,7 +67,10 @@
 	}
 
 	async function openItem(n: Notification) {
-		open = false;
+		// Through `close()`, so focus is back on the bell before any navigation —
+		// a non-invoice notification navigates nowhere, and the clicked button
+		// is about to unmount.
+		close();
 		try {
 			if (!n.read_at) await notificationStore.markRead(n.id);
 		} catch {
@@ -86,6 +89,15 @@
 		}
 	}
 
+	// A non-modal popover: when focus leaves the bell + popover pair, it
+	// closes rather than staying open behind the reader (WCAG 2.4.3).
+	function onWrapperFocusOut(e: FocusEvent) {
+		const next = e.relatedTarget as Node | null;
+		if (!open || !next) return;
+		if ((e.currentTarget as HTMLElement).contains(next)) return;
+		open = false;
+	}
+
 	// Esc closes + restores focus to the bell, matching the entity/profile menus.
 	function onWindowKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape' && open) close();
@@ -94,7 +106,15 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<div class="bell-wrapper" class:collapsed>
+{#snippet loadError()}
+	<div class="bell-error" role="alert" data-testid="bell-error">
+		<p>{m('notifications.empty.errored')}</p>
+		<button type="button" class="bell-retry" onclick={retry}>{m('common.retry')}</button>
+	</div>
+{/snippet}
+
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="bell-wrapper" class:collapsed onfocusout={onWrapperFocusOut}>
 	{#if open}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="bell-backdrop" onclick={close} onkeydown={() => {}}></div>
@@ -111,13 +131,13 @@
 				{#if loading && recent.length === 0}
 					<p class="bell-empty" role="status">{m('common.loading')}</p>
 				{:else if errored && recent.length === 0}
-					<div class="bell-error" role="alert" data-testid="bell-error">
-						<p>{m('notifications.empty.errored')}</p>
-						<button type="button" class="bell-retry" onclick={retry}>{m('common.retry')}</button>
-					</div>
+					{@render loadError()}
 				{:else if recent.length === 0}
 					<p class="bell-empty">{m('notifications.empty.all')}</p>
 				{:else}
+					<!-- A failed refresh over rows from an earlier load: the rows
+					     stay, but they are not current, and the popover says so. -->
+					{#if errored}{@render loadError()}{/if}
 					{#each recent as n (n.id)}
 						<button class="bell-item" class:unread={!n.read_at} onclick={() => openItem(n)}>
 							<span class="bell-dot" class:on={!n.read_at} aria-hidden="true"></span>

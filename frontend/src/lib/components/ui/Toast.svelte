@@ -34,45 +34,118 @@
 	let region = $state<HTMLElement | null>(null);
 	let hovered = $state(false);
 	let focusInside = $state(false);
+	// Where keyboard focus came from when it entered the region, so the last
+	// dismissal can hand it back there rather than to the top of the page.
+	let returnTo: HTMLElement | null = null;
+	// Distance (px) from the viewport bottom the region must clear: the top of
+	// a fixed bulk-action bar, when one is showing. 0 = none.
+	let lift = $state(0);
 
 	$effect(() => {
 		queue.setPaused(hovered || focusInside);
 	});
 
-	// The list emptied under the pointer or the focus: neither `mouseleave`
-	// nor `focusout` is guaranteed to fire for an element that is removed.
+	/**
+	 * Re-read hover and focus from the page after the list changes. A toast can
+	 * leave without its own `mouseleave` / `focusout` — dismissed, evicted by
+	 * the error cap, replaced by a repeat — and a stale `hovered` would freeze
+	 * every remaining timer. A focused toast that left hands focus on.
+	 */
+	$effect(() => {
+		void toasts;
+		tick().then(() => {
+			if (!region) return;
+			hovered = !!region.querySelector('.toast:hover');
+			if (focusInside) handOffFocus();
+		});
+	});
+
+	/**
+	 * Keep persistent errors clear of what the reader needs next (WCAG 2.4.11).
+	 * The region sits bottom-right, which is where the shared bulk-action bar
+	 * sits too (centred, `bottom: 24px`); while one is on screen the region
+	 * rises above it. Observed only while toasts are showing.
+	 */
 	$effect(() => {
 		if (toasts.length === 0) {
-			hovered = false;
-			focusInside = false;
+			lift = 0;
+			return;
 		}
+		let observed: Element | null = null;
+		let frame = 0;
+		const resize = new ResizeObserver(() => schedule());
+		function measure() {
+			frame = 0;
+			const bar = document.querySelector('.bulk-bar');
+			if (bar !== observed) {
+				if (observed) resize.unobserve(observed);
+				observed = bar;
+				if (bar) resize.observe(bar);
+			}
+			lift = bar ? Math.max(0, window.innerHeight - bar.getBoundingClientRect().top) + 8 : 0;
+		}
+		function schedule() {
+			if (!frame) frame = requestAnimationFrame(measure);
+		}
+		const mutations = new MutationObserver(schedule);
+		mutations.observe(document.body, { childList: true, subtree: true });
+		window.addEventListener('resize', schedule);
+		measure();
+		return () => {
+			cancelAnimationFrame(frame);
+			mutations.disconnect();
+			resize.disconnect();
+			window.removeEventListener('resize', schedule);
+		};
 	});
+
+	function onFocusIn(e: FocusEvent) {
+		const from = e.relatedTarget as HTMLElement | null;
+		if (!focusInside && from && !region?.contains(from)) returnTo = from;
+		focusInside = true;
+	}
 
 	function onFocusOut(e: FocusEvent) {
 		const next = e.relatedTarget as Node | null;
-		focusInside = !!(next && region?.contains(next));
+		if (next) {
+			focusInside = !!region?.contains(next);
+			return;
+		}
+		// No destination: the focused toast is being removed (Chromium fires
+		// `focusout` on removal), or the window lost focus. Decide once the DOM
+		// has settled.
+		tick().then(() => {
+			if (focusInside) handOffFocus();
+		});
 	}
 
 	/**
-	 * Dismissed from its own button: the focused button is about to vanish, so
-	 * hand focus to the next toast's dismiss button, or — when this was the
-	 * last one — to the page's `<main>` (the skip-link target), never `<body>`
-	 * (WCAG 2.4.3).
+	 * The focused toast is gone: move focus to the next toast's dismiss button,
+	 * or — when none is left — back where it came from, falling back to the
+	 * page's `<main>` (the skip-link target), never `<body>` (WCAG 2.4.3).
 	 */
-	async function dismissFromButton(id: number) {
-		dismiss(id);
-		await tick();
-		// The card under the pointer was just removed, so no `mouseleave` will
-		// come for it: re-read whether the pointer is over a remaining toast.
-		hovered = !!region?.querySelector('.toast:hover');
+	function handOffFocus() {
+		// Idempotent: only acts when focus has actually been dropped. Both the
+		// list-change effect and `focusout` may call it for one removal.
+		const active = document.activeElement;
+		if (active && active !== document.body) {
+			focusInside = !!region?.contains(active);
+			return;
+		}
 		const next = region?.querySelector<HTMLButtonElement>('.toast-dismiss');
 		if (next) {
 			next.focus();
-		} else {
-			focusInside = false;
-			document.getElementById('main-content')?.focus();
+			focusInside = true;
+			return;
 		}
+		focusInside = false;
+		const target = returnTo?.isConnected ? returnTo : document.getElementById('main-content');
+		returnTo = null;
+		target?.focus();
 	}
+
+	// Focus hand-off and the hover re-read happen in the list-change effect
+	// above, which covers this and every other way a toast leaves.
 </script>
 
 <!--
@@ -93,7 +166,10 @@
 	class="toast-region"
 	role="region"
 	aria-label={m('toast.region')}
-	onfocusin={() => (focusInside = true)}
+	style:bottom={lift
+		? `max(${lift}px, calc(16px + var(--consent-banner-height, 0px)))`
+		: 'calc(16px + var(--consent-banner-height, 0px))'}
+	onfocusin={onFocusIn}
 	onfocusout={onFocusOut}
 >
 	<div class="toast-container" aria-live="assertive">
@@ -133,7 +209,7 @@
 			type="button"
 			class="toast-dismiss"
 			aria-label={m('toast.dismiss')}
-			onclick={() => dismissFromButton(t.id)}
+			onclick={() => dismiss(t.id)}
 		>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 		</button>
@@ -145,6 +221,7 @@
 	   just groups them for the landmark. */
 	.toast-region {
 		position: fixed;
+		/* `bottom` is set inline: above the consent banner and any bulk bar. */
 		bottom: 16px;
 		right: 16px;
 		z-index: 9999;
@@ -171,7 +248,8 @@
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 		pointer-events: auto;
 		animation: slide-in 0.25s ease;
-		max-width: 420px;
+		/* Never wider than the viewport's gutters (reflow at 320px, 1.4.10). */
+		max-width: min(420px, calc(100vw - 32px));
 	}
 
 	@keyframes slide-in {
