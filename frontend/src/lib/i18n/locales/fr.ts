@@ -3012,8 +3012,11 @@ export const messages = {
 	'portal.invoices.waitingOn.erp': "En cours d'enregistrement dans le système comptable de votre client",
 
 	// Auth — login (routes/login/+page.svelte)
-	'auth.login.heading': 'FeohLedger',
+	'auth.login.heading': "Se connecter",
 	'auth.login.subtitle': 'Connectez-vous pour continuer',
+	'auth.login.pageTitle': "Se connecter — FeohLedger",
+	'auth.login.workspace': "Espace de travail : {workspace}",
+	'auth.login.loadingOptions': "Chargement des options de connexion…",
 	'auth.login.email': 'E-mail',
 	'auth.login.password': 'Mot de passe',
 	'auth.login.signIn': 'Se connecter',

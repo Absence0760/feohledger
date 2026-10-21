@@ -1839,7 +1839,7 @@ A single OIDC flow supports both Okta and Entra because they're both OIDC-compli
 
 ### Flow
 
-1. User clicks **Sign in with Okta/Microsoft** on `/login` (button renders only when `GET /api/auth/sso/config?slug=<tenant>` returns `enabled: true`). `slug` is optional — on a vanity host it is omitted and the tenant comes from the request `Host` (see *SSO on a white-label vanity host* below).
+1. User clicks **Sign in with Okta/Microsoft** on `/login` (button renders only when `GET /api/auth/sso/config?slug=<tenant>` returns `enabled: true`). `slug` is optional — on a vanity host it is omitted and the tenant comes from the request `Host` (see *SSO on a white-label vanity host* below). The page asks for the OIDC and SAML configs **in parallel** and shows a short loading state until both have answered (either way), so an SSO-only workspace never draws the password form and then pulls it away; a failed call still leaves password sign-in (issue #635 finding 33). Its heading is "Sign in", its tab title is localized (`login/+layout.svelte`, which `/login/mfa` inherits), and on a workspace host it names the workspace by that host — nothing a public endpoint would have to disclose.
 2. Browser navigates to `GET /api/auth/sso/authorize?slug=<tenant>` on the backend (same optional-`slug` rule).
 3. Backend fetches the discovery doc (cached in Redis for 24h), mints a one-shot `state` + `nonce` into Redis (keyed to the tenant slug), and **302-redirects** to the IdP's `authorization_endpoint` with `redirect_uri` pointing to the *tenant's own subdomain* (built from `FEOH_TENANT_URL_TEMPLATE`).
 4. User authenticates on the IdP.

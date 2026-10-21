@@ -1,6 +1,6 @@
 <script lang="ts">
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
-	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
 	import IconCheck from '~icons/material-symbols/check-circle-outline';
 	import { api, ApiError } from '#lib/api.ts';
 	import { SIGNUP_EMAIL_HAS_WORKSPACE } from '#lib/api/codedRefusals.ts';
@@ -122,7 +122,7 @@
 			{#if phase === 'success' && result}
 				<div class="done-icon" aria-hidden="true"><IconCheck /></div>
 			{:else}
-				<BrandMark size={40} />
+				<AuthBrandMark />
 			{/if}
 			{#if phase === 'pending'}
 				<h1>{m('auth.verify.pendingHeading')}</h1>

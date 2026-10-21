@@ -3008,8 +3008,11 @@ export const messages = {
 	'portal.invoices.waitingOn.erp': 'Registrándose en el sistema contable de tu cliente',
 
 	// Auth — login (routes/login/+page.svelte)
-	'auth.login.heading': 'FeohLedger',
+	'auth.login.heading': "Iniciar sesión",
 	'auth.login.subtitle': 'Inicia sesión para continuar',
+	'auth.login.pageTitle': "Iniciar sesión — FeohLedger",
+	'auth.login.workspace': "Espacio de trabajo: {workspace}",
+	'auth.login.loadingOptions': "Cargando las opciones de inicio de sesión…",
 	'auth.login.email': 'Correo electrónico',
 	'auth.login.password': 'Contraseña',
 	'auth.login.signIn': 'Iniciar sesión',

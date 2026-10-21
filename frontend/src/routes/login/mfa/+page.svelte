@@ -1,6 +1,6 @@
 <script lang="ts">
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
-	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
 	import { auth, type MFAChallenge } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -174,7 +174,7 @@
 <AuthShell>
 	<form class="mfa-form" onsubmit={handleSubmit}>
 		<div class="head">
-			<BrandMark size={40} />
+			<AuthBrandMark />
 			<h1>{m('auth.mfa.heading')}</h1>
 			<p class="subtitle">
 				{#if method === 'passkey'}

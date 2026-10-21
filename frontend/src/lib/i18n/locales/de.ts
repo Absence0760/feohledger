@@ -3011,8 +3011,11 @@ export const messages = {
 	'portal.invoices.waitingOn.erp': 'Wird im Buchhaltungssystem Ihres Kunden erfasst',
 
 	// Auth — login (routes/login/+page.svelte)
-	'auth.login.heading': 'FeohLedger',
+	'auth.login.heading': "Anmelden",
 	'auth.login.subtitle': 'Zum Fortfahren anmelden',
+	'auth.login.pageTitle': "Anmelden — FeohLedger",
+	'auth.login.workspace': "Arbeitsbereich: {workspace}",
+	'auth.login.loadingOptions': "Anmeldeoptionen werden geladen…",
 	'auth.login.email': 'E-Mail',
 	'auth.login.password': 'Passwort',
 	'auth.login.signIn': 'Anmelden',

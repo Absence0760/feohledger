@@ -2952,8 +2952,11 @@ export const messages = {
 	'portal.invoices.waitingOn.erp': 'お客様の会計システムに記録中',
 
 	// Auth — login (routes/login/+page.svelte)
-	'auth.login.heading': 'FeohLedger',
+	'auth.login.heading': "サインイン",
 	'auth.login.subtitle': '続行するにはサインインしてください',
+	'auth.login.pageTitle': "サインイン — FeohLedger",
+	'auth.login.workspace': "ワークスペース: {workspace}",
+	'auth.login.loadingOptions': "サインイン方法を読み込んでいます…",
 	'auth.login.email': 'メールアドレス',
 	'auth.login.password': 'パスワード',
 	'auth.login.signIn': 'サインイン',

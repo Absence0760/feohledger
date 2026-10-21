@@ -3189,8 +3189,11 @@ export const en = {
 	'portal.invoices.waitingOn.erp': "Being recorded in your customer's accounting system",
 
 	// Auth — login (routes/login/+page.svelte)
-	'auth.login.heading': 'FeohLedger',
+	'auth.login.heading': "Sign in",
 	'auth.login.subtitle': 'Sign in to continue',
+	'auth.login.pageTitle': "Sign in — FeohLedger",
+	'auth.login.workspace': "Workspace: {workspace}",
+	'auth.login.loadingOptions': "Loading sign-in options…",
 	'auth.login.email': 'Email',
 	'auth.login.password': 'Password',
 	'auth.login.signIn': 'Sign in',

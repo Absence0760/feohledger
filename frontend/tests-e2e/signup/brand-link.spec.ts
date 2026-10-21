@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { VANITY_ORIGIN } from '../fixtures/env';
 import { ACME_BASE, expect, NO_TENANT_BASE, test } from '../fixtures/helpers';
 
@@ -61,6 +62,44 @@ test.describe('on a vanity (white-label) host', () => {
 	test('the mark is not a link to FeohLedger marketing', async ({ page }) => {
 		await page.goto('/login/forgot-password');
 		await expect(page.locator('.auth-card img.brand-mark')).toBeVisible();
+		await expect(page.getByRole('link', { name: 'FeohLedger home' })).toHaveCount(0);
+	});
+});
+
+/**
+ * The rest of the pre-auth pages render their form-column mark through the
+ * same component (issue #635 finding 31b): sign-in, its MFA step, and the
+ * signup verification page all used a plain `BrandMark`.
+ */
+test.describe('the other pre-auth pages, on the apex', () => {
+	test.use({ baseURL: NO_TENANT_BASE });
+
+	const homeLink = (page: Page) =>
+		page.getByRole('link', { name: 'FeohLedger home' });
+
+	test('sign-in: the mark is the named link home', async ({ page }) => {
+		await page.goto('/login');
+		await expect(homeLink(page)).toHaveCount(1);
+		await expect(homeLink(page)).toHaveAttribute('href', '/');
+		await expect(homeLink(page).locator('img.brand-mark')).toHaveAttribute('alt', '');
+	});
+
+	test('verify: the mark is the named link home', async ({ page }) => {
+		// No token: the page's error state, which still carries the mark.
+		await page.goto('/verify');
+		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+		await expect(homeLink(page)).toHaveCount(1);
+		await expect(homeLink(page)).toHaveAttribute('href', '/');
+	});
+
+});
+
+test.describe('the other pre-auth pages, on a workspace subdomain', () => {
+	test.use({ baseURL: ACME_BASE });
+
+	test('sign-in: the mark is not a link', async ({ page }) => {
+		await page.goto('/login');
+		await expect(page.locator('form.login-form img.brand-mark')).toBeVisible();
 		await expect(page.getByRole('link', { name: 'FeohLedger home' })).toHaveCount(0);
 	});
 });
