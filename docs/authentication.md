@@ -1854,6 +1854,8 @@ A single OIDC flow supports both Okta and Entra because they're both OIDC-compli
    - Mints our own JWT and returns `{access_token, must_change_password, tenant_slug}`.
 8. Frontend stores the JWT, fetches `/api/auth/me`, and routes to `/change-password` if flagged or `/` otherwise.
 
+An IdP that refuses or abandons the sign-in redirects back with `?error=<code>` instead (RFC 6749 §4.1.2.1). The OIDC callback and the SAML bridge (`/login/saml-callback`) are one component, `components/auth/AuthCallback.svelte`, rendered inside `AuthShell` like every other sign-in screen; it states the refusal in words from `utils/idpCallbackError.ts` — `access_denied`, `login_required`, `consent_required`, `interaction_required`, `temporarily_unavailable` and `server_error` each have a sentence, anything else a generic one — and shows the raw code only as small support detail, and only when it is a short identifier: the value comes from the URL, so text someone wrote into a link is never echoed (issue #635 finding 36). The `?next=` destination stashed before the round trip is taken on arrival either way, and the "Back to sign in" link carries it.
+
 ### Why callback URLs are per-tenant
 
 Each customer registers their own Okta/Entra app with `redirect_uri = https://<theirtenant>.app.com/login/sso-callback`. That way the IdP redirects directly to the tenant origin and our localStorage JWT works without cross-origin hops. In dev, `FEOH_TENANT_URL_TEMPLATE=http://{slug}.localhost:7777` gives each tenant their own callback URL for free.

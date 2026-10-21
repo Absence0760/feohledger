@@ -391,7 +391,7 @@ component the second time you would duplicate one.**
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
 - marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail`
-- auth: `AuthShell` (every pre-auth employee page) `AuthCard` `AuthBrandMark` (the form-column mark; a home link on the apex only)
+- auth: `AuthShell` (every pre-auth employee page) `AuthCard` `AuthBrandMark` (the form-column mark; a home link on the apex only) `AuthCallback` (the SSO / SAML return page)
 
 Two invariants the library enforces, worth knowing before you call anything:
 
