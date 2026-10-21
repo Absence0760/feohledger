@@ -45,7 +45,13 @@ import {
  *   3. Fail closed — an unlinked vendor, and a bill with no invoice / due
  *      date, are refused before anything is posted (Xero needs both dates;
  *      the adapter never invents them).
- *   4. Disconnect — clears the connection.
+ *   4. Paid in Xero → recorded in FeohLedger (decisions §303) — a pushed bill
+ *      rests at `sent_to_erp`; once fake Xero marks it PAID with money paid,
+ *      `POST /sync-erp-status` (the on-demand form of the ERP status sweep)
+ *      records an external payment and the invoice reaches `paid`. A bill
+ *      Xero shows PAID by credit alone, and one VOIDED, are flagged for a
+ *      person instead and the invoice stays where it was.
+ *   5. Disconnect — clears the connection.
  */
 
 const PROVIDER = 'xero';
@@ -80,6 +86,46 @@ async function oauthStatus(page: Page) {
 	});
 	expect(resp.ok()).toBe(true);
 	return resp.json();
+}
+
+/** Drive fake Xero's bill status through its test hook. */
+async function setXeroStatus(
+	request: APIRequestContext,
+	id: string,
+	status: string,
+	amountPaid?: string
+): Promise<void> {
+	const resp = await request.post(`${FAKE_ERP_BASE}/xero/api.xro/2.0/__set-status`, {
+		data: { id, status, ...(amountPaid ? { amount_paid: amountPaid } : {}) }
+	});
+	expect(resp.ok(), await resp.text()).toBe(true);
+}
+
+/** Ask the ERP now what happened to a pushed invoice (the on-demand sweep). */
+async function syncErpStatus(page: Page, invoiceId: string) {
+	const resp = await page.request.post(`${API_BASE}/api/invoices/${invoiceId}/sync-erp-status`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status(), await resp.text()).toBe(200);
+	return (await resp.json()) as { status: string; erp_status: string; outcome: string };
+}
+
+/** Push an approved Xero-ready invoice and return it with its bill id. */
+async function pushedInvoice(page: Page, prefix: string) {
+	await syncErpVendors(page);
+	await syncErpGlAccounts(page);
+	const inv = await createApprovedInvoice(page, {
+		prefix,
+		invoiceDate: '2026-10-01',
+		dueDate: '2026-10-31',
+		amount: '1150.00',
+		taxAmount: '150.00',
+		currency: 'ZAR',
+		vendor: SUPPLIER,
+		glAccount: '6100'
+	});
+	expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
+	return { inv, billId: await erpReferenceFromAudit(page, inv.id) };
 }
 
 /** A bill straight from the fake, as Xero holds it. */
@@ -137,7 +183,7 @@ test.describe('/erp xero adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
 			expect(bill.Type).toBe('ACCPAY');
 			expect(bill.Contact.ContactID).toBe('xero-contact-1');
@@ -179,6 +225,98 @@ test.describe('/erp xero adapter against fake-erp', () => {
 			expect(await erpFailureFromAudit(page, inv.id)).toBe('Xero post refused: missing_dates');
 		} finally {
 			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a bill paid in Xero is recorded in FeohLedger as an external payment', async ({
+		page,
+		request
+	}) => {
+		const { inv, billId } = await pushedInvoice(page, 'E2E-XERO-PAID');
+		const headers = await authedTenantHeaders(page);
+
+		// Still owed in Xero: nothing changes.
+		expect(await syncErpStatus(page, inv.id)).toMatchObject({
+			status: 'sent_to_erp',
+			erp_status: 'open',
+			outcome: 'unchanged'
+		});
+
+		await setXeroStatus(request, billId, 'PAID', '1150.00');
+		expect(await syncErpStatus(page, inv.id)).toEqual({
+			id: inv.id,
+			status: 'paid',
+			erp_status: 'paid',
+			outcome: 'recorded_paid'
+		});
+
+		// The ERP-sourced payment: completed, external, referencing the bill.
+		const listed = await page.request.get(`${API_BASE}/api/payments`, {
+			headers,
+			params: { invoice_id: inv.id }
+		});
+		expect(listed.status(), await listed.text()).toBe(200);
+		const payments = (await listed.json()).items as Array<{
+			status: string;
+			provider: string | null;
+			reference: string | null;
+		}>;
+		expect(payments).toHaveLength(1);
+		expect(payments[0]).toMatchObject({
+			status: 'completed',
+			provider: 'external',
+			reference: billId
+		});
+
+		const audit = await page.request.get(`${API_BASE}/api/invoices/${inv.id}/audit-log`, {
+			headers
+		});
+		const actions = ((await audit.json()) as Array<{ action: string }>).map((r) => r.action);
+		expect(actions).toContain('invoice.paid_via_erp_report');
+
+		// Asked again, it is no longer waiting on the ERP: nothing is recorded twice.
+		const again = await page.request.post(
+			`${API_BASE}/api/invoices/${inv.id}/sync-erp-status`,
+			{ headers }
+		);
+		expect(again.status()).toBe(409);
+	});
+
+	test('a bill Xero settled by credit, or voided, is flagged and never recorded as paid', async ({
+		page,
+		request
+	}) => {
+		const headers = await authedTenantHeaders(page);
+		const credited = await pushedInvoice(page, 'E2E-XERO-CREDITED');
+		const voided = await pushedInvoice(page, 'E2E-XERO-VOIDED');
+
+		// PAID with nothing paid against it is a credit note, not money.
+		await setXeroStatus(request, credited.billId, 'PAID');
+		expect(await syncErpStatus(page, credited.inv.id)).toMatchObject({
+			status: 'sent_to_erp',
+			erp_status: 'settled_no_payment',
+			outcome: 'flagged'
+		});
+
+		await setXeroStatus(request, voided.billId, 'VOIDED');
+		expect(await syncErpStatus(page, voided.inv.id)).toMatchObject({
+			status: 'sent_to_erp',
+			erp_status: 'cancelled',
+			outcome: 'flagged'
+		});
+
+		for (const { inv } of [credited, voided]) {
+			const listed = await page.request.get(`${API_BASE}/api/payments`, {
+				headers,
+				params: { invoice_id: inv.id }
+			});
+			expect((await listed.json()).items).toHaveLength(0);
+			const flags = await page.request.get(`${API_BASE}/api/exceptions`, {
+				headers,
+				params: { type: 'erp_reconciliation', search: inv.invoice_number }
+			});
+			expect(flags.status(), await flags.text()).toBe(200);
+			expect(await flags.text()).toContain(inv.id);
 		}
 	});
 

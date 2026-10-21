@@ -181,7 +181,7 @@ test.describe('/erp blackbaud_fe_nxt adapter against fake-erp', () => {
 			glAccount: '01-5000-00'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			const posted = await blackbaudInvoice(request, await erpReferenceFromAudit(page, inv.id));
 			expect(posted.vendor_id).toBe(136);
 			expect(posted.amount).toBe(1234.56);

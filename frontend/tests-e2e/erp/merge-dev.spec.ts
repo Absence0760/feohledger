@@ -311,7 +311,7 @@ test.describe('/erp merge_dev adapter against fake-erp', () => {
 		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);
-			expect(terminal).toBe('done');
+			expect(terminal).toBe('sent_to_erp');
 
 			// The adapter returned the fake's Merge-shaped document id — proof
 			// the REAL merge_dev adapter (not the mock) performed the post.

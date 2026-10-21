@@ -118,7 +118,7 @@ test.describe('/erp netsuite adapter against fake-erp', () => {
 		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);
-			expect(terminal).toBe('done');
+			expect(terminal).toBe('sent_to_erp');
 
 			// NetSuite returns 204 + the record URL in the Location header; the
 			// adapter extracts the trailing id — the fake mints numeric-string

@@ -281,10 +281,11 @@ export async function createApprovedInvoice(
 }
 
 /** POST send-to-erp (202) and poll the invoice's real status field — never a
- *  fixed sleep — until the async ERP dispatch settles on a terminal outcome.
- *  Success is `done` (sending_to_erp → sent_to_erp → done); a failed post
- *  lands on `failed` after the adapter's bounded retries, so polling for the
- *  terminal pair keeps a failure diagnosable instead of a bare poll timeout.
+ *  fixed sleep — until the async ERP dispatch settles on its outcome.
+ *  Success is `sent_to_erp`, where a pushed invoice rests until the ERP pays
+ *  it (decisions §303); a failed post lands on `failed` after the adapter's
+ *  bounded retries, so polling for the pair keeps a failure diagnosable
+ *  instead of a bare poll timeout.
  *  Returns the terminal status for the caller to assert. */
 export async function sendToErpAndAwaitTerminal(page: Page, invoiceId: string): Promise<string> {
 	const sent = await page.request.post(`${API_BASE}/api/invoices/${invoiceId}/send-to-erp`, {
@@ -296,9 +297,9 @@ export async function sendToErpAndAwaitTerminal(page: Page, invoiceId: string): 
 	await expect
 		.poll(async () => (await getInvoice(page, invoiceId)).status, {
 			timeout: 20_000,
-			message: 'invoice never reached a terminal ERP status (done/failed)'
+			message: 'invoice never reached an ERP outcome (sent_to_erp/failed)'
 		})
-		.toMatch(/^(done|failed)$/);
+		.toMatch(/^(sent_to_erp|failed)$/);
 
 	return (await getInvoice(page, invoiceId)).status;
 }
@@ -325,7 +326,8 @@ export async function erpReferenceFromAudit(page: Page, invoiceId: string): Prom
 	return ref as string;
 }
 
-/** Best-effort cleanup — a `done` invoice is immutable and DELETE 409s;
+/** Best-effort cleanup — a pushed (`sent_to_erp`) or `done` invoice is
+ *  immutable and DELETE 409s;
  *  accept that (the worker's tenant resets between sessions). */
 export async function deleteInvoice(page: Page, id: string): Promise<void> {
 	await page.request.delete(`${API_BASE}/api/invoices/${id}`, {

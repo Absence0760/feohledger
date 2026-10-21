@@ -144,7 +144,7 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);
-			expect(terminal).toBe('done');
+			expect(terminal).toBe('sent_to_erp');
 
 			// The adapter returned the fake's BC-shaped document id — proof the
 			// REAL dynamics_365_bc adapter (token exchange included) performed

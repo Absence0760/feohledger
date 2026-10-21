@@ -148,7 +148,7 @@ test.describe('/erp syspro adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			expect(await postedValue(request, invoiceNumber)).toBe('875.40');
 			expect(await openSessions(request)).toBe(0);
 		} finally {
@@ -174,7 +174,7 @@ test.describe('/erp syspro adapter against fake-erp', () => {
 		try {
 			// A second APSTIN post would be refused "already on file" by SYSPRO;
 			// `done` means the adapter found the first one and stopped there.
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			expect(await postedValue(request, invoiceNumber)).toBe('310.05');
 		} finally {
 			await deleteInvoice(page, inv.id);

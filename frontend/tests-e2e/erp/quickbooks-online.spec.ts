@@ -170,7 +170,7 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 
 			const billId = await erpReferenceFromAudit(page, inv.id);
 			const bill = await billFromFake(page, billId);
@@ -208,7 +208,7 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 			glAccount: 'Job Expenses:Job Materials'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			const bill = await billFromFake(page, await erpReferenceFromAudit(page, inv.id));
 			expect(
 				bill.Line.map(

@@ -88,7 +88,7 @@ test.describe('/invoices — Send to ERP button', () => {
 		page
 	}) => {
 		// Point the tenant at the in-process mock ERP so the dispatch settles
-		// deterministically (sending_to_erp → sent_to_erp → done).
+		// deterministically (sending_to_erp → sent_to_erp, where it rests).
 		await setErp(page, { type: 'mock', integration_method: 'direct' });
 		const inv = await createNewInvoice(page);
 		try {
@@ -121,7 +121,7 @@ test.describe('/invoices — Send to ERP button', () => {
 			// Before the fix the pre-save 409'd and this stayed `approved` forever.
 			await expect
 				.poll(async () => getStatus(page, inv.id), { timeout: 15_000 })
-				.toMatch(/sent_to_erp|posted_in_erp|done/);
+				.toBe('sent_to_erp');
 		} finally {
 			await page.request
 				.delete(`${API_BASE}/api/invoices/${inv.id}`, { headers: await authedTenantHeaders(page) })

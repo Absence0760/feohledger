@@ -136,7 +136,7 @@ test.describe('/erp sage_accounting adapter against fake-erp', () => {
 			glAccount: '7500'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			const posted = await sageInvoice(request, await erpReferenceFromAudit(page, inv.id));
 			expect(posted.contact.id).toBe('sage-contact-1');
 			expect(posted.vendor_reference ?? posted.reference).toBe(inv.invoice_number);

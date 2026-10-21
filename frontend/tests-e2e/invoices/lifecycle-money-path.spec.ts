@@ -6,7 +6,7 @@ import { API_BASE, authedTenantHeaders, expect, tenantPsql, test } from '../fixt
  * Authoritative graph: backend/app/services/workflow_engine.py::VALID_TRANSITIONS
  *
  *   new → (submit) → ready_for_review → (approve) → approved
- *        → (send-to-erp) → sending_to_erp → sent_to_erp → … → done
+ *        → (send-to-erp) → sending_to_erp → sent_to_erp   (rests: the ERP pays it)
  *   ready_for_review → (reject) → rejected → (resubmit) → ready_for_review
  *   payment_scheduled / paid → (void) → approved        (back-edge)
  *
@@ -170,7 +170,9 @@ test.describe('/invoices lifecycle — forward money path', () => {
 		await page.goto('/invoices');
 	});
 
-	test('new → ready_for_review → approved → ERP → done, each step audited', async ({ page }) => {
+	test('new → ready_for_review → approved → ERP → sent_to_erp, each step audited', async ({
+		page
+	}) => {
 		const inv = await createNewInvoice(page, { amount: '4242.42' });
 		try {
 			// new → ready_for_review (submit for review via the workflow).
@@ -199,11 +201,12 @@ test.describe('/invoices lifecycle — forward money path', () => {
 			expect(sent.status()).toBe(202);
 
 			// Poll the real status field — never a fixed sleep — until the mock
-			// ERP chain settles. It always lands on `done` (sent_to_erp → done)
-			// or, in the posted variant, posted_in_erp → done.
+			// ERP post settles. It rests at `sent_to_erp`: the ERP holds the bill
+			// and pays it, so it is never `done` (terminal) and never payable here
+			// (decisions §303).
 			await expect
 				.poll(async () => (await getInvoice(page, inv.id)).status, { timeout: 15_000 })
-				.toBe('done');
+				.toBe('sent_to_erp');
 
 			// Append-only audit trail: every transition wrote its own row, in
 			// order. `approved`, the ERP submit, and the completion are all present.
@@ -211,7 +214,8 @@ test.describe('/invoices lifecycle — forward money path', () => {
 			expect(actions).toContain('invoice.submitted_for_review');
 			expect(actions).toContain('invoice.approved');
 			expect(actions).toContain('invoice.erp_submitted');
-			expect(actions).toContain('invoice.completed');
+			expect(actions).toContain('invoice.erp_confirmed');
+			expect(actions).not.toContain('invoice.completed');
 			// Ordering invariant: submitted precedes approved precedes erp submit.
 			expect(actions.indexOf('invoice.submitted_for_review')).toBeLessThan(
 				actions.indexOf('invoice.approved')

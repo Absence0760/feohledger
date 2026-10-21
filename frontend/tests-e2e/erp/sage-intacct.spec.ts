@@ -98,7 +98,7 @@ test.describe('/erp sage_intacct adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			const bill = await intacctBill(request, await erpReferenceFromAudit(page, inv.id));
 			expect(bill.totalTxnAmount).toBe('2450.75');
 			expect(bill.vendor.id).toBe('V-ACME');

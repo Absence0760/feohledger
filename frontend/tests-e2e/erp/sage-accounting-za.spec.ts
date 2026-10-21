@@ -101,7 +101,7 @@ test.describe('/erp sage_accounting_za adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			const posted = await sageInvoice(request, await erpReferenceFromAudit(page, inv.id));
 			expect(posted.SupplierId).toBe(101);
 			// The fake only saves lines carrying a known tax type and totals

@@ -444,7 +444,7 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 			glAccount: 'Depreciation'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 			const { Bill } = await sandbox(`bills/${await erpReferenceFromAudit(page, inv.id)}`);
 			expect(lineAccounts(Bill)).toEqual(['40']);
 		} finally {
@@ -472,7 +472,7 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 				glAccount
 			});
 			try {
-				expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+				expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('sent_to_erp');
 				const { Bill } = await sandbox(`bills/${await erpReferenceFromAudit(page, inv.id)}`);
 				expect(lineAccounts(Bill), glAccount).toEqual([accountId]);
 				expect(Bill.VendorRef.value).toBe(vendorId);
