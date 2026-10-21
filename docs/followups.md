@@ -43,8 +43,10 @@ a GitHub issue only when one warrants its own thread.
 narrowed the ERP polling/void (c) entry to the still-open void/recall gap and
 opened three (c) entries, the paid amount/date the other adapters don't read,
 SYSPRO's paid read and a UI action for the on-demand ERP status check, taking
-the file from 118 → 121. Before that, 2026-10-20 —
-fixing signup's dead ends (decisions §292)
+the file from 117 → 120. Before that, 2026-10-20 — the admin persona's
+user-management fixes (decisions §293) closed the (c) entry "A SCIM
+deactivation writes no audit row", taking the file from 118 → 117. Before
+that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
@@ -178,7 +180,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**121 open: 105 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**120 open: 104 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1337,19 +1339,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       Scale customer who asks for it, or before the pricing page next lists it
       — whichever is first; until then the listing should be qualified or
       dropped (owned by the pricing-page work, issue #426).
-- [ ] **(c) A SCIM deactivation writes no audit row.** `api/scim.py`'s PUT
-      (`active: false`), PATCH (`active` replace / remove) and DELETE all set
-      `User.is_active = False` with no `user.deactivated`-style audit row, where
-      the admin path (`/api/admin/users`) audits the same change. Access is
-      still cut at once — `get_current_user` refuses an inactive user, so the
-      leaver's live JWTs stop working — so this is a SOX trail gap, not an
-      access gap. Pre-existing; the plan-gate review noticed it because §258
-      keeps deprovisioning open on every plan. **Durable fix:** one helper in
-      `api/scim.py` that every deactivating branch calls, writing a PII-free
-      audit row (actor `None`, `details.source: "scim"`) through
-      `dispatch_auth_audit`, plus `revoke_user_sessions` for parity with the
-      admin path; a test per branch. **Trigger:** the next change to
-      `api/scim.py`, or before the first SCIM-provisioned customer.
 
 ### Receiving, ERP depth and commerce sync (2026-10-07, roadmap Priority 14, decisions §260)
 

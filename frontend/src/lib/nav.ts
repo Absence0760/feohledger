@@ -44,7 +44,9 @@ import {
 	PERM_PAYMENT_EXECUTE,
 	PERM_PAYMENT_RECORD_EXTERNAL,
 	PERM_PAYMENT_VOID,
-	PERM_USER_MANAGE
+	PERM_USER_MANAGE,
+	PERM_VENDOR_BLOCK,
+	PERM_VENDOR_MANAGE
 } from '#lib/types/admin.ts';
 
 /**
@@ -132,7 +134,19 @@ export const NAV: NavEntry[] = [
 		roles: ['admin', 'ap_manager', 'cfo'],
 		permissions: [PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL]
 	},
-	{ kind: 'link', label: 'Vendors', labelKey: 'nav.vendors', href: '/vendors', icon: 'vendors', roles: ['admin', 'ap_manager', 'cfo'] },
+	// `permissions` OR's in a custom role holding only `vendor.manage` /
+	// `vendor.block`: the reads the page makes (GET /api/vendors, /counts, /ids,
+	// /{id}) admit either permission alongside the three roles
+	// (`require_role_or_permission`), so the row must not hide the page from it.
+	{
+		kind: 'link',
+		label: 'Vendors',
+		labelKey: 'nav.vendors',
+		href: '/vendors',
+		icon: 'vendors',
+		roles: ['admin', 'ap_manager', 'cfo'],
+		permissions: [PERM_VENDOR_MANAGE, PERM_VENDOR_BLOCK]
+	},
 	// Sanctions-screening review queue (a sub-route of /vendors). Reuses the
 	// existing `vendors.col.screening` message ("Screening") as its label — a
 	// dedicated `nav.screening` key is a later i18n slice (Lane A owns locales).
