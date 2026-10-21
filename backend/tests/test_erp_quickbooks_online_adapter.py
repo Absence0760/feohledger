@@ -699,6 +699,115 @@ def test_status_mapping(token, no_override, balance, total, linked, expected):
     assert _run_with(qbo, lambda: _adapter().get_invoice_status("145")) == expected
 
 
+def _bill_payment(pid, *, total, lines, date="2026-01-05"):
+    return {"Id": pid, "TotalAmt": total, "TxnDate": date, "Line": lines}
+
+
+def _pays(bill_id, amount="100.10"):
+    return {"Amount": amount, "LinkedTxn": [{"TxnId": bill_id, "TxnType": "Bill"}]}
+
+
+@pytest.mark.parametrize(
+    ("payments", "expected"),
+    [
+        # One cheque for this bill alone: its cash, on its date.
+        ([_bill_payment("901", total="100.10", lines=[_pays("145")])], ("100.10", "2026-01-05")),
+        # Two part payments: summed, dated by the later one.
+        (
+            [
+                _bill_payment("901", total="60.00", lines=[_pays("145", "60.00")]),
+                _bill_payment(
+                    "902", total="40.10", lines=[_pays("145", "40.10")], date="2026-02-01"
+                ),
+            ],
+            ("100.10", "2026-02-01"),
+        ),
+        # QuickBooks applies a vendor credit THROUGH a bill payment, whose
+        # TotalAmt is then the cash net of it: not attributable, never booked.
+        (
+            [
+                _bill_payment(
+                    "901",
+                    total="0",
+                    lines=[
+                        _pays("145"),
+                        {
+                            "Amount": "100.10",
+                            "LinkedTxn": [{"TxnId": "7", "TxnType": "VendorCredit"}],
+                        },
+                    ],
+                )
+            ],
+            None,
+        ),
+        # One cheque paying two bills can't be split from here.
+        (
+            [_bill_payment("901", total="250.00", lines=[_pays("145"), _pays("146", "149.90")])],
+            None,
+        ),
+    ],
+)
+def test_cash_paid_to_bill(payments, expected):
+    from datetime import date
+
+    from app.services.erp_adapters.quickbooks_online import cash_paid_to_bill
+
+    paid = cash_paid_to_bill("145", payments)
+    if expected is None:
+        assert paid is None
+    else:
+        assert paid == (Decimal(expected[0]), date.fromisoformat(expected[1]))
+
+
+class _QboPays(_Qbo):
+    """`_Qbo` that also answers reads of a bill payment by id (or fails them)."""
+
+    def __init__(self, *, payments=None, **kw):
+        super().__init__(**kw)
+        self.payments = payments or {}
+
+    async def request(self, method, url, params=None, content=None, headers=None):
+        path = url.split(f"/v3/company/{REALM}/", 1)[1]
+        entity, _, entity_id = path.partition("/")
+        if method == "GET" and entity == "billpayment":
+            self.calls.append({"method": method, "url": url, "params": params})
+            if entity_id not in self.payments:
+                return _resp(500, {})
+            return _resp(200, {"BillPayment": self.payments[entity_id]})
+        return await super().request(method, url, params, content, headers)
+
+
+def test_a_paid_bill_reports_the_cash_its_payments_put_against_it(token, no_override):
+    from datetime import date
+
+    bill = {
+        "Id": "145",
+        "Balance": Decimal(0),
+        "TotalAmt": Decimal("100.10"),
+        "LinkedTxn": _PAID_BY_CHEQUE,
+    }
+    qbo = _QboPays(
+        bill=bill,
+        payments={"901": _bill_payment("901", total="100.10", lines=[_pays("145")])},
+    )
+    report = _run_with(qbo, lambda: _adapter().get_bill_status("145"))
+    assert report.status is ErpInvoiceStatus.paid
+    assert report.amount_paid == Decimal("100.10")
+    assert report.paid_on == date(2026, 1, 5)
+
+
+def test_an_unreadable_bill_payment_reads_unknown_not_paid(token, no_override):
+    bill = {
+        "Id": "145",
+        "Balance": Decimal(0),
+        "TotalAmt": Decimal("100.10"),
+        "LinkedTxn": _PAID_BY_CHEQUE,
+    }
+    report = _run_with(_QboPays(bill=bill), lambda: _adapter().get_bill_status("145"))
+    assert report.status is ErpInvoiceStatus.unknown
+    assert report.amount_paid is None
+
+
 def test_status_unknown_when_bill_missing(token, no_override):
     assert _run_with(_Qbo(), lambda: _adapter().get_invoice_status("1")) == ErpInvoiceStatus.unknown
 

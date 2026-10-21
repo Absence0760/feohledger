@@ -17,8 +17,16 @@ Whatever the source, the report is applied by ``services/erp_reported_status``
 * ``cancelled`` → an ``erp_reconciliation`` exception (money may be in flight
   ERP-side; the invoice is never transitioned);
 * ``settled_no_payment`` → an ``erp_reconciliation`` exception: the ERP shows
-  nothing owing but records no payment (a credit note, a write-off), so there
-  is nothing honest to record and a person decides;
+  nothing owing but no cash payment covering it can be confirmed (a credit
+  note, a write-off, a payment shared with other bills), so there is nothing
+  honest to record and a person decides;
+
+(Either flag is the blocking ``payment_reconciliation`` instead when the
+invoice sits at a status FeohLedger could pay, ``posted_in_erp``.) A paid
+report carries the ERP's paid amount and date when the adapter can read them
+(``ErpBillStatus``): a stated amount must equal what FeohLedger says is owed
+or the record is refused, and the payment is dated the ERP's paid date, not
+the day of the poll;
 * anything else (``open``, ``partially_paid``, ``draft``, ``unknown``) → nothing.
   Partial payments are not recorded (``external_payment`` refuses them).
 
@@ -34,9 +42,10 @@ failure is counted (``invoice_failures``) and never halts the tenant; one
 tenant's failure is counted (``failures``) and never halts the sweep.
 
 **Idempotent across ticks.** A recorded invoice leaves the candidate set
-(``paid``). A refused record re-tries each tick — so it lands by itself once a
-person clears the cause — and its exception is opened once (the open-exception
-dedup). A flag (``cancelled`` / ``settled_no_payment``) is raised once per
+(``paid``). A refused record re-tries each tick and its blocking
+``payment_reconciliation`` is opened once (the open-exception dedup); once a
+person has cleared the cause AND resolved that flag (it blocks the record too),
+the next tick records it. A flag (``cancelled`` / ``settled_no_payment``) is raised once per
 status the ERP reports, remembered on ``WorkflowInstance.state_data``, so a
 person resolving it is not answered by the same flag on the next tick.
 
@@ -65,7 +74,7 @@ from app.config import settings
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.workflow import WorkflowInstance
-from app.services.erp_adapters.base import ErpInvoiceStatus
+from app.services.erp_adapters.base import ErpBillStatus, ErpInvoiceStatus
 
 logger = logging.getLogger(__name__)
 
@@ -164,13 +173,35 @@ def pollable_reference(state_data: dict | None, connection: ErpConnection) -> st
     return str(reference)
 
 
-async def poll_status(connection: ErpConnection, reference: str) -> ErpInvoiceStatus:
+async def poll_status(connection: ErpConnection, reference: str) -> ErpBillStatus:
     """Ask the ERP. No lock and no transaction may be open around this call."""
-    status = await connection.adapter.get_invoice_status(reference)
+    report = await connection.adapter.get_bill_status(reference)
     try:
-        return ErpInvoiceStatus(status)
+        status = ErpInvoiceStatus(report.status)
     except ValueError:
-        return ErpInvoiceStatus.unknown
+        return ErpBillStatus(ErpInvoiceStatus.unknown)
+    return ErpBillStatus(status, amount_paid=report.amount_paid, paid_on=report.paid_on)
+
+
+def _flag_type(invoice: Invoice) -> str:
+    """Which exception a cancelled / settled-without-payment report opens.
+
+    The non-blocking ``erp_reconciliation`` while the invoice is not payable in
+    FeohLedger (``sent_to_erp``, where a push rests). An invoice the ERP holds
+    at a PAYABLE status (``posted_in_erp``, from an older webhook) gets the
+    blocking ``payment_reconciliation`` instead: the ERP no longer claims it,
+    so FeohLedger paying it would pay a bill the supplier is not owed
+    (decisions §303).
+    """
+    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.services.erp_reported_status import (
+        ERP_PAID_UNRECORDED_EXCEPTION_TYPE,
+        ERP_RECONCILIATION_EXCEPTION_TYPE,
+    )
+
+    if invoice.status.value in PAYABLE_INVOICE_STATUSES:
+        return ERP_PAID_UNRECORDED_EXCEPTION_TYPE
+    return ERP_RECONCILIATION_EXCEPTION_TYPE
 
 
 async def apply_status(
@@ -179,7 +210,7 @@ async def apply_status(
     org: Organization,
     invoice_id: uuid.UUID,
     reference: str,
-    erp_status: ErpInvoiceStatus,
+    erp_status: ErpBillStatus,
     adapter_key: str,
 ) -> SyncOutcome:
     """Apply one polled status to one invoice. The caller commits.
@@ -195,7 +226,8 @@ async def apply_status(
     )
     from app.services.workflow_engine import get_invoice_for_update, get_workflow_instance
 
-    if erp_status not in (
+    status = erp_status.status
+    if status not in (
         ErpInvoiceStatus.paid,
         ErpInvoiceStatus.cancelled,
         ErpInvoiceStatus.settled_no_payment,
@@ -211,7 +243,7 @@ async def apply_status(
     ):
         return SyncOutcome.not_awaiting
 
-    if erp_status is ErpInvoiceStatus.paid:
+    if status is ErpInvoiceStatus.paid:
         recorded = await record_erp_reported_payment(
             db,
             invoice,
@@ -219,39 +251,44 @@ async def apply_status(
             erp_type=adapter_key,
             erp_document_id=reference,
             event_id=_POLL_EVENT,
+            amount=erp_status.amount_paid,
+            paid_on=erp_status.paid_on,
         )
         return SyncOutcome.recorded_paid if recorded else SyncOutcome.refused
 
     # Flag-once: a person resolving the flag must not be answered by the same
     # flag on the next tick. A different status later is a new report.
-    if state.get(FLAGGED_STATUS_KEY) == erp_status.value:
+    if state.get(FLAGGED_STATUS_KEY) == status.value:
         return SyncOutcome.unchanged
-    if erp_status is ErpInvoiceStatus.cancelled:
+    if status is ErpInvoiceStatus.cancelled:
         await raise_erp_cancelled_exception(
             db,
             invoice,
             org_id=org.id,
             erp_type=adapter_key,
-            erp_status=erp_status.value,
+            erp_status=status.value,
             erp_document_id=reference,
             event_id=_POLL_EVENT,
+            exception_type=_flag_type(invoice),
         )
     else:
         await open_erp_reconciliation_exception(
             db,
             invoice,
             org_id=org.id,
+            exception_type=_flag_type(invoice),
             description=(
-                f"The ERP ({adapter_key}) shows nothing owing on this bill but records "
-                f"no payment against it — it may have been settled by a credit note or "
-                f"written off. FeohLedger has recorded nothing. If it was paid, record "
-                f"it via POST /api/payments/record-outside "
+                f"The ERP ({adapter_key}) shows nothing owing on this bill, but FeohLedger "
+                f"could not confirm a cash payment covering it — it may have been settled "
+                f"by a credit note or written off, or paid together with other bills. "
+                f"FeohLedger has recorded nothing. If it was paid, record it via "
+                f"POST /api/payments/record-outside "
                 f"(erp_document_id={reference}, event={_POLL_EVENT})."
             ),
         )
     if instance is not None:
         # A NEW dict: `state_data` is plain JSONB, so an in-place edit is lost.
-        instance.state_data = {**state, FLAGGED_STATUS_KEY: erp_status.value}
+        instance.state_data = {**state, FLAGGED_STATUS_KEY: status.value}
     return SyncOutcome.flagged
 
 

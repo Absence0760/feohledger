@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -75,6 +76,7 @@ from app.services import erp_oauth
 from app.services.erp_adapters.base import (
     NOT_CONNECTED,
     VENDOR_NOT_LINKED,
+    ErpBillStatus,
     ErpInvoiceStatus,
     ErpListingIncomplete,
     ErpPostResult,
@@ -179,9 +181,48 @@ def _dec(value: Any) -> Decimal | None:
 _BILL_PAYMENT_TXN_TYPES = frozenset({"BillPaymentCheck", "BillPaymentCreditCard"})
 
 
-def _has_bill_payment(bill: dict) -> bool:
+def _bill_payment_ids(bill: dict) -> list[str]:
     linked = bill.get("LinkedTxn") or []
-    return any(isinstance(t, dict) and t.get("TxnType") in _BILL_PAYMENT_TXN_TYPES for t in linked)
+    return [
+        str(t["TxnId"])
+        for t in linked
+        if isinstance(t, dict) and t.get("TxnType") in _BILL_PAYMENT_TXN_TYPES and t.get("TxnId")
+    ]
+
+
+def _has_bill_payment(bill: dict) -> bool:
+    return bool(_bill_payment_ids(bill))
+
+
+def cash_paid_to_bill(bill_id: str, payments: list[dict]) -> tuple[Decimal, date | None] | None:
+    """The cash the linked bill payments put against ``bill_id``, and the latest date.
+
+    None when it can't be attributed to this bill alone: a payment that also
+    pays another bill or applies a vendor credit (QuickBooks applies credits
+    THROUGH a bill payment, whose ``TotalAmt`` is then the cash net of them,
+    possibly zero), or no cash at all. The sweep then flags the bill for a
+    person instead of recording a figure it cannot state (decisions §303).
+    """
+    cash = Decimal(0)
+    latest: date | None = None
+    for payment in payments:
+        for line in payment.get("Line") or []:
+            for txn in (line or {}).get("LinkedTxn") or []:
+                if txn.get("TxnType") != "Bill" or str(txn.get("TxnId")) != str(bill_id):
+                    return None
+        total = _dec(payment.get("TotalAmt"))
+        if total is None:
+            return None
+        cash += total
+        try:
+            paid = date.fromisoformat(str(payment.get("TxnDate") or "")[:10])
+        except ValueError:
+            paid = None
+        if paid is not None and (latest is None or paid > latest):
+            latest = paid
+    if cash <= 0:
+        return None
+    return cash, latest
 
 
 def map_bill_status(bill: dict) -> ErpInvoiceStatus:
@@ -727,6 +768,34 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         if await self._delete_untouched(bill):
             return VoidOutcome.VOIDED
         return VoidOutcome.NOT_VOIDED
+
+    async def get_bill_status(self, erp_document_id: str) -> ErpBillStatus:
+        """Status, plus the cash the linked bill payments put against the bill.
+
+        A bill reading ``paid`` is re-checked against its BillPayments: the
+        amount paid is their cash for this bill alone, dated by the latest
+        ``TxnDate``. A payment that also pays another bill or applies a vendor
+        credit can't be attributed, so the bill reads ``settled_no_payment``
+        and is flagged; a BillPayment that can't be read now reads ``unknown``,
+        and the next poll asks again (docs/decisions.md §303).
+        """
+        bill = await self._get_bill(erp_document_id)
+        if not bill:
+            return ErpBillStatus(ErpInvoiceStatus.unknown)
+        status = map_bill_status(bill)
+        if status is not ErpInvoiceStatus.paid:
+            return ErpBillStatus(status)
+        payments: list[dict] = []
+        for payment_id in _bill_payment_ids(bill):
+            resp = await self._request("GET", f"billpayment/{payment_id}", timeout=15)
+            payment = _json(resp).get("BillPayment") if resp.status_code == 200 else None
+            if not isinstance(payment, dict):
+                return ErpBillStatus(ErpInvoiceStatus.unknown)
+            payments.append(payment)
+        paid = cash_paid_to_bill(str(bill.get("Id") or erp_document_id), payments)
+        if paid is None:
+            return ErpBillStatus(ErpInvoiceStatus.settled_no_payment)
+        return ErpBillStatus(status, amount_paid=paid[0], paid_on=paid[1])
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         bill = await self._get_bill(erp_document_id)

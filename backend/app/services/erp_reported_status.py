@@ -19,6 +19,9 @@ Nothing here commits; the caller owns the transaction and holds the invoice
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,6 +103,7 @@ async def raise_erp_cancelled_exception(
     erp_status: str,
     erp_document_id: str | None,
     event_id,
+    exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
 ) -> bool:
     """The ERP reports the bill VOIDED/CANCELLED after the invoice moved past
     the point where ``→ failed`` is legal (``sent_to_erp`` / ``posted_in_erp`` /
@@ -109,6 +113,7 @@ async def raise_erp_cancelled_exception(
         db,
         invoice,
         org_id=org_id,
+        exception_type=exception_type,
         description=(
             f"ERP reported '{erp_status}' (void/cancel) via {erp_type} for an "
             f"invoice already at '{invoice.status.value}' — money may be in flight. "
@@ -126,8 +131,17 @@ async def record_erp_reported_payment(
     erp_type: str,
     erp_document_id: str | None,
     event_id: str | None,
+    amount: Decimal | None = None,
+    paid_on: date | None = None,
 ) -> bool:
     """Book the ERP's `Paid` as a payment made outside FeohLedger.
+
+    ``amount`` / ``paid_on`` are what the ERP says was paid and when, when the
+    caller can read them (the status sweep, through `ErpBillStatus`). A stated
+    amount must equal the net owed, or the record is refused like any other
+    figure mismatch — which is what stops a bill part-settled by an ERP-side
+    credit being booked as paid in full. Without a date, or with one in the
+    future, the payment is dated today.
 
     Through `services/external_payment.record_invoice_paid_outside`, which
     walks a `sent_to_erp` invoice through `posted_in_erp` once every gate has
@@ -148,6 +162,7 @@ async def record_erp_reported_payment(
     )
     from app.utils.dates import utc_today
 
+    today = utc_today()
     reference = (erp_document_id or (f"erp-event:{event_id}" if event_id else None) or erp_type)[
         :255
     ]
@@ -158,9 +173,10 @@ async def record_erp_reported_payment(
             invoice=invoice,
             method=None,
             reference=reference,
-            paid_on=utc_today(),
+            paid_on=paid_on if paid_on is not None and paid_on <= today else today,
             actor_id=None,
             source="erp",
+            amount=amount,
         )
     except ExternalPaymentRefused as exc:
         await open_erp_reconciliation_exception(
@@ -178,3 +194,42 @@ async def record_erp_reported_payment(
         )
         return False
     return True
+
+
+async def flag_void_of_erp_held_bill(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    org_id,
+    payment_id,
+) -> bool:
+    """A payment on an invoice the ERP holds as a bill was voided: block re-payment.
+
+    The void sends the invoice `paid → approved`, which is payable, and the
+    status sweep no longer looks at it. But the bill is still in the ERP — and
+    if the voided payment was the ERP's own (recorded from its `Paid`), the ERP
+    has paid it. A FeohLedger run would then pay the supplier a second time. So
+    a void on a pushed invoice (its workflow carries an `erp_reference`) opens
+    the blocking `payment_reconciliation` in the void's own transaction, and a
+    person decides whether FeohLedger may pay it (decisions §303). Returns
+    whether a flag was opened. Never commits.
+    """
+    from app.services.workflow_engine import get_workflow_instance
+
+    instance = await get_workflow_instance(db, invoice.id)
+    state = (instance.state_data if instance is not None else None) or {}
+    reference = state.get("erp_reference")
+    if not reference:
+        return False
+    return await open_erp_reconciliation_exception(
+        db,
+        invoice,
+        org_id=org_id,
+        exception_type=ERP_PAID_UNRECORDED_EXCEPTION_TYPE,
+        description=(
+            f"A payment ({payment_id}) was voided on an invoice whose bill is held in the "
+            f"ERP (erp_document_id={reference}). If the ERP paid it, paying it here pays "
+            f"the supplier twice, so FeohLedger will not pay it while this is open. "
+            f"Check the bill in the ERP before resolving."
+        ),
+    )

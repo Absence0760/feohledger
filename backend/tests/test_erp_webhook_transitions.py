@@ -340,7 +340,7 @@ async def test_forbidden_nonvoid_transition_is_pure_silent_204(fake_redis):
 async def test_erp_paid_for_an_invoice_feohledger_never_paid_is_recorded(fake_redis, current):
     """The ERP-led half of the no-rail pilot: `posted_in_erp → paid` is not an
     edge (a `paid` invoice needs a payment behind it), so the handler records the
-    ERP's payment through `_record_erp_reported_payment` — which supplies one —
+    ERP's payment through `erp_reported_status.record_erp_reported_payment` — which supplies one —
     and commits. It used to drop the report silently, leaving a no-rail tenant
     with no automatic path to `paid`."""
     org = _org_with_erp_secret("erp-secret")

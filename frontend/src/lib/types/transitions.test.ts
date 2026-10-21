@@ -22,7 +22,7 @@ const BACKEND_TRANSITIONS: Record<string, string[]> = {
 	approved: ['sending_to_erp', 'payment_scheduled', 'done'],
 	rejected: ['ready_for_review', 'new'],
 	sending_to_erp: ['sent_to_erp', 'failed'],
-	sent_to_erp: ['posted_in_erp', 'done'],
+	sent_to_erp: ['posted_in_erp'],
 	posted_in_erp: ['payment_scheduled', 'done'],
 	payment_scheduled: ['paid', 'approved'],
 	paid: ['done', 'approved'],

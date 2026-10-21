@@ -230,7 +230,7 @@ otherwise). Point the backend at it with
   (bearer must be one it issued) lists the one organisation, tenant
   `fake-xero-tenant-1`. Wired up by the committed `FEOH_ERP_XERO_*` dev values.
 - Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
-  "amount_paid"?}`. The backend reads `PAID` as paid only with `amount_paid`
+  "amount_paid"?, "paid_on"?}` (`paid_on` → `FullyPaidOnDate`). The backend reads `PAID` as paid only with `amount_paid`
   above zero; `PAID` with nothing paid is a bill settled by credit note
   (docs/decisions.md §303). `POST /__reset` clears this state too.
 
@@ -312,10 +312,12 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
 
 ## QuickBooks Online (`/qbo`)
 
-**Status hook:** `POST /__qbo/set-balance {"id", "balance", "payment"?}`.
-A zero balance alone reads as settled with no payment; `"payment": true` also
-links a `BillPaymentCheck` to the bill, which is what the backend reads as paid
-(docs/decisions.md §303).
+**Status hook:** `POST /__qbo/set-balance {"id", "balance", "payment"?,
+"payment_amount"?, "paid_on"?}`. A zero balance alone reads as settled with no
+payment; `"payment": true` also links a `BillPaymentCheck` to the bill and
+stores it (cash for this bill alone, `GET
+/qbo/v3/company/{realm}/billpayment/{id}`), which is what the backend reads as
+paid, at that amount and date (docs/decisions.md §303).
 
 **Validation Faults** (off until a spec turns them on): `POST
 /__qbo/validation` with any of `{"closed_through": "YYYY-MM-DD",

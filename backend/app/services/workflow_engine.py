@@ -55,7 +55,11 @@ VALID_TRANSITIONS: dict[InvoiceStatus, set[InvoiceStatus]] = {
     },
     InvoiceStatus.rejected: {InvoiceStatus.ready_for_review, InvoiceStatus.new},
     InvoiceStatus.sending_to_erp: {InvoiceStatus.sent_to_erp, InvoiceStatus.failed},
-    InvoiceStatus.sent_to_erp: {InvoiceStatus.posted_in_erp, InvoiceStatus.done},
+    # No `sent_to_erp → done` (decisions §303): a pushed invoice rests at
+    # `sent_to_erp` until the ERP pays it, and closing it to the terminal `done`
+    # with no payment is exactly the stranding that decision removed — no later
+    # ERP payment could land. It leaves only on the way to `paid`.
+    InvoiceStatus.sent_to_erp: {InvoiceStatus.posted_in_erp},
     InvoiceStatus.posted_in_erp: {
         InvoiceStatus.payment_scheduled,
         InvoiceStatus.done,

@@ -650,6 +650,45 @@ def test_status_mapping(token, bill, expected):
         assert _run(_adapter().get_invoice_status("inv-1")) is expected
 
 
+def test_a_paid_bill_reports_the_cash_paid_and_its_date(token):
+    """1,000 bill: 400 credited, 600 paid. Xero says PAID; what was PAID is
+    600, and that is what the status sweep holds FeohLedger's net owed to
+    (decisions §303), so the credit can't be booked as money."""
+    from datetime import date
+
+    bill = {
+        "Status": "PAID",
+        "Total": 1000,
+        "AmountPaid": 600,
+        "AmountCredited": 400,
+        "FullyPaidOnDate": "/Date(1767571200000+0000)/",
+    }
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(200, {"Invoices": [bill]}))
+        report = _run(_adapter().get_bill_status("inv-1"))
+    assert report.status is ErpInvoiceStatus.paid
+    assert report.amount_paid == Decimal("600")
+    assert report.paid_on == date(2026, 1, 5)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("/Date(1767571200000+0000)/", "2026-01-05"),
+        ("/Date(1767571200000)/", "2026-01-05"),
+        ("2026-01-05T00:00:00", "2026-01-05"),
+        ("garbage", None),
+        (None, None),
+    ],
+)
+def test_xero_dates(raw, expected):
+    from datetime import date
+
+    from app.services.erp_adapters.xero import xero_date
+
+    assert xero_date(raw) == (date.fromisoformat(expected) if expected else None)
+
+
 def test_status_unknown_on_error(token):
     with patch("httpx.AsyncClient") as cm:
         _client(cm).get = AsyncMock(return_value=_resp(404, {}))

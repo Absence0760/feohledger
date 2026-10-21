@@ -30,6 +30,26 @@ class ErpInvoiceStatus(enum.StrEnum):
     unknown = "unknown"
 
 
+@dataclass(frozen=True)
+class ErpBillStatus:
+    """A bill's status, plus what the ERP says was PAID on it when it can say.
+
+    ``amount_paid`` is the money the ERP records as paid against this bill, in
+    the bill's currency — never its total, and never a credit applied to it.
+    ``paid_on`` is the date the ERP records the bill as paid. Both are None when
+    the adapter cannot read them; the status sweep then records the payment
+    at FeohLedger's own net amount, dated the day it learned of it
+    (docs/decisions.md §303). When ``amount_paid`` is stated it must equal what
+    FeohLedger says is owed, or the record is refused and flagged — that is
+    what stops a bill part-settled by an ERP-side credit being booked as paid
+    in full.
+    """
+
+    status: ErpInvoiceStatus
+    amount_paid: Decimal | None = None
+    paid_on: date | None = None
+
+
 @dataclass
 class LineItemPayload:
     line_number: int
@@ -565,6 +585,14 @@ class ErpAdapter:
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         """Poll the ERP for the current status of a posted invoice."""
         raise NotImplementedError
+
+    async def get_bill_status(self, erp_document_id: str) -> ErpBillStatus:
+        """The status with the paid amount and date, for the status sweep.
+
+        Default: the status alone. An adapter that can read the money paid
+        against a bill (and when) overrides this — see :class:`ErpBillStatus`.
+        """
+        return ErpBillStatus(await self.get_invoice_status(erp_document_id))
 
     async def void_invoice(self, erp_document_id: str) -> bool:
         """Request cancellation of a posted invoice."""

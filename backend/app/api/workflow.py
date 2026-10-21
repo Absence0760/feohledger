@@ -605,6 +605,13 @@ async def sync_erp_status(
             status_code=400,
             detail=f"'{exc.adapter_key}' is not a supported ERP adapter.",
         ) from exc
+    except Exception as exc:  # noqa: BLE001 — an adapter that can't be built from this config
+        raise HTTPException(
+            status_code=400,
+            detail=coded_refusal(
+                ERP_STATUS_NOT_CONFIGURED, "The connected ERP's settings are incomplete."
+            ),
+        ) from exc
 
     reference = pollable_reference(state_data, connection)
     if reference is None:
@@ -638,7 +645,7 @@ async def sync_erp_status(
     return {
         "id": str(invoice_id),
         "status": current.value,
-        "erp_status": erp_status.value,
+        "erp_status": erp_status.status.value,
         "outcome": outcome.value,
     }
 

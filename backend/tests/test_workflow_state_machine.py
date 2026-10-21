@@ -118,6 +118,15 @@ def test_no_outgoing_edges_target_a_predecessor_other_than_explicit_resets():
     )
 
 
+def test_a_pushed_invoice_leaves_sent_to_erp_only_on_the_way_to_paid():
+    """A push rests at `sent_to_erp` until the ERP pays it (decisions §303).
+    `sent_to_erp → done` used to exist: `/complete`'s fall-through or a bulk
+    status move could close a pushed bill to the terminal `done` with no
+    payment, the very stranding §303 removed. Its one way out is the posting
+    the ERP's recorded payment walks through."""
+    assert VALID_TRANSITIONS[InvoiceStatus.sent_to_erp] == {InvoiceStatus.posted_in_erp}
+
+
 def test_rejected_can_only_target_review_or_new():
     """A rejected invoice can be revised (→ready_for_review) or
     discarded back to fresh (→new). It must not jump straight to

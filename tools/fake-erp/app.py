@@ -15,6 +15,7 @@ defusedxml for the request-supplied XML the SYSPRO routes parse.
 from __future__ import annotations
 
 import copy
+import datetime
 import json
 import os
 import re
@@ -1628,6 +1629,11 @@ async def xero_set_status(body: dict) -> dict:
     record["Status"] = body["status"]
     if body.get("amount_paid") is not None:
         record["AmountPaid"] = _XeroDecimal(str(body["amount_paid"]))
+    if body.get("paid_on"):
+        # Xero's JSON date form, as FullyPaidOnDate arrives from the real API.
+        paid = datetime.date.fromisoformat(str(body["paid_on"]))
+        epoch_ms = (paid - datetime.date(1970, 1, 1)).days * 86_400_000
+        record["FullyPaidOnDate"] = f"/Date({epoch_ms}+0000)/"
     return {"status": "ok"}
 
 
@@ -2979,14 +2985,25 @@ async def qbo_get_bill(request: Request, realm: str, bill_id: str) -> dict:
     return {"Bill": copy.deepcopy(bill)}
 
 
+@qbo.get("/v3/company/{realm}/billpayment/{payment_id}")
+async def qbo_get_bill_payment(request: Request, realm: str, payment_id: str) -> dict:
+    _require_qbo_auth(request, realm)
+    payment = _qbo().get("billpayments", {}).get(payment_id)
+    if payment is None:
+        raise _qbo_fault(400, "610", "Object Not Found")
+    return {"BillPayment": copy.deepcopy(payment)}
+
+
 @app.post("/__qbo/set-balance")
 async def qbo_set_balance(body: dict) -> dict:
     """Test hook: set a bill's Balance so an e2e can drive status.
 
-    Body: {"id": "<bill Id>", "balance": <number>, "payment"?: true}.
-    A zero balance alone reads as settled with no payment; ``payment: true``
-    also links a ``BillPaymentCheck``, which is what the backend reads as paid
-    (docs/decisions.md §303).
+    Body: {"id": "<bill Id>", "balance": <number>, "payment"?: true,
+    "payment_amount"?: <number>, "paid_on"?: "YYYY-MM-DD"}. A zero balance alone
+    reads as settled with no payment; ``payment: true`` also links a
+    ``BillPaymentCheck`` (readable at ``GET billpayment/{id}``, cash for this
+    bill alone), which is what the backend reads as paid (docs/decisions.md
+    §303).
     """
     bill = _qbo()["bills"].get(str(body.get("id", "")))
     if bill is None:
@@ -2996,6 +3013,19 @@ async def qbo_set_balance(body: dict) -> dict:
         linked = bill.setdefault("LinkedTxn", [])
         txn_id = f"pay-{bill['Id']}-{len(linked) + 1}"
         linked.append({"TxnId": txn_id, "TxnType": "BillPaymentCheck"})
+        # The BillPayment itself, cash for this bill alone, as the backend
+        # reads it back (GET billpayment/{id}).
+        _qbo().setdefault("billpayments", {})[txn_id] = {
+            "Id": txn_id,
+            "TxnDate": str(body.get("paid_on") or "2026-10-20"),
+            "TotalAmt": body.get("payment_amount", bill["TotalAmt"]),
+            "Line": [
+                {
+                    "Amount": body.get("payment_amount", bill["TotalAmt"]),
+                    "LinkedTxn": [{"TxnId": bill["Id"], "TxnType": "Bill"}],
+                }
+            ],
+        }
     bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
     return {"status": "ok"}
 

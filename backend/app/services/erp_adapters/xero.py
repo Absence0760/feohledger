@@ -34,7 +34,8 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import date
+import re
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import httpx
@@ -42,6 +43,7 @@ import httpx
 from app.config import settings
 from app.services.erp_adapters.base import (
     VENDOR_NOT_LINKED,
+    ErpBillStatus,
     ErpInvoiceStatus,
     ErpListingIncomplete,
     ErpPostResult,
@@ -198,6 +200,22 @@ def _decimal(value) -> Decimal | None:
     if value is None:
         return None
     return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+_MS_DATE = re.compile(r"^/Date\((-?\d+)([+-]\d{4})?\)/$")
+
+
+def xero_date(value) -> date | None:
+    """A Xero date — the ``/Date(<ms>+0000)/`` form its JSON uses, or ISO."""
+    if not value or not isinstance(value, str):
+        return None
+    match = _MS_DATE.match(value.strip())
+    if match:
+        return datetime.fromtimestamp(int(match.group(1)) / 1000, tz=UTC).date()
+    try:
+        return date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        return None
 
 
 def _failure(resp) -> ErpPostResult:
@@ -469,12 +487,29 @@ class XeroAdapter(OAuthErpAdapter):
         return bills[0] if bills else None
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
+        return (await self.get_bill_status(erp_document_id)).status
+
+    async def get_bill_status(self, erp_document_id: str) -> ErpBillStatus:
+        """Status, plus ``AmountPaid`` and ``FullyPaidOnDate`` for a paid bill.
+
+        ``AmountPaid`` excludes credit notes (Xero carries those in
+        ``AmountCredited``), so a bill part-settled by credit reports less paid
+        than FeohLedger says is owed, and the record is refused and flagged
+        rather than booked in full (docs/decisions.md §303).
+        """
         headers = await self._headers()
         async with self.oauth_client(timeout=15) as client:
             bill = await self._get_bill(client, headers, erp_document_id)
         if bill is None:
-            return ErpInvoiceStatus.unknown
-        return map_bill_status(bill)
+            return ErpBillStatus(ErpInvoiceStatus.unknown)
+        status = map_bill_status(bill)
+        if status is not ErpInvoiceStatus.paid:
+            return ErpBillStatus(status)
+        return ErpBillStatus(
+            status,
+            amount_paid=_decimal(bill.get("AmountPaid")),
+            paid_on=xero_date(bill.get("FullyPaidOnDate")),
+        )
 
     async def _live_bill(self, client, headers, erp_document_id: str) -> dict | None:
         """The bill when it is live; None only when Xero POSITIVELY reports it

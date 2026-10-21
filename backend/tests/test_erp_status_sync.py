@@ -38,7 +38,7 @@ from app.models.organization import Organization
 from app.models.payment import Payment
 from app.models.workflow import AuditLog, WorkflowInstance
 from app.services import erp_status_sync
-from app.services.erp_adapters.base import ErpInvoiceStatus
+from app.services.erp_adapters.base import ErpBillStatus, ErpInvoiceStatus
 from app.services.erp_adapters.mock_adapter import MockAdapter
 from app.services.external_payment import EXTERNAL_PAYMENT_PROVIDER
 
@@ -65,18 +65,20 @@ class _Erp:
     """What the mock ERP answers per reference, and which references it was asked."""
 
     def __init__(self, monkeypatch):
-        self.statuses: dict[str, ErpInvoiceStatus] = {}
+        # A bare status, or an `ErpBillStatus` with the amount / date paid.
+        self.statuses: dict[str, ErpInvoiceStatus | ErpBillStatus] = {}
         self.raises: set[str] = set()
         self.asked: list[str] = []
         erp = self
 
-        async def _status(_self, erp_document_id: str) -> ErpInvoiceStatus:
+        async def _status(_self, erp_document_id: str) -> ErpBillStatus:
             erp.asked.append(erp_document_id)
             if erp_document_id in erp.raises:
-                raise RuntimeError("ERP unreachable")
-            return erp.statuses.get(erp_document_id, ErpInvoiceStatus.open)
+                raise RuntimeError("ERP unreachable: secret-erp-body")
+            found = erp.statuses.get(erp_document_id, ErpInvoiceStatus.open)
+            return found if isinstance(found, ErpBillStatus) else ErpBillStatus(found)
 
-        monkeypatch.setattr(MockAdapter, "get_invoice_status", _status)
+        monkeypatch.setattr(MockAdapter, "get_bill_status", _status)
 
 
 @pytest.fixture
@@ -312,7 +314,7 @@ async def test_a_refused_record_blocks_once_and_lands_after_the_cause_is_cleared
     ("erp_status", "needle"),
     [
         (ErpInvoiceStatus.cancelled, "void/cancel"),
-        (ErpInvoiceStatus.settled_no_payment, "records no payment"),
+        (ErpInvoiceStatus.settled_no_payment, "could not confirm a cash payment"),
     ],
 )
 async def test_cancelled_and_settled_without_payment_are_flagged_once(
@@ -536,3 +538,117 @@ async def test_the_route_is_refused_to_a_clerk_and_across_tenants(realdb, erp):
     assert clerk.status_code == 403
     assert other_tenant.status_code == 404
     assert erp.asked == []
+
+
+# ---------------------------------------------------------------------------
+# what the ERP says was paid, and when (money-path review)
+# ---------------------------------------------------------------------------
+
+
+async def test_the_erps_paid_amount_and_date_are_what_get_booked(realdb, erp):
+    from datetime import date
+
+    await _connect(realdb)
+    inv_id = await _seed(realdb, number="SYNC-DATED", state_data=_pushed_state("REF-DATED"))
+    erp.statuses["REF-DATED"] = ErpBillStatus(
+        ErpInvoiceStatus.paid, amount_paid=Decimal("410.00"), paid_on=date(2026, 1, 5)
+    )
+
+    result = await erp_status_sync.run_erp_status_sync_once()
+
+    assert result.recorded_paid == 1
+    [payment] = await _payments(realdb, inv_id)
+    assert payment.amount == Decimal("410.00")
+    # Dated the day the ERP paid, not the day of the poll (1099 year, aging).
+    assert payment.completed_at.date() == date(2026, 1, 5)
+
+
+async def test_a_bill_part_settled_by_erp_credit_is_refused_not_booked_in_full(realdb, erp):
+    """1,000 owed; the ERP applied a 400 credit and paid 600 cash. FeohLedger
+    knows nothing of the credit, so booking the net owed would record 1,000 that
+    never left the bank. The stated 600 does not match, so the record is
+    refused and the invoice blocked for a person."""
+    await _connect(realdb)
+    inv_id = await _seed(
+        realdb, number="SYNC-PART", state_data=_pushed_state("REF-PART"), amount="1000.00"
+    )
+    erp.statuses["REF-PART"] = ErpBillStatus(ErpInvoiceStatus.paid, amount_paid=Decimal("600.00"))
+
+    result = await erp_status_sync.run_erp_status_sync_once()
+
+    assert result.refused == 1
+    assert await _payments(realdb, inv_id) == []
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.sent_to_erp
+    [flag] = await _exceptions(realdb, inv_id)
+    assert flag.exception_type == "payment_reconciliation"
+    assert "external_payment_amount_mismatch" in flag.description
+
+
+@pytest.mark.parametrize(
+    "erp_status", [ErpInvoiceStatus.cancelled, ErpInvoiceStatus.settled_no_payment]
+)
+async def test_a_payable_invoice_the_erp_no_longer_claims_is_blocked(realdb, erp, erp_status):
+    """At `posted_in_erp` FeohLedger could pay the invoice, so a bill the ERP
+    shows cancelled or settled without payment blocks payment."""
+    await _connect(realdb)
+    inv_id = await _seed(
+        realdb,
+        number=f"SYNC-PAYABLE-{erp_status.value}",
+        status=InvoiceStatus.posted_in_erp,
+        state_data=_pushed_state("REF-PAYABLE"),
+    )
+    erp.statuses["REF-PAYABLE"] = erp_status
+
+    await erp_status_sync.run_erp_status_sync_once()
+
+    [flag] = await _exceptions(realdb, inv_id)
+    assert flag.exception_type == "payment_reconciliation"
+
+
+async def test_voiding_the_erps_payment_does_not_reopen_the_bill_for_payment(realdb, erp):
+    """The sweep records the ERP's payment; someone voids it. The invoice goes
+    back to `approved`, but the ERP still holds (and paid) the bill, so a run
+    must not be able to pay it again."""
+    await _connect(realdb)
+    inv_id = await _seed(realdb, number="SYNC-VOID", state_data=_pushed_state("REF-VOID"))
+    erp.statuses["REF-VOID"] = ErpInvoiceStatus.paid
+    await erp_status_sync.run_erp_status_sync_once()
+    [payment] = await _payments(realdb, inv_id)
+
+    async with realdb.client(key="a", role="admin") as c:
+        voided = await c.post(
+            f"/api/payments/{payment.id}/void", json={"reason": "booked against the wrong bill"}
+        )
+        run = await c.post(
+            "/api/payments/runs", json={"items": [{"invoice_id": str(inv_id), "method": "ach"}]}
+        )
+
+    assert voided.status_code == 200, voided.text
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.approved
+    assert run.status_code != 201, run.text
+    flags = [e.exception_type for e in await _exceptions(realdb, inv_id)]
+    assert "payment_reconciliation" in flags
+
+
+async def test_a_pushed_invoice_cannot_be_closed_to_done(realdb, erp):
+    """`sent_to_erp → done` is gone: `/complete` used to fall through to it and
+    strand a pushed bill in the terminal `done`, where no ERP payment lands."""
+    inv_id = await _seed(realdb, number="SYNC-COMPLETE", state_data=_pushed_state("R-C"))
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/invoices/{inv_id}/complete")
+    assert resp.status_code == 409, resp.text
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.sent_to_erp
+
+
+async def test_the_route_reports_an_unreachable_erp_without_its_body(realdb, erp):
+    await _connect(realdb)
+    inv_id = await _seed(realdb, number="ROUTE-502", state_data=_pushed_state("REF-502"))
+    erp.raises.add("REF-502")
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/invoices/{inv_id}/sync-erp-status")
+
+    assert resp.status_code == 502
+    assert "secret-erp-body" not in resp.text
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.sent_to_erp
+    assert await _exceptions(realdb, inv_id) == []
