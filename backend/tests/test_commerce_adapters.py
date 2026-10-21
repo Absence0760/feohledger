@@ -46,7 +46,10 @@ from tests.commerce_contract import (
     use_fake_commerce,
 )
 
-EN_CATALOGUE = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/i18n/locales/en.ts"
+# The English main catalogue plus the settings slice, which /organization loads
+# and which holds the commerce form's labels (decisions §300).
+_LOCALES = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/i18n/locales"
+EN_CATALOGUES = (_LOCALES / "en.ts", _LOCALES / "settings/en.ts")
 
 
 @pytest.fixture(autouse=True)
@@ -162,7 +165,7 @@ def test_every_registered_spec_is_well_formed():
 
 
 def test_every_catalogue_message_key_exists_in_the_frontend_catalogue():
-    text = EN_CATALOGUE.read_text()
+    text = "".join(p.read_text() for p in EN_CATALOGUES)
     keys = {f"org.commerce.field.{name}" for name in catalog.KNOWN_FIELD_LABELS}
     for cls in registry.registered_adapters().values():
         for f in cls.spec.fields:
@@ -170,7 +173,7 @@ def test_every_catalogue_message_key_exists_in_the_frontend_catalogue():
             if "help_key" in f:
                 keys.add(f["help_key"])
     missing = sorted(k for k in keys if f"'{k}':" not in text)
-    assert not missing, f"frontend en.ts lacks {missing}"
+    assert not missing, f"the frontend English catalogue (main + settings slice) lacks {missing}"
 
 
 def test_every_host_naming_field_is_a_destination_key():

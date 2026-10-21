@@ -113,9 +113,17 @@ any tip opens. `content.test.ts` § bundle boundaries pins both.
 
 The glossary, help-route and diagram **strings** are their own lazy catalogue
 slice too (`src/lib/i18n/locales/help/<locale>.ts`, decisions §261): the /help
-layout and each `HelpTip` call `ensureHelpCatalogue()` on mount, and English
-shows until the reader's slice lands. Add a new `help.*` key there, in all six
-locales — only `help.pageLink` and `help.tip.*` stay in the main catalogue.
+`+layout.ts` awaits `ensureSlices('help', 'settings')` before rendering, and
+each `HelpTip` calls `ensureSlices('help')` as it initialises, showing the
+static English copy until the reader's slice lands. Add a new `help.*` key
+there, in all six locales — only `help.pageLink` and `help.tip.*` stay in the
+main catalogue.
+
+/help loads the **settings** slice as well (decisions §300) because guides name
+the configuration screens' controls with `{ui:org.…}` / `{ui:admin.…}`, and
+those keys now live in it. A guide that starts naming the supplier portal's
+controls (`{ui:portal.…}`) needs `'portal'` added to that load —
+`src/lib/i18n/slices.test.ts` fails until it is, naming the guide.
 
 ## Tests
 

@@ -12723,6 +12723,93 @@ row), `backend/tests/test_saml_acs_integration.py` (ACS → bridge → exchange)
 `frontend/src/lib/api/sessionRejection.test.ts` (revocation) and
 `frontend/src/lib/api/codedRefusals.test.ts` (the three sentences).
 
+## 292. Signup refuses an address that already has an account at /complete, and a used verification link is re-answered (2026-10-20)
+
+**Two dead ends in self-service signup.**
+
+1. **An address that already had an account.** `users.email` is unique across
+   every organization, but `/signup/start` never looked at the address. The
+   visitor was told a link was on its way; opening it ran `provision_tenant`,
+   which created the database, hit the unique index, dropped the database and
+   surfaced as a 500 "Something went wrong… contact support". The verification
+   stayed unconsumed, so every reload did all of that again.
+2. **Opening the link twice.** `/verify` redeems on page load and the token is
+   spent on success, so a reload, a second tab, or a mail scanner that ran the
+   page first met the uniform 410 "invalid or expired, please sign up again" —
+   and signing up again then failed, because the slug was now taken by the
+   workspace that very link had created.
+
+**The rule for (1): refuse at `/complete`, keep `/start` uniform.**
+`/signup/complete` checks the address (case-insensitively, as sign-in does)
+before the slug and before provisioning. An address with an account answers
+`409` coded `signup_email_has_workspace`, with `params.sign_in_url` the existing
+account's own sign-in page, built exactly as the wrong-workspace login refusal
+builds it (§288). The verification is spent and committed before the refusal is
+raised, so it can never reach provisioning again, and re-opening it re-states
+the same refusal. The address is checked before the slug so someone signing up
+again for their own workspace is pointed at it, not told the name is taken.
+
+`/start` answers an address with an account exactly as it answers any other —
+same status, same message, a verification link sent. It is public and captcha'd
+but unauthenticated, and a different answer there would let anyone test which
+addresses have accounts. At `/complete` the visitor has proven they read the
+mailbox, so naming the workspace tells them nothing they could not learn from
+their own inbox.
+
+**Rejected: sending a "you already have a workspace" email from `/start`
+instead of a verification link.** It saves the visitor a click and also keeps
+the answer uniform, but it needs a second email template in six locales, and
+`/complete` needs the check regardless: an address can gain an account between
+the two steps. One refusal point covers both.
+
+**The race is a definite answer too.** If the account appears after the check,
+the real `provision_tenant` fails on the unique index. It already drops the
+database it created and removes any control-plane rows it committed (#575), so
+nothing half-made is left. `/complete` then re-reads the address and the slug
+and, when either explains the failure, answers the coded refusal or the slug
+409, never a 500 the link would repeat. A failure neither explains is still the
+500 with the link left unconsumed, so a transient fault can be retried.
+
+**The rule for (2): `/complete` is idempotent for a spent link.** A spent,
+unexpired verification whose slug now names an organization holding an account
+with the link's address is re-answered with that workspace: `200`,
+`already_verified: true`, the tenant URL, the address and `sign_in_url`.
+Nothing is issued. There is no second set-password link (`set_password_url` is
+null), no welcome email, and no audit row. The first answer and the welcome
+email carry the only link, and minting a fresh credential every time an email
+link is opened is what the single-token design of §283 avoids. The page shows
+"Your workspace is ready" with **Go to sign in** and says where the
+set-password link is. A spent link that matches no workspace, or one past its
+24-hour life, is still the uniform 410: the re-answer never shows a workspace
+the link did not create, and a stale link is not kept alive.
+
+**Rejected: redeeming on a button, as the reset-password page spends its token
+only on submit.** The property that page has is that opening the link costs the
+user nothing (its load is a non-consuming `check`, §283). A button would not
+give `/verify` that property: once the workspace exists the token is spent
+however it was spent, so a reload after success would still meet the 410. The
+re-answer does give it, for every way the link gets opened, the button click
+included. It also makes a JavaScript-running mail scanner harmless: if it
+redeems first, the person who clicks next sees their workspace, and the
+set-password link is in the welcome email the scanner's visit sent.
+
+**Not fixed here.** Nobody who has forgotten which workspace their account is in
+can find it without support. Forgot-password works only on a workspace host,
+and the apex has no sign-in page. This refusal helps only someone who has
+already started a signup. The durable fix, an apex "email me my workspace
+address" form with a uniform answer, is in `docs/followups.md`.
+
+Guards: `backend/tests/test_signup.py` (`/start` uniform for an address with an
+account; the coded refusal on a case variant, never provisioning and stable
+across re-opening; the race against the real `provision_tenant` leaving no
+database and no organization; a spent link re-answered twice with nothing
+minted, sent or provisioned; a spent link on someone else's slug still 410),
+`frontend/src/lib/api/codedRefusals.test.ts` (the refusal localized, the link
+carried), and `frontend/tests-e2e/signup/flow.spec.ts` (both states stubbed, plus
+through Mailpit: the link opened again in a second tab after success, and an
+existing login's signup refused on first open and on reload, with the slug left
+free).
+
 ## 293. SCIM writes are audited and last-admin guarded, the guard is serialized, and a deleted user's row says who they were (2026-10-20)
 
 An admin persona review found four gaps in how user accounts change, all in the
@@ -12825,3 +12912,104 @@ reads vendors without any vendor permission, so the same move would have taken
 the page from the CFO. `deps.require_role_or_permission` admits either, so the
 system roles keep exactly what they had, and the nav row ORs the same two
 permissions.
+
+## 300. Strings only some routes render load with those routes, as lazy catalogue slices in every locale (2026-10-20)
+
+(Numbered 300 because §292–§299 are held by pull requests still in flight.)
+
+The Japanese catalogue measured 100 KB gzipped on `main` — the per-chunk
+ceiling in `web-bundle-budget.yml` — and the five keys of PR #611 took it to
+101. The help slice of §261 had bought two weeks. Behind it sat a second
+problem: English main is a static import, so it shares an entry chunk with
+the i18n runtime, and that chunk was at ~97 KB. Moving keys out of the other
+five catalogues alone would have left the English chunk to trip the ceiling
+next.
+
+The keys moved were chosen by measuring gzipped bytes per top-level namespace
+in `ja` and `en` and keeping the namespaces only a bounded set of routes
+renders:
+
+| Slice | Namespaces | Keys | Share of `ja` | Loaded by |
+|---|---|---|---|---|
+| `settings` | `org`, `orgSso`, `admin`, `billing`, `sweepHealth` | 1,023 | ~20% | `/organization`, `/admin/**`, `/billing`, `/help` |
+| `portal` | `portal` | 295 | ~5% | `/portal/**` |
+
+`invoices`, `vendors`, `payments` and `workflows` are as large but render
+across the app (modals, pickers, status badges), so they stay in the main
+catalogue. Measured on `main` + the split: largest main catalogue 77 KB,
+largest chunk 77 KB (the English one), settings 21 KB, portal 6 KB, total
+1034 KB (was 1050); with #611 on top, 77 / 78 / 1034.
+
+How it works, and what it guarantees:
+
+1. **One mechanism, not a second hand-rolled copy of §261's.**
+   `ensureSlices(...names)` replaces `ensureHelpCatalogue()`;
+   `SLICE_LOADERS` holds a loader per slice per locale; `m()` reads the main
+   catalogue first and only then finds a key's slice by prefix
+   (`SLICE_PREFIXES`), so the runtime never bundles a slice's key list.
+   `MessageKey` now means any key `m()` resolves.
+2. **A route awaits its slice.** Each route's `+layout.ts` is
+   `export const load = () => ensureSlices('settings')`. SvelteKit awaits it
+   before rendering, so a slice key is never read before its slice is there and
+   a client-side navigation paints the reader's language on the first frame —
+   which is better than §261's "English until it lands" on a route.
+   `tests-e2e/i18n/catalogue-slices.spec.ts` proves this with the slice's
+   chunk deliberately delayed; a `load` that does not wait fails it.
+3. **The route-scoped slices are lazy in English too.** Nothing reads them
+   unloaded, and keeping their English out of the entry chunk is what brought
+   the English chunk from ~97 to 77 KB. The help slice keeps its static
+   English copy: a HelpTip renders on every page with no route `load` to wait
+   on, so it needs something to show while its chunk is in flight.
+4. **A key rendered where its slice is not loaded is a test failure.**
+   `src/lib/i18n/slices.test.ts` builds the import graph of `src/` and fails on
+   any file that names a key of a slice (a literal, a `{ui:}` reference in help
+   prose, or a runtime-built prefix) and is reachable from a route whose
+   layouts do not load that slice, naming the chain. Keys the backend names —
+   the ERP and commerce form fields' `label_key`s — are read out of the backend
+   adapter packages and attributed to the panel that renders them. Every slice
+   key must be named somewhere, so a key the scan cannot place fails rather
+   than slipping through; that found two dead keys (`help.glossary.topic`,
+   `org.section.brandingSaved`), removed. In dev, `m()` also logs such a key.
+   The thirteen keys under the slice prefixes that shared code renders —
+   role names, NACHA field names, commerce environment options, the portal's
+   "waiting on" phases — stay in the main catalogue, which the test is what
+   decided.
+5. **A locale switch swaps everything at once.** `setLocale` loads the main
+   catalogue and every wanted slice in parallel and assigns them together, so
+   a settings form never shows one language inside another's chrome. A slice
+   that fails in the new locale falls back to English. §261's loader retried a
+   failed help chunk in a loop for as long as it kept failing; the loader now
+   retries only when the locale changed while it was in flight.
+6. **Parity and plurals cover every slice.** `messages_parity.test.ts` holds
+   each slice in each locale to the main catalogue's rules;
+   `plural_messages.test.ts` and `approvalThresholdCurrency.test.ts` read every
+   slice through `allMessages.ts::loadAllMessages`, having silently stopped
+   seeing the keys that moved (help's plurals included, since §261).
+7. **The budget counts one file per catalogue kind**, the kinds read off the
+   `locales/` subdirectories, so a further slice is counted correctly without
+   editing the workflow.
+
+Rejected:
+
+- **Raising `MAX_LARGEST_CHUNK_KB`.** The workflow's own log says not to for
+  catalogues, and the next feature would trip it again.
+- **A slice per route.** Six thousand keys reorganised for a problem two
+  prefixes solved, and a page's strings would fragment across its modals and
+  shared components.
+- **Moving `invoices.*` / `vendors.*` / `payments.*`.** Larger, but rendered
+  from shared modals and pickers on most routes; the scope test would have
+  kept most of them in main, and a slice every route loads saves nothing.
+- **Keeping the new slices' English static, as help's is.** Simpler, but it
+  leaves the English chunk at ~98 KB, two kilobytes from the ceiling.
+- **Resolving the visitor's locale before the first route `load` runs**, so a
+  non-English cold load of a settings route does not fetch the English slice
+  before its own. It saves ~15 KB on that one cold load and would mean the
+  route `load` and `initLocale` racing to decide the locale; the existing
+  English-first paint of the main catalogue already has the same shape.
+
+Tests: `frontend/src/lib/i18n/slices.test.ts`,
+`frontend/src/lib/i18n/messages_parity.test.ts`,
+`frontend/src/lib/i18n/plural_messages.test.ts`,
+`frontend/tests-e2e/i18n/catalogue-slices.spec.ts`, and the backend's
+`test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
+settings slice for the form labels they check.

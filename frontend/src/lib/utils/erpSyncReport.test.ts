@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { en } from '../i18n/locales/en';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import { interpolate } from '../i18n/interpolate';
 import type { MessageKey } from '../i18n/messages';
 import { glSyncReportLines, vendorSyncReportLines } from './erpSyncReport';
 
 const t = (key: MessageKey, params?: Record<string, string | number>) =>
-	interpolate(en[key], params, 'en');
+	interpolate(EN_ALL[key], params, 'en');
 
 describe('glSyncReportLines', () => {
 	it('is one success line when nothing was refused', () => {

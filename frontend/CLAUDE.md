@@ -303,6 +303,16 @@ in all six locales; guide bodies under `src/lib/help/` are English, rendered
 `lang="en"`, and name every UI label with `{ui:key}` rather than typing it —
 `src/lib/help/content.test.ts` resolves each reference. See `docs/help-centre.md`.
 
+**Not every key lives in `locales/<loc>.ts`.** Strings only some routes render
+are lazy catalogue slices — `locales/help/`, `locales/settings/` (`org.*`,
+`orgSso.*`, `admin.*`, `billing.*`, `sweepHealth.*`) and `locales/portal/` —
+loaded by `ensureSlices()` from those routes' `+layout.ts` (decisions §261,
+§300). A new key under a slice prefix goes in the slice; a new route or shared
+component that renders slice keys must load the slice or keep the key in main.
+`src/lib/i18n/slices.test.ts` fails on either mistake and names the import
+chain. Tests that need a key's English text whichever chunk it is in read
+`#lib/i18n/allMessages.ts`, never the app.
+
 ### Tenant — `src/lib/tenant.ts` + `src/lib/hostRouting.ts`
 
 `hostRouting.ts` owns the pure rules ("what does this hostname mean") and is
