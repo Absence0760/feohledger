@@ -39,10 +39,22 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (QuickBooks status sync and
+**Last reconciled:** 2026-10-21 — merging main (the invoice's stored ERP
+document id, auto-send on approval, the adapters' honest paid read) into the
+#575 round-1 branch again; both sides' entries kept, taking the file to 129.
+Before that, on main, 2026-10-21 — storing the ERP document id on the invoice
+(decisions §302) opened two (c) entries, the deep link not choosing the ERP
+organisation/company and the ERP webhook's id-only path, taking the file from
+124 → 126. Before that, 2026-10-21 — auto-sending an approved invoice to the ERP
+(decisions §304) opened one (c) entry, an approval whose post-commit push never
+ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
+true` before deploying it, taking the file from 122 → 124. Before that, 2026-10-21 — the adapters' honest paid read (decisions
+§303) split the "ERP status polling and void are unwired" (c) entry into the
+non-QuickBooks status sync-back gap and the void/recall gap, taking the file
+from 121 → 122. Before that, on this branch, 2026-10-21 — merging main (QuickBooks status sync and
 payment write-back, Xero Disconnect, PO vendor link by supplier id) into the
 #575 round-1 branch; both sides' entries kept, taking the file to 124. Before
-that, 2026-10-20 — the #575 money-path review (decisions §305)
+that, 2026-10-20 — the #575 money-path review (decisions §308)
 opened one (c) entry, the invoice currency that cannot be unknown, taking the
 file from 119 → 120. Before that, 2026-10-20 — giving backend rules a single owner (issue #575 §3)
 opened two (c) entries, the payment-schedule readers that join every row and the CSV
@@ -198,7 +210,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**124 open: 107 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**129 open: 111 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1497,13 +1509,31 @@ scope (§260) — do not fold them into any of these.
       fix:** key the id by ERP (a `vendor_erp_links` table, or `{erp_type: id}`)
       and resolve by the active ERP. **Trigger:** the first tenant that
       switches ERP.
-- [ ] **(c) ERP status polling and void are unwired, and three adapters read a
-      zero balance as paid.** `get_invoice_status` / `void_invoice` have no
-      callers under `app/`. When they are wired in, SYSPRO, Sage SA and
-      QuickBooks map balance 0 to `paid`, which also catches a credited or
-      zero-total bill. **Durable fix:** map paid only on a recorded payment
-      (or the ERP's own paid status), before wiring the poll. **Trigger:**
-      wiring the ERP status poll or void into any flow.
+- [ ] **(c) A bill paid in any ERP but QuickBooks never reaches FeohLedger.**
+      Status sync-back (§295) covers adapters with `supports_status_sync`,
+      which today means QuickBooks only. For every other ERP a push still closes
+      at `done`, and `done` is terminal, so the ERP's later payment cannot be
+      recorded. The webhook's `Paid` and "record payment made outside" both
+      skip a `done` invoice. This is what the live Xero Demo Company test hit:
+      FEOH-INV-001 was paid in Xero and still reads `done`. The adapter
+      reads are now honest about paid versus credited (§303).
+      **Durable fix:** extend §295 per adapter: implement `bill_report` (and
+      `changed_bills` or a keyset poll where the ERP has no change feed) plus
+      `post_payment`, so `supports_status_sync` can be true and the push lands
+      at `posted_in_erp` under §296's dispatch-time read. Xero first. A design
+      that instead rests a pushed bill at the non-payable `sent_to_erp` was
+      built and is kept on the `feat/erp-status-sync` branch. It contradicts
+      §295's "either place may pay" decision and needs a product call before
+      reuse. **Trigger:** the first Xero tenant, or the live Xero re-test.
+- [ ] **(c) A bill already posted to the ERP can't be voided or recalled from
+      FeohLedger.** `void_invoice` has no caller under `app/` beyond
+      `posted_total`'s cleanup of a mismatched bill, and no user action voids
+      or recalls a pushed bill. **Durable fix:** a `POST /api/invoices/{id}/
+      void-erp` (the push's roles) that calls `void_invoice` and refuses a bill
+      the ERP shows paid or part-paid. On success it walks the invoice through
+      an audited edge back to `approved`, so it can be corrected and re-pushed
+      or paid. **Trigger:** the first customer who needs to recall a pushed
+      bill, or the live void test now pending.
 - [ ] **(c) Business Central's vendor sync stores `paymentTermsId` (a GUID) as
       the payment-terms text, and NetSuite's PO sync pulls no lines.**
       **Durable fix:** resolve BC's `paymentTerms` code; pull NetSuite PO lines
@@ -1697,7 +1727,7 @@ scope (§260) — do not fold them into any of these.
       `currency="USD"` before anything has read the document. So an extraction
       whose model returns no currency field, and no code beside the amounts,
       leaves a non-US invoice labelled USD, which is the default decisions
-      §160/§196/§200 forbid. Since §305 the printed code fills the gap when the
+      §160/§196/§200 forbid. Since §308 the printed code fills the gap when the
       page has one; this entry is the case where it doesn't. Two readers then
       stamp the same default again: `invoice_warnings` scopes the
       statistical-anomaly history with `Invoice.currency == (invoice.currency
@@ -2000,6 +2030,55 @@ providers still have the same gap.
       the provider. **Trigger:** the next change to either adapter's OAuth
       spec, or before either provider's platform app goes live.
 
+### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §304)
+
+- [ ] **(c) An approval whose auto-send never ran is not noticed.** The push
+      after an approval is post-commit work, so a process that dies between the
+      approval's commit and the job (a deploy, an OOM) leaves the invoice at
+      `approved` with neither `invoice.erp_submitted` nor
+      `invoice.erp_auto_send_refused` on its trail. It is still payable and
+      sendable by hand, so nothing is lost, but the configured automation was
+      skipped silently. **Durable fix:** a sweep that finds `approved` invoices
+      whose snapshot has `erp_export.auto_send_on_approval` on, approved more
+      than a few minutes ago with no auto-send row of either kind since that
+      approval, and runs `erp_send.send_after_approval` for them (it already
+      re-locks and acts only on `approved`). **Trigger:** the first tenant that
+      relies on auto-send in production, or the first report of an approved
+      invoice that did not reach the ERP.
+
+### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §302)
+
+- [ ] **(c) The ERP deep link opens in whichever organisation / company the
+      user last had open.** `erp_adapters/deep_links.py` builds Xero's
+      `go.xero.com/AccountsPayable/View.aspx?InvoiceID=` and QuickBooks'
+      `app.qbo.intuit.com/app/bill?txnId=` links from the id alone, so a user
+      who works in several Xero organisations or QuickBooks companies lands on
+      "not found" (or the wrong company) unless the right one is already
+      selected. Xero's own MCP server wraps the bill page in
+      `organisationlogin/default.aspx?shortcode=<org>&redirecturl=…`, which
+      needs the organisation's `ShortCode`; we never fetch it. **Durable
+      fix:** read `ShortCode` from `GET /Organisation` when the Xero connection
+      resolves its tenant (`XeroAdapter.resolve_external_tenant_id`), keep it
+      on the ERP config, and build the shortcode redirect; find QuickBooks'
+      equivalent company-selecting URL (if Intuit has one) keyed by the
+      stored `realmId`. The mobile ERP panel shows the id with no link at
+      all, because the app carries no `url_launcher`; add it (and parse
+      `erp_document_url` into `Invoice`) in the same change. **Trigger:** a
+      multi-organisation Xero or multi-company QuickBooks customer, a report
+      of the link opening the wrong books, or a mobile user asking to open
+      the bill.
+- [ ] **(c) The ERP status webhook still ignores an event that carries only
+      `erp_document_id`.** `api/erp_webhook.py` resolves the invoice by
+      `correlation_id` and returns early without one ("not supported yet"). The
+      bill id is now on `invoices.erp_document_id`, so the lookup has a column
+      to use. **Durable fix:** with no `correlation_id`, resolve the invoice by
+      `erp_document_id` (indexed, scoped to the tenant, acting only on exactly
+      one match and taking the same `get_invoice_for_update` row lock), with a
+      realdb test that a second invoice carrying the same id is refused rather
+      than guessed. **Trigger:** wiring a provider whose webhook does not echo
+      our correlation id (QuickBooks / Xero change notifications carry only
+      the entity id).
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
@@ -2239,3 +2318,16 @@ from that work is the one entry below.
       `positive_pay_files_expired`. **Trigger:** the first deployment that
       generates a Positive Pay file, and the SOC 2 records-management evidence
       request either way.
+- [ ] **(b) Confirm every stored `auto_send_on_approval: true` before deploying
+      decisions §304.** The flag did nothing until §304, and every workflow save
+      used to store `true` through the schema default, so a stored `true` may be
+      a choice or an accident. Once deployed, a tenant with one and a live ERP
+      sends each approved invoice to the ERP on approval, and it leaves the
+      payment queue. **Durable fix:** before the deploy, list the default and
+      active workflow definitions (`steps_config`) holding
+      `erp_export.config.auto_send_on_approval = true` in every tenant with a
+      live ERP, confirm each with the tenant's admin, and set the rest to
+      `false` through `PATCH /api/workflows/{id}`. Invoices already created
+      keep the snapshot they froze, so the same check covers the unapproved
+      invoices under such a definition. **Trigger:** the first deploy carrying
+      decisions §304 to an environment with a tenant on a live ERP.

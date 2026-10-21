@@ -193,7 +193,7 @@ def test_the_gate_refuses_an_out_of_range_overall_confidence(bogus):
 def test_no_amount_never_auto_approves_on_either_trigger(amount):
     """An extraction that read no amount (the upload's 0 placeholder survives —
     an unparseable token, or a currency the document contradicts) used to sail
-    under any `auto_approve_below` floor and past every cap (decisions §305)."""
+    under any `auto_approve_below` floor and past every cap (decisions §308)."""
     assert (
         decide_auto_approve(
             {"auto_approve_enabled": True, "auto_approve_threshold": 0.5},

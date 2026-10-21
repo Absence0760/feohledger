@@ -13338,7 +13338,231 @@ first runs from `ci.yml` start a new configuration beside the old
 are matched across configurations, so this changes which configuration an
 alert is reported under, not whether it is reported.
 
-## 304. PDFs draw non-Latin text through one escaper with font fallback; the seed carries production-shaped rows from one shared file (2026-10-20)
+## 302. The invoice carries its ERP bill id, and the deep link is built once, at push time, by the backend (2026-10-20)
+
+**Found live against Xero.** FEOH-INV-001 was posted and Xero returned its
+InvoiceID, but the id went only to `workflow_instances.state_data
+["erp_reference"]` and the `invoice.erp_confirmed` audit row. The invoice modal
+read its ERP reference off the *latest* ERP audit row, which on a success is
+`invoice.completed` (no reference), and hid the ERP section at `done` anyway. A
+user had no way from the invoice to the bill.
+
+**The rule.** `invoices.erp_document_id` (migration 0118) holds the bill of
+record, written by `services/erp._call_erp` beside the existing state_data
+write — the one place a push is confirmed. It takes the adapter's
+`erp_document_id` only: a document *number* is not addressable (no deep link,
+no API lookup), and `"UNKNOWN"` names nothing. A payment void does not clear it
+(the bill is still in the ERP), and every later confirmed push overwrites the
+pair. A push that confirms without reporting an id CLEARS both columns rather
+than keeping the earlier pair. Keeping it was the first draft, on the grounds
+that the push idempotency resolves a re-push to the same bill, but that only
+holds within one ERP. After an org switches ERP, the kept pair would link a
+money record to another system's bill. A failed push never writes it: a bill a
+failure left behind is the `erp_orphan_document_id` state, not the bill of
+record.
+
+**The deep link is stored, not derived on read.** `invoices.erp_document_url`
+comes from `erp_adapters/deep_links.py`, the one provider → URL mapping, at
+push time. Rejected: a frontend helper over a stored provider name. The link
+depends on the adapter config that posted the bill — QuickBooks sandbox and
+production companies are on different hosts — which only the backend holds,
+and an org may change ERP after posting, so deriving it on read from the
+*current* config would point an old bill at the wrong system. Mobile and any
+other client also get the link with no copy of the mapping. Only Xero and
+QuickBooks Online have one; Merge.dev's id is Merge's own, and the other
+adapters' web UIs are not addressable by the id alone, so they show the id with
+no link. Both URLs are documented by neither vendor: Xero's
+`AccountsPayable/View.aspx?InvoiceID=` matches the page Xero's own MCP server
+targets (which wraps it in an organisation-choosing redirect; not done here —
+`docs/followups.md`), and QuickBooks' `app/bill?txnId=` is the bill page's own
+URL.
+
+**Backfill.** 0118 copies `state_data->>'erp_reference'` where the invoice has
+exactly one workflow instance and the value is not `UNKNOWN`. That value is the
+adapter's id on every adapter that returns one; only a success with a number
+and no id stored the number, which cannot be told apart afterwards and is
+accepted. The URL is not backfilled: the tenant database does not record which
+adapter posted the bill.
+
+**Where it is shown.** Both columns are on `InvoiceResponse`, which the web
+invoice modal and the mobile ERP panel read. Each shows the reference at `done`,
+and after a void, as well as at the ERP statuses. Mobile shows the id without a
+link (`docs/followups.md`). The supplier portal's invoice schema and the public
+`/api/v1` contract deliberately leave both out. The ERP bill is our ledger's
+record, not the supplier's, and adding a field to `/v1` is a published-contract
+change that needs its own decision.
+
+## 303. An adapter reads a bill as paid only on the ERP's own paid status or a payment it records (2026-10-21)
+
+**The problem.** `get_invoice_status` mapped a zero balance to `paid` in three
+adapters (SYSPRO, Sage Accounting ZA, QuickBooks), and Sage Intacct and
+Blackbaud FE NXT did the same as a fallback when their own status word still
+said open. A credit note, a write-off or a zero-total bill also leaves nothing
+owing, so anything recording an ERP-reported payment from that answer would
+book money that never moved, as a 1099-reportable cash payment. The open
+follow-up named this as the precondition for wiring any status poll.
+
+**The rule.** `paid` is a claim that money left the customer. An adapter returns
+it only on the ERP's own paid status, or on a payment the ERP records against
+the bill:
+
+| Adapter | `paid` when | Nothing owing otherwise |
+|---|---|---|
+| QuickBooks Online | `Balance == 0`, `TotalAmt != 0`, and a `BillPaymentCheck` / `BillPaymentCreditCard` in `LinkedTxn` | `settled_no_payment` |
+| Xero | `Status == PAID` and `AmountPaid > 0` (credit notes count in `AmountCredited`) | `settled_no_payment` |
+| Sage Accounting ZA | `AmountDue == 0`, Sage's own `Paid` flag, and a non-zero `Total` | `settled_no_payment` |
+| SYSPRO | never: `ApInvoice` states only a balance | `settled_no_payment` |
+| Sage Intacct | `state == paid` | `open` until the state catches up |
+| Blackbaud FE NXT | `status == Paid` | `open` until the status catches up |
+
+`settled_no_payment` is a new `ErpInvoiceStatus` member. It means "nothing is
+owing, and no payment can be seen", and a caller must flag it for a person, not
+record a payment. Intacct and FE NXT return `open` instead because a lagging
+status word is a timing issue that the next read resolves, not a different fact.
+
+**Relation to §295.** QuickBooks' status sync-back does not use
+`get_invoice_status`. It reads `bill_report`, which judges "settled outside
+FeohLedger" from the balance and treats a vendor credit as not cash. This entry
+brings the older per-adapter read into line with that, so a later generic poll
+for ERPs without `supports_status_sync` (Xero, the gap the live Demo Company
+test found, which is tracked in `docs/followups.md`) starts from honest answers.
+No caller under `app/` reads `get_invoice_status` today, so nothing changes at
+runtime.
+
+Guards: `tests/test_erp_{quickbooks_online,xero,sage_accounting_za,syspro,sage_intacct,blackbaud}_adapter.py`.
+
+## 304. Approval sends to the ERP when the workflow says so, and a refusal leaves the invoice approved (2026-10-20)
+
+**Found live.** In a Xero test, tenant `acme`'s default workflow had the ERP
+export step's `auto_send_on_approval: true`, the builder's "Auto-send on
+approval" switch showed it on, and a manager approved FEOH-INV-001. It sat at
+`approved` until someone clicked "Send to ERP". The flag was in the schema, the
+templates and the builder, and nothing in the backend read it; §286 had even
+written "approval never pushes" down as the rule.
+
+**The rule.** An approval that finalises an invoice starts its ERP push when
+three things hold: the invoice's frozen snapshot (never the live definition, as
+for every other step) has an enabled `erp_export` step whose config holds
+`auto_send_on_approval` as the literal `true`; the org has a live ERP; and the
+same gates a person's "Send to ERP" meets let it through. Every approval door
+counts: `review.approve_invoice`'s final level (in-app single and bulk, email,
+Slack, Teams, mobile, the exception agents), `/complete`'s amount-floor
+auto-approve, and the extraction worker's auto-approve. A partial chain
+approval is not a final one and does not send.
+
+**One sequence for every push.** `services/erp_send.start_erp_send` is the plan
+gate (§258/§281), the export gate (§286), the `approved → sending_to_erp`
+transition with its audit row, the commit, and then `dispatch_erp`, in that
+order. `/send-to-erp`, `/retry-erp`, `/complete` and the auto-send all call it,
+so the auto path cannot skip a gate the manual one applies or apply them in
+another order.
+
+**After the approval commits, in a transaction of its own.** The approval
+doors queue the push as post-commit work (`services/post_commit`); the
+extraction worker calls `send_after_approval` itself once its own commit
+returns, because there post-commit work runs inline while the committing
+session still holds the worker's single connection. Either way the push opens
+its own session, re-locks the invoice and acts only on `approved`. Two things
+follow:
+
+- **A refusal cannot undo the approval.** The approval has already committed.
+  The invoice stays `approved`, which is still payable and still sendable by
+  hand, and the refusal is recorded as an `invoice.erp_auto_send_refused` audit
+  row carrying `{trigger, status_code, refusal: {code, params}}`, the same coded
+  refusal the manual door would have answered with. The approver's response
+  says `approved` and is never a 402 or 409 for a push they did not ask for.
+  Rejected: running the gates inside the approval transaction and failing the
+  approval on a refusal. An open duplicate would then make an invoice
+  unapprovable rather than unpostable, and the plan gate would turn a downgrade
+  into a block on approving. Also rejected: transitioning to `sending_to_erp`
+  in the approval transaction. Every caller that reads the status after
+  `approve_invoice` (the email, Slack and Teams doors tell a partial chain
+  approval from a final one that way) would have seen a status that was not
+  `approved`.
+- **It cannot dispatch twice.** Approval leaves `ready_for_review` and happens
+  once. A retried job, or a manual send or payment schedule that got there
+  first, finds a status other than `approved` under the row lock and does
+  nothing. The `approved → sending_to_erp` transition under that lock is the
+  single guard, as it already was for the manual doors. A bulk approve queues
+  one job per transaction and sends its invoices one after another.
+
+**A missing key is off, and so is the schema default.** The seeded and
+provisioned definitions carry no `auto_send_on_approval` key, and the builder
+renders a missing key as the switch off with the "users must manually trigger
+Send to ERP" warning, so only the literal `true` counts. The schema default for
+`ErpExportStepConfig.auto_send_on_approval` was `true`, and every definition
+save runs each step through that model and stores the dump: an admin who
+changed an approval threshold on a workflow showing the switch off stored
+`true` without seeing it. The default is now `false`. A builder-added step and
+the templates still set it on explicitly, where the switch shows it.
+
+**Stored `true` values are not rewritten.** Before this change the flag did
+nothing, so a `true` saved through the old default cannot be told from one an
+admin chose. Rewriting them to `false` would undo real choices (`acme`'s, the
+one that found this); leaving them means a tenant whose admin saved a workflow
+since the schema existed starts auto-sending on deploy. That is an operator
+call per tenant, tracked as a (b) entry in `docs/followups.md`: before
+deploying, list the definitions holding `true` and confirm each with its
+admin.
+
+**What auto-send hands over.** A successful push ends the invoice at `done`,
+live ERP or mock, by hand or automatically (`erp.send_to_erp_internal`), and
+`done` is not payable here: the bill is paid from the ERP. With an ERP's status
+sync on (QuickBooks, §295) the push lands at `posted_in_erp` instead, still
+payable here, and auto-send changes nothing about that. That is the existing
+meaning of "Send to ERP"; auto-send makes it happen at approval, so with the
+switch on an approved invoice leaves FeohLedger's payment queue moments after
+approval, before anyone can schedule it directly. The builder says so under the
+switch, and `backend/docs/payments.md` notes it. Tenants that pay through
+FeohLedger runs keep the switch off.
+
+**Why the mock ERP is skipped.** For the same reason, applied to tenants with no
+real ledger: the mock is the local-first stand-in (guard rail 7), and every dev
+and e2e tenant runs on it. Auto-sending there would empty the payment queue
+those tenants and the payment specs depend on, with no ERP to pay from. A person
+can still send to it by hand.
+
+**No person behind it.** An extraction auto-approval of an emailed invoice has
+no actor, so `dispatch_erp` and the Lambda worker now carry a null `actor_id`
+instead of the string `"None"`.
+
+**The extraction worker awaits the send.** Its loop (in-process, or the
+Lambda handler's) closes when the job returns, so a local-mode send started as
+a task there would be abandoned at `sending_to_erp`. It passes
+`inline_dispatch=True`, and the send holds that worker until it finishes,
+retries included.
+
+**`post_commit` was running at savepoint boundaries.** SQLAlchemy fires
+`after_commit` when a SAVEPOINT is released and `after_rollback` when one rolls
+back. Bulk approve runs each row in a savepoint, so every queued job (the
+approval emails and chat posts, and now the auto-send) ran at the first row's
+release, inside the still-open outer transaction, and a skipped row's rollback
+then dropped whatever was queued after. A release now leaves the queue alone,
+and a savepoint rollback drops only the jobs queued inside that savepoint.
+
+**A hand-off that fails lands at `failed`.** If `dispatch_erp` raises after the
+`sending_to_erp` commit (an SQS send in lambda mode), nothing will ever run that
+push and `/retry-erp` takes only `failed`. `start_erp_send` now moves it there
+with an `invoice.erp_failed` row, for the manual doors too, which used to
+answer 500 and leave the invoice stranded at `sending_to_erp`.
+
+**Not done here** (`docs/followups.md`): the auto-send is post-commit work, so
+a process that dies between the approval's commit and the job leaves the
+invoice `approved` with neither an `erp_submitted` nor an
+`erp_auto_send_refused` row. Nothing is lost (it is payable and sendable by
+hand), but nothing notices either; a reconciliation sweep is the durable fix.
+
+Guards: `backend/tests/test_erp_auto_send_on_approval.py` (sends with the flag
+on; not with it off, absent, the step disabled, no instance, no ERP or the mock
+ERP; the snapshot decides in both directions; the floor and extraction
+auto-approvals; a partial chain; an open duplicate and the plan each recorded
+with the invoice left approved; a rolled-back approval sends nothing; a second
+run and a bulk approve each dispatch once), `tests/test_erp_dispatch.py` and
+`tests/test_erp_lambda.py` (inline dispatch in a worker scope, the null actor),
+and `frontend/tests-e2e/erp/xero.spec.ts` (approving reaches fake Xero as a bill
+with no click; with the flag off nothing is posted until the click).
+
+## 307. PDFs draw non-Latin text through one escaper with font fallback; the seed carries production-shaped rows from one shared file (2026-10-20)
 
 **Found by the production-shaped fixtures (#575 § 2).** The seed and e2e
 fixtures now carry a non-ASCII vendor (`Ōsaka Seimitsu Kōgyō 株式会社 — …
@@ -13382,11 +13606,11 @@ Guards: `backend/tests/test_pdf_text.py` (each renderer, with the fixture's
 names, asserts no glyph outside cp1252 was drawn in a Helvetica face; the long
 number wraps; `&` prints as `&`), `backend/tests/test_seed_realistic.py`.
 
-## 305. "Approved or beyond" is one population for budgets and fraud baselines; a printed currency code is evidence, never a default (#575, 2026-10-20)
+## 308. "Approved or beyond" is one population for budgets and fraud baselines; a printed currency code is evidence, never a default (#575, 2026-10-20)
 
-(Numbered 305, with §304 above it, because §295, §296 and §301 landed on
-`main` first and §297–§299, §302 and §303 are held by pull requests still in
-flight.)
+(Numbered 308, with §307 above it, because §295, §296, §301 and §302–§304
+landed on `main` first and §297–§299, §305 and §306 are held by pull requests
+still in flight.)
 
 **Budget actual.** The realised leg of a budget (and the PO-relief leg, which
 must admit exactly the same invoices) is `APPROVED_OR_BEYOND_STATUSES`, so it now

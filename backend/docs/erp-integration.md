@@ -223,7 +223,7 @@ approved
     v
 sending_to_erp          (adapter.post_invoice() called)
     |
-    ├── success ──> sent_to_erp    (ERP accepted, document ID stored)
+    ├── success ──> sent_to_erp    (ERP accepted, document ID stored on the invoice)
     |                   |
     |                   v
     |               posted_in_erp  (ERP confirmed posting — webhook or poll)
@@ -289,9 +289,12 @@ no background sweep, so an ERP without a webhook never reports a status change
 back, and nothing times a stuck `sent_to_erp` invoice out. The webhook above is the
 only inbound path today. The intended design was a sweep every few minutes over
 `sent_to_erp` invoices that transitions on a changed status and fails one stuck
-past a timeout; before wiring it, three adapters' "balance 0 ⇒ paid" mapping has to
-change (it also matches a credited or zero-total bill). Tracked in
-`docs/followups.md` ("ERP status polling and void are unwired"). QuickBooks
+past a timeout. The adapters' reads are ready for it: since decisions §303 `paid`
+means the ERP's own paid status or a payment it records, never a zero balance
+alone, and a bill with nothing owing but no visible payment reads
+`settled_no_payment` (for a person, never recorded). Tracked in
+`docs/followups.md` ("A bill paid in any ERP but QuickBooks never reaches
+FeohLedger"). QuickBooks
 Online is the exception: its status comes back through its own webhook and a
 change-data-capture sweep (next section).
 
@@ -457,7 +460,7 @@ plain JSONB under RDS storage encryption until that migration.
 
 `backend/app/services/erp_adapters/catalog.py` is the single source of truth for
 the Organization → ERP form, served at `GET /api/organization/erp/providers`
-(admin). Each entry carries `key`, `label`, `regions` (`US`, `ZA`), `auth`
+(admin). Each entry carries `key`, `label`, `regions` (ISO codes; the picker groups `US` and `ZA`, and lists any other region — `GB` for Sage Accounting — under "Other"), `auth`
 (`credentials` | `oauth`), `fields` (`name`, `label_key` — a frontend i18n
 `MessageKey`, `secret`, `required`, optional `placeholder` / `help_key` /
 `options`) and `docs_url`; the endpoint adds `available` (adapter registered in
@@ -470,7 +473,7 @@ included, under `erp_integrations`, §281).
 |---|---|---|---|
 | `quickbooks_online` | QuickBooks Online | US | OAuth (optional BYO app; `environment`) |
 | `xero` | Xero | US, ZA | OAuth (optional BYO app; `bill_status`, `default_tax_type`) |
-| `sage_accounting` | Sage Business Cloud Accounting (v3.1: US, UK, IE, CA) | US | OAuth (optional BYO app) |
+| `sage_accounting` | Sage Business Cloud Accounting (v3.1: UK, IE, CA, DE, ES, FR; the US product was retired 2024-12-31) | GB (listed under "Other") | OAuth (optional BYO app) |
 | `sage_accounting_za` | Sage Business Cloud Accounting (South Africa) | ZA | API key + Sage login + company |
 | `blackbaud_fe_nxt` | Blackbaud Financial Edge NXT | US | OAuth (optional BYO app + SKY API subscription key) |
 | `sage_intacct` | Sage Intacct | US, ZA | REST API client credentials + company / user |
@@ -1099,8 +1102,19 @@ reasoning).
 - **What the user does:** resolve or dismiss the exception in Exceptions, then
   send again. Clearing it goes through `exception_lifecycle.record_decision`,
   so someone implicated in the invoice cannot clear it for themselves.
-- **Approval never pushes.** Approving advances the workflow's step pointer
-  only; the push is always one of the three requests above.
+- **Approval pushes only when the workflow says so** (decisions §304). With
+  the snapshot's `erp_export.auto_send_on_approval` on and a live ERP, approval
+  starts the push after it commits, through the same gates
+  (`services/erp_send.start_erp_send`, shared with the three doors above). A
+  refusal there is not a 409 to the approver: the invoice stays `approved` and
+  an `invoice.erp_auto_send_refused` audit row records the coded refusal. With
+  the flag off (or absent), approving advances the step pointer only. The push
+  is post-commit work: a process that dies between the approval and the job
+  skips it without a trace (tracked in `docs/followups.md`).
+- **A hand-off that raises lands at `failed`.** When `dispatch_erp` raises after
+  the `sending_to_erp` commit (an SQS send), `start_erp_send` moves the invoice
+  to `failed` with an `invoice.erp_failed` row (`error: "ERP send could not be
+  queued"`), so `/retry-erp` can take it.
 
 The browser states the code from either place (`api/erpRefusals.ts`, also used
 by `codedRefusals.ts` for the 409). Tests:
@@ -1403,6 +1417,38 @@ written. A failure that reports no document leaves earlier ids in place,
 because that bill is still in the ERP. A successful push clears them, because
 its `erp_reference` then names the bill of record.
 
+## The invoice names its bill in the ERP
+
+A confirmed push stores the adapter's `erp_document_id` on
+`invoices.erp_document_id` and the provider's deep link on
+`invoices.erp_document_url` (migration 0118), alongside the
+`state_data["erp_reference"]` write in `services/erp._call_erp`. Both are on
+`InvoiceResponse`; the invoice modal's ERP section shows the id as
+"ERP Reference", linked when there is a URL, at every status from
+`sending_to_erp` on, `done` included.
+
+- **Only the ERP's id is stored**, never the document number or the
+  `"UNKNOWN"` placeholder `erp_reference` falls back to: the column is what a
+  deep link or an API lookup addresses. A success that reports no id clears
+  both columns, because an earlier pair may name another ERP's bill after the
+  org switches ERP.
+- **A failure never writes it.** A bill a failed push left behind is the
+  orphan state above, not the bill of record.
+- **A payment void keeps it** (the bill is still in the ERP); a later confirmed
+  push overwrites it, and the push idempotency makes that the same bill.
+- **Deep links live in one place**, `erp_adapters/deep_links.py`, built at push
+  time from the config that posted the bill:
+
+  | Adapter | Link |
+  |---|---|
+  | `xero` | `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=<id>` |
+  | `quickbooks_online` | `https://app.qbo.intuit.com/app/bill?txnId=<id>` (`app.sandbox.qbo.intuit.com` when `environment` is `sandbox`) |
+  | everything else (Merge.dev, mock, the other direct adapters) | none — the id is shown alone |
+
+  Both open in the user's currently selected organisation / company
+  (`docs/followups.md`). Invoices posted before 0117 got the id backfilled
+  from `state_data` but no link. Reasoning: `docs/decisions.md` §302.
+
 **Manual retry:** `POST /api/invoices/{id}/retry-erp` resets `erp_retries` to 0
 and moves the invoice to `sending_to_erp`. The route then dispatches the push.
 It assigns a **new** `state_data` dict. The column is plain JSONB with no
@@ -1666,7 +1712,7 @@ form. JSON throughout — no XML parser on this path.
 |---|---|
 | token | `POST <base>/oauth2/token` (form: `grant_type=client_credentials`, `client_id`, `client_secret`, `username`) — one per adapter operation |
 | `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`) or any GL account ERP id (`account_not_linked`) → `POST services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` |
-| `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` (+ `totalTxnAmountDue = 0` ⇒ paid) |
+| `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` only — never `totalTxnAmountDue = 0` (decisions §303) |
 | `void_invoice` | deletes a draft / posted-unpaid bill; a bill that is paid, partially paid, selected for payment or reversed returns `False` (reversal with its payment is an accountant's call) |
 | `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors and accounts up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort |
 | `test_connection` | token + a one-row vendor query |
@@ -1722,7 +1768,7 @@ query-string parameters, which is how the WCF REST host takes them:
 | Operation | Business object |
 |---|---|
 | `post_invoice` | refuse without `vendor_erp_id` / a GL account ERP id → `COMFND` on `ApInvoice` by (`Supplier`, `Invoice`) → `Transaction/Post` `APSTIN` |
-| `get_invoice_status` | `COMFND` on `ApInvoice` — `MthInvBal1` 0 ⇒ paid, below `OrigInvValue` ⇒ partially paid, else open |
+| `get_invoice_status` | `COMFND` on `ApInvoice` — `MthInvBal1` 0 ⇒ `settled_no_payment` (no paid status to read, decisions §303), below `OrigInvValue` ⇒ partially paid, else open |
 | `void_invoice` | not automated (`False`) — reversing a posted AP invoice is an adjustment / credit in an open period, an accountant's call |
 | `list_vendors` / `list_gl_accounts` | `COMFND` on `ApSupplier` / `GenMaster` (`AccountType` A/L/C/R/E → asset/liability/equity/revenue/expense) |
 | `list_pos` | `COMFND` on `PorMasterHdr` + `PorMasterDetail` (total = Σ qty × price) + `ApSupplier` for names, one session; a PO with no lines returned is skipped, never synced at 0 |
@@ -1913,12 +1959,17 @@ unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_UR
 override the OAuth endpoints, which dev points at fake-erp so the connect flow
 runs locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
 
-**Region coverage: not South Africa.** Every v3.1 operation lists its
-availability as CA, DE, ES, FR, GB, IE and US. Sage Business Cloud Accounting
+**Region coverage: not the US, not South Africa.** Every v3.1 operation lists
+its availability as CA, DE, ES, FR, GB, IE and US, but **Sage retired the US
+product on 2024-12-31** and ended US access on 2025-01-31
+([Sage](https://www.sage.com/en-us/sage-business-cloud/sage-accounting/)), so
+no US business exists to connect. A US customer on Sage is on Sage Intacct
+(`sage_intacct`) or the desktop Sage 50, which has no connector. Test this
+adapter against a UK trial business. Sage Business Cloud Accounting
 **South Africa** (the Pastel successor) runs on a separate codebase with its
 own API (`https://accounting.sageone.co.za/api/2.0.0`, API key + basic auth,
 not OAuth), and Sage's developer community confirms v3.1 does not serve it.
-So this adapter covers the US and the other v3.1 regions; a ZA business cannot
+So this adapter covers the other v3.1 regions; a ZA business cannot
 complete its consent flow. A ZA Sage adapter is separate work.
 
 **`settings.erp` keys:** `oauth` (written by `erp_oauth` only),
@@ -1996,7 +2047,7 @@ pages.
 | Operation | Calls |
 |---|---|
 | `post_invoice` | refuse pre-flight without a numeric `vendor_erp_id` (SupplierId) / numeric GL account ids, or in a non-home currency → `SupplierInvoice/Get` idempotency lookup → `Supplier/Get/{id}` (+ `Company/Get/{id}`) currency check → `Account/Get` + `TaxType/Get` → `SupplierInvoice/Save` |
-| `get_invoice_status` | `SupplierInvoice/Get/{id}` — `AmountDue` 0 ⇒ paid, below `Total` ⇒ partially paid, else open |
+| `get_invoice_status` | `SupplierInvoice/Get/{id}` — `AmountDue` 0 ⇒ paid with Sage's `Paid` flag and a non-zero `Total`, else `settled_no_payment` (decisions §303); below `Total` ⇒ partially paid, else open |
 | `void_invoice` | `SupplierInvoice/Delete/{id}`, only when `AmountDue == Total` and the invoice is neither `Locked` nor `Paid`; otherwise `False` (reverse it in Sage with its payment) |
 | `list_vendors` / `list_gl_accounts` / `list_pos` | `Supplier/Get` / `Account/Get` (active only; category → asset/liability/equity/revenue/expense, unknown → unclassified) / `PurchaseOrder/Get` (`currency` left NULL — decisions §197) |
 | `test_connection` | `Company/Get` answers *and* lists the configured `company_id` |
@@ -2077,7 +2128,7 @@ tenant; the environment is burned into the token.
 | Operation | Call |
 |---|---|
 | `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>` → `POST /accountspayable/v1/invoices/process` → `GET …/backgroundProcess/{id}/status` (≤ 10 reads, 1 s apart) → `…/result` |
-| `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (balance 0 ⇒ paid), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
+| `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (a zero balance stays open until FE NXT says `Paid`, decisions §303), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
 | `void_invoice` | not automated (`False`): the AP API has no invoice delete, and cancelling a posted payable is an adjustment in an open period |
 | `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort; template and deleted POs skipped; PO `currency` stays NULL |
 | `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take), up to `SYNC_LISTING_MAX_ROWS`; `prevent_data_entry` accounts emitted `active=False`; `account_type` unclassified (FE NXT's `class` is a net-asset class) |

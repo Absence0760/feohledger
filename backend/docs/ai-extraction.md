@@ -243,7 +243,7 @@ statement cell can't drift apart:
 A model transcribing the printed total often keeps the code the page prints:
 `GBP 9,500.00`, `1,234.56 USD`. `_amount_core_and_codes` strips the code so the
 magnitude parses, and **returns it** — it is the document stating that figure's
-currency, not decoration (`docs/decisions.md` §305). `extraction_currency_evidence`
+currency, not decoration (`docs/decisions.md` §308). `extraction_currency_evidence`
 collects the codes from every money token that parses (the same header + line
 set the convention vote reads) and weighs them against the model's `currency`
 field (`CurrencyEvidence`):

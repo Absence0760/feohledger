@@ -673,7 +673,7 @@ async def test_actual_counts_an_invoice_mid_erp_push(realdb):
     await _mk_invoice(realdb, amount="120.00", cost_center=cc, status="sending_to_erp")
     await _mk_invoice(realdb, amount="30.00", cost_center=cc, status="sent_to_erp")
     # Approved, then the ERP push failed: still spend a human signed off. The
-    # approval stamp is the evidence (decisions §73 / §305).
+    # approval stamp is the evidence (decisions §73 / §308).
     await _mk_invoice(
         realdb, amount="7.00", cost_center=cc, status="failed", approval_date=date(2026, 9, 1)
     )

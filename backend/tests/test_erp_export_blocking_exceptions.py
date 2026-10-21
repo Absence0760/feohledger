@@ -25,7 +25,10 @@ Pinned here, on real Postgres over real HTTP:
 * `/complete`'s own `refresh_warnings` can find the duplicate mid-request: the
   refusal persists that exception, and once a person has dismissed it the next
   refresh does not re-open it (which would make the invoice unpostable);
-* approval itself never pushes, whatever the `erp_export` step says.
+* approval does not push while the step's `auto_send_on_approval` is off (an
+  absent key reads as off); with it on, approval's auto-send meets the same
+  gate and leaves the invoice `approved` (`test_erp_auto_send_on_approval.py`,
+  decisions §304).
 """
 
 from __future__ import annotations
@@ -147,10 +150,10 @@ def dispatched(monkeypatch):
     """Record what the HTTP doors hand the dispatcher, and run nothing."""
     calls: list[uuid.UUID] = []
 
-    async def _record(invoice_id, org_id, actor_id):
+    async def _record(invoice_id, org_id, actor_id, **_kwargs):
         calls.append(invoice_id)
 
-    monkeypatch.setattr("app.api.workflow.dispatch_erp", _record)
+    monkeypatch.setattr("app.services.erp_send.dispatch_erp", _record)
     return calls
 
 
@@ -589,10 +592,11 @@ async def test_a_new_fraud_finding_is_still_raised_after_another_was_dismissed(r
 # ---------------------------------------------------------------------------
 
 
-async def test_approval_never_pushes_even_with_the_erp_step_on(realdb, dispatched):
-    """Approval advances the workflow's step pointer only; the push is a
-    separate, gated request. So an approved invoice with an open duplicate sits
-    at `approved` until someone sends it, and that send is refused."""
+async def test_approval_does_not_push_with_auto_send_off(realdb, dispatched):
+    """`_ERP_ON` enables the step without `auto_send_on_approval`, which reads as
+    off (decisions §304): approval advances the step pointer only and the push
+    is a separate, gated request. So an approved invoice with an open duplicate
+    sits at `approved` until someone sends it, and that send is refused."""
     info = realdb.info(TENANT)
     mk = realdb.sessionmaker(TENANT)
     inv_id = await _seed(mk, info.org_id, number="ERPX-008", status=InvoiceStatus.ready_for_review)

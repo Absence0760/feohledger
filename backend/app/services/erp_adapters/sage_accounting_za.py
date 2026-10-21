@@ -207,13 +207,21 @@ def split_inclusive(gross: Decimal, percentage: Decimal) -> tuple[Decimal, Decim
 
 
 def map_invoice_status(record: dict) -> ErpInvoiceStatus:
-    """Outstanding vs paid from ``AmountDue`` against ``Total``."""
+    """Outstanding vs paid from ``AmountDue`` against ``Total``, and Sage's own ``Paid``.
+
+    Nothing due is ``paid`` only when Sage itself marks the invoice ``Paid`` and
+    it had something to pay; otherwise (a zero-total invoice, or a zero balance
+    Sage does not call paid) it is ``settled_no_payment``, never recorded as
+    a payment (docs/decisions.md §303).
+    """
     total = _decimal(record.get("Total"))
     due = _decimal(record.get("AmountDue"))
     if total is None or due is None:
         return ErpInvoiceStatus.unknown
     if due == 0:
-        return ErpInvoiceStatus.paid
+        if record.get("Paid") is True and total != 0:
+            return ErpInvoiceStatus.paid
+        return ErpInvoiceStatus.settled_no_payment
     if abs(due) < abs(total):
         return ErpInvoiceStatus.partially_paid
     return ErpInvoiceStatus.open

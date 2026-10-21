@@ -369,6 +369,19 @@ export interface Invoice {
 	file_url: string | null;
 	warnings: InvoiceWarning[] | null;
 	po_match: PoMatch | null;
+	/**
+	 * The bill this invoice was posted as in the ERP (a Xero InvoiceID, a
+	 * QuickBooks Bill Id, ...); `null` until a push is confirmed. Written only by
+	 * the backend's ERP push (`services/erp.py`).
+	 */
+	erp_document_id: string | null;
+	/**
+	 * The provider's deep link to that bill, built by the backend from the ERP
+	 * config that posted it (`services/erp_adapters/deep_links.py` — the one
+	 * provider → URL mapping). `null` for a provider with no stable deep link:
+	 * render the id alone, never build a URL here.
+	 */
+	erp_document_url: string | null;
 	priors_summary: { cache: number; rag: number } | null;
 }
 
