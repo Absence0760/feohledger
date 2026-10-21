@@ -113,7 +113,7 @@ and `/complete` provision a new workspace under a different slug, since §292's
 existing-account refusal no longer finds it. The closed workspace's own
 verification link is deleted with it, so re-opening it is the uniform 410.
 Nothing deletes an abandoned trial on its own; why, and what would have to
-change first: `docs/decisions.md` §303 and `docs/followups.md` § Surfaced by
+change first: `docs/decisions.md` §306 and `docs/followups.md` § Surfaced by
 self-service workspace closure.
 
 ## Backend components

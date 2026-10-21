@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Organization → Close workspace (`docs/decisions.md` §303).
+	 * Organization → Close workspace (`docs/decisions.md` §306).
 	 *
 	 * An administrator deletes an UNUSED workspace — typically an abandoned
 	 * trial — which also frees its users' email addresses, so they can be

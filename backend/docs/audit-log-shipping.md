@@ -107,7 +107,7 @@ fan-out under a runaway sweep.
 `audit_log_shipper.flush_tenant(db_name)` ships one tenant's whole unshipped
 backlog now, batch after batch, and raises on any failure (or on a backlog that
 does not drain within `FLUSH_MAX_BATCHES`). Its caller is a self-service
-workspace closure (`services/workspace_closure.py`, decisions §303): the tenant
+workspace closure (`services/workspace_closure.py`, decisions §306): the tenant
 database is about to be dropped, and an unshipped row would be lost with it. The
 closure writes its `organization.closing` row, flushes, and refuses to delete
 anything if the flush fails. With `FEOH_AUDIT_SHIPPING_ENABLED` off it is not

@@ -196,7 +196,7 @@ workspace's side:
   The administrator types the workspace's slug back and, where MFA is on,
   confirms a code or a passkey (a password alone is not enough, and an account
   with no second factor enrolls one first). `POST /api/organization/close`;
-  reasoning and the full guard list: [`decisions.md`](decisions.md) §303.
+  reasoning and the full guard list: [`decisions.md`](decisions.md) §306.
 
 Neither one reveals anything about the other workspace to the inviter; the
 refusal's sentence only says that its administrator can close it.

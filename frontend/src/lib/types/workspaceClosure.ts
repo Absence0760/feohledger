@@ -1,5 +1,5 @@
 /**
- * Closing a workspace (Organization → Close workspace, `docs/decisions.md` §303).
+ * Closing a workspace (Organization → Close workspace, `docs/decisions.md` §306).
  *
  * The backend refuses a self-service closure for any workspace that holds
  * something that must be kept, and names each reason by a stable code

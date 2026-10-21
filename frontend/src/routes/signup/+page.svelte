@@ -133,7 +133,7 @@
 			} else {
 				slugStatus = 'bad';
 				// A slug resting after a workspace closure is stated as such, in
-				// the reader's language (decisions §303); otherwise the reason.
+				// the reader's language (decisions §306); otherwise the reason.
 				slugError =
 					res.reason_code === 'signup_slug_held'
 						? m('refusal.signupSlugHeld')

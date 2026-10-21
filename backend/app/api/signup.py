@@ -122,7 +122,7 @@ VERIFICATION_TTL = timedelta(hours=24)
 SIGNUP_EMAIL_HAS_WORKSPACE = "signup_email_has_workspace"
 
 #: The slug belonged to a workspace its administrator closed, and is resting
-#: (`utils.slug.ensure_slug_not_held`, decisions §303). Its own code, so the
+#: (`utils.slug.ensure_slug_not_held`, decisions §306). Its own code, so the
 #: page can say the name is temporarily unavailable rather than taken — nobody
 #: owns it, and saying "taken" would send the visitor looking for its owner.
 SIGNUP_SLUG_HELD = "signup_slug_held"

@@ -3,7 +3,7 @@
 **When you need this**: weekly, and whenever someone asks whether a closed
 workspace is fully gone. An administrator can close an unused workspace from
 **Organization → Close workspace** (`POST /api/organization/close`,
-`docs/decisions.md` §303). The app deletes the workspace's documents, its
+`docs/decisions.md` §306). The app deletes the workspace's documents, its
 database and its control-plane rows itself. It cannot delete the nightly
 **backup dumps**: they live in the backup bucket, which the API has no access to.
 

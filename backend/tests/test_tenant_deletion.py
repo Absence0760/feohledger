@@ -167,7 +167,7 @@ async def test_the_database_goes_first_then_documents_then_the_control_row():
 
     assert order == ["database", "storage", "storage", "control"], (
         "the database goes first, so a drop that fails leaves a whole workspace "
-        "rather than one whose files are gone (decisions §303); the sweep runs twice "
+        "rather than one whose files are gone (decisions §306); the sweep runs twice "
         "for an object PUT mid-listing; and the control-plane row — the only place "
         "the object-storage prefix is written down — goes last (decisions §179)"
     )

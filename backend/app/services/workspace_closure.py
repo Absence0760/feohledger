@@ -1,6 +1,6 @@
 """Self-service workspace closure — an administrator deletes an UNUSED workspace.
 
-Why it exists (`docs/decisions.md` §303): `users.email` is globally unique and
+Why it exists (`docs/decisions.md` §306): `users.email` is globally unique and
 one address is one account in one workspace (§291). Someone who signs up with
 an address, abandons the trial and is later added to another workspace with
 the same address is refused `email_in_other_workspace`, and before this the

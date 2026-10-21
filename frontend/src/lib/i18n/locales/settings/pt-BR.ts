@@ -1112,7 +1112,7 @@ export const messages = {
 	'org.payments.nachaHint': "Opcional. Permite baixar um lote em rascunho como arquivo ACH NACHA para enviar ao seu banco. O banco fornece estes valores: um nome de empresa (até 16 caracteres), um ID de empresa de 10 caracteres (geralmente 1 seguido do seu EIN), o número de roteamento de 9 dígitos do banco e, opcionalmente, o nome do banco (até 23 caracteres).",
 	'org.payments.nachaInvalid': "Verifique os dados do arquivo bancário: {fields}.",
 
-	// Closing a workspace (Organization → Close workspace, decisions §303)
+	// Closing a workspace (Organization → Close workspace, decisions §306)
 	'org.close.title': "Encerrar este espaço de trabalho",
 	'org.close.intro': "Encerrar um espaço de trabalho o exclui permanentemente: suas faturas, fornecedores, documentos e configurações, e todas as contas de usuário nele. Use isto para um espaço de trabalho de que você não precisa mais, como uma avaliação que você criou e não continuou. O encerramento libera os endereços de e-mail dos seus usuários, para que possam ser adicionados a outro espaço de trabalho.",
 	'org.close.checking': "Verificando se este espaço de trabalho pode ser encerrado…",

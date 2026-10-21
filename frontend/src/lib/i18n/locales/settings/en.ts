@@ -1130,7 +1130,7 @@ export const enSettings = {
 	'org.payments.nachaHint': "Optional. Lets you download a draft run as a NACHA ACH file to upload to your bank. Your bank provides these values: a company name (up to 16 characters), a 10-character company ID (usually 1 followed by your EIN), your bank's 9-digit routing number, and optionally the bank's name (up to 23 characters).",
 	'org.payments.nachaInvalid': "Check the bank-file details: {fields}.",
 
-	// Closing a workspace (Organization → Close workspace, decisions §303)
+	// Closing a workspace (Organization → Close workspace, decisions §306)
 	'org.close.title': "Close this workspace",
 	'org.close.intro': "Closing a workspace permanently deletes it: its invoices, vendors, documents and settings, and every user account in it. Use this for a workspace you no longer need, such as a trial you set up and did not continue. Closing it frees its users' email addresses, so they can be added to another workspace.",
 	'org.close.checking': "Checking whether this workspace can be closed…",

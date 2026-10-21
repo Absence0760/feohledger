@@ -386,7 +386,7 @@ async def test_unknown_tenant_returns_204(realdb):
 
 @pytest.mark.asyncio
 async def test_a_slug_never_addresses_a_tenant(realdb):
-    """The path takes the organisation id, never the slug (decisions §303): a
+    """The path takes the organisation id, never the slug (decisions §306): a
     slug can pass to a new workspace after a closure, and an Access Point still
     configured with the old URL must not deliver the closed tenant's supplier
     invoices to it. A delivery addressed by slug — even a live tenant's — is
