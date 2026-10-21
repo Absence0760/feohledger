@@ -1,4 +1,6 @@
 <script lang="ts" generics="T extends string">
+	import type { Component } from 'svelte';
+
 	/**
 	 * A small, single-choice picker drawn as a row of segments — a `<fieldset>`
 	 * of real radio buttons, because that is what it is.
@@ -12,6 +14,15 @@
 	 * in `app.css`); the whole segment is its label, so the hit area is the
 	 * segment, not the 16px dot.
 	 *
+	 * `compact` draws the same fieldset as a row of icons, for a header with no
+	 * room for words (the landing page's theme switch, docs/decisions.md §306).
+	 * Nothing about the semantics changes: the legend and every label are still
+	 * in the accessibility tree, only visually hidden, so the group keeps its
+	 * name and each radio its label; the radio itself is visually hidden too and
+	 * the segment carries its focus ring. Each segment also gets a `title`, so a
+	 * pointer user can find out what an icon means. Every option needs an
+	 * `icon` in this mode — an icon-less compact segment would be an empty box.
+	 *
 	 * Labels arrive already localized, like `SettingsRail` — the component is
 	 * i18n-agnostic. First use: the colour theme on `/profile`
 	 * (docs/decisions.md §289).
@@ -19,6 +30,8 @@
 	interface Option {
 		value: T;
 		label: string;
+		/** Drawn before the label; required when `compact`. Decorative. */
+		icon?: Component;
 	}
 
 	let {
@@ -27,7 +40,8 @@
 		options,
 		value,
 		onchange,
-		describedBy
+		describedBy,
+		compact = false
 	}: {
 		/** The group's accessible name, rendered as a visible `<legend>`. */
 		legend: string;
@@ -38,14 +52,21 @@
 		onchange: (value: T) => void;
 		/** id of a hint element describing the whole group. */
 		describedBy?: string;
+		/** Icons only; legend and labels kept for assistive tech. */
+		compact?: boolean;
 	} = $props();
 </script>
 
-<fieldset class="segmented" aria-describedby={describedBy}>
-	<legend>{legend}</legend>
+<fieldset class="segmented" class:compact aria-describedby={describedBy}>
+	<legend class:visually-hidden={compact}>{legend}</legend>
 	<div class="segments">
 		{#each options as option (option.value)}
-			<label class="segment" class:checked={value === option.value} data-value={option.value}>
+			<label
+				class="segment"
+				class:checked={value === option.value}
+				data-value={option.value}
+				title={compact ? option.label : undefined}
+			>
 				<input
 					type="radio"
 					{name}
@@ -53,7 +74,8 @@
 					checked={value === option.value}
 					onchange={() => onchange(option.value)}
 				/>
-				<span>{option.label}</span>
+				{#if option.icon}<option.icon aria-hidden="true" class="segment-icon" />{/if}
+				<span class:visually-hidden={compact}>{option.label}</span>
 			</label>
 		{/each}
 	</div>
@@ -120,5 +142,58 @@
 	.segment:has(input:focus-visible) {
 		outline: 2px solid var(--accent);
 		outline-offset: 1px;
+	}
+
+	/* Compact: icons in a pill. 30px squares clear the 24px 2.5.8 floor with
+	   room to spare. The track is a translucent --surface so it sits on
+	   whatever the header is over; the checked ring is below. */
+	.compact .segments {
+		flex-wrap: nowrap;
+		gap: 2px;
+		padding: 2px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--surface) 55%, transparent);
+	}
+	.compact .segment {
+		position: relative;
+		justify-content: center;
+		min-height: 30px;
+		min-width: 30px;
+		padding: 0;
+		border-radius: 999px;
+		font-size: 1rem;
+	}
+	/* The radio, visually hidden but still the focusable, checkable control.
+	   A scoped rule rather than the global `.visually-hidden`, which at (0,1,0)
+	   loses to app.css's `input[type='radio']` width and height. Clipped, not
+	   faded: an at-rest `opacity` is what opacityAudit.test.ts keeps out. */
+	.compact .segment input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		margin: -1px;
+		padding: 0;
+		border: 0;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+	/* With the dot hidden, the raised fill is no cue at all (1.04:1 against the
+	   track in both palettes) and --border is ~1.3:1. The chosen segment gets
+	   an --accent ring (≥5.7:1 against the track in both palettes, 1.4.11) on
+	   the calibrated accent tint pair: the ring is an edge the others lack,
+	   which a hovered option's --border edge does not imitate, so the state
+	   never rests on hue alone (1.4.1). */
+	.compact .segment.checked {
+		border-color: var(--accent);
+		background: var(--accent-tint);
+		color: var(--accent-on-tint);
+		box-shadow: none;
+	}
+	/* The segment, not the hidden radio, is what the eye finds. */
+	.compact .segment:has(input:focus-visible) {
+		outline-offset: 0;
+	}
+	.segment :global(.segment-icon) {
+		flex: none;
 	}
 </style>
