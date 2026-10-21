@@ -165,29 +165,35 @@
 						}}
 					/>
 				</p>
-				{#if showDetails}
-					<dl class="consent-details">
-						<dt>{m('consent.necessaryTerm')}</dt>
-						<dd>{m('consent.necessaryDesc')}</dd>
-						<dt>{m('consent.analyticsTerm')}</dt>
-						<dd>
-							<!--
-								This category is empty, and saying so is the point. The copy
-								previously read "Aggregate product-usage measurement to improve
-								the app", which described a thing the frontend does not do:
-								there is no analytics script anywhere in it, and `getConsent()`
-								has no caller. Soliciting consent for processing that isn't
-								happening is an accuracy problem in its own right, so the
-								category stays — the mechanism should exist before it is
-								needed — but it states what is true today.
-							-->
-							{m('consent.analyticsDesc')}
-						</dd>
-					</dl>
-				{/if}
+				<!-- `hidden`, not `{#if}`: the Manage button's `aria-controls` names
+				     this list, so it exists in both states. -->
+				<dl class="consent-details" id="consent-details" hidden={!showDetails}>
+					<dt>{m('consent.necessaryTerm')}</dt>
+					<dd>{m('consent.necessaryDesc')}</dd>
+					<dt>{m('consent.analyticsTerm')}</dt>
+					<dd>
+						<!--
+							This category is empty, and saying so is the point. The copy
+							previously read "Aggregate product-usage measurement to improve
+							the app", which described a thing the frontend does not do:
+							there is no analytics script anywhere in it, and `getConsent()`
+							has no caller. Soliciting consent for processing that isn't
+							happening is an accuracy problem in its own right, so the
+							category stays — the mechanism should exist before it is
+							needed — but it states what is true today.
+						-->
+						{m('consent.analyticsDesc')}
+					</dd>
+				</dl>
 			</div>
 			<div class="consent-actions">
-				<button type="button" class="btn-link" onclick={() => (showDetails = !showDetails)}>
+				<button
+					type="button"
+					class="btn-link"
+					aria-expanded={showDetails}
+					aria-controls="consent-details"
+					onclick={() => (showDetails = !showDetails)}
+				>
 					{showDetails ? m('consent.hideDetails') : m('consent.manage')}
 				</button>
 				<!--
