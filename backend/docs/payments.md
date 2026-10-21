@@ -125,6 +125,14 @@ Shows invoices in payable statuses (`approved`, `sent_to_erp`, `posted_in_erp`, 
 - Shows payment terms per invoice
 - Count shown in the tab badge
 
+An invoice sent to the ERP leaves this queue: a successful push ends at `done`,
+and the bill is paid from the ERP. The exception is an ERP with status sync on
+(QuickBooks, decisions §295): there the push lands at `posted_in_erp`, which
+stays payable here, and a payment from either side is reflected in the other. With the workflow's **Auto-send on approval**
+switch on (and a live ERP connected) that happens moments after approval, so
+such an invoice never waits here (`docs/decisions.md` §304). Tenants that pay
+through FeohLedger runs keep the switch off.
+
 ### History Tab
 
 All payments across all methods in one table.
@@ -1070,7 +1078,7 @@ slot, and the void is its only undo.
 
 The History tab offers Void exactly when the row's `void_refusal` is `null` —
 the same function, so the button and the endpoint cannot disagree
-(`docs/decisions.md` §304; `tests/test_payment_action_verdicts.py`).
+(`docs/decisions.md` §305; `tests/test_payment_action_verdicts.py`).
 
 ### A void re-flags the invoice if the vendor's bank details changed since
 

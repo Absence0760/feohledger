@@ -223,7 +223,7 @@ approved
     v
 sending_to_erp          (adapter.post_invoice() called)
     |
-    ├── success ──> sent_to_erp    (ERP accepted, document ID stored)
+    ├── success ──> sent_to_erp    (ERP accepted, document ID stored on the invoice)
     |                   |
     |                   v
     |               posted_in_erp  (ERP confirmed posting — webhook or poll)
@@ -460,7 +460,7 @@ plain JSONB under RDS storage encryption until that migration.
 
 `backend/app/services/erp_adapters/catalog.py` is the single source of truth for
 the Organization → ERP form, served at `GET /api/organization/erp/providers`
-(admin). Each entry carries `key`, `label`, `regions` (`US`, `ZA`), `auth`
+(admin). Each entry carries `key`, `label`, `regions` (ISO codes; the picker groups `US` and `ZA`, and lists any other region — `GB` for Sage Accounting — under "Other"), `auth`
 (`credentials` | `oauth`), `fields` (`name`, `label_key` — a frontend i18n
 `MessageKey`, `secret`, `required`, optional `placeholder` / `help_key` /
 `options`) and `docs_url`; the endpoint adds `available` (adapter registered in
@@ -473,7 +473,7 @@ included, under `erp_integrations`, §281).
 |---|---|---|---|
 | `quickbooks_online` | QuickBooks Online | US | OAuth (optional BYO app; `environment`) |
 | `xero` | Xero | US, ZA | OAuth (optional BYO app; `bill_status`, `default_tax_type`) |
-| `sage_accounting` | Sage Business Cloud Accounting (v3.1: US, UK, IE, CA) | US | OAuth (optional BYO app) |
+| `sage_accounting` | Sage Business Cloud Accounting (v3.1: UK, IE, CA, DE, ES, FR; the US product was retired 2024-12-31) | GB (listed under "Other") | OAuth (optional BYO app) |
 | `sage_accounting_za` | Sage Business Cloud Accounting (South Africa) | ZA | API key + Sage login + company |
 | `blackbaud_fe_nxt` | Blackbaud Financial Edge NXT | US | OAuth (optional BYO app + SKY API subscription key) |
 | `sage_intacct` | Sage Intacct | US, ZA | REST API client credentials + company / user |
@@ -1102,8 +1102,19 @@ reasoning).
 - **What the user does:** resolve or dismiss the exception in Exceptions, then
   send again. Clearing it goes through `exception_lifecycle.record_decision`,
   so someone implicated in the invoice cannot clear it for themselves.
-- **Approval never pushes.** Approving advances the workflow's step pointer
-  only; the push is always one of the three requests above.
+- **Approval pushes only when the workflow says so** (decisions §304). With
+  the snapshot's `erp_export.auto_send_on_approval` on and a live ERP, approval
+  starts the push after it commits, through the same gates
+  (`services/erp_send.start_erp_send`, shared with the three doors above). A
+  refusal there is not a 409 to the approver: the invoice stays `approved` and
+  an `invoice.erp_auto_send_refused` audit row records the coded refusal. With
+  the flag off (or absent), approving advances the step pointer only. The push
+  is post-commit work: a process that dies between the approval and the job
+  skips it without a trace (tracked in `docs/followups.md`).
+- **A hand-off that raises lands at `failed`.** When `dispatch_erp` raises after
+  the `sending_to_erp` commit (an SQS send), `start_erp_send` moves the invoice
+  to `failed` with an `invoice.erp_failed` row (`error: "ERP send could not be
+  queued"`), so `/retry-erp` can take it.
 
 The browser states the code from either place (`api/erpRefusals.ts`, also used
 by `codedRefusals.ts` for the 409). Tests:
@@ -1405,6 +1416,38 @@ These are the ERP's own ids, not PII. The provider's response body is never
 written. A failure that reports no document leaves earlier ids in place,
 because that bill is still in the ERP. A successful push clears them, because
 its `erp_reference` then names the bill of record.
+
+## The invoice names its bill in the ERP
+
+A confirmed push stores the adapter's `erp_document_id` on
+`invoices.erp_document_id` and the provider's deep link on
+`invoices.erp_document_url` (migration 0118), alongside the
+`state_data["erp_reference"]` write in `services/erp._call_erp`. Both are on
+`InvoiceResponse`; the invoice modal's ERP section shows the id as
+"ERP Reference", linked when there is a URL, at every status from
+`sending_to_erp` on, `done` included.
+
+- **Only the ERP's id is stored**, never the document number or the
+  `"UNKNOWN"` placeholder `erp_reference` falls back to: the column is what a
+  deep link or an API lookup addresses. A success that reports no id clears
+  both columns, because an earlier pair may name another ERP's bill after the
+  org switches ERP.
+- **A failure never writes it.** A bill a failed push left behind is the
+  orphan state above, not the bill of record.
+- **A payment void keeps it** (the bill is still in the ERP); a later confirmed
+  push overwrites it, and the push idempotency makes that the same bill.
+- **Deep links live in one place**, `erp_adapters/deep_links.py`, built at push
+  time from the config that posted the bill:
+
+  | Adapter | Link |
+  |---|---|
+  | `xero` | `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=<id>` |
+  | `quickbooks_online` | `https://app.qbo.intuit.com/app/bill?txnId=<id>` (`app.sandbox.qbo.intuit.com` when `environment` is `sandbox`) |
+  | everything else (Merge.dev, mock, the other direct adapters) | none — the id is shown alone |
+
+  Both open in the user's currently selected organisation / company
+  (`docs/followups.md`). Invoices posted before 0117 got the id backfilled
+  from `state_data` but no link. Reasoning: `docs/decisions.md` §302.
 
 **Manual retry:** `POST /api/invoices/{id}/retry-erp` resets `erp_retries` to 0
 and moves the invoice to `sending_to_erp`. The route then dispatches the push.
@@ -1916,12 +1959,17 @@ unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_UR
 override the OAuth endpoints, which dev points at fake-erp so the connect flow
 runs locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
 
-**Region coverage: not South Africa.** Every v3.1 operation lists its
-availability as CA, DE, ES, FR, GB, IE and US. Sage Business Cloud Accounting
+**Region coverage: not the US, not South Africa.** Every v3.1 operation lists
+its availability as CA, DE, ES, FR, GB, IE and US, but **Sage retired the US
+product on 2024-12-31** and ended US access on 2025-01-31
+([Sage](https://www.sage.com/en-us/sage-business-cloud/sage-accounting/)), so
+no US business exists to connect. A US customer on Sage is on Sage Intacct
+(`sage_intacct`) or the desktop Sage 50, which has no connector. Test this
+adapter against a UK trial business. Sage Business Cloud Accounting
 **South Africa** (the Pastel successor) runs on a separate codebase with its
 own API (`https://accounting.sageone.co.za/api/2.0.0`, API key + basic auth,
 not OAuth), and Sage's developer community confirms v3.1 does not serve it.
-So this adapter covers the US and the other v3.1 regions; a ZA business cannot
+So this adapter covers the other v3.1 regions; a ZA business cannot
 complete its consent flow. A ZA Sage adapter is separate work.
 
 **`settings.erp` keys:** `oauth` (written by `erp_oauth` only),

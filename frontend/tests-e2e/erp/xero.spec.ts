@@ -12,17 +12,25 @@ import {
 } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
+	markSeededWorkflowVersions,
+	purgeSeededWorkflowVersions
+} from '../workflows/seededWorkflowVersions';
+import {
 	FAKE_ERP_BASE,
+	type Inv,
 	createApprovedInvoice,
 	deleteInvoice,
 	erpFailureFromAudit,
 	erpReferenceFromAudit,
+	getInvoice,
+	loginAsSecondActor,
 	sendToErpAndAwaitTerminal,
 	syncErpGlAccounts,
 	syncErpPurchaseOrders,
 	syncErpVendors,
 	testErpConnection
 } from './helpers';
+import type { Invoice } from '#lib/types/invoice.ts';
 
 /**
  * xero adapter e2e — the REAL Xero adapter
@@ -96,6 +104,104 @@ async function xeroBill(request: APIRequestContext, id: string) {
 	return (await resp.json()).Invoices[0];
 }
 
+/** Every bill the fake holds under an invoice number (its idempotency filter). */
+async function xeroBillsNumbered(request: APIRequestContext, invoiceNumber: string) {
+	const resp = await request.get(
+		`${FAKE_ERP_BASE}/xero/api.xro/2.0/Invoices?InvoiceNumbers=${encodeURIComponent(invoiceNumber)}`,
+		{ headers: { Authorization: 'Bearer spec', 'Xero-Tenant-Id': TENANT } }
+	);
+	expect(resp.ok(), await resp.text()).toBe(true);
+	return (await resp.json()).Invoices as unknown[];
+}
+
+type WorkflowStepShape = { type: string; config?: Record<string, unknown> };
+
+/** Run `body` with the tenant's default workflow's ERP step set to auto-send
+ *  on approval (or not), through the same PATCH the builder saves with, and
+ *  put the steps back afterwards. An invoice freezes the workflow when it is
+ *  created (decisions §304 reads that snapshot), so `body` creates its own. */
+async function withAutoSend(page: Page, on: boolean, body: () => Promise<void>): Promise<void> {
+	const headers = await authedTenantHeaders(page);
+	const list = await page.request.get(`${API_BASE}/api/workflows?page_size=100`, { headers });
+	expect(list.ok(), await list.text()).toBe(true);
+	const workflows = (await list.json()).items as Array<{
+		id: string;
+		is_default: boolean;
+		entity_id: string | null;
+		steps_config: { steps: WorkflowStepShape[] };
+	}>;
+	const wf = workflows.find((w) => w.is_default && w.entity_id === null) ?? workflows.find((w) => w.is_default);
+	expect(wf, 'the tenant has a default workflow').toBeTruthy();
+	const before = wf!.steps_config.steps;
+	// Each PATCH of the seeded default's steps snapshots a `workflow_versions`
+	// row no name sweep can reach (decisions §127); remove exactly ours after.
+	const seededVersions = markSeededWorkflowVersions();
+	const steps = before.map((s) =>
+		s.type === 'erp_export' ? { ...s, config: { ...s.config, auto_send_on_approval: on } } : s
+	);
+	const patched = await page.request.patch(`${API_BASE}/api/workflows/${wf!.id}`, {
+		headers,
+		data: { steps }
+	});
+	expect(patched.ok(), await patched.text()).toBe(true);
+	try {
+		await body();
+	} finally {
+		await page.request.patch(`${API_BASE}/api/workflows/${wf!.id}`, {
+			headers,
+			data: { steps: before }
+		});
+		purgeSeededWorkflowVersions(seededVersions);
+	}
+}
+
+/** An invoice awaiting review, ready for the synced Xero supplier and account.
+ *  Created as `page`'s admin; `approveAsSecondActor` approves it as the `cfo`
+ *  (segregation of duties). Submitted through `/complete`, the way the modal
+ *  submits, so it reaches review with its workflow snapshot. */
+async function createInvoiceForApproval(page: Page, prefix: string): Promise<Inv> {
+	const headers = await authedTenantHeaders(page);
+	const created = await page.request.post(`${API_BASE}/api/invoices`, {
+		headers,
+		data: {
+			invoice_number: `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+			vendor: SUPPLIER,
+			amount: '1150.00',
+			tax_amount: '150.00',
+			currency: 'ZAR',
+			invoice_date: '2026-10-01',
+			due_date: '2026-10-31',
+			gl_account: '6100',
+			status: 'new'
+		}
+	});
+	expect(created.status(), await created.text()).toBe(201);
+	const inv = (await created.json()) as Inv;
+	const submitted = await page.request.post(`${API_BASE}/api/invoices/${inv.id}/complete`, {
+		headers
+	});
+	expect(submitted.status(), await submitted.text()).toBe(200);
+	expect((await getInvoice(page, inv.id)).status).toBe('ready_for_review');
+	return inv;
+}
+
+async function approveAsSecondActor(page: Page, invoiceId: string): Promise<void> {
+	const approved = await page.request.post(`${API_BASE}/api/invoices/${invoiceId}/approve`, {
+		headers: await loginAsSecondActor(page),
+		data: {}
+	});
+	expect(approved.status(), await approved.text()).toBe(200);
+	expect((await approved.json()).status).toBe('approved');
+}
+
+async function auditActions(page: Page, invoiceId: string): Promise<string[]> {
+	const resp = await page.request.get(`${API_BASE}/api/invoices/${invoiceId}/audit-log`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status()).toBe(200);
+	return ((await resp.json()) as Array<{ action: string }>).map((r) => r.action);
+}
+
 test.describe('/erp xero adapter against fake-erp', () => {
 	test.beforeEach(async ({ page }) => {
 		await skipUnlessReachable(SERVICES.fakeErp);
@@ -154,6 +260,46 @@ test.describe('/erp xero adapter against fake-erp', () => {
 		}
 	});
 
+	test('a posted invoice names its Xero bill and links to it', async ({ page, request }) => {
+		// Found live: FEOH-INV-001 was posted to Xero, but the bill's InvoiceID
+		// was kept only in workflow state_data and the audit row, so nothing a
+		// user reads led from the invoice to the bill.
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-XERO-REF',
+			invoiceDate: '2026-10-01',
+			dueDate: '2026-10-31',
+			amount: '1150.00',
+			taxAmount: '150.00',
+			currency: 'ZAR',
+			vendor: SUPPLIER,
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
+			const link = `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=${bill.InvoiceID}`;
+
+			const posted = (await getInvoice(page, inv.id)) as Inv &
+				Pick<Invoice, 'erp_document_id' | 'erp_document_url'>;
+			expect(posted.erp_document_id).toBe(bill.InvoiceID);
+			expect(posted.erp_document_url).toBe(link);
+
+			// The detail view at `done`, where the ERP section used to be hidden.
+			await page.goto(`/invoices?id=${inv.id}`);
+			await expect(page.getByTestId('erp-reference')).toContainText(bill.InvoiceID);
+			const anchor = page.getByTestId('erp-reference-link');
+			await expect(anchor).toHaveAttribute('href', link);
+			await expect(anchor).toHaveAttribute('target', '_blank');
+			await expect(anchor).toHaveAccessibleName(
+				`${bill.InvoiceID} (opens the bill in the ERP in a new tab)`
+			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
 	test('an invoice whose vendor never synced is refused, not posted', async ({ page }) => {
 		await syncErpGlAccounts(page);
 		const inv = await createApprovedInvoice(page, {
@@ -185,6 +331,67 @@ test.describe('/erp xero adapter against fake-erp', () => {
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}
+	});
+
+	test('auto-send on approval: approving reaches Xero with no "Send to ERP" click', async ({
+		page,
+		request
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		await withAutoSend(page, true, async () => {
+			const inv = await createInvoiceForApproval(page, 'E2E-XERO-AUTO');
+			try {
+				await approveAsSecondActor(page, inv.id);
+				// Polled on the invoice's real status: approval answers first,
+				// then its own post-commit transaction starts the push.
+				await expect
+					.poll(async () => (await getInvoice(page, inv.id)).status, {
+						// The same budget `sendToErpAndAwaitTerminal` gives a clicked send.
+						timeout: 20_000,
+						message: 'the approved invoice never finished its automatic ERP send'
+					})
+					.toMatch(/^(done|failed)$/);
+				expect((await getInvoice(page, inv.id)).status).toBe('done');
+
+				const trail = await auditActions(page, inv.id);
+				expect(trail.indexOf('invoice.erp_submitted')).toBeGreaterThan(
+					trail.indexOf('invoice.approved')
+				);
+				const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
+				expect(bill.Type).toBe('ACCPAY');
+				expect(bill.InvoiceNumber).toBe(inv.invoice_number);
+				expect(bill.Contact.ContactID).toBe('xero-contact-1');
+				expect(Number(bill.Total)).toBe(1150);
+			} finally {
+				await deleteInvoice(page, inv.id);
+			}
+		});
+	});
+
+	test('auto-send off: approval leaves the invoice approved and posts nothing', async ({
+		page,
+		request
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		await withAutoSend(page, false, async () => {
+			const inv = await createInvoiceForApproval(page, 'E2E-XERO-MANUAL');
+			try {
+				await approveAsSecondActor(page, inv.id);
+				// With the flag off approval queues no push at all, so there is
+				// nothing to wait for: the state right after the approval is final.
+				expect((await getInvoice(page, inv.id)).status).toBe('approved');
+				expect(await auditActions(page, inv.id)).not.toContain('invoice.erp_submitted');
+				expect(await xeroBillsNumbered(request, inv.invoice_number)).toHaveLength(0);
+
+				// The person's click is still what sends it, and it posts once.
+				expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+				expect(await xeroBillsNumbered(request, inv.invoice_number)).toHaveLength(1);
+			} finally {
+				await deleteInvoice(page, inv.id);
+			}
+		});
 	});
 
 	test('a supplier only ordered from syncs, and each PO links to its vendor', async ({
