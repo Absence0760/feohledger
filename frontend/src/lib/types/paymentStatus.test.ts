@@ -9,7 +9,7 @@ import {
 	runStatusLabelKey,
 	type PaymentStatus
 } from './payment';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Drift guard: the frontend payment-status vocabulary must cover every status
@@ -64,14 +64,14 @@ describe('PAYMENT_STATUSES', () => {
 		for (const status of PAYMENT_STATUSES) {
 			const key = PAYMENT_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key].trim().length).toBeGreaterThan(0);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
 		}
 	});
 
 	it('never uses the raw enum value as its own label', () => {
 		for (const status of PAYMENT_STATUSES) {
-			expect(en[PAYMENT_STATUS_LABEL_KEYS[status]]).not.toBe(status);
+			expect(EN_ALL[PAYMENT_STATUS_LABEL_KEYS[status]]).not.toBe(status);
 		}
 	});
 
@@ -90,7 +90,7 @@ describe('PAYMENT_STATUSES', () => {
 		// payment a dead end in the UI, with no chip and no release/dismiss path.
 		const held: PaymentStatus = 'pending_compliance';
 		expect(PAYMENT_STATUSES).toContain(held);
-		expect(en[PAYMENT_STATUS_LABEL_KEYS[held]]).toBe('Compliance Hold');
+		expect(EN_ALL[PAYMENT_STATUS_LABEL_KEYS[held]]).toBe('Compliance Hold');
 	});
 });
 
@@ -140,14 +140,14 @@ describe('RUN_STATUS_LABEL_KEYS', () => {
 		for (const status of PAYMENT_RUN_STATUSES) {
 			const key = RUN_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} -> "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key].trim().length).toBeGreaterThan(0);
+			expect(Object.keys(EN_ALL), `${status} -> "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
 		}
 	});
 
 	it('never uses the raw enum value as its own label', () => {
 		for (const status of PAYMENT_RUN_STATUSES) {
-			expect(en[RUN_STATUS_LABEL_KEYS[status]]).not.toBe(status);
+			expect(EN_ALL[RUN_STATUS_LABEL_KEYS[status]]).not.toBe(status);
 		}
 	});
 

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { interpolate } from './interpolate';
 import { SUPPORTED_LOCALES } from './locale';
-import { CATALOGUE_LOADERS } from './catalogues';
+import { loadAllMessages } from './allMessages';
 import builderSource from '../../routes/workflows/[id]/+page.svelte?raw';
 import organizationSource from '../../routes/organization/+page.svelte?raw';
 import matrixEditorSource from '../components/modals/ApprovalMatrixEditor.svelte?raw';
@@ -75,7 +75,7 @@ const RENDER_SITES: Record<string, string> = {
 describe('approval thresholds name their currency', () => {
 	for (const loc of SUPPORTED_LOCALES) {
 		test(`${loc}: every denominated label carries {currency} and no hardcoded sign`, async () => {
-			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
+			const dict = (await loadAllMessages(loc)) as Record<string, string>;
 			for (const key of DENOMINATED_KEYS) {
 				const value = dict[key];
 				expect(value, `${loc} is missing ${key}`).toBeTruthy();
@@ -87,7 +87,7 @@ describe('approval thresholds name their currency', () => {
 		});
 
 		test(`${loc}: every hint names the concept, not a code or a sign`, async () => {
-			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
+			const dict = (await loadAllMessages(loc)) as Record<string, string>;
 			for (const key of CONCEPT_HINT_KEYS) {
 				const value = dict[key];
 				expect(value, `${loc} is missing ${key}`).toBeTruthy();
@@ -97,7 +97,7 @@ describe('approval thresholds name their currency', () => {
 		});
 
 		test(`${loc}: the unresolved-currency noun is a word, not a code`, async () => {
-			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
+			const dict = (await loadAllMessages(loc)) as Record<string, string>;
 			const noun = dict['common.reportingCurrencyUnresolved'];
 			expect(noun, `${loc} is missing the noun`).toBeTruthy();
 			// Not a three-letter code, and no sign — it names the concept so the

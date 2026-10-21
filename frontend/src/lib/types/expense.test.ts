@@ -15,7 +15,7 @@ import {
 	expensePreapprovalStatusLabelKey,
 	reconciliationStatusLabelKey
 } from './expense';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /**
@@ -67,13 +67,13 @@ describe.each(CASES)('$name', ({ values, keys, accessor }) => {
 		for (const status of values) {
 			const key = keys[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 
 	it('never uses the raw enum value as its own label', () => {
 		for (const status of values) {
-			expect(en[keys[status]]).not.toBe(status);
+			expect(EN_ALL[keys[status]]).not.toBe(status);
 		}
 	});
 
@@ -93,7 +93,7 @@ describe('EXPENSE_PAYMENT_METHOD_LABEL_KEYS', () => {
 		for (const method of EXPENSE_PAYMENT_METHODS) {
 			const key = EXPENSE_PAYMENT_METHOD_LABEL_KEYS[method];
 			expect(key, `${method} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${method} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${method} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 });
