@@ -5,6 +5,8 @@
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import ThemePicker from '#lib/components/ui/ThemePicker.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { TALLY_ORNAMENT, TALLY_ORNAMENT_SIZE } from '#lib/marketing/ornament.ts';
+	import { theme } from '#lib/stores/theme.svelte.ts';
 
 	/**
 	 * The split-screen frame every pre-auth employee page renders inside: the
@@ -91,9 +93,9 @@
 			     depicts, so an alt text would announce the same idea twice. -->
 			<img
 				class="panel-art"
-				src={asset('marketing/tally-split.webp')}
-				width="1100"
-				height="460"
+				src={asset(TALLY_ORNAMENT[theme.resolved])}
+				width={TALLY_ORNAMENT_SIZE.width}
+				height={TALLY_ORNAMENT_SIZE.height}
 				alt=""
 				decoding="async"
 				draggable="false"
@@ -207,8 +209,8 @@
 		max-width: none;
 		height: auto;
 		margin: 28px -6% 0 auto;
-		filter: drop-shadow(0 24px 40px rgba(231, 185, 94, 0.13))
-			drop-shadow(0 8px 16px rgba(0, 0, 0, 0.5));
+		filter: drop-shadow(0 24px 40px color-mix(in srgb, var(--gilt) 13%, transparent))
+			drop-shadow(0 8px 16px var(--drop-shade));
 		animation: art-in 1s cubic-bezier(0.22, 1, 0.36, 1) 0.3s backwards;
 	}
 	@keyframes panel-in {

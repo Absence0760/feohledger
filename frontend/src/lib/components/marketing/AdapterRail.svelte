@@ -87,7 +87,7 @@
 		padding: 9px 18px;
 		border-radius: 999px;
 		border: 1px solid var(--border);
-		background: rgba(24, 26, 35, 0.55);
+		background: color-mix(in srgb, var(--surface) 55%, transparent);
 		color: var(--text-muted);
 		font-size: 0.86rem;
 		font-weight: 500;
@@ -96,6 +96,6 @@
 	}
 	.set li:hover {
 		color: var(--text);
-		border-color: rgba(99, 140, 255, 0.45);
+		border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 	}
 </style>

@@ -16,7 +16,10 @@
 	import HeroPipeline from '#lib/components/marketing/HeroPipeline.svelte';
 	import { LEGAL_PAGES } from '#lib/legal/pages.ts';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import ThemePicker from '#lib/components/ui/ThemePicker.svelte';
 	import { countUp, reveal } from '#lib/actions/reveal.ts';
+	import { TALLY_ORNAMENT, TALLY_ORNAMENT_SIZE } from '#lib/marketing/ornament.ts';
+	import { theme } from '#lib/stores/theme.svelte.ts';
 
 	const features = [
 		{
@@ -98,11 +101,10 @@
 
 <svelte:window onscroll={() => (scrolled = window.scrollY > 12)} />
 
-<!-- Pinned to the dark palette whatever the visitor's theme: the rendered
-     tally ornament, the grain and the glass panels were designed on navy, and a
-     light rendition is a design job, not a token swap (docs/decisions.md §289).
-     `data-theme-scope="dark"` redeclares the dark tokens on this subtree. -->
-<div class="landing" data-theme-scope="dark">
+<!-- Follows the visitor's theme like every other surface (docs/decisions.md
+     §306): every colour below is a palette token, and the one raster — the
+     tally ornament — has a render lit for each ground. -->
+<div class="landing">
 	<Atmosphere fixed />
 
 	<header class="nav" class:scrolled>
@@ -110,18 +112,24 @@
 			<BrandMark size={28} />
 			<span class="brand-name">FeohLedger</span>
 		</a>
-		<nav class="nav-links">
-			<a href="#features">Features</a>
-			<a href="#how">How it works</a>
-			<a href="#pricing">Pricing</a>
-			<a href="/signup" class="nav-cta">
-				<!-- Two labels, one shown per breakpoint. `display: none` on the
-				     hidden one takes it out of the accessibility tree too, so the
-				     link's name is always exactly the label in view. -->
-				<span class="cta-long">Create workspace</span><span class="cta-short">Start free</span>
-				<IconArrow aria-hidden="true" />
-			</a>
-		</nav>
+		<div class="nav-end">
+			<nav class="nav-links">
+				<a href="#features">Features</a>
+				<a href="#how">How it works</a>
+				<a href="#pricing">Pricing</a>
+				<a href="/signup" class="nav-cta">
+					<!-- Two labels, one shown per breakpoint. `display: none` on the
+					     hidden one takes it out of the accessibility tree too, so the
+					     link's name is always exactly the label in view. -->
+					<span class="cta-long">Create workspace</span><span class="cta-short">Start free</span>
+					<IconArrow aria-hidden="true" />
+				</a>
+			</nav>
+			<!-- An anonymous visitor has no /profile, so the theme is chosen here:
+			     the auth pages' picker, drawn as three icons. Beside the <nav>, not
+			     in it — it is a setting, not a destination. -->
+			<ThemePicker name="landing-theme" compact />
+		</div>
 	</header>
 
 	<main class="content">
@@ -202,7 +210,7 @@
 						     that is only defensible if this really is decoration: the
 						     ordinal is already carried by the cards' reading order, so
 						     nothing is lost by hiding it. The fade is in the COLOUR
-						     (an rgba), not an `opacity` on the element — group opacity
+						     (a `color-mix`), not an `opacity` on the element — group opacity
 						     would composite the card's real text down with it, which
 						     is the idiom src/lib/a11y/opacityAudit.test.ts exists to
 						     keep out of this tree. -->
@@ -238,9 +246,9 @@
 
 				<div class="tally-art" use:reveal={{ delay: 120 }}>
 					<img
-						src={asset('marketing/tally-split.webp')}
-						width="1100"
-						height="460"
+						src={asset(TALLY_ORNAMENT[theme.resolved])}
+						width={TALLY_ORNAMENT_SIZE.width}
+						height={TALLY_ORNAMENT_SIZE.height}
 						loading="lazy"
 						decoding="async"
 						draggable="false"
@@ -351,10 +359,6 @@
 		   2.4.11 Focus Not Obscured. Per-section `scroll-margin-top` fixed only
 		   the two anchors it was written on. */
 		scroll-padding-top: 88px;
-		/* The page is pinned to the dark palette (`data-theme-scope="dark"` on
-		   `.landing`), but the document scroller belongs to <html>, which a
-		   light theme would otherwise give a light scrollbar. */
-		color-scheme: dark;
 	}
 
 	.landing {
@@ -391,7 +395,7 @@
 		transition: background 0.25s, border-color 0.25s, backdrop-filter 0.25s;
 	}
 	.nav.scrolled {
-		background: rgba(15, 17, 23, 0.72);
+		background: color-mix(in srgb, var(--bg) 72%, transparent);
 		backdrop-filter: blur(14px) saturate(140%);
 		border-bottom-color: var(--border);
 	}
@@ -407,10 +411,14 @@
 		font-size: 1rem;
 		letter-spacing: -0.01em;
 	}
+	.nav-end,
 	.nav-links {
 		display: flex;
 		align-items: center;
 		gap: 22px;
+	}
+	.nav-end {
+		gap: 16px;
 	}
 	.nav-links a {
 		color: var(--text-muted);
@@ -436,13 +444,16 @@
 		padding: 9px 17px;
 		border-radius: 8px;
 		font-weight: 500;
-		box-shadow: 0 8px 22px -12px rgba(99, 140, 255, 0.9);
+		box-shadow: 0 8px 22px -12px var(--accent-glow);
 		transition: transform 0.15s, box-shadow 0.15s;
 	}
+	/* Restates the fill beside the white it must out-vote `.nav-links a:hover`
+	   with, so the pair is decided in one rule the token audit can read. */
 	.nav-links .nav-cta:hover {
+		background: var(--accent-strong);
 		color: #fff;
 		transform: translateY(-1px);
-		box-shadow: 0 12px 26px -12px rgba(99, 140, 255, 1);
+		box-shadow: 0 12px 26px -12px color-mix(in srgb, var(--accent) 70%, transparent);
 	}
 	.cta-short {
 		display: none;
@@ -451,8 +462,9 @@
 		.nav {
 			padding: 14px 20px;
 		}
+		.nav-end,
 		.nav-links {
-			gap: 12px;
+			gap: 10px;
 		}
 		.nav-links a:not(.nav-cta) { display: none; }
 		.nav-links .nav-cta {
@@ -508,8 +520,8 @@
 		padding: 5px 13px 5px 11px;
 		margin-bottom: 20px;
 		border-radius: 999px;
-		border: 1px solid rgba(99, 140, 255, 0.28);
-		background: rgba(99, 140, 255, 0.10);
+		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+		background: var(--accent-tint);
 		font-size: 0.75rem;
 		font-weight: 600;
 		letter-spacing: 0.08em;
@@ -531,7 +543,7 @@
 		font-weight: 800;
 	}
 	h1 .accent {
-		background: linear-gradient(100deg, #7d9bff 0%, #a37dff 42%, #e7b95e 100%);
+		background: linear-gradient(100deg, var(--accent-on-tint) 0%, var(--brand-violet) 42%, var(--gilt) 100%);
 		background-size: 220% 100%;
 		-webkit-background-clip: text;
 		background-clip: text;
@@ -573,15 +585,15 @@
 	.primary {
 		background: var(--accent-strong);
 		color: #fff;
-		box-shadow: 0 14px 34px -14px rgba(99, 140, 255, 0.95);
+		box-shadow: 0 14px 34px -14px var(--accent-glow);
 	}
 	.primary:hover {
 		transform: translateY(-2px);
-		box-shadow: 0 20px 42px -16px rgba(99, 140, 255, 1);
+		box-shadow: 0 20px 42px -16px color-mix(in srgb, var(--accent) 70%, transparent);
 	}
 	.primary.large { padding: 15px 30px; font-size: 1rem; }
 	.secondary {
-		background: rgba(24, 26, 35, 0.6);
+		background: color-mix(in srgb, var(--surface) 60%, transparent);
 		color: var(--text);
 		border: 1px solid var(--border);
 	}
@@ -614,7 +626,8 @@
 		gap: 20px;
 		border-radius: 18px;
 		border: 1px solid var(--border);
-		background: rgba(24, 26, 35, 0.4);
+		background: color-mix(in srgb, var(--surface) 40%, transparent);
+		box-shadow: var(--shadow-card);
 	}
 	@media (max-width: 760px) {
 		.stats { grid-template-columns: repeat(2, 1fr); margin-bottom: 80px; }
@@ -628,7 +641,7 @@
 		font-weight: 800;
 		letter-spacing: -0.03em;
 		font-variant-numeric: tabular-nums;
-		background: linear-gradient(135deg, #7d9bff, #a37dff);
+		background: linear-gradient(135deg, var(--accent-on-tint), var(--brand-violet));
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
@@ -678,7 +691,8 @@
 		position: relative;
 		border-radius: 14px;
 		padding: 24px;
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
 		transition: border-color 0.2s, transform 0.2s, background 0.2s;
 	}
@@ -692,12 +706,12 @@
 		left: 18%;
 		right: 18%;
 		height: 1px;
-		background: linear-gradient(90deg, transparent, rgba(99, 140, 255, 0.55), transparent);
+		background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent);
 		transition: left 0.3s, right 0.3s;
 	}
 	.feature:hover {
-		border-color: rgba(99, 140, 255, 0.4);
-		background: rgba(30, 33, 45, 0.75);
+		border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+		background: color-mix(in srgb, var(--surface) 82%, transparent);
 		transform: translateY(-3px);
 	}
 	.feature:hover::before {
@@ -711,8 +725,8 @@
 		width: 44px;
 		height: 44px;
 		border-radius: 12px;
-		background: linear-gradient(140deg, rgba(99, 140, 255, 0.22), rgba(163, 125, 255, 0.14));
-		border: 1px solid rgba(99, 140, 255, 0.22);
+		background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--brand-violet) 14%, transparent));
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 		color: var(--accent-on-tint);
 		font-size: 22px;
 		margin-bottom: 16px;
@@ -748,7 +762,8 @@
 		overflow: hidden;
 		border-radius: 14px;
 		padding: 28px 24px;
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
 	}
 	.step-num {
@@ -759,7 +774,7 @@
 		font-weight: 800;
 		line-height: 1;
 		/* The fade lives in the colour, not in `opacity` — see the markup. */
-		color: rgba(226, 228, 234, 0.07);
+		color: color-mix(in srgb, var(--text) 7%, transparent);
 	}
 	.step-icon {
 		display: inline-flex;
@@ -768,8 +783,8 @@
 		width: 46px;
 		height: 46px;
 		border-radius: 12px;
-		background: linear-gradient(135deg, rgba(99, 140, 255, 0.22), rgba(163, 125, 255, 0.18));
-		border: 1px solid rgba(99, 140, 255, 0.22);
+		background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--brand-violet) 18%, transparent));
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 		color: var(--accent-on-tint);
 		font-size: 24px;
 		margin-bottom: 16px;
@@ -829,8 +844,8 @@
 		/* The render is lit from above-left on a transparent film, so a warm
 		   bloom under it reads as the object's own light on the page rather
 		   than as a box around a picture. */
-		filter: drop-shadow(0 26px 46px rgba(231, 185, 94, 0.14))
-			drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+		filter: drop-shadow(0 26px 46px color-mix(in srgb, var(--gilt) 14%, transparent))
+			drop-shadow(0 8px 18px var(--drop-shade));
 	}
 	.diff-grid {
 		display: grid;
@@ -843,12 +858,13 @@
 	.diff {
 		border-radius: 14px;
 		padding: 26px;
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
 		transition: border-color 0.2s;
 	}
 	.diff:hover {
-		border-color: rgba(99, 140, 255, 0.32);
+		border-color: color-mix(in srgb, var(--accent) 32%, transparent);
 	}
 	.diff h3 {
 		margin: 0 0 10px;
@@ -879,9 +895,9 @@
 		padding: 64px 40px;
 		text-align: center;
 		background:
-			radial-gradient(640px 320px at 50% 0%, rgba(99, 140, 255, 0.26), transparent 70%),
-			linear-gradient(180deg, rgba(31, 35, 48, 0.9), rgba(20, 22, 31, 0.9));
-		border: 1px solid rgba(99, 140, 255, 0.22);
+			radial-gradient(640px 320px at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+			linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 60%, var(--surface)), var(--surface));
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 	}
 	.cta-inner h2 {
 		font-size: clamp(1.7rem, 3.6vw, 2.4rem);
@@ -899,7 +915,7 @@
 	/* ------------------------------ footer ------------------------------- */
 	.footer {
 		border-top: 1px solid var(--border);
-		background: rgba(15, 17, 23, 0.6);
+		background: color-mix(in srgb, var(--bg) 60%, transparent);
 	}
 	.footer-inner {
 		max-width: 1180px;

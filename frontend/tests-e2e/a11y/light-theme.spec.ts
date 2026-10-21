@@ -253,6 +253,16 @@ test.describe('light theme — axe (WCAG 2.2 AA), signed out', () => {
 		await expectNoA11yViolations(page);
 	});
 
+	test('the auth shell panel shows the tally render lit for the theme in use', async ({ page }) => {
+		// The same two renders as the landing page (lib/marketing/ornament.ts).
+		await page.goto('/login');
+		await expect(page.locator('input[type="email"]')).toBeVisible();
+		const art = page.locator('.panel-art');
+		await expect(art).toHaveAttribute('src', /tally-split-light\.webp$/);
+		await page.getByRole('group', { name: 'Theme' }).getByRole('radio', { name: 'Dark' }).check();
+		await expect(art).toHaveAttribute('src', /tally-split\.webp$/);
+	});
+
 	for (const path of ['/legal', '/legal/privacy']) {
 		test(`${path} has no axe violations in light mode`, async ({ page }) => {
 			await page.goto(path);
@@ -284,13 +294,148 @@ test.describe('light theme — the public no-tenant origin', () => {
 		await expectNoA11yViolations(page);
 	});
 
-	test('the marketing landing stays on its dark palette under a light OS', async ({ page }) => {
+	/*
+	 * The marketing landing page follows the theme (docs/decisions.md §306,
+	 * superseding §289's dark pin), including its one raster: the tally
+	 * ornament has a render lit for each ground.
+	 */
+	const landingBg = (page: Page) =>
+		page.locator('.landing').evaluate((el) => getComputedStyle(el).backgroundColor);
+	const ornament = (page: Page) => page.locator('.tally-art img');
+
+	test('the marketing landing follows a light OS and has no axe violations', async ({ page }) => {
+		await recordFirstFrameTheme(page);
 		await page.goto('/');
 		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-		const landingBg = await page
-			.locator('.landing')
-			.evaluate((el) => getComputedStyle(el).backgroundColor);
-		expect(landingBg).toBe(DARK_BG);
+		expect(
+			await page.evaluate(() => (window as unknown as { __firstFrameTheme: string }).__firstFrameTheme)
+		).toBe('system');
+		expect(await landingBg(page)).toBe(LIGHT_BG);
+		expect((await rootStyle(page)).scheme).toBe('light');
+		await expect(ornament(page)).toHaveAttribute('src', /tally-split-light\.webp$/);
 		await expectNoA11yViolations(page);
+	});
+
+	test('a stored Light choice paints the landing light from the first frame under a dark OS', async ({
+		page
+	}) => {
+		await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+		await storeTheme(page, 'light');
+		await recordFirstFrameTheme(page);
+		// The ornament's FIRST src, not its settled one: an <img> that mounted
+		// with the dark file and was corrected after hydration would fetch the
+		// wrong render and visibly swap. Recorded the moment the element appears.
+		await page.addInitScript(() => {
+			new MutationObserver((_, observer) => {
+				const img = document.querySelector('.tally-art img');
+				if (!img) return;
+				(window as unknown as { __firstOrnamentSrc: string | null }).__firstOrnamentSrc =
+					img.getAttribute('src');
+				observer.disconnect();
+			}).observe(document, { childList: true, subtree: true });
+		});
+		const ornamentRequests: string[] = [];
+		page.on('request', (r) => {
+			if (/\/marketing\/tally-split/.test(r.url())) ornamentRequests.push(r.url());
+		});
+
+		await page.goto('/');
+		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+		expect(
+			await page.evaluate(() => (window as unknown as { __firstFrameTheme: string }).__firstFrameTheme)
+		).toBe('light');
+		expect(await landingBg(page)).toBe(LIGHT_BG);
+		expect(
+			await page.evaluate(
+				() => (window as unknown as { __firstOrnamentSrc: string }).__firstOrnamentSrc
+			)
+		).toMatch(/tally-split-light\.webp$/);
+
+		// It is lazy, but Chromium's lazy margin may already have fetched it:
+		// bring it into view and wait until the light file has been requested
+		// (collected from the start, so an early fetch is not missed).
+		await ornament(page).scrollIntoViewIfNeeded();
+		await expect.poll(() => ornamentRequests.some((u) => /tally-split-light\.webp$/.test(u))).toBe(true);
+		await expect(ornament(page)).toHaveJSProperty('complete', true);
+		expect(ornamentRequests.filter((u) => /tally-split\.webp$/.test(u)), 'the dark render was fetched').toEqual(
+			[]
+		);
+	});
+
+	test('the marketing landing in dark (dark OS) has no axe violations', async ({ page }) => {
+		await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+		await page.goto('/');
+		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+		expect(await landingBg(page)).toBe(DARK_BG);
+		await expect(ornament(page)).toHaveAttribute('src', /tally-split\.webp$/);
+		await expectNoA11yViolations(page);
+	});
+
+	test('at 320px the landing header holds the mark, the CTA and the theme switch without overflow', async ({
+		page
+	}) => {
+		// 1.4.10 at the criterion's own width: the switch is the third thing in
+		// a row that had room for two (Landing.svelte's 400px rule).
+		await page.setViewportSize({ width: 320, height: 800 });
+		await page.goto('/');
+		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+		const header = page.locator('header');
+		await expect(header.getByRole('group', { name: 'Theme' })).toBeVisible();
+		await expect(header.getByRole('link', { name: 'Start free' })).toBeInViewport({ ratio: 1 });
+		const last = header.locator('label', { has: page.getByRole('radio', { name: 'Dark' }) });
+		const box = await last.boundingBox();
+		expect(box!.x + box!.width, 'the last segment ends inside the viewport').toBeLessThanOrEqual(320);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+		await expectNoA11yViolations(page);
+	});
+
+	test('the landing header carries a theme switch: a keyboard radio group that applies and persists', async ({
+		page
+	}) => {
+		// An anonymous visitor has no /profile; this is where they choose.
+		await page.goto('/');
+		const group = page.locator('header').getByRole('group', { name: 'Theme' });
+		const system = group.getByRole('radio', { name: 'System' });
+		await expect(system).toBeChecked();
+
+		// 2.5.8: the segment is the target, and it clears 24 × 24.
+		for (const name of ['System', 'Light', 'Dark']) {
+			const box = await group.locator('label', { has: page.getByRole('radio', { name }) }).boundingBox();
+			expect(box!.width, `${name} segment width`).toBeGreaterThanOrEqual(24);
+			expect(box!.height, `${name} segment height`).toBeGreaterThanOrEqual(24);
+		}
+
+		// Reached by Tab like any control, not only by a programmatic focus.
+		await page.keyboard.press('Tab');
+		for (let i = 0; i < 12 && !(await system.evaluate((el) => el === document.activeElement)); i++) {
+			await page.keyboard.press('Tab');
+		}
+		await expect(system).toBeFocused();
+		// The radio is clipped to 1px, so the segment must draw the ring (2.4.7).
+		const segment = (name: string) => group.locator('label', { has: page.getByRole('radio', { name }) });
+		expect(await segment('System').evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('solid');
+		// With the dot hidden, the checked segment needs an edge the others lack
+		// (1.4.11 / 1.4.1), not just a fill.
+		const edge = (name: string) => segment(name).evaluate((el) => getComputedStyle(el).borderTopColor);
+		expect(await edge('System')).not.toBe(await edge('Light'));
+		await page.keyboard.press('ArrowRight');
+		await page.keyboard.press('ArrowRight');
+		await expect(group.getByRole('radio', { name: 'Dark' })).toBeChecked();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await expect.poll(() => landingBg(page)).toBe(DARK_BG);
+		await expect(ornament(page)).toHaveAttribute('src', /tally-split\.webp$/);
+
+		await page.reload();
+		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+		await expect(group.getByRole('radio', { name: 'Dark' })).toBeChecked();
+		expect(await landingBg(page)).toBe(DARK_BG);
+		await expectNoA11yViolations(page);
+
+		// By pointer: the radio is visually hidden, so the icon segment (its
+		// <label>) is what a mouse user clicks.
+		await group.locator('label', { has: page.getByRole('radio', { name: 'Light' }) }).click();
+		await expect(group.getByRole('radio', { name: 'Light' })).toBeChecked();
+		await expect.poll(() => landingBg(page)).toBe(LIGHT_BG);
+		await expect(ornament(page)).toHaveAttribute('src', /tally-split-light\.webp$/);
 	});
 });

@@ -13631,3 +13631,88 @@ per-caller field on payloads other clients (mobile, the public API) share.
 **Not covered here** (tracked in `docs/followups.md`): the modal's
 assigned-elsewhere clause, which the server does not enforce, and the pages
 that still restate a predicate.
+
+## 306. The landing page follows the visitor's theme, with a light render of the tally (2026-10-21)
+
+**This supersedes §289's "the marketing landing page stays dark" and §294's
+"not until evidence says otherwise".** §294 named what would reopen the
+question — drop-off or repeated feedback — and what doing it properly would
+mean: a light render of the tally, panel treatments composed for a light
+ground, contrast re-measured, the theme followed rather than toggled per page.
+What reopened it is the operator asking for it directly: a visitor who chose
+Light (or whose OS did) met a navy landing page between a light sign-in page
+and a light app, and on the apex domain that page is the product's first
+impression. The job was done the way §294 said it must be, not as a token
+swap that leaves a dark-composed render on white.
+
+**What changed.**
+
+- **No pin.** `data-theme-scope="dark"` is gone from `Landing` and from
+  `app.css`'s dark selector list; nothing else used the mechanism, so it was
+  removed rather than kept idle. The landing subtree (`Landing`, `Pricing`,
+  `HeroPipeline`, `AdapterRail`, `Atmosphere`) takes System / Light / Dark
+  from the same pre-paint script and store as everything else, so a stored
+  Light is on `<html>` at the first frame here too.
+- **Every colour is a token.** 85 literals — navy glass `rgba(24, 26, 35, …)`,
+  accent glows, the text-gradient stops, the stamp and ping greens — became
+  palette tokens or `color-mix(in srgb, var(--token) N%, transparent)`. Three
+  tokens are new, in both palettes: `--gilt` (the tally's gold), `--brand-violet`
+  (the gradient midpoint) and `--drop-shade` (a cast shadow: black on navy, a
+  soft ink on light, where black at the same strength reads as dirt). The dark
+  values are the old literals, so the dark page is unchanged to the eye.
+- **Light treatments, not an inversion.** Glass panels are translucent
+  `--surface` (white, in light) with `--shadow-card`, so they lift off the pale
+  ground by shadow rather than by being lighter than it; the hero card is
+  `--surface` with `--shadow-float`; the eyebrow pills moved onto the
+  calibrated `--accent-tint` / `--accent-on-tint` pair; the grid, grain and
+  vignette already followed `--text` / `--bg`. The brand mark is untouched.
+- **A second render of the tally.** On the light ground the dark render's
+  softbox reflections came out as near-white cream, the page's own value, and
+  the stick's near edges dissolved. `tally_scene.py` now takes
+  `TALLY_VARIANT=light`: dimmer softbox, ~0.45 stop less exposure, a warm weak
+  fill and a lower rim, everything else shared — so the two renders trim to the
+  same 1100 × 460 frame and swapping them never moves the layout.
+  `gen-marketing.sh` renders both (or one, by argument, so retuning one
+  lighting leaves the other's bytes alone) and refuses a pair that disagrees in
+  size. The page picks the file from `theme.resolved`
+  (`lib/marketing/ornament.ts`) rather than a `<picture>` media query, which
+  would follow the OS and ignore a stored choice; `AuthShell`'s panel, which
+  already followed the theme and was showing the dark render on white, uses the
+  same map. The grain overlay is shared — a grey tile under `overlay` blending
+  reads as grain on either ground — so it was not re-rendered.
+- **A theme switch in the header.** An anonymous visitor has no `/profile`.
+  `ThemePicker` and `SegmentedControl` gained `compact`: the same fieldset of
+  native radios drawn as three icons, legend and labels visually hidden but in
+  the accessibility tree, each segment titled, 30px targets, the radio clipped
+  (not faded) and the segment carrying the focus ring. With the dot hidden the
+  raised fill was no cue at all (1.04:1 against the track), so the chosen
+  segment takes an `--accent` ring on the accent tint pair — an edge the other
+  segments lack, ≥5.7:1 against the track in both palettes (1.4.11, 1.4.1). It sits beside the
+  `<nav>`, not in it — a setting, not a destination — and fits beside the mark
+  and the short CTA at 320px. No new strings: it reuses `profile.appearance.*`,
+  translated in all six locales.
+
+**Rejected.** *A page-local toggle* (a landing-only light/dark switch that
+does not touch the global choice) — §294 already ruled it out, and a choice
+that reverts on the next page is not a choice. *Keeping the scope mechanism for
+later* — an unused pin is an exemption from the light audit waiting to be
+reused. *CSS-swapping two `<img>` elements* — needs the light selectors written
+twice more (explicit and System) for one image, where the store already knows
+the answer.
+
+Guards: `src/lib/a11y/tokenPairing.test.ts` (both palettes over every
+marketing stylesheet with no exemption; no `data-theme-scope` anywhere; the
+marketing components type no colour literal — hex, any functional notation,
+`white` / `black`, in `<style>` or an inline `style=` — but `#fff` in a rule
+that also sets a `-strong` background, and a mask's `#000`; `--gilt`, `--brand-violet` and `--accent-on-tint` held to 4.5:1
+on `--bg` and `--surface` in each palette, since the scan cannot measure a
+`background-clip: text` gradient), `src/lib/marketing/ornament.test.ts` (both
+renders committed, same intrinsic size, not the same file), and
+`tests-e2e/a11y/light-theme.spec.ts` (the landing under a light OS: axe clean,
+light render; dark: axe clean, dark render; a stored Light under a dark OS:
+`data-theme` at the first frame, the ornament's first `src` the light file and
+the dark one never requested;
+the header switch reached by Tab, operated by arrow keys and by pointer,
+persisting across a reload, segments ≥ 24px, a drawn focus ring, a checked
+edge the others lack; at 320px the header holds mark, CTA and switch with no
+overflow; the auth shell's panel follows the theme).

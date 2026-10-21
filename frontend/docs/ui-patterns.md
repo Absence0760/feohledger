@@ -1212,16 +1212,26 @@ script only decides which one the page asks for.
   `AuthShell` page. It is listed on the Cookie Notice (`feoh_theme`), which
   with the Privacy Policy says it is the only cookie the app sets —
   `storageInventory.test.ts` fails if a second `document.cookie =` appears.
-- **What follows the theme:** the signed-in app, the auth shell (`AuthShell`,
-  signup, MFA, reset), the supplier portal, the help centre and the legal
-  pages. **What does not:** the marketing landing page (`Landing` and the
-  components only it renders — `Pricing`, `HeroPipeline`, `AdapterRail`). Its
-  rendered ornament, grain and glass panels were designed on navy, so its root
-  carries `data-theme-scope="dark"`, which `app.css` includes in the dark
-  palette's selector list: custom properties inherit, so redeclaring the dark
-  tokens on that element pins the whole subtree. The light audit skips those
-  four files; `tokenPairing.test.ts` proves each is rendered only inside the
-  pinned root, so a component cannot be pinned and then reused elsewhere.
+- **Everything follows the theme:** the signed-in app, the auth shell
+  (`AuthShell`, signup, MFA, reset), the supplier portal, the help centre, the
+  legal pages and the marketing landing page (decisions §306, which ended
+  §289's dark pin). There is no per-subtree palette pin, and
+  `tokenPairing.test.ts` fails if a `data-theme-scope` reappears. The landing
+  page's header carries a compact `ThemePicker` (an anonymous visitor has no
+  `/profile`).
+- **The public pages' brand colours are tokens too.** `--gilt` (the tally's
+  gold) and `--brand-violet` are the gradient stops beside the accent blue
+  (headline, stat figures, pipeline rail, featured-plan ring); `--drop-shade`
+  is the cast shadow under a lit object. Each has a light value, and the stops
+  are held to 4.5:1 on `--bg` / `--surface` in both palettes, because a
+  `background-clip: text` gradient is something the rule scan cannot measure.
+  The marketing components may type no colour literal at all except `#fff` on
+  a `-strong` fill and a mask's `#000` (the same test).
+- **A raster picks its file from `theme.resolved`.** The rendered tally
+  ornament has a lighting per palette (`#lib/marketing/ornament.ts`, generated
+  by `pnpm gen:marketing`); a `<picture>` with a `prefers-color-scheme` source
+  would follow the OS and ignore a stored choice. Both renders share one
+  intrinsic size so a theme switch never moves the layout.
 - **A new colour token goes in both palettes**, measured in both. The light
   base tokens are deliberately darker than the bare-surface bar needs: ~40
   rules set a base token as text on a 10–20% tint of its own hue, and each base

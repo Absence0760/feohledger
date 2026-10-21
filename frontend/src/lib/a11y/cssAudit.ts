@@ -167,8 +167,8 @@ export function parsePalette(css: string, theme: PaletteTheme = 'dark'): Record<
 	const blocks = rootBlocks(css);
 	const light = normalizeSelector(LIGHT_THEME_SELECTOR);
 	// The base layer is any top-level block whose selector LIST includes a
-	// bare `:root` — `:root, [data-theme-scope='dark'] { … }` is the dark
-	// palette, shared with the subtree that pins it.
+	// bare `:root` — a list, not an exact match, so a selector later added
+	// beside `:root` on the dark palette is still read as the dark palette.
 	const isBase = (selector: string) => selector.split(',').some((part) => part.trim() === ':root');
 	const layers: ((selector: string) => boolean)[] =
 		theme === 'dark' ? [isBase] : [isBase, (selector) => selector === light];
