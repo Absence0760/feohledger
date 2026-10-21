@@ -123,7 +123,7 @@ The FastAPI app uses `pydantic-settings` (`backend/app/config.py`) with the `FEO
 ```env
 # Database
 # The app role with no password: IAM auth mints a token per connection
-# (docs/decisions.md §304). The task role needs rds-db:connect on feoh_app.
+# (docs/decisions.md §305). The task role needs rds-db:connect on feoh_app.
 FEOH_DATABASE_URL=postgresql+asyncpg://feoh_app@rds-host:5432/feohledger
 FEOH_DATABASE_IAM_AUTH=true
 FEOH_TENANT_DB_PREFIX=feoh_

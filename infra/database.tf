@@ -13,7 +13,7 @@
 # it from the private infra-secrets repo at apply time (README.md § Workload
 # stack). It is the break-glass credential only: the app signs in as its own
 # least-privilege role, `feoh_app`, with an IAM auth token (compute.tf's
-# ConnectAsAppRole, docs/decisions.md §304), so the master password is not in
+# ConnectAsAppRole, docs/decisions.md §305), so the master password is not in
 # the VM's sops env at all.
 
 # RDS creates this group itself on first export — unencrypted by a CMK and kept

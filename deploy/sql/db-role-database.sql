@@ -1,4 +1,4 @@
--- The per-database half of deploy/db-role-cutover.sh (docs/decisions.md §304).
+-- The per-database half of deploy/db-role-cutover.sh (docs/decisions.md §305).
 -- Run as the RDS MASTER user, connected to ONE database (the control plane, or a
 -- feoh_* tenant), after db-role-cluster.sql. Idempotent: it only touches objects
 -- the master still owns, so a second run finds nothing to do.

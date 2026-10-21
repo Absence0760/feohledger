@@ -12,7 +12,7 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Secrets management).
 |---|---|---|---|
 | `FEOH_SECRET_KEY` (JWT signing) | sops — `infra-secrets` (`feohledger/`) | **90 days** | Forge any user's JWT; full impersonation |
 | AWS KMS key for SOPS | AWS KMS | **365 days (auto)** | Decrypt every secret under `infra-secrets/feohledger/` |
-| RDS master password | sops — `infra-secrets` (`feohledger/terraform.sops.yaml`); **not** on the VM | **90 days**, and once right after the IAM cutover | Full DB read/write — but only from inside the VPC (the instance is private), and break-glass only: the app signs in as `feoh_app` with IAM tokens (`docs/decisions.md` §304) |
+| RDS master password | sops — `infra-secrets` (`feohledger/terraform.sops.yaml`); **not** on the VM | **90 days**, and once right after the IAM cutover | Full DB read/write — but only from inside the VPC (the instance is private), and break-glass only: the app signs in as `feoh_app` with IAM tokens (`docs/decisions.md` §305) |
 | `feoh_app` IAM auth tokens | minted per connection, never stored | **15 minutes (automatic)** | One new connection as the app role while it lasts; nothing to rotate — revoke `rds-db:connect` on the VM role to stop all of them |
 | `FEOH_ANTHROPIC_API_KEY` (platform Claude Vision) | sops — `infra-secrets` (`feohledger/`) | **180 days** | Anthropic billing fraud, prompt extraction abuse |
 | `FEOH_LITHIC_API_KEY` (virtual cards — platform) | sops — `infra-secrets` (`feohledger/`) | **180 days** | Issue cards on our account |
@@ -180,7 +180,7 @@ unaffected.
 ### RDS master password (break-glass)
 
 Since the IAM cutover (`deploy/README.md` § Database role, `docs/decisions.md`
-§304) the app, its migrations and `backup.sh` / `psql.sh` sign in as `feoh_app`
+§305) the app, its migrations and `backup.sh` / `psql.sh` sign in as `feoh_app`
 with IAM tokens, so **the master password is not on the VM** and rotating it
 does not interrupt the app. It is the break-glass credential: a logical
 restore, a pgvector upgrade, a cutover re-run.

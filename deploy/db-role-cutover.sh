@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Move the app off the RDS master user onto its own least-privilege roles
-# (docs/decisions.md §304). Run on the VM, from deploy/, while deploy/.env still
+# (docs/decisions.md §305). Run on the VM, from deploy/, while deploy/.env still
 # signs in as the MASTER (the state before the cutover, or the break-glass URL
 # afterwards). Idempotent: a second run changes nothing, and re-running it is
 # also how ownership is handed back after a rollback window or a restore that

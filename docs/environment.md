@@ -239,7 +239,7 @@ must be `verify-full`. The API refuses to boot otherwise, every engine refuses
 to build, and `deploy/decrypt-env.sh` refuses first. An AWS region must resolve
 (`AWS_REGION` / `AWS_DEFAULT_REGION`). Off is local dev and CI: password auth
 against the local container, unchanged. The production role, cutover and
-rollback: `deploy/README.md` § Database role, `docs/decisions.md` §304.
+rollback: `deploy/README.md` § Database role, `docs/decisions.md` §305.
 
 **Database TLS is not a `FEOH_` variable.** asyncpg (every engine, and the raw connections tenant provisioning opens) and libpq (`pg_dump` and friends) both read the standard `PGSSLMODE` / `PGSSLROOTCERT` when the URL names no TLS option, so that is how a deployment sets it: the backend image sets `PGSSLROOTCERT` to the RDS CA bundle it carries, and the deployment sets `PGSSLMODE=verify-full` for RDS. Unset, asyncpg's default is `prefer` — what local dev uses. `docs/minimal-deployment.md` § Database TLS.
 

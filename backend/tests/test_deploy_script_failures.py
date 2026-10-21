@@ -377,7 +377,7 @@ IAM_ENV = (
 
 def test_restore_refuses_the_iam_app_role_before_touching_anything(tmp_path: Path) -> None:
     """The app role cannot recreate pgvector, so a logical restore is the
-    master's (docs/decisions.md §304)."""
+    master's (docs/decisions.md §305)."""
     d = _deploy(tmp_path, "restore.sh")
     d.env_file(IAM_ENV)
 

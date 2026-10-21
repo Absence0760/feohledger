@@ -82,7 +82,7 @@ feoh_load_db_mode || die "could not determine the database mode from deploy/.env
 # would fail every tenant. So this is a break-glass operation: point
 # FEOH_DATABASE_URL at the master for it, then re-run ./db-role-cutover.sh,
 # which hands everything the restore created back to the app role, and switch
-# back (docs/decisions.md §304, deploy/README.md § Database role). A
+# back (docs/decisions.md §305, deploy/README.md § Database role). A
 # point-in-time restore — the first choice on RDS — keeps the roles and needs
 # none of this.
 if [ "${FEOH_DB_IAM:-0}" = 1 ]; then

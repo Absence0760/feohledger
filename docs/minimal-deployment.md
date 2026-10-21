@@ -520,7 +520,7 @@ IAM token minted per connection from the instance profile
 (`backend/app/db_engine.py`), so there is no long-lived database credential on
 the VM. pgvector is created once in `template1` by the master, because the app
 role may not create it. The cutover, rollback and break-glass procedure is
-`deploy/README.md` § Database role; the reasoning is `docs/decisions.md` §304.
+`deploy/README.md` § Database role; the reasoning is `docs/decisions.md` §305.
 
 ### Database TLS
 

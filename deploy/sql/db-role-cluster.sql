@@ -1,4 +1,4 @@
--- The cluster half of deploy/db-role-cutover.sh (docs/decisions.md §304).
+-- The cluster half of deploy/db-role-cutover.sh (docs/decisions.md §305).
 -- Run as the RDS MASTER user, connected to the control-plane database, once per
 -- cutover and again after anything that recreates objects as the master
 -- (a rollback window, a restore). Every statement is idempotent; a second run

@@ -46,7 +46,7 @@ connection (CREATE / DROP DATABASE, a one-off probe) with
 the app signs in as the `feoh_app` role with an RDS IAM token the factory mints
 per new connection, off the event loop, and the URL carries no password. A
 connection opened around the factory would have nothing to sign in with
-(`docs/environment.md`, `../../docs/decisions.md` §304).
+(`docs/environment.md`, `../../docs/decisions.md` §305).
 
 **The production role owns everything, but is not a superuser.** The app signs
 in as `feoh_app` and every session acts as `feoh_owner` (its `role` default),
