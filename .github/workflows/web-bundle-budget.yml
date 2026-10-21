@@ -10,15 +10,21 @@ name: Web bundle budget
 # the right answer is "ship the feature". The rule is that the bump is
 # deliberate and justified IN THIS FILE (see the log under MAX_TOTAL_KB), never
 # a casual edit because the job went red.
+#
+# How it blocks a merge: this is a reusable workflow, called by the
+# `bundle-budget` job in ci.yml, which the `CI gate` job (the single required
+# check on `main`) needs. It used to be a standalone workflow with its own
+# `pull_request` trigger, outside the gate — so a red budget never blocked
+# anything, and PR #611 merged over it and left `main` failing. Making it a
+# separately required check would not work either: it is path-scoped, and a
+# required check that never reports on an unrelated PR hangs that PR forever.
+# The path scoping now lives in ci.yml's `changes` job (the `bundle` filter):
+# an unrelated PR SKIPS the caller job, which the gate counts as a pass, while
+# a failure or cancel fails the gate. Do not add a trigger here — ci.yml runs
+# it on every PR and push to main that touches the frontend.
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/web-bundle-budget.yml'
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read

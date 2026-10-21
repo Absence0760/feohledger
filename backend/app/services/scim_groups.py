@@ -34,8 +34,10 @@ import uuid
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import ROLE_ADMIN
 from app.models.organization import Organization
-from app.models.user import Role, UserRole
+from app.models.user import Role, User, UserRole
+from app.services.admin_lockout import guard_admin_removal
 from app.services.audit_dispatch import dispatch_auth_audit
 
 logger = logging.getLogger(__name__)
@@ -249,12 +251,59 @@ async def reconcile_user_roles(
             )
 
 
+async def admins_losing_admin(
+    db: AsyncSession, org_id, member_ids: set[str], groups: dict, role_map: dict
+) -> list[uuid.UUID]:
+    """The active system-``admin`` holders this reconciliation would strip of it.
+
+    Empty unless ``admin`` is itself an IdP-managed role in the map. Read before
+    any role is touched, so the last-admin guard can refuse the whole group
+    write up front rather than half-way through its members.
+    """
+    if ROLE_ADMIN not in managed_role_names(role_map):
+        return []
+    candidates: list[uuid.UUID] = []
+    for raw in member_ids:
+        try:
+            uid = raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
+        except (ValueError, AttributeError):
+            continue
+        if ROLE_ADMIN not in desired_role_names_for_user(groups, role_map, str(uid)):
+            candidates.append(uid)
+    if not candidates:
+        return []
+    rows = await db.execute(
+        select(User.id)
+        .join(UserRole, UserRole.user_id == User.id)
+        .join(Role, Role.id == UserRole.role_id)
+        .where(
+            User.id.in_(candidates),
+            User.organization_id == org_id,
+            User.is_active.is_(True),
+            Role.name == ROLE_ADMIN,
+            Role.organization_id.is_(None),
+        )
+    )
+    return list(rows.scalars().all())
+
+
 async def reconcile_members(db: AsyncSession, org: Organization, member_ids: set[str]) -> None:
     """Reconcile roles for a set of affected users after a group change.
-    Reads the (already-persisted) groups + map off org.settings."""
+    Reads the (already-persisted) groups + map off org.settings.
+
+    Raises :class:`~app.services.admin_lockout.LastAdminLockout`, before any
+    role is changed, when the change would strip ``admin`` from every active
+    admin in the org — the same guard the admin API and SCIM deprovisioning
+    apply. The caller's transaction must then roll back, group state included.
+    """
     groups = get_groups(org.settings)
     role_map = get_role_map(org.settings)
     if not managed_role_names(role_map):
         return
+    await guard_admin_removal(
+        db,
+        org.id,
+        removed_user_ids=await admins_losing_admin(db, org.id, member_ids, groups, role_map),
+    )
     for user_id in member_ids:
         await reconcile_user_roles(db, org.id, user_id, groups, role_map)
