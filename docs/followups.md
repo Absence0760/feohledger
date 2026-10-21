@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
+**Last reconciled:** 2026-10-21 — merging main (§305, §306) into the #575 round-1 branch, both sides' entries kept, taking the file to 134. Before that, 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
 decisions §305) opened three (c) entries — the modal's assignee clause, bulk
 status approving a draft past review, and the pages still restating server
 predicates — taking the file from 126 → 129. Before that, 2026-10-21 — storing the ERP document id on the invoice
@@ -51,7 +51,15 @@ ran, and one (b) entry, confirming each tenant's stored `auto_send_on_approval:
 true` before deploying it, taking the file from 122 → 124. Before that, 2026-10-21 — the adapters' honest paid read (decisions
 §303) split the "ERP status polling and void are unwired" (c) entry into the
 non-QuickBooks status sync-back gap and the void/recall gap, taking the file
-from 121 → 122. Before that, 2026-10-21 — merging main (QuickBooks status sync, Xero
+from 121 → 122. Before that, on this branch, 2026-10-21 — merging main (QuickBooks status sync and
+payment write-back, Xero Disconnect, PO vendor link by supplier id) into the
+#575 round-1 branch; both sides' entries kept, taking the file to 124. Before
+that, 2026-10-20 — the #575 money-path review (decisions §308)
+opened one (c) entry, the invoice currency that cannot be unknown, taking the
+file from 119 → 120. Before that, 2026-10-20 — giving backend rules a single owner (issue #575 §3)
+opened two (c) entries, the payment-schedule readers that join every row and the CSV
+importer's byte-exact duplicate skip, taking the file from 117 → 119. Before that,
+2026-10-21 — merging main (QuickBooks status sync, Xero
 Disconnect) into the PO vendor-link branch; both sides' entries kept, taking
 the file to 121. Before that, 2026-10-20 — the live Xero Demo Company test opened two
 (c) entries (unapproved ERP POs syncing as open, and the adapters that still
@@ -206,7 +214,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**131 open: 113 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**134 open: 116 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1678,9 +1686,70 @@ scope (§260) — do not fold them into any of these.
       deploy + restore rehearsal, and the further tests listed there. One
       piece has landed: every deploy now ends with a smoke check of the site
       and the API through the VM's own Caddy (#579, decisions §277) — it
-      would have caught the v0.1.0 empty-404 outage.
+      would have caught the v0.1.0 empty-404 outage. Since extended
+      (`deploy/smoke.sh`) to a tenant host's TLS and `public-config` against
+      the env, and run by `aws-deploy.yml` too; Compose version parity has
+      landed as well (CI's `deploy-compose` job, the VM's version read from
+      `bootstrap-vm.sh`).
       **Trigger:** the next change to `deploy/`, Alembic bootstrap or
       `tenant_provisioning`, and in any case before customer #2.
+
+### Surfaced by giving backend rules a single owner (2026-10-20, issue #575 §3)
+
+- [ ] **(c) Three readers join every `PaymentSchedule` row, not the invoice's
+      current one.** The payment queue page (`api/payments` — `outerjoin
+      (PaymentSchedule, …)` in the queue listing), its early-pay savings
+      aggregate, and the dashboard's discount-capture tile all join the table
+      directly, so an invoice carrying two schedule rows is listed twice in the
+      queue and its discount counted twice. The cash forecast, discount sweep
+      and ROI already take the latest row through
+      `services/payment_schedules.LATEST_SCHEDULE_ORDER`. Latent: nothing but
+      `scripts/seed.py` writes a schedule today, and the dashboard comment
+      treats "two schedules on different terms" as two rows on purpose, so
+      whether more than one schedule per invoice is meaningful is a product
+      call first. **Durable fix:** decide that one schedule per invoice is the
+      model (a unique index on `payment_schedules.invoice_id` plus a migration
+      that keeps the latest row), or route all three readers through a
+      `DISTINCT ON` subquery built from `LATEST_SCHEDULE_ORDER`.
+      **Trigger:** the first code path other than the seed that creates a
+      `PaymentSchedule`.
+- [ ] **(c) CSV import skips a duplicate only on a byte-exact invoice number.**
+      `services/csv_import` dedups on `(vendor_id, invoice_number)` with `==`,
+      while the duplicate gate (`invoice_warnings.normalize_invoice_number`,
+      decisions §77) treats `INV-001` and `INV-1` as one payable. So a re-import
+      whose numbers are formatted differently creates a second row, which the
+      gate then flags as a payment-blocking `duplicate` — caught, but as queue
+      work rather than a skipped row. Using the normalized form in the importer
+      would instead skip a row silently, which is a worse failure for a row
+      that is a genuine near-duplicate. **Durable fix:** report a normalized
+      match as a per-row import error naming the existing invoice (neither
+      silently skipped nor imported). **Trigger:** the next change to the CSV
+      importer's row validation.
+- [ ] **(c) An invoice cannot say "currency unknown", so a missing code reads
+      as `USD`.** `Invoice.currency` is `Mapped[str]` (NOT NULL, default
+      `"USD"`), and `POST /api/workflow/upload` creates the row with
+      `currency="USD"` before anything has read the document. So an extraction
+      whose model returns no currency field, and no code beside the amounts,
+      leaves a non-US invoice labelled USD, which is the default decisions
+      §160/§196/§200 forbid. Since §308 the printed code fills the gap when the
+      page has one; this entry is the case where it doesn't. Two readers then
+      stamp the same default again: `invoice_warnings` scopes the
+      statistical-anomaly history with `Invoice.currency == (invoice.currency
+      or "USD")`, and `extraction.resolve_gate_aggregate` passes
+      `currency=… or "USD"` to the structuring sum. Each `or "USD"` is
+      unreachable for a flushed row (the column is NOT NULL) and only mirrors
+      the column default, so removing them alone changes nothing. **Durable
+      fix:** make `invoices.currency` nullable (tenant migration; no backfill,
+      because no honest value exists for the rows already stamped), have the
+      upload create the row with `NULL`, and have every reader of an unknown
+      currency fail closed. That means the anomaly and structuring lookups
+      compare nothing and the approval gates read `GateAmount(expressible=False)`,
+      which `reporting_gate_amount` already supports. Schemas, the web and
+      mobile types, ERP push and payment-run building must then refuse or
+      label a NULL currency, which is why this is sized work rather than a
+      one-line fix. **Trigger:** the next change to the upload's invoice
+      construction, or the first tenant reporting a non-USD invoice extracted
+      as USD.
 
 ### Surfaced by replacing signup's temporary password (2026-10-19, decisions §283)
 

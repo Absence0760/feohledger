@@ -1,0 +1,20 @@
+{
+  "id": "msg_golden_jpy_zero_decimal",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"invoice_number\": {\n    \"value\": \"SP-55810\",\n    \"confidence\": 0.97\n  },\n  \"vendor_name\": {\n    \"value\": \"Sakura Precision Parts K.K.\",\n    \"confidence\": 0.95\n  },\n  \"vendor_address\": {\n    \"value\": \"1-2-3 Example-cho, Nagoya\",\n    \"confidence\": 0.85\n  },\n  \"vendor_tax_id\": {\n    \"value\": \"T9999999999999\",\n    \"confidence\": 0.9\n  },\n  \"amount\": {\n    \"value\": \"¥176,440\",\n    \"confidence\": 0.96\n  },\n  \"currency\": {\n    \"value\": \"JPY\",\n    \"confidence\": 0.95\n  },\n  \"subtotal\": {\n    \"value\": \"¥160,400\",\n    \"confidence\": 0.94\n  },\n  \"tax_amount\": {\n    \"value\": \"¥16,040\",\n    \"confidence\": 0.93\n  },\n  \"tax_rate\": {\n    \"value\": \"10%\",\n    \"confidence\": 0.92\n  },\n  \"discount_amount\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"shipping_amount\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"invoice_date\": {\n    \"value\": \"2026-09-25\",\n    \"confidence\": 0.96\n  },\n  \"due_date\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"payment_terms\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"po_number\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"description\": {\n    \"value\": \"Bearings, couplings and machining\",\n    \"confidence\": 0.8\n  },\n  \"reference_number\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"payment_method\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"bill_to_address\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"remit_to_address\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"suggested_gl_account\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"suggested_cost_center\": {\n    \"value\": null,\n    \"confidence\": 0.0\n  },\n  \"line_items\": [\n    {\n      \"line_number\": 1,\n      \"item_code\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"description\": {\n        \"value\": \"Bearing unit 6204-ZZ\",\n        \"confidence\": 0.93\n      },\n      \"quantity\": {\n        \"value\": \"40\",\n        \"confidence\": 0.93\n      },\n      \"unit_price\": {\n        \"value\": \"¥1,850\",\n        \"confidence\": 0.93\n      },\n      \"tax\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"total\": {\n        \"value\": \"¥74,000\",\n        \"confidence\": 0.93\n      }\n    },\n    {\n      \"line_number\": 2,\n      \"item_code\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"description\": {\n        \"value\": \"Shaft coupling 25mm\",\n        \"confidence\": 0.93\n      },\n      \"quantity\": {\n        \"value\": \"12\",\n        \"confidence\": 0.93\n      },\n      \"unit_price\": {\n        \"value\": \"¥4,200\",\n        \"confidence\": 0.93\n      },\n      \"tax\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"total\": {\n        \"value\": \"¥50,400\",\n        \"confidence\": 0.93\n      }\n    },\n    {\n      \"line_number\": 3,\n      \"item_code\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"description\": {\n        \"value\": \"Machining fee\",\n        \"confidence\": 0.93\n      },\n      \"quantity\": {\n        \"value\": \"1\",\n        \"confidence\": 0.93\n      },\n      \"unit_price\": {\n        \"value\": \"¥36,000\",\n        \"confidence\": 0.93\n      },\n      \"tax\": {\n        \"value\": null,\n        \"confidence\": 0.0\n      },\n      \"total\": {\n        \"value\": \"¥36,000\",\n        \"confidence\": 0.93\n      }\n    }\n  ]\n}"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 3120,
+    "output_tokens": 1480,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

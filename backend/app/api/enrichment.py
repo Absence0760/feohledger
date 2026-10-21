@@ -37,7 +37,8 @@ from app.api.deps import (
 )
 from app.api.permissions import PERM_VENDOR_MANAGE
 from app.models.exception import Exception as APException
-from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
+from app.models.invoice import Invoice, InvoiceLineItem
+from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES
 from app.models.organization import Organization
 from app.models.procurement import GoodsReceipt, PurchaseOrder
 from app.models.user import User
@@ -93,18 +94,6 @@ _CONSOLIDATION_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 # External enrichment (calling out to D&B / Clearbit) is a data-stewardship
 # action and may consume a metered external API — managerial, clerk excluded.
 _ENRICH_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
-
-# Approved-or-beyond — a human-accepted coding/price baseline. Draft / rejected
-# invoices are unreviewed noise and excluded. Mirrors adaptive_workflows.
-_APPROVED_STATUSES = (
-    InvoiceStatus.approved,
-    InvoiceStatus.sending_to_erp,
-    InvoiceStatus.sent_to_erp,
-    InvoiceStatus.posted_in_erp,
-    InvoiceStatus.payment_scheduled,
-    InvoiceStatus.paid,
-    InvoiceStatus.done,
-)
 
 
 def _vendor_in_scope(vendor_id: uuid.UUID, entity_id: uuid.UUID | None):
@@ -202,7 +191,7 @@ async def invoice_suggestions(
             .where(
                 Invoice.vendor_id == inv.vendor_id,
                 Invoice.id != inv.id,
-                Invoice.status.in_(_APPROVED_STATUSES),
+                Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
             )
             .order_by(Invoice.created_at.desc())
             .limit(HISTORY_LIMIT),
@@ -252,7 +241,7 @@ async def invoice_suggestions(
             .where(
                 Invoice.vendor_id == inv.vendor_id,
                 Invoice.id != inv.id,
-                Invoice.status.in_(_APPROVED_STATUSES),
+                Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
                 InvoiceLineItem.unit_price.is_not(None),
             )
             .order_by(Invoice.created_at.desc())
@@ -342,7 +331,7 @@ async def _accuracy_input(
         )
         .where(
             Invoice.vendor_id == vendor_id,
-            Invoice.status.in_(_APPROVED_STATUSES),
+            Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
         )
     )
     base = apply_entity_scope(base, Invoice, entity_id)

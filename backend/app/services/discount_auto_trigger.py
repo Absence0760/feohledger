@@ -90,7 +90,6 @@ from app.models.discount import (
 )
 from app.models.invoice import Invoice
 from app.models.organization import Organization
-from app.models.payment import PaymentSchedule
 from app.services.audit_dispatch import dispatch_audit
 from app.services.discount_offers import (
     best_tier_for_date,
@@ -101,6 +100,7 @@ from app.services.discount_offers import (
     tier_deadline,
 )
 from app.services.discount_roi import compute_roi, days_between
+from app.services.payment_schedules import latest_schedule
 from app.services.sweep_health import SWEEP_DISCOUNT_AUTO_TRIGGER, run_sweep_loop
 from app.utils.dates import utc_today
 
@@ -179,16 +179,9 @@ async def _resolve_due_date(db: AsyncSession, offer: DiscountOffer) -> date | No
     """
     if offer.invoice_id is None:
         return None
-    due = (
-        await db.execute(
-            select(PaymentSchedule.due_date)
-            .where(PaymentSchedule.invoice_id == offer.invoice_id)
-            .order_by(PaymentSchedule.created_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if due is not None:
-        return due
+    schedule = await latest_schedule(db, offer.invoice_id)
+    if schedule is not None and schedule.due_date is not None:
+        return schedule.due_date
     return (
         await db.execute(select(Invoice.due_date).where(Invoice.id == offer.invoice_id))
     ).scalar_one_or_none()

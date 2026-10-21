@@ -540,6 +540,8 @@ export const messages = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Les montants ne concordent pas : sous-total ({subtotal}) + taxe ({tax}) + livraison ({shipping}) − remise ({discount}) = {expected}, mais le total est {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'La date d’échéance ({dueDate}) est antérieure à la date de facture ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'Le total des lignes ({lineItemsTotal}) ne correspond pas au montant de la facture ({amount}).',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Les montants sont libellés en {printedCurrency}, mais la devise de la facture indique {fieldCurrency}. Les montants ont été laissés vides — saisissez-les depuis le document.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Les montants sont libellés dans plusieurs devises ({printedCurrencies}). Les montants ont été laissés vides — saisissez-les depuis le document.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Ligne {lineNumber} : {quantity} × {unitPrice} = {expected}, mais le total est {total}.',
 	'invoices.warning.glCodesNotInChart': 'Comptes généraux suggérés par l’IA absents du plan comptable actif : {codes}',
 	'invoices.warning.glCodeStalePrior': 'Le compte général « {code} » mis en cache pour ce fournisseur n’est plus dans le plan comptable actif.',

@@ -54,11 +54,16 @@ def _user():
 async def _call_cancel(adapter, card, db):
     from app.api.cards import cancel_card
 
+    org = _org()
+    # `_require_card_adapter` resolves the org's card credentials through its
+    # own control-plane session; this is a unit test over a mocked `db`, so the
+    # lookup is stubbed too rather than leaking onto the real engine.
     with (
         patch("app.services.card_adapters.get_card_adapter", return_value=adapter),
+        patch("app.api.cards.settings_with_secrets", new=AsyncMock(return_value=org.settings)),
         patch("app.services.audit_dispatch.dispatch_audit", new=AsyncMock()),
     ):
-        return await cancel_card(card_id=card.id, db=db, org=_org(), user=_user(), entity_id=None)
+        return await cancel_card(card_id=card.id, db=db, org=org, user=_user(), entity_id=None)
 
 
 @pytest.mark.asyncio

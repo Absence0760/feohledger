@@ -85,7 +85,8 @@ from decimal import Decimal
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES
 from app.models.procurement import (
     DEAD_PO_STATUSES,
     Budget,
@@ -120,15 +121,32 @@ _DIMENSION_MATCH_COLUMN = {
     BudgetDimension.project: Invoice.project,
 }
 
-# Invoice statuses that represent realised spend against a budget dimension.
-REALISED_INVOICE_STATUSES: tuple[str, ...] = (
-    "approved",
-    "sent_to_erp",
-    "posted_in_erp",
-    "payment_scheduled",
-    "paid",
-    "done",
-)
+# Invoice statuses that represent realised spend against a budget dimension:
+# every status a human-approved invoice can hold. This was a hand-listed copy
+# that left out `sending_to_erp`, so an invoice dropped out of `actual` (and
+# stopped relieving its PO) for as long as its ERP push was in flight or stuck
+# there (issue #575). It is the shared set now, not a copy of it.
+REALISED_INVOICE_STATUSES: tuple[str, ...] = tuple(s.value for s in APPROVED_OR_BEYOND_STATUSES)
+
+
+def realised_invoice_clause():
+    """The status half of "this invoice is realised spend", as SQL.
+
+    ``REALISED_INVOICE_STATUSES``, plus ``failed`` WITH evidence of approval. An
+    approved invoice whose ERP push failed sits at ``failed`` and is still
+    spend a human signed off; but ``failed`` is also where a failed EXTRACTION
+    lands, before any review, so the status alone proves nothing. The durable
+    ``Invoice.approval_date`` stamp (written on every approval path, never
+    cleared) is the evidence — the reading ``services/analytics`` takes for the
+    touchless rate (`decisions.md` §73) and ``api/vendors._bank_change_flag_statuses``
+    for the bank-change flag (§286). See §308.
+
+    One function because the ``actual`` leg and the PO-relief leg must admit
+    exactly the same invoices (``_realised_for_budget``)."""
+    return or_(
+        Invoice.status.in_(REALISED_INVOICE_STATUSES),
+        and_(Invoice.status == InvoiceStatus.failed, Invoice.approval_date.is_not(None)),
+    )
 
 
 @dataclass(frozen=True)
@@ -254,7 +272,7 @@ def _realised_for_budget() -> list:
     invoices. If the two could disagree, relief would either leave a double
     count standing or drop spend from both legs at once."""
     return [
-        Invoice.status.in_(REALISED_INVOICE_STATUSES),
+        realised_invoice_clause(),
         # Bound realised spend to the budget's own period so two budgets
         # tracking the same dimension in different periods don't both report
         # all-time spend. Only applied when BOTH bounds are set; a period-less
@@ -382,7 +400,7 @@ def _invoice_po_attribution(budget_ids: Sequence[uuid.UUID]):
         )
         .where(
             Invoice.po_number.in_(converted_numbers),
-            Invoice.status.in_(REALISED_INVOICE_STATUSES),
+            realised_invoice_clause(),
         )
         .subquery()
     )

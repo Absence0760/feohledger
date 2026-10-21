@@ -296,7 +296,7 @@ Beyond the committed defaults, the deployed env sets at minimum:
 | `FEOH_SECRET_KEY` | `openssl rand -hex 32` |
 | `FEOH_CREDENTIAL_KMS_KEY_ID` | `terraform output app_kms_key_alias` (e.g. `alias/feohledger-app-prod`) — the key that seals tenant ERP / payment / card credentials. **Required**: the API (and `alembic`) refuse to boot in production without it, and `deploy.sh` refuses first. Set it before the first deploy carrying migration 0110, which seals the existing credentials with it. The VM role already holds `kms:GenerateDataKey` + `kms:Decrypt` on that key (`infra/compute.tf`) |
 | `FEOH_SIGNUP_ENABLED` | `false` to keep self-service signup closed (every `/api/signup/*` route 404s and `/signup` says signup is closed) — the usual choice here, with tenants provisioned by `deploy/add-tenant.sh`. Leave it unset (on) only when you want public signup, and then set both hCaptcha keys |
-| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **Required while signup is on** — the API refuses to boot in production with the secret empty, and `deploy.sh` refuses first. With `FEOH_SIGNUP_ENABLED=false` neither is needed. |
+| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **Both required while signup is on** — the API refuses to boot in production with either empty (no site key means no widget, so every signup fails the captcha), and `deploy.sh` refuses first. With `FEOH_SIGNUP_ENABLED=false` neither is needed. |
 | `FEOH_DATABASE_URL` | **RDS path:** `postgresql+asyncpg://<master user>:<master password>@<RDS endpoint>:5432/feohledger` — the endpoint host name exactly as RDS reports it (verify-full checks the certificate against it), no query string, and a URL-safe password (`openssl rand -hex 24`; anything else percent-encoded). Setting it is what selects the RDS path. **Container path:** leave unset — compose derives it from `POSTGRES_PASSWORD` |
 | `PGSSLMODE` | **RDS path:** `verify-full` (required; `require` / `verify-ca` warn, anything weaker is refused). **Container path:** leave unset — the container serves no TLS |
 | `POSTGRES_PASSWORD` | **Container path:** `openssl rand -hex 24` (compose derives `FEOH_DATABASE_URL` from it). **RDS path:** leave empty — nothing reads it |
@@ -339,10 +339,13 @@ pipeline), then rolls the containers with `up -d --wait` — the deploy fails
 loudly if the API healthcheck never passes, and a failed build or migration
 leaves the previous containers serving. Only then does the new SPA go live — a
 copy of the build under `deploy/www/releases/`, switched in by one symlink
-rename — followed by a Caddy reload and a **smoke check**: `curl` from the VM,
-through its own Caddy, must get a 200 with a non-empty body from
-`https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health`, or the deploy
-fails (`deploy/README.md` § Deploys, § How the SPA is served). Flags: `--no-pull`, `--ref <sha>`,
+rename — followed by a Caddy reload and, last, a **smoke check**
+(`deploy/smoke.sh --vm`): `curl` from the VM, through its own Caddy, must get a
+200 with a non-empty body from `https://<APP_DOMAIN>/`,
+`https://<API_DOMAIN>/api/health` and the first tenant host (over a valid
+certificate), and `/api/public-config` must report signup as `.env` configures
+it, with a captcha site key while it is on — or the deploy fails
+(`deploy/README.md` § Deploys, § How the SPA is served). Flags: `--no-pull`, `--ref <sha>`,
 `--backend-only`, `--frontend-only`. Only one deploy runs at a time (a `flock`
 on `deploy/.deploy.lock`), and after the checkout the script re-runs the
 `deploy.sh` it just checked out, so a release that changes the deploy steps is

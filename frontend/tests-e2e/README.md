@@ -88,6 +88,7 @@ tests-e2e/
 │   ├── helpers.ts                   per-worker fixtures + signIn / tenantPsql / etc.
 │   ├── services.ts                  reachability gates for the opt-in compose services
 │   ├── realisticRows.ts             production-shaped rows (long names / numbers / emails, non-ASCII, big amounts) — see "Layout guard" below
+│   ├── realisticValues.ts           reads backend/scripts/fixtures/realistic_rows.json, the ONE file those values live in (seed + e2e)
 │   └── globalSetup.ts               pre-run guard — see "Workflow shape guard" below
 ├── a11y/                            axe-core accessibility regression guard (WCAG 2.2 AA)
 ├── meta/                            source guards over the specs themselves — see "Row teardown" and "Ports" below
@@ -143,14 +144,26 @@ cover the rest.
 shipped at 1666px: a table that fit every seeded row and overflowed the card
 the first day a customer used it. It seeds `fixtures/realisticRows.ts` — long
 vendor names, ERP-length invoice numbers, an email assignee, a non-ASCII
-vendor, thirteen-digit amounts — through the API (falling back to
-`tenantPsql` only for workflow state no endpoint mints), then visits every
+unverified vendor, a tax-exclusive invoice with net lines, thirteen-digit
+amounts — through the API (falling back to `tenantPsql` only for state no
+endpoint mints: workflow status, an unverified vendor), then visits every
 page in `NAV` at 1280px and 1666px and asserts that no table, row action or KPI
 card leaves its container. At 1666px a table must fit outright; at 1280px it
 may scroll inside a `tabindex="0"` region. **Use `REALISTIC` for any new layout
 assertion** rather than inventing strings — short test strings are how #574
 passed. An overflow it reports is a layout defect to fix in the page; never
 widen its tolerance.
+
+**The values are shared with the seed.** They are spelled once, in
+`backend/scripts/fixtures/realistic_rows.json`, and read here through
+`fixtures/realisticValues.ts` (with an `LYT575` marker appended so teardown
+finds exactly these rows), by the day-one journey (`day-one/fixtures.ts`), and
+by `backend/scripts/seed_realistic.py`. The lean seed every CI e2e tenant gets
+therefore carries them too: the two vendors that own invoices have the long
+and the non-ASCII (unverified) names, `LEAN-003` is tax-exclusive with net
+lines, `LEAN-004` has an ERP-length number and the open exception is assigned
+to the long routing alias — reshaped rather than added, so no spec's row counts
+move. Change a value in the JSON, never at a reader.
 
 ## Workflow shape guard (`fixtures/globalSetup.ts`)
 

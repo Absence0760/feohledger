@@ -509,6 +509,24 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         "Line items total ({lineItemsTotal}) doesn't match invoice amount ({amount}).",
         {"lineItemsTotal": "number", "amount": "number"},
     ),
+    # The document contradicts itself about its currency, so `_apply_extraction`
+    # left the header money unread (`decisions.md` §308). The codes are `text`,
+    # not `currency`: a `currency` param only labels a `money` figure beside it
+    # and never reaches the sentence, and here the codes ARE the sentence.
+    WarningSpec(
+        "self_correction_currency_conflict",
+        "extraction_self_correction",
+        "Amounts are printed in {printedCurrency}, but the invoice currency reads "
+        "{fieldCurrency}. The amounts were left blank — enter them from the document.",
+        {"printedCurrency": "text", "fieldCurrency": "text"},
+    ),
+    WarningSpec(
+        "self_correction_currency_mixed",
+        "extraction_self_correction",
+        "Amounts are printed in more than one currency ({printedCurrencies}). "
+        "The amounts were left blank — enter them from the document.",
+        {"printedCurrencies": "text"},
+    ),
     WarningSpec(
         "self_correction_line_item_math",
         "extraction_self_correction",

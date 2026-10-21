@@ -8,6 +8,7 @@ Tracks usage for billing when platform mode is used.
 
 import functools
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -25,7 +26,7 @@ from app.services.decimal_convention import (
     apply_convention,
     detect_convention,
 )
-from app.services.extraction_adapters.base import ExtractionResult
+from app.services.extraction_adapters.base import ExtractedLineItem, ExtractionResult
 from app.services.invoice_warning_catalog import warning
 from app.services.workflow_engine import (
     advance_workflow,
@@ -351,7 +352,8 @@ def decide_auto_approve(
       * ``require_cfo_above`` — demands a CFO; the ``system (auto-approve)`` actor
         is not a CFO.
     When either gate would trip, the invoice falls back to human review rather
-    than auto-approving past the control. Amount is compared with ``Decimal`` so
+    than auto-approving past the control. An amount of zero or less — no amount
+    was read — never auto-approves on either trigger. Amount is compared with ``Decimal`` so
     a boundary value isn't misjudged by a float cast. Pure — no IO.
 
     ``aggregate_amount`` is what those two gates are measured against: this
@@ -386,6 +388,16 @@ def decide_auto_approve(
 
     amount_gate = _coerce_gate_amount(amount)
     gate_amount = amount_gate if aggregate_amount is None else _coerce_gate_amount(aggregate_amount)
+
+    # No amount was read — nothing here for a policy to approve. An extraction
+    # that leaves the amount at the upload's 0 placeholder (an unparseable
+    # token, or a currency the document contradicts — `_apply_extraction`)
+    # raises `missing_amount`, but that warning is not an input to this pure
+    # gate, and without this a 0 sails under any `auto_approve_below` floor and
+    # past every max / CFO cap. Same `<= 0` rule as the `missing_amount`
+    # warning in `invoice_warnings.refresh_warnings` (`decisions.md` §308).
+    if amount_gate.amount <= 0:
+        return False
 
     # A confidence outside 0..1 is not evidence of anything — it is an adapter
     # reporting on a scale we didn't ask for. Treating it as "very confident" is
@@ -862,23 +874,7 @@ async def run_extraction(
 
             line_item = InvoiceLineItem(
                 invoice_id=invoice.id,
-                line_number=li.line_number,
-                item_code=li.item_code.value if li.item_code.value else None,
-                description=li.description.value if li.description.value else None,
-                quantity=(
-                    _clean_decimal(li.quantity.value, amount_convention)
-                    if li.quantity.value
-                    else None
-                ),
-                unit_price=(
-                    _clean_decimal(li.unit_price.value, amount_convention)
-                    if li.unit_price.value
-                    else None
-                ),
-                tax=_clean_decimal(li.tax.value, amount_convention) if li.tax.value else None,
-                total=(
-                    _clean_decimal(li.total.value, amount_convention) if li.total.value else None
-                ),
+                **extracted_line_values(li, amount_convention),
                 gl_account=li_gl,
             )
             db.add(line_item)
@@ -1313,6 +1309,24 @@ _CURRENCY_SYMBOLS = "$\u20ac\u00a3\u00a5\u20b9\u20bd\u20a9\u0e3f\u20aa\u20a6"
 # thousands separator in French convention (``1 234,56``).
 _NUMERIC_WHITESPACE = (" ", "\t", "\u00a0", "\u202f")
 
+# An ISO 4217-shaped currency code written beside the figure — ``EUR 8.739,84``,
+# ``1,234.56 USD``. A model transcribing the printed total keeps the code the
+# page prints, and left in place it made the whole token unparseable: the
+# invoice's ``amount`` silently stayed empty and every self-check that needs it
+# skipped (issue #575). It is stripped for the magnitude, but it is NOT
+# decoration: it is the document stating the figure's currency, so
+# :func:`_amount_core_and_codes` hands it back and
+# :func:`extraction_currency_evidence` weighs it against the ``currency`` field
+# (`decisions.md` §308). Discarding it is how ``GBP 9,500.00`` with no currency
+# field was stored as USD 9,500 — the column default — and cleared a USD cap.
+_CURRENCY_CODE_AFFIX = re.compile(
+    r"^(?P<lead>[A-Z]{3})(?=[\s\d.,(+-])|(?<=[\d.,)\s])(?P<trail>[A-Z]{3})$"
+)
+
+# Swiss grouping: ``1'234.50`` / ``1’234.50``. An apostrophe is never a decimal
+# point, so between a digit and a three-digit group it is dropped like a space.
+_APOSTROPHE_GROUP = re.compile(r"(?<=\d)['\u2019](?=\d{3}(?:\D|$))")
+
 # The money fields whose tokens vote on the document's decimal convention.
 # Deliberately money only: `tax_rate` is a percentage and `quantity` a count,
 # and neither is written under an amount's grouping habits.
@@ -1329,11 +1343,22 @@ def _amount_core(val: str | None) -> str | None:
     see is exactly the one that will be parsed. ``None`` when nothing numeric
     survives.
     """
+    return _amount_core_and_codes(val)[0]
+
+
+def _amount_core_and_codes(val: str | None) -> tuple[str | None, frozenset[str]]:
+    """:func:`_amount_core`, plus the ISO codes printed beside the figure.
+
+    The codes are the ones :data:`_CURRENCY_CODE_AFFIX` stripped — usually none,
+    one for ``GBP 9,500.00``, and two (a contradiction the caller must treat as
+    such) for ``USD 100 EUR``. They are returned whether or not the rest parses;
+    :func:`extraction_currency_evidence` only counts the codes of tokens that do.
+    """
     if val is None:
-        return None
+        return None, frozenset()
     s = str(val).strip()
     if s.casefold() in _NULL_SENTINELS:
-        return None
+        return None, frozenset()
 
     # Accounting negatives: "(123.45)" → "-123.45"
     if s.startswith("(") and s.endswith(")"):
@@ -1341,15 +1366,25 @@ def _amount_core(val: str | None) -> str | None:
 
     for sym in _CURRENCY_SYMBOLS:
         s = s.replace(sym, "")
+    codes: set[str] = set()
+
+    def _strip_code(m: re.Match) -> str:
+        codes.add(m.group("lead") or m.group("trail"))
+        return ""
+
+    s = _CURRENCY_CODE_AFFIX.sub(_strip_code, s.strip()).strip()
+    if s.startswith("(") and s.endswith(")"):
+        s = "-" + s[1:-1].strip()  # "EUR (12.50)" — the code sat outside the parentheses
     for ws in _NUMERIC_WHITESPACE:
         s = s.replace(ws, "")
+    s = _APOSTROPHE_GROUP.sub("", s)
     s = s.replace("%", "")
     # Unicode minus → ASCII minus
     s = s.replace("\u2212", "-")
 
     if not s or s.casefold() in _NULL_SENTINELS:
-        return None
-    return s
+        return None, frozenset(codes)
+    return s, frozenset(codes)
 
 
 def extraction_amount_convention(result: ExtractionResult) -> AmountConvention | None:
@@ -1393,14 +1428,154 @@ def _clean_decimal(val: str | None, convention: AmountConvention | None = None) 
     keeps the historical US reading there.
 
     Returns None on anything that can't be parsed — never raises.
+
+    The magnitude only: an ISO code printed beside the figure is stripped and
+    dropped here. A caller that decides a currency reads it through
+    :func:`_clean_decimal_and_codes` instead.
     """
-    core = _amount_core(val)
+    return _clean_decimal_and_codes(val, convention)[0]
+
+
+def _clean_decimal_and_codes(
+    val: str | None, convention: AmountConvention | None = None
+) -> tuple[Decimal | None, frozenset[str]]:
+    """:func:`_clean_decimal`, plus the currency codes the token printed.
+
+    The codes come back only when the magnitude parsed — a code beside
+    something that is not a number is not evidence of a number's currency.
+    """
+    core, codes = _amount_core_and_codes(val)
     if core is None:
-        return None
+        return None, frozenset()
     try:
-        return Decimal(apply_convention(core, convention))
+        return Decimal(apply_convention(core, convention)), codes
     except Exception:
+        return None, frozenset()
+
+
+def _clean_currency_code(val: str | None) -> str | None:
+    """The model's ``currency`` field as an uppercase 3-letter code, or None.
+
+    Models sometimes return ``"US Dollars"`` or ``"USD."``; the sentinel
+    filter + uppercase + trailing-dot trim recovers the second, and anything
+    that is not then three letters is not a code.
+    """
+    cur = _clean_string(val)
+    if cur is None:
         return None
+    cur_upper = cur.upper().rstrip(".").strip()
+    if len(cur_upper) == 3 and cur_upper.isalpha():
+        return cur_upper
+    return None
+
+
+@dataclass(frozen=True)
+class CurrencyEvidence:
+    """What one extraction says about the currency of its money.
+
+    Two sources can name it: the model's ``currency`` field, and the ISO codes
+    the page printed beside the amounts themselves (``GBP 9,500.00``). They are
+    weighed together, never one silently over the other (`decisions.md` §308):
+
+    * they agree, or only one speaks → :attr:`currency` is that code;
+    * they disagree — the field says ``EUR`` beside ``USD 1,000.00``, or two
+      amounts print different codes → :attr:`conflict`, and :attr:`currency` is
+      ``None``. The writer then leaves every header amount unread rather than
+      label it with a currency the document itself contradicts;
+    * neither speaks → ``None`` and no conflict. The row keeps whatever
+      currency it already had (the upload's placeholder — see
+      `docs/followups.md` on the ``USD`` column default).
+    """
+
+    field_currency: str | None
+    printed_codes: frozenset[str]
+
+    @property
+    def conflict(self) -> bool:
+        if len(self.printed_codes) > 1:
+            return True
+        return bool(
+            self.field_currency
+            and self.printed_codes
+            and self.printed_codes != {self.field_currency}
+        )
+
+    @property
+    def currency(self) -> str | None:
+        if self.conflict:
+            return None
+        if self.field_currency:
+            return self.field_currency
+        if self.printed_codes:
+            return next(iter(self.printed_codes))
+        return None
+
+
+def extraction_currency_evidence(
+    result: ExtractionResult, convention: AmountConvention | None = None
+) -> CurrencyEvidence:
+    """The :class:`CurrencyEvidence` of one extraction.
+
+    Every money token votes — the header's and the lines', the same set
+    :func:`extraction_amount_convention` reads — because the lines are stored
+    in the invoice's currency too, and a line printed ``USD`` under a ``GBP``
+    total is the same contradiction as two header figures disagreeing.
+    ``tax_rate`` and ``quantity`` are not money and carry no code.
+    """
+    tokens = [getattr(result, f).value for f in _HEADER_MONEY_FIELDS]
+    for li in result.line_items:
+        tokens.extend(getattr(li, f).value for f in _LINE_MONEY_FIELDS)
+    printed: set[str] = set()
+    for token in tokens:
+        printed |= _clean_decimal_and_codes(token, convention)[1]
+    return CurrencyEvidence(
+        field_currency=_clean_currency_code(result.currency.value),
+        printed_codes=frozenset(printed),
+    )
+
+
+def extracted_line_values(
+    li: ExtractedLineItem, convention: AmountConvention | None = None
+) -> dict:
+    """The ``InvoiceLineItem`` column values one extracted line is stored as.
+
+    The line-level twin of :func:`_apply_extraction`, and the only place a
+    model's line is turned into column values — ``run_extraction`` persists
+    exactly this, and the golden contract tests assert exactly this.
+
+    It used to be inlined with a ``value if value else None`` guard per field,
+    which got three things wrong on real model output (issue #575):
+
+    * text fields skipped the sentinel filter the header uses, so a leaked
+      ``"string or null"`` or ``"N/A"`` was stored as an item code;
+    * a JSON **number** — a model writing a SKU as ``4411`` — reached the
+      ``String`` column as an ``int``, which asyncpg refuses, failing the whole
+      extraction over one item code;
+    * a JSON ``0`` is falsy, so a real zero tax or total was stored as NULL.
+
+    Money goes through :func:`_clean_decimal` under the document's convention,
+    the same reading the header and the self-correction pass use.
+    """
+    return {
+        "line_number": _clean_line_number(li.line_number),
+        "item_code": _clean_string(li.item_code.value),
+        "description": _clean_string(li.description.value),
+        "quantity": _clean_decimal(li.quantity.value, convention),
+        "unit_price": _clean_decimal(li.unit_price.value, convention),
+        "tax": _clean_decimal(li.tax.value, convention),
+        "total": _clean_decimal(li.total.value, convention),
+    }
+
+
+def _clean_line_number(val) -> int | None:
+    """A model's ``line_number`` as an int for the ``Integer`` column, or None."""
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, str) and val.strip().isdigit():
+        return int(val.strip())
+    return None
 
 
 def _clean_string(val: str | None) -> str | None:
@@ -1568,7 +1743,16 @@ def _apply_extraction(
         if cleaned is not None:
             setattr(invoice, dst, cleaned)
 
-    # Decimals.
+    # Which currency the money is in — decided BEFORE any amount is written,
+    # because an amount is only meaningful with its currency (`decisions.md`
+    # §308). A document that contradicts itself about it gets no header money
+    # at all: the amount stays unread, so `refresh_warnings` raises
+    # `missing_amount` / `missing_data` and `decide_auto_approve` refuses a
+    # zero amount — the same fail-closed path an unparseable token always took.
+    # `run_self_correction` names the conflict to the reviewer.
+    evidence = extraction_currency_evidence(result, convention)
+
+    # Decimals. `tax_rate` is a percentage, not money, so it is written either way.
     for src, dst in (
         (result.amount, "amount"),
         (result.subtotal, "subtotal"),
@@ -1577,6 +1761,8 @@ def _apply_extraction(
         (result.discount_amount, "discount_amount"),
         (result.shipping_amount, "shipping_amount"),
     ):
+        if evidence.conflict and dst != "tax_rate":
+            continue
         d = _clean_decimal(src.value, convention)
         if d is not None:
             setattr(invoice, dst, d)
@@ -1590,14 +1776,12 @@ def _apply_extraction(
         if d is not None:
             setattr(invoice, dst, d)
 
-    # Currency — uppercase 3-char code or None. Models sometimes return
-    # "US Dollars" or "USD." with punctuation; we normalise via the
-    # sentinel filter + uppercase, then validate length.
-    cur = _clean_string(result.currency.value)
-    if cur is not None:
-        cur_upper = cur.upper().rstrip(".").strip()
-        if len(cur_upper) == 3 and cur_upper.isalpha():
-            invoice.currency = cur_upper
+    # Currency — the field, or the code printed beside the amounts when the
+    # field is empty, never a default (`CurrencyEvidence`). On a conflict the
+    # row's currency is left as it was, beside amounts that were left as they
+    # were: neither half of the contradiction is written.
+    if evidence.currency is not None:
+        invoice.currency = evidence.currency
 
     # Payment method — map free-form to canonical dropdown values.
     pm = _normalize_payment_method(result.payment_method.value)

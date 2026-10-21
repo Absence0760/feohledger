@@ -131,7 +131,8 @@ services:
       # Same override seam as the URLs above (e.g. an external LB in front).
       FEOH_TRUSTED_PROXY_CIDRS: ${FEOH_TRUSTED_PROXY_CIDRS:-172.28.0.0/16}
     depends_on:
-      # `required: false` (compose >= 2.20; bootstrap-vm.sh pins 2.32.4): in
+      # `required: false` (compose >= 2.20; bootstrap-vm.sh's COMPOSE_VERSION
+      # must stay at or above it — tests/test_deploy_db_mode.py): in
       # local mode the `localdb` profile is active and the api waits for a
       # healthy database exactly as before; with an external database the
       # service is not in the project and the dependency is skipped.

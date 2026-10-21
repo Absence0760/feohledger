@@ -31,9 +31,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
-from app.models.payment import Payment, PaymentRun
+from app.models.payment import LIVE_PAYMENT_TERMINAL_STATUSES, Payment, PaymentRun
 from app.models.vendor import Vendor
-from app.services.payment_runs import one_currency
+from app.services.payment_runs import PAYABLE_VENDOR_STATUS, one_currency
 from app.services.positive_pay_adapters import AchAuthorizationItem, CheckIssueItem
 from app.tenant import apply_entity_scope
 from app.utils.dates import utc_today
@@ -42,8 +42,10 @@ from app.utils.dates import utc_today
 DEFAULT_AMOUNT_TOLERANCE = Decimal("0.01")
 
 # Payment statuses that DON'T represent a cheque actually issued to the bank —
-# excluded from a check-issue file (we never handed these to anyone).
-_EXCLUDED_PAYMENT_STATUSES = frozenset({"failed", "cancelled", "voided"})
+# excluded from a check-issue file (we never handed these to anyone). Exactly
+# the not-live statuses, so the one definition is read
+# (`models/payment.LIVE_PAYMENT_TERMINAL_STATUSES`, issue #575).
+_EXCLUDED_PAYMENT_STATUSES = frozenset(LIVE_PAYMENT_TERMINAL_STATUSES)
 
 # Return classifications.
 CLASS_MATCHED_OK = "matched_ok"
@@ -293,7 +295,7 @@ async def build_ach_authorization_items(
     """
     query = select(Vendor).where(
         Vendor.organization_id == org_id,
-        Vendor.status == "active",
+        Vendor.status == PAYABLE_VENDOR_STATUS,
         Vendor.payments_blocked.is_(False),
     )
     query = apply_entity_scope(query, Vendor, entity_id)

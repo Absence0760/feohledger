@@ -44,6 +44,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES
 from app.services.approval_chain import (
     cfo_gate_applies,
     max_amount_gate_applies,
@@ -57,19 +58,6 @@ from app.services.exception_agents.base import (
 )
 from app.services.exception_agents.llm_rationale import build_rationale
 from app.services.vendor_enrichment import HISTORY_LIMIT, suggest_fields
-
-# Approved-or-beyond statuses define a human-accepted coding baseline (mirrors
-# ``api.enrichment._APPROVED_STATUSES`` / ``adaptive_workflows``). Draft / rejected
-# invoices are unreviewed noise and excluded from the history sample.
-_APPROVED_STATUSES = (
-    InvoiceStatus.approved,
-    InvoiceStatus.sending_to_erp,
-    InvoiceStatus.sent_to_erp,
-    InvoiceStatus.posted_in_erp,
-    InvoiceStatus.payment_scheduled,
-    InvoiceStatus.paid,
-    InvoiceStatus.done,
-)
 
 # The single field this resolver auto-codes. ``cost_center`` rides along on the
 # same correction *only when* a GL fix is being applied (never on its own — a
@@ -122,7 +110,7 @@ async def _history_rows(db: AsyncSession, invoice: Invoice) -> list[dict]:
             .where(
                 Invoice.vendor_id == invoice.vendor_id,
                 Invoice.id != invoice.id,
-                Invoice.status.in_(_APPROVED_STATUSES),
+                Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
             )
             .order_by(Invoice.created_at.desc())
             .limit(HISTORY_LIMIT)
