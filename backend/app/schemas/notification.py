@@ -61,6 +61,7 @@ class NotificationPrefs(BaseModel):
     chat_message: ChannelPrefs = Field(default_factory=ChannelPrefs)
     cash_shortfall_projected: ChannelPrefs = Field(default_factory=ChannelPrefs)
     ai_invoice_usage: ChannelPrefs = Field(default_factory=ChannelPrefs)
+    erp_connection_expiring: ChannelPrefs = Field(default_factory=ChannelPrefs)
 
 
 class NotificationPrefsUpdate(BaseModel):
@@ -78,6 +79,7 @@ class NotificationPrefsUpdate(BaseModel):
     chat_message: ChannelPrefs | None = None
     cash_shortfall_projected: ChannelPrefs | None = None
     ai_invoice_usage: ChannelPrefs | None = None
+    erp_connection_expiring: ChannelPrefs | None = None
 
 
 class DeviceTokenRegister(BaseModel):

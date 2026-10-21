@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 
@@ -292,6 +292,11 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "exception_blocks_erp_export",
         # `services/erp` itself: the invoice is due before it is dated
         "invoice_due_before_date",
+        # A payment written back to the ERP (`post_payment`, decisions §295)
+        "payment_account_not_mapped",
+        "bill_not_in_erp",
+        "payment_exceeds_balance",
+        "bill_payment_voided",
     }
 )
 
@@ -370,6 +375,106 @@ class ErpPostResult:
     #: path that may have created something first (a failed read-back, a
     #: timeout, a 5xx): the default False is the fail-closed answer.
     not_posted: bool = False
+    #: For :meth:`ErpAdapter.post_payment`: what the ERP still shows open on
+    #: the bill after this payment (None = not read). A positive figure means
+    #: the bill stays partly open there — a discount or credit taken in
+    #: FeohLedger that the ERP does not know about (``payment_erp_sync``).
+    bill_balance_after: Decimal | None = None
+
+
+#: Stable reason code: a payment written back to the ERP (``post_payment``)
+#: needs the ERP account it was paid from, and the org has mapped none for the
+#: payment's rail (``settings.erp.bill_payment_bank_account`` /
+#: ``bill_payment_card_account``, GL codes), or the code is not linked to an
+#: account in the connected company. Never guessed.
+PAYMENT_ACCOUNT_NOT_MAPPED = "payment_account_not_mapped"
+
+#: Stable reason code: the bill the payment would be applied to is not (or no
+#: longer) in the ERP — deleted there, or never confirmed.
+BILL_NOT_IN_ERP = "bill_not_in_erp"
+
+#: Stable reason code: the payment is larger than what the ERP still shows
+#: open on the bill. Posting it would overpay the bill in the ERP.
+PAYMENT_EXCEEDS_BALANCE = "payment_exceeds_balance"
+
+#: Stable reason code: the ERP payment this payment id already created was
+#: voided in the ERP by someone there. Posting it again would overrule them,
+#: so the write-back stops and a person decides.
+BILL_PAYMENT_VOIDED = "bill_payment_voided"
+
+
+class ErpBillState(enum.StrEnum):
+    """Where a bill stands in the ERP, as the status sync reads it (§295)."""
+
+    open = "open"
+    partially_paid = "partially_paid"
+    paid = "paid"
+    #: Gone from the ERP: deleted, or voided where the ERP voids.
+    deleted = "deleted"
+    unknown = "unknown"
+
+
+@dataclass
+class ErpBillReport:
+    """One bill as the ERP reports it, for ``services/erp_status_sync``.
+
+    PII-free by construction: ids, a state, a date and a rail. Never the
+    vendor, the memo text, or an amount beyond what decides the state.
+    """
+
+    bill_id: str
+    state: ErpBillState
+    #: The correlation id our ``post_invoice`` wrote onto the bill (QuickBooks:
+    #: the ``PrivateNote`` marker), or None when the bill carries none — a bill
+    #: someone keyed in the ERP by hand, or one we can no longer read.
+    correlation_id: str | None = None
+    #: The date of the latest payment the ERP applied that FeohLedger did NOT
+    #: post itself, and that payment's rail as a ``Payment.method`` value
+    #: (None = not stated; it then counts as 1099-reportable).
+    paid_on: date | None = None
+    payment_method: str | None = None
+    #: The ERP's own ids of those payments (``external``), and whether every
+    #: payment on the bill is one FeohLedger posted (``post_payment``). A bill
+    #: paid only by our own write-back is not news to us.
+    external_payment_ids: tuple[str, ...] = ()
+    paid_only_by_us: bool = False
+    #: True when the bill was taken down by MORE than FeohLedger's own
+    #: write-backs applied to it — judged from the balance, so a vendor credit
+    #: or a journal entry counts as well as a person's payment. This, not the
+    #: payment list, is what says "settled outside FeohLedger".
+    reduced_outside: bool = False
+    #: True when that outside reduction was (at least partly) a vendor credit,
+    #: or nothing readable paid it in cash: the bill was settled without the
+    #: money leaving, so it must not be booked as a cash payment.
+    settled_by_credit: bool = False
+
+
+@dataclass
+class PaymentPayload:
+    """A FeohLedger payment written back to the ERP against its bill (§295)."""
+
+    #: Our ``Payment.id`` — the idempotency key (QuickBooks ``requestid`` and
+    #: the marker in the bill payment's ``PrivateNote``).
+    payment_id: str
+    #: The ERP bill the invoice was posted as (``erp_reference``).
+    bill_id: str
+    amount: Decimal
+    currency: str
+    paid_on: date
+    #: The payment's rail (``Payment.method``).
+    method: str | None = None
+    #: True when the rail is a payment card (``payment_methods.
+    #: CARD_PAYMENT_METHODS``): booked from a credit-card account, not a bank.
+    card: bool = False
+    #: The ERP's id for the account the payment is booked from — the org's
+    #: mapped bank or card account (``settings.erp.bill_payment_bank_account``
+    #: / ``bill_payment_card_account``, our GL codes) resolved through the
+    #: chart under the current connection realm. None = not mapped or not
+    #: linked; the adapter refuses ``payment_account_not_mapped``.
+    pay_from_account_erp_id: str | None = None
+    vendor_erp_id: str | None = None
+    #: The remittance reference, when the rail has one (a cheque number).
+    reference: str | None = None
 
 
 @dataclass
@@ -541,6 +646,11 @@ class ErpAdapter:
     """Base class for ERP integrations. Subclass and implement all methods."""
 
     erp_type: str = "base"
+    #: True for an adapter whose bills' payment status flows back to us
+    #: (``bill_report`` / ``changed_bills``) AND whose payments we write back
+    #: (``post_payment``). Only then may a confirmed push leave the invoice
+    #: payable at ``posted_in_erp`` (``services/erp_status_sync``, §295).
+    supports_status_sync: bool = False
 
     def __init__(self, config: dict):
         self.config = config
@@ -596,4 +706,37 @@ class ErpAdapter:
 
     async def test_connection(self) -> bool:
         """Verify the ERP connection is working."""
+        raise NotImplementedError
+
+    # -- status sync-back + payment write-back (decisions §295) -------------
+    #
+    # The base raises NotImplementedError for each, and every caller checks
+    # ``supports_status_sync`` first: an adapter without them keeps today's
+    # behaviour (the push closes the invoice at ``done``; ``payment_erp_sync``
+    # pushes nothing).
+
+    async def post_payment(self, payload: PaymentPayload) -> ErpPostResult:
+        """Apply a FeohLedger payment to its bill in the ERP, idempotently on
+        ``payload.payment_id``: a retry never creates a second ERP payment."""
+        raise NotImplementedError
+
+    async def void_payment(self, payload: PaymentPayload) -> ErpPostResult:
+        """Reverse what :meth:`post_payment` wrote for ``payload.payment_id``.
+        Success when nothing of ours is left on the bill."""
+        raise NotImplementedError
+
+    async def bill_report(self, bill_id: str) -> ErpBillReport:
+        """Where ``bill_id`` stands now. ``deleted`` only on the ERP's positive
+        answer; an unreadable bill raises, never reads as gone."""
+        raise NotImplementedError
+
+    async def bills_for_payment(self, payment_id: str) -> list[str]:
+        """The bills an ERP payment record is applied to (for a webhook that
+        names the payment, not the bill)."""
+        raise NotImplementedError
+
+    async def changed_bills(self, since: datetime) -> list[str]:
+        """Every bill changed since ``since`` — directly, or through a payment
+        applied to it — the change-data-capture backstop for lost webhooks.
+        Raises rather than return a partial list."""
         raise NotImplementedError
