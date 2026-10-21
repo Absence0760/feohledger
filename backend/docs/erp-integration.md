@@ -1133,7 +1133,9 @@ the predicates the run builder and the card mint refuse each other with, so
 the three cannot disagree about what is live (decisions §306).
 
 - **One answer, two places.** `erp_export_gate.erp_export_refusal` is asked by
-  `_call_erp` (before any adapter, every attempt) and by the three HTTP doors.
+  `_call_erp` (before any adapter, every attempt) and by the three HTTP doors
+  and the auto-send on approval, all through `erp_send.start_erp_send` (an
+  auto-send refusal is an `invoice.erp_auto_send_refused` row, §304).
   An open duplicate / fraud exception is named first; otherwise the live claim
   refuses with code `payment_blocks_erp_export` and
   `params = {claim: "payment" | "virtual_card"}`, plus `possibly_posted: true`
