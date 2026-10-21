@@ -457,7 +457,7 @@ plain JSONB under RDS storage encryption until that migration.
 
 `backend/app/services/erp_adapters/catalog.py` is the single source of truth for
 the Organization → ERP form, served at `GET /api/organization/erp/providers`
-(admin). Each entry carries `key`, `label`, `regions` (`US`, `ZA`), `auth`
+(admin). Each entry carries `key`, `label`, `regions` (ISO codes; the picker groups `US` and `ZA`, and lists any other region — `GB` for Sage Accounting — under "Other"), `auth`
 (`credentials` | `oauth`), `fields` (`name`, `label_key` — a frontend i18n
 `MessageKey`, `secret`, `required`, optional `placeholder` / `help_key` /
 `options`) and `docs_url`; the endpoint adds `available` (adapter registered in
@@ -470,7 +470,7 @@ included, under `erp_integrations`, §281).
 |---|---|---|---|
 | `quickbooks_online` | QuickBooks Online | US | OAuth (optional BYO app; `environment`) |
 | `xero` | Xero | US, ZA | OAuth (optional BYO app; `bill_status`, `default_tax_type`) |
-| `sage_accounting` | Sage Business Cloud Accounting (v3.1: US, UK, IE, CA) | US | OAuth (optional BYO app) |
+| `sage_accounting` | Sage Business Cloud Accounting (v3.1: UK, IE, CA, DE, ES, FR; the US product was retired 2024-12-31) | GB (listed under "Other") | OAuth (optional BYO app) |
 | `sage_accounting_za` | Sage Business Cloud Accounting (South Africa) | ZA | API key + Sage login + company |
 | `blackbaud_fe_nxt` | Blackbaud Financial Edge NXT | US | OAuth (optional BYO app + SKY API subscription key) |
 | `sage_intacct` | Sage Intacct | US, ZA | REST API client credentials + company / user |
@@ -1913,12 +1913,17 @@ unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_UR
 override the OAuth endpoints, which dev points at fake-erp so the connect flow
 runs locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
 
-**Region coverage: not South Africa.** Every v3.1 operation lists its
-availability as CA, DE, ES, FR, GB, IE and US. Sage Business Cloud Accounting
+**Region coverage: not the US, not South Africa.** Every v3.1 operation lists
+its availability as CA, DE, ES, FR, GB, IE and US, but **Sage retired the US
+product on 2024-12-31** and ended US access on 2025-01-31
+([Sage](https://www.sage.com/en-us/sage-business-cloud/sage-accounting/)), so
+no US business exists to connect. A US customer on Sage is on Sage Intacct
+(`sage_intacct`) or the desktop Sage 50, which has no connector. Test this
+adapter against a UK trial business. Sage Business Cloud Accounting
 **South Africa** (the Pastel successor) runs on a separate codebase with its
 own API (`https://accounting.sageone.co.za/api/2.0.0`, API key + basic auth,
 not OAuth), and Sage's developer community confirms v3.1 does not serve it.
-So this adapter covers the US and the other v3.1 regions; a ZA business cannot
+So this adapter covers the other v3.1 regions; a ZA business cannot
 complete its consent flow. A ZA Sage adapter is separate work.
 
 **`settings.erp` keys:** `oauth` (written by `erp_oauth` only),
