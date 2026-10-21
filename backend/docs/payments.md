@@ -737,6 +737,18 @@ re-sent.
   booked with no longer applies today (its deadline passed), or one now applies
   that it was not booked with (§ An accepted early-payment discount is paid).
   Same rule as `net_amount_changed`: never re-priced here.
+- `erp_bill_not_open:<state>` / `erp_bill_unverified` / `erp_bill_void_pending` /
+  `erp_bill_unlinked:<why>` — the live read of the
+  invoice's QuickBooks bill immediately before the rail (decisions §296): the
+  ERP shows it paid, part-paid or deleted (a blocking `payment_reconciliation`
+  is opened with it, so the retry keeps skipping until a person clears it), or
+  the read failed and the item was held rather than paid blind (the retry just
+  re-reads), or only our own write-back paid it and its QuickBooks void is still
+  pending, or the bill can never be read under the current connection
+  (`unlinked`: no document id, no company, or another company — an
+  `erp_reconciliation` names the way out: record it as paid outside FeohLedger,
+  or re-post). All refused before any rail call, so all are retry-safe. A NACHA
+  export and `POST /api/cards/generate` run the same read.
 - `invoice_locked` is retry-safe and needs no skip rule: it only means another
   request held the invoice row past the bound when dispatch tried (§ Bounded
   wait for the invoice lock), so the retry simply re-attempts it.

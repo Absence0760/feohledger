@@ -12945,9 +12945,97 @@ the first cut could still pay a bill twice, each closed here:
   the payment's status, posts the settled amount, and runs for an accepted
   short settlement too. A run item may not name the record-only `card` rail.
 
-**Accepted residual, tracked** (`docs/followups.md`): between a payment made in
-QuickBooks and its webhook (seconds) or the next sweep, a FeohLedger run can
-still execute the same bill. The ERP-paid path then flags it blocking; nothing
-yet re-reads the bill at dispatch. Status sync and connection health are
-separate flags but meant to run together: a lost connection is skipped by the
-sweep and only the health sweep tells anyone.
+**The remaining window is closed at dispatch (§296):** between a payment made
+in QuickBooks and its webhook (seconds) or the next sweep, a FeohLedger run
+could still execute the same bill; every dispatch now re-reads the bill live.
+Status sync and connection health are separate flags but meant to run
+together: a lost connection is skipped by the sweep and only the health sweep
+tells anyone.
+
+## 296. A payment re-reads its QuickBooks bill immediately before the rail, and an unreadable bill is held (2026-10-20)
+
+**Context.** §295 brings a payment made in QuickBooks back to us by webhook
+(seconds) or by the change-data-capture sweep (hours), and only then does the
+invoice leave our payment queue. A run approved before that — or the second
+item of a run whose first item is at the rail when the bookkeeper pays — still
+went out: the bill was paid twice, and the blocking flag the ERP-paid path
+raises afterwards only stopped what had not yet been dispatched. No local
+check can close this, because the fact that changed lives in QuickBooks.
+
+**Decision.** `services/erp_status_sync.erp_bill_dispatch_refusal` runs at
+every point where money is about to move, with the invoice row locked:
+`api/payments._execute_single_payment` — which every rail dispatch reaches
+(`/execute`, `/resume`, `/retry-failed`, a standalone payment,
+`/compliance/release`, the virtual-card leg) — after
+`payment_runs.dispatch_preflight` has re-confirmed the local facts (still
+payable, no open payment-blocking exception, vendor active, amount still owed)
+and BEFORE the rail adapter; the NACHA export, since the bank's upload of the
+file is the money moving; and `POST /api/cards/generate` before it mints, since
+a minted card is spendable the moment it exists.
+
+- It reads only for an ERP whose bills sync back (`status_sync_active`) and an
+  invoice pushed there under the CURRENT connection realm. An invoice never
+  pushed, or pushed before §295 (closed at `done`, never payable here), is not
+  read.
+- **Open** — nothing taken off the bill by anyone — pays. **Anything else**
+  (paid, part-paid, credited, deleted, a state we cannot classify) refuses the
+  item `erp_bill_not_open:<state>` and opens the blocking
+  `payment_reconciliation` in the same transaction, so neither a later run nor
+  `/retry-failed` pays it until a person clears it. The rest of the run
+  proceeds: one bill's state says nothing about another's.
+- **Paid only by our own write-back while a FeohLedger void of it is recorded
+  as pending** is **held** `erp_bill_void_pending`, retry-safe, with no
+  exception: nothing outside us paid it, the pending-void sweep resolves it,
+  and a flag a person must clear would be a false alarm. "Paid only by us"
+  with NO pending void is unexplained and takes the blocking path.
+- **A bill that can never be read under this connection** — the push named no
+  document, recorded no company, or lives in a company other than the one
+  connected now (a sandbox → production switch) — is held
+  `erp_bill_unlinked:<why>` with a non-blocking `erp_reconciliation`: a retry
+  cannot clear it, so the way out (record it as paid outside FeohLedger, or
+  re-post) needs an owner.
+- **When the bill cannot be vouched for right now** — a network error, an
+  Intuit 5xx/429/401, a lost connection, or a read past
+  `FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS` (10 s, the whole read: the bill and
+  its payments) — the item is **held**: refused `erp_bill_unverified`,
+  retry-safe, no exception. A connection-level failure holds that org's further
+  checks for a minute without reading, so a degraded QuickBooks costs a long
+  run one timeout, not one per item with each invoice locked; an error about
+  one bill (a 400) holds that item alone. A token refresh cut short by the
+  bound is safe: `erp_oauth.get_access_token` runs the rotation and its
+  persistence as one shielded task, so a refresh Intuit has answered is always
+  stored. Argued:
+  - *Paying blind* re-opens exactly the double payment this exists to close,
+    and the failure is most likely precisely when QuickBooks is busy or
+    degraded — month-end, when bookkeepers pay bills. A double payment is a
+    recovery from the supplier; a held payment is a day's delay that
+    `/retry-failed` ends as soon as Intuit answers, with nothing to undo.
+  - *Raising the blocking exception* on a failed read was rejected: nothing is
+    known to be wrong, and a flag that needs a person (with segregation of
+    duties) to clear an Intuit outage would train people to clear flags
+    unread. The refusal reason on the payment row, the run's partial status and
+    the audit row the dispatch loop writes for every attempt already make the
+    hold visible.
+  - *Retrying the read inline* was rejected: the invoice row lock is held, and
+    the bounded single read is what keeps that lock short.
+- **Idempotent and audited.** The check is a read plus a de-duplicated
+  exception; the refusal is recorded by the dispatch loop's per-payment
+  `payment.*` audit row like every other pre-rail refusal; both reasons are in
+  `payment_runs._RETRY_SAFE_FAILURE_PREFIXES` because no order exists at the
+  processor.
+
+**Accepted residual.** For a rail dispatch and a card mint, the read and the
+money moving are milliseconds apart, not atomic: a bill paid in QuickBooks in
+that gap still goes out, and §295's webhook then raises the blocking flag on
+anything left. Closing it would need a lock QuickBooks does not offer. **A
+NACHA file is different:** the money moves when a person uploads it to the
+bank, hours or days after the export's read, and nothing re-reads the bill in
+between. The record-only pilot's customer is asked to upload promptly; the
+export's own read is what this change can guarantee; a re-check between export
+and upload, and reading the file's bills concurrently rather than one after
+another under the run and invoice locks, are tracked in `docs/followups.md`.
+The old "refuse while the last sync is stale" idea is unnecessary — the live
+read is fresher than any sync. The check follows
+`FEOH_ERP_STATUS_SYNC_ENABLED`: an operator who turns sync off leaves
+`posted_in_erp` invoices payable with no read, by design — the flag is the
+statement that QuickBooks is in the loop.

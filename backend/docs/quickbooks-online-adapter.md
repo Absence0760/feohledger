@@ -183,6 +183,20 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   bill) sends the invoice back to `approved` while QuickBooks still shows the
   bill paid, and nothing about the bill changes again — so the void opens the
   blocking `payment_reconciliation` in the same transaction.
+- **Dispatch re-reads the bill** (decisions §296). Immediately before each
+  FeohLedger payment for a QuickBooks-posted invoice is handed to its rail —
+  after `dispatch_preflight` re-confirmed the local facts under the invoice row
+  lock — `erp_bill_dispatch_refusal` reads the bill live (bounded by
+  `FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS`). Open → pay. Anything else →
+  refused `erp_bill_not_open:<state>` and the blocking `payment_reconciliation`
+  opened, the rest of the run carrying on. Paid only by our own write-back
+  while a void of it is pending → held `erp_bill_void_pending`. A failed or
+  timed-out read → held `erp_bill_unverified` (a connection-level failure
+  holds that org's checks for a minute without reading). Both are retry-safe
+  and open no exception. A push with no document id or company, or a bill in a
+  company other than the one connected now → held `erp_bill_unlinked:<why>`
+  with a non-blocking `erp_reconciliation`, since no retry clears it. The NACHA
+  export and `POST /api/cards/generate` do the same read.
 - The write-back re-reads the payment's status first (a void can commit
   between the sync's transition and the ERP call), posts what reached the
   supplier (the settled amount when it is in the bill's currency), and runs

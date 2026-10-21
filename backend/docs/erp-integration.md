@@ -330,10 +330,14 @@ Decisions §295; the phase-by-phase account is
   `bill_payment_voided`, `currency_mismatch`, and the Intuit Fault codes) and
   land on `payment.erp_post_failed` plus an `erp_reconciliation` exception. A
   payment void voids the BillPayment too.
-- **Residual window, accepted and tracked.** A bill paid in QuickBooks reaches
-  us within seconds by webhook, or by the next sweep; a FeohLedger run executed
-  inside that window still pays. The ERP-paid path then raises the blocking
-  flag on anything not yet dispatched (`docs/followups.md`).
+- **Checked again at dispatch.** A bill paid in QuickBooks reaches us within
+  seconds by webhook, or by the next sweep — too late for a run already
+  executing. So every payment re-reads its bill from QuickBooks immediately
+  before its rail is called, under the invoice row lock
+  (`erp_status_sync.erp_bill_dispatch_refusal`, decisions §296): not open →
+  refused `erp_bill_not_open:<state>` with the blocking
+  `payment_reconciliation`; unreadable → held `erp_bill_unverified`, never paid
+  blind. The NACHA export runs the same read.
 
 ## Organization ERP Configuration
 

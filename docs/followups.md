@@ -43,7 +43,9 @@ a GitHub issue only when one warrants its own thread.
 narrowed the QuickBooks entry to the header-only-tax product call, closed the
 "ERP-reported payment is dated the day the webhook arrives" (c) entry, and
 opened one (c) (a bill paid in QuickBooks while a run is already executing) and
-one (b) (turning status sync on in production), taking the file from 118 → 119.
+one (b) (turning status sync on in production), taking the file from 118 → 119;
+the dispatch-time ERP check (decisions §296) then closed that (c) and opened
+one for a NACHA file's bills being read only at export, 119 → 119.
 Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
@@ -1257,20 +1259,17 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       apportion header tax across lines or keep refusing, then build it in the
       shared `bill_lines` rules so every adapter follows. **Trigger:** the first
       pilot customer on QuickBooks whose bills carry header-only tax.
-- [ ] **(c) A bill paid in QuickBooks can still be paid by a run already
-      executing.** With status sync on (§295) the invoice leaves the payment
-      queue when QuickBooks' payment reaches us — by webhook within seconds, or
-      by the next CDC sweep. A run dispatched inside that window pays the bill a
-      second time; the ERP-paid path then raises the blocking
-      `payment_reconciliation`, which stops only what was not yet dispatched.
-      **Durable fix:** for an invoice whose bill is in a status-synced ERP,
-      re-read the bill (`ErpAdapter.bill_report`) in `dispatch_preflight` and
-      refuse the leg (`erp_bill_paid`) when the ERP shows it paid or part-paid,
-      retry-safe like `invoice_not_payable` — and refuse a QuickBooks-posted
-      invoice outright while its connection's last complete sync
-      (`status_sync_through`) is older than the lookback. **Trigger:** the first
-      double payment caught by that flag, or a tenant that pays in both places
-      daily.
+- [ ] **(c) A NACHA file's bills are read once, at export.** The dispatch-time
+      QuickBooks check (decisions §296) reads each bill when the file is built,
+      but the money moves when a person uploads it to the bank, hours or days
+      later; a bill paid in QuickBooks in between is paid twice. The export also
+      reads its bills one after another while holding the run and every invoice
+      lock (about a second each, so a large file holds them for minutes).
+      **Durable fix:** read the file's bills concurrently under a bounded
+      semaphore once the locks are taken, and offer a "verify before upload"
+      step (re-read the run's bills; void and regenerate the file when any is no
+      longer open). **Trigger:** the first record-only tenant on QuickBooks with
+      status sync on, or a NACHA run over ~50 payments.
 
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
