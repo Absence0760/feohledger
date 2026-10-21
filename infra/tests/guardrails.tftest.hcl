@@ -9,7 +9,10 @@
 # instance, one sha-shaped parameter; and the SPA stack (frontend.tf): a bucket
 # only this distribution reads, the platform certificate on the apex + wildcard,
 # a publish grant scoped to that bucket and distribution, and DNS that stays on
-# the VM until frontend_on_cloudfront moves it — with api. on the VM regardless.
+# the VM until frontend_on_cloudfront moves it — with api. on the VM regardless;
+# and the external uptime checks (uptime.tf): which hosts are checked and how,
+# that each alarm pages and emails, that the phone subscription exists only
+# when a number is set, and the certificate-expiry backstop.
 
 mock_provider "aws" {
   # A mocked policy document renders a random string, which the KMS key and
@@ -166,6 +169,32 @@ override_resource {
   override_during = plan
   values = {
     public_ip = "192.0.2.10"
+  }
+}
+
+# The uptime alarms name both topics and their health check; give those known
+# values so the assertions compare them exactly instead of staying unknown.
+override_resource {
+  target          = aws_sns_topic.alerts
+  override_during = plan
+  values = {
+    arn = "arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"
+  }
+}
+
+override_resource {
+  target          = aws_sns_topic.pager
+  override_during = plan
+  values = {
+    arn = "arn:aws:sns:us-east-1:000000000000:feohledger-prod-pager"
+  }
+}
+
+override_resource {
+  target          = aws_route53_health_check.uptime
+  override_during = plan
+  values = {
+    id = "00000000-0000-0000-0000-0000000uptime"
   }
 }
 
@@ -862,5 +891,184 @@ run "cutover_moves_the_apex_and_tenants_to_cloudfront_and_leaves_api_on_the_vm" 
   assert {
     condition     = aws_route53_record.api.records == toset(["192.0.2.10"])
     error_message = "api.<domain> must stay on the VM through the cutover."
+  }
+}
+
+# ── External uptime checks + paging (uptime.tf, monitoring.tf) ───────────────
+
+run "uptime_checks_the_apex_and_the_api_over_https_from_three_regions" {
+  command = plan
+
+  assert {
+    condition     = toset(keys(aws_route53_health_check.uptime)) == toset(["apex", "api"])
+    error_message = "Without a tenant slug, exactly the apex and the API are checked."
+  }
+
+  assert {
+    condition = alltrue([
+      for c in aws_route53_health_check.uptime :
+      c.port == 443 && c.enable_sni && c.request_interval == 30 && c.failure_threshold == 3 && length(c.regions) == 3
+    ])
+    error_message = "Every check is HTTPS on 443 with SNI (CloudFront needs it), a 30 s interval, 3 failures, and three regions."
+  }
+
+  assert {
+    condition     = aws_route53_health_check.uptime["apex"].fqdn == "feohledger.com" && aws_route53_health_check.uptime["apex"].type == "HTTPS" && aws_route53_health_check.uptime["apex"].resource_path == "/"
+    error_message = "The apex check requests https://<domain>/."
+  }
+
+  assert {
+    condition     = aws_route53_health_check.uptime["api"].fqdn == "api.feohledger.com" && aws_route53_health_check.uptime["api"].resource_path == "/api/health"
+    error_message = "The API check requests the public liveness probe on api.<domain>."
+  }
+
+  assert {
+    condition     = aws_route53_health_check.uptime["api"].type == "HTTPS_STR_MATCH" && aws_route53_health_check.uptime["api"].search_string == "\"status\":\"ok\""
+    error_message = "The API check must match the liveness body, or a 200 from the SPA router (index.html) would pass for it."
+  }
+}
+
+run "uptime_checks_a_tenant_host_when_a_slug_is_set" {
+  command = plan
+
+  variables {
+    uptime_tenant_slug = "pilot-test"
+  }
+
+  assert {
+    condition     = aws_route53_health_check.uptime["tenant"].fqdn == "pilot-test.feohledger.com" && aws_route53_health_check.uptime["tenant"].type == "HTTPS"
+    error_message = "The tenant check requests https://<slug>.<domain>/."
+  }
+
+  assert {
+    condition     = toset(keys(aws_cloudwatch_metric_alarm.uptime)) == toset(["apex", "api", "tenant"])
+    error_message = "Every health check gets its own alarm."
+  }
+}
+
+run "uptime_alarms_page_and_email_on_failure_and_recovery" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for a in aws_cloudwatch_metric_alarm.uptime :
+      a.namespace == "AWS/Route53" && a.metric_name == "HealthCheckStatus" && a.dimensions["HealthCheckId"] == "00000000-0000-0000-0000-0000000uptime"
+      && a.comparison_operator == "LessThanThreshold" && a.threshold == 1
+    ])
+    error_message = "Each uptime alarm watches its health check's HealthCheckStatus and fires below 1."
+  }
+
+  assert {
+    condition = alltrue([
+      for a in aws_cloudwatch_metric_alarm.uptime :
+      toset(a.alarm_actions) == toset(["arn:aws:sns:us-east-1:000000000000:feohledger-prod-pager", "arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"])
+      && toset(a.ok_actions) == toset(a.alarm_actions)
+    ])
+    error_message = "An outage and its recovery both go to the pager (phone) and the alerts (email) topics."
+  }
+
+  assert {
+    condition     = alltrue([for a in aws_cloudwatch_metric_alarm.uptime : a.treat_missing_data == "breaching"])
+    error_message = "An uptime alarm that cannot see its metric must not stay quiet."
+  }
+}
+
+run "only_customer_facing_alarms_page" {
+  command = plan
+
+  assert {
+    condition     = contains(aws_cloudwatch_metric_alarm.db_storage.alarm_actions, "arn:aws:sns:us-east-1:000000000000:feohledger-prod-pager")
+    error_message = "Database storage running out pages: past it writes fail, and no uptime check notices first."
+  }
+
+  assert {
+    condition = alltrue([
+      for a in [
+        aws_cloudwatch_metric_alarm.db_cpu,
+        aws_cloudwatch_metric_alarm.db_memory,
+        aws_cloudwatch_metric_alarm.db_cpu_credits,
+        aws_cloudwatch_metric_alarm.app_cpu_credits,
+        aws_cloudwatch_metric_alarm.frontend_5xx,
+        aws_cloudwatch_metric_alarm.frontend_4xx,
+        aws_cloudwatch_metric_alarm.platform_certificate_expiry,
+      ] : !contains(a.alarm_actions, "arn:aws:sns:us-east-1:000000000000:feohledger-prod-pager")
+    ])
+    error_message = "Sizing, cost and early-warning alarms stay email-only, so the phone only rings when customers are affected."
+  }
+}
+
+run "no_phone_number_means_no_sms_subscription" {
+  command = plan
+
+  assert {
+    condition     = length(aws_sns_topic_subscription.pager_sms) == 0 && length(aws_sns_sms_preferences.pager) == 0 && length(aws_cloudwatch_metric_alarm.pager_delivery_failed) == 0
+    error_message = "With alert_phone_number unset, nothing may be subscribed by SMS, the account's SMS settings stay untouched, and there is no delivery alarm to watch."
+  }
+}
+
+run "a_phone_number_subscribes_the_pager_topic_by_sms" {
+  command = plan
+
+  variables {
+    alert_phone_number = "+12025550123"
+  }
+
+  assert {
+    condition     = length(aws_sns_topic_subscription.pager_sms) == 1 && aws_sns_topic_subscription.pager_sms[0].protocol == "sms" && aws_sns_topic_subscription.pager_sms[0].topic_arn == "arn:aws:sns:us-east-1:000000000000:feohledger-prod-pager"
+    error_message = "The number subscribes to the pager topic over SMS."
+  }
+
+  assert {
+    condition     = nonsensitive(aws_sns_topic_subscription.pager_sms[0].endpoint) == "+12025550123"
+    error_message = "The subscription texts the configured number."
+  }
+
+  assert {
+    condition     = aws_sns_sms_preferences.pager[0].default_sms_type == "Transactional"
+    error_message = "Pages go out as Transactional SMS."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.pager_delivery_failed[0].metric_name == "NumberOfNotificationsFailed" && aws_cloudwatch_metric_alarm.pager_delivery_failed[0].dimensions["TopicName"] == "feohledger-prod-pager" && toset(aws_cloudwatch_metric_alarm.pager_delivery_failed[0].alarm_actions) == toset(["arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"])
+    error_message = "A text SNS could not deliver must be reported by email, never through the pager it failed on."
+  }
+}
+
+run "rejects_a_phone_number_not_in_e164_form" {
+  command = plan
+
+  variables {
+    alert_phone_number = "(202) 555-0123"
+  }
+
+  expect_failures = [var.alert_phone_number]
+}
+
+run "rejects_a_hostname_as_the_uptime_tenant_slug" {
+  command = plan
+
+  variables {
+    uptime_tenant_slug = "pilot.feohledger.com"
+  }
+
+  expect_failures = [var.uptime_tenant_slug]
+}
+
+run "certificate_expiry_backstops_acm_renewal" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.platform_certificate_expiry.namespace == "AWS/CertificateManager" && aws_cloudwatch_metric_alarm.platform_certificate_expiry.metric_name == "DaysToExpiry" && aws_cloudwatch_metric_alarm.platform_certificate_expiry.threshold == 30
+    error_message = "The certificate alarm fires once DaysToExpiry drops under 30."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.platform_certificate_expiry.dimensions["CertificateArn"] == "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+    error_message = "It must watch the platform certificate."
+  }
+
+  assert {
+    condition     = toset(aws_cloudwatch_metric_alarm.platform_certificate_expiry.alarm_actions) == toset(["arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"])
+    error_message = "A month's warning emails; it does not page."
   }
 }
