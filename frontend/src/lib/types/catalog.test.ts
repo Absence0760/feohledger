@@ -10,7 +10,7 @@ import {
 	punchoutStatusLabelKey,
 	type PunchoutSessionStatus
 } from './catalog';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Map-completeness guard for the punch-out session-status labels.
@@ -33,8 +33,8 @@ describe('PUNCHOUT_STATUS_LABEL_KEYS', () => {
 		for (const status of PUNCHOUT_STATUSES) {
 			const key = PUNCHOUT_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key]).not.toBe(status);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key]).not.toBe(status);
 		}
 	});
 
@@ -62,7 +62,7 @@ describe('CATALOG_TYPE_LABEL_KEYS', () => {
 		for (const type of CATALOG_TYPES) {
 			const key = CATALOG_TYPE_LABEL_KEYS[type];
 			expect(key, `${type} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${type} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${type} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 
@@ -75,7 +75,7 @@ describe('CATALOG_TYPE_LABEL_KEYS', () => {
 describe('GUIDED_BUYING_REASON_LABEL_KEYS', () => {
 	it('names a real catalogue key for every reason', () => {
 		for (const key of Object.values(GUIDED_BUYING_REASON_LABEL_KEYS)) {
-			expect(Object.keys(en), `"${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `"${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 

@@ -126,6 +126,39 @@ Backend API endpoints are role-gated via `Depends(require_roles(...))` in `backe
 
 The temporary password is shown **only once** — it is not stored or retrievable after the dialog is closed.
 
+### An address can belong to only one workspace
+
+`users.email` is globally unique: one address is one account in one workspace,
+and there is no multi-workspace membership yet (tracked in
+[`followups.md`](followups.md) § Multi-workspace membership). So inviting, or
+renaming a user to, an address that is already taken is a `409` with one of two
+coded refusals, each stated in the reader's language
+(`frontend/src/lib/api/codedRefusals.ts`):
+
+| Code | When | What it tells the admin |
+|---|---|---|
+| `email_in_this_workspace` | A user in **this** workspace already has the address | They already exist here — find and edit them |
+| `email_in_other_workspace` | An account in **another** workspace has it | Use a different address for this person (for example their address at your company) |
+
+The second used to be a bare "Email already in use", which gave no way forward.
+It names no workspace and no account — but it still tells anyone holding
+`user.manage` that the address is on the platform somewhere. That signal is
+unavoidable while the address is global (refusing without saying why, or
+pretending to succeed, would either strand the admin or quietly create nothing),
+so it is **bounded instead**: each workspace may get 20 other-workspace
+refusals per hour (`admin.EMAIL_COLLISION_LIMIT`), checked before the lookup, so
+a sweep is throttled with a `429` and learns nothing more; a same-workspace hit
+does not spend the budget. While it is spent, **every** create and email rename
+in the workspace gets the coded `429` `email_check_throttled` (free addresses
+too — otherwise the 429 would be the oracle), with `Retry-After`; it lifts on
+its own within the hour. SCIM (`POST`/`PUT`/`PATCH /scim/v2/Users`) answers the
+same two cases as a SCIM `409 uniqueness` with the same distinction in its
+`detail`, without the budget — an IdP retries a doomed write on every reconcile
+cycle, and a throttle would turn that into a stuck provisioning job. An SSO
+sign-in whose IdP asserts such an address is refused the same way
+([`authentication.md`](authentication.md) § JIT user provisioning). Reasoning:
+[`decisions.md`](decisions.md) §291.
+
 ## Resetting a user's password
 
 An admin never **chooses** another user's password — they reset it, and the
@@ -188,10 +221,11 @@ Users cannot change their own email or roles.
 | GET | `/api/admin/roles` | List all available roles — the picker `role_names` is chosen from (`user.manage`) |
 | GET | `/api/admin/permissions` | The granular-permission catalog, key + label (`user.manage`) |
 | POST | `/api/admin/users` | Create a user (returns temp password) (`user.manage`) |
-| PATCH | `/api/admin/users/:id` | Update user name, email, roles or active status (`user.manage`). A field resent at its current value is not a change: it is not applied and not named in the `user.updated` audit row. A `password` field is refused (`422 admin_password_field_removed`) |
+| PATCH | `/api/admin/users/:id` | Update user name, email, roles or active status (`user.manage`). A field resent at its current value is not a change: it is not applied and not named in the `user.updated` audit row, which records each changed role list, active flag and address before and after. A `password` field is refused (`422 admin_password_field_removed`). Removing the org's last active admin (demote or deactivate, self or not) is `409`, serialized on the organization row so two admins demoting each other cannot both pass |
 | POST | `/api/admin/users/:id/reset-password` | Reset to a generated temp the user must change at next sign-in; revokes their sessions; returns the temp once (`user.manage`, org-scoped, out-rank guarded, not self, audited `user.password_reset`) |
 | POST | `/api/admin/users/:id/revoke-sessions` | Force-log-out a user without changing their account (`user.manage`, org-scoped, idempotent, audited) |
-| DELETE | `/api/admin/users/:id` | Permanently delete a user (cannot delete yourself) (`user.manage`) |
+| DELETE | `/api/admin/users/:id` | Permanently delete a user (cannot delete yourself; never the last active admin — `409`) (`user.manage`). Audited `user.deleted` with the account's `email`, `role_names` and `was_active`, written before the delete commits: if the record cannot be written the delete is refused (`503`) |
+| POST | `/api/admin/users/bulk-delete` | The same delete per id, best-effort (`user.manage`). Each row's delete and its `user.deleted` record stand or fall together (a savepoint per row); per-row failure reasons: `not_found`, `self`, `forbidden`, `blocked` (still referenced), `last_admin`, `audit_unavailable` |
 
 `user.manage` defaults to `admin` only — identical to the four endpoints'
 prior `require_roles(ROLE_ADMIN)` gate — but an org can grant it to a custom
@@ -285,7 +319,19 @@ organizations
 - **Token revocation**: Redis-backed blocklist (tokens are blocklisted on logout)
 - **Password hashing**: Bcrypt
 
-## Future Considerations
+## Users managed by an IdP (SCIM)
 
-- **Email invitations**: Send invite emails with a magic link or temp password via SMTP (admins currently hand temp passwords to invitees out-of-band)
-- **SCIM `/Groups`**: map IdP groups to our `Role` rows (`/Users` is shipped; group sync is not)
+An org on a plan with SCIM can let its IdP (Okta, Entra, Authentik) create,
+rename and deprovision users and map IdP groups onto roles —
+[`authentication.md` § SCIM 2.0](authentication.md#scim-20-user-provisioning-from-okta--entra).
+Those writes follow the admin rules above:
+
+- **They are on the trail.** `user.created` / `user.updated` with
+  `via: "scim"`, the same before-and-after shape as an admin edit, and a null
+  actor (the IdP's token is not a user).
+- **A deprovision signs the person out** — every session revoked, as an admin
+  deactivation does.
+- **The IdP cannot remove the last active admin.** A deprovision of that user,
+  or a group change that would take `admin` from them, is refused with a SCIM
+  `400 mutability` the IdP shows its admin, and audited. Make someone else an
+  admin here first.

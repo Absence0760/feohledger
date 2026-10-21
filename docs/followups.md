@@ -39,7 +39,14 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — the light theme (decisions §289) opened one
+**Last reconciled:** 2026-10-20 — the admin persona's user-management fixes
+(decisions §293) closed the (c) entry "A SCIM deactivation writes no audit
+row", taking the file from 118 → 117. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
+opened one (c) entry, the missing self-service "find my workspace" recovery,
+taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
+§291) opened two (c) entries, multi-workspace membership and the SAML ACS's
+other refusals still landing as raw JSON, taking the file from 115 → 117.
+Before that, 2026-10-20 — the light theme (decisions §289) opened one
 (c) entry, a white-label accent left unchecked as text on the light surfaces,
 taking the file from 114 → 115. Before that, 2026-10-20 — the live QuickBooks re-test (#598) reached
 the sync screens' entry, which landed (coded `erp_listing_incomplete` /
@@ -168,7 +175,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**115 open: 99 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**117 open: 101 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1212,7 +1219,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       **Fired 2026-10-08, deliberately not taken:** the help-catalogue split
       (decisions §261) changed the workflow only to count one help slice like
       one catalogue; the total measured 1005 of 1075, so the every-chunk sum is
-      not binding and this stays the next budget change's job.
+      not binding and this stays the next budget change's job. **Fired again
+      2026-10-20, again not taken:** the settings and portal slices (§300)
+      generalised that to one file per catalogue kind; the total measured 1034
+      of 1075 (down from 1050), still not binding, and the change was scoped to
+      the per-chunk ceiling that was.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
@@ -1323,19 +1334,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       Scale customer who asks for it, or before the pricing page next lists it
       — whichever is first; until then the listing should be qualified or
       dropped (owned by the pricing-page work, issue #426).
-- [ ] **(c) A SCIM deactivation writes no audit row.** `api/scim.py`'s PUT
-      (`active: false`), PATCH (`active` replace / remove) and DELETE all set
-      `User.is_active = False` with no `user.deactivated`-style audit row, where
-      the admin path (`/api/admin/users`) audits the same change. Access is
-      still cut at once — `get_current_user` refuses an inactive user, so the
-      leaver's live JWTs stop working — so this is a SOX trail gap, not an
-      access gap. Pre-existing; the plan-gate review noticed it because §258
-      keeps deprovisioning open on every plan. **Durable fix:** one helper in
-      `api/scim.py` that every deactivating branch calls, writing a PII-free
-      audit row (actor `None`, `details.source: "scim"`) through
-      `dispatch_auth_audit`, plus `revoke_user_sessions` for parity with the
-      admin path; a test per branch. **Trigger:** the next change to
-      `api/scim.py`, or before the first SCIM-provisioned customer.
 
 ### Receiving, ERP depth and commerce sync (2026-10-07, roadmap Priority 14, decisions §260)
 
@@ -1811,6 +1809,62 @@ scope (§260) — do not fold them into any of these.
       `stores/brandTheme.ts` to report the accent against both themes'
       surfaces. **Trigger:** the first tenant that sets a brand accent, or any
       white-label sale.
+
+### Surfaced by the cross-workspace identity fixes (2026-10-20, decisions §291)
+
+- [ ] **(c) Multi-workspace membership: one person cannot belong to two
+      workspaces.** `users.email` is globally unique and `User.organization_id`
+      is one column, so an auditor, a bookkeeper serving several clients or a
+      contractor in two customers' IdPs needs a separate address per workspace.
+      §291 made every collision a stated, coded refusal (admin create/rename,
+      SCIM, SSO/SAML JIT) and budgeted the admin path's existence signal, but
+      the signal itself remains for as long as the address is global, and the
+      person's only way forward is another address. **Durable fix:** split
+      identity from membership — a `memberships(user_id, organization_id,
+      roles, is_active)` table, login resolving the account by address and then
+      the membership by the page's workspace (which also retires the
+      `wrong_workspace` refusal into a workspace picker), per-membership
+      sessions/JWT `org`, and admin "invite" adding a membership to an existing
+      account (with the invitee's consent) instead of creating one. Large: it
+      touches login, every `organization_id`-keyed user query, SCIM, JIT,
+      access reviews, DSAR/erasure and the per-user audit trail. **Trigger:** a
+      customer or partner asks for one person in two workspaces, or the
+      partner/reseller programme onboards an accountant serving several
+      tenants. Full plan, security risks and the
+      cross-tenant test matrix: #614.
+- [ ] **(c) The SAML ACS still answers its other refusals as raw JSON at the
+      API origin.** Only the address-in-another-workspace refusal is routed to
+      the SPA bridge (`sso.create_saml_refusal_handoff`); `inactive`,
+      `domain_blocked`, `unsafe_email`, a replay or a bad assertion still leave
+      the browser on `{"detail": "SAML login could not be verified."}` from the
+      ACS URL, in English, with no way back — the OIDC callback page states its
+      refusals because the SPA posts the callback itself. **Durable fix:** send
+      every ACS refusal through the same refusal handoff, keeping the one
+      generic sentence (and its PII-free audit reasons) for the verification
+      failures so the bridge says no more than the ACS does today, and coded
+      `inactive` / `domain_blocked` the OIDC path already states. **Trigger:**
+      the first SAML tenant in production, or a support report of a blank JSON
+      page after an IdP sign-in.
+
+### Surfaced by fixing signup's dead ends (2026-10-20, decisions §292)
+
+- [ ] **(c) There is no self-service "find my workspace" recovery.** A user
+      who forgets which workspace their account is in has no way back without
+      support: forgot-password only works on a workspace host (it needs the
+      tenant to build the reset link), and the apex has no sign-in page at
+      all. Signup now points an address that already has an account at its
+      workspace (§292), but only after the visitor has filled the form and
+      clicked a verification link — that is not a recovery path, and nobody
+      should have to start a signup to find a sign-in page. **Durable fix:**
+      an apex "Email me my workspace address" form — `POST
+      /api/workspace-lookup {email}`, public, captcha'd and rate-limited per
+      IP and per address like `/signup/start`, answering every address with
+      the same "if that address has an account, we've emailed it" response,
+      and emailing the account's own `tenant_urls.sign_in_url` (address
+      prefilled) only when one exists — linked from the apex landing page and
+      from the login page's error states. **Trigger:** the first support
+      request from someone who cannot find their workspace, or before signup
+      is advertised beyond the pilot.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

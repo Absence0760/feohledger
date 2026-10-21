@@ -176,8 +176,18 @@ workspace — the `X-Tenant-Slug` header, or a registered custom domain in `Host
 (`tenant.resolve_tenant_slug_by_custom_domain`, as `get_tenant_slug` reads it) —
 and it is not the account's own, the answer is `403` with the coded refusal
 `wrong_workspace` (`api/auth._refuse_other_workspace`), whose
-`params.sign_in_url` is the account's own sign-in page (`tenant_urls.sign_in_url`),
-plus an `auth.login.failure` / `reason=wrong_workspace` audit row. No token is
+`params.sign_in_url` is the account's own sign-in page (`tenant_urls.sign_in_url`
+with `prefer_custom_domain=True`: the org's own `tenant_url_template` when set,
+else its first registered custom domain, else the platform `<slug>` URL — a
+vanity-host tenant signs in on its vanity origin, where its stored token and its
+passkeys live), plus an `auth.login.failure` / `reason=wrong_workspace` audit
+row in the **account's** workspace carrying `attempted_workspace` (the slug the
+page named, capped at 63 characters) and `password_verified: true`, so an
+auditor can tell a confused user from someone who already holds the password
+and is trying it on another host. The attempted workspace gets **no** row: it
+holds no account, and since an unknown address leaves no row anywhere, a row
+there only when the password was right would make its audit log an oracle for
+"this address has an account" ([decisions.md](decisions.md) §291). No token is
 issued. The check runs **after** the password verifies, so a wrong password
 there is still the plain `401` and the link reveals nothing the caller could not
 learn by signing in. A request naming no workspace (an API client) is
@@ -201,7 +211,16 @@ signed out because your session belonged to a different workspace. Sign in
 here, or on your own workspace's page." — worded so it never claims this page is
 theirs, and shown as a neutral notice (AuthShell's `.info`, in a polite
 `role="status"` region) rather than the red error alert. It keys on the code,
-never the English (`api/sessionRejection.ts`). Tests:
+never the English (`api/sessionRejection.ts`). Before clearing it, the SPA also
+**revokes** that token on the server, best-effort
+(`sessionRejection.revokeRejectedSession`): the token is still a live session in
+its own workspace until it expires, and clearing it from this origin's storage
+alone left a usable credential behind on a shared machine. `POST /api/auth/logout`
+needs no workspace — it reads the token's own `jti`/`sub`/`org`, blocklists it and
+audits `auth.logout` in the token's own workspace — so the call carries the token
+and deliberately not this page's `X-Tenant-Slug`, with `keepalive` because the
+page navigates away immediately, and every failure swallowed. An expired session
+(`401`) is not revoked; the server already refuses it. Tests:
 `frontend/src/lib/api/sessionRejection.test.ts`, and the journey end to end in
 `frontend/tests-e2e/auth/tenant-isolation.spec.ts` § signing in on another
 workspace's page.
@@ -433,7 +452,12 @@ Action names:
 | Self-service session revoke (one, or everywhere else) | `auth.session.revoked` — PII-free, records only `{scope: "single"\|"others", revoked: <count>}` |
 | Admin force-logout of another user | `user.sessions_revoked` — PII-free, records only the revoked count |
 | Admin reset of another user's password (`POST /api/admin/users/{id}/reset-password`) | `user.password_reset` — PII-free, records `{changed_fields: ["password"], must_change_password: true, sessions_revoked: <count>}` (`null` when the forced logout failed — the reset still returns its temp, with `sessions_revoked: false` on the response); never the temp |
-| Admin edit of a user (`PATCH /api/admin/users/{id}`) | `user.updated` — `changed_fields` names only fields whose value actually changed (the Edit form resends every field; a resent unchanged value is neither applied nor named — #566). No values except `role_names` / `is_active` when those changed |
+| Admin edit of a user (`PATCH /api/admin/users/{id}`) | `user.updated` — `changed_fields` names only fields whose value actually changed (the Edit form resends every field; a resent unchanged value is neither applied nor named — #566). Each changed field is recorded **before and after**: `previous_role_names` / `role_names`, `previous_is_active` / `is_active`, `previous_email` / `email` (the address, like the `auth.*` rows record it). `full_name` is named but its value never recorded. Built by `services/user_audit.user_updated_details`, shared with SCIM |
+| Admin delete of a user (`DELETE /api/admin/users/{id}`, `POST /api/admin/users/bulk-delete`) | `user.deleted` — `{email, role_names, was_active}` captured before the row goes, since afterwards nothing else says who the id was. Written **before** the delete commits with `record_auth_audit_or_raise`: a failed write refuses the delete (`503` on the single route; `audit_unavailable` for that row of a bulk delete, inside a savepoint, the rest of the batch still landing) |
+| Admin invite (`POST /api/admin/users`) | `user.created` — `{role_names}` |
+| SCIM create / rename / deactivate (`POST`, `PUT`, `PATCH`, `DELETE /api/scim/v2/Users…`) | `user.created` / `user.updated` with `via: "scim"` and a null `actor_id` (the IdP's bearer token is not a user). Same shapes as the admin rows, plus `operation` (`put` \| `patch` \| `delete`), `previous_external_id` / `external_id` when that changed, and on a deactivation `sessions_revoked` (`null` when the forced logout failed — the deprovision still answers 2xx). An unchanged write records nothing |
+| SCIM deprovision of the org's last active admin, refused | `user.deactivation_refused` — `{via: "scim", operation, reason: "last_active_admin"}` |
+| SCIM group change that would strip `admin` from the last active admin, refused | `auth.scim.role_revoke_refused` — `{role: "admin", source: "scim_group", reason: "last_active_admin"}`, `entity_type: "organization"` |
 | Self-service password change (`POST /auth/change-password`, incl. the forced first-login change; `PATCH /auth/me` with `password`) | `auth.password.changed` — PII-free, records `{via: "change_password" \| "profile", forced: <bool>}`; `forced` is true when it replaced an admin-issued temp (signup issues none — decisions §283). Written before the `auth.session.revoked` row the same change's forced logout writes, which is a side effect and not the event |
 | Supplier-portal password change (`POST /portal/auth/change-password`, incl. the forced first sign-in change) | `portal.password.changed` — the portal twin of `auth.password.changed`: PII-free, records `{via: "change_password", forced: <bool>}` (`forced` = it replaced the temp the AP team issued), identifies the account by `actor_id`/`entity_id`, never by address. Written before the `portal.session.revoked` side-effect row |
 | Forgot-password link requested / redeemed (`POST /auth/forgot-password`, `POST /auth/reset-password`) | `auth.password_reset.requested` (`actor_id` null — the requester is unauthenticated) · `auth.password_reset.completed` (`actor_id` = the account) — both PII-free, recording only `{ip}`; never the token or the new password. `requested` is written only for an existing, active account with a tenant to route to |
@@ -1101,11 +1125,16 @@ exactly as before.
   it isn't the fraud-sensitive action the permission exists to gate — see
   "Approve and reject are not always the same role set" below), and user
   create/update/delete/bulk-delete (`user.manage`). The vendor list/detail/
-  counts reads and the change-request queue's own `GET /vendors/change-requests`
-  stay on `require_roles` too — broader than any one splittable permission
-  (cfo can read vendor detail without holding `vendor.manage`), matching the
-  same "reads stay coarse, only the specific action splits" pattern payments.py
-  uses for `GET /payments/queue` etc. Role/permission CRUD itself stays
+  counts/ids reads (`GET /vendors`, `/vendors/{id}`, `/vendors/counts`,
+  `/vendors/ids`) are `require_role_or_permission`: the three roles they always
+  admitted (admin, ap_manager, cfo) **or** `vendor.manage` / `vendor.block`. A
+  plain `require_permission` was not possible — cfo reads vendors without
+  holding any vendor permission — but role-only left a custom role holding
+  just one of those permissions with a 403 on the very list its permission acts
+  on, while the nav (which ORs `permissions`) showed it the page. The
+  change-request queue's own `GET /vendors/change-requests` stays on
+  `require_roles`, matching the "reads stay coarse, only the specific action
+  splits" pattern payments.py uses for `GET /payments/queue` etc. Role/permission CRUD itself stays
   admin-only on `require_roles` (managing the catalog must not be a grantable
   permission — that would be a privilege-escalation path).
   - **One migration deliberately does NOT reproduce the prior matrix.**
@@ -1188,10 +1217,21 @@ exactly as before.
     closes it: before any field is mutated, if the target is currently an
     active admin and the update would make them not one (role removal,
     deactivation, or both), the request is refused (409) unless another
-    active admin already exists in the org to undo it. Applies to self and
-    third-party targets alike, though for a third party it's a no-op — acting
-    on an admin already required the caller to be one themselves, so the org
-    never actually reaches zero admins in that case.
+    active admin already exists in the org to undo it. The single and bulk
+    deletes apply it too (a bulk row it stops fails as `last_admin`).
+    **The check is serialized.** It used to count and then act with nothing
+    held, so two admins demoting or deleting each other at the same moment
+    each saw the other still standing and both passed. The rule now lives in
+    `services/admin_lockout`, which locks the organization row (`FOR NO KEY
+    UPDATE`, held to the commit) before it counts whenever the write would
+    remove an active admin — the second request waits, then counts what the
+    first left (`tests/test_admin_lockout.py` drives the race against
+    Postgres). **SCIM applies the same guard**: a deprovision (`PATCH
+    active:false`, `PUT active:false`, `DELETE`) of the last active admin is
+    refused `400` `scimType: "mutability"` and audited, and so is a group
+    change that would revoke an IdP-managed `admin` role from the last one —
+    see [SCIM 2.0](#scim-20-user-provisioning-from-okta--entra).
+    `docs/decisions.md` §293.
 - **Frontend** — `auth.can(perm)` mirrors `require_permission`; the gated
   controls converted so far are payment Execute, payment Void, vendor
   Block/Unblock (`VendorModal.svelte`), vendor create/edit + the consolidation
@@ -1858,6 +1898,44 @@ First SSO login provisions the user. Three match paths:
 
 New users get `ap_clerk` role by default (least privilege). The first user ever in an org gets `admin`.
 
+**An address that already has an account in another workspace is refused, not
+created.** The first two matches search only this org, and `users.email` is
+globally unique — one address is one account in one workspace — so "create new"
+used to trip the UNIQUE constraint at flush and both callbacks answered a bare
+`500` with no audit row. `jit_provision` now asks
+`identity_provisioning.email_holder_org_id` (platform-wide, case-insensitive)
+first and raises `EmailInOtherWorkspace`; the insert also runs in a savepoint, so
+an address taken by a concurrent writer between the check and the flush is the
+same refusal. The callbacks turn it into:
+
+- **OIDC** — `POST /api/auth/sso/callback` answers `403` coded
+  `sso_email_in_other_workspace` (`api/refusals.SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL`)
+  and writes `auth.sso.login.failure` / `reason=sso_email_in_other_workspace`
+  (with the email, as OIDC failure rows do) in **this** workspace.
+- **SAML** — the ACS writes `auth.saml.login.failure` with the same reason and the
+  usual PII-free details, then 303s to the SPA bridge with a one-time code
+  (`sso.create_saml_refusal_handoff`, same store, TTL and single use as a token
+  handoff), and `POST /api/auth/saml/exchange` answers that code with the same
+  coded `403` and no token — so the browser lands on the callback page rather
+  than on raw JSON at the ACS.
+
+Both callback pages state it in the reader's language
+(`refusal.ssoEmailInOtherWorkspace`, through `api/codedRefusals.ts`): the
+address belongs to another workspace, sign in on your own workspace's page or
+ask this workspace's admin to have the IdP send a different address. It carries
+**no link** to the account's own sign-in page, unlike the password path's
+`wrong_workspace`. That link is safe there because only someone who proved the
+password sees it; here the proof is an assertion from this workspace's IdP,
+which this workspace's admin controls and can make say any address — a link
+would name another tenant's workspace for any address they typed. The bare
+"this address is taken" it does reveal is what `POST /api/admin/users` already
+tells the same admin. Nothing is written to the other workspace's audit log,
+which this IdP's admin must not be able to write into. Reasoning:
+[decisions.md](decisions.md) §291. Tests:
+`backend/tests/test_email_identity_case.py` (JIT, the race, the OIDC callback)
+and `backend/tests/test_saml_acs_integration.py` (the ACS → bridge → exchange
+round trip).
+
 A match that lands on a **deactivated** account (`users.is_active = false`) raises
 `DeactivatedAccount` instead of returning the row, so neither SSO callback can
 mint a session for someone who has been offboarded — see
@@ -2253,7 +2331,7 @@ Every SCIM request Authorization-headers a bearer token; the backend SHA-256s it
 | `POST` | `/Users` | Create. Returns 409 `uniqueness` on duplicate userName. |
 | `PUT` | `/Users/{id}` | **Full-resource replace.** Authentik (and RFC 7644 §3.5.1) update users via PUT, not PATCH. Returns 409 `uniqueness` if the new userName collides with another user. |
 | `PATCH` | `/Users/{id}` | Partial update. Supports the ops Okta + Entra send (active toggle, userName/externalId/name replace, root-object replace). A `userName` op returns 409 `uniqueness` on a collision. |
-| `DELETE` | `/Users/{id}` | **Soft delete** — sets `is_active=false`. Preserves audit trail. |
+| `DELETE` | `/Users/{id}` | **Soft delete** — sets `is_active=false`. Preserves audit trail. The same deactivation as a `PATCH active:false` (see below). |
 | `GET` | `/Groups` | List + paginate; `displayName eq` filter. |
 | `GET` | `/Groups/{id}` | Fetch one group. |
 | `POST` | `/Groups` | Create. 409 `uniqueness` on duplicate displayName. |
@@ -2284,6 +2362,31 @@ non-empty string, so Entra's deprovision left the account active and answered
 case, on both the `path: "active"` op and a path-less replace, and answers any
 other value with a 400 `invalidValue` rather than guessing a lifecycle state
 (`tests/test_scim_active_patch.py`).
+
+**Every user write is audited, and a deprovision ends the user's sessions.**
+Create writes `user.created`; a rename, a name or `externalId` change, and
+every deactivation (`PATCH active:false`, `PUT active:false`, `DELETE`) write
+`user.updated` with each changed field before and after — `via: "scim"`, a
+null `actor_id`, and the `operation` that did it. A deactivation commits, then
+revokes every session the account holds (`revoke_user_sessions`, as the admin
+PATCH does) and records the count; a revoke that fails is recorded as
+`sessions_revoked: null` and the IdP still gets its 2xx, since the
+deactivation itself stands and a 5xx would only make it retry. Before this an
+IdP-driven leaver was shut out with nothing on the trail to say who or when.
+Shapes: [Auth event audit logging](#auth-event-audit-logging).
+
+**SCIM cannot remove the org's last active admin.** A deprovision of the only
+active admin — every spelling above — and a `/Groups` write that would revoke
+an IdP-managed `admin` role from the last one are refused **before anything
+changes**, with `400` and `scimType: "mutability"`, and audited
+(`user.deactivation_refused` / `auth.scim.role_revoke_refused`). RFC 7644
+§3.12 defines `mutability` as a modification "not compatible with the target
+attribute's … current state", and IdPs show a 400 to their admin instead of
+retrying it; a 409 was rejected because the RFC reserves it for uniqueness and
+version conflicts. The guard, and the organization-row lock that serializes it,
+are the admin API's own (`services/admin_lockout`). To deprovision that person,
+make someone else an admin in FeohLedger first (`tests/test_scim_user_lifecycle_audit.py`,
+`docs/decisions.md` §293).
 
 ### Filter syntax
 

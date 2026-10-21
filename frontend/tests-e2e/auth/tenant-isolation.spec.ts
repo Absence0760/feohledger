@@ -264,7 +264,8 @@ test.describe('signing in on another workspace’s page', () => {
 	});
 
 	test('a token for another workspace already in storage signs the user out to this page’s sign-in', async ({
-		page
+		page,
+		request
 	}) => {
 		// Defence in depth for a token that got there some other way (one issued
 		// before the sign-in refusal, a renamed workspace): every tenant-scoped
@@ -277,6 +278,12 @@ test.describe('signing in on another workspace’s page', () => {
 		await expect(page.locator('input[type="email"]')).toBeVisible();
 		await page.evaluate((t) => localStorage.setItem('auth_token', t), techflowToken);
 
+		// The token is still a live session in techflow; the SPA revokes it
+		// there on the way out (decisions §291), with the token alone — not
+		// acme's slug, which is what caused the refusal.
+		const revocation = page.waitForRequest(
+			(r) => new URL(r.url()).pathname === '/api/auth/logout' && r.method() === 'POST'
+		);
 		await page.goto(`${ACME_BASE}/`);
 		await page.waitForURL(`${ACME_BASE}/login?reason=other_workspace`);
 		// Information, not a failure: a neutral notice in a polite live region,
@@ -288,5 +295,23 @@ test.describe('signing in on another workspace’s page', () => {
 		);
 		await expect(loginError(page)).toHaveCount(0);
 		expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
+
+		const sent = await revocation;
+		expect(sent.headers()['authorization']).toBe(`Bearer ${techflowToken}`);
+		expect(sent.headers()['x-tenant-slug']).toBeUndefined();
+		// …and techflow itself now refuses the token.
+		await expect
+			.poll(
+				async () =>
+					(
+						await request.get(`${API_URL}/api/auth/me`, {
+							headers: {
+								Authorization: `Bearer ${techflowToken}`,
+								'X-Tenant-Slug': 'techflow'
+							}
+						})
+					).status()
+			)
+			.toBe(401);
 	});
 });

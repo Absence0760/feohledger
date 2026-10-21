@@ -14,7 +14,9 @@ import {
 	PERM_PAYMENT_EXECUTE,
 	PERM_PAYMENT_RECORD_EXTERNAL,
 	PERM_PAYMENT_VOID,
-	PERM_USER_MANAGE
+	PERM_USER_MANAGE,
+	PERM_VENDOR_BLOCK,
+	PERM_VENDOR_MANAGE
 } from './types/admin';
 
 const links = NAV.filter((e): e is NavLink => e.kind === 'link');
@@ -66,7 +68,7 @@ const NAV_GATES: Record<string, { roles: string[] | null; permissions?: string[]
 		roles: NOT_CLERK,
 		permissions: [PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL]
 	},
-	'/vendors': { roles: NOT_CLERK },
+	'/vendors': { roles: NOT_CLERK, permissions: [PERM_VENDOR_MANAGE, PERM_VENDOR_BLOCK] },
 	'/vendors/screening': { roles: ALL_FOUR },
 	'/vendors/change-requests': { roles: ['admin', 'ap_manager'] },
 	'/exceptions': { roles: ['admin', 'ap_manager'] },
@@ -294,6 +296,18 @@ test('the Payments row is reachable by role OR by holding payment.execute/void/r
 	// entry level, not just via the lower-level `canSee` helper.
 	expect(isEntryVisible(payments, hasNoRole, canExecuteOnly)).toBe(true);
 	expect(isEntryVisible(payments, hasNoRole, canNothing)).toBe(false);
+});
+
+test('the Vendors row is reachable by role OR by holding vendor.manage/vendor.block', () => {
+	const vendors = link('/vendors');
+	const hasNoRole = () => false;
+	const canNothing = () => false;
+	expect(isEntryVisible(vendors, hasNoRole, canNothing)).toBe(false);
+	expect(isEntryVisible(vendors, hasNoRole, (p) => p === PERM_VENDOR_MANAGE)).toBe(true);
+	expect(isEntryVisible(vendors, hasNoRole, (p) => p === PERM_VENDOR_BLOCK)).toBe(true);
+	// cfo holds no vendor permission and keeps the row by role.
+	const hasCfo = (...roles: string[]) => roles.includes('cfo');
+	expect(isEntryVisible(vendors, hasCfo, canNothing)).toBe(true);
 });
 
 test('the Users tab lists both admin AND user.manage as its gate; Roles is admin-only', () => {

@@ -4,6 +4,7 @@ import {
 	loginNoticeKey,
 	loginPathFor,
 	ownWorkspaceSignInUrl,
+	revokeRejectedSession,
 	sessionRejection,
 	TOKEN_TENANT_MISMATCH
 } from './sessionRejection.ts';
@@ -54,6 +55,54 @@ describe('the /login round trip', () => {
 
 	it('honours only a reason it set', () => {
 		expect(loginNoticeKey(new URLSearchParams('reason=something_else'))).toBeNull();
+	});
+});
+
+describe('revokeRejectedSession', () => {
+	type Call = { url: string; init: RequestInit };
+	const recorder = () => {
+		const calls: Call[] = [];
+		const fetchImpl = async (url: string, init: RequestInit) => {
+			calls.push({ url, init });
+			return undefined;
+		};
+		return { calls, fetchImpl };
+	};
+
+	it("logs a token for another workspace out of that workspace, without this page's slug", () => {
+		const { calls, fetchImpl } = recorder();
+		revokeRejectedSession('other_workspace', 'tok-1', 'http://localhost:8000', fetchImpl);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].url).toBe('http://localhost:8000/api/auth/logout');
+		expect(calls[0].init.method).toBe('POST');
+		expect(calls[0].init.keepalive).toBe(true);
+		// The token is the whole credential; the header that caused the refusal
+		// must not ride along.
+		expect(calls[0].init.headers).toEqual({ Authorization: 'Bearer tok-1' });
+	});
+
+	it('uses the same-origin API base on a vanity host', () => {
+		const { calls, fetchImpl } = recorder();
+		revokeRejectedSession('other_workspace', 'tok-1', '', fetchImpl);
+		expect(calls[0].url).toBe('/api/auth/logout');
+	});
+
+	it('leaves an expired session, and a missing token, alone', () => {
+		const { calls, fetchImpl } = recorder();
+		revokeRejectedSession('expired', 'tok-1', '', fetchImpl);
+		revokeRejectedSession('other_workspace', null, '', fetchImpl);
+		expect(calls).toHaveLength(0);
+	});
+
+	it('never throws, whether the request rejects or fetch itself throws', async () => {
+		const rejecting = () => Promise.reject(new Error('offline'));
+		const throwing = () => {
+			throw new TypeError('no fetch');
+		};
+		expect(() => revokeRejectedSession('other_workspace', 't', '', rejecting)).not.toThrow();
+		expect(() => revokeRejectedSession('other_workspace', 't', '', throwing)).not.toThrow();
+		// Let the swallowed rejection settle; an unhandled one fails the run.
+		await new Promise((resolve) => setTimeout(resolve, 0));
 	});
 });
 

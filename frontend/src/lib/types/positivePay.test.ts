@@ -12,7 +12,7 @@ import {
 } from './positivePay';
 import { CATALOGUE_LOADERS } from '#lib/i18n/catalogues.ts';
 import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Map-completeness guard for the Positive Pay label maps.
@@ -27,7 +27,7 @@ describe('POSITIVE_PAY_STATUS_LABEL_KEYS', () => {
 		for (const status of POSITIVE_PAY_STATUSES) {
 			const key = POSITIVE_PAY_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 
@@ -44,11 +44,11 @@ describe('BANK_FORMAT_LABEL_KEYS', () => {
 		for (const fmt of BANK_FORMATS) {
 			const key = BANK_FORMAT_LABEL_KEYS[fmt];
 			expect(key, `${fmt} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${fmt} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key].trim().length).toBeGreaterThan(0);
+			expect(Object.keys(EN_ALL), `${fmt} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
 			// The raw wire value is what the list's Format column and the detail
 			// meta pill used to print; a key resolving back to it would be no fix.
-			expect(en[key]).not.toBe(fmt);
+			expect(EN_ALL[key]).not.toBe(fmt);
 		}
 	});
 
@@ -78,7 +78,7 @@ describe('POSITIVE_PAY_FILE_TYPE_LABEL_KEYS', () => {
 		for (const fileType of POSITIVE_PAY_FILE_TYPES) {
 			const key = POSITIVE_PAY_FILE_TYPE_LABEL_KEYS[fileType];
 			expect(key, `${fileType} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${fileType} → "${key}" is not in the catalogue`).toContain(key);
+			expect(Object.keys(EN_ALL), `${fileType} → "${key}" is not in the catalogue`).toContain(key);
 		}
 	});
 

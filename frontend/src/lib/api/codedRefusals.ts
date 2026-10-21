@@ -67,6 +67,11 @@ export const INVOICE_STALE_EDIT = 'invoice_stale_edit';
  *  modal branches on it to drop the stale copy and reopen the current one. */
 export const INVOICE_STALE_APPROVAL = 'invoice_stale_approval';
 
+/** `POST /api/signup/complete` for an address that already has an account
+ *  (`backend/app/api/signup.py::SIGNUP_EMAIL_HAS_WORKSPACE`). `/verify`
+ *  branches on it to link the existing workspace's sign-in page. */
+export const SIGNUP_EMAIL_HAS_WORKSPACE = 'signup_email_has_workspace';
+
 /** `POST /api/invoices/{id}/complete` refused for blank required fields
  *  (`backend/app/api/workflow.py::INVOICE_REQUIRED_FIELDS_MISSING`). */
 export const INVOICE_REQUIRED_FIELDS_MISSING = 'invoice_required_fields_missing';
@@ -347,6 +352,15 @@ const BUILDERS: Record<string, Builder> = {
 			? t('refusal.wrongWorkspace', { workspace: new URL(url).host })
 			: t('refusal.wrongWorkspaceNoLink');
 	},
+	// `api/signup.py::_refuse_if_email_has_account` — a verified signup for an
+	// address that already has an account; the link is that account's own
+	// sign-in page (decisions §292).
+	[SIGNUP_EMAIL_HAS_WORKSPACE]: (p, t) => {
+		const url = str(p, 'sign_in_url');
+		return url
+			? t('refusal.signupEmailHasWorkspace', { url })
+			: t('refusal.signupEmailHasWorkspaceNoLink');
+	},
 	// `api/payments.py::_refuse_record_only` — every dispatching endpoint on a
 	// tenant whose payments are recorded, never sent. `params.reason` says why
 	// the mode resolved so; the sentence is the same for every reason.
@@ -447,7 +461,16 @@ const BUILDERS: Record<string, Builder> = {
 	commerce_sync_not_retryable: fixed('refusal.commerceSyncNotRetryable'),
 	commerce_sync_not_found: fixed('refusal.commerceSyncNotFound'),
 	commerce_unknown_entity: fixed('refusal.commerceUnknownEntity'),
-	commerce_unknown_provider: fixed('refusal.commerceUnknownProvider')
+	commerce_unknown_provider: fixed('refusal.commerceUnknownProvider'),
+	// One address, one account, one workspace (decisions §291). An SSO / SAML
+	// sign-in whose IdP asserted an address held in another workspace — stated
+	// on the callback page, deliberately with no link (`api/refusals.py`) — and
+	// a user-manager's create / rename onto a taken address.
+	sso_email_in_other_workspace: fixed('refusal.ssoEmailInOtherWorkspace'),
+	email_in_this_workspace: fixed('refusal.emailInThisWorkspace'),
+	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
+	// The admin path's other-workspace budget is spent (`api/admin.py`).
+	email_check_throttled: fixed('refusal.emailCheckThrottled')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

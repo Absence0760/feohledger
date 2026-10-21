@@ -8,7 +8,7 @@ import {
 	invoiceStatusLabelKey,
 	type InvoiceStatus
 } from './invoice';
-import { en } from '#lib/i18n/locales/en.ts';
+import { EN_ALL } from '#lib/i18n/allMessages.ts';
 
 /**
  * Drift guard for the invoice-status LABELS, the sibling of
@@ -25,14 +25,14 @@ describe('INVOICE_STATUS_LABEL_KEYS', () => {
 		for (const status of INVOICE_STATUSES) {
 			const key = INVOICE_STATUS_LABEL_KEYS[status];
 			expect(key, `${status} has no label key`).toBeTruthy();
-			expect(Object.keys(en), `${status} → "${key}" is not in the catalogue`).toContain(key);
-			expect(en[key].trim().length).toBeGreaterThan(0);
+			expect(Object.keys(EN_ALL), `${status} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
 		}
 	});
 
 	it('never uses the raw enum value as its own label', () => {
 		for (const status of INVOICE_STATUSES) {
-			expect(en[INVOICE_STATUS_LABEL_KEYS[status]]).not.toBe(status);
+			expect(EN_ALL[INVOICE_STATUS_LABEL_KEYS[status]]).not.toBe(status);
 		}
 	});
 
@@ -69,6 +69,6 @@ describe('INVOICE_STATUS_LABEL_KEYS', () => {
 		// "Pending" would read as "waiting for a human" beside
 		// `ready_for_review`, which is the status that actually means that.
 		const status: InvoiceStatus = 'pending';
-		expect(en[INVOICE_STATUS_LABEL_KEYS[status]]).toBe('Extracting');
+		expect(EN_ALL[INVOICE_STATUS_LABEL_KEYS[status]]).toBe('Extracting');
 	});
 });
