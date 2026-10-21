@@ -494,6 +494,14 @@ baseline at all (issue #575). `tests/test_invoice_status_groups.py` derives
 each group from `VALID_TRANSITIONS` and fails on a literal restatement anywhere
 under `app/`.
 
+Two readings of these sets are deliberate and are recorded in
+`docs/decisions.md` §302. The budget's realised spend adds `failed` back, but
+only with `Invoice.approval_date` set (an approved invoice whose ERP push
+failed). And the fraud baselines read `done`, which is the CSV importer's
+default status, so imported history seeds them. That is safe because the checks
+then fire more often, never less. It is also why the touchless rate (§73), which
+asks a different question, still requires the approval stamp.
+
 ## Workflow Models
 
 ### WorkflowDefinition

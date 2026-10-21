@@ -74,7 +74,10 @@ OPEN_AP_STATUSES: tuple[InvoiceStatus, ...] = (
 #: which is accepted history all the same; where proof of an approval matters,
 #: read `Invoice.approval_date` (`services/analytics.TOUCHLESS_*`). `failed` is
 #: excluded because it is reachable from `pending` (never reviewed) as well as
-#: from `sending_to_erp`, so the status alone proves nothing.
+#: from `sending_to_erp`, so the status alone proves nothing; the budget adds it
+#: back only with the stamp (`budget_service.realised_invoice_clause`). Why the
+#: baselines read imported `done` history when §73's touchless rate does not:
+#: `docs/decisions.md` §302.
 APPROVED_OR_BEYOND_STATUSES: tuple[InvoiceStatus, ...] = (
     *OPEN_AP_STATUSES,
     InvoiceStatus.paid,
