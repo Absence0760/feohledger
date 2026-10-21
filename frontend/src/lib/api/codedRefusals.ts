@@ -25,7 +25,8 @@
  *    or fraud exception (stated by `api/erpRefusals.ts`), an ERP sync
  *    refused because the connection is gone or the listing is incomplete,
  *    and every self-service signup refusal (the workspace address, the
- *    email and name checks, the captcha, the verification link);
+ *    email and name checks, the captcha, the verification link), and the
+ *    shared rate limiter's 429 on every surface it guards;
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -259,6 +260,28 @@ function nachaNotConfigured(params: Params, t: Translate): string | null {
 		return key ? t(key) : f;
 	});
 	return t('refusal.nachaNotConfigured', { fields: formatList(labels) });
+}
+
+// --- the shared rate limiter ---------------------------------------------------
+
+/** Every 429 the shared limiter answers (`backend/app/services/rate_limit.py`):
+ *  sign-in, MFA, password reset, signup, the supplier portal, the public API. */
+export const RATE_LIMITED = 'rate_limited';
+
+/**
+ * The limiter's wait, said the way a person would: whole seconds under a
+ * minute, then whole minutes, then whole hours — each rounded UP, so the
+ * reader is never told to come back before the server will let them. The
+ * params carry only the `Retry-After` figure; the sentence adds nothing the
+ * server did not say (which limit tripped is deliberately not sent).
+ */
+function rateLimited(params: Params, t: Translate): string | null {
+	const seconds = params.retry_after_seconds;
+	if (typeof seconds !== 'number' || !Number.isInteger(seconds) || seconds < 1) return null;
+	if (seconds < 60) return t('refusal.rateLimitedSeconds', { n: seconds });
+	const minutes = Math.ceil(seconds / 60);
+	if (minutes < 60) return t('refusal.rateLimitedMinutes', { n: minutes });
+	return t('refusal.rateLimitedHours', { n: Math.ceil(seconds / 3600) });
 }
 
 // --- the table ---------------------------------------------------------------
@@ -518,7 +541,9 @@ const BUILDERS: Record<string, Builder> = {
 	email_in_this_workspace: fixed('refusal.emailInThisWorkspace'),
 	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
 	// The admin path's other-workspace budget is spent (`api/admin.py`).
-	email_check_throttled: fixed('refusal.emailCheckThrottled')
+	email_check_throttled: fixed('refusal.emailCheckThrottled'),
+	// Any 429 from the shared limiter (`services/rate_limit.py`).
+	[RATE_LIMITED]: rateLimited
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

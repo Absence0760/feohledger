@@ -4011,6 +4011,11 @@ export const en = {
 	'refusal.signupLinkInvalid': "This verification link is invalid or has expired. Sign up again.",
 	'refusal.signupUnavailable': "Workspace creation is temporarily unavailable. Try again later.",
 	'refusal.signupProvisioningFailed': "Something went wrong while creating your workspace. Contact support.",
+	// The shared limiter's 429 (`services/rate_limit.py`, `rate_limited`): the wait,
+	// rounded up to the largest whole unit, never which limit tripped.
+	'refusal.rateLimitedSeconds': "Too many attempts. Wait {n, plural, one {# second} other {# seconds}} and try again.",
+	'refusal.rateLimitedMinutes': "Too many attempts. Wait {n, plural, one {# minute} other {# minutes}} and try again.",
+	'refusal.rateLimitedHours': "Too many attempts. Wait {n, plural, one {# hour} other {# hours}} and try again.",
 	'csvImport.result.summary': '{imported} imported, {skipped} skipped',
 	'csvImport.toast.failed': 'Import failed',
 	'csvImport.toast.partial': 'Imported {imported}, skipped {skipped} — see the details below',

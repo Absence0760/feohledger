@@ -3837,6 +3837,11 @@ export const messages = {
 	'refusal.signupLinkInvalid': "Ce lien de vérification est invalide ou a expiré. Inscrivez-vous à nouveau.",
 	'refusal.signupUnavailable': "La création d'espaces de travail est temporairement indisponible. Réessayez plus tard.",
 	'refusal.signupProvisioningFailed': "Un problème est survenu lors de la création de votre espace de travail. Contactez le support.",
+	// The shared limiter's 429 (`services/rate_limit.py`, `rate_limited`): the wait,
+	// rounded up to the largest whole unit, never which limit tripped.
+	'refusal.rateLimitedSeconds': "Trop de tentatives. Patientez {n, plural, one {# seconde} other {# secondes}} avant de réessayer.",
+	'refusal.rateLimitedMinutes': "Trop de tentatives. Patientez {n, plural, one {# minute} other {# minutes}} avant de réessayer.",
+	'refusal.rateLimitedHours': "Trop de tentatives. Patientez {n, plural, one {# heure} other {# heures}} avant de réessayer.",
 	'csvImport.result.summary': '{imported} importées, {skipped} ignorées',
 	'csvImport.toast.failed': 'Échec de l’importation',
 	'csvImport.toast.partial': '{imported} importées, {skipped} ignorées — voir les détails ci-dessous',

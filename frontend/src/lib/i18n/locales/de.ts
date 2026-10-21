@@ -3835,6 +3835,11 @@ export const messages = {
 	'refusal.signupLinkInvalid': "Dieser Bestätigungslink ist ungültig oder abgelaufen. Registrieren Sie sich erneut.",
 	'refusal.signupUnavailable': "Das Erstellen von Arbeitsbereichen ist vorübergehend nicht möglich. Versuchen Sie es später erneut.",
 	'refusal.signupProvisioningFailed': "Beim Erstellen Ihres Arbeitsbereichs ist ein Fehler aufgetreten. Wenden Sie sich an den Support.",
+	// The shared limiter's 429 (`services/rate_limit.py`, `rate_limited`): the wait,
+	// rounded up to the largest whole unit, never which limit tripped.
+	'refusal.rateLimitedSeconds': "Zu viele Versuche. Warten Sie {n, plural, one {# Sekunde} other {# Sekunden}} und versuchen Sie es dann erneut.",
+	'refusal.rateLimitedMinutes': "Zu viele Versuche. Warten Sie {n, plural, one {# Minute} other {# Minuten}} und versuchen Sie es dann erneut.",
+	'refusal.rateLimitedHours': "Zu viele Versuche. Warten Sie {n, plural, one {# Stunde} other {# Stunden}} und versuchen Sie es dann erneut.",
 	'csvImport.result.summary': '{imported} importiert, {skipped} übersprungen',
 	'csvImport.toast.failed': 'Import fehlgeschlagen',
 	'csvImport.toast.partial': '{imported} importiert, {skipped} übersprungen — Details siehe unten',

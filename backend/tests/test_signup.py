@@ -370,6 +370,14 @@ async def test_slug_check_rate_limited_returns_429(realdb, monkeypatch):
             last_resp = await c.get("/api/signup/slug-check", params={"slug": _unique_slug()})
     assert last_resp is not None
     assert last_resp.status_code == 429
+    # On the wire: the coded refusal the signup page localizes, with the
+    # standard Retry-After header still set and naming the same wait.
+    wait = int(last_resp.headers["Retry-After"])
+    assert wait >= 1
+    detail = last_resp.json()["detail"]
+    assert detail["code"] == "rate_limited"
+    assert detail["params"] == {"retry_after_seconds": wait}
+    assert detail["message"].startswith("Too many requests.")
 
 
 def test_config_requires_captcha_in_deployed_env():

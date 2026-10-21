@@ -10,6 +10,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { en } from '../i18n/locales/en';
 import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import { messages as de } from '../i18n/locales/de';
+import { messages as fr } from '../i18n/locales/fr';
+import { messages as es } from '../i18n/locales/es';
+import { messages as ptBR } from '../i18n/locales/pt-BR';
+import { messages as ja } from '../i18n/locales/ja';
 import { interpolate } from '../i18n/interpolate';
 import { setActiveFormatLocale } from '../i18n/formatLocale';
 import type { MainMessageKey, MessageKey } from '../i18n/messages';
@@ -19,6 +23,7 @@ import {
 	INVOICE_STALE_APPROVAL,
 	INVOICE_STALE_EDIT,
 	PLAN_FEATURE_REQUIRED,
+	RATE_LIMITED,
 	SIGNUP_EMAIL_HAS_WORKSPACE,
 	codedRefusalText,
 	localizeApiDetail,
@@ -629,5 +634,65 @@ describe('the self-service signup refusals (issue #635 finding 18)', () => {
 		expect(refusalField({ field: 'admin_email' })).toBe('admin_email');
 		expect(refusalField({})).toBeNull();
 		expect(refusalField({ field: 3 })).toBeNull();
+	});
+});
+
+describe('the shared rate limiter’s 429 (`rate_limited`)', () => {
+	it('states the wait in seconds, pluralised, in the reader’s language', () => {
+		expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: 1 }, enT)).toBe(
+			'Too many attempts. Wait 1 second and try again.'
+		);
+		expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: 42 }, enT)).toBe(
+			'Too many attempts. Wait 42 seconds and try again.'
+		);
+		expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: 42 }, deT)).toBe(
+			'Zu viele Versuche. Warten Sie 42 Sekunden und versuchen Sie es dann erneut.'
+		);
+	});
+
+	it('rounds a longer wait UP to whole minutes, then whole hours', () => {
+		const say = (s: number) => codedRefusalText(RATE_LIMITED, { retry_after_seconds: s }, enT);
+		expect(say(60)).toBe('Too many attempts. Wait 1 minute and try again.');
+		// 61 s is not "1 minute": the reader would come back too early.
+		expect(say(61)).toBe('Too many attempts. Wait 2 minutes and try again.');
+		expect(say(3540)).toBe('Too many attempts. Wait 59 minutes and try again.');
+		// Rounds to 60 minutes → said as the hour it is.
+		expect(say(3541)).toBe('Too many attempts. Wait 1 hour and try again.');
+		expect(say(3600)).toBe('Too many attempts. Wait 1 hour and try again.');
+		expect(say(3601)).toBe('Too many attempts. Wait 2 hours and try again.');
+	});
+
+	it('states it in every shipped locale', () => {
+		for (const [locale, messages] of [
+			['fr', fr],
+			['es', es],
+			['pt-BR', ptBR],
+			['ja', ja]
+		] as const) {
+			const t = translator(messages, locale);
+			for (const s of [5, 300, 7200]) {
+				const text = codedRefusalText(RATE_LIMITED, { retry_after_seconds: s }, t);
+				expect(text, `${locale} ${s}s`).toBeTruthy();
+				expect(text).not.toContain('{');
+				expect(text).not.toContain('Too many');
+			}
+		}
+	});
+
+	it('falls back to the server sentence for a missing or malformed wait', () => {
+		for (const bad of [undefined, null, 0, -5, 1.5, '30']) {
+			expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: bad }, enT)).toBeNull();
+		}
+	});
+
+	it('reaches the transport from a raw limiter detail', () => {
+		const raw = {
+			code: 'rate_limited',
+			message: 'Too many requests. Please wait 90 seconds before trying again.',
+			params: { retry_after_seconds: 90 }
+		};
+		expect(localizeApiDetail(raw, deT)).toBe(
+			'Zu viele Versuche. Warten Sie 2 Minuten und versuchen Sie es dann erneut.'
+		);
 	});
 });

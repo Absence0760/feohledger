@@ -325,4 +325,42 @@ test.describe('coded refusals, read in German', () => {
 			`Wir haben einen Bestätigungslink an ${FORM.email} gesendet. Klicken Sie innerhalb von 24 Stunden darauf, um Ihren Arbeitsbereich fertig einzurichten.`
 		);
 	});
+
+	// The shared limiter's 429 (`backend/app/services/rate_limit.py`) is coded
+	// `rate_limited` with the Retry-After wait as a param, so it is stated in
+	// German too — in the banner, since it is about no one field — and the
+	// wait is said in whole minutes, rounded up. The body is exactly what the
+	// limiter serializes (pinned in backend/tests/test_rate_limit_security.py).
+	test('a rate-limited submit says how long to wait, in German, in the banner', async ({
+		page
+	}) => {
+		await stubCaptcha(page, {
+			start: () => ({
+				status: 429,
+				json: {
+					detail: {
+						code: 'rate_limited',
+						message: 'Too many requests. Please wait 1790 seconds before trying again.',
+						params: { retry_after_seconds: 1790 }
+					}
+				}
+			})
+		});
+		await page.goto('/signup');
+		await page.locator('#signup-company').fill(FORM.company);
+		await page.locator('#signup-slug').fill(FORM.slug);
+		await page.locator('#signup-name').fill(FORM.name);
+		await page.locator('#signup-email').fill(FORM.email);
+		await expect(page.locator('small.hint.ok')).toBeVisible();
+		await captchaEvent(page, 'solve', 't');
+		await page.locator('form.signup-form button[type="submit"]').click();
+
+		await expect(page.locator('.error')).toHaveText(
+			'Zu viele Versuche. Warten Sie 30 Minuten und versuchen Sie es dann erneut.'
+		);
+		await expect(page.locator('body')).not.toContainText('Too many requests');
+		// Nothing was refused on a field: every field keeps its value, none is marked.
+		await expect(page.locator('#signup-slug')).toHaveValue(FORM.slug);
+		await expect(page.locator('[aria-invalid="true"]')).toHaveCount(0);
+	});
 });

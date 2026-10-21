@@ -168,6 +168,39 @@ async def test_rate_limit_429_includes_retry_after_header(fake_redis):
     assert 1 <= retry_after <= 60
 
 
+@pytest.mark.asyncio
+async def test_rate_limit_429_is_a_coded_refusal_stating_the_wait(fake_redis):
+    """The 429's detail is the coded `rate_limited` refusal, so a client states
+    the wait in the reader's language (issue #635 finding C). The wait it names
+    is the Retry-After header's own figure, and the English message keeps the
+    sentence a client that reads `detail` as text has always shown."""
+    from app.services.rate_limit import RATE_LIMITED, RateLimitExceeded, check_rate_limit
+
+    for _ in range(5):
+        await check_rate_limit("signup", _fake_request(), limit=5, window_seconds=60)
+    with pytest.raises(RateLimitExceeded) as exc:
+        await check_rate_limit("signup", _fake_request(), limit=5, window_seconds=60)
+    detail = exc.value.detail
+    wait = int(exc.value.headers["Retry-After"])
+    assert detail == {
+        "code": RATE_LIMITED,
+        "message": f"Too many requests. Please wait {wait} seconds before trying again.",
+        "params": {"retry_after_seconds": wait},
+    }
+
+
+def test_rate_limit_refusal_carries_nothing_beyond_the_wait():
+    """Which bucket tripped, its limit and its count stay server-side: the
+    params are exactly the Retry-After figure, for every limiter."""
+    from app.services.rate_limit import RateLimitExceeded
+
+    exc = RateLimitExceeded(42)
+    assert exc.status_code == 429
+    assert exc.headers == {"Retry-After": "42"}
+    assert set(exc.detail) == {"code", "message", "params"}
+    assert exc.detail["params"] == {"retry_after_seconds": 42}
+
+
 # ---------------------------------------------------------------------------
 # Bucket isolation
 # ---------------------------------------------------------------------------

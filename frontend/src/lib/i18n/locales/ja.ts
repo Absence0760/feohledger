@@ -3769,6 +3769,11 @@ export const messages = {
 	'refusal.signupLinkInvalid': "この確認リンクは無効か、有効期限が切れています。もう一度サインアップしてください。",
 	'refusal.signupUnavailable': "ワークスペースの作成は一時的に利用できません。しばらくしてからもう一度お試しください。",
 	'refusal.signupProvisioningFailed': "ワークスペースの作成中に問題が発生しました。サポートにお問い合わせください。",
+	// The shared limiter's 429 (`services/rate_limit.py`, `rate_limited`): the wait,
+	// rounded up to the largest whole unit, never which limit tripped.
+	'refusal.rateLimitedSeconds': "試行回数が多すぎます。{n, plural, other {#秒}}待ってから、もう一度お試しください。",
+	'refusal.rateLimitedMinutes': "試行回数が多すぎます。{n, plural, other {#分}}待ってから、もう一度お試しください。",
+	'refusal.rateLimitedHours': "試行回数が多すぎます。{n, plural, other {#時間}}待ってから、もう一度お試しください。",
 	'csvImport.result.summary': '{imported}件をインポート、{skipped}件をスキップ',
 	'csvImport.toast.failed': 'インポートに失敗しました',
 	'csvImport.toast.partial': '{imported}件をインポート、{skipped}件をスキップしました。詳細は下記をご覧ください',

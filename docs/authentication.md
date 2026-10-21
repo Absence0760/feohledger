@@ -421,6 +421,15 @@ Four properties make this safe to put in front of a login form:
 - **Tenant-scoped on the portal.** A vendor address is unique only *within* a
   tenant DB; keying on the address alone would let one tenant's traffic throttle
   another tenant's supplier.
+- **One answer for both axes.** Every 429 either axis raises is the same
+  `RateLimitExceeded`: the `Retry-After` header plus the coded refusal
+  `{code: "rate_limited", message, params: {retry_after_seconds}}`, where the
+  param is the header's own figure. Nothing in it says which bucket tripped, its
+  limit or its count, so the body cannot tell an identity budget from an IP cap
+  (or a known account from an unknown one) any more than the old English
+  sentence could. The web client states the wait in the reader's language
+  (`frontend/src/lib/api/codedRefusals.ts`); a client that reads `detail` as
+  text keeps the English `message`.
 
 **Accepted trade-off:** because the bucket is keyed on the identity, someone who
 knows an address can burn that account's *password* budget and delay a
