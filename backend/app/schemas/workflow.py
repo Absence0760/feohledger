@@ -78,7 +78,7 @@ class ErpExportStepConfig(BaseModel):
     export_format: str = "json"  # "json", "xml", "csv", "cxml", "edi"
     # Off unless set: every save runs a step through this model and stores the
     # dump, so a True default would arm the push for anyone who saved a
-    # workflow the builder showed with the switch off (decisions §302).
+    # workflow the builder showed with the switch off (decisions §304).
     auto_send_on_approval: bool = False
     include_line_items: bool = True  # include line item details in the payload
     include_attachments: bool = False  # include PDF file URL in the payload

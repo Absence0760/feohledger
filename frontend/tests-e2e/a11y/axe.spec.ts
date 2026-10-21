@@ -309,7 +309,7 @@ test.describe('accessibility — public surfaces on the no-tenant origin (WCAG 2
 	test('marketing landing (/) has no axe violations', async ({ page }) => {
 		await page.goto('/');
 		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-		await expect(page.locator('.stat-value').first()).toHaveText('11');
+		await expect(page.locator('.stat-value').first()).toHaveText('12');
 		await expectNoA11yViolations(page);
 	});
 

@@ -292,7 +292,7 @@ _ACTION_PHRASES: dict[str, tuple[str, bool]] = {
     "invoice.erp_confirmed": ("accepted by the ERP", _PASSIVE),
     "invoice.erp_failed": ("failed to post to the ERP", _ACTIVE),
     # Approval was configured to start the push and a gate refused it; the
-    # invoice stayed `approved` (decisions §302).
+    # invoice stayed `approved` (decisions §304).
     "invoice.erp_auto_send_refused": ("held back from the automatic ERP send", _PASSIVE),
     "invoice.peppol_sent": ("sent over PEPPOL", _PASSIVE),
     "invoice.peppol_send_failed": ("failed to send over PEPPOL", _ACTIVE),

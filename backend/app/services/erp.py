@@ -26,6 +26,7 @@ from app.services.erp_link_realm import (
     legacy_links_trusted,
     live_link_clause,
 )
+from app.services.erp_status_sync import status_sync_active
 from app.services.gl_chart import resolve_erp_account_ids
 from app.services.workflow_engine import (
     complete_workflow,
@@ -484,13 +485,31 @@ async def send_to_erp_internal(
                 action_name="invoice.erp_confirmed",
                 details={"erp_reference": erp_ref},
             )
-            await transition_invoice(
-                db,
-                invoice,
-                InvoiceStatus.done,
-                actor_id=actor_id,
-                action_name="invoice.completed",
-            )
+            if status_sync_active(erp_config):
+                # The ERP reports this bill's payment status back to us
+                # (webhooks + the reconciliation sweep), and our payments are
+                # written back to it, so the bill stays PAYABLE here: a bill
+                # paid in the ERP reaches `paid` through the ERP-paid path and
+                # leaves the payment queue (decisions §295).
+                await transition_invoice(
+                    db,
+                    invoice,
+                    InvoiceStatus.posted_in_erp,
+                    actor_id=actor_id,
+                    action_name="invoice.erp_status_posted_in_erp",
+                    details={"erp_reference": erp_ref, "erp_status": "confirmed_by_push"},
+                )
+            else:
+                # Nothing would ever tell us the ERP paid this bill, so it is
+                # the ERP's to pay: leaving it payable here invites a double
+                # payment.
+                await transition_invoice(
+                    db,
+                    invoice,
+                    InvoiceStatus.done,
+                    actor_id=actor_id,
+                    action_name="invoice.completed",
+                )
 
             if instance:
                 instance.state_data = {
@@ -694,6 +713,9 @@ async def _call_erp(
             # transitions commit: a failure between the two would otherwise
             # leave a confirmed bill reading as never posted.
             new_state["erp_reference"] = reference
+            # The ERP company the bill lives in: an ERP's ids are per company,
+            # so the status sync matches a bill id only within it (§295).
+            new_state["erp_realm"] = connection_realm(config)
         if result.pending_job_id != payload.pending_job_id:
             new_state[PENDING_JOB_KEY] = result.pending_job_id
         if result.success:

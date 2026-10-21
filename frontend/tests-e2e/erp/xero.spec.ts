@@ -4,6 +4,7 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	currentTenantSlug,
+	deleteVendorsWhere,
 	expect,
 	signInAndWait,
 	tenantBase,
@@ -25,6 +26,7 @@ import {
 	loginAsSecondActor,
 	sendToErpAndAwaitTerminal,
 	syncErpGlAccounts,
+	syncErpPurchaseOrders,
 	syncErpVendors,
 	testErpConnection
 } from './helpers';
@@ -52,7 +54,10 @@ import {
  *   3. Fail closed — an unlinked vendor, and a bill with no invoice / due
  *      date, are refused before anything is posted (Xero needs both dates;
  *      the adapter never invents them).
- *   4. Disconnect — clears the connection.
+ *   4. Supplier + PO sync — a contact Xero does not yet flag IsSupplier (it
+ *      has only been sent POs) still syncs as a vendor, and every PO links to
+ *      its vendor by ContactID. Both regressed in the live Demo Company test.
+ *   5. Disconnect — clears the connection.
  */
 
 const PROVIDER = 'xero';
@@ -113,7 +118,7 @@ type WorkflowStepShape = { type: string; config?: Record<string, unknown> };
 /** Run `body` with the tenant's default workflow's ERP step set to auto-send
  *  on approval (or not), through the same PATCH the builder saves with, and
  *  put the steps back afterwards. An invoice freezes the workflow when it is
- *  created (decisions §302 reads that snapshot), so `body` creates its own. */
+ *  created (decisions §304 reads that snapshot), so `body` creates its own. */
 async function withAutoSend(page: Page, on: boolean, body: () => Promise<void>): Promise<void> {
 	const headers = await authedTenantHeaders(page);
 	const list = await page.request.get(`${API_BASE}/api/workflows?page_size=100`, { headers });
@@ -348,12 +353,32 @@ test.describe('/erp xero adapter against fake-erp', () => {
 		});
 	});
 
+	test('a supplier only ordered from syncs, and each PO links to its vendor', async ({
+		page
+	}) => {
+		// Start without the PO-only supplier or its POs, so an earlier run's
+		// rows cannot stand in for what this sync has to produce.
+		deleteVendorsWhere(`erp_vendor_id = 'xero-contact-3'`, currentTenantSlug());
+		await syncErpVendors(page);
+		const { adapter, pos } = await syncErpPurchaseOrders(page);
+		expect(adapter).toBe(PROVIDER);
+		const vendorOf = (number: string) => pos.find((po) => po.po_number === number)?.vendor_name;
+		// Xero marks a contact IsSupplier only once it has a bill, so this one
+		// is reached through its unbilled POs (an authorised one and a draft).
+		expect(vendorOf('PO-XERO-403')).toBe('Fake Xero PO-only Supplier');
+		expect(vendorOf('PO-XERO-404')).toBe('Fake Xero PO-only Supplier');
+		expect(vendorOf('PO-XERO-401')).toBe(SUPPLIER);
+	});
+
 	test('disconnect clears the connection', async ({ page }) => {
 		const headers = await authedTenantHeaders(page);
 		const resp = await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, {
 			headers
 		});
-		expect((await resp.json()).disconnected).toBe(true);
+		// The grant is revoked at Xero, not just forgotten here — otherwise the
+		// org stays connected on Xero's side (the live Demo Company showed it
+		// "Already connected" on the next consent).
+		expect(await resp.json()).toEqual({ disconnected: true, revoked: true });
 		const status = await oauthStatus(page);
 		expect(status.connected).toBe(false);
 	});

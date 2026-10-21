@@ -589,7 +589,7 @@ async def approve_invoice(
     # Every control above has passed and the invoice is `approved`. When its
     # frozen workflow says "send to the ERP on approval", the push is queued
     # for AFTER the caller commits, in a transaction of its own, so a plan or
-    # duplicate refusal there can never undo this approval (decisions §302).
+    # duplicate refusal there can never undo this approval (decisions §304).
     from app.services.erp_send import schedule_auto_send
 
     schedule_auto_send(db, invoice, instance, actor_id=actor_id)

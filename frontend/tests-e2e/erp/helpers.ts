@@ -161,6 +161,7 @@ export async function syncErpGlAccounts(page: Page): Promise<void> {
 /** A PO as `GET /api/purchase-orders` lists it. */
 export type SyncedPo = {
 	po_number: string;
+	vendor_name: string | null;
 	total: number | string;
 	currency: string | null;
 	status: string;
@@ -296,11 +297,29 @@ export async function sendToErpAndAwaitTerminal(page: Page, invoiceId: string): 
 	await expect
 		.poll(async () => (await getInvoice(page, invoiceId)).status, {
 			timeout: 20_000,
-			message: 'invoice never reached a terminal ERP status (done/failed)'
+			message: 'invoice never reached a terminal ERP status (done/posted_in_erp/failed)'
 		})
-		.toMatch(/^(done|failed)$/);
+		.toMatch(/^(done|posted_in_erp|failed)$/);
 
 	return (await getInvoice(page, invoiceId)).status;
+}
+
+/** Is QuickBooks status sync-back on in the backend under test
+ *  (`FEOH_ERP_STATUS_SYNC_ENABLED`, decisions §295)? Read off the admin sweep
+ *  health report, which names every sweep with its `enabled` flag. */
+export async function qboStatusSyncEnabled(page: Page): Promise<boolean> {
+	const resp = await page.request.get(`${API_BASE}/api/health/sweeps`, {
+		headers: await authedTenantHeaders(page)
+	});
+	if (!resp.ok()) return false;
+	const { sweeps } = (await resp.json()) as { sweeps: { name: string; enabled: boolean }[] };
+	return sweeps.some((s) => s.name === 'erp-status-sync' && s.enabled);
+}
+
+/** Where a confirmed QuickBooks push lands: `posted_in_erp` (still payable —
+ *  QuickBooks reports its payment back) with status sync on, else `done`. */
+export async function qboPushLanding(page: Page): Promise<'done' | 'posted_in_erp'> {
+	return (await qboStatusSyncEnabled(page)) ? 'posted_in_erp' : 'done';
 }
 
 /** Read the ERP document id the adapter returned for a sent invoice, off the

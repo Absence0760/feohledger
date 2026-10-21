@@ -466,7 +466,7 @@ async def send_to_erp(
     # The plan gate (a LIVE ERP needs the plan, decisions §258/§281), the row
     # lock, the export gate (an open duplicate / fraud flag, §286), the
     # transition, the commit, then the dispatch — the sequence every push
-    # shares, approval's auto-send included (`services/erp_send`, §302). A
+    # shares, approval's auto-send included (`services/erp_send`, §304). A
     # refusal is a 402 / 409 with the invoice still `approved`.
     invoice = await start_erp_send(
         db,
@@ -675,7 +675,7 @@ async def complete_invoice(
             if instance:
                 await advance_workflow(db, instance, "erp_push", action="auto_approved")
             # The workflow may say "send to the ERP on approval" (decisions
-            # §302): queued for after this commit, in its own transaction.
+            # §304): queued for after this commit, in its own transaction.
             schedule_auto_send(db, invoice, instance, actor_id=user.id)
             await db.commit()
             await db.refresh(invoice)

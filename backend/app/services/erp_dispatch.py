@@ -26,7 +26,7 @@ async def dispatch_erp(
     ``inline`` awaits the local send instead of scheduling it on this loop.
     ``actor_id`` is None when no person started the push: an extraction
     auto-approval of an invoice that arrived by email, auto-sent on approval
-    (decisions §302).
+    (decisions §304).
     """
     if settings.erp_mode == "lambda":
         # Off the event loop: boto3 is synchronous, so the client build (which

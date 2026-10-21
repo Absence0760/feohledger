@@ -122,7 +122,7 @@ def test_send_to_sqs_message_body_and_group_id_shape(monkeypatch):
 
 async def test_dispatch_erp_inline_awaits_the_send_on_a_worker_loop(monkeypatch):
     """The extraction worker auto-sends an invoice it auto-approved (decisions
-    §302) from its own short-lived loop, in-process or in Lambda, which closes
+    §304) from its own short-lived loop, in-process or in Lambda, which closes
     the moment the job returns. A task started there would be abandoned
     mid-send, so the caller asks for the send to be awaited inline."""
     monkeypatch.setattr(settings, "erp_mode", "local")

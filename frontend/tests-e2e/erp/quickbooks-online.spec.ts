@@ -17,6 +17,7 @@ import {
 	deleteInvoice,
 	erpFailureFromAudit,
 	erpReferenceFromAudit,
+	qboPushLanding,
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
 	syncAndListGlAccounts,
@@ -170,7 +171,7 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe(await qboPushLanding(page));
 
 			const billId = await erpReferenceFromAudit(page, inv.id);
 			const bill = await billFromFake(page, billId);
@@ -208,7 +209,7 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 			glAccount: 'Job Expenses:Job Materials'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe(await qboPushLanding(page));
 			const bill = await billFromFake(page, await erpReferenceFromAudit(page, inv.id));
 			expect(
 				bill.Line.map(

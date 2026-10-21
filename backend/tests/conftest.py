@@ -1428,3 +1428,15 @@ async def _dispose_module_global_engines() -> None:
     from app.database import dispose_all_engines
 
     await dispose_all_engines()
+
+
+@pytest.fixture(autouse=True)
+def _reset_erp_unreachable_hold():
+    """The dispatch-time ERP check's per-org "QuickBooks unreachable" hold
+    (decisions §296) is process state, and realdb org ids are stable within a
+    slot: one test's failed read must not hold the next test's payments."""
+    from app.services import erp_status_sync
+
+    erp_status_sync._unreachable_until.clear()
+    yield
+    erp_status_sync._unreachable_until.clear()

@@ -4,7 +4,7 @@
 itself when the workflow snapshot says ``auto_send_on_approval`` all go through
 :func:`start_erp_send`, so the gates cannot drift between them. The auto path
 runs in its own transaction after the approval has committed, so a refusal
-there can never undo the approval (docs/decisions.md §302).
+there can never undo the approval (docs/decisions.md §304).
 """
 
 from __future__ import annotations

@@ -12913,6 +12913,34 @@ the page from the CFO. `deps.require_role_or_permission` admits either, so the
 system roles keep exactly what they had, and the nav row ORs the same two
 permissions.
 
+## 294. The landing page stays dark as brand, not as a gap waiting for a light version (2026-10-20)
+
+**§289 left the marketing page dark for a reason of cost; this makes it the
+decision.** §289 kept the landing page on the dark palette because a light
+version is a design job (a re-render of the §180 tally on a light ground, new
+grain, new glass-panel and hero-card treatments), not a token swap. It did not
+say whether that job should ever be done, and without an answer the question
+comes back every time someone notices that a light-mode visitor sees a dark
+landing page and then a light sign-in page.
+
+**The answer is no, until evidence says otherwise.** The landing page is the
+one surface composed as a picture, and dark is its brand: the render, the grain
+and the panels were designed together on navy and have passed the accessibility
+audit as they stand. A visitor sees it once or twice before signing up, a dark
+marketing site in front of a light product is a common and unremarkable
+pairing, and a day spent on a second version moves nothing for the first pilot
+customer. Everything a reader spends time in already follows the theme (§289:
+the app, the auth shell, signup, the legal pages, the help centre, the supplier
+portal), so the theme preference is honoured wherever it matters.
+
+**What would reopen it:** measured drop-off of light-mode visitors between the
+landing page and sign-in or signup, or repeated feedback that the switch is
+jarring. Either is a reason to do the design job properly (a light render of
+the tally, panel treatments composed for a light ground, contrast re-measured),
+following the visitor's theme through the existing `data-theme-scope`
+mechanism rather than a page-local toggle. Not a reason: consistency for its
+own sake, or a token swap that leaves the dark-composed render on white.
+
 ## 300. Strings only some routes render load with those routes, as lazy catalogue slices in every locale (2026-10-20)
 
 (Numbered 300 because §292–§299 are held by pull requests still in flight.)
@@ -13014,7 +13042,303 @@ Tests: `frontend/src/lib/i18n/slices.test.ts`,
 `test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
 settings slice for the form labels they check.
 
-## 302. Approval sends to the ERP when the workflow says so, and a refusal leaves the invoice approved (2026-10-20)
+## 295. QuickBooks status flows back, our payments flow there, and a dying connection says so (QuickBooks Phases 3–5, migration 0117, 2026-10-20)
+
+**Context.** Phases 0–2 of the QuickBooks Online adapter (§269–§270, §284–§287)
+push bills. Three things were open (`backend/docs/quickbooks-online-adapter.md`):
+a bill paid or deleted in QuickBooks never reached FeohLedger, a payment made in
+FeohLedger never reached QuickBooks, and nothing warned before the refresh token
+expired. Reading the money path to scope them found the premise missing: a
+confirmed push walked `sent_to_erp → done` (since the `done` status was added),
+so a pushed invoice was never payable here at all, and a QuickBooks "paid" had
+nothing to move. The double-payment risk the plan worried about could not occur
+— and neither could the feature it was meant to protect.
+
+**Decision — where a push lands.** A confirmed push lands at `posted_in_erp`
+(payable) instead of `done` **only when the ERP's payment status provably comes
+back**: `FEOH_ERP_STATUS_SYNC_ENABLED` on AND an adapter with
+`supports_status_sync` (QuickBooks Online). `services/erp_status_sync.
+status_sync_active` is the one predicate `send_to_erp_internal` asks. Off (the
+default, like every outbound sweep), the push still closes at `done`: leaving a
+bill payable here while nothing would ever tell us QuickBooks paid it is the
+double payment. The same flag starts the change-data-capture sweep, so the
+landing can never be on without its guaranteed channel. The push records
+`state_data.erp_realm` beside `erp_reference`: QuickBooks numbers bills per
+company (§284), so a bill id only names a bill within its realm.
+
+Rejected: *landing at `posted_in_erp` for every ERP* (no other adapter reports
+payments back, so every pushed invoice would sit payable while the ERP paid it);
+*gating on the webhook token alone* (Intuit does not guarantee delivery; the CDC
+sweep is the guaranteed channel); *a per-tenant "who pays" setting* (a second
+switch that can contradict the first; nothing here stops a QuickBooks tenant
+paying in either place, and the sync handles both).
+
+**Decision — inbound (Phase 3).**
+
+- `POST /api/erp/webhook/quickbooks`, declared before `/webhook/{erp_type}`.
+  The raw body is verified with the Intuit app's ONE verifier token
+  (`FEOH_ERP_QBO_WEBHOOK_VERIFIER_TOKEN`, base64 HMAC-SHA256 in
+  `intuit-signature`, `webhook_security.verify_hmac_sha256_base64`) before any
+  parse; empty token = every delivery refused, no fallback. CloudEvents only
+  (`qbo.bill.*`, `qbo.billpayment.*`); the event's `data` is never trusted —
+  the bill is read back. Each event is claimed by its id before the 204 goes
+  back (a dedup store we cannot reach is a bodyless 503 so Intuit redelivers);
+  the reads and the transition run after the response, on the request's loop
+  (`payment_erp_sync`'s shape), because Intuit wants an answer within seconds
+  and an event costs up to three reads of the company. A failed event releases
+  its claim. Every rejection is a silent 204.
+- **The realm index is a unique expression index on the OAuth block, not an
+  `erp_connections` table** (migration 0117, control plane:
+  `uq_organizations_erp_oauth_company` on `settings.erp.oauth.(provider,
+  external_tenant_id)`). The block is the one record of the connection, written
+  only by the callback, the refresher and disconnect; a table would be a copy
+  all three must keep in step. The index serves the webhook's routing and makes
+  "one tenant per company" a database rule (the callback maps the
+  IntegrityError of a racing second tenant to `already_linked`). The migration
+  refuses a control plane already holding two tenants on one company rather
+  than pick one. A tenant that switched to another ERP keeps the block (§270) but
+  is not synced.
+- The CDC sweep (`erp-status-sync`) is stateless: every tick asks each company
+  for changes over an overlapping window (`FEOH_ERP_STATUS_SYNC_LOOKBACK_HOURS`,
+  72 h). Re-applying a report is a no-op, so no cursor is stored; a full CDC page
+  raises rather than apply part (§287's "absence is evidence only in a whole
+  listing").
+- `apply_bill_report` matches a bill to its invoice by our `PrivateNote` marker
+  AND the invoice's `erp_reference` (a deleted bill, which cannot be read, by
+  `erp_reference` within the recorded realm only), locks the invoice, and acts
+  by the table in `quickbooks-online-adapter.md` § Phases 3–5 as built. Paid by a
+  person → the existing ERP-paid path (recorded as paid outside, `source=erp`).
+  Paid there while a FeohLedger payment is scheduled, part-paid there, or deleted
+  there while payable here → the payment-BLOCKING `payment_reconciliation`,
+  because each lets a run pay money not owed; the other disagreements →
+  `erp_reconciliation`. **A bill paid only by our own write-back is not news**:
+  the adapter tells our BillPayments (marker) from a person's.
+- The followup "an ERP-reported payment is dated the day the webhook arrives"
+  is the same code path, so it is closed here: the generic webhook takes
+  optional `paid_on` / `payment_method`, QuickBooks supplies the paying
+  BillPayment's `TxnDate` / `PayType`, both validated like the user's own record
+  (a real date not in the future; a recordable rail, never `virtual_card`) and
+  falling back to arrival date / NULL. QuickBooks `CreditCard` needed a rail
+  that is a card but not ours: **`card`**, recorded only (refused on a payment
+  FeohLedger would dispatch), excluded from the 1099 like `virtual_card`.
+
+**Decision — outbound (Phase 4).** `payment_erp_sync` writes a settled payment
+back once its invoice is `paid`, after that commit (no lock across Intuit), only
+for a bill pushed under the CURRENT realm. Idempotent on the payment id in the
+bill's two layers (find our own marker on the bill's BillPayments; `requestid`).
+A replay of a payment someone voided in QuickBooks is refused
+(`bill_payment_voided`) rather than reported written — re-posting would overrule
+them. The pay-from account is the org's choice, as GL codes from our chart
+(`bill_payment_bank_account` / `bill_payment_card_account`, resolved under the
+realm): QuickBooks needs a bank account for `Check` and a card account for
+`CreditCard`, and a guess books money from the wrong account. Never more than the
+bill's open balance (`payment_exceeds_balance`). Refusals are coded on the
+existing registry (`intuit_code`, never `Message`/`Detail`), audited
+`payment.erp_post_failed`, flagged `erp_reconciliation`; they never undo the
+transition, since the money moved. Open question 3 (early-pay discounts) is
+answered conservatively: post what was paid and flag the balance left open for
+the bookkeeper — no vendor credit is created on their behalf. A FeohLedger void
+voids our BillPayment (flagged when it cannot).
+
+**Decision — the connection (Phase 5).** The refresher already records the
+expiry Intuit returns on every rotation. The `erp-connection-health` sweep (off
+by default) **first keeps a quiet connection alive** — a token with fewer than 45
+days left is refreshed through the refresher's own lock and compare-and-swap
+(`force_refresh`) — and only then warns: admins get an in-app + email
+`erp_connection_expiring` notice at each lead (30/7/1 days) still crossed after
+the refresh, once per (reported expiry, lead), the marker written after the
+send so a crash repeats a warning rather than losing one. A connection the
+provider refused gets one "reconnect" notice; the refresher now records why
+(`reconnect_reason`: expired past the reported expiry, else revoked), which
+`/status` and the ERP panel state, with Reconnect offered from the first lead.
+Warning without refreshing was rejected: Intuit rolls the lifetime forward on a
+refresh, so most "expiring" connections are only idle, and a notice for those
+trains admins to ignore the one about the hard cap.
+
+**Hardened in review, before merge.** The money-path review found four ways
+the first cut could still pay a bill twice, each closed here:
+
+- *A vendor credit is not a void.* QuickBooks records a credit applied to a bill
+  as a $0 BillPayment; reading every $0 BillPayment as voided made a
+  fully-credited bill look "paid only by our write-back" and left it payable.
+  "Settled outside FeohLedger" is now judged from the BALANCE (`TotalAmt −
+  Balance` beyond what our marked BillPayments applied), and a credit-settled
+  bill opens the blocking flag instead of being booked as a (1099-reportable)
+  cash payment.
+- *A stateless window loses multi-day gaps.* The sweep keeps a per-connection
+  high-water mark of its last COMPLETE pass and reads from it; with no mark, a
+  mark past CDC's 30 days, or a CDC answer too full to trust, it reads back
+  every bill still payable here instead. A reconnect starts with no mark.
+- *Voiding an ERP-reported payment* reopened the invoice while QuickBooks still
+  showed the bill paid and would never report it again: the void now opens the
+  blocking flag in the same transaction.
+- *A void's ERP leg must survive a crash*, so the pending ERP void is written in
+  the void's transaction and the sweep finishes it; and the write-back re-reads
+  the payment's status, posts the settled amount, and runs for an accepted
+  short settlement too. A run item may not name the record-only `card` rail.
+
+**The remaining window is closed at dispatch (§296):** between a payment made
+in QuickBooks and its webhook (seconds) or the next sweep, a FeohLedger run
+could still execute the same bill; every dispatch now re-reads the bill live.
+Status sync and connection health are separate flags but meant to run
+together: a lost connection is skipped by the sweep and only the health sweep
+tells anyone.
+
+## 296. A payment re-reads its QuickBooks bill immediately before the rail, and an unreadable bill is held (2026-10-20)
+
+**Context.** §295 brings a payment made in QuickBooks back to us by webhook
+(seconds) or by the change-data-capture sweep (hours), and only then does the
+invoice leave our payment queue. A run approved before that — or the second
+item of a run whose first item is at the rail when the bookkeeper pays — still
+went out: the bill was paid twice, and the blocking flag the ERP-paid path
+raises afterwards only stopped what had not yet been dispatched. No local
+check can close this, because the fact that changed lives in QuickBooks.
+
+**Decision.** `services/erp_status_sync.erp_bill_dispatch_refusal` runs at
+every point where money is about to move, with the invoice row locked:
+`api/payments._execute_single_payment` — which every rail dispatch reaches
+(`/execute`, `/resume`, `/retry-failed`, a standalone payment,
+`/compliance/release`, the virtual-card leg) — after
+`payment_runs.dispatch_preflight` has re-confirmed the local facts (still
+payable, no open payment-blocking exception, vendor active, amount still owed)
+and BEFORE the rail adapter; the NACHA export, since the bank's upload of the
+file is the money moving; and `POST /api/cards/generate` before it mints, since
+a minted card is spendable the moment it exists.
+
+- It reads only for an ERP whose bills sync back (`status_sync_active`) and an
+  invoice pushed there under the CURRENT connection realm. An invoice never
+  pushed, or pushed before §295 (closed at `done`, never payable here), is not
+  read.
+- **Open** — nothing taken off the bill by anyone — pays. **Anything else**
+  (paid, part-paid, credited, deleted, a state we cannot classify) refuses the
+  item `erp_bill_not_open:<state>` and opens the blocking
+  `payment_reconciliation` in the same transaction, so neither a later run nor
+  `/retry-failed` pays it until a person clears it. The rest of the run
+  proceeds: one bill's state says nothing about another's.
+- **Paid only by our own write-back while a FeohLedger void of it is recorded
+  as pending** is **held** `erp_bill_void_pending`, retry-safe, with no
+  exception: nothing outside us paid it, the pending-void sweep resolves it,
+  and a flag a person must clear would be a false alarm. "Paid only by us"
+  with NO pending void is unexplained and takes the blocking path.
+- **A bill that can never be read under this connection** — the push named no
+  document, recorded no company, or lives in a company other than the one
+  connected now (a sandbox → production switch) — is held
+  `erp_bill_unlinked:<why>` with a non-blocking `erp_reconciliation`: a retry
+  cannot clear it, so the way out (record it as paid outside FeohLedger, or
+  re-post) needs an owner.
+- **When the bill cannot be vouched for right now** — a network error, an
+  Intuit 5xx/429/401, a lost connection, or a read past
+  `FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS` (10 s, the whole read: the bill and
+  its payments) — the item is **held**: refused `erp_bill_unverified`,
+  retry-safe, no exception. A connection-level failure holds that org's further
+  checks for a minute without reading, so a degraded QuickBooks costs a long
+  run one timeout, not one per item with each invoice locked; an error about
+  one bill (a 400) holds that item alone. A token refresh cut short by the
+  bound is safe: `erp_oauth.get_access_token` runs the rotation and its
+  persistence as one shielded task, so a refresh Intuit has answered is always
+  stored. Argued:
+  - *Paying blind* re-opens exactly the double payment this exists to close,
+    and the failure is most likely precisely when QuickBooks is busy or
+    degraded — month-end, when bookkeepers pay bills. A double payment is a
+    recovery from the supplier; a held payment is a day's delay that
+    `/retry-failed` ends as soon as Intuit answers, with nothing to undo.
+  - *Raising the blocking exception* on a failed read was rejected: nothing is
+    known to be wrong, and a flag that needs a person (with segregation of
+    duties) to clear an Intuit outage would train people to clear flags
+    unread. The refusal reason on the payment row, the run's partial status and
+    the audit row the dispatch loop writes for every attempt already make the
+    hold visible.
+  - *Retrying the read inline* was rejected: the invoice row lock is held, and
+    the bounded single read is what keeps that lock short.
+- **Idempotent and audited.** The check is a read plus a de-duplicated
+  exception; the refusal is recorded by the dispatch loop's per-payment
+  `payment.*` audit row like every other pre-rail refusal; both reasons are in
+  `payment_runs._RETRY_SAFE_FAILURE_PREFIXES` because no order exists at the
+  processor.
+
+**Accepted residual.** For a rail dispatch and a card mint, the read and the
+money moving are milliseconds apart, not atomic: a bill paid in QuickBooks in
+that gap still goes out, and §295's webhook then raises the blocking flag on
+anything left. Closing it would need a lock QuickBooks does not offer. **A
+NACHA file is different:** the money moves when a person uploads it to the
+bank, hours or days after the export's read, and nothing re-reads the bill in
+between. The record-only pilot's customer is asked to upload promptly; the
+export's own read is what this change can guarantee; a re-check between export
+and upload, and reading the file's bills concurrently rather than one after
+another under the run and invoice locks, are tracked in `docs/followups.md`.
+The old "refuse while the last sync is stale" idea is unnecessary — the live
+read is fresher than any sync. The check follows
+`FEOH_ERP_STATUS_SYNC_ENABLED`: an operator who turns sync off leaves
+`posted_in_erp` invoices payable with no read, by design — the flag is the
+statement that QuickBooks is in the loop.
+
+## 301. The bundle budget and the security scans gate merges through `CI gate`, called from ci.yml (2026-10-20)
+
+**What was wrong.** Branch protection on `main` requires one status check,
+`CI gate` (the `ci-gate` job in `ci.yml`), which fans in on every job in that
+file. Two workflows ran on pull requests from files of their own —
+`web-bundle-budget.yml` and `security.yml` (CodeQL Python, TypeScript/JavaScript
+and GitHub Actions, plus Trivy on the backend image) — so the gate never saw
+their results. A red one was advisory in practice: PR #611 merged with the
+budget red and left `main` failing it, though the budget file's own header said
+"a PR that pushes either metric over its budget fails".
+
+**Rejected: make them required checks too.** The budget is path-scoped. A
+required check whose workflow never triggers never reports, and GitHub holds
+the PR as "expected — waiting for status" forever. Every PR that leaves
+`frontend/` alone would have hung. That is the same reason `ci.yml` has no
+`paths-ignore` and does its scoping inside the run (the `changes` job).
+
+**The rule.** A check that lives in another workflow file gates merges only by
+being *called* from `ci.yml` (`on: workflow_call`), from a job `ci-gate` needs.
+Both files are now reusable workflows, and `ci.yml` calls them as
+`bundle-budget` and `security`.
+
+- **Path scoping moves into `changes`.** The budget's old `paths:` list
+  (`frontend/**`, its own workflow file) is the new `bundle` filter, plus
+  `ci.yml` like every other filter. An unrelated PR **skips** the caller job;
+  `ci-gate` counts `skipped` as a pass and anything else — `failure`,
+  `cancelled` — as a fail, unchanged. If `changes` itself fails, the caller is
+  skipped, but `ci-gate` needs `changes` directly, so the gate still fails.
+- **Security runs on every PR and every push to main, with no filter.** It
+  used to skip docs-only PRs (`paths-ignore`). Keeping that would need a
+  negated filter, and `dorny/paths-filter`'s default `some` quantifier cannot
+  express "anything except docs"; switching the quantifier would change every
+  other filter. CodeQL on a docs-only PR costs two minutes. Not worth a
+  second mechanism.
+- **Trivy comes along.** It is in the same file. It runs with `exit-code: 0`, so
+  only an image that fails to build (or a broken scan step) can turn it red, and
+  a backend image that does not build should block a merge.
+- **The weekly schedule stays in `security.yml`.** No commit starts a CI run on
+  Monday morning, and a full CI run to rescan for new CVEs would be waste. So
+  `security.yml` keeps `schedule` alongside `workflow_call`. Nothing else
+  triggers either file, so no job runs twice.
+- **Permissions are granted at the call site.** A called workflow's token is
+  capped by the calling job, and `ci.yml` defaults to `contents: read`, so the
+  `security` job grants `security-events: write` (SARIF upload) and
+  `actions: read` (CodeQL's workflow-run lookup) itself.
+- **The budget's steps, comments, ceilings and change log are untouched.**
+  Only the trigger changed, so the error messages that tell a contributor to
+  edit `web-bundle-budget.yml` still point at the right file.
+
+**CodeQL timeout: 10 → 20 minutes, no retries.** One CodeQL Python run hit
+the 10-minute timeout on 2026-10-20. Its log shows it was not hung. Extraction
+progressed the whole time, at about ten times the normal per-file cost: 943
+files in 8.5 minutes, where a healthy runner did 1431 in 83 seconds. Over the
+previous 60 runs the three CodeQL jobs took a median of 0.7–1.5 minutes and a
+maximum of 6.6. Ten minutes was about 2× a slow-but-healthy run, too little
+for a check that now blocks merges. Twenty absorbs a degraded runner and still
+stops a real hang long before GitHub's six-hour default. Retrying was
+rejected: a second attempt would hide a genuine hang instead of surfacing it.
+Trivy keeps 10 (median 0.9, max 3.8).
+
+**Transition note.** CodeQL keys an analysis by workflow file and job, so the
+first runs from `ci.yml` start a new configuration beside the old
+`security.yml` ones. The weekly schedule still runs from `security.yml`. Alerts
+are matched across configurations, so this changes which configuration an
+alert is reported under, not whether it is reported.
+
+## 304. Approval sends to the ERP when the workflow says so, and a refusal leaves the invoice approved (2026-10-20)
 
 **Found live.** In a Xero test, tenant `acme`'s default workflow had the ERP
 export step's `auto_send_on_approval: true`, the builder's "Auto-send on
@@ -13090,7 +13414,9 @@ admin.
 
 **What auto-send hands over.** A successful push ends the invoice at `done`,
 live ERP or mock, by hand or automatically (`erp.send_to_erp_internal`), and
-`done` is not payable here: the bill is paid from the ERP. That is the existing
+`done` is not payable here: the bill is paid from the ERP. With an ERP's status
+sync on (QuickBooks, §295) the push lands at `posted_in_erp` instead, still
+payable here, and auto-send changes nothing about that. That is the existing
 meaning of "Send to ERP"; auto-send makes it happen at approval, so with the
 switch on an approved invoice leaves FeohLedger's payment queue moments after
 approval, before anyone can schedule it directly. The builder says so under the

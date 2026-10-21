@@ -89,6 +89,9 @@ XERO_OAUTH = register_oauth_provider(
         display_name="Xero",
         authorize_url="https://login.xero.com/identity/connect/authorize",
         token_url="https://identity.xero.com/connect/token",
+        # Revoking the refresh token also removes every connection it holds,
+        # so Disconnect leaves no live grant at Xero. Form body + Basic auth.
+        revoke_url="https://identity.xero.com/connect/revocation",
         # Granular scopes: `accounting.invoices` covers invoices (bills) and
         # purchase orders; `accounting.settings.read` covers Organisation,
         # Accounts and TaxRates. `offline_access` yields the refresh token.
@@ -103,6 +106,7 @@ XERO_OAUTH = register_oauth_provider(
         client_secret_setting="erp_xero_client_secret",
         authorize_url_setting="erp_xero_authorize_url",
         token_url_setting="erp_xero_token_url",
+        revoke_url_setting="erp_xero_revoke_url",
     )
 )
 
@@ -116,6 +120,12 @@ _STATUS_MAP = {
     "VOIDED": ErpInvoiceStatus.cancelled,
     "DELETED": ErpInvoiceStatus.cancelled,
 }
+
+#: PO statuses before a bill exists. A contact on one of these may not be
+#: ``IsSupplier`` yet, so ``list_vendors`` reads them too.
+_UNBILLED_PO_STATUSES = ("DRAFT", "SUBMITTED", "AUTHORISED")
+#: ContactIDs per ``GET Contacts?IDs=`` request, to keep the URL short.
+_CONTACT_ID_BATCH = 50
 
 _PO_STATUS_MAP = {
     "DRAFT": "open",
@@ -576,10 +586,30 @@ class XeroAdapter(OAuthErpAdapter):
 
         Xero leaves ARCHIVED contacts out unless ``includeArchived`` asks for
         them, and a vendor linked to one would then look like a dead link.
+
+        Xero sets ``IsSupplier`` only once a contact has a bill, so a supplier
+        that has so far only been sent purchase orders is not one yet. Those
+        are the suppliers whose first bill AP is about to enter, so the
+        contacts on every unbilled PO are added. Like the supplier walk, that
+        read is complete or raises: the vendor sync reads absence as evidence.
         """
         rows = await self._paged_complete(
             "Contacts", {"where": "IsSupplier==true", "includeArchived": "true"}, "Contacts"
         )
+        seen = {raw.get("ContactID") for raw in rows}
+        ordered_from: list[str] = []
+        for status in _UNBILLED_PO_STATUSES:
+            pos = await self._paged_complete("PurchaseOrders", {"Status": status}, "PurchaseOrders")
+            for po in pos:
+                contact_id = (po.get("Contact") or {}).get("ContactID")
+                if contact_id and contact_id not in seen:
+                    seen.add(contact_id)
+                    ordered_from.append(contact_id)
+        for i in range(0, len(ordered_from), _CONTACT_ID_BATCH):
+            batch = ",".join(ordered_from[i : i + _CONTACT_ID_BATCH])
+            rows += await self._paged_complete(
+                "Contacts", {"IDs": batch, "includeArchived": "true"}, "Contacts"
+            )
         return [_contact_to_vendor(raw) for raw in rows if raw.get("ContactID")]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
@@ -664,6 +694,7 @@ def _xero_po_to_payload(raw: dict) -> PoPayload:
     return PoPayload(
         po_number=str(raw["PurchaseOrderNumber"]),
         vendor_name=(raw.get("Contact") or {}).get("Name"),
+        vendor_erp_id=(raw.get("Contact") or {}).get("ContactID") or None,
         total=_decimal(raw.get("Total")) or Decimal("0"),
         status=_PO_STATUS_MAP.get(str(raw.get("Status") or "").upper(), "open"),
         expected_delivery_date=delivery,
