@@ -4639,6 +4639,7 @@ export const messages = {
 	'refusal.emailCheckThrottled': "このワークスペースで最近入力されたアドレスのうち、別のワークスペースに既に属していたものが多すぎるため、ユーザーの追加とメールアドレスの変更を最大 1 時間停止しています。しばらくしてからもう一度お試しください。",
 	'refusal.workspaceCloseConfirmationMismatch': "閉鎖することを確認するため、このワークスペースのアドレスを表示どおり正確に入力してください。",
 	'refusal.workspaceCloseRefused': "このワークスペースには保管が必要な記録または他のユーザーのアカウントがあるため、ここでは閉鎖できません。閉鎖するにはサポートにお問い合わせください。",
+	'refusal.signupSlugHeld': "このワークスペースアドレスは最近閉鎖されたワークスペースのもので、しばらくの間使用できません。別のアドレスを選択してください。",
 	'refusal.workspaceCloseInProgress': "このワークスペースは既に閉鎖処理中です。",
 	'refusal.workspaceCloseAuditUnavailable': "監査記録を保存できなかったため、現在ワークスペースを閉鎖できませんでした。何も削除されていません。数分後にもう一度お試しください。",
 	'refusal.workspaceCloseIncomplete': "ワークスペースの閉鎖が完了しませんでした。もう一度お試しください。再び失敗する場合はサポートにお問い合わせください。",

@@ -86,7 +86,7 @@ from app.services.rate_limit import check_rate_limit, resolve_client_ip
 from app.services.tenant_provisioning import provision_tenant
 from app.utils.emails import email_matches, exact_email_first, looks_like_email
 from app.utils.hcaptcha import CaptchaError, verify_captcha
-from app.utils.slug import SlugError, ensure_slug_available, validate_slug_format
+from app.utils.slug import SlugError, SlugHeld, ensure_slug_available, validate_slug_format
 from app.utils.tenant_urls import password_reset_url, sign_in_url, tenant_base_url
 
 logger = logging.getLogger(__name__)
@@ -120,6 +120,28 @@ VERIFICATION_TTL = timedelta(hours=24)
 
 #: /complete for an address that already has an account (decisions §292).
 SIGNUP_EMAIL_HAS_WORKSPACE = "signup_email_has_workspace"
+
+#: The slug belonged to a workspace its administrator closed, and is resting
+#: (`utils.slug.ensure_slug_not_held`, decisions §294). Its own code, so the
+#: page can say the name is temporarily unavailable rather than taken — nobody
+#: owns it, and saying "taken" would send the visitor looking for its owner.
+SIGNUP_SLUG_HELD = "signup_slug_held"
+
+
+def _slug_conflict(exc: SlugError) -> HTTPException:
+    """The 409 for a slug that cannot be had: coded when it is resting after a
+    closure, the plain sentence when another workspace has it."""
+    if isinstance(exc, SlugHeld):
+        return HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                SIGNUP_SLUG_HELD,
+                "This workspace address belonged to a workspace that was closed recently, "
+                "and is unavailable for a while. Choose a different address.",
+            ),
+        )
+    return HTTPException(status_code=409, detail=str(exc))
+
 
 _INVALID_LINK = "This verification link is invalid or has expired. Please sign up again."
 
@@ -186,7 +208,12 @@ async def slug_check(
         await ensure_slug_available(slug, db)
         return SlugCheckResponse(slug=slug, available=True)
     except SlugError as exc:
-        return SlugCheckResponse(slug=slug, available=False, reason=str(exc))
+        return SlugCheckResponse(
+            slug=slug,
+            available=False,
+            reason=str(exc),
+            reason_code=SIGNUP_SLUG_HELD if isinstance(exc, SlugHeld) else None,
+        )
 
 
 @router.post("/start", response_model=SignupStartResponse)
@@ -233,7 +260,7 @@ async def signup_start(
     try:
         await ensure_slug_available(body.slug, db)
     except SlugError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _slug_conflict(exc) from exc
 
     # 5. Drop any prior un-consumed verifications for this email so a "resend"
     #    replaces rather than accumulates (caps unbounded pending-row growth,
@@ -361,7 +388,7 @@ async def signup_complete(
     try:
         await ensure_slug_available(verification.slug, db)
     except SlugError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _slug_conflict(exc) from exc
 
     # 2b. Refuse BEFORE provisioning when there is nowhere to send the admin.
     #     The admin will have no password, and both the set-password link and
@@ -415,7 +442,7 @@ async def signup_complete(
             await ensure_slug_available(verification.slug, db)
         except SlugError as slug_exc:
             logger.warning("Provisioning lost a slug race (slug=%s)", slug)
-            raise HTTPException(status_code=409, detail=str(slug_exc)) from exc
+            raise _slug_conflict(slug_exc) from exc
         logger.exception("Provisioning failed for slug=%s", slug)
         raise HTTPException(
             status_code=500,

@@ -4728,6 +4728,7 @@ export const messages = {
 	'refusal.emailCheckThrottled': "Zu viele kürzlich in diesem Workspace eingegebene Adressen gehörten bereits zu anderen Workspaces. Das Hinzufügen von Benutzern und das Ändern ihrer E-Mail-Adresse ist daher für bis zu eine Stunde pausiert. Versuchen Sie es später erneut.",
 	'refusal.workspaceCloseConfirmationMismatch': "Geben Sie die Adresse dieses Workspace genau wie angezeigt ein, um zu bestätigen, dass er geschlossen werden soll.",
 	'refusal.workspaceCloseRefused': "Dieser Workspace kann hier nicht geschlossen werden, weil er Daten enthält, die aufbewahrt werden müssen, oder Konten anderer Personen. Wenden Sie sich an den Support, um ihn zu schließen.",
+	'refusal.signupSlugHeld': "Diese Workspace-Adresse gehörte zu einem Workspace, der kürzlich geschlossen wurde, und ist eine Zeit lang nicht verfügbar. Wählen Sie eine andere Adresse.",
 	'refusal.workspaceCloseInProgress': "Dieser Workspace wird bereits geschlossen.",
 	'refusal.workspaceCloseAuditUnavailable': "Der Workspace konnte gerade nicht geschlossen werden, weil sein Prüfprotokolleintrag nicht gespeichert werden konnte. Es wurde nichts gelöscht. Versuchen Sie es in ein paar Minuten erneut.",
 	'refusal.workspaceCloseIncomplete': "Das Schließen des Workspace wurde nicht abgeschlossen. Versuchen Sie es erneut; wenn es wieder fehlschlägt, wenden Sie sich an den Support.",

@@ -4721,6 +4721,7 @@ export const messages = {
 	'refusal.emailCheckThrottled': "Demasiadas direcciones introducidas recientemente en este espacio de trabajo ya pertenecían a otros espacios de trabajo, así que añadir usuarios o cambiar su correo está en pausa durante un máximo de una hora. Vuelva a intentarlo más tarde.",
 	'refusal.workspaceCloseConfirmationMismatch': "Escriba la dirección de este espacio de trabajo exactamente como se muestra para confirmar que debe cerrarse.",
 	'refusal.workspaceCloseRefused': "Este espacio de trabajo no se puede cerrar aquí porque contiene registros que deben conservarse o cuentas de otras personas. Póngase en contacto con soporte para cerrarlo.",
+	'refusal.signupSlugHeld': "Esta dirección pertenecía a un espacio de trabajo que se cerró hace poco y no está disponible durante un tiempo. Elija otra dirección.",
 	'refusal.workspaceCloseInProgress': "Este espacio de trabajo ya se está cerrando.",
 	'refusal.workspaceCloseAuditUnavailable': "No se pudo cerrar el espacio de trabajo en este momento porque no se pudo guardar su registro de auditoría. No se eliminó nada. Vuelva a intentarlo en unos minutos.",
 	'refusal.workspaceCloseIncomplete': "El cierre del espacio de trabajo no terminó. Vuelva a intentarlo; si vuelve a fallar, póngase en contacto con soporte.",

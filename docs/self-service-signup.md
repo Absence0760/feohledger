@@ -99,9 +99,19 @@ is on, a code or a passkey. What it leaves behind: a control-plane
 where audit shipping is on, and the per-tenant backups, which an operator
 removes within the DPA's 60 days
 ([`founder-runbooks/workspace-closure.md`](founder-runbooks/workspace-closure.md)).
-Until the operator has, the closed workspace's slug stays taken: `/signup`
-answers it as unavailable, because a new workspace under it would share its
-`feoh_<slug>` backup name.
+Until the operator has — and for 90 days from the closure in any case
+(`utils/slug.CLOSED_SLUG_COOLDOWN`), so bookmarks, identity-provider redirect
+URIs and invite emails cannot point at a new owner early — the closed
+workspace's slug is held. Signup says so in its own words: the slug check
+returns `reason_code: signup_slug_held` and `/signup/complete` refuses with the
+coded `409 signup_slug_held` ("temporarily unavailable after a workspace
+closure", localized), never the bare "already taken". The hold lives in
+`provision_tenant`, so the partner and operator paths get it too.
+
+After a closure, the address it held signs up again like any other: `/start`
+and `/complete` provision a new workspace under a different slug, since §292's
+existing-account refusal no longer finds it. The closed workspace's own
+verification link is deleted with it, so re-opening it is the uniform 410.
 Nothing deletes an abandoned trial on its own; why, and what would have to
 change first: `docs/decisions.md` §294 and `docs/followups.md` § Surfaced by
 self-service workspace closure.

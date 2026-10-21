@@ -30,7 +30,7 @@ from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscr
 from app.services.schema_version import head_revision, record_head
 from app.utils.emails import normalize_email
 from app.utils.passwords import hash_password
-from app.utils.slug import validate_slug_format
+from app.utils.slug import ensure_slug_not_held, validate_slug_format
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +390,9 @@ async def provision_tenant(
     ``must_change_password=False`` since the password is their own choice.
 
     Raises ``SlugError`` before any database work when ``slug`` fails
-    ``utils.slug.validate_slug_format``. The API callers validate first to
+    ``utils.slug.validate_slug_format``, and ``SlugHeld`` (a ``SlugError``)
+    while a closed workspace still holds it (``utils.slug.ensure_slug_not_held``).
+    The API callers validate first to
     return a 422, but the check lives here so every caller gets it — the
     ``scripts/create_tenant.py`` CLI (and ``deploy/add-tenant.sh`` behind it)
     passes an operator-typed slug straight through, and with tenants on
@@ -398,6 +400,11 @@ async def provision_tenant(
     infrastructure host.
     """
     validate_slug_format(slug)
+    # A closed workspace's slug is held here, at the one chokepoint every
+    # provisioning path shares — signup, partner, and the operator CLI behind
+    # `deploy/add-tenant.sh` alike (decisions §294).
+    async with control_session_factory() as session:
+        await ensure_slug_not_held(slug, session)
     db_name = f"{settings.tenant_db_prefix}{slug}"
     await _require_system_admin_role()
 

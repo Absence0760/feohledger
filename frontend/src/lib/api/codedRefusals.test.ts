@@ -106,7 +106,8 @@ describe('codedRefusalText', () => {
 		['workspace_close_confirmation_mismatch', 'refusal.workspaceCloseConfirmationMismatch'],
 		['workspace_close_in_progress', 'refusal.workspaceCloseInProgress'],
 		['workspace_close_audit_unavailable', 'refusal.workspaceCloseAuditUnavailable'],
-		['workspace_close_incomplete', 'refusal.workspaceCloseIncomplete']
+		['workspace_close_incomplete', 'refusal.workspaceCloseIncomplete'],
+		['signup_slug_held', 'refusal.signupSlugHeld']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
