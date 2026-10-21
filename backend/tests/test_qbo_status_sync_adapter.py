@@ -463,3 +463,19 @@ def test_void_payment_voids_only_our_own_bill_payment():
     # Nothing of ours left: a second void is a no-op success.
     assert _run(qbo, lambda: _adapter().void_payment(_payload())).success
     assert len([c for c in qbo.calls if (c["params"] or {}).get("include") == "void"]) == 1
+
+
+def test_an_erp_without_status_sync_answers_fail_closed_by_default():
+    """The base defaults (decisions §295): an ERP that does not report back is
+    not a skeleton, but nothing it answers may read as "paid" or "open"."""
+    from app.services.erp_adapters.dispatcher import get_erp_adapter
+
+    adapter = get_erp_adapter({"type": "netsuite", "integration_method": "direct"})
+    assert adapter.supports_status_sync is False
+    report = asyncio.run(adapter.bill_report("1"))
+    assert report.state is ErpBillState.unknown
+    written = asyncio.run(adapter.post_payment(_payload()))
+    assert written.success is False and written.retryable is False
+    assert asyncio.run(adapter.void_payment(_payload())).success is False
+    assert asyncio.run(adapter.bills_for_payment("9")) == []
+    assert asyncio.run(adapter.changed_bills(datetime(2026, 10, 1, tzinfo=UTC))) == []

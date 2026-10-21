@@ -710,33 +710,48 @@ class ErpAdapter:
 
     # -- status sync-back + payment write-back (decisions §295) -------------
     #
-    # The base raises NotImplementedError for each, and every caller checks
-    # ``supports_status_sync`` first: an adapter without them keeps today's
-    # behaviour (the push closes the invoice at ``done``; ``payment_erp_sync``
-    # pushes nothing).
+    # Every caller checks ``supports_status_sync`` first, and an adapter without
+    # it keeps the old behaviour (the push closes the invoice at ``done``;
+    # ``payment_erp_sync`` writes nothing back). The defaults below are
+    # therefore the honest answer of an ERP that does not report back, and each
+    # is fail-closed if anything ever reached it anyway: a write-back is
+    # refused (never "posted"), a bill reads ``unknown`` (never ``open``, so
+    # the dispatch-time check would refuse, not pay), and no changes or linked
+    # bills are claimed. Not NotImplementedError: these adapters are not
+    # skeletons — status sync is an optional capability, like the payment
+    # adapters' (``tests/test_adapter_contract_integrity.py``).
+
+    def _no_status_sync(self) -> ErpPostResult:
+        return ErpPostResult(
+            success=False,
+            message=f"{self.erp_type} does not support payment write-back",
+            retryable=False,
+        )
 
     async def post_payment(self, payload: PaymentPayload) -> ErpPostResult:
         """Apply a FeohLedger payment to its bill in the ERP, idempotently on
-        ``payload.payment_id``: a retry never creates a second ERP payment."""
-        raise NotImplementedError
+        ``payload.payment_id``: a retry never creates a second ERP payment.
+        Default: refused — this ERP takes no write-back."""
+        return self._no_status_sync()
 
     async def void_payment(self, payload: PaymentPayload) -> ErpPostResult:
         """Reverse what :meth:`post_payment` wrote for ``payload.payment_id``.
-        Success when nothing of ours is left on the bill."""
-        raise NotImplementedError
+        Success when nothing of ours is left on the bill. Default: refused."""
+        return self._no_status_sync()
 
     async def bill_report(self, bill_id: str) -> ErpBillReport:
         """Where ``bill_id`` stands now. ``deleted`` only on the ERP's positive
-        answer; an unreadable bill raises, never reads as gone."""
-        raise NotImplementedError
+        answer; an unreadable bill raises, never reads as gone. Default:
+        ``unknown`` — never ``open``, so nothing is paid on its say-so."""
+        return ErpBillReport(bill_id=str(bill_id), state=ErpBillState.unknown)
 
     async def bills_for_payment(self, payment_id: str) -> list[str]:
         """The bills an ERP payment record is applied to (for a webhook that
-        names the payment, not the bill)."""
-        raise NotImplementedError
+        names the payment, not the bill). Default: none known."""
+        return []
 
     async def changed_bills(self, since: datetime) -> list[str]:
         """Every bill changed since ``since`` — directly, or through a payment
         applied to it — the change-data-capture backstop for lost webhooks.
-        Raises rather than return a partial list."""
-        raise NotImplementedError
+        Raises rather than return a partial list. Default: none reported."""
+        return []
