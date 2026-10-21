@@ -12809,3 +12809,47 @@ carried), and `frontend/tests-e2e/signup/flow.spec.ts` (both states stubbed, plu
 through Mailpit: the link opened again in a second tab after success, and an
 existing login's signup refused on first open and on reload, with the slug left
 free).
+
+## 293. PDFs draw non-Latin text through one escaper with font fallback; the seed carries production-shaped rows from one shared file (2026-10-20)
+
+**Found by the production-shaped fixtures (#575 § 2).** The seed and e2e
+fixtures now carry a non-ASCII vendor (`Ōsaka Seimitsu Kōgyō 株式会社 — …
+Zürich`), and rendering it into the remittance advice printed
+`■saka Seimitsu K■gy■ ■■■■`. Every PDF here sets text in ReportLab's built-in
+Helvetica, a WinAnsi (cp1252) Type 1 font with no glyph outside Latin-1, and
+each renderer had its own `_escape` that only escaped XML. The same render
+showed a second defect: the remittance line table put the invoice number and
+description in **bare** cell strings, so a long ERP invoice number never wrapped
+(it ran through the Description column) and the description printed its
+escaped `&amp;` literally.
+
+**Decision.** `services/pdf_text.pdf_markup` is the one escaper: it escapes and
+wraps each run Helvetica cannot draw in a `<font>` that can — DejaVu Sans,
+bundled (~1.4 MB, Bitstream Vera / DejaVu licence) and subset-embedded, for
+Latin Extended / Greek / Cyrillic; ReportLab's built-in Adobe CID fonts for CJK
+(`HeiseiKakuGo-W5`) and Hangul (`HYGothic-Medium`). Supplier text in a table
+cell becomes a `Paragraph`.
+
+**Rejected: switching every PDF's base font to DejaVu.** It would change the
+look of every existing document for the benefit of the few characters
+Helvetica lacks; fallback per run leaves an all-Latin-1 document byte-for-byte
+in its old typeface.
+
+**Rejected: bundling a CJK TrueType face.** Noto Sans CJK ships as CFF/OTF,
+which ReportLab cannot embed, and a TrueType CJK face is several MB in a public
+repo. The CID fonts cost nothing and every mainstream viewer (Acrobat, Preview,
+pdf.js, pdfium) supplies the glyphs. The trade: CJK glyphs are the viewer's,
+not embedded, and Han characters are drawn with the Japanese face (which covers
+the common Chinese repertoire). Revisit if a customer reports a viewer without
+Adobe-Japan1 / Korea1 support.
+
+**Shared values.** The long / non-ASCII / tax-exclusive values live in
+`backend/scripts/fixtures/realistic_rows.json` and nowhere else: the full seed
+adds them (`scripts/seed_realistic.py`), the lean seed reshapes its existing
+rows with them (so no e2e count moves), and the layout specs and day-one
+journey read them through `frontend/tests-e2e/fixtures/realisticValues.ts`. A
+value spelled twice is how the layout spec and the demo would drift apart.
+
+Guards: `backend/tests/test_pdf_text.py` (each renderer, with the fixture's
+names, asserts no glyph outside cp1252 was drawn in a Helvetica face; the long
+number wraps; `&` prints as `&`), `backend/tests/test_seed_realistic.py`.

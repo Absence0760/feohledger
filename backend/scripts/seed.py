@@ -11,11 +11,18 @@ Two seed shapes:
   default 25-row pagination. Best for local development where you
   actually want to click around.
 - **Lean** (``--lean`` / ``FEOH_SEED_MODE=lean``) — every tenant gets
-  just enough for the e2e suite (4 vendors, 10 invoices across status
-  buckets, 1 default workflow, 1 GL account, no exceptions/payments/
-  cards). Specs that need richer state build it via API at the start
-  of the test. Roughly an order of magnitude faster — that's what
-  ``.github/workflows/ci.yml`` runs.
+  just enough for the e2e suite (4 vendors, 14 invoices across status
+  buckets, 1 default workflow, 1 GL account, a handful of exceptions, credit
+  memos and payments, no cards). Specs that need richer state build it via
+  API at the start of the test. Roughly an order of magnitude faster —
+  that's what ``.github/workflows/ci.yml`` runs.
+
+Both shapes carry production-shaped rows (#575 § 2) — long and non-ASCII
+vendor names, an unverified vendor, ERP-length invoice numbers, a
+tax-exclusive invoice with net lines, a long assignee address — from
+``scripts/fixtures/realistic_rows.json`` via ``scripts/seed_realistic.py``.
+The full seed adds them; the lean seed reshapes its existing rows so no e2e
+count moves.
 """
 
 import argparse
@@ -88,6 +95,7 @@ from app.services.tenant_provisioning import (
     _parse_maintenance_dsn,
     asyncpg_connect_kwargs,
 )
+from app.utils.dates import utc_today
 from app.utils.passwords import pwd_context
 
 # Canonical role set, owned by `control_plane_bootstrap` — a production control
@@ -175,6 +183,20 @@ def _make_portal_user(vendor: "Vendor") -> "VendorUser":
         is_active=True,
         must_change_password=False,
     )
+
+
+def _seed_realistic():
+    """`scripts/seed_realistic.py`, the production-shaped rows (#575 § 2).
+
+    Imported lazily, like `seed_extras`: run as `python scripts/seed.py` the
+    module is a bare sibling on `sys.path[0]`; imported as `scripts.seed` (the
+    pytest suite) it is `scripts.seed_realistic`.
+    """
+    try:
+        import seed_realistic
+    except ModuleNotFoundError:
+        from scripts import seed_realistic
+    return seed_realistic
 
 
 async def create_database(db_name: str) -> None:
@@ -1674,6 +1696,15 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         session.add_all(filler_invoices)
         await session.flush()
 
+        # Production-shaped rows (#575 § 2): long + non-ASCII vendor names, an
+        # unverified first-time supplier, ERP-shaped invoice numbers, a
+        # tax-exclusive invoice with net lines, and a long assignee address. The
+        # values come from `fixtures/realistic_rows.json`, which the e2e layout
+        # specs read too. They join the workflow + audit back-fill below.
+        realistic_invoices = await _seed_realistic().add_realistic_rows(
+            session, org_id, today=utc_today()
+        )
+
         # Workflow instances + steps for every invoice (named + filler). Without
         # these, the approval queue and the assistant's pending-approvals tool
         # read empty even though invoices sit in `ready_for_review`. seed_actor
@@ -1681,7 +1712,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         _seed_workflows_for_invoices(
             session,
             default_def=default_def,
-            invoices=invoices + filler_invoices,
+            invoices=invoices + filler_invoices + realistic_invoices,
             approver_id=seed_actor,
             now=datetime.now(UTC),
         )
@@ -1701,7 +1732,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
                     entity_id=inv.id,
                     details={"source": "seed", "status": inv.status},
                 )
-                for inv in filler_invoices
+                for inv in filler_invoices + realistic_invoices
             ]
         )
 
@@ -1802,19 +1833,26 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         await seed_extras(session, org_id)
 
         await session.commit()
-        total_invoices = len(invoices) + len(filler_invoices)
+        total_invoices = len(invoices) + len(filler_invoices) + len(realistic_invoices)
         total_vendors = len(all_vendors) + len(filler_vendors_list)
         total_payments = 3 + len(filler_payments)
         print(
             f"  Seeded {tenant_label}: {total_vendors} vendors "
             f"({len(filler_vendors_list)} bulk filler), {total_invoices} invoices "
-            f"({len(filler_invoices)} bulk filler), 5 POs, 2 GRs, "
+            f"({len(filler_invoices)} bulk filler, {len(realistic_invoices)} production-shaped), "
+            f"5 POs, 2 GRs, "
             f"{len(gl_accounts)} GL accounts, 1 payment run, {total_payments} payments "
             f"({len(filler_payments)} bulk filler), 4 exceptions, 1 portal user "
             f"— bulk fillers exist so /invoices, /vendors and /payments paginate"
         )
 
     await engine.dispose()
+
+
+# 1-based positions in `seed_tenant_lean`'s status list: LEAN-003 is the
+# `ready_for_review` row, LEAN-004 the first `approved` one.
+LEAN_TAX_EXCLUSIVE_INDEX = 3
+LEAN_LONG_NUMBER_INDEX = 4
 
 
 def _e2e_org_id(idx: int) -> uuid.UUID:
@@ -1970,9 +2008,17 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
                 print(f"  {tenant_label} tenant already seeded. Skipping.")
                 return
 
+            # Production-shaped (#575 § 2): the two vendors that own invoices
+            # carry the shared long and non-ASCII names (`fixtures/
+            # realistic_rows.json`), so every e2e spec renders its rows with
+            # the strings a real tenant has — and the unverified one is the
+            # shape a first invoice from a new supplier auto-creates. RESHAPED
+            # rather than added: the suite reads counts off these tenants.
+            realistic = _seed_realistic()
+            lean_names = realistic.realistic_lean_names()
             v_alpha = Vendor(
                 organization_id=org_id,
-                name="Lean Vendor Alpha",
+                name=lean_names["long_vendor"],
                 code="LVA",
                 email="alpha@vendor.test",
                 address="1 Test Lane, Test City, TC 00001",
@@ -1985,7 +2031,7 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
             )
             v_beta = Vendor(
                 organization_id=org_id,
-                name="Lean Vendor Beta",
+                name=lean_names["non_ascii_vendor"],
                 code="LVB",
                 email="beta@vendor.test",
                 payment_terms="Net 60",
@@ -2096,25 +2142,39 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
             # exactly one — the first, `new`-status row — goes to v_beta so the
             # portal-isolation spec can assert the alpha user never sees it.
             invoices: list[Invoice] = []
+            tax_spec = realistic.load_realistic_rows()["tax_exclusive_invoice"]
             for i, status in enumerate(statuses, start=1):
                 owner = v_beta if i == 1 else v_alpha
                 # correlation_id is what `GET /api/invoices/{id}/audit-log`
                 # joins on. Generate it here so the matching audit_log
                 # row stamped below can be retrieved.
                 corr_id = uuid.uuid4()
+                number = f"LEAN-{i:03d}"
+                header: dict = {"amount": Decimal(f"{100 + i}.00"), "currency": "USD"}
+                if i == LEAN_LONG_NUMBER_INDEX:
+                    # An ERP-shaped invoice number with no natural break point,
+                    # on the first `approved` row — the payment queue's.
+                    number = f"{number}-{lean_names['long_invoice_number']}"
+                if i == LEAN_TAX_EXCLUSIVE_INDEX:
+                    # Tax-exclusive: net lines summing to `subtotal`, the tax
+                    # once on the header (the #572 shape).
+                    header = realistic.tax_exclusive_header(tax_spec)
                 inv = Invoice(
                     organization_id=org_id,
                     vendor_name=owner.name,
                     vendor_id=owner.id,
-                    invoice_number=f"LEAN-{i:03d}",
-                    amount=Decimal(f"{100 + i}.00"),
-                    currency="USD",
+                    invoice_number=number,
                     status=status,
                     invoice_date=date(2026, 1, i % 28 + 1),
                     correlation_id=corr_id,
+                    **header,
                 )
                 invoices.append(inv)
                 session.add(inv)
+            await session.flush()
+            session.add_all(
+                realistic.tax_exclusive_lines(invoices[LEAN_TAX_EXCLUSIVE_INDEX - 1].id, tax_spec)
+            )
 
             # One PO + one GR linked to the PO. `purchase-orders/list.spec.ts`
             # and `goods-receipts/list.spec.ts` each just need the
@@ -2184,6 +2244,8 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
                         severity="warning",
                         description="Possible duplicate of LEAN-001",
                         status="open",
+                        # A routing alias, the way #574's queue carried it.
+                        assigned_to=lean_names["assignee_email"],
                     ),
                     APException(
                         organization_id=org_id,

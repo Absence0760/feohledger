@@ -1,0 +1,49 @@
+{
+  "//": "Production-shaped row values (#575 section 2) - the ONE place they are spelled. Read by backend/scripts/seed_realistic.py (the full + lean seed), frontend/tests-e2e/fixtures/realisticRows.ts (the layout specs) and frontend/tests-e2e/day-one/fixtures.ts (the day-one journey). Change a value here, never at a reader. See backend/docs/seed-data.md.",
+  "long_vendor_name": "Northwind Industrial Fasteners & Precision Components International Holdings (EMEA) GmbH",
+  "non_ascii_vendor_name": "Ōsaka Seimitsu Kōgyō 株式会社 — Société Générale d’Équipements Zürich",
+  "invoice_numbers": [
+    "INV-2026-000012345678901-ACCOUNTSPAYABLE-EMEA-NORTH",
+    "AP/2026/10/000987654321/REV-03/SUPPLEMENTARY",
+    "ERP-77889900112233445566778899"
+  ],
+  "amounts": ["9876543210987.65", "12345678.90", "987654321.00"],
+  "contract_number": "MSA-2026-EMEA-NORTH-000123456789",
+  "contract_title": "Master Services and Supply Agreement for Precision Fasteners, Tooling and Field Services (EMEA)",
+  "memo_number": "CM-2026-000045678901234",
+  "memo_reason": "Volume rebate true-up for Q3 deliveries across all EMEA North distribution centres",
+  "payment_reference": "ACH-TRACE-0210000210000123456789",
+  "mailbox_domain": "northwind-industrial-fasteners-international.example.com",
+  "assignee_local_part": "accounts.payable.escalations",
+  "assignee_name": "Accounts Payable Escalations — Regional Controller (EMEA North)",
+  "remittance_local_part": "remittance.advice",
+  "exception_description": "does not match the received quantity on line 14 of 27",
+  "manager": {
+    "name": "Priya Raghunathan-Okonkwo",
+    "email": "accounts.payable.operations.manager@dayone-trading.example.com"
+  },
+  "tax_exclusive_invoice": {
+    "vendor_name": "Ångström Präzisionsinstrumente & Kalibrierdienste (Europa) GmbH",
+    "invoice_number": "INV-2026-10-EU/000123456789-CAL",
+    "po_number": "PO-4410",
+    "currency": "USD",
+    "tax_rate": "19.00",
+    "subtotal": "1500.00",
+    "tax_amount": "285.00",
+    "amount": "1785.00",
+    "lines": [
+      {
+        "description": "Kalibrierung Drehmomentschlüssel (ISO 6789)",
+        "quantity": "3",
+        "unit_price": "412.50",
+        "total": "1237.50"
+      },
+      {
+        "description": "Prüfprotokoll & Versand",
+        "quantity": "1",
+        "unit_price": "262.50",
+        "total": "262.50"
+      }
+    ]
+  }
+}
