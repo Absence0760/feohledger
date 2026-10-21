@@ -313,8 +313,9 @@
 			if (!historySequence.isCurrentRequest(token)) return;
 			history = [];
 			historyVendorId = vendorId;
+			// The timeline states the failure in place, with a Retry
+			// (role="alert"); a toast saying it again would sit over the dialog.
 			historyError = true;
-			toast(m('vendors.screening.queue.toast.historyFailed'), 'error');
 		} finally {
 			if (historySequence.isCurrentRequest(token)) historyLoading = false;
 		}

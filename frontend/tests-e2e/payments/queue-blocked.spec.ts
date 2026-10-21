@@ -389,11 +389,13 @@ test.describe('/payments queue — payment-blocking exceptions', () => {
 
 			// The panel-level error carries the server's own detail, which names
 			// the invoice number — the only thing that makes a 20-row selection
-			// actionable. It persists (unlike the 5-second toast).
+			// actionable. It is stated here, beside the refused button, and not
+			// repeated in a toast (one error, one signal).
 			const panelError = page.getByTestId('create-run-error');
 			await expect(panelError).toBeVisible();
 			await expect(panelError).toContainText(number);
 			await expect(panelError).toContainText('exception');
+			await expect(page.getByTestId('toast').filter({ hasText: number })).toHaveCount(0);
 
 			// Changing the selection clears it — a stale refusal must not linger.
 			await page.locator('.pay-bar').getByRole('button', { name: 'Clear' }).click();

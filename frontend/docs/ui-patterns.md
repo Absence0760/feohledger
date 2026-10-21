@@ -1124,7 +1124,20 @@ inherit it for free. Reuse these; don't re-solve them per page.
   **A toast is never the only sign of a failed LOAD**: a page whose data did not
   arrive says so in place with `ui/LoadError` and a Retry (the vendors list and
   the notification bell are the worked examples); a toast reports an action's
-  outcome.
+  outcome. **One error, one signal:** an error a dialog or panel already states
+  in place — a `role="alert"` element beside the control that failed — is not
+  also toasted. `role="alert"` is announced the moment it appears, so the copy
+  added nothing for a screen-reader user, and since an error toast no longer
+  times out it sat over the dialog until dismissed (the payment run's NACHA
+  refusal, stated in its panel AND toasted, covered "Record run as paid…"). A
+  form that has an error slot puts its own client-side refusals there too
+  (`cfo/ForecastVariancePanel`). A failed LOAD's generic in-place block may
+  still be paired with a toast carrying the server's own detail — the two say
+  different things. Guard: `src/lib/a11y/errorDoubleReport.test.ts` (Svelte AST:
+  no `toast(…, 'error')` passes a variable rendered inside `role="alert"`, or
+  sits on the same code path as an assignment to one — or, for an `{#if flag}`
+  alert with fixed words, raises fixed words too). It reads one file at a time,
+  so an error state passed down to a child component is outside it.
 - **Inline form feedback** (WCAG 4.1.3) — a message that appears in response
   to an action (`{#if saved}<div class="message">…`) must be announced, not
   just shown. A polite status sits inside a live region that already exists

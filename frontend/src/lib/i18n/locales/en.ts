@@ -1305,7 +1305,6 @@ export const en = {
 	'vendors.screening.queue.history.score': 'score {score}',
 	'vendors.screening.queue.close': 'Close',
 	'vendors.screening.queue.toast.loadFailed': 'Failed to load the screening review queue',
-	'vendors.screening.queue.toast.historyFailed': 'Failed to load screening history',
 	'vendors.screening.queue.toast.blocked': 'Payments blocked',
 	'vendors.screening.queue.toast.unblocked': 'Payments unblocked',
 	'vendors.screening.queue.toast.actionFailed': 'Action failed',

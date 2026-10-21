@@ -622,13 +622,10 @@
 
 	async function createDraftRun() {
 		if (selectedQueue.size === 0) return;
-		if (mixedCurrencySelection) {
-			// Advance signal for the backend's own 422 — never send a request we
-			// already know is refused.
-			createRunError = m('payments.queue.mixedCurrencyBlocked');
-			toast(createRunError, 'error');
-			return;
-		}
+		// Never send a request we already know is refused (the backend's own
+		// 422). The button is disabled for it and `mixed-currency-warning` states
+		// why, so there is nothing to add here.
+		if (mixedCurrencySelection) return;
 		createRunError = '';
 		creatingRun = true;
 		try {
@@ -663,11 +660,11 @@
 		} catch (err) {
 			// `ApiError.message` is `formatApiDetail(body.detail, …)`, so the
 			// backend's 409 detail — which names the offending invoice numbers —
-			// arrives intact. Surface it in BOTH places: the toast announces it
-			// (assertive live region), the panel keeps it readable.
-			const detail = err instanceof Error ? err.message : m('payments.queue.createFailed');
-			createRunError = detail;
-			toast(detail, 'error');
+			// arrives intact. The panel states it (role="alert", so it is
+			// announced as it appears) beside the button that was refused, and
+			// nothing else does: one error, one signal (`docs/ui-patterns.md`
+			// § Toast).
+			createRunError = err instanceof Error ? err.message : m('payments.queue.createFailed');
 		} finally {
 			creatingRun = false;
 		}
@@ -778,10 +775,10 @@
 			}
 			await Promise.all([loadSummary(), loadQueue()]);
 		} catch (err) {
-			// Kept in the dialog (role="alert") as well as toasted: a coded
-			// refusal names what to fix, and the toast fades.
+			// Stated in the dialog (role="alert") beside the form, and only
+			// there: a coded refusal names what to fix, and a second copy in a
+			// toast would sit over the dialog (one error, one signal).
 			recordError = err instanceof Error ? err.message : m('payments.recordOutside.failed');
-			toast(recordError, 'error');
 		} finally {
 			recording = false;
 		}
@@ -799,7 +796,9 @@
 	// `no_card`, a non-card payment), which closes the dialog as before.
 	let voidCardResult = $state<Payment | null>(null);
 	let retryingCardCancel = $state(false);
-	let cardRetryFailed = $state(false);
+	// Why the last card-close retry did not close the card ('' = it did, or
+	// none was tried). Stated in the dialog, never also toasted.
+	let cardRetryError = $state('');
 
 	const voidCardDisposition = $derived(voidCardResult?.void_card_disposition ?? null);
 	// Only the retryable verdict gets a button. `not_closed_final` (the card was
@@ -812,13 +811,13 @@
 		voidTarget = p;
 		voidReason = '';
 		voidCardResult = null;
-		cardRetryFailed = false;
+		cardRetryError = '';
 	}
 
 	function closeVoid() {
 		voidTarget = null;
 		voidCardResult = null;
-		cardRetryFailed = false;
+		cardRetryError = '';
 	}
 
 	/** Refresh every surface a void (or a later card close) can change. */
@@ -869,22 +868,24 @@
 	async function commitCardCancelRetry() {
 		if (!voidCardResult) return;
 		retryingCardCancel = true;
-		cardRetryFailed = false;
+		cardRetryError = '';
 		try {
 			const retried = await retryVoidCardCancel(voidCardResult.id);
 			voidCardResult = retried;
 			if ((retried.void_card_disposition ?? null) === 'closed') {
 				toast(m('payments.void.card.closed'), 'success');
 			} else {
-				cardRetryFailed = true;
+				cardRetryError = m('payments.void.card.retryFailed');
 			}
-			await reloadAfterVoid();
 		} catch (err) {
-			cardRetryFailed = true;
-			toast(errorMessage(err, m('payments.void.card.retryFailed')), 'error');
+			cardRetryError = errorMessage(err, m('payments.void.card.retryFailed'));
+			return;
 		} finally {
 			retryingCardCancel = false;
 		}
+		// Outside the try: a list that fails to refresh reports itself, and is
+		// not a failed card close — the dialog must not say both.
+		await reloadAfterVoid();
 	}
 
 	function canVoid(p: Payment): boolean {
@@ -2933,9 +2934,9 @@
 					{labelKey ? m(labelKey) : voidCardResult.void_card_outcome}
 				</p>
 			{/if}
-			{#if cardRetryFailed}
+			{#if cardRetryError}
 				<p class="state error" role="alert" data-testid="void-card-retry-failed">
-					{m('payments.void.card.retryFailed')}
+					{cardRetryError}
 				</p>
 			{/if}
 			<div class="modal-footer">

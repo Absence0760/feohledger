@@ -1510,12 +1510,12 @@
 			);
 			toast(m('orgSso.toast.saved'), 'success');
 		} catch (err) {
-			const text =
+			// Stated beside Save (role="alert"), and only there: one error, one
+			// signal (`docs/ui-patterns.md` § Toast).
+			ssoSaveError =
 				err instanceof ApiError
 					? (ssoRefusalText(err, m) ?? err.message)
 					: m('orgSso.toast.saveFailed');
-			ssoSaveError = text;
-			toast(text, 'error');
 		} finally {
 			savingSso = false;
 		}

@@ -1185,8 +1185,6 @@ export const messages = {
 	'vendors.screening.queue.close': 'Fermer',
 	'vendors.screening.queue.toast.loadFailed':
 		'Impossible de charger la file d’examen des vérifications',
-	'vendors.screening.queue.toast.historyFailed':
-		'Impossible de charger l’historique des vérifications',
 	'vendors.screening.queue.toast.blocked': 'Paiements bloqués',
 	'vendors.screening.queue.toast.unblocked': 'Paiements débloqués',
 	'vendors.screening.queue.toast.actionFailed': 'Échec de l’action',

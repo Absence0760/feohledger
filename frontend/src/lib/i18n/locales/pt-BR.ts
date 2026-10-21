@@ -1186,8 +1186,6 @@ export const messages = {
 	'vendors.screening.queue.close': 'Fechar',
 	'vendors.screening.queue.toast.loadFailed':
 		'Não foi possível carregar a fila de análise de triagem',
-	'vendors.screening.queue.toast.historyFailed':
-		'Não foi possível carregar o histórico de triagens',
 	'vendors.screening.queue.toast.blocked': 'Pagamentos bloqueados',
 	'vendors.screening.queue.toast.unblocked': 'Pagamentos desbloqueados',
 	'vendors.screening.queue.toast.actionFailed': 'A ação falhou',

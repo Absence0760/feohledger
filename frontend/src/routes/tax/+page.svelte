@@ -267,8 +267,9 @@
 			);
 			await load();
 		} catch (err) {
+			// Stated in the dialog (role="alert"), and only there: one error, one
+			// signal (`docs/ui-patterns.md` § Toast).
 			fileError = err instanceof Error ? err.message : m('tax.fileModal.toast.failed');
-			toast(fileError, 'error');
 		} finally {
 			filing = false;
 		}

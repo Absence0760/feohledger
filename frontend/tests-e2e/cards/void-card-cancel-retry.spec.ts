@@ -273,7 +273,14 @@ test.describe('/payments — the retry finishes the void', () => {
 		await openVoidDialog(page);
 		await page.getByTestId('void-card-retry').click();
 
-		await expect(page.getByTestId('void-card-retry-failed')).toBeVisible();
+		// The server's own reason, stated in the dialog — and only there (one
+		// error, one signal: a toast repeating it would sit over the dialog).
+		await expect(page.getByTestId('void-card-retry-failed')).toHaveText(
+			"Only a voided payment's card close can be retried"
+		);
+		await expect(
+			page.getByTestId('toast').filter({ hasText: 'card close can be retried' })
+		).toHaveCount(0);
 	});
 });
 

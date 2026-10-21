@@ -1163,7 +1163,6 @@ export const messages = {
 	'vendors.screening.queue.history.score': 'スコア {score}',
 	'vendors.screening.queue.close': '閉じる',
 	'vendors.screening.queue.toast.loadFailed': 'スクリーニング審査キューを読み込めませんでした',
-	'vendors.screening.queue.toast.historyFailed': 'スクリーニング履歴を読み込めませんでした',
 	'vendors.screening.queue.toast.blocked': '支払いをブロックしました',
 	'vendors.screening.queue.toast.unblocked': '支払いのブロックを解除しました',
 	'vendors.screening.queue.toast.actionFailed': '操作に失敗しました',

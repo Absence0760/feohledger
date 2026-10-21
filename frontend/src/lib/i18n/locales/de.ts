@@ -1184,8 +1184,6 @@ export const messages = {
 	'vendors.screening.queue.close': 'Schließen',
 	'vendors.screening.queue.toast.loadFailed':
 		'Die Screening-Prüfwarteschlange konnte nicht geladen werden',
-	'vendors.screening.queue.toast.historyFailed':
-		'Der Screening-Verlauf konnte nicht geladen werden',
 	'vendors.screening.queue.toast.blocked': 'Zahlungen gesperrt',
 	'vendors.screening.queue.toast.unblocked': 'Zahlungen freigegeben',
 	'vendors.screening.queue.toast.actionFailed': 'Aktion fehlgeschlagen',

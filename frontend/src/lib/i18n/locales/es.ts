@@ -1182,8 +1182,6 @@ export const messages = {
 	'vendors.screening.queue.close': 'Cerrar',
 	'vendors.screening.queue.toast.loadFailed':
 		'No se pudo cargar la cola de revisión de verificaciones',
-	'vendors.screening.queue.toast.historyFailed':
-		'No se pudo cargar el historial de verificaciones',
 	'vendors.screening.queue.toast.blocked': 'Pagos bloqueados',
 	'vendors.screening.queue.toast.unblocked': 'Pagos desbloqueados',
 	'vendors.screening.queue.toast.actionFailed': 'La acción falló',

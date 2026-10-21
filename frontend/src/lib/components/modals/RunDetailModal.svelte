@@ -225,8 +225,9 @@
 			await load();
 			onchange?.();
 		} catch (err) {
+			// Stated in the panel (role="alert"), beside the button that failed —
+			// and only there: one error, one signal (`docs/ui-patterns.md` § Toast).
 			nachaError = err instanceof Error ? err.message : m('paymentRuns.runDetail.nachaFailed');
-			toast(nachaError, 'error');
 		} finally {
 			downloadingNacha = false;
 			confirmRegenerate = false;
@@ -261,8 +262,8 @@
 			await load();
 			onchange?.();
 		} catch (err) {
+			// In the form (role="alert"), not also a toast: one error, one signal.
 			rejectError = err instanceof Error ? err.message : m('paymentRuns.runDetail.nachaRejectFailed');
-			toast(rejectError, 'error');
 		} finally {
 			rejecting = false;
 		}
@@ -302,9 +303,9 @@
 			onchange?.();
 		} catch (err) {
 			// A coded refusal names the invoice that stopped the WHOLE run
-			// (nothing was recorded), so it stays on screen beside the form.
+			// (nothing was recorded), so it stays on screen beside the form — and
+			// only there: one error, one signal.
 			recordError = err instanceof Error ? err.message : m('paymentRuns.runDetail.recordFailed');
-			toast(recordError, 'error');
 		} finally {
 			recordingRun = false;
 		}
