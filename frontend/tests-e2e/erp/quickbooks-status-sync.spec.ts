@@ -103,7 +103,12 @@ async function postedInvoice(page: Page, prefix: string) {
 	const inv = await createApprovedInvoice(page, {
 		prefix,
 		invoiceNumber: `${prefix[0]}${Date.now() % 1e9}-${Math.floor(Math.random() * 1e3)}`,
-		amount: '321.09',
+		// The helper's default amount, deliberately: with status sync on, a
+		// pushed bill stays at posted_in_erp, which counts as this vendor's
+		// payment history for the stat-anomaly fraud rule. A different figure
+		// here moved Vendor A's mean far enough that the other QBO specs' bills
+		// read as outliers in a reused tenant, and the ERP-export gate (§286)
+		// refused them.
 		vendor: 'Fake ERP Vendor A',
 		glAccount: '6100'
 	});
