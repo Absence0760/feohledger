@@ -23,7 +23,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 # Anchor THIS checkout's `backend/` on sys.path before `app` is imported below.
 # Run as a script, sys.path[0] is `scripts/`, so `app` is not on sys.path at
@@ -41,6 +41,7 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(1, str(Path(__file__).resolve().parent.parent))
 
 from app.database import _make_tenant_url, control_session_factory
+from app.db_engine import create_async_engine
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.vendor import Vendor

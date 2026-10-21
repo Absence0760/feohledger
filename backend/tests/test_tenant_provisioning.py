@@ -73,6 +73,7 @@ def test_control_tables_are_the_expected_control_plane_set():
             "webhook_deliveries",
             "webauthn_credentials",
             "provider_credentials",
+            "workspace_closures",
         }
     )
 
@@ -117,7 +118,7 @@ async def test_create_postgres_database_creates_when_absent():
     conn.close = AsyncMock()
 
     with patch(
-        "app.services.tenant_provisioning.asyncpg.connect",
+        "app.db_engine.asyncpg.connect",
         new=AsyncMock(return_value=conn),
     ):
         await _create_postgres_database("feoh_freshslug")
@@ -149,7 +150,7 @@ async def test_create_postgres_database_rejects_unsafe_name(evil_name):
     # must be rejected BEFORE any connection or DDL — defense-in-depth at the
     # one DDL sink where the value can't be parameterized.
     connect = AsyncMock()
-    with patch("app.services.tenant_provisioning.asyncpg.connect", new=connect):
+    with patch("app.db_engine.asyncpg.connect", new=connect):
         with pytest.raises(ValueError, match="unsafe tenant database name"):
             await _create_postgres_database(evil_name)
         with pytest.raises(ValueError, match="unsafe tenant database name"):
@@ -167,7 +168,7 @@ async def test_create_postgres_database_idempotent_when_present():
     conn.close = AsyncMock()
 
     with patch(
-        "app.services.tenant_provisioning.asyncpg.connect",
+        "app.db_engine.asyncpg.connect",
         new=AsyncMock(return_value=conn),
     ):
         await _create_postgres_database("feoh_existing")
@@ -184,7 +185,7 @@ async def test_create_postgres_database_closes_connection_on_error():
     conn.close = AsyncMock()
 
     with patch(
-        "app.services.tenant_provisioning.asyncpg.connect",
+        "app.db_engine.asyncpg.connect",
         new=AsyncMock(return_value=conn),
     ):
         with pytest.raises(RuntimeError):
@@ -210,7 +211,7 @@ async def test_create_postgres_database_parses_host_port_from_url():
     test_url = "postgresql+asyncpg://apuser:apsecret@db.example.com:6543/feohledger"
     with patch.object(settings, "database_url", test_url):
         with patch(
-            "app.services.tenant_provisioning.asyncpg.connect",
+            "app.db_engine.asyncpg.connect",
             new=_fake_connect,
         ):
             await _create_postgres_database("feoh_parsetest")
@@ -241,7 +242,7 @@ async def test_create_postgres_database_url_parse_defaults_port_5432():
     test_url = "postgresql+asyncpg://u:p@localhost/feohledger"
     with patch.object(settings, "database_url", test_url):
         with patch(
-            "app.services.tenant_provisioning.asyncpg.connect",
+            "app.db_engine.asyncpg.connect",
             new=_fake_connect,
         ):
             await _create_postgres_database("feoh_defaultport")

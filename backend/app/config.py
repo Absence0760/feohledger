@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/feohledger"
     tenant_db_prefix: str = "feoh_"
+    # FEOH_DATABASE_IAM_AUTH: sign in to the database with an RDS IAM auth token
+    # minted per connection instead of a password in the URL (`app/db_engine.py`,
+    # docs/decisions.md §310). Off by default, so a laptop and CI keep password
+    # auth against the local container (guard rail 7). On, `database_url` must
+    # carry NO password and TLS must be verify-full — checked at boot below, and
+    # again by the engine factory itself on paths that never load settings
+    # (the Lambda handlers). The factory reads the same variable from the
+    # environment; Settings has no env_file, so the two cannot disagree.
+    database_iam_auth: bool = False
 
     # Auth / JWT
     secret_key: str = "change-me-in-production"
@@ -895,7 +904,7 @@ class Settings(BaseSettings):
     # PEPPOL AS4 INBOUND receive (the receiver-corner C4 webhook the Access
     # Point posts inbound documents to). Master switch — mirrors
     # ``email_intake_domain`` / ``audit_shipping_enabled`` gating: the public
-    # ``POST /api/peppol/inbound/{tenant_slug}`` route is a no-op 204 until this
+    # ``POST /api/peppol/inbound/{organization_id}`` route is a no-op 204 until this
     # is on, so the surface is closed by default. The signing secret is the
     # HMAC-SHA256 key the Access Point signs the inbound POST body with; it has
     # NO hardcoded secret fallback (the boot guard refuses to start a deployed
@@ -1095,6 +1104,19 @@ class Settings(BaseSettings):
         return self.environment.strip().lower() not in _NON_DEPLOYED_ENVS
 
     @model_validator(mode="after")
+    def _validate_database_iam_auth(self) -> "Settings":
+        # Fail closed at boot: with IAM auth on, a password still in the URL is a
+        # second, long-lived way in, and anything short of verify-full would send
+        # the bearer token to an unverified server. The message never echoes the
+        # URL. Imported here, not at module top, to keep config's import graph
+        # free of SQLAlchemy for the modules that only want settings.
+        if self.database_iam_auth:
+            from app.db_engine import validate_iam_database_url
+
+            validate_iam_database_url(self.database_url)
+        return self
+
+    @model_validator(mode="after")
     def _validate_extraction_provider(self) -> "Settings":
         # Empty is the documented "derive from the key" default; anything else
         # must name a registered adapter. See `_EXTRACTION_PROVIDERS`.
@@ -1134,6 +1156,18 @@ class Settings(BaseSettings):
                 f"environment ({self.environment!r}) and self-service signup is on; "
                 "refusing to boot with captcha verification disabled on the public "
                 "signup endpoint. Set FEOH_SIGNUP_ENABLED=false to close signup instead."
+            )
+        # The other half of the pair. With the secret set the server verifies
+        # every signup, but the browser only renders the widget when
+        # /api/public-config hands it a site key — so a missing key is a
+        # signup page whose every submit fails the captcha (#575: the
+        # post-deploy smoke check asserts the same thing from outside).
+        if self.is_deployed and self.signup_enabled and not self.hcaptcha_sitekey.strip():
+            raise ValueError(
+                "FEOH_HCAPTCHA_SITEKEY must be set when FEOH_ENVIRONMENT is a deployed "
+                f"environment ({self.environment!r}) and self-service signup is on; "
+                "without it /signup renders no captcha and every signup is refused. "
+                "Set FEOH_SIGNUP_ENABLED=false to close signup instead."
             )
         return self
 

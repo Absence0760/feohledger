@@ -295,7 +295,7 @@ test.describe('light theme — the public no-tenant origin', () => {
 	});
 
 	/*
-	 * The marketing landing page follows the theme (docs/decisions.md §306,
+	 * The marketing landing page follows the theme (docs/decisions.md §312,
 	 * superseding §289's dark pin), including its one raster: the tally
 	 * ornament has a render lit for each ground.
 	 */

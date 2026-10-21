@@ -2977,6 +2977,19 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  ) {
+    return 'Los importes figuran en $printedCurrency, pero la moneda de la factura indica $fieldCurrency. Los importes se dejaron en blanco: introdúzcalos desde el documento.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies) {
+    return 'Los importes figuran en más de una moneda ($printedCurrencies). Los importes se dejaron en blanco: introdúzcalos desde el documento.';
+  }
+
+  @override
   String invoiceWarningSelfCorrectionLineItemMath(
     String lineNumber,
     String quantity,

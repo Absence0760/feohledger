@@ -18,7 +18,7 @@
 	 * page brings a light theme into the workspace it creates.
 	 *
 	 * `compact` is the same control as three icons, for the marketing landing
-	 * page's header (docs/decisions.md §306): an anonymous visitor has no
+	 * page's header (docs/decisions.md §312): an anonymous visitor has no
 	 * `/profile`, and the header has no room for three words at 320px. Group
 	 * name and option labels stay in the accessibility tree.
 	 *

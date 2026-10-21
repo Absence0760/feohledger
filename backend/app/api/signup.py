@@ -129,7 +129,11 @@ SIGNUP_EMAIL_HAS_WORKSPACE = "signup_email_has_workspace"
 # from `utils/slug.SlugError.code`; the captcha's from `utils/hcaptcha`. Each
 # code is exactly as specific as the English it replaces: none of them says
 # anything about which addresses have accounts (that stays /complete's, after
-# the mailbox is proven — decisions §292).
+# the mailbox is proven — decisions §292). A slug resting after its workspace
+# was closed is `utils/slug.SLUG_HELD` (`signup_slug_held`, decisions §306):
+# its own code, so the page says the address is temporarily unavailable rather
+# than taken — nobody owns it, and "taken" would send the visitor looking for
+# its owner.
 SIGNUP_EMAIL_INVALID = "signup_email_invalid"
 SIGNUP_NAME_HAS_LINK = "signup_name_has_link"
 SIGNUP_EMAIL_SEND_FAILED = "signup_email_send_failed"

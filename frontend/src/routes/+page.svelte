@@ -91,7 +91,7 @@
 	});
 
 	// An admin on an empty workspace gets the setup checklist: the server sends
-	// `onboarding` to that reader and no other (`docs/decisions.md` §309).
+	// `onboarding` to that reader and no other (`docs/decisions.md` §315).
 	const showSetup = $derived(isEmptyTenant && !!data?.onboarding);
 	const SETUP_STEP_LABEL: Record<(typeof DASHBOARD_SETUP_STEPS)[number], MessageKey> = {
 		company: 'dashboard.setup.step.company',
@@ -244,7 +244,7 @@
 		<!-- An admin's first run: the setup the `start-admin` guide recommends,
 		     each step ticked only from a fact the server holds, uploading the
 		     first invoice last. It retires itself — the server stops sending
-		     `onboarding` once the workspace has an invoice (decisions §309). -->
+		     `onboarding` once the workspace has an invoice (decisions §315). -->
 		<section class="setup chart-card" aria-labelledby="dashboard-setup-heading" data-testid="dashboard-setup">
 			<div class="setup-head">
 				<h2 id="dashboard-setup-heading">{m('dashboard.setup.heading')}</h2>

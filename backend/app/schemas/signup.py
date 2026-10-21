@@ -51,6 +51,8 @@ class SlugCheckResponse(BaseModel):
     slug: str
     available: bool
     # Why it is unavailable: `reason` is the English sentence, `code` the
-    # `utils/slug.SLUG_*` rule a client localizes on. Both None when available.
+    # `utils/slug.SLUG_*` rule a client localizes on — `signup_slug_held` when
+    # the address is resting after a workspace closure (decisions §306), so the
+    # form says "temporarily unavailable", not "taken". Both None when available.
     reason: str | None = None
     code: str | None = None

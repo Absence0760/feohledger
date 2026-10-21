@@ -33,7 +33,9 @@ pilot. With it off:
 
 **What production should set:** a deployment that takes self-service customers
 keeps the default (`true`) and **must** set `FEOH_HCAPTCHA_SECRET` and
-`FEOH_HCAPTCHA_SITEKEY` — it refuses to boot without the secret. A deployment
+`FEOH_HCAPTCHA_SITEKEY` — it refuses to boot without either (the site key is
+what `/api/public-config` hands the widget; without it every signup fails the
+captcha), and the post-deploy smoke check confirms `public-config` serves it. A deployment
 whose tenants are provisioned by hand sets `FEOH_SIGNUP_ENABLED=false` and may
 leave both hCaptcha values empty.
 
@@ -52,7 +54,7 @@ file: a secret starting `0x` is otherwise read by YAML as a number.
 2. `/signup` form: company name, desired slug, admin name, admin email, hCaptcha (explicit render, in whichever theme the page is showing — `theme.resolved` — and redrawn when that changes unless the visitor has already solved it, decisions §289, §290). The page's theme picker (every `AuthShell` page carries one) writes the shared `feoh_theme` cookie on the platform domain, so a theme chosen here is the one the new workspace opens in. The form holds the server's input rules up front — both names `minlength="2"` (`schemas/signup.py`), and the slug rule from `utils/slug.py` (starts with a letter, no trailing or doubled hyphen; the reserved list stays the availability check's) — and puts a refusal on the field it is about: the `/start` 409 on the workspace address, each Pydantic 422 item on the field its `loc` names (`aria-invalid` + `aria-describedby`, focus moved there); anything else stays in the banner. **Captcha edge cases:** if hCaptcha's script cannot load (a content blocker or a browser privacy shield — the `<script>`'s `error` event, or `load` with no `hcaptcha` global), the page says so where the widget would be (`role="alert"`) and drops the failed element so the next visit retries; and because the backend verifies the captcha *before* the slug-taken 409 or the email 502, any answer from the server clears the token and resets the widget, so a retry never carries a spent token. Guards: `frontend/tests-e2e/signup/captcha.spec.ts`, `form-rules.spec.ts`.
 3. Form submits `POST /api/signup/start`. Backend validates (including refusing an admin name that holds a web or email address: the name greets the reader of an email sent to whatever address the visitor typed, and mail clients auto-link a bare URL even in inert text), records an `EmailVerification` row, and emails a verification link (`PUBLIC_URL/verify?token=...`). The form sends the visitor's UI `locale`, and the verification and welcome emails are written in it (`email_adapters/email_catalogue.py`, all six locales; anything unsupported falls back to English, never a refusal).
 
-   **Every refusal on `/api/signup/*` is coded** (`api/refusals.coded_refusal`, issue #635 finding 18): the workspace-address rules carry `utils/slug.py`'s `SLUG_*` code (`slug_required`, `slug_format`, `slug_reserved`, `slug_hyphen_edge`, `slug_double_hyphen`, `slug_taken`, with `params.slug`), the captcha `utils/hcaptcha.py`'s (`captcha_required` / `captcha_unavailable` / `captcha_failed`), and the rest `signup_email_invalid`, `signup_name_has_link`, `signup_email_send_failed`, `signup_link_invalid` (the uniform 410), `signup_unavailable` (503) and `signup_provisioning_failed` (500). One about a form field carries `params.field` — the `SignupStartRequest` field name — and the page puts the sentence under that field. `GET /slug-check` returns the same code beside its `reason`. The client states each from its code (`frontend/src/lib/api/codedRefusals.ts`), so nothing reaches the visitor in the server's English, and the copy says "workspace address", never "slug". The codes are exactly as specific as the English they replace: `/start` still answers an address that has an account like any other (decisions §292). The `/start` success `message` stays English for API clients; the page writes its own confirmation from the address it submitted.
+   **Every refusal on `/api/signup/*` is coded** (`api/refusals.coded_refusal`, issue #635 finding 18): the workspace-address rules carry `utils/slug.py`'s `SLUG_*` code (`slug_required`, `slug_format`, `slug_reserved`, `slug_hyphen_edge`, `slug_double_hyphen`, `slug_taken`, and `signup_slug_held` for an address resting after a workspace closure — below — each with `params.slug`), the captcha `utils/hcaptcha.py`'s (`captcha_required` / `captcha_unavailable` / `captcha_failed`), and the rest `signup_email_invalid`, `signup_name_has_link`, `signup_email_send_failed`, `signup_link_invalid` (the uniform 410), `signup_unavailable` (503) and `signup_provisioning_failed` (500). One about a form field carries `params.field` — the `SignupStartRequest` field name — and the page puts the sentence under that field. `GET /slug-check` returns the same code beside its `reason`. The client states each from its code (`frontend/src/lib/api/codedRefusals.ts`), so nothing reaches the visitor in the server's English, and the copy says "workspace address", never "slug". The codes are exactly as specific as the English they replace: `/start` still answers an address that has an account like any other (decisions §292). The `/start` success `message` stays English for API clients; the page writes its own confirmation from the address it submitted.
 4. User clicks the link. `/verify?token=...` calls `POST /api/signup/complete`. Backend re-checks availability and provisions the tenant (DB + org + an admin user with **no password** — `hashed_password` NULL, the representation SSO-only users already have, so `/auth/login` refuses the account until a password exists; `must_change_password=false`). It then mints a **set-password link**: a forgot-password reset token (`services/password_reset.issue_reset_token`, same Redis store, keyed digest and single-use `GETDEL`) with a longer life, `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS` (default 72), built by the same `utils/tenant_urls.password_reset_url` as the reset email plus `&mode=set`. The link is returned to the browser (`set_password_url`) **and** emailed in the welcome message; it is one token, so whichever copy is used first spends the other.
 5. The verify page shows **Set your password**, a button straight to `<tenant>/login/reset-password?token=…&mode=set`. That page (the existing reset page) reads the token with `POST /api/auth/reset-password/check` — a read that never consumes it, so a mail scanner opening the link, or a reload, leaves it usable — fills a hidden `autocomplete="username"` field with the account email so a password manager saves the new password under it, and redeems the token with `POST /api/auth/reset-password` on submit. Only that submit spends the token.
 6. The confirmation links to `/login?email=<address>`; the login page prefills its email field from `?email=` (`frontend/src/lib/utils/prefillEmail.ts`, a plausible single address only). The user signs in with the password they chose — no forced change.
@@ -81,6 +83,47 @@ The uniform `410` renders as **This link has expired** with localized copy (veri
 There is no self-service way yet to find your workspace without starting a signup: see `docs/followups.md` (an apex "email me my workspace address" form).
 
 The welcome email carries the **Set your password** button (with the paste-this fallback and the expiry), the workspace URL and the email as plain panel values, and a sign-in link with the address prefilled — no password anywhere. Its preheader is fixed copy ("Your workspace is live."), never the link. With no tenant base URL configured, `/complete` refuses with `503` **before** provisioning and leaves the verification unconsumed — a passwordless admin with no link to set a password (forgot-password needs that URL too) would have no way in. A Redis failure while minting yields no link (the email and the verify page point at Forgot password) rather than failing a request whose tenant already exists. The response is sent `Cache-Control: no-store`, and the issuance is audited as `auth.password_reset.requested` with `via: signup`.
+
+## Closing a workspace the signer-up no longer wants
+
+The address used at signup becomes that workspace's one account, and one address
+can belong to only one workspace (`docs/decisions.md` §291). A trial that is
+abandoned therefore holds its admin's address: if that person is later added to
+another workspace — their employer's, typically — the add is refused
+`email_in_other_workspace`. The way out is self-service, not support: they sign
+in to the abandoned workspace (**Forgot password** works if they never set one)
+and close it from **Organization → Close workspace**. Closing deletes the
+workspace and every account in it, through the operator's own deletion code, so
+the address is free at once.
+
+It is a narrow door on purpose: a workspace that holds anything that must be
+kept — approved invoices, payments, other active users, a paid subscription and
+the rest of the list in [`user-management.md`](user-management.md) § Freeing an
+address held by an abandoned workspace — is refused with its reasons, and
+support closes it instead. The closure needs the slug typed back and, where MFA
+is on, a code or a passkey. What it leaves behind: a control-plane
+`workspace_closures` row (ids, slug, proof, counts — no address), the
+`organization.closing` audit event already shipped to the write-once archive
+where audit shipping is on, and the per-tenant backups, which an operator
+removes within the DPA's 60 days
+([`founder-runbooks/workspace-closure.md`](founder-runbooks/workspace-closure.md)).
+Until the operator has — and for 90 days from the closure in any case
+(`utils/slug.CLOSED_SLUG_COOLDOWN`), so bookmarks, identity-provider redirect
+URIs and invite emails cannot point at a new owner early — the closed
+workspace's slug is held. Signup says so in its own words: the slug check
+returns `code: signup_slug_held` (the same `code` field as every other
+workspace-address rule — `utils/slug.SLUG_HELD`, raised as `SlugHeld`) and
+`/signup/start` and `/signup/complete` refuse with the coded `409 signup_slug_held` ("temporarily unavailable after a workspace
+closure", localized), never the bare "already taken". The hold lives in
+`provision_tenant`, so the partner and operator paths get it too.
+
+After a closure, the address it held signs up again like any other: `/start`
+and `/complete` provision a new workspace under a different slug, since §292's
+existing-account refusal no longer finds it. The closed workspace's own
+verification link is deleted with it, so re-opening it is the uniform 410.
+Nothing deletes an abandoned trial on its own; why, and what would have to
+change first: `docs/decisions.md` §306 and `docs/followups.md` § Surfaced by
+self-service workspace closure.
 
 ## Backend components
 

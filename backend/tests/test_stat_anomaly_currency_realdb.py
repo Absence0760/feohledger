@@ -142,3 +142,103 @@ async def test_stat_anomaly_not_masked_by_foreign_currency_history(realdb):
         await s.commit()
 
     assert any(w["type"] == "fraud_stat_anomaly" for w in warnings), warnings
+
+
+async def _mk_history_invoice_at(mk, org_id, *, vendor_id, amount, status, remit_to=None):
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        s.add(
+            Invoice(
+                organization_id=org_id,
+                entity_id=ent,
+                vendor_id=vendor_id,
+                vendor_name="Acme Supply",
+                invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
+                amount=Decimal(amount),
+                currency="USD",
+                status=status,
+                remit_to_address=remit_to,
+            )
+        )
+        await s.commit()
+
+
+async def _new_invoice_warnings(mk, org_id, *, vendor_id, amount, settings, remit_to=None):
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        inv = Invoice(
+            organization_id=org_id,
+            entity_id=ent,
+            vendor_id=vendor_id,
+            vendor_name="Acme Supply",
+            invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
+            amount=Decimal(amount),
+            currency="USD",
+            status=InvoiceStatus.new,
+            remit_to_address=remit_to,
+        )
+        s.add(inv)
+        await s.flush()
+        warnings = await refresh_warnings(s, inv, org_settings=settings)
+        await s.commit()
+    return warnings
+
+
+@pytest.mark.asyncio
+async def test_stat_anomaly_baseline_includes_finished_invoices(realdb):
+    """Issue #575: the fraud baselines listed {approved, posted_in_erp,
+    payment_scheduled, paid} by hand, so a vendor whose history had run to
+    `done` (the terminal state of every finished invoice) or sat at
+    `sent_to_erp` had no baseline and the rule never fired. The baseline is
+    the shared approved-or-beyond set now — the one the adaptive anomaly
+    baseline and the price-variance rule already read."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _mk_vendor(mk, org_id)
+    for amt, status in (
+        ("950", InvoiceStatus.done),
+        ("1000", InvoiceStatus.done),
+        ("1050", InvoiceStatus.sent_to_erp),
+        ("1000", InvoiceStatus.sending_to_erp),
+        ("975", InvoiceStatus.done),
+    ):
+        await _mk_history_invoice_at(mk, org_id, vendor_id=vendor_id, amount=amt, status=status)
+
+    warnings = await _new_invoice_warnings(
+        mk, org_id, vendor_id=vendor_id, amount="10000", settings=_ONLY_STAT_ANOMALY
+    )
+    assert any(w["type"] == "fraud_stat_anomaly" for w in warnings), warnings
+
+
+@pytest.mark.asyncio
+async def test_remit_to_change_compared_against_a_finished_invoice(realdb):
+    """The bank-redirect signature: the vendor's last accepted invoice was paid
+    and closed (`done`) to one address, the new one names another. With the
+    hand-listed set the `done` predecessor was invisible and nothing fired."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _mk_vendor(mk, org_id)
+    await _mk_history_invoice_at(
+        mk,
+        org_id,
+        vendor_id=vendor_id,
+        amount="1000",
+        status=InvoiceStatus.done,
+        remit_to="1 Old Street",
+    )
+    only_bank_change = {
+        "fraud_rules": {
+            **_ONLY_STAT_ANOMALY["fraud_rules"],
+            "stat_anomaly_enabled": False,
+            "bank_change_enabled": True,
+        }
+    }
+    warnings = await _new_invoice_warnings(
+        mk,
+        org_id,
+        vendor_id=vendor_id,
+        amount="1000",
+        settings=only_bank_change,
+        remit_to="99 New Road",
+    )
+    assert any(w.get("code") == "remit_to_changed" for w in warnings), warnings

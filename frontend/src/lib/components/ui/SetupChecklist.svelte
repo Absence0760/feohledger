@@ -11,7 +11,7 @@
 <script lang="ts">
 	/**
 	 * An ordered list of setup steps, each a link to where it is done and,
-	 * when the server knows, whether it has been (`docs/decisions.md` §309).
+	 * when the server knows, whether it has been (`docs/decisions.md` §315).
 	 *
 	 * A step's `done` is one of three things, and they are drawn differently on
 	 * purpose:

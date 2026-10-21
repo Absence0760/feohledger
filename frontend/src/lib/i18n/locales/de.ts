@@ -584,6 +584,8 @@ export const messages = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Die Beträge stimmen nicht: Zwischensumme ({subtotal}) + Steuer ({tax}) + Versand ({shipping}) − Rabatt ({discount}) = {expected}, die Gesamtsumme lautet jedoch {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'Das Fälligkeitsdatum ({dueDate}) liegt vor dem Rechnungsdatum ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'Die Positionssumme ({lineItemsTotal}) stimmt nicht mit dem Rechnungsbetrag ({amount}) überein.',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Die Beträge sind in {printedCurrency} angegeben, die Rechnungswährung lautet jedoch {fieldCurrency}. Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Die Beträge sind in mehr als einer Währung angegeben ({printedCurrencies}). Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Position {lineNumber}: {quantity} × {unitPrice} = {expected}, die Summe lautet jedoch {total}.',
 	'invoices.warning.glCodesNotInChart': 'Von der KI vorgeschlagene Sachkonten fehlen im aktiven Kontenplan: {codes}',
 	'invoices.warning.glCodeStalePrior': 'Das zwischengespeicherte Sachkonto „{code}“ des Lieferanten ist nicht mehr im aktiven Kontenplan.',
@@ -3085,6 +3087,7 @@ export const messages = {
 	'auth.login.signInWith': 'Anmelden mit {provider}',
 	'auth.login.forgotPassword': 'Passwort vergessen?',
 	'auth.login.signedOutOtherWorkspace': "Sie wurden abgemeldet, weil Ihre Sitzung zu einem anderen Workspace gehörte. Melden Sie sich hier an oder auf der Seite Ihres eigenen Workspace.",
+	'auth.login.workspaceClosed': "Dieser Workspace wurde geschlossen und seine Konten gelöscht. Ihre E-Mail-Adressen können jetzt in einem anderen Workspace verwendet werden.",
 	'auth.login.goToOwnWorkspace': "Zur Anmeldeseite Ihres Workspace",
 	'auth.login.devAccounts.heading': 'Entwicklungskonten',
 	'auth.login.devAccounts.hint': 'Nur für die lokale Entwicklung. Wählen Sie ein Seed-Konto, um das Formular auszufüllen.',
@@ -4881,7 +4884,7 @@ export const messages = {
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Diese E-Mail-Adresse gehört bereits zu einem Konto in einem anderen Workspace und kann sich hier nicht anmelden. Melden Sie sich auf der Seite Ihres eigenen Workspace an, oder bitten Sie die Administration dieses Workspace, Ihren Identitätsanbieter eine andere Adresse verwenden zu lassen.",
 	'refusal.emailInThisWorkspace': "In diesem Workspace gibt es bereits einen Benutzer mit dieser E-Mail-Adresse.",
-	'refusal.emailInOtherWorkspace': "Diese E-Mail-Adresse hat bereits ein Konto in einem anderen Workspace. Eine Adresse kann nur zu einem Workspace gehören; verwenden Sie für diese Person eine andere Adresse.",
+	'refusal.emailInOtherWorkspace': "Diese E-Mail-Adresse hat bereits ein Konto in einem anderen Workspace. Eine Adresse kann nur zu einem Workspace gehören; verwenden Sie für diese Person eine andere Adresse. Wenn die Person den anderen Workspace nicht mehr nutzt, kann dessen Administrator ihn schließen, wodurch die Adresse frei wird.",
 	'refusal.emailCheckThrottled': "Zu viele kürzlich in diesem Workspace eingegebene Adressen gehörten bereits zu anderen Workspaces. Das Hinzufügen von Benutzern und das Ändern ihrer E-Mail-Adresse ist daher für bis zu eine Stunde pausiert. Versuchen Sie es später erneut.",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
 	'refusal.vendorMergeSelf': "Ein Lieferant kann nicht mit sich selbst zusammengeführt werden. Wählen Sie einen anderen maßgeblichen Lieferanten.",
@@ -4891,6 +4894,13 @@ export const messages = {
 	'refusal.vendorMergeInvalidId': "Einer dieser Lieferanten konnte nicht erkannt werden. Schließen Sie diesen Dialog und öffnen Sie ihn erneut.",
 	'refusal.vendorMergeCrossEntity': "Diese Lieferanten gehören zu unterschiedlichen Einheiten, und eine Zusammenführung kann keine Ausgaben von einer Tochtergesellschaft auf eine andere verschieben.",
 	'refusal.vendorMergeBlockedDuplicate': "Für ein Duplikat sind Zahlungen gesperrt, für den maßgeblichen Lieferanten nicht. Eine Zusammenführung würde dessen zurückgehaltene Rechnungen freigeben. Heben Sie die Sperre zuerst in der Screening-Prüfung auf oder lassen Sie das Duplikat bei dieser Zusammenführung weg.",
+	'refusal.workspaceCloseConfirmationMismatch': "Geben Sie die Adresse dieses Workspace genau wie angezeigt ein, um zu bestätigen, dass er geschlossen werden soll.",
+	'refusal.workspaceCloseRefused': "Dieser Workspace kann hier nicht geschlossen werden, weil er Daten enthält, die aufbewahrt werden müssen, oder Konten anderer Personen. Wenden Sie sich an den Support, um ihn zu schließen.",
+	'refusal.workspaceCloseActorNotAdmin': "Nur ein aktiver Administrator dieses Workspace kann ihn schließen.",
+	'refusal.signupSlugHeld': "Diese Workspace-Adresse gehörte zu einem Workspace, der kürzlich geschlossen wurde, und ist eine Zeit lang nicht verfügbar. Wählen Sie eine andere Adresse.",
+	'refusal.workspaceCloseInProgress': "Dieser Workspace wird bereits geschlossen.",
+	'refusal.workspaceCloseAuditUnavailable': "Der Workspace konnte gerade nicht geschlossen werden, weil sein Prüfprotokolleintrag nicht gespeichert werden konnte. Es wurde nichts gelöscht. Versuchen Sie es in ein paar Minuten erneut.",
+	'refusal.workspaceCloseIncomplete': "Das Schließen des Workspace wurde nicht abgeschlossen. Versuchen Sie es erneut; wenn es wieder fehlschlägt, wenden Sie sich an den Support.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Dieser Lieferant ist noch nicht in {provider}. Synchronisieren Sie die Lieferanten aus {provider} oder legen Sie den Lieferanten dort an und versuchen Sie es dann erneut.",

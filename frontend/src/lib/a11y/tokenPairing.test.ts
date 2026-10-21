@@ -95,7 +95,7 @@ describe('style token pairing', () => {
 
 /**
  * The marketing landing page follows the theme like every other surface
- * (docs/decisions.md §306, superseding §289's dark pin). It is held to both
+ * (docs/decisions.md §312, superseding §289's dark pin). It is held to both
  * audits above with no exemption; these checks keep it there.
  *
  * The audit only measures pairs it can resolve, and a colour typed as a
@@ -251,7 +251,7 @@ for (const theme of PALETTE_THEMES) describe(`palette contract [${theme}]`, () =
 	// --gilt and --brand-violet are gradient stops on the landing page's
 	// headline and figures (background-clip: text), which the rule scan cannot
 	// measure — so the stops themselves are held to the body-text bar, which
-	// makes any gradient through them legible end to end (decisions §306).
+	// makes any gradient through them legible end to end (decisions §312).
 	for (const token of [
 		'--text',
 		'--text-muted',

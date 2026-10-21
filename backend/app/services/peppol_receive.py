@@ -85,7 +85,7 @@ class InboundPeppolMessage:
 class ReceiveResult:
     accepted: bool = False
     duplicate: bool = False
-    tenant_slug: str | None = None
+    organization_id: uuid.UUID | None = None
     invoice_id: uuid.UUID | None = None
     transmission_id: uuid.UUID | None = None
     # PII-free reason CODE only (e.g. "unknown_tenant", "bad_signature",
@@ -117,7 +117,7 @@ def verify_inbound_signature(body: bytes, signature: str | None) -> bool:
 async def receive_peppol_message(
     ctrl_db: AsyncSession,
     *,
-    tenant_slug: str,
+    organization_id: uuid.UUID,
     message: InboundPeppolMessage,
 ) -> ReceiveResult:
     """Resolve the tenant, dedupe, validate, and create an Invoice from an
@@ -126,10 +126,10 @@ async def receive_peppol_message(
     Every soft-reject returns a :class:`ReceiveResult` with a PII-free ``reason``
     code (the caller logs it and returns 204) — never raises for a rejection.
     """
-    result = ReceiveResult(tenant_slug=tenant_slug)
+    result = ReceiveResult(organization_id=organization_id)
 
     org = (
-        await ctrl_db.execute(select(Organization).where(Organization.slug == tenant_slug))
+        await ctrl_db.execute(select(Organization).where(Organization.id == organization_id))
     ).scalar_one_or_none()
     if org is None:
         result.reason = "unknown_tenant"
@@ -150,9 +150,10 @@ async def receive_peppol_message(
 
     # Short-lived tenant session — identical shape to email-intake. pool_size=1
     # keeps us under PostgreSQL's connection limit; disposed in `finally`.
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url
+    from app.db_engine import create_async_engine
     from app.models.entity import Entity
     from app.services.extraction_dispatch import dispatch_extraction
     from app.services.storage import _put_object, invoice_file_url

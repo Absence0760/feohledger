@@ -562,9 +562,10 @@ class SweepResult:
 
 async def _sweep_tenant(db_name: str, *, now: datetime) -> tuple[int, int]:
     """Run every due schedule for one tenant. Returns (run, failed)."""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url
+    from app.db_engine import create_async_engine
 
     engine = create_async_engine(_make_tenant_url(db_name))
     factory = async_sessionmaker(engine, expire_on_commit=False)

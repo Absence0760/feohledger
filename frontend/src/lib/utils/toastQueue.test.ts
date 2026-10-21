@@ -6,7 +6,7 @@ import {
 	type ToastMessage
 } from './toastQueue.ts';
 
-// decisions §307 — WCAG 2.2.1: errors stay until dismissed; everything else
+// decisions §313 — WCAG 2.2.1: errors stay until dismissed; everything else
 // pauses while hovered / focused and resumes with the time it had left.
 
 function setup() {

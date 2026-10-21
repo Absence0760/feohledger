@@ -78,9 +78,9 @@ from app.models.invoice import Invoice
 from app.models.procurement import Budget, BudgetDimension
 from app.services.budget_service import (
     _DIMENSION_MATCH_COLUMN,
-    REALISED_INVOICE_STATUSES,
     _invoice_scan_narrowing,
     _leg_columns,
+    realised_invoice_clause,
 )
 
 TENANT = "a"
@@ -250,7 +250,7 @@ def _actual_leg_query(dimension: BudgetDimension, budget: Budget):
         .where(
             Budget.id.in_([budget.id]),
             *_invoice_scan_narrowing(match_col, [budget]),
-            Invoice.status.in_(REALISED_INVOICE_STATUSES),
+            realised_invoice_clause(),
             or_(
                 Budget.period_start.is_(None),
                 Budget.period_end.is_(None),

@@ -2,7 +2,7 @@ import type { OnboardingProgress } from '#lib/types/analytics.ts';
 
 /**
  * The first-run setup steps — where each one is done, and whether the server
- * says it has been (`docs/decisions.md` §309).
+ * says it has been (`docs/decisions.md` §315).
  *
  * Shared by the dashboard's setup checklist and `/organization`'s Getting
  * started panel, so the two cannot send the same step to two different places

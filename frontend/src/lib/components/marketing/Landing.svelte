@@ -134,7 +134,7 @@
 />
 
 <!-- Follows the visitor's theme like every other surface (docs/decisions.md
-     §306): every colour below is a palette token, and the one raster — the
+     §312): every colour below is a palette token, and the one raster — the
      tally ornament — has a render lit for each ground. -->
 {#if copyReady}
 <div class="landing">

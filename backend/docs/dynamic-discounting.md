@@ -290,7 +290,7 @@ Three properties are load-bearing on both sides:
 
 - **The base is server-computed and must not be previewed.** `base_amount` is
   the summed open balance of that one vendor's invoices in the caller's entity
-  (`_OPEN_FOR_DISCOUNT`: `approved` → `payment_scheduled`). Re-deriving it in
+  (`_OPEN_FOR_DISCOUNT`, which is `models/invoice_status.OPEN_AP_STATUSES`: `approved` → `payment_scheduled`). Re-deriving it in
   the client from a second query would give the page a figure that can quietly
   disagree with the one booked — the same reason an invoice header is never
   recomputed from its line items. The form states the rule in words; the

@@ -9,7 +9,7 @@
 
 	let toasts = $state<ToastMessage[]>([]);
 
-	// Timing lives in `utils/toastQueue.ts` (decisions §307): an error stays
+	// Timing lives in `utils/toastQueue.ts` (decisions §313): an error stays
 	// until dismissed; anything else times out, but its clock stops while the
 	// toasts are hovered or hold focus (WCAG 2.2.1).
 	const queue = createToastQueue({ onChange: (items) => (toasts = items) });

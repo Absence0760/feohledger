@@ -15,7 +15,7 @@
 	 * segment, not the 16px dot.
 	 *
 	 * `compact` draws the same fieldset as a row of icons, for a header with no
-	 * room for words (the landing page's theme switch, docs/decisions.md §306).
+	 * room for words (the landing page's theme switch, docs/decisions.md §312).
 	 * Nothing about the semantics changes: the legend and every label are still
 	 * in the accessibility tree, only visually hidden, so the group keeps its
 	 * name and each radio its label; the radio itself is visually hidden too and

@@ -2957,6 +2957,19 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  ) {
+    return 'Amounts are printed in $printedCurrency, but the invoice currency reads $fieldCurrency. The amounts were left blank — enter them from the document.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies) {
+    return 'Amounts are printed in more than one currency ($printedCurrencies). The amounts were left blank — enter them from the document.';
+  }
+
+  @override
   String invoiceWarningSelfCorrectionLineItemMath(
     String lineNumber,
     String quantity,

@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.models.invoice_status import OPEN_AP_STATUSES as _OPEN_AP_STATUS_MEMBERS
 from app.utils.dates import utc_today
 
 # Canonical "open accounts-payable" invoice-status set — an approved liability
@@ -57,15 +58,9 @@ from app.utils.dates import utc_today
 # the aging bands always sum to the AP balance. Kept here (pure, IO-free module)
 # so the API layer, the dashboard, and the scheduled-report runner import the
 # same tuple instead of maintaining drifting copies (the F-4 root cause). Values
-# are the `InvoiceStatus` enum's `.value` strings — stated literally to keep this
-# module free of an ORM-model import.
-OPEN_AP_STATUSES: tuple[str, ...] = (
-    "approved",
-    "sending_to_erp",
-    "sent_to_erp",
-    "posted_in_erp",
-    "payment_scheduled",
-)
+# are the `InvoiceStatus` enum's `.value` strings, derived from the one set in
+# `models/invoice_status` rather than listed here a second time.
+OPEN_AP_STATUSES: tuple[str, ...] = tuple(s.value for s in _OPEN_AP_STATUS_MEMBERS)
 
 
 @dataclass(frozen=True)
@@ -564,13 +559,10 @@ def discount_capture_from_grouped_rows(groups: list[dict]) -> DiscountCaptureMet
 # every `VALID_TRANSITIONS` edge into them originates at `approved`, and every
 # writer of `approved` stamps `Invoice.approval_date`. Status alone is proof
 # here, so no extra evidence is needed.
-TOUCHLESS_CLEARED_STATUSES: tuple[str, ...] = (
-    "approved",
-    "sending_to_erp",
-    "sent_to_erp",
-    "posted_in_erp",
-    "payment_scheduled",
-)
+#
+# That is exactly the open-AP set — approved and not yet paid or closed — so it
+# is named by it rather than listed a second time (issue #575).
+TOUCHLESS_CLEARED_STATUSES: tuple[str, ...] = OPEN_AP_STATUSES
 
 # Statuses reachable EITHER through review or around it — status alone proves
 # nothing, so these are in the cleared leg only with the approval stamp:

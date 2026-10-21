@@ -21,7 +21,7 @@ Output: assets/marketing/render/tally-split[-light].png (RGBA, transparent
 film), which gen-marketing.sh downsamples into frontend/static/marketing/.
 
 Two lightings of the same object, picked by TALLY_VARIANT (docs/decisions.md
-§306). `dark` (the default) is the original, composed for the navy page: a cool
+§312). `dark` (the default) is the original, composed for the navy page: a cool
 blue fill and rim keep the shadow side off black. `light` is for the light
 page: the same geometry, camera and depth of field — so the trimmed frame and
 the alpha are identical and the page can swap one file for the other with no

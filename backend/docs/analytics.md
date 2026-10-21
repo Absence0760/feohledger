@@ -618,7 +618,7 @@ stopped counting invoices that never went through approval.*
 ### First-run fields — `organization_has_invoices` and `onboarding`
 
 Two fields describe the WORKSPACE rather than the figures (`docs/decisions.md`
-§309):
+§315):
 
 - `organization_has_invoices` — whether the organization has any invoice,
   **ignoring `X-Entity-ID`**. Every other figure here is entity-scoped, so
@@ -1079,10 +1079,13 @@ It is unreachable today only because nothing but `scripts/seed.py` constructs a
 `PaymentSchedule` — an accident of the current feature set, not a guarantee.
 
 The query now takes `DISTINCT ON (invoice_id) … ORDER BY invoice_id,
-created_at DESC, id DESC` — the LATEST schedule, mirroring
-`discount_auto_trigger._resolve_due_date`'s existing `ORDER BY created_at DESC
-LIMIT 1` on the same table, so the discount engine and the cash forecast cannot
-disagree about an invoice's due date. `created_at` defaults to
+created_at DESC, id DESC` — the LATEST schedule, by
+`services/payment_schedules.LATEST_SCHEDULE_ORDER`, the one rule the discount
+engine's `latest_schedule` (auto-capture sweep and per-invoice ROI) reads too,
+so the discount engine and the cash forecast cannot disagree about an invoice's
+due date. (Until issue #575 those two ordered by `created_at` alone and could
+pick the other row of a same-transaction tie;
+`tests/test_payment_schedule_latest.py` pins all three to one answer.) `created_at` defaults to
 `transaction_timestamp()`, so rows written in one commit share a timestamp and
 "latest" is genuinely undefined between them; the `id` tiebreak only makes that
 case **deterministic** (a copilot `plan_id` must not flap between reads), it

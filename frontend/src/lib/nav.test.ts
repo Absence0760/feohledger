@@ -512,12 +512,12 @@ test('the Settings split preserves every destination exactly once', () => {
 			'/adaptive',
 		])
 	);
-	// 15 from the split, plus Subscription, moved in from Billing (§308).
+	// 15 from the split, plus Subscription, moved in from Billing (§314).
 	expect(split).toHaveLength(16);
 });
 
 // ---------------------------------------------------------------------------
-// Group names that say what is in them (issue #635 #23, decisions §308).
+// Group names that say what is in them (issue #635 #23, decisions §314).
 // ---------------------------------------------------------------------------
 
 test('our own subscription sits in Settings beside Organization, not among the payables tools', () => {

@@ -665,6 +665,8 @@ export const en = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Amounts don\'t add up: subtotal ({subtotal}) + tax ({tax}) + shipping ({shipping}) − discount ({discount}) = {expected}, but total is {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'Due date ({dueDate}) is before invoice date ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'Line items total ({lineItemsTotal}) doesn\'t match invoice amount ({amount}).',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Amounts are printed in {printedCurrency}, but the invoice currency reads {fieldCurrency}. The amounts were left blank — enter them from the document.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Amounts are printed in more than one currency ({printedCurrencies}). The amounts were left blank — enter them from the document.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.',
 	'invoices.warning.glCodesNotInChart': 'AI suggested GL code(s) not in active chart: {codes}',
 	'invoices.warning.glCodeStalePrior': 'Cached vendor GL code “{code}” is no longer in the active chart of accounts.',
@@ -3264,6 +3266,7 @@ export const en = {
 	'auth.login.signInWith': 'Sign in with {provider}',
 	'auth.login.forgotPassword': 'Forgot password?',
 	'auth.login.signedOutOtherWorkspace': "You were signed out because your session belonged to a different workspace. Sign in here, or on your own workspace's page.",
+	'auth.login.workspaceClosed': "This workspace has been closed and its accounts deleted. Their email addresses can now be used in another workspace.",
 	'auth.login.goToOwnWorkspace': "Go to your workspace's sign-in page",
 	'auth.login.devAccounts.heading': 'Dev accounts',
 	'auth.login.devAccounts.hint': 'Local development only. Pick a seeded account to fill the form.',
@@ -5063,7 +5066,7 @@ export const en = {
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "This email address already belongs to an account in another workspace, so it can't sign in here. Sign in on your own workspace's page, or ask this workspace's administrator to have your identity provider use a different address.",
 	'refusal.emailInThisWorkspace': "A user with this email address already exists in this workspace.",
-	'refusal.emailInOtherWorkspace': "This email address already has an account in another workspace. An address can belong to only one workspace, so use a different address for this person.",
+	'refusal.emailInOtherWorkspace': "This email address already has an account in another workspace. An address can belong to only one workspace, so use a different address for this person. If they no longer use that other workspace, its administrator can close it, which frees the address.",
 	'refusal.emailCheckThrottled': "Too many addresses entered in this workspace recently already belonged to other workspaces, so adding users or changing their email is paused for up to an hour. Try again later.",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`). No
 	// params: the vendors are already on the steward's screen.
@@ -5074,6 +5077,13 @@ export const en = {
 	'refusal.vendorMergeInvalidId': "One of these vendors couldn't be identified. Close this dialog and open it again.",
 	'refusal.vendorMergeCrossEntity': "These vendors belong to different entities, and a merge can't move one subsidiary's spend to another.",
 	'refusal.vendorMergeBlockedDuplicate': "A duplicate has its payments blocked and the canonical vendor doesn't, so merging would release its held invoices. Resolve the block in its screening review first, or leave it out of this merge.",
+	'refusal.workspaceCloseConfirmationMismatch': "Type this workspace's address exactly as shown to confirm that it should be closed.",
+	'refusal.workspaceCloseRefused': "This workspace can't be closed here because it holds records that must be kept or other people's accounts. Contact support to close it.",
+	'refusal.workspaceCloseActorNotAdmin': "Only an active administrator of this workspace can close it.",
+	'refusal.signupSlugHeld': "This workspace address belonged to a workspace that was closed recently, and is unavailable for a while. Choose a different address.",
+	'refusal.workspaceCloseInProgress': "This workspace is already being closed.",
+	'refusal.workspaceCloseAuditUnavailable': "The workspace could not be closed right now because its audit record could not be saved. Nothing was deleted. Try again in a few minutes.",
+	'refusal.workspaceCloseIncomplete': "Closing the workspace did not finish. Try again; if it fails again, contact support.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "This vendor isn't in {provider} yet. Sync vendors from {provider}, or add the vendor there, then retry.",

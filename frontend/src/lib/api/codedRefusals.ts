@@ -55,6 +55,7 @@ import { EXCEPTION_BLOCKS_ERP_EXPORT, erpRefusalText } from '#lib/api/erpRefusal
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
+import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
@@ -424,6 +425,9 @@ const BUILDERS: Record<string, Builder> = {
 	slug_hyphen_edge: fixed('refusal.slugHyphenEdge'),
 	slug_double_hyphen: fixed('refusal.slugDoubleHyphen'),
 	slug_taken: slugNamed('refusal.slugTaken'),
+	// Resting after its workspace was closed (`utils/slug.ensure_slug_not_held`,
+	// decisions §306): nobody owns it, so the sentence is not "taken".
+	signup_slug_held: fixed('refusal.signupSlugHeld'),
 	signup_email_invalid: fixed('refusal.signupEmailInvalid'),
 	signup_name_has_link: fixed('refusal.signupNameHasLink'),
 	captcha_required: fixed('refusal.captchaRequired'),
@@ -554,7 +558,17 @@ const BUILDERS: Record<string, Builder> = {
 	vendor_merge_duplicate_not_found: fixed('refusal.vendorMergeDuplicateNotFound'),
 	vendor_merge_invalid_id: fixed('refusal.vendorMergeInvalidId'),
 	vendor_merge_cross_entity: fixed('refusal.vendorMergeCrossEntity'),
-	vendor_merge_blocked_duplicate: fixed('refusal.vendorMergeBlockedDuplicate')
+	vendor_merge_blocked_duplicate: fixed('refusal.vendorMergeBlockedDuplicate'),
+	// Closing a workspace (`api/organization_close.py`, decisions §306). The
+	// refusal's blockers are listed by the page itself; the toast is the
+	// fixed sentence, and a blocker list this build cannot read falls back.
+	workspace_close_confirmation_mismatch: fixed('refusal.workspaceCloseConfirmationMismatch'),
+	workspace_close_refused: (p, t) =>
+		refusalBlockers(p) === null ? null : t('refusal.workspaceCloseRefused'),
+	workspace_close_in_progress: fixed('refusal.workspaceCloseInProgress'),
+	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
+	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
+	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, type Page } from '@playwright/test';
 
+import { SHARED } from '../fixtures/realisticValues';
+
 /**
  * Shared pieces of the day-one suite (`journey.spec.ts`). Nothing here is seed
  * data: the stack this suite runs against (`scripts/day-one/stack.sh`) holds one
@@ -37,21 +39,25 @@ export function readTenant(): DayOneTenant | null {
 }
 
 /**
- * Production-shaped values (#575 § 2). Seed and e2e fixtures are short ASCII;
- * real first invoices are not, and #574's table overflow only showed with these.
+ * Production-shaped values (#575 § 2): non-ASCII and long, a tax-EXCLUSIVE
+ * invoice (net lines, the tax only on the header), a long assignee address.
+ * From `backend/scripts/fixtures/realistic_rows.json` (via
+ * `fixtures/realisticValues.ts`), the one file the seed and the layout specs
+ * read too — never respelled here. This suite runs on an EMPTY tenant, so the
+ * values carry no teardown marker.
  */
+const TAX = SHARED.tax_exclusive_invoice;
 export const REAL = {
-	// Non-ASCII, punctuation, and long enough to wrap any column it lands in.
-	vendorName: 'Ångström Präzisionsinstrumente & Kalibrierdienste (Europa) GmbH',
-	// Long, with the separators real numbering schemes use.
-	invoiceNumber: 'INV-2026-10-EU/000123456789-CAL',
-	poNumber: 'PO-4410',
-	managerName: 'Priya Raghunathan-Okonkwo',
-	managerEmail: 'accounts.payable.operations.manager@dayone-trading.example.com',
-	// Tax-EXCLUSIVE: line amounts are net, the tax sits on the header only.
-	subtotal: '1500.00',
-	taxAmount: '285.00',
-	total: '1785.00'
+	vendorName: TAX.vendor_name,
+	invoiceNumber: TAX.invoice_number,
+	poNumber: TAX.po_number,
+	managerName: SHARED.manager.name,
+	managerEmail: SHARED.manager.email,
+	subtotal: TAX.subtotal,
+	taxAmount: TAX.tax_amount,
+	taxRate: TAX.tax_rate,
+	total: TAX.amount,
+	lines: TAX.lines
 } as const;
 
 /** Escape text for an XML element or attribute value. `&` first, or the
@@ -119,7 +125,7 @@ export function ublInvoice(today = new Date()): Buffer {
       <cbc:TaxableAmount currencyID="USD">${REAL.subtotal}</cbc:TaxableAmount>
       <cbc:TaxAmount currencyID="USD">${REAL.taxAmount}</cbc:TaxAmount>
       <cac:TaxCategory>
-        <cbc:ID>S</cbc:ID><cbc:Percent>19.00</cbc:Percent>
+        <cbc:ID>S</cbc:ID><cbc:Percent>${REAL.taxRate}</cbc:Percent>
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:TaxCategory>
     </cac:TaxSubtotal>
@@ -130,27 +136,21 @@ export function ublInvoice(today = new Date()): Buffer {
     <cbc:TaxInclusiveAmount currencyID="USD">${REAL.total}</cbc:TaxInclusiveAmount>
     <cbc:PayableAmount currencyID="USD">${REAL.total}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>
-  <cac:InvoiceLine>
-    <cbc:ID>1</cbc:ID>
-    <cbc:InvoicedQuantity unitCode="C62">3</cbc:InvoicedQuantity>
-    <cbc:LineExtensionAmount currencyID="USD">1237.50</cbc:LineExtensionAmount>
+${REAL.lines
+	.map(
+		(line, i) => `  <cac:InvoiceLine>
+    <cbc:ID>${i + 1}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="C62">${line.quantity}</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="USD">${line.total}</cbc:LineExtensionAmount>
     <cac:Item>
-      <cbc:Name>Kalibrierung Drehmomentschlüssel (ISO 6789)</cbc:Name>
-      <cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>19.00</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory>
+      <cbc:Name>${xmlEscape(line.description)}</cbc:Name>
+      <cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>${REAL.taxRate}</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory>
     </cac:Item>
-    <cac:Price><cbc:PriceAmount currencyID="USD">412.50</cbc:PriceAmount></cac:Price>
+    <cac:Price><cbc:PriceAmount currencyID="USD">${line.unit_price}</cbc:PriceAmount></cac:Price>
   </cac:InvoiceLine>
-  <cac:InvoiceLine>
-    <cbc:ID>2</cbc:ID>
-    <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
-    <cbc:LineExtensionAmount currencyID="USD">262.50</cbc:LineExtensionAmount>
-    <cac:Item>
-      <cbc:Name>Prüfprotokoll &amp; Versand</cbc:Name>
-      <cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>19.00</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory>
-    </cac:Item>
-    <cac:Price><cbc:PriceAmount currencyID="USD">262.50</cbc:PriceAmount></cac:Price>
-  </cac:InvoiceLine>
-</Invoice>
+`
+	)
+	.join('')}</Invoice>
 `;
 	return Buffer.from(xml, 'utf8');
 }

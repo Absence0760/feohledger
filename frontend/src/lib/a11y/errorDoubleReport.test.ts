@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 /**
  * Static guard: one error, one signal (`docs/ui-patterns.md` § Toast).
  *
- * An error toast stays until it is dismissed (decisions §307). Where a dialog
+ * An error toast stays until it is dismissed (decisions §313). Where a dialog
  * or panel already states the same failure in place — a `role="alert"` element
  * rendering the error variable — a second copy in a toast adds nothing for
  * anyone: `role="alert"` is itself announced the moment it appears, and the

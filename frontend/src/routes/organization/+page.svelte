@@ -49,6 +49,7 @@
 	import type { OnboardingResponse } from '#lib/types/analytics.ts';
 	import ErpConnectionPanel from '#lib/components/organization/ErpConnectionPanel.svelte';
 	import CommerceConnectionPanel from '#lib/components/organization/CommerceConnectionPanel.svelte';
+	import CloseWorkspacePanel from '#lib/components/organization/CloseWorkspacePanel.svelte';
 	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
 	import {
 		FEATURE_ERP_INTEGRATIONS,
@@ -343,7 +344,12 @@
 		},
 		{
 			labelKey: 'org.rail.group.account',
-			items: [{ slug: 'plan', labelKey: 'org.section.plan' }]
+			items: [
+				{ slug: 'plan', labelKey: 'org.section.plan' },
+				// Deleting an unused workspace, which frees its addresses
+				// (decisions §306). Last: the one irreversible panel.
+				{ slug: 'close', labelKey: 'org.section.close' }
+			]
 		}
 	];
 
@@ -419,7 +425,7 @@
 	/**
 	 * Getting started — the settings a new workspace configures first, each
 	 * ticked from the same server-side facts as the dashboard's setup checklist
-	 * (`GET /api/dashboard/onboarding`, `docs/decisions.md` §309). Read again
+	 * (`GET /api/dashboard/onboarding`, `docs/decisions.md` §315). Read again
 	 * each time the panel is shown, so a step saved on another panel is ticked
 	 * on the way back. Admin-only: a non-admin, or a read that fails, gets the
 	 * same links with no done state at all — an unknown is never drawn as
@@ -3248,6 +3254,10 @@
 							<span class="plan-date">{m('org.plan.created', { date: formatDate(org.created_at, '—', { month: 'long', day: 'numeric', year: 'numeric' }) })}</span>
 						</div>
 					</section>
+				{/if}
+
+				{#if section === 'close'}
+					<CloseWorkspacePanel {readOnly} {userLoaded} />
 				{/if}
 			</fieldset>
 		</div>

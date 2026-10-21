@@ -37,6 +37,30 @@ Tenant connections are derived automatically:
 postgresql+asyncpg://postgres:postgres@localhost:5432/feoh_acme
 ```
 
+**Every connection is made by `app/db_engine.py`.** Import
+`create_async_engine` from there (a drop-in for SQLAlchemy's), and open a raw
+connection (CREATE / DROP DATABASE, a one-off probe) with
+`connect_raw(url, database=...)`, never a bare `asyncpg.connect`.
+`tests/test_db_engine_chokepoint.py` fails on any other way in, under `app/`,
+`scripts/` or `alembic/`. The reason is `FEOH_DATABASE_IAM_AUTH`: in production
+the app signs in as the `feoh_app` role with an RDS IAM token the factory mints
+per new connection, off the event loop, and the URL carries no password. A
+connection opened around the factory would have nothing to sign in with
+(`docs/environment.md`, `../../docs/decisions.md` §310).
+
+**The production role owns everything, but is not a superuser.** The app signs
+in as `feoh_app` and every session acts as `feoh_owner` (its `role` default),
+which holds `CREATEDB` and owns the control plane, every tenant database and
+every object in them. Neither role is in `rds_superuser` or can create roles or
+untrusted extensions. `DROP DATABASE … WITH (FORCE)` needs `SET ROLE NONE`
+first, as `tenant_provisioning._drop_postgres_database` does, because only the
+signing-in role may terminate its own other sessions. pgvector comes from `template1`, where the master created
+it once, so `CREATE EXTENSION IF NOT EXISTS vector` is a no-op the role may run.
+**A new migration must not need more than owner rights.** Creating an untrusted
+extension, `ALTER SYSTEM`, or a role change would fail in production as the app
+role. Such a step is a master (break-glass) operation, done by hand
+(`../../deploy/README.md` § Database role).
+
 ## Data Models
 
 ### Numeric column types — the guard is opt-out
@@ -101,6 +125,7 @@ decimal comparison rather than binary drift.
 - `roles` — role definitions (admin, ap_manager, ap_clerk, cfo)
 - `user_roles` — many-to-many join table
 - `email_verifications` — pending self-service signups (token, email, slug, admin_name, expires_at, consumed_at). Created by `POST /api/signup/start`, consumed by `POST /api/signup/complete`.
+- `workspace_closures` — the record of a workspace its administrator closed (`POST /api/organization/close`, decisions §306): ids, slug, step-up proof, what was removed, and whether the operator has removed its backups yet. Kept when the tenant it describes is deleted.
 - `extraction_usage` — billing rows: invoice_id, provider, program_type, period (used for tracking platform-extraction usage), plus the provider's token usage — input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, model (all nullable, migration 0108; `backend/docs/ai-extraction.md` § Token tracking)
 - `card_rebates` — billing rows: virtual_card_id, amount, rate, status, period
 
@@ -191,6 +216,8 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0007     | Tenant  | `payments`   | Adds `payments.provider`, `provider_payment_id`, `failure_reason`, `submitted_at`, `completed_at` (adapter lifecycle).   |
 | 0022     | Tenant  | `vendors`    | Creates `vendor_change_requests` (supplier-portal staged bank/tax changes pending AP approval) + a partial index on `status='pending'`. |
 | 0118     | Tenant  | `invoices`   | Adds `invoices.erp_document_id` varchar(255) + `erp_document_url` varchar(1024); backfills the id from the invoice's single workflow instance's `state_data.erp_reference` (not `UNKNOWN`), never the URL (decisions §302). |
+| 0119     | Control | `workspace_closures` | Creates `workspace_closures`, the control-plane record of a self-service workspace closure that outlives the deleted tenant; no foreign keys; no-op on a tenant DB (decisions §306). |
+| 0120     | Tenant  | `contracts`  | Adds `contracts.activated_at` timestamptz; backfills it from the first `contract.active` audit row, else from an `active`/`expired`/`terminated` status (decisions §306). |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).
 
@@ -519,6 +546,7 @@ gate fails if a model is added without being classified.
    - `UserRole` — junction table
    - `WebAuthnCredential` — registered passkey (credential_id, public_key, sign_count, transports) per `user_id`; the WebAuthn second factor (migration 0063)
    - `ProviderCredential` — `provider_credentials`: one row per (organization, settings block `erp` / `payments` / `cards`) holding that block's secrets as ONE envelope-encrypted JSON map (`ciphertext`, `wrapped_key`, `key_provider` `kms`/`local`, `key_id`) plus the stored path NAMES (`secret_fields`, so "is it set?" needs no decrypt); unique `(organization_id, block)`, plain FK to `organizations` (swept by `tenant_deletion`). Control-plane, beside the `Organization.settings` it was moved out of, so migration 0110 could copy-and-strip in one transaction. See `services/provider_credentials.py` and `erp-integration.md` § Where the credentials live
+   - `WorkspaceClosure` — `workspace_closures`: one row per workspace an administrator closed (`services/workspace_closure.py`, migration 0119): `organization_id` (UNIQUE, no FK — the org is deleted), `slug`, `requested_by_user_id` (no FK), `requested_by_roles` (role names, JSONB), `step_up_proof`, `status` `started`/`completed`, counts of what the deletion removed, `last_failure` / `last_failure_at` (the exception class of a part-way failure), and `backups_cleared_at` / `backups_cleared_by` (the operator's backup leg). Its downgrade is a deliberate no-op. The one control-plane table a tenant deletion deliberately keeps (`tenant_deletion.CONTROL_TABLES_EXEMPT`): it is the record that outlives the tenant. No address or name
    - `AssistantUsage` — billing: per-org/month assistant token meter. The
      *only* usage meter that is control-plane; `ExtractionUsage` and
      `CardRebate` read like control-plane data but are tenant-local (see

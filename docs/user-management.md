@@ -138,7 +138,7 @@ coded refusals, each stated in the reader's language
 | Code | When | What it tells the admin |
 |---|---|---|
 | `email_in_this_workspace` | A user in **this** workspace already has the address | They already exist here — find and edit them |
-| `email_in_other_workspace` | An account in **another** workspace has it | Use a different address for this person (for example their address at your company) |
+| `email_in_other_workspace` | An account in **another** workspace has it | Use a different address for this person (for example their address at your company) — or, if they no longer use the other workspace, its administrator can close it, which frees the address |
 
 The second used to be a bare "Email already in use", which gave no way forward.
 It names no workspace and no account — but it still tells anyone holding
@@ -158,6 +158,48 @@ cycle, and a throttle would turn that into a stuck provisioning job. An SSO
 sign-in whose IdP asserts such an address is refused the same way
 ([`authentication.md`](authentication.md) § JIT user provisioning). Reasoning:
 [`decisions.md`](decisions.md) §291.
+
+### Freeing an address held by an abandoned workspace
+
+The common way into the second refusal is innocent: someone signed up for a
+trial with an address, never used it, and is now being added to their
+employer's workspace. Two things free the address, both on the **other**
+workspace's side:
+
+- **Another administrator there deletes the person's user** (Admin > Users >
+  Delete). The row goes, so the address is free at once.
+- **The person closes the workspace**, when they are its only active user:
+  **Organization → Close workspace** (`/organization?section=close`, admin only).
+  Closing deletes the workspace — its documents, its database and every account
+  in it — through the same code as the operator's `scripts/delete_tenant.py`, so
+  every address in it is free afterwards. It is refused, with the reasons listed
+  on the page, whenever the workspace holds anything that must be kept: other
+  active users, a supplier-portal login, approved invoices, payments, payment
+  runs, virtual cards, applied credit memos, approved expense reports, card
+  transactions, bank statements, tax filings or records, Positive Pay files,
+  e-invoices, goods receipts, stock pushed to a commerce platform, contracts
+  that have been in force, accepted discounts, approved supplier bank or tax
+  changes, data-subject request records, supplier statement reconciliations,
+  approved pre-approvals / requisitions / intake requests, received or closed
+  purchase orders, a paid subscription, a partner relationship or a custom
+  domain. Those go to support. Before anything is asked, the page also lists
+  what a closure WOULD delete (counts of invoices, vendors, purchase orders and
+  so on), so the decision is an informed one.
+
+  **What the deployment must provide.** In a deployed environment the closure
+  needs `FEOH_MFA_ENABLED` on (it takes a second factor, and the page says so
+  instead of offering a close that cannot succeed), a real write-once audit
+  archive (`FEOH_AUDIT_SHIPPING_ENABLED` with non-`mock` providers — the trail is
+  shipped and sealed before the database is dropped), and `local` audit mode. A
+  deployment missing any of these refuses every self-service closure with that
+  reason, and support closes the workspace. Local dev needs none of them.
+  The administrator types the workspace's slug back and, where MFA is on,
+  confirms a code or a passkey (a password alone is not enough, and an account
+  with no second factor enrolls one first). `POST /api/organization/close`;
+  reasoning and the full guard list: [`decisions.md`](decisions.md) §306.
+
+Neither one reveals anything about the other workspace to the inviter; the
+refusal's sentence only says that its administrator can close it.
 
 ## Resetting a user's password
 

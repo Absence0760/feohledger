@@ -53,6 +53,13 @@ APP_DIR = BACKEND_DIR / "app"
 #: `_make_tenant_url` and the control-plane engine live.
 CHOKEPOINT = APP_DIR / "database.py"
 
+#: The engine factory every site imports `create_async_engine` from. It is a
+#: pass-through that forwards whatever URL its caller passed (and adds the IAM
+#: token callable when that is on), so it has no URL of its own to classify —
+#: the callers are what this scan judges. `tests/test_db_engine_chokepoint.py`
+#: keeps every site going through it.
+ENGINE_FACTORY = APP_DIR / "db_engine.py"
+
 #: The approved ways to turn a tenant DB name into a URL. `make_tenant_url` is
 #: the primitive in `app/tenant_url.py`; `_make_tenant_url` is `app/database.py`'s
 #: binding of it to `settings.database_url`, which ~70 in-app call sites spell.
@@ -264,7 +271,7 @@ def test_every_engine_url_comes_from_make_tenant_url_or_the_control_plane():
     seen = 0
 
     for path in sorted(APP_DIR.rglob("*.py")):
-        if path == CHOKEPOINT or not _constructs_an_engine(path.read_text()):
+        if path in (CHOKEPOINT, ENGINE_FACTORY) or not _constructs_an_engine(path.read_text()):
             continue
         rel = _rel(path)
         for lineno, url, scope in _engine_sites(path):

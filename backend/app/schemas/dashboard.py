@@ -147,7 +147,7 @@ class DiscountCapture(BaseModel):
 class OnboardingProgress(BaseModel):
     """First-run setup facts, each derived on read from data another feature
     owns — never a stored tick. Field meanings: `app/services/onboarding.py`
-    (`docs/decisions.md` §309)."""
+    (`docs/decisions.md` §315)."""
 
     company: bool
     users: bool

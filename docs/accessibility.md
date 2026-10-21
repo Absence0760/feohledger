@@ -244,7 +244,7 @@ The current build implements:
   back the moment a choice is made. Guarded by
   `frontend/tests-e2e/legal/pages.spec.ts` (the consent-banner rail test).
 - **Live-region announcements** for toasts and async status (`aria-live`).
-- **Toasts are timing-adjustable** (SC 2.2.1, decisions §307) — an error toast
+- **Toasts are timing-adjustable** (SC 2.2.1, decisions §313) — an error toast
   stays until the reader dismisses it with its keyboard-reachable dismiss
   button; any other toast's timer stops while it is hovered or holds focus and
   resumes afterwards. Persistent errors are capped at three on screen, and a

@@ -12,7 +12,7 @@ import { expect, signInAndWait, test } from '../fixtures/helpers';
  *
  * Each step that has a fact behind it is ticked from the same server-side
  * derivation as the dashboard's setup checklist (`GET /api/dashboard/onboarding`,
- * `docs/decisions.md` §309); the ones with none — defaults, payment-run sign-off,
+ * `docs/decisions.md` §315); the ones with none — defaults, payment-run sign-off,
  * branding — carry no done state at all.
  *
  * The five `#org-*` anchors these links used to carry still resolve, because

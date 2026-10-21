@@ -72,7 +72,7 @@
 		} catch {
 			// Stated in place below — a toast is never the only sign of a failed
 			// load, and a persistent error toast repeating it would be noise
-			// (decisions §307).
+			// (decisions §313).
 			loadError = true;
 		} finally {
 			loading = false;

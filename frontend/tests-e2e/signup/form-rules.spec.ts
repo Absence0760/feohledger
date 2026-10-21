@@ -310,6 +310,31 @@ test.describe('coded refusals, read in German', () => {
 		);
 	});
 
+	test('an address resting after a workspace closure is "unavailable for a while", not taken', async ({
+		page
+	}) => {
+		// The held slug is one more code on the slug-check's single `code` field
+		// (`utils/slug.SLUG_HELD`, decisions §306) — no separate field to read.
+		await stubCaptcha(page);
+		await page.route(
+			(url) => url.pathname === '/api/signup/slug-check',
+			(route) =>
+				route.fulfill({
+					json: {
+						slug: 'oldco',
+						available: false,
+						reason: "'oldco' belonged to a workspace that was closed recently.",
+						code: 'signup_slug_held'
+					}
+				})
+		);
+		await page.goto('/signup');
+		await page.locator('#signup-slug').fill('oldco');
+		await expect(page.locator('#slug-hint')).toHaveText(
+			'Diese Workspace-Adresse gehörte zu einem Workspace, der kürzlich geschlossen wurde, und ist eine Zeit lang nicht verfügbar. Wählen Sie eine andere Adresse.'
+		);
+	});
+
 	test('the confirmation is written in German from the address it went to', async ({ page }) => {
 		await stubCaptcha(page);
 		await page.goto('/signup');

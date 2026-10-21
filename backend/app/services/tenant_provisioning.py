@@ -14,14 +14,16 @@ import re
 import uuid
 from dataclasses import dataclass
 
-import asyncpg
 from sqlalchemy import select, text
-from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.api.deps import ROLE_ADMIN
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
+from app.db_engine import (
+    asyncpg_connect_kwargs,
+    connect_raw,
+    create_async_engine,
+)
 from app.models import Base
 from app.models.billing import Subscription
 from app.models.organization import Organization
@@ -30,7 +32,7 @@ from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscr
 from app.services.schema_version import head_revision, record_head
 from app.utils.emails import normalize_email
 from app.utils.passwords import hash_password
-from app.utils.slug import validate_slug_format
+from app.utils.slug import ensure_slug_not_held, validate_slug_format
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,10 @@ CONTROL_TABLES: frozenset[str] = frozenset(
         # provider_credential.py for why they sit beside `organizations`).
         # Control-plane only, never fanned to tenant DBs.
         "provider_credentials",
+        # The record of a workspace an administrator closed (see app/models/
+        # workspace_closure.py). It outlives the tenant it describes, so it
+        # cannot live in that tenant's DB. Control-plane only.
+        "workspace_closures",
     }
 )
 
@@ -109,42 +115,6 @@ class ProvisioningResult:
     db_name: str
 
 
-#: Query keys SQLAlchemy's asyncpg dialect consumes itself and never forwards to
-#: ``asyncpg.connect`` (``AsyncAdapt_asyncpg_dbapi.connect``) — passing one to a
-#: raw ``asyncpg.connect`` would be a TypeError.
-_SQLALCHEMY_ONLY_QUERY_KEYS = frozenset(
-    {"prepared_statement_cache_size", "prepared_statement_name_func"}
-)
-
-
-def asyncpg_connect_kwargs(url: str, *, database: str | None = None) -> dict:
-    """``asyncpg.connect`` keyword arguments for a ``postgresql+asyncpg://`` URL.
-
-    Parsed with SQLAlchemy's own ``make_url`` — the parser every engine in the
-    app uses — so a raw asyncpg connection reaches exactly the server, as
-    exactly the user, an engine on the same URL would: the password is
-    percent-decoded, a missing port is left to asyncpg's default, and the URL's
-    query string is forwarded the way the dialect forwards it (``ssl=`` and
-    friends become connect kwargs). Before this, a hand-rolled split dropped the
-    query outright, so a TLS option set on ``FEOH_DATABASE_URL`` reached every
-    engine but never the CREATE/DROP DATABASE connection.
-
-    With no ``ssl`` key in the URL, asyncpg falls back to ``PGSSLMODE`` /
-    ``PGSSLROOTCERT`` from the environment — the mechanism the deployed stack
-    uses (docs/minimal-deployment.md § Database TLS) — exactly as an engine does.
-
-    ``database`` overrides the URL's database (``"postgres"`` for maintenance).
-    """
-    parsed = make_url(url)
-    kwargs: dict = {
-        key: value for key, value in parsed.query.items() if key not in _SQLALCHEMY_ONLY_QUERY_KEYS
-    }
-    kwargs.update(parsed.translate_connect_args(username="user"))
-    if database is not None:
-        kwargs["database"] = database
-    return kwargs
-
-
 def _parse_maintenance_dsn() -> dict:
     """``asyncpg.connect`` kwargs for the 'postgres' maintenance DB on the
     configured server (CREATE / DROP DATABASE cannot run in a transaction, so
@@ -159,7 +129,7 @@ async def _create_postgres_database(db_name: str) -> bool:
     — so the caller knows whether it's safe to drop on a later failure.
     """
     _assert_safe_db_name(db_name)
-    conn = await asyncpg.connect(**_parse_maintenance_dsn())
+    conn = await connect_raw(settings.database_url, database="postgres")
     try:
         exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", db_name)
         if exists:
@@ -176,8 +146,16 @@ async def _drop_postgres_database(db_name: str) -> None:
     """Drop a tenant DB we created during a provisioning attempt that then
     failed, so a partial failure doesn't leak orphan databases."""
     _assert_safe_db_name(db_name)
-    conn = await asyncpg.connect(**_parse_maintenance_dsn())
+    conn = await connect_raw(settings.database_url, database="postgres")
     try:
+        # In production the session signs in as `feoh_app` and acts as
+        # `feoh_owner` (its role default, docs/decisions.md §310). WITH (FORCE)
+        # terminates the database's other sessions, and Postgres allows that only
+        # to a role with the privileges of the role that SIGNED THEM IN — which
+        # `feoh_owner` lacks for `feoh_app`. Back to the session user, which has
+        # both its own sessions and the owner's privileges. A no-op anywhere the
+        # login role has no role default (local dev, CI).
+        await conn.execute("SET ROLE NONE")
         await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
         logger.info("Dropped orphan database after failed provisioning: %s", db_name)
     finally:
@@ -386,7 +364,9 @@ async def provision_tenant(
     ``must_change_password=False`` since the password is their own choice.
 
     Raises ``SlugError`` before any database work when ``slug`` fails
-    ``utils.slug.validate_slug_format``. The API callers validate first to
+    ``utils.slug.validate_slug_format``, and ``SlugHeld`` (a ``SlugError``)
+    while a closed workspace still holds it (``utils.slug.ensure_slug_not_held``).
+    The API callers validate first to
     return a 422, but the check lives here so every caller gets it — the
     ``scripts/create_tenant.py`` CLI (and ``deploy/add-tenant.sh`` behind it)
     passes an operator-typed slug straight through, and with tenants on
@@ -394,6 +374,11 @@ async def provision_tenant(
     infrastructure host.
     """
     validate_slug_format(slug)
+    # A closed workspace's slug is held here, at the one chokepoint every
+    # provisioning path shares — signup, partner, and the operator CLI behind
+    # `deploy/add-tenant.sh` alike (decisions §306).
+    async with control_session_factory() as session:
+        await ensure_slug_not_held(slug, session)
     db_name = f"{settings.tenant_db_prefix}{slug}"
     await _require_system_admin_role()
 

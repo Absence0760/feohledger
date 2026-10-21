@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/helpers';
 
 /**
- * `ui/Toast.svelte` in a real page (decisions §307, WCAG 2.2.1 / 2.4.3 /
+ * `ui/Toast.svelte` in a real page (decisions §313, WCAG 2.2.1 / 2.4.3 /
  * 2.4.11). The queue's rules are unit-tested in `utils/toastQueue.test.ts`;
  * this pins the WIRING those tests cannot see — the hover/focus pause reaching
  * the queue, an error outliving the old five seconds, focus going back where it

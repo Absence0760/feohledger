@@ -65,6 +65,7 @@ from app.models.exception import Exception as ExceptionModel
 from app.models.expense import CorporateCardTransaction
 from app.models.invoice import Invoice, InvoiceExtractionResult, InvoiceLineItem
 from app.models.invoice import InvoiceStatus as DBInvoiceStatus
+from app.models.invoice_status import POST_APPROVAL_LOCKED_STATUSES
 from app.models.organization import Organization
 from app.models.payment import Payment, PaymentSchedule
 from app.models.peppol_transmission import PeppolTransmission
@@ -141,14 +142,9 @@ from app.utils.dates import resolve_day_first_preference
 from app.utils.http import content_disposition_attachment, detail_text
 from app.utils.search import ilike_contains
 
-IMMUTABLE_STATUSES = {
-    DBInvoiceStatus.sending_to_erp,
-    DBInvoiceStatus.sent_to_erp,
-    DBInvoiceStatus.posted_in_erp,
-    DBInvoiceStatus.payment_scheduled,
-    DBInvoiceStatus.paid,
-    DBInvoiceStatus.done,
-}
+# Past approval and handed onward: no edit, delete or bulk change. One set,
+# owned by `models/invoice_status` and shared with `services/gl_recode`.
+IMMUTABLE_STATUSES = POST_APPROVAL_LOCKED_STATUSES
 
 # An invoice may be transmitted over PEPPOL only once it has cleared AP
 # approval (mirrors the ERP-send / payment-run gate). `approved` plus every

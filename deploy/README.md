@@ -20,18 +20,20 @@ The whole flow is four commands on a fresh VM:
 
 | File | Purpose |
 |---|---|
-| `bootstrap-vm.sh` | One-time, idempotent VM setup (Amazon Linux 2023): docker + compose plugin + sops + cronie (AL2023 ships no cron daemon) + AWS CLI, automatic security updates (dnf-automatic; docker/containerd excluded so the stack never bounces at a random hour), 2 GB swap, nightly backup cron, IMDSv2 hop-limit fix. Other distros get the manual list. |
+| `bootstrap-vm.sh` | One-time, idempotent VM setup (Amazon Linux 2023): docker + compose plugin at exactly `COMPOSE_VERSION` (the one place that version is written — CI installs it from this line, and a re-run replaces any other version) + sops + cronie (AL2023 ships no cron daemon) + AWS CLI, automatic security updates (dnf-automatic; docker/containerd excluded so the stack never bounces at a random hour), 2 GB swap, nightly backup cron, IMDSv2 hop-limit fix. Other distros get the manual list. |
 | `compose.prod.yml` | Redis (AOF) + API + Caddy, plus Postgres (pgvector) under the `localdb` profile for container mode only. No DB host ports; S3 is real AWS. API healthcheck lets deploys verify themselves. Container logs capped (json-file, 10 MB × 5 per service) so they can't fill the 30 GB disk. `FEOH_DATABASE_URL` (set → RDS) and `FEOH_REDIS_URL` are override seams; `PGSSLMODE` is passed to the api (default `prefer`). The one-shot `pgtools` service (same Postgres image, RDS CA bundle mounted, `tools` profile) carries the pg client tools for RDS. Also the one-shot `frontend-build` service (Node image + pnpm-store cache) behind a `build` profile, so `up` never starts it — `deploy.sh` runs it. Every image is `repo:tag@sha256:…`, bumped by Dependabot (`backend/docs/docker.md` § Image pinning). |
 | `Caddyfile` | TLS + static SPA (served from `/srv/current`, the live release under the gitignored `www/` — § How the SPA is served) + `api.feohledger.com` reverse proxy. Domains via env. |
 | `tenants.caddy.example` | Template for the per-VM tenant host list (`tenants.caddy`, gitignored). `add-tenant.sh` maintains it — manual edits rarely needed. |
-| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). Also `feoh_sync_source`, `deploy.sh`'s checkout step: main's tip, or with `--ref` exactly one commit that must be on `origin/main`, always leaving the checkout on `main`. And the serving half: `feoh_publish_frontend` (a build becomes the live release by an atomic symlink swap), `feoh_caddy_reload` (reload, or recreate when Caddy's single-file mounts are stale) and `feoh_smoke_check` (the post-deploy fetch through the VM's own Caddy). |
+| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password — or, with `FEOH_DATABASE_IAM_AUTH` on, a fresh IAM token minted per run — passed through the environment, never an argv). Also `feoh_sync_source`, `deploy.sh`'s checkout step: main's tip, or with `--ref` exactly one commit that must be on `origin/main`, always leaving the checkout on `main`. And the serving half: `feoh_publish_frontend` (a build becomes the live release by an atomic symlink swap), `feoh_caddy_reload` (reload, or recreate when Caddy's single-file mounts are stale) and `feoh_smoke_check` (one post-deploy fetch, through the VM's own Caddy or public DNS). Small readers shared so two scripts cannot disagree: `feoh_signup_enabled` (decrypt-env.sh and smoke.sh), `feoh_compose_pin` (deploy.sh and CI's installer). |
+| `smoke.sh` | The post-deploy smoke check: apex, `api/health`, a tenant host's TLS, and `/api/public-config` matching the env (§ Deploys). `--vm` reads `.env` and goes through this VM's Caddy (deploy.sh's last step); with explicit flags it goes through public DNS (`aws-deploy.yml`'s last job). Exit 1 on any failed check, 2 on bad usage. |
 | `compose.sh` / `psql.sh` | Ad-hoc `docker compose` / `psql` with the database mode applied — use these instead of a bare `docker compose -f compose.prod.yml …`, which in container mode would start the stack without its database. |
-| `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → publish the SPA as a release under `www/` (atomic symlink swap, § How the SPA is served) → Caddy reload (or recreate, if its mounted config is stale) → smoke check of the site and the API through the VM's own Caddy. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
+| `deploy.sh` | Preflight → lock (one deploy at a time, `flock` on the gitignored `.deploy.lock`) → pull main, or check out `--ref <sha>` → re-run the `deploy.sh` just checked out → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → publish the SPA as a release under `www/` (atomic symlink swap, § How the SPA is served) → Caddy reload (or recreate, if its mounted config is stale) → `smoke.sh --vm`, last: the site, the API, a tenant host's TLS and `public-config` against the env, through the VM's own Caddy. Flags: `--no-pull`, `--ref <sha>` (what a release runs over SSM), `--backend-only`, `--frontend-only`. |
 | `add-tenant.sh` | Tenant DB + org + admin user (same `provision_tenant` path as signup) + Caddy host block + reload, in one shot. Generates a temp password (first-login change forced) unless `--admin-password` given. |
 | `remove-tenant.sh` | The inverse of `add-tenant.sh`, and the deletion `/legal/dpa` § 13 promises within 60 days of termination: removes the Caddy host block and reloads (stop serving first), runs `scripts/delete_tenant.py` in the api container (documents → tenant DB → control-plane rows), then deletes every version of that tenant's nightly dumps from the backup bucket. `--dry-run` prints the inventory and changes nothing; otherwise it makes you type the slug back. Only `delete_tenant.py`'s exit 4 (no such organisation) lets it carry on to the Caddy and backup legs of a tenant already deleted; any other inventory failure (api down, database unreachable, a partner organisation refused) stops it before it changes anything. Prints the written confirmation to send the customer, including the two residues it does NOT reach. |
+| `db-role-cutover.sh` | One-shot, idempotent move of the app off the RDS master onto the `feoh_app` role (IAM auth, `CREATEDB`, owner of every app database — § Database role, `docs/decisions.md` §310). Runs as the master; `--check` reports, `--verify-login` proves the app role signs in with a token. SQL in `sql/`. |
 | `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. On RDS these are the long-retention, provider-independent copy beside RDS's automated backups + PITR (globals with `--no-role-passwords`); in container mode they are the whole DR story. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. Fails, without pinging, if the server's database list does not include the control plane `feohledger` — an empty list used to report success. |
-| `restore.sh` | Streams a night's dumps back from S3 — each DB via `pg_restore --create` (skips existing DBs unless `--force`). Container mode replays globals first; on RDS it skips them and restores with `--no-owner --no-acl` so everything belongs to the master user. Stops the api for the duration, rolls the stack back up after. Test it once against a scratch stack. On RDS, a point-in-time restore is the first choice (`docs/minimal-deployment.md` § Point-in-time restore). |
-| `decrypt-env.sh` | Decrypts `prod.sops.yaml` to `.env` and checks it — required keys, JWT key strength, values compose's `env_file` would silently rewrite, and the database mode (RDS: a URL `lib.sh` can parse, `PGSSLMODE` `verify-full`; container: `POSTGRES_PASSWORD`, no TLS mode it cannot serve) — before it replaces the current `.env`. `deploy.sh` runs it; run it on its own to check a new secrets file without deploying. |
+| `restore.sh` | Streams a night's dumps back from S3 — each DB via `pg_restore --create` (skips existing DBs unless `--force`). Container mode replays globals first; on RDS it skips them and restores with `--no-owner --no-acl` so everything belongs to the master user. Stops the api for the duration, rolls the stack back up after. Test it once against a scratch stack. On RDS, a point-in-time restore is the first choice (`docs/minimal-deployment.md` § Point-in-time restore). A logical restore on RDS runs as the master (break-glass, § Database role) and refuses the IAM app role, which cannot recreate pgvector. |
+| `decrypt-env.sh` | Decrypts `prod.sops.yaml` to `.env` and checks it — required keys, JWT key strength, values compose's `env_file` would silently rewrite, and the database mode (RDS: a URL `lib.sh` can parse, `PGSSLMODE` `verify-full`, and either a password or `FEOH_DATABASE_IAM_AUTH` true — never both; container: `POSTGRES_PASSWORD`, no TLS mode it cannot serve) — before it replaces the current `.env`. `deploy.sh` runs it; run it on its own to check a new secrets file without deploying. |
 | `prod.sops.yaml.example` | Template for the VM's secrets file: flat YAML keyed by env var name, every value quoted. The encrypted original lives in `infra-secrets` (`docs/decisions.md` §171). |
 
 ## Before the VM (once per project)
@@ -53,9 +55,11 @@ The whole flow is four commands on a fresh VM:
   IMDS hop limit itself.
 - Database (RDS path): the RDS for PostgreSQL 16 instance from `infra/` —
   `db.t4g.micro`, `rds.force_ssl = 1`, initial database `feohledger`, 5432
-  open to the VM's security group only. Its endpoint and master password go
-  into `FEOH_DATABASE_URL`, with `PGSSLMODE: "verify-full"`
-  (`docs/minimal-deployment.md` § The RDS instance).
+  open to the VM's security group only. The app signs in as the `feoh_app`
+  role with an IAM token: `FEOH_DATABASE_URL` is the endpoint with that user
+  and **no password**, `FEOH_DATABASE_IAM_AUTH: "true"`, `PGSSLMODE:
+  "verify-full"` (§ Database role). The master password stays in
+  `infra-secrets` for break-glass and is not in the VM's env.
 - DNS: three records → this VM: `feohledger.com`, `api.feohledger.com`, and a
   **wildcard** `*.feohledger.com` (the wildcard makes tenant onboarding
   DNS-free; it needs no wildcard certificate — Caddy issues per-host certs).
@@ -96,14 +100,34 @@ doesn't come up. If the build or migration step fails, the previously-running
 containers keep serving. Only one deploy runs at a time — a second one, manual
 or released, refuses to start while the first holds `.deploy.lock`.
 
-The deploy ends with a **smoke check**: from the VM, `curl` fetches
-`https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health` through this VM's
-own Caddy (`--resolve <host>:443:127.0.0.1` — no public DNS or hairpin NAT
-involved, but the real hostname, certificate and site block) and fails the
-deploy unless each answers 200 with a non-empty body, retrying for up to a
-minute while a just-recreated Caddy loads its certificates. The API's own
-healthcheck stays green through a Caddy that serves nothing, which is how
-v0.1.0 shipped every page as an empty 404 (#579).
+The deploy ends with a **smoke check**, `./smoke.sh --vm` — its last step, and
+the same script the ECS release workflow ends with (#575). From the VM, `curl`
+fetches through this VM's own Caddy (`--resolve <host>:443:127.0.0.1` — no
+public DNS or hairpin NAT involved, but the real hostname, certificate and site
+block), retrying for up to a minute per check while a just-recreated Caddy
+loads its certificates:
+
+- `https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health` — each a 200
+  with a non-empty body. The API's own healthcheck stays green through a Caddy
+  that serves nothing, which is how v0.1.0 shipped every page as an empty 404
+  (#579).
+- the first tenant host in `tenants.caddy` — a page over a certificate curl
+  accepts, i.e. the tenant TLS path. Before the first `add-tenant.sh` there is
+  none; the script prints a NOTE saying so rather than passing silently.
+- `https://<API_DOMAIN>/api/public-config` — `signup_enabled` must match
+  `FEOH_SIGNUP_ENABLED` in `.env` (unset means on, as in the app), and while
+  signup is on `hcaptcha_sitekey` must be `FEOH_HCAPTCHA_SITEKEY`.
+
+It reports every failed check, not just the first, and exits 1; the deploy then
+fails. Run it by hand any time: `./smoke.sh --vm`. From elsewhere, through
+public DNS: `./smoke.sh --app <host> --api <host> --tenant <host> --signup true|false [--sitekey <key>]`.
+
+`deploy.sh` also compares the running `docker compose` with `COMPOSE_VERSION`
+in `bootstrap-vm.sh` and warns when they differ: CI renders `compose.prod.yml`
+with exactly that version, in both database modes, and fails on any warning
+(`deploy-compose` job; #569 was a warning only the VM's compose printed).
+Re-running `bootstrap-vm.sh` converges the plugin on the pin. To bump compose,
+change that one line — CI reads it from there.
 
 ### How the SPA is served
 
@@ -257,6 +281,69 @@ laptop, on its own ports beside the dev stack.
 `./add-tenant.sh <slug> --name "Company" --admin-email admin@company.com` —
 provisions everything and prints the login URL + temp password. Don't run
 `scripts/seed.py` (demo data) in prod.
+
+## Database role
+
+The app does not sign in as the RDS master. It signs in as `feoh_app` (`LOGIN`,
+`rds_iam`, no password), with a 15-minute IAM token minted per connection from
+the instance profile (`backend/app/db_engine.py`). Every session acts as
+`feoh_owner` (`NOLOGIN`, `CREATEDB`), which owns the control plane, every
+tenant database, and everything in them. Neither role is in `rds_superuser` or
+can create roles. The master joins `feoh_owner`, so it can still do everything
+(that is the rollback), but never joins `feoh_app`, so RDS keeps accepting its
+password. The deploy scripts' pg tools mint their own tokens on the VM the same
+way. The reasoning and the rejected alternatives are in `docs/decisions.md`
+§310.
+
+**The cutover** (once per instance; idempotent). Steps that touch a secret are
+the operator's.
+
+1. `terraform apply` the `rds-db:connect` grant (`../infra/README.md` § Workload
+   stack). Harmless before anything uses it.
+2. Deploy a release carrying this code. With `FEOH_DATABASE_IAM_AUTH` unset
+   nothing changes yet.
+3. On the VM, from `deploy/`, while `.env` still holds the master URL:
+   `./db-role-cutover.sh --check`, then `./db-role-cutover.sh`, then
+   `./db-role-cutover.sh --check` again. Expect every database owned by
+   `feoh_owner`, `0` master-owned objects in each, and `template1 has
+   pgvector: t`. `feoh_app` should show `rds_iam t`, `master_can_set f` and
+   `defaults role=feoh_owner`. `feoh_owner` should show `login f`,
+   `createdb t` and `master_can_set t`. That `--check` itself signed in with the
+   master's password, which proves the master is not IAM-only.
+4. `./db-role-cutover.sh --verify-login` — signs in as `feoh_app` with a token
+   minted here. If it fails, nothing has changed for the app yet.
+5. In `infra-secrets/feohledger/prod.sops.yaml`: `FEOH_DATABASE_URL` becomes
+   `postgresql+asyncpg://feoh_app@<db_address>:5432/feohledger` (no password)
+   and `FEOH_DATABASE_IAM_AUTH: "true"` is added. Copy it onto the VM,
+   `./decrypt-env.sh`, then redeploy (`./deploy.sh --ref <the live sha>` or the
+   release workflow) — migrations run as `feoh_app` first.
+6. Verify: the smoke check passes;
+   `./psql.sh -d feohledger -Atc "SELECT session_user, current_user"` prints
+   `feoh_app|feoh_owner`; `./backup.sh` completes; sign in to a tenant.
+7. Rotate the master password (`../docs/secrets-rotation.md` § RDS master
+   password): it sat in the VM's env until step 5.
+
+**Rollback** at any point: put the master URL back in `prod.sops.yaml` with
+`FEOH_DATABASE_IAM_AUTH` false (or removed) and redeploy. The master inherits
+`feoh_owner`'s privileges, so it can still do everything, migrations and tenant
+provisioning included. Run `./db-role-cutover.sh` again when you come back: it
+hands over whatever the master created in the meantime. Before step 5, the app
+has not changed at all, so there is nothing to roll back.
+
+**Break-glass as the master** (a logical `restore.sh`, a pgvector upgrade, a
+cutover re-run after a rollback): for one command, in that shell only. Read
+the URL without echo, so it lands in neither the terminal nor the history —
+`read -rs MASTER_URL`, paste, then
+`FEOH_DATABASE_URL="$MASTER_URL" FEOH_DATABASE_IAM_AUTH=false ./restore.sh <date>`
+(the shell wins over `.env` for both, in `lib.sh` and compose alike). Run that
+way, `restore.sh` leaves the api **stopped**, because rolling it up from this
+shell would hand it the master's URL. Re-run `./db-role-cutover.sh` the same way
+next, then `unset MASTER_URL` (or close the shell), and bring the api up from a
+clean shell with `./compose.sh up -d --wait`. Then rotate the master password,
+since it was on the VM (`../docs/secrets-rotation.md`). The cutover's own SQL
+resolves names from the catalog only. In any interactive master session in an
+app database, run `SET search_path = pg_catalog, pg_temp;` first, because the
+app owns `public` there.
 
 ## Backups
 

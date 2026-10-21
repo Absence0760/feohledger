@@ -432,7 +432,7 @@ export interface ReportingAgingBuckets extends AgingBuckets {
  * `GET /api/dashboard/onboarding`). Each is derived on read from data another
  * feature owns — never a stored tick — so a step is done only when the setting
  * it names is. Field meanings: `backend/app/services/onboarding.py`
- * (`docs/decisions.md` §309).
+ * (`docs/decisions.md` §315).
  */
 export interface OnboardingProgress {
 	company: boolean;

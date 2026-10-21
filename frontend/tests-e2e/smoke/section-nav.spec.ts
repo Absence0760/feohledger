@@ -32,7 +32,7 @@ test.describe('grouped sidebar navigation', () => {
 			'Bank Changes',
 			'Exceptions',
 			'Procurement',
-			// "Treasury", not "Billing" (decisions §308): it holds the payables
+			// "Treasury", not "Billing" (decisions §314): it holds the payables
 			// money tools, and our own subscription moved to Settings.
 			'Treasury',
 			'Insights',

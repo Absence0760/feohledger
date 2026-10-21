@@ -13632,7 +13632,514 @@ per-caller field on payloads other clients (mobile, the public API) share.
 assigned-elsewhere clause, which the server does not enforce, and the pages
 that still restate a predicate.
 
-## 306. The landing page follows the visitor's theme, with a light render of the tally (2026-10-21)
+## 306. An administrator can close an unused workspace, which releases its addresses; anything that must be kept goes to support (migrations 0119, 0120, 2026-10-20)
+
+**The dead end.** Since §291 an address names one account in one workspace.
+Someone who signs up with an address, abandons the trial, and is later added to
+another workspace with it is refused `email_in_other_workspace`, and deleting a
+workspace was operator-only (`scripts/delete_tenant.py`), so the only way out
+was support. Reproduced end to end in `backend/tests/test_workspace_closure.py`
+(provision a trial, refuse the address in a second workspace, close the trial,
+accept the address; and through signup: the same address signs up again, §292's
+refusal no longer finding it). Phase 0 of #614; it does not depend on
+multi-workspace membership.
+
+**The call: a self-service close for an administrator, fail-closed to the
+unused workspace, and nothing else.** `POST /api/organization/close` (admin
+role, not a permission: closing is not a splittable duty). It deletes the
+workspace through `services/tenant_deletion.delete_tenant`, and deleting the
+user rows is what frees the addresses. `GET` is the preflight the page reads
+first: the blockers, and — so the irreversible action is an informed one — a
+count per class of what WILL be deleted (invoices, vendors, purchase orders,
+credit memos, expense reports, contracts, exceptions, deactivated accounts).
+
+**What refuses it**, each by a stable code the page states, and the way forward
+for every one is support:
+
+- records with a retention obligation or an effect outside the workspace: an
+  approved invoice (status past review, or `approved_by` set, which also
+  catches one whose ERP send failed); any payment, payment run or virtual card;
+  an applied credit memo; an approved or reimbursed expense report or an
+  approved spend pre-approval; imported card transactions or bank statements;
+  supplier statement reconciliations (`backend/docs/privacy.md` keeps their
+  files as evidence); 1099 filings, VAT / GST / withholding records, Positive
+  Pay files, sent or received e-invoices; a purchase order that has been
+  received or closed; an approved or converted requisition or intake request;
+  goods receipts and stock pushed to a commerce platform; a contract that was
+  ever in force; an accepted discount; an approved supplier bank or tax change;
+  a data-subject request record;
+- other people's accounts: another **active** user (another administrator can
+  remove the caller instead, which frees the address the same way), or a
+  supplier-portal login;
+- a commercial relationship: a live subscription the billing provider knows
+  about, or an active / past-due one on a priced plan; a partner parent or a
+  partner-managed child;
+- operator-side state: a registered custom domain;
+- a deployment that cannot keep the promises below: MFA switched off in a
+  deployed environment (`require_sensitive_step_up` would refuse every attempt,
+  so the page says so up front), no real write-once audit archive configured
+  (shipping off, no sink, or `mock` among the sinks), or `lambda` audit mode
+  (an audit row can still be in SQS, invisible and undrainable per tenant, when
+  the database is dropped; tracked in `docs/followups.md`). Local dev and CI
+  are exempt, as from every MFA check (guard rail 7);
+- and, fail-closed, any check that cannot be evaluated (`records_unverifiable`).
+
+**Every tenant table is decided, not remembered.** `TENANT_CHECKS` and
+`CLOSURE_ALLOWED` (table → reason, the shape of
+`tenant_deletion.CONTROL_TABLES_EXEMPT`) together cover every tenant table
+exactly once, and a test fails on a table in neither, so the next table cannot
+reach a closure without someone deciding whether it is a record that must be
+kept. Allowed, with the reasons in the code: children of a guarded parent;
+master and reference data (vendors, GL accounts, entities, policies, budgets,
+catalogues) — a trial plausibly holds them, and an approved bank change blocks
+on its own; configuration (workflows, reports, mappings, templates — every
+invoice a template generated is guarded as an invoice); open, draft, rejected
+and cancelled work of every kind, including an **untouched purchase order**:
+native POs exist (`requisition_service.convert_requisition_to_po`, a
+contract's create-PO, intake) and others are pulled from an ERP, but an order
+nothing has happened to records an intent to buy, while everything that makes
+it a transaction — a receipt, an approved requisition, a contract in force, an
+approved invoice, a payment — blocks; exceptions and agent decisions (a cleared
+payment-blocking exception matters once a payment exists, which blocks);
+sanctions-screening results (the same); notifications and chat history; and
+the audit log itself, shipped and sealed first (below).
+
+**A contract's evidence is `activated_at`, not its status.** `/cancel` is
+allowed from `active`, so a contract that bound the parties could read as a
+draft; `signed_date` is optional input. Migration 0120 adds `activated_at`,
+stamped on first activation and never cleared, backfilled from the first
+`contract.active` audit row, else from a status that says the contract has
+been in force.
+
+**The step-up is a second factor, not the password**: `require_sensitive_step_up`
+(operation `workspace_close`), as the unmasked DSAR export uses (§182). An
+account with no second factor is refused, not exempted; enrolling one needs no
+step-up. The slug is typed back first.
+
+**Nothing checked can change before the delete.** The control-plane checks run
+under `FOR UPDATE` on the organisation row, held until the control-plane rows
+are deleted in that same transaction (`delete_tenant(control_session=…)`):
+every insert referencing the organisation — an invite, a SCIM or SSO provision,
+a subscription — takes `FOR KEY SHARE` on that row for its foreign key, and
+every `settings` writer takes `FOR UPDATE`, so all of them wait. An UPDATE of a
+row that already exists does not touch the organisation row (a billing webhook
+moving the free subscription onto a priced plan, a reactivated user), so the
+organisation's `subscriptions` and `users` rows are locked too. **The actor is
+re-validated under that lock** — still present, active, in the organisation
+and an admin — and refused (`403 workspace_close_actor_not_admin`) if not. The
+tenant checks run again in a transaction holding `SHARE` locks on every guarded
+table, kept open until `DROP DATABASE … WITH (FORCE)` terminates it. Either
+lock not coming within 5 s is `records_unverifiable`; an unrelated writer that
+collides with the table locks can fail its own transaction, accepted for a
+workspace the guards say is unused. Two closures serialize on a
+transaction-scoped advisory lock (`409 workspace_close_in_progress`). The
+control-plane transaction stays open across the drop and the document sweep; a
+server-side `idle_in_transaction_session_timeout` (none is set) killing it would
+end as `workspace_close_incomplete`, which the resume path finishes. The route
+also checks the account belongs to the workspace, since `get_tenant` skips a
+token with no `org` claim.
+
+**No audit row is lost with the database.** An `organization.closing` row is
+written first, synchronously in every audit mode, carrying the source IP and
+the actor's role names the way auth rows carry an IP. Where shipping is on, the
+process's queued audit writes are awaited (`audit_dispatch.settle_auth_audits`),
+the tenant's trail is flushed to the archive (`audit_log_shipper.flush_tenant`),
+and the table is then **sealed**: `LOCK TABLE audit_log IN EXCLUSIVE MODE` on a
+connection held until the drop. If a row committed between the flush and the
+seal it is seen under the seal, which is released and the round repeats (three
+rounds, then refuse). After the seal a write waits and fails with the database,
+which `audit_dispatch` reports at ERROR — a write that never committed, never a
+committed row the archive lacks. Any failure here is `503
+workspace_close_audit_unavailable` with nothing deleted, and is logged with ids
+only rather than audited into the tenant, because the audit path is what just
+failed.
+
+**The record that outlives the tenant** is a control-plane `workspace_closures`
+row (migration 0119; no foreign keys, no address, no name, no IP — ids, slug,
+the requester's role names, proof, counts). It reads `completed` in the same
+transaction that deletes the organisation. Refusals and a closure already
+running are audited into the tenant's own log (it still exists); a closure that
+fails part-way records the exception class on the row (`last_failure`, the
+tenant's log may be gone) and an id-only ERROR line. Its downgrade is a
+deliberate no-op: the rows are the only evidence of deletions that happened and
+the operator's backup queue.
+
+**The deletion order changes for every caller: database, then documents, then
+the control plane.** §179 put documents first; the reasoning there was only
+that the control-plane row (which names the storage prefix) must go last, and
+that still holds. But documents-first meant a drop that failed left a LIVE
+workspace whose invoices pointed at deleted files. Database-first, a failed drop
+leaves the workspace whole, and a failed sweep leaves a workspace that is
+already unusable under a prefix the org row still names, which a re-run (or the
+closure's resume path: database gone plus a `started` row) finishes. With the
+database gone no upload can commit, and the sweep makes a second pass for an
+object an in-flight request PUT during the first listing. `scripts/delete_tenant.py`
+and `deploy/remove-tenant.sh` inherit it unchanged otherwise.
+
+**After the commit**, the deleted accounts' Redis state is cleared
+(`services/credential_cleanup`): live sessions blocklisted and their set and
+metadata deleted, a pending TOTP enrollment, an email OTP, passkey challenges,
+and any unspent reset / set-password link (found by scanning the reset prefix,
+since those keys are digests of the token). Best-effort: the tokens are already
+inert against deleted user rows.
+
+**The slug is held** — by `utils/slug.ensure_slug_not_held`, called from
+`provision_tenant` itself so signup, partner provisioning and the operator CLI
+behind `deploy/add-tenant.sh` all get it — until an operator has removed the
+backups (a new tenant would reuse `feoh_<slug>`, and removing the old dumps
+would remove the new) **and** `CLOSED_SLUG_COOLDOWN` (90 days, covering the
+backup retention cycle and so beyond the DPA's 60-day window) has passed, so
+bookmarks, IdP redirect URIs, invite and approval emails cannot point at a new
+owner early. Signup states it with its own code, `signup_slug_held`, not "taken".
+`scripts/workspace_closures.py list` is the operator's queue (owed backups, and
+closures that never finished); `mark-cleared <organization-id> --operator
+<handle>` records who removed them and when (runbook:
+`docs/founder-runbooks/workspace-closure.md`).
+
+**A reused slug inherits nothing addressed to its old owner.** PEPPOL inbound
+was the one route where it would have: the signing key is platform-wide, so the
+path was the only binding, and it named the slug. It now names the organisation
+id (`POST /api/peppol/inbound/{organization_id}`), which no later tenant can
+hold; a delivery addressed by slug is the silent 204 of an unknown tenant. The
+siblings were checked: email / Slack / Teams approval tokens name a user and an
+invoice that exist only in the closed tenant (refused, tested); payment, card
+and ERP webhooks verify a per-tenant secret deleted with the organisation;
+punch-out returns match a session in the tenant database; email intake keys on
+a per-tenant random token. None was changed.
+
+**The sign-in page of a closed workspace** renders its notice
+(`/login?reason=workspace_closed`) from the URL alone; its only calls, the SSO
+and SAML config probes, answer 404 for the deleted tenant, which the page
+already treats as "no SSO" (tested against a really-deleted tenant).
+
+**Rejected: a sweep deleting unverified or abandoned trials past N days.**
+Unverified signups never become accounts (the workspace is provisioned only at
+`/signup/complete`), so they hold no address. A verified-but-idle workspace is a
+customer's data under the DPA, deleted on the customer's instruction or after
+termination plus notice, and "idle" is not an instruction: nothing records a
+trial as ended (the baseline subscription is the free plan, `active`, with no
+`trial_end`). It is not needed for the dead end either: whoever is refused
+controls the address and can sign in to the abandoned workspace and close it.
+Abandoned workspaces kept forever are a storage-limitation question, tracked in
+`docs/followups.md`.
+
+**Rejected: a support runbook only** — the status quo, at the cost of an
+operator's destructive manual run for the commonest case, an empty trial.
+
+**Rejected: the password as the step-up.** Factor management accepts it (§191)
+because what it protects is the factor; here the output is the destruction of
+everything in the workspace, which is the DSAR export's reasoning.
+
+**Also changed:** the `email_in_other_workspace` sentence says the other
+workspace's administrator can close it to free the address.
+
+**Where its strings live (§300).** The panel's strings are `org.close.*` and
+`org.section.close`, in the settings slice that /organization loads. Everything a
+route without that slice can render stays in the main catalogue: the coded
+refusals (`refusal.workspaceClose*`, `refusal.signupSlugHeld`), and the
+`/login?reason=workspace_closed` notice. `api/codedRefusals.ts` reads a refusal's
+blocker list through the key-free `types/workspaceClosureRefusal.ts`, never
+`types/workspaceClosure.ts`, so the registry every route imports names no slice
+key (`i18n/slices.test.ts`).
+
+Numbered §306, after #616's §300: #611 landed as §292, and the open #612 and #613 claim §293 and §294.
+
+Tests: `backend/tests/test_workspace_closure.py` (each record class through a
+real row built from the model; what must not block; the table classification;
+each control-plane and deployment blocker; the inventory; admin-only and
+unauthenticated refusals; the dead end released through admin create and
+through signup; the resting slug's own code at slug-check and `/complete`; the
+closed workspace's spent link as the uniform 410; the confirmation; the actor
+re-validated under the lock; a record written after the preflight refused under
+lock with its audit row; the concurrency lock and its audit row; an unshippable
+trail, a trail that keeps growing, and a row committed between flush and seal;
+a drop that fails leaving the documents, recorded and finished by a retry; the
+resume path; the second factor with MFA on; Redis cleared; the closed sign-in
+page's probes; the operator queue, `--operator` and the cooldown; the operator
+CLI refused a held slug; a reused slug inheriting no approval email; a token
+with no workspace claim; a tenant write, an invite and a subscription or user
+update each held off until the delete), `backend/tests/test_tenant_deletion.py`
+(the order, a failed drop leaving documents, the second pass),
+`backend/tests/test_peppol_inbound.py` (a slug addresses nothing),
+`backend/tests/test_migration_0119_workspace_closures.py`,
+`backend/tests/test_migration_0120_contract_activated_at.py`,
+`backend/tests/test_audit_log_shipper.py` (`flush_tenant`),
+`frontend/src/lib/types/workspaceClosure.test.ts`,
+`frontend/src/lib/api/codedRefusals.test.ts`,
+`frontend/src/lib/api/sessionRejection.test.ts` and
+`frontend/tests-e2e/organization/close-workspace.spec.ts`.
+
+## 307. PDFs draw non-Latin text through one escaper with font fallback; the seed carries production-shaped rows from one shared file (2026-10-20)
+
+**Found by the production-shaped fixtures (#575 § 2).** The seed and e2e
+fixtures now carry a non-ASCII vendor (`Ōsaka Seimitsu Kōgyō 株式会社 — …
+Zürich`), and rendering it into the remittance advice printed
+`■saka Seimitsu K■gy■ ■■■■`. Every PDF here sets text in ReportLab's built-in
+Helvetica, a WinAnsi (cp1252) Type 1 font with no glyph outside Latin-1, and
+each renderer had its own `_escape` that only escaped XML. The same render
+showed a second defect: the remittance line table put the invoice number and
+description in **bare** cell strings, so a long ERP invoice number never wrapped
+(it ran through the Description column) and the description printed its
+escaped `&amp;` literally.
+
+**Decision.** `services/pdf_text.pdf_markup` is the one escaper: it escapes and
+wraps each run Helvetica cannot draw in a `<font>` that can — DejaVu Sans,
+bundled (~1.4 MB, Bitstream Vera / DejaVu licence) and subset-embedded, for
+Latin Extended / Greek / Cyrillic; ReportLab's built-in Adobe CID fonts for CJK
+(`HeiseiKakuGo-W5`) and Hangul (`HYGothic-Medium`). Supplier text in a table
+cell becomes a `Paragraph`.
+
+**Rejected: switching every PDF's base font to DejaVu.** It would change the
+look of every existing document for the benefit of the few characters
+Helvetica lacks; fallback per run leaves an all-Latin-1 document byte-for-byte
+in its old typeface.
+
+**Rejected: bundling a CJK TrueType face.** Noto Sans CJK ships as CFF/OTF,
+which ReportLab cannot embed, and a TrueType CJK face is several MB in a public
+repo. The CID fonts cost nothing and every mainstream viewer (Acrobat, Preview,
+pdf.js, pdfium) supplies the glyphs. The trade: CJK glyphs are the viewer's,
+not embedded, and Han characters are drawn with the Japanese face (which covers
+the common Chinese repertoire). Revisit if a customer reports a viewer without
+Adobe-Japan1 / Korea1 support.
+
+**Shared values.** The long / non-ASCII / tax-exclusive values live in
+`backend/scripts/fixtures/realistic_rows.json` and nowhere else: the full seed
+adds them (`scripts/seed_realistic.py`), the lean seed reshapes its existing
+rows with them (so no e2e count moves), and the layout specs and day-one
+journey read them through `frontend/tests-e2e/fixtures/realisticValues.ts`. A
+value spelled twice is how the layout spec and the demo would drift apart.
+
+Guards: `backend/tests/test_pdf_text.py` (each renderer, with the fixture's
+names, asserts no glyph outside cp1252 was drawn in a Helvetica face; the long
+number wraps; `&` prints as `&`), `backend/tests/test_seed_realistic.py`.
+
+## 308. "Approved or beyond" is one population for budgets and fraud baselines; a printed currency code is evidence, never a default (#575, 2026-10-20)
+
+(Numbered 308, with §307 above it, because §295, §296, §301 and §302–§304
+landed on `main` first and §297–§299, §305 and §306 are held by pull requests
+still in flight.)
+
+**Budget actual.** The realised leg of a budget (and the PO-relief leg, which
+must admit exactly the same invoices) is `APPROVED_OR_BEYOND_STATUSES`, so it now
+includes `sending_to_erp`: an approved invoice no longer drops out of `actual`
+while its ERP push is in flight or stuck. It also includes `failed` **with**
+`Invoice.approval_date` set — an approved invoice whose push failed is still
+spend a human signed off, while an unstamped `failed` is a failed extraction
+nobody reviewed (`budget_service.realised_invoice_clause`). That is the same
+evidence rule §73 uses for the touchless rate and §286 for the bank-change flag.
+
+**Fraud baselines.** The remit-to-change, statistical-anomaly and LLM-anomaly
+baselines in `invoice_warnings` now read `APPROVED_OR_BEYOND_STATUSES` too,
+which adds `sending_to_erp`, `sent_to_erp` and `done`. Before that, a vendor
+whose history had all finished (`done`) had no baseline at all, so every check
+that needs one silently skipped.
+
+**The trade-off we accepted.** `done` is the CSV importer's default status
+(`services/csv_import`), so unreviewed imported history now seeds the remit-to
+baseline (and the anomaly baselines). `paid` was already in the set and already
+importable, so the exposure is not new in kind. The direction it fails is the
+safe one: a baseline built from unreviewed history makes the checks fire *more*
+often (a remit-to that differs from an imported row raises `remit_to_changed`),
+never less. An attacker who could plant a CSV row could already plant a `paid`
+one.
+
+**Why this is not §73.** §73 says `done` / `paid` are not proof of *review*,
+and it is right for the question it answers: the touchless rate claims the
+platform did the approving, and an imported row is evidence neither way. A
+baseline asks something else: "what has this vendor historically billed us,
+and where did we pay?" Accepted history answers that whether or not this
+platform reviewed it, and excluding it leaves a migrated tenant with no
+baseline at all, which is worse. Where proof of an approval matters (touchless
+rate, budget `failed`, bank-change flag), read `approval_date`. Where the
+question is history, read the status set.
+
+**A currency code printed on an amount.** A model transcribing `GBP 9,500.00`
+keeps the code. Stripping it so the magnitude parses (#575) then discarded it,
+so with no `currency` field the invoice kept the upload's `USD` placeholder and
+was gated as USD 9,500; `USD 1,000.00` beside `currency: EUR` was silently
+EUR 1,000. Before #575 the token failed to parse, so the amount stayed empty.
+That was wrong too, but it erred towards a human. The code is now evidence
+(`extraction.CurrencyEvidence`), weighed with the field and never overruled by
+a default (§160, §196, §200: a missing currency stays missing):
+
+- the field and the printed codes agree, or only one of them speaks → that is the currency;
+- they disagree, or two amounts print different codes → no header money is written and the row's currency is left as it was. The amount stays at `0`, so `missing_amount` fires, and `self_correction_currency_conflict` / `_mixed` tells the reviewer why;
+- neither speaks → unchanged (see `docs/followups.md`: the upload still stamps `USD`).
+
+A symbol (`$`, `€`) is not evidence, because `$` names a dozen currencies.
+
+**Rejected: let the field win.** It is the model's summary, and the code is
+the page's own text next to the figure. When they disagree there is no basis
+for picking one, and either pick can be wrong by the full exchange rate.
+
+**Found alongside it.** "Amount unset" did not actually block auto-approve.
+`decide_auto_approve` never read `missing_amount`, so an extraction that left
+the 0 placeholder auto-approved under any `auto_approve_below` floor (0 < floor)
+or on confidence alone. It now refuses an amount `<= 0` on both triggers, the
+same rule as the `missing_amount` warning.
+
+Guards: `tests/test_budget_rollup.py::test_actual_counts_an_invoice_mid_erp_push`,
+`tests/test_budgets.py::test_spend_po_relief_counts_an_approved_invoice_whose_erp_push_failed`,
+`tests/test_extraction_cleaners.py` (currency evidence),
+`tests/test_extraction_golden.py` (the eur_multipage read with its currency
+field removed and contradicted), `tests/test_extraction_self_correction.py`,
+`tests/test_extraction_confidence_contract.py::test_no_amount_never_auto_approves_on_either_trigger`.
+
+## 310. The app signs in to RDS as a least-privilege role with an IAM token, and the master password leaves the VM (2026-10-21)
+
+**The problem.** Production connected as the RDS master user `postgres`, whose
+password sat in `FEOH_DATABASE_URL` in the VM's deploy env. A leaked env file,
+a backup of the VM disk, or a shell on the box was therefore a full,
+long-lived login to every tenant database, as a member of `rds_superuser`.
+IAM database authentication was already enabled on the instance and used by
+nothing. This had to close before the first paying customer's data landed.
+
+**What changed.**
+
+- **Two roles, created by the master once** with `deploy/db-role-cutover.sh`
+  (the SQL is in `deploy/sql/db-role-{cluster,database}.sql`):
+  - `feoh_owner` is `NOLOGIN`, `CREATEDB`, and a member of nothing. It owns the
+    control plane, every `feoh_<slug>` database, and everything in them.
+  - `feoh_app` is `LOGIN` with no password. It is a member of `rds_iam` and of
+    `feoh_owner`, and nothing else. Its `role` defaults to `feoh_owner`, so
+    every session acts as the owner and every object the app creates is owned
+    by the owner too.
+  - Neither role has `CREATEROLE`, membership in `rds_superuser`, or superuser.
+  - The cutover verifies all of this (attributes and an allowlist of
+    memberships) on every run, not only when it creates the roles.
+- **A token per new connection.** `backend/app/db_engine.py` is now where every
+  engine and every raw asyncpg connection is made. `create_async_engine` there
+  is a drop-in for SQLAlchemy's; `connect_raw` replaces bare `asyncpg.connect`.
+  With `FEOH_DATABASE_IAM_AUTH` on, both pass asyncpg a callable `password`
+  that signs a fresh RDS auth token. asyncpg calls it once per connection
+  attempt and awaits an awaitable result, so the 15-minute token lifetime
+  never matters to a pooled engine (minting once per process would break the
+  first reconnect after a quarter of an hour). The same callable works through
+  SQLAlchemy 2's asyncpg dialect (`connect_args` reach `asyncpg.connect`
+  unchanged), so no `do_connect` event is needed, and a single mechanism covers
+  engines, raw connections, Alembic and the Lambda handlers.
+- **Off the event loop.** `generate_db_auth_token` signs locally, but it needs
+  credentials, and botocore resolves and refreshes instance-profile credentials
+  with a synchronous IMDS call. The callable is a coroutine that runs every
+  boto3 step in `asyncio.to_thread`. The one RDS client is created lazily, in
+  that worker thread, under a lock.
+- **Fail closed.** With the flag on, a URL that still carries a password, a
+  URL with no user or host, or TLS short of `verify-full` is refused: at boot
+  (`Settings`), at every engine construction, and by `decrypt-env.sh` before a
+  deploy. A token is a bearer credential for its 15 minutes, so `require`
+  (which accepts any certificate) is not enough. The flag defaults off, so a
+  laptop and CI keep password auth against the local container (guard rail 7).
+- **Deploy tooling.** `deploy/lib.sh` accepts the password-less IAM URL. Each
+  `pgtools` run (`psql.sh`, `backup.sh`) mints its own token on the VM with
+  `aws rds generate-db-auth-token` and passes it as `PGPASSWORD` through the
+  environment, never an argv. The instance role holds `rds-db:connect` on
+  exactly `dbuser:<resource id>/feoh_app` (`infra/compute.tf`). `feoh_owner`
+  cannot sign in at all. The master
+  password lives only in `infra-secrets` (`terraform.sops.yaml`), for
+  break-glass.
+
+**pgvector is not a trusted extension on RDS.** The AWS list of extensions a
+non-`rds_superuser` holding `CREATE` may install does not include `vector`
+(verified against the RDS user guide's "PostgreSQL trusted extensions" list,
+2026-10-21; the pgvector image's control file says the same locally). So the
+cutover creates it once in `template1`, as the master. Every database the app
+creates afterwards is copied from `template1` and already has it, and the
+`CREATE EXTENSION IF NOT EXISTS vector` in provisioning and migration 0003 is
+a permitted no-op. PostgreSQL checks for an existing extension before it checks
+privilege, which was verified against a non-superuser role. The extension (and
+its member objects) stays owned by the master. Ownership cannot be transferred
+anyway, and updating pgvector is a master operation.
+
+**No separate provisioning role.** The earlier follow-up proposed "a separate,
+narrower path for `CREATE DATABASE`" (`feoh_owner` is not that: it exists for
+the master's sake, and the app always acts as it). A provisioning role would add
+no isolation. Self-service
+signup and partner provisioning run `CREATE DATABASE` inside the running API,
+so a second role's credential would have to be reachable from the same process
+(and the same instance profile). Anyone who compromised the API would hold both
+roles. What `CREATEDB` adds on top of owning every tenant database already is
+only the ability to create more databases. The real reductions are the ones
+made here: no `rds_superuser`, no `CREATEROLE`, and no password to steal.
+
+**Explicit `ALTER … OWNER`, not `REASSIGN OWNED`.** `REASSIGN OWNED BY postgres`
+also reassigns shared objects the master owns (the `postgres` maintenance
+database, any database outside the app's set) and extension ownership, in one
+statement whose reach cannot be read off the page. Here everything moves to
+`feoh_owner`. The per-database SQL names
+what it moves: schemas, relations (owned sequences follow their table), types,
+and routines. It then fails if `pg_shdepend` shows anything else outside
+extensions still owned by the master. An object class it does not handle stops
+the run, so nothing is quietly left behind.
+
+**Why two roles, and why the master never joins the login role.** RDS signs a
+member of `rds_iam` in by token only, and AWS documents that inherited
+membership counts. The master has to stay a password login, because it is the
+rollback and the break-glass path. It also has to be able to `SET` to the
+owner, since a non-superuser may transfer ownership only to such a role, and to
+inherit the owner's privileges, which is what makes the rollback work. One role
+cannot both carry `rds_iam` and be joined by the master. So ownership sits on
+`feoh_owner`, which has no `rds_iam` and which the master joins
+`WITH INHERIT TRUE, SET TRUE`. The master is never made a member of `feoh_app`
+beyond the ADMIN-only grant PG16 gives a role's creator, the same link AWS's own
+"`CREATE USER …; GRANT rds_iam …`" procedure leaves. The cutover refuses to
+finish if the master is a member of `feoh_app` with INHERIT or SET. (The first
+draft made the master an inheriting member of a single `feoh_app`. The security
+review caught that this could make the master IAM-only on RDS, part-way through
+the cutover itself.)
+
+One consequence: `DROP DATABASE … WITH (FORCE)` terminates the database's other
+sessions. Postgres allows that only to a role holding the privileges of the role
+that *signed those sessions in*, and `feoh_owner` does not hold `feoh_app`'s.
+`tenant_provisioning._drop_postgres_database` therefore runs `SET ROLE NONE`
+first. As the session user, `feoh_app`, it has both its own sessions and the
+owner's privileges. `RESET ROLE` would not do this, because it returns to the
+role default, `feoh_owner`. Locally the statement is a no-op.
+
+**The cutover's own queries resolve names from the catalog only.** After the
+cutover the app owns `public` in every app database. A `public.format(text,
+text, text)` planted there would match more exactly than
+`pg_catalog.format(text, VARIADIC "any")`, and so it would run with the master's
+privileges on the next re-run (the CVE-2018-1058 shape). Both SQL files set
+`search_path = pg_catalog, pg_temp`, and the script passes the same setting to
+every psql it runs through `PGOPTIONS`. A test plants exactly that function.
+
+**Rollback is trivial by construction.** The master inherits the owner's
+privileges. Pointing `FEOH_DATABASE_URL` back at the master, with
+`FEOH_DATABASE_IAM_AUTH` off, just works, migrations and tenant provisioning
+included. Objects created during that window belong to the master, and
+re-running the cutover hands them back.
+
+**What stays with the master (break-glass).** A logical `restore.sh` recreates
+each database from `template0`, which has no pgvector, so it refuses in IAM mode
+and runs with the master URL, followed by a re-run of the cutover. A
+point-in-time restore keeps the roles, and is still the first choice. The
+`rds-db:connect` ARN names the instance's resource id, so a PITR into a new
+instance needs the grant re-applied. Rotating the master password no longer
+touches the VM.
+
+**No migration.** Roles and database ownership are cluster-level. Nothing in any
+schema changes, so there is no Alembic revision.
+
+**Verified.** Every engine site moved to the factory, and
+`tests/test_db_engine_chokepoint.py` fails on a new direct
+`create_async_engine` / `async_engine_from_config` / `asyncpg.connect` under
+`app/`, `scripts/` or `alembic/`. `tests/test_db_engine.py` covers the factory:
+a token per new connection against the real local Postgres with the generator
+stubbed, minted off the loop, and the fail-closed rules.
+`tests/test_db_role_cutover.py` runs the cutover SQL as a non-superuser
+master-like role on throwaway databases, and covers the script's wiring.
+Deploy-side coverage is in `test_deploy_db_mode.py` and
+`test_deploy_decrypt_env.py`. End to end against a throwaway pgvector cluster,
+with a non-superuser master: the deploy migration and a tenant provisioned as
+the master, then the cutover, then a second run (a no-op), then, as `feoh_app`
+(acting as `feoh_owner`), the migration step, a new tenant, downgrade and
+upgrade of a pre-cutover tenant, DDL and queries, and `delete_tenant.py` with
+another app session open on the database (the `WITH (FORCE)` path). For the
+rollback, the master downgraded, migrated and provisioned a tenant, and the next
+cutover run handed that tenant over. The
+operator rollout is `deploy/README.md` § Database role.
+
+## 312. The landing page follows the visitor's theme, with a light render of the tally (2026-10-21)
 
 **This supersedes §289's "the marketing landing page stays dark" and §294's
 "not until evidence says otherwise".** §294 named what would reopen the
@@ -13717,7 +14224,9 @@ persisting across a reload, segments ≥ 24px, a drawn focus ring, a checked
 edge the others lack; at 320px the header holds mark, CTA and switch with no
 overflow; the auth shell's panel follows the theme).
 
-## 307. Error toasts stay until dismissed; other toasts pause while hovered or focused (issue #635, 2026-10-21)
+Numbered §312, with this branch's §313–§315 after it: they were drafted as §306–§309, main took §306–§308 and §310 first, and the open #631 and #634 claim §309 and §311.
+
+## 313. Error toasts stay until dismissed; other toasts pause while hovered or focused (issue #635, 2026-10-21)
 
 **This supersedes the fixed five-second timer `frontend/docs/ui-patterns.md`
 documented as deliberate** ("auto-dismiss timer kept"). Decided by the
@@ -13774,7 +14283,7 @@ that do need one.
 (`docs/accessibility.md`, `frontend/docs/ui-patterns.md` § Toast); it should
 be confirmed by whoever owns `docs/accessibility.md`.
 
-## 308. The sidebar's groups say what is in them: Treasury, Subscription under Settings, Cash-flow analytics (issue #635, 2026-10-21)
+## 314. The sidebar's groups say what is in them: Treasury, Subscription under Settings, Cash-flow analytics (issue #635, 2026-10-21)
 
 **Decided** by the operator's delegate on #635 finding 23 · `frontend/src/lib/nav.ts`
 
@@ -13827,7 +14336,7 @@ operator-set partner capability (a plan entitlement or an
 minting moved to Organization settings, or accepting the row as is. Tracked in
 `docs/followups.md`.
 
-## 309. An admin's first run is a setup checklist ticked from facts the app already holds; emptiness is the workspace's (issue #635, 2026-10-21)
+## 315. An admin's first run is a setup checklist ticked from facts the app already holds; emptiness is the workspace's (issue #635, 2026-10-21)
 
 Decided by the operator's delegate on #635 findings 9 and 38.
 

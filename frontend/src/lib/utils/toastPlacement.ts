@@ -6,7 +6,7 @@
  * bulk-action bar (`bottomInset`). On a phone an open dialog is nearly as wide
  * as the viewport and up to 90vh tall, and on a desktop a wide dialog reaches
  * into the corner too — so a toast there sits over the dialog's fields and
- * buttons. Since error toasts stopped timing out (decisions §307), one stays
+ * buttons. Since error toasts stopped timing out (decisions §313), one stays
  * there until it is dismissed.
  *
  * Steering the stack AROUND the dialog's contents cannot be made to work: a

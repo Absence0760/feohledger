@@ -752,6 +752,8 @@
   "invoiceWarningSelfCorrectionTotalReconciliation": "Les montants ne concordent pas : sous-total ({subtotal}) + taxe ({tax}) + livraison ({shipping}) − remise ({discount}) = {expected}, mais le total est {amount}.",
   "invoiceWarningSelfCorrectionDateOrdering": "La date d’échéance ({dueDate}) est antérieure à la date de facture ({invoiceDate}).",
   "invoiceWarningSelfCorrectionLineItemsSum": "Le total des lignes ({lineItemsTotal}) ne correspond pas au montant de la facture ({amount}).",
+  "invoiceWarningSelfCorrectionCurrencyConflict": "Les montants sont libellés en {printedCurrency}, mais la devise de la facture indique {fieldCurrency}. Les montants ont été laissés vides — saisissez-les depuis le document.",
+  "invoiceWarningSelfCorrectionCurrencyMixed": "Les montants sont libellés dans plusieurs devises ({printedCurrencies}). Les montants ont été laissés vides — saisissez-les depuis le document.",
   "invoiceWarningSelfCorrectionLineItemMath": "Ligne {lineNumber} : {quantity} × {unitPrice} = {expected}, mais le total est {total}.",
   "invoiceWarningGlCodesNotInChart": "Comptes généraux suggérés par l’IA absents du plan comptable actif : {codes}",
   "invoiceWarningGlCodeStalePrior": "Le compte général « {code} » mis en cache pour ce fournisseur n’est plus dans le plan comptable actif.",

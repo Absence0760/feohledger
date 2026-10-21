@@ -80,6 +80,7 @@ async def _mk_invoice(
     dimension_value=None,
     invoice_date=None,
     status="paid",
+    approval_date=None,
 ):
     """One realised invoice, attributed on whichever dimension column is asked
     for — the rollup batches by dimension, so all four need exercising."""
@@ -97,6 +98,7 @@ async def _mk_invoice(
                 currency=currency,
                 entity_id=entity_id,
                 invoice_date=invoice_date,
+                approval_date=approval_date,
                 organization_id=org_id,
                 **{dimension: value},
             )
@@ -654,3 +656,34 @@ async def test_check_endpoint_reads_the_same_spend_as_the_rollup(realdb):
     assert Decimal(str(check["actual"])) == Decimal(usd["actual"])
     assert check["remaining_after"] == 600.0
     assert check["would_overspend"] is False
+
+
+async def test_actual_counts_an_invoice_mid_erp_push(realdb):
+    """Issue #575: the realised set was a hand-listed copy of "approved or
+    beyond" that left out `sending_to_erp`, so an approved invoice vanished
+    from `actual` while its ERP push was in flight (or stuck there) and
+    reappeared once it landed. Every approved-or-beyond status counts, and the
+    set IS the shared one rather than a copy of it."""
+    from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES
+    from app.services.budget_service import REALISED_INVOICE_STATUSES
+
+    assert set(REALISED_INVOICE_STATUSES) == {s.value for s in APPROVED_OR_BEYOND_STATUSES}
+
+    bid, cc = await _mk_budget(realdb, amount="1000.00")
+    await _mk_invoice(realdb, amount="120.00", cost_center=cc, status="sending_to_erp")
+    await _mk_invoice(realdb, amount="30.00", cost_center=cc, status="sent_to_erp")
+    # Approved, then the ERP push failed: still spend a human signed off. The
+    # approval stamp is the evidence (decisions §73 / §308).
+    await _mk_invoice(
+        realdb, amount="7.00", cost_center=cc, status="failed", approval_date=date(2026, 9, 1)
+    )
+    # `failed` with no approval stamp is a failed EXTRACTION — never reviewed.
+    await _mk_invoice(realdb, amount="500.00", cost_center=cc, status="failed")
+    # Not yet accepted — never realised spend.
+    await _mk_invoice(realdb, amount="999.00", cost_center=cc, status="ready_for_review")
+    async with realdb.client(key="a", role="cfo") as c:
+        spend = (await c.get(f"/api/budgets/{bid}/spend")).json()
+        rollup = (await c.get("/api/budgets/rollup")).json()
+    assert spend["actual"] == 157.0
+    # The rollup reads the same predicate, so it cannot disagree with /spend.
+    assert Decimal(_by_ccy(rollup)["USD"]["actual"]) == Decimal("157.00")

@@ -63,7 +63,19 @@ REQUIRED_VARS=(APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
 . ./lib.sh
 DB_URL=$(env_value FEOH_DATABASE_URL)
 SSLMODE=$(env_value PGSSLMODE)
+# FEOH_DATABASE_IAM_AUTH (docs/decisions.md §310): spelled the way pydantic
+# reads a bool, or the app refuses to boot on it.
+IAM_AUTH=$(env_value FEOH_DATABASE_IAM_AUTH)
+if feoh_is_true "$IAM_AUTH"; then
+	IAM=1
+elif [ -z "$IAM_AUTH" ] || feoh_is_false "$IAM_AUTH"; then
+	IAM=0
+else
+	die "FEOH_DATABASE_IAM_AUTH='${IAM_AUTH}' is not a boolean the app reads — use \"true\" or \"false\"."
+fi
 if [ -z "$DB_URL" ]; then
+	[ "$IAM" = 0 ] ||
+		die "FEOH_DATABASE_IAM_AUTH is on with no FEOH_DATABASE_URL — IAM auth is for RDS; the local container signs in with POSTGRES_PASSWORD."
 	REQUIRED_VARS+=(POSTGRES_PASSWORD)
 	case "$SSLMODE" in
 	"" | disable | allow | prefer) ;;
@@ -78,7 +90,19 @@ else
 	*\?*) die "FEOH_DATABASE_URL carries a query string — set TLS with PGSSLMODE instead, which the app (asyncpg) and the backup tools (libpq) both read; a URL option reaches only the app." ;;
 	esac
 	[[ "$DB_URL" =~ $FEOH_EXTERNAL_DB_URL_RE ]] ||
-		die "FEOH_DATABASE_URL is not postgresql+asyncpg://USER:PASSWORD@HOST[:PORT]/DATABASE with the RDS endpoint host name (verify-full checks the certificate against it) and user/password in URL-unreserved characters or %XX escapes (openssl rand -hex 24 needs none). Its value is not printed."
+		die "FEOH_DATABASE_URL is not postgresql+asyncpg://USER[:PASSWORD]@HOST[:PORT]/DATABASE with the RDS endpoint host name (verify-full checks the certificate against it) and user/password in URL-unreserved characters or %XX escapes (openssl rand -hex 24 needs none). Its value is not printed."
+	# Group 4 is the password (lib.sh). IAM auth and a password are exclusive:
+	# the app refuses a password beside IAM auth at boot, and with neither
+	# nothing would sign the connection in.
+	if [ "$IAM" = 1 ]; then
+		[ -z "${BASH_REMATCH[4]}" ] ||
+			die "FEOH_DATABASE_IAM_AUTH is on but FEOH_DATABASE_URL carries a password — the IAM form is postgresql+asyncpg://feoh_app@HOST:5432/feohledger. Its value is not printed."
+		[ "$SSLMODE" = verify-full ] ||
+			die "PGSSLMODE must be verify-full with FEOH_DATABASE_IAM_AUTH on (got '${SSLMODE}') — the auth token is a bearer credential, sent only to a verified server; the app refuses anything else at boot."
+	else
+		[ -n "${BASH_REMATCH[4]}" ] ||
+			die "FEOH_DATABASE_URL has no password and FEOH_DATABASE_IAM_AUTH is not \"true\" — set FEOH_DATABASE_IAM_AUTH: \"true\" for the IAM-authenticated app role, or put the (break-glass) master password back."
+	fi
 	case "$SSLMODE" in
 	verify-full) ;;
 	verify-ca | require)
@@ -87,13 +111,15 @@ else
 	*) die "PGSSLMODE='${SSLMODE}' would allow an unencrypted or unverified connection to the external database — use verify-full." ;;
 	esac
 fi
-# FEOH_HCAPTCHA_SECRET is one of those boot checks only while self-service
-# signup is on (config.py _require_captcha_in_deployed_envs): with
-# FEOH_SIGNUP_ENABLED false the signup routes 404 and there is nothing for a
-# captcha to protect. Mirror the rule, including every spelling pydantic reads
-# as false, so the two cannot disagree about whether the secret is needed.
-if ! grep -Eiq '^FEOH_SIGNUP_ENABLED=(false|0|no|off|f|n)$' .env.tmp; then
-	REQUIRED_VARS+=(FEOH_HCAPTCHA_SECRET)
+# The hCaptcha pair is one of those boot checks only while self-service signup
+# is on (config.py _require_captcha_in_deployed_envs): the secret verifies each
+# signup, and the site key is what renders the widget — without it every
+# signup fails the captcha. With FEOH_SIGNUP_ENABLED false the signup routes
+# 404 and there is nothing for a captcha to protect. lib.sh's
+# feoh_signup_enabled mirrors the rule, including every spelling pydantic reads
+# as false, and smoke.sh asks it the same question after the deploy.
+if [ "$(feoh_signup_enabled .env.tmp)" = true ]; then
+	REQUIRED_VARS+=(FEOH_HCAPTCHA_SECRET FEOH_HCAPTCHA_SITEKEY)
 fi
 MISSING=""
 for var in "${REQUIRED_VARS[@]}"; do

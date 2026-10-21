@@ -59,7 +59,7 @@ at the point it bit:
 ## Two lightings, one frame
 
 The page follows the visitor's theme ([`docs/decisions.md`
-§306](../../docs/decisions.md)), so the ornament is rendered once per palette.
+§312](../../docs/decisions.md)), so the ornament is rendered once per palette.
 The dark lighting was composed for navy: a cool blue fill and rim keep the
 shadow side off black. On a light ground that lighting fails the other way —
 the faces reflecting the softbox come out near-white cream, the same value as

@@ -108,9 +108,23 @@ describe('codedRefusalText', () => {
 		['sso_email_in_other_workspace', 'refusal.ssoEmailInOtherWorkspace'],
 		['email_in_this_workspace', 'refusal.emailInThisWorkspace'],
 		['email_in_other_workspace', 'refusal.emailInOtherWorkspace'],
-		['email_check_throttled', 'refusal.emailCheckThrottled']
+		['email_check_throttled', 'refusal.emailCheckThrottled'],
+		['workspace_close_confirmation_mismatch', 'refusal.workspaceCloseConfirmationMismatch'],
+		['workspace_close_in_progress', 'refusal.workspaceCloseInProgress'],
+		['workspace_close_audit_unavailable', 'refusal.workspaceCloseAuditUnavailable'],
+		['workspace_close_incomplete', 'refusal.workspaceCloseIncomplete'],
+		['workspace_close_actor_not_admin', 'refusal.workspaceCloseActorNotAdmin'],
+		['signup_slug_held', 'refusal.signupSlugHeld']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
+	});
+
+	it('states a refused workspace closure only when it can read the blockers', () => {
+		expect(
+			codedRefusalText('workspace_close_refused', { blockers: ['payments'] }, deT)
+		).toBe(de['refusal.workspaceCloseRefused']);
+		expect(codedRefusalText('workspace_close_refused', {}, deT)).toBeNull();
+		expect(codedRefusalText('workspace_close_refused', { blockers: [1] }, deT)).toBeNull();
 	});
 
 	it('states an incomplete ERP listing by why it stopped', () => {

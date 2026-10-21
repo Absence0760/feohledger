@@ -1,6 +1,6 @@
 /**
  * The toast queue's timing rules, kept out of `ui/Toast.svelte` so they can be
- * unit-tested with fake timers (decisions §307, WCAG 2.2.1 Timing Adjustable).
+ * unit-tested with fake timers (decisions §313, WCAG 2.2.1 Timing Adjustable).
  *
  * - An ERROR toast never times out. It stays until the reader dismisses it,
  *   because it is often the only account of what went wrong and may carry an

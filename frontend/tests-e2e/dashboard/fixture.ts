@@ -130,7 +130,7 @@ function base(patch: DashboardPatch): DashboardData {
 	return {
 		total_invoices: 6,
 		// An established workspace: the checklist is retired, and the server
-		// sends `onboarding` to nobody (`docs/decisions.md` §309).
+		// sends `onboarding` to nobody (`docs/decisions.md` §315).
 		organization_has_invoices: true,
 		onboarding: null,
 		total_amount: 6000,

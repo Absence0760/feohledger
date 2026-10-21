@@ -1,6 +1,6 @@
 """The dashboard's first-run fields: org-wide emptiness and the setup checklist.
 
-Two defects from #635, one decision (`docs/decisions.md` §309):
+Two defects from #635, one decision (`docs/decisions.md` §315):
 
 * **Emptiness is a property of the workspace, not of the selected entity.**
   The dashboard decided "brand-new workspace" from `total_invoices`, which is

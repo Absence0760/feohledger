@@ -4,7 +4,7 @@ import { API_BASE, expect, signInAndWait, tenantPsql, test } from '../fixtures/h
 import { emptyTenantDashboardResponse, onboardingProgress } from './fixture';
 
 /**
- * The dashboard's first run (#635, `docs/decisions.md` §309).
+ * The dashboard's first run (#635, `docs/decisions.md` §315).
  *
  * - An ADMIN on a workspace with no invoices gets a setup checklist instead of
  *   the lone "Go to invoices" button: the steps the `start-admin` guide

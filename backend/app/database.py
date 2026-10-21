@@ -7,10 +7,10 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 from app.config import settings
+from app.db_engine import create_async_engine
 from app.tenant_url import make_tenant_url
 
 # ---------------------------------------------------------------------------
@@ -219,6 +219,18 @@ def get_tenant_engine(db_name: str) -> AsyncEngine:
             max_overflow=10,
         )
     return _tenant_engines[db_name]
+
+
+async def forget_tenant_engine(db_name: str) -> None:
+    """Drop and dispose the cached app-loop engine for a tenant DB that is gone.
+
+    For a deletion run inside the API process (`services/workspace_closure`):
+    the database was dropped, so a pooled engine for it can only ever hand out
+    connections to nothing. A no-op when nothing is cached.
+    """
+    engine = _tenant_engines.pop(db_name, None)
+    if engine is not None:
+        await engine.dispose()
 
 
 async def dispose_all_engines() -> None:

@@ -54,6 +54,7 @@ from app.services.branding import (
     build_logo_flowable,
     get_brand_context,
 )
+from app.services.pdf_text import pdf_markup
 
 
 @dataclass
@@ -142,20 +143,20 @@ def render_audit_report_pdf(ctx: AuditReportContext) -> bytes:
         story.append(logo)
         story.append(Spacer(1, 0.06 * inch))
     else:
-        story.append(Paragraph(_escape(brand.product_name), h_brand))
+        story.append(Paragraph(pdf_markup(brand.product_name), h_brand))
     story.append(Paragraph("SOX Audit Trail", h_title))
-    story.append(Paragraph(_escape(ctx.org_name), body))
+    story.append(Paragraph(pdf_markup(ctx.org_name), body))
     story.append(
         Paragraph(
-            f"Scope: <b>{_escape(ctx.scope_label)}</b>",
+            f"Scope: <b>{pdf_markup(ctx.scope_label)}</b>",
             body,
         )
     )
     story.append(
         Paragraph(
             f"Generated: <b>{ctx.generated_at.strftime('%B %d, %Y %H:%M UTC')}</b> · "
-            f"By: <b>{_escape(ctx.generated_by_name)}</b> "
-            f"({_escape(ctx.generated_by_email)})",
+            f"By: <b>{pdf_markup(ctx.generated_by_name)}</b> "
+            f"({pdf_markup(ctx.generated_by_email)})",
             body,
         )
     )
@@ -172,7 +173,7 @@ def render_audit_report_pdf(ctx: AuditReportContext) -> bytes:
         summary_data = [["Action", "Count"]]
         # Sort by count desc, then action asc for stable, readable output.
         for action, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
-            summary_data.append([_escape(action), str(count)])
+            summary_data.append([Paragraph(pdf_markup(action), body), str(count)])
         summary_table = Table(summary_data, colWidths=[4.0 * inch, 1.2 * inch])
         summary_table.setStyle(
             TableStyle(
@@ -222,13 +223,13 @@ def render_audit_report_pdf(ctx: AuditReportContext) -> bytes:
             actor = f"{actor}\n{e.actor_email}" if actor else e.actor_email
         table_data.append(
             [
-                Paragraph(_escape(e.created_at), cell),
-                Paragraph(_escape(e.action), cell),
-                Paragraph(_escape(e.entity_type), cell),
-                Paragraph(_escape(_short(e.entity_id)), cell),
-                Paragraph(_escape(actor), cell),
-                Paragraph(_escape(_short(e.correlation_id)), cell),
-                Paragraph(_escape(_details_str(e.details)), cell),
+                Paragraph(pdf_markup(e.created_at), cell),
+                Paragraph(pdf_markup(e.action), cell),
+                Paragraph(pdf_markup(e.entity_type), cell),
+                Paragraph(pdf_markup(_short(e.entity_id)), cell),
+                Paragraph(pdf_markup(actor), cell),
+                Paragraph(pdf_markup(_short(e.correlation_id)), cell),
+                Paragraph(pdf_markup(_details_str(e.details)), cell),
             ]
         )
 
@@ -300,9 +301,3 @@ def _details_str(details: dict | None) -> str:
     for k, v in details.items():
         parts.append(f"{k}={v}")
     return "; ".join(parts)
-
-
-def _escape(s: str) -> str:
-    """ReportLab's Paragraph parses the string as inline XML — escape <, >, &
-    so a value containing those characters doesn't break the doc."""
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

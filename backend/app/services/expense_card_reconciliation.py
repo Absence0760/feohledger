@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.expense import CorporateCardTransaction, Expense
 from app.models.virtual_card import VirtualCard
+from app.services.card_issuance import CARD_SPENT_STATUSES
 from app.services.vendor_matching import _normalize, _similarity
 from app.tenant import apply_entity_scope
 from app.utils.dates import utc_today
@@ -43,8 +44,9 @@ from app.utils.dates import utc_today
 # days). Money math stays Decimal; only the date window uses timedelta.
 _CARD_MATCH_WINDOW_DAYS = 5
 
-# VirtualCard statuses that represent realised spend worth reconciling.
-_CHARGED_STATUSES = ("charged", "completed")
+# VirtualCard statuses that represent realised spend worth reconciling — the
+# spent set `card_issuance` owns (issue #575).
+_CHARGED_STATUSES = tuple(sorted(CARD_SPENT_STATUSES))
 
 
 @dataclass(frozen=True)

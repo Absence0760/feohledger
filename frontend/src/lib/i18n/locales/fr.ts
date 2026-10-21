@@ -587,6 +587,8 @@ export const messages = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Les montants ne concordent pas : sous-total ({subtotal}) + taxe ({tax}) + livraison ({shipping}) − remise ({discount}) = {expected}, mais le total est {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'La date d’échéance ({dueDate}) est antérieure à la date de facture ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'Le total des lignes ({lineItemsTotal}) ne correspond pas au montant de la facture ({amount}).',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Les montants sont libellés en {printedCurrency}, mais la devise de la facture indique {fieldCurrency}. Les montants ont été laissés vides — saisissez-les depuis le document.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Les montants sont libellés dans plusieurs devises ({printedCurrencies}). Les montants ont été laissés vides — saisissez-les depuis le document.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Ligne {lineNumber} : {quantity} × {unitPrice} = {expected}, mais le total est {total}.',
 	'invoices.warning.glCodesNotInChart': 'Comptes généraux suggérés par l’IA absents du plan comptable actif : {codes}',
 	'invoices.warning.glCodeStalePrior': 'Le compte général « {code} » mis en cache pour ce fournisseur n’est plus dans le plan comptable actif.',
@@ -3086,6 +3088,7 @@ export const messages = {
 	'auth.login.signInWith': 'Se connecter avec {provider}',
 	'auth.login.forgotPassword': 'Mot de passe oublié ?',
 	'auth.login.signedOutOtherWorkspace': "Vous avez été déconnecté, car votre session appartenait à un autre espace de travail. Connectez-vous ici ou sur la page de votre propre espace de travail.",
+	'auth.login.workspaceClosed': "Cet espace de travail a été fermé et ses comptes supprimés. Leurs adresses e-mail peuvent désormais être utilisées dans un autre espace de travail.",
 	'auth.login.goToOwnWorkspace': "Aller à la page de connexion de votre espace de travail",
 	'auth.login.devAccounts.heading': 'Comptes de développement',
 	'auth.login.devAccounts.hint': 'Développement local uniquement. Choisissez un compte de démonstration pour remplir le formulaire.',
@@ -4881,7 +4884,7 @@ export const messages = {
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Cette adresse e-mail appartient déjà à un compte d’un autre espace de travail ; elle ne peut donc pas se connecter ici. Connectez-vous sur la page de votre propre espace de travail, ou demandez à l’administrateur de cet espace de travail que votre fournisseur d’identité utilise une autre adresse.",
 	'refusal.emailInThisWorkspace': "Un utilisateur avec cette adresse e-mail existe déjà dans cet espace de travail.",
-	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne.",
+	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne. Si cette personne n’utilise plus l’autre espace de travail, son administrateur peut le fermer, ce qui libère l’adresse.",
 	'refusal.emailCheckThrottled': "Trop d’adresses saisies récemment dans cet espace de travail appartenaient déjà à d’autres espaces de travail : l’ajout d’utilisateurs et la modification de leur e-mail sont suspendus pendant une heure au plus. Réessayez plus tard.",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
 	'refusal.vendorMergeSelf': "Un fournisseur ne peut pas être fusionné avec lui-même. Choisissez un autre fournisseur de référence.",
@@ -4891,6 +4894,13 @@ export const messages = {
 	'refusal.vendorMergeInvalidId': "L’un de ces fournisseurs n’a pas pu être identifié. Fermez cette fenêtre et rouvrez-la.",
 	'refusal.vendorMergeCrossEntity': "Ces fournisseurs appartiennent à des entités différentes, et une fusion ne peut pas transférer les dépenses d’une filiale vers une autre.",
 	'refusal.vendorMergeBlockedDuplicate': "Les paiements d’un doublon sont bloqués, mais pas ceux du fournisseur de référence : la fusion libérerait ses factures retenues. Levez d’abord le blocage dans son examen de filtrage, ou excluez-le de cette fusion.",
+	'refusal.workspaceCloseConfirmationMismatch': "Saisissez l’adresse de cet espace de travail exactement comme affichée pour confirmer qu’il doit être fermé.",
+	'refusal.workspaceCloseRefused': "Cet espace de travail ne peut pas être fermé ici, car il contient des données qui doivent être conservées ou les comptes d’autres personnes. Contactez le support pour le fermer.",
+	'refusal.workspaceCloseActorNotAdmin': "Seul un administrateur actif de cet espace de travail peut le fermer.",
+	'refusal.signupSlugHeld': "Cette adresse appartenait à un espace de travail fermé récemment et n’est pas disponible pendant un certain temps. Choisissez une autre adresse.",
+	'refusal.workspaceCloseInProgress': "Cet espace de travail est déjà en cours de fermeture.",
+	'refusal.workspaceCloseAuditUnavailable': "L’espace de travail n’a pas pu être fermé pour le moment, car son enregistrement d’audit n’a pas pu être sauvegardé. Rien n’a été supprimé. Réessayez dans quelques minutes.",
+	'refusal.workspaceCloseIncomplete': "La fermeture de l’espace de travail n’a pas abouti. Réessayez ; en cas de nouvel échec, contactez le support.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Ce fournisseur n'existe pas encore dans {provider}. Synchronisez les fournisseurs depuis {provider} ou créez-le là-bas, puis réessayez.",

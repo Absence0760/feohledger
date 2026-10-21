@@ -5,7 +5,7 @@ panel tick a step only when the app already holds a fact that says it was
 done. There is no tracking table and no "mark as done" write: every flag
 below is recomputed from data some other feature owns, so a step cannot be
 ticked by visiting a page and cannot drift from the setting it describes
-(`docs/decisions.md` §309).
+(`docs/decisions.md` §315).
 
 Each flag is deliberately narrow, and named for the fact it reads rather than
 for an intention nobody recorded:

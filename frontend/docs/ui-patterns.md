@@ -1079,7 +1079,7 @@ inherit it for free. Reuse these; don't re-solve them per page.
   "Status messages" (`toast.region`; not "Notifications", which is the sidebar
   bell's name) + two persistent live containers (`aria-live="assertive"` for
   errors, `"polite"` for the rest). Each toast has a real 24px `<button>`
-  dismiss (`toast.dismiss`). **Timing (decisions §307, superseding the fixed
+  dismiss (`toast.dismiss`). **Timing (decisions §313, superseding the fixed
   5-second timer this entry used to call deliberate):** an **error stays until
   dismissed** — an explicit `duration` does not change that; every other toast
   times out (5 s, or the caller's explicit `duration`), but its clock **stops
@@ -1330,7 +1330,7 @@ script only decides which one the page asks for.
   `storageInventory.test.ts` fails if a second `document.cookie =` appears.
 - **Everything follows the theme:** the signed-in app, the auth shell
   (`AuthShell`, signup, MFA, reset), the supplier portal, the help centre, the
-  legal pages and the marketing landing page (decisions §306, which ended
+  legal pages and the marketing landing page (decisions §312, which ended
   §289's dark pin). There is no per-subtree palette pin, and
   `tokenPairing.test.ts` fails if a `data-theme-scope` reappears. The landing
   page's header carries a compact `ThemePicker` (an anonymous visitor has no

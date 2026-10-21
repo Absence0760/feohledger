@@ -3,13 +3,22 @@
 # shellcheck disable=SC2034
 # Shared by every deploy script (sourced, never run): the ONE place the
 # database mode is decided, and the compose invocation that follows from it —
-# plus feoh_sync_source, deploy.sh's choice of which commit to build (bottom).
+# plus feoh_sync_source, deploy.sh's choice of which commit to build, and
+# feoh_smoke_check, which smoke.sh runs after every deploy (bottom).
 #
 #   external — the sops env sets FEOH_DATABASE_URL (the documented path:
 #              Amazon RDS). The `postgres` service never starts; pg client
 #              tools run in the one-shot `pgtools` service against the URL's
 #              host. PGSSLMODE comes from the sops env (decrypt-env.sh refuses
-#              anything weaker than `require`).
+#              anything weaker than `require`, and anything but `verify-full`
+#              with IAM auth). Two ways to sign in (docs/decisions.md §310):
+#                IAM  — FEOH_DATABASE_IAM_AUTH true and a URL with NO password
+#                       (the app role, `feoh_app`). Each pg tool run gets a
+#                       fresh 15-minute RDS auth token, minted here on the VM
+#                       with the instance profile and passed as PGPASSWORD
+#                       through the environment.
+#                password — the URL carries one (the RDS master: the state
+#                       before db-role-cutover.sh, and the break-glass path).
 #   local    — FEOH_DATABASE_URL unset: the Postgres container under the
 #              `localdb` profile, reached with `exec` exactly as before.
 #
@@ -21,25 +30,94 @@
 #   DB_SERVICES  the services that must be up for the API to reach its database
 #                (`postgres` in local mode, nothing in external mode)
 # and, in external mode, the libpq connection variables for `pgtools`
-# (feoh_pg_run). decrypt-env.sh sources this file too, to validate the URL with
-# the same parser the scripts use.
+# (feoh_pg_run), plus
+#   FEOH_DB_IAM    1 when the tools sign in with an IAM token, else 0
+#   FEOH_PGREGION  the region the token is signed for (IAM mode only)
+# decrypt-env.sh sources this file too, to validate the URL with the same
+# parser the scripts use.
 
 # The value of KEY in deploy/.env (last one wins, as for compose), or empty.
 feoh_env() {
 	grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true
 }
 
-# The external-database URL contract, as one ERE: an asyncpg URL with user,
-# password, a host name (use the RDS endpoint: verify-full checks the
-# certificate against it, so an IP or a CNAME of your own fails the handshake;
-# IPv6 literals are not accepted at all), an optional port, a database, and NO
-# query string. TLS is set by PGSSLMODE alone, which asyncpg (the app) and libpq
-# (pg_dump & co.) both read; a `?ssl=` on the URL would reach the app but not
-# libpq, so the two halves would disagree about it. User and password are
-# URL-unreserved characters or %XX escapes — anything else percent-encoded
-# (`openssl rand -hex 24` needs none). Groups: 1 user, 3 password, 5 host,
-# 7 port, 8 database.
-FEOH_EXTERNAL_DB_URL_RE='^postgresql\+asyncpg://(([A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+):(([A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+)@([A-Za-z0-9.-]+)(:([0-9]+))?/([A-Za-z0-9_-]+)$'
+# The external-database URL contract, as one ERE: an asyncpg URL with a user,
+# an optional password (absent exactly when FEOH_DATABASE_IAM_AUTH is on — the
+# callers check which), a host name (use the RDS endpoint: verify-full checks
+# the certificate against it, and an IAM token is signed for that exact name,
+# so an IP or a CNAME of your own fails; IPv6 literals are not accepted at all),
+# an optional port, a database, and NO query string. TLS is set by PGSSLMODE
+# alone, which asyncpg (the app) and libpq (pg_dump & co.) both read; a `?ssl=`
+# on the URL would reach the app but not libpq, so the two halves would
+# disagree about it. User and password are URL-unreserved characters or %XX
+# escapes — anything else percent-encoded (`openssl rand -hex 24` needs none).
+# Groups: 1 user, 4 password (empty when absent), 6 host, 8 port, 9 database.
+FEOH_EXTERNAL_DB_URL_RE='^postgresql\+asyncpg://(([A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+)(:(([A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+))?@([A-Za-z0-9.-]+)(:([0-9]+))?/([A-Za-z0-9_-]+)$'
+
+# feoh_is_true <value> succeeds when the app would read <value> as boolean
+# true (pydantic's spellings, any case). With feoh_is_false below, a value that
+# is neither is an error to its caller; an unset FEOH_DATABASE_IAM_AUTH is off,
+# which the callers check for themselves, since feoh_is_false refuses empty.
+feoh_is_true() {
+	case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | t | yes | y | on) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+# feoh_is_false <value> succeeds when the app would read <value> as boolean
+# false: every spelling pydantic accepts, in any case. Anything else, empty
+# included, is not false.
+feoh_is_false() {
+	[[ "$1" =~ ^([Ff][Aa][Ll][Ss][Ee]|0|[Nn][Oo]|[Oo][Ff][Ff]|[Ff]|[Nn])$ ]]
+}
+
+# feoh_signup_enabled [<dotenv>] prints `true` or `false`: whether the API
+# configured by that file (default deploy/.env) serves self-service signup.
+# FEOH_SIGNUP_ENABLED defaults to true (config.py), so only a false spelling
+# closes it; the last line wins, as for compose. decrypt-env.sh (the captcha
+# keys are required exactly when it is on) and smoke.sh (what public-config
+# must report) both ask here, so they cannot disagree.
+feoh_signup_enabled() {
+	local value
+	value=$(grep -E '^FEOH_SIGNUP_ENABLED=' "${1:-.env}" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+	if feoh_is_false "$value"; then echo false; else echo true; fi
+}
+
+# The first tenant host in deploy/tenants.caddy (a `<host> {` line, the shape
+# add-tenant.sh appends), or empty when no tenant has been added yet.
+feoh_first_tenant_host() {
+	{ sed -nE 's/^([A-Za-z0-9][A-Za-z0-9.-]*)[[:space:]]*\{[[:space:]]*$/\1/p' tenants.caddy 2>/dev/null || true; } | head -1
+}
+
+# feoh_compose_pin <bootstrap-vm.sh> prints the Docker Compose release tag
+# (vX.Y.Z) the VM is bootstrapped with: that file's one COMPOSE_VERSION= line.
+# The one parser of the pin: deploy.sh compares the running compose with it,
+# and CI installs it (scripts/install_vm_compose.sh), so CI checks deploy/ with
+# the compose the VM runs (#575). Fails on no line, several, or a non-tag.
+feoh_compose_pin() {
+	local count pin
+	count=$(grep -cE '^COMPOSE_VERSION=' "$1" 2>/dev/null || true)
+	if [ "${count:-0}" != 1 ]; then
+		echo "expected exactly one COMPOSE_VERSION= line in $1, found ${count:-0}." >&2
+		return 1
+	fi
+	pin=$(sed -nE 's/^COMPOSE_VERSION=(.*)$/\1/p' "$1")
+	if ! [[ "$pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "COMPOSE_VERSION in $1 is '${pin}', not a vX.Y.Z release tag." >&2
+		return 1
+	fi
+	printf '%s\n' "$pin"
+}
+
+# An RDS IAM auth token for <host> <port> <user>, on stdout. Signed locally by
+# the AWS CLI with the instance profile (bootstrap-vm.sh installs it); the VM
+# role holds rds-db:connect on exactly the app role (infra/compute.tf). Valid
+# for 15 minutes for NEW connections, so callers mint one per tool run. Nothing
+# secret is on its argv; the token itself is the output.
+feoh_iam_token() {
+	aws rds generate-db-auth-token --hostname "$1" --port "$2" --username "$3" \
+		--region "$FEOH_PGREGION" --output text
+}
 
 # Percent-decode (a URL-encoded password: `p%40ss` -> `p@ss`).
 feoh_urldecode() {
@@ -48,6 +126,7 @@ feoh_urldecode() {
 
 feoh_load_db_mode() {
 	COMPOSE=(docker compose -f compose.prod.yml)
+	FEOH_DB_IAM=0
 	# Compose gives the shell environment precedence over .env when it
 	# interpolates, so mirror that here or the scripts and compose could
 	# disagree about which database the stack is on.
@@ -65,13 +144,45 @@ feoh_load_db_mode() {
 		return 1
 	fi
 	FEOH_PGUSER=$(feoh_urldecode "${BASH_REMATCH[1]}")
-	FEOH_PGHOST="${BASH_REMATCH[5]}"
-	FEOH_PGPORT="${BASH_REMATCH[7]:-5432}"
-	FEOH_PGDATABASE="${BASH_REMATCH[8]}"
+	FEOH_PGHOST="${BASH_REMATCH[6]}"
+	FEOH_PGPORT="${BASH_REMATCH[8]:-5432}"
+	FEOH_PGDATABASE="${BASH_REMATCH[9]}"
+	local password="${BASH_REMATCH[4]}"
+	# Same precedence as the url above, and as compose.prod.yml passes it to the api.
+	local iam="${FEOH_DATABASE_IAM_AUTH:-$(feoh_env FEOH_DATABASE_IAM_AUTH)}"
+	if feoh_is_true "$iam"; then
+		# Fail closed, as the app does: a password left beside IAM auth is the
+		# long-lived credential the switch exists to retire.
+		if [ -n "$password" ]; then
+			echo "FEOH_DATABASE_IAM_AUTH is on but FEOH_DATABASE_URL carries a password — remove it (run ./decrypt-env.sh for the details)." >&2
+			return 1
+		fi
+		FEOH_PGREGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(feoh_env AWS_REGION)}}"
+		if [ -z "$FEOH_PGREGION" ]; then
+			echo "FEOH_DATABASE_IAM_AUTH is on but no AWS_REGION is set; the auth token is signed per region." >&2
+			return 1
+		fi
+		# Checked here, not only by decrypt-env.sh at deploy time: a shell override
+		# or an edited .env would otherwise send the bearer token under `prefer`.
+		local sslmode="${PGSSLMODE:-$(feoh_env PGSSLMODE)}"
+		if [ "$sslmode" != verify-full ]; then
+			echo "FEOH_DATABASE_IAM_AUTH is on but PGSSLMODE is not verify-full — an IAM token is only ever sent to a verified server." >&2
+			return 1
+		fi
+		FEOH_DB_IAM=1
+		# Minted per tool run by feoh_pg_run, never held here.
+		unset PGPASSWORD
+		return 0
+	fi
+	if [ -z "$password" ]; then
+		echo "FEOH_DATABASE_URL has no password and FEOH_DATABASE_IAM_AUTH is not on — nothing would sign the connection in (run ./decrypt-env.sh for the details)." >&2
+		return 1
+	fi
+	FEOH_DB_IAM=0
 	# Exported so `docker compose run -e PGPASSWORD` (no `=value`) hands it to
 	# the container from this process's environment — never from an argv that
 	# `ps` would show.
-	PGPASSWORD=$(feoh_urldecode "${BASH_REMATCH[3]}")
+	PGPASSWORD=$(feoh_urldecode "$password")
 	export PGPASSWORD
 }
 
@@ -79,8 +190,10 @@ feoh_load_db_mode() {
 # in: `feoh_pg pg_dump -Fc -d mydb`. stdin/stdout pass through (no TTY), so it
 # pipes. Local mode `exec`s into the running container as the `postgres`
 # superuser over its socket (what backup.sh/restore.sh always did); external
-# mode runs the one-shot `pgtools` container as the URL's user (RDS: the master
-# user, a member of rds_superuser — NOT a superuser).
+# mode runs the one-shot `pgtools` container as the URL's user — after the
+# cutover `feoh_app`, which acts as `feoh_owner` (owner of every app database,
+# CREATEDB, not a superuser, not in rds_superuser); before it, or on the
+# break-glass path, the RDS master (a member of rds_superuser — NOT a superuser).
 feoh_pg() {
 	if [ "$DB_MODE" = external ]; then
 		feoh_pg_run "$@"
@@ -92,11 +205,21 @@ feoh_pg() {
 # The external half of feoh_pg: the one-shot `pgtools` container, libpq
 # connection variables from the URL (feoh_load_db_mode).
 feoh_pg_run() {
+	if [ "${FEOH_DB_IAM:-0}" = 1 ]; then
+		# A fresh token for this run: it outlives no connection it opens, and a
+		# nightly backup's many runs each get their own.
+		PGPASSWORD=$(feoh_iam_token "$FEOH_PGHOST" "$FEOH_PGPORT" "$FEOH_PGUSER") || {
+			echo "could not mint an RDS IAM auth token for ${FEOH_PGUSER} (aws rds generate-db-auth-token failed — instance profile, region, or the rds-db:connect grant)." >&2
+			return 1
+		}
+		export PGPASSWORD
+	fi
 	"${COMPOSE[@]}" run --rm -T --no-deps \
 		-e PGHOST="$FEOH_PGHOST" \
 		-e PGPORT="$FEOH_PGPORT" \
 		-e PGUSER="$FEOH_PGUSER" \
 		-e PGPASSWORD \
+		-e PGOPTIONS \
 		pgtools "$@"
 }
 
@@ -281,18 +404,25 @@ feoh_caddy_reload() {
 	fi
 }
 
-# feoh_smoke_check <host> <path> fetches https://<host><path> through THIS VM's
-# Caddy — `--resolve <host>:443:127.0.0.1`, so it depends on neither public DNS
-# nor the network hairpinning back to the VM's own public IP — under the real
-# hostname, so SNI, the certificate and the site block are the ones users hit.
+# feoh_smoke_check <host> <path> [<body-file>] fetches https://<host><path>
+# through THIS VM's Caddy — `--resolve <host>:443:127.0.0.1`, so it depends on
+# neither public DNS nor the network hairpinning back to the VM's own public IP
+# — under the real hostname, so SNI, the certificate and the site block are the
+# ones users hit. FEOH_SMOKE_RESOLVE names that address; set it EMPTY to go
+# through public DNS instead (smoke.sh does, run from outside the VM). curl
+# verifies the certificate either way, so a host without a valid one fails.
 # It passes on HTTP 200 with a non-empty body: the v0.1.0 outage answered 404
-# with an empty one while the API healthcheck stayed green. It retries for a
-# while (FEOH_SMOKE_ATTEMPTS × FEOH_SMOKE_INTERVAL seconds, default 20 × 3): a
-# just-recreated Caddy may still be loading its certificates, and on a first
-# deploy issuing them.
+# with an empty one while the API healthcheck stayed green. Given a
+# <body-file>, the passing body is copied there for the caller to inspect. It
+# retries for a while (FEOH_SMOKE_ATTEMPTS × FEOH_SMOKE_INTERVAL seconds,
+# default 20 × 3): a just-recreated Caddy may still be loading its
+# certificates, and on a first deploy issuing them.
 feoh_smoke_check() {
-	local host=$1 path=$2 attempts=${FEOH_SMOKE_ATTEMPTS:-20} interval=${FEOH_SMOKE_INTERVAL:-3}
+	local host=$1 path=$2 keep=${3:-} attempts=${FEOH_SMOKE_ATTEMPTS:-20} interval=${FEOH_SMOKE_INTERVAL:-3}
+	local resolve=${FEOH_SMOKE_RESOLVE-127.0.0.1}
 	local url="https://${host}${path}" body err code="000" i
+	local via=()
+	[ -z "$resolve" ] || via=(--resolve "${host}:443:${resolve}")
 	body=$(mktemp) || return 1
 	err=$(mktemp) || return 1
 	for ((i = 1; i <= attempts; i++)); do
@@ -300,9 +430,10 @@ feoh_smoke_check() {
 		# otherwise leave the previous attempt's body in place to be counted.
 		: >"$body"
 		code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 10 \
-			--resolve "${host}:443:127.0.0.1" "$url" 2>"$err") || true
+			${via[@]+"${via[@]}"} "$url" 2>"$err") || true
 		[ -n "$code" ] || code="000"
 		if [ "$code" = 200 ] && [ -s "$body" ]; then
+			if [ -n "$keep" ]; then cp "$body" "$keep" || return 1; fi
 			rm -f "$body" "$err"
 			echo "==> smoke: ${url} → 200"
 			return 0

@@ -72,7 +72,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 # Anchor THIS checkout's `backend/` on sys.path before `app` is imported — same
 # reasoning (and the same E402 constraint) as `seed_extras.py`.
@@ -81,6 +81,7 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
+from app.db_engine import create_async_engine
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.payment import Payment

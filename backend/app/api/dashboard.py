@@ -791,7 +791,7 @@ async def get_dashboard(
     # First-run state. Emptiness is decided org-wide (see the helper), and the
     # setup checklist is computed only for the one reader it is for: an admin
     # on a workspace with no invoices yet. Everyone else gets `null` and pays
-    # for none of its queries (`docs/decisions.md` §309).
+    # for none of its queries (`docs/decisions.md` §315).
     organization_has_invoices = await _organization_has_invoices(db, entity_id, total_invoices or 0)
     onboarding = None
     if not organization_has_invoices and holds_any_role(user, (ROLE_ADMIN,)):

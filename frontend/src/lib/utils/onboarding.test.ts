@@ -18,7 +18,7 @@ const NONE: OnboardingProgress = {
 	email_intake: false
 };
 
-describe('setup steps (docs/decisions.md §309)', () => {
+describe('setup steps (docs/decisions.md §315)', () => {
 	it('reads each tracked step from its own server flag, and nothing else', () => {
 		for (const flag of Object.keys(NONE) as (keyof OnboardingProgress)[]) {
 			const progress = { ...NONE, [flag]: true };

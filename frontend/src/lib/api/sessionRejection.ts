@@ -27,6 +27,12 @@ export type SessionRejection = 'expired' | 'other_workspace';
 export const LOGIN_REASON_PARAM = 'reason';
 
 const REASON_OTHER_WORKSPACE = 'other_workspace';
+const REASON_WORKSPACE_CLOSED = 'workspace_closed';
+
+/** Where an administrator lands after closing their workspace
+ *  (`components/organization/CloseWorkspacePanel.svelte`): this host's sign-in
+ *  page, which says the workspace is gone and that its addresses are free. */
+export const WORKSPACE_CLOSED_LOGIN_PATH = `/login?${LOGIN_REASON_PARAM}=${REASON_WORKSPACE_CLOSED}`;
 
 /** Whether a refused response ends the session, and why; `null` when it
  *  does not (any other 403, a 404, a 409…). */
@@ -92,9 +98,14 @@ export function loginPathFor(rejection: SessionRejection, next?: string | null):
 /** The notice `/login` shows for the reason in its URL, or `null`. Only a
  *  reason this module set is honoured — the parameter is not free text. */
 export function loginNoticeKey(params: Pick<URLSearchParams, 'get'>): MessageKey | null {
-	return params.get(LOGIN_REASON_PARAM) === REASON_OTHER_WORKSPACE
-		? 'auth.login.signedOutOtherWorkspace'
-		: null;
+	switch (params.get(LOGIN_REASON_PARAM)) {
+		case REASON_OTHER_WORKSPACE:
+			return 'auth.login.signedOutOtherWorkspace';
+		case REASON_WORKSPACE_CLOSED:
+			return 'auth.login.workspaceClosed';
+		default:
+			return null;
+	}
 }
 
 /** The account's own sign-in page from a `wrong_workspace` refusal's params,

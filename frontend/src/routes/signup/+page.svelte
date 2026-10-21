@@ -33,7 +33,9 @@
 		slug: string;
 		available: boolean;
 		// Why not: the English sentence, and the rule's code to state it in
-		// the reader's language (`backend/app/utils/slug.py::SLUG_*`).
+		// the reader's language (`backend/app/utils/slug.py::SLUG_*`, including
+		// `signup_slug_held` for an address resting after a workspace closure,
+		// decisions §306).
 		reason?: string | null;
 		code?: string | null;
 	}

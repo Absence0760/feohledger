@@ -7,7 +7,7 @@
 #
 #   1. Blender renders the split tally ornament (tally_scene.py) with Cycles on
 #      the GPU, once per page theme — `dark` for the navy palette, `light` for
-#      the light one (docs/decisions.md §306) — then ImageMagick trims the
+#      the light one (docs/decisions.md §312) — then ImageMagick trims the
 #      transparent margin, downsamples it to the width the page serves, and
 #      encodes it as WebP. The two lightings share geometry, camera and depth
 #      of field, so both trim to the same frame and the page swaps them with

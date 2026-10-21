@@ -14,12 +14,15 @@ What the tests pin:
 - a file that fails any check never replaces the `.env` already in place, because
   `backup.sh` and `add-tenant.sh` read that file between deploys;
 - a value compose's `env_file` would silently rewrite is refused;
-- `FEOH_HCAPTCHA_SECRET` is required exactly when the app would require it —
-  while `FEOH_SIGNUP_ENABLED` is not false;
+- the hCaptcha secret AND site key are required exactly when the app would
+  require them — while `FEOH_SIGNUP_ENABLED` is not false;
 - the database mode is checked the way deploy/lib.sh will use it: the local
   container needs `POSTGRES_PASSWORD` (compose no longer refuses it empty
   itself) and no TLS mode it cannot serve; an external database (RDS) needs a
   URL lib.sh can hand to libpq and `PGSSLMODE` at `require` or stricter;
+- IAM auth (`FEOH_DATABASE_IAM_AUTH`, docs/decisions.md §310) and a URL
+  password are exclusive, IAM auth needs `verify-full` exactly, and the flag
+  must be a boolean the app reads;
 - a refusal names the key, never the value.
 """
 
@@ -52,6 +55,7 @@ REQUIRED = {
     "FEOH_S3_BUCKET": "feohledger-invoice-files",
     "BACKUP_S3_BUCKET": "feohledger-backups",
     "FEOH_HCAPTCHA_SECRET": "dummy-captcha-secret",
+    "FEOH_HCAPTCHA_SITEKEY": "dummy-captcha-sitekey",
     "FEOH_CREDENTIAL_KMS_KEY_ID": "alias/feohledger-app-prod",
     "FEOH_EMAIL_PROVIDER": "ses",
 }
@@ -170,25 +174,49 @@ def test_refuses_a_missing_required_var(deploy: Deploy, missing: str, shape: str
 
 
 @pytest.mark.parametrize("spelling", ["false", "False", "0", "no", "off", "f", "n"])
-def test_a_closed_signup_needs_no_captcha_secret(deploy: Deploy, spelling: str) -> None:
-    """The app demands FEOH_HCAPTCHA_SECRET only while self-service signup is on
-    (config.py `_require_captcha_in_deployed_envs`). The script mirrors that, for
-    every spelling pydantic reads as false, so an invite-only deploy is not
-    refused here for a secret the app itself would boot without."""
-    dotenv = _dotenv({"FEOH_HCAPTCHA_SECRET": None, "FEOH_SIGNUP_ENABLED": spelling})
+def test_a_closed_signup_needs_no_captcha_keys(deploy: Deploy, spelling: str) -> None:
+    """The app demands the hCaptcha secret and site key only while self-service
+    signup is on (config.py `_require_captcha_in_deployed_envs`). The script
+    mirrors that, for every spelling pydantic reads as false, so an invite-only
+    deploy is not refused here for keys the app itself would boot without."""
+    dotenv = _dotenv(
+        {
+            "FEOH_HCAPTCHA_SECRET": None,
+            "FEOH_HCAPTCHA_SITEKEY": None,
+            "FEOH_SIGNUP_ENABLED": spelling,
+        }
+    )
     result = deploy.run(dotenv)
     assert result.returncode == 0, result.stderr
     assert deploy.env.read_text() == dotenv
 
 
+@pytest.mark.parametrize("key", ["FEOH_HCAPTCHA_SECRET", "FEOH_HCAPTCHA_SITEKEY"])
 @pytest.mark.parametrize("signup", [None, "true", "1", "falsey"])
-def test_an_open_signup_still_needs_the_captcha_secret(deploy: Deploy, signup: str | None) -> None:
+def test_an_open_signup_still_needs_both_captcha_keys(
+    deploy: Deploy, signup: str | None, key: str
+) -> None:
     """Unset, true, or anything pydantic would not read as false keeps signup on,
-    and with it the captcha requirement — never loosened by a near-miss spelling."""
+    and with it the captcha requirement — never loosened by a near-miss spelling.
+    The site key counts as much as the secret: without it /signup renders no
+    widget and every signup fails the captcha (#575)."""
     deploy.env.write_text(PREVIOUS_ENV)
-    result = deploy.run(_dotenv({"FEOH_HCAPTCHA_SECRET": None, "FEOH_SIGNUP_ENABLED": signup}))
+    result = deploy.run(_dotenv({key: None, "FEOH_SIGNUP_ENABLED": signup}))
     _assert_refused_and_kept(deploy, result)
-    assert "FEOH_HCAPTCHA_SECRET" in result.stderr
+    assert key in result.stderr
+
+
+def test_the_last_signup_line_wins_as_for_compose(deploy: Deploy) -> None:
+    """Compose and the app read the LAST FEOH_SIGNUP_ENABLED line; an earlier
+    `false` must not waive the captcha keys for a signup the app serves."""
+    deploy.env.write_text(PREVIOUS_ENV)
+    dotenv = (
+        _dotenv({"FEOH_HCAPTCHA_SITEKEY": None})
+        + "FEOH_SIGNUP_ENABLED=false\nFEOH_SIGNUP_ENABLED=true\n"
+    )
+    result = deploy.run(dotenv)
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_HCAPTCHA_SITEKEY" in result.stderr
 
 
 @pytest.mark.parametrize("provider", ["console", "Console", "CONSOLE "])
@@ -306,17 +334,19 @@ def test_accepts_an_external_url_lib_sh_can_parse(deploy: Deploy, url: str) -> N
             "postgresql+psycopg://feohadmin:0123abcd@db.example.internal/feohledger",
             "postgresql+asyncpg://",
         ),
-        ("postgresql+asyncpg://feohadmin@db.example.internal/feohledger", "USER:PASSWORD@HOST"),
-        ("postgresql+asyncpg://feohadmin:0123abcd@db.example.internal:5432", "USER:PASSWORD@HOST"),
-        ("postgresql+asyncpg://feohadmin:0123abcd@[::1]:5432/feohledger", "USER:PASSWORD@HOST"),
+        (
+            "postgresql+asyncpg://feohadmin:0123abcd@db.example.internal:5432",
+            "USER[:PASSWORD]@HOST",
+        ),
+        ("postgresql+asyncpg://feohadmin:0123abcd@[::1]:5432/feohledger", "USER[:PASSWORD]@HOST"),
         # Characters that must be percent-encoded, and a broken escape.
         (
             "postgresql+asyncpg://feohadmin:pa!ss@db.example.internal/feohledger",
-            "USER:PASSWORD@HOST",
+            "USER[:PASSWORD]@HOST",
         ),
         (
             "postgresql+asyncpg://feohadmin:pa%G1ss@db.example.internal/feohledger",
-            "USER:PASSWORD@HOST",
+            "USER[:PASSWORD]@HOST",
         ),
     ],
 )
@@ -365,6 +395,62 @@ def test_the_local_container_refuses_a_tls_mode_it_cannot_serve(deploy: Deploy, 
 def test_the_local_container_accepts_a_non_verifying_mode(deploy: Deploy, mode: str) -> None:
     result = deploy.run(_dotenv({"PGSSLMODE": mode}))
     assert result.returncode == 0, result.stderr
+
+
+IAM_URL = "postgresql+asyncpg://feoh_app@db.example.internal:5432/feohledger"
+
+
+def _iam(overrides: dict[str, str | None] | None = None) -> str:
+    return _rds(
+        {"FEOH_DATABASE_URL": IAM_URL, "FEOH_DATABASE_IAM_AUTH": "true", **(overrides or {})}
+    )
+
+
+@pytest.mark.parametrize("flag", ["true", "TRUE", "1", "yes", "on"])
+def test_accepts_the_password_less_iam_url(deploy: Deploy, flag: str) -> None:
+    result = deploy.run(_iam({"FEOH_DATABASE_IAM_AUTH": flag}))
+    assert result.returncode == 0, result.stderr
+    assert "WARN" not in result.stderr
+
+
+def test_iam_auth_refuses_a_url_that_still_carries_a_password(deploy: Deploy) -> None:
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_iam({"FEOH_DATABASE_URL": RDS_URL}))
+    _assert_refused_and_kept(deploy, result)
+    assert "carries a password" in result.stderr
+    assert "0123abcd" not in result.stderr + result.stdout
+
+
+@pytest.mark.parametrize("flag", [None, "", "false", "0"])
+def test_a_password_less_url_needs_iam_auth_on(deploy: Deploy, flag: str | None) -> None:
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_iam({"FEOH_DATABASE_IAM_AUTH": flag}))
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_DATABASE_IAM_AUTH" in result.stderr
+
+
+@pytest.mark.parametrize("mode", ["require", "verify-ca"])
+def test_iam_auth_refuses_tls_that_only_warns_for_a_password(deploy: Deploy, mode: str) -> None:
+    """The token is a bearer credential: verify-full or nothing (the app agrees)."""
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_iam({"PGSSLMODE": mode}))
+    _assert_refused_and_kept(deploy, result)
+    assert "verify-full" in result.stderr
+
+
+def test_iam_auth_without_an_external_database_is_refused(deploy: Deploy) -> None:
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_dotenv({"FEOH_DATABASE_IAM_AUTH": "true"}))
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_DATABASE_IAM_AUTH" in result.stderr
+
+
+@pytest.mark.parametrize("flag", ["enabled", "tru", "2"])
+def test_an_unreadable_iam_flag_is_refused(deploy: Deploy, flag: str) -> None:
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_iam({"FEOH_DATABASE_IAM_AUTH": flag}))
+    _assert_refused_and_kept(deploy, result)
+    assert "not a boolean" in result.stderr
 
 
 def test_deploy_sh_decrypts_only_through_decrypt_env() -> None:

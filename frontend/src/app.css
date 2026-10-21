@@ -179,7 +179,7 @@
 	/* ---------------------------------------------------------------
 	   The brand's two accent hues beside --accent, for the public pages'
 	   gradients (the hero headline, the stat figures, the pipeline rail)
-	   and their glows (docs/decisions.md §306). They were literals in the
+	   and their glows (docs/decisions.md §312). They were literals in the
 	   marketing components while the landing page was pinned dark; a
 	   gradient stop chosen for navy is 1.8:1 on white, so they are tokens
 	   with a light value now. Both clear 4.5:1 on --bg and --surface in
