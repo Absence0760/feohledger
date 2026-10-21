@@ -1,9 +1,11 @@
-"""Migration 0117 runs against a real control plane: down, up, and up again.
+"""Migration 0117 runs against a real control plane: up, up again, and a
+downgrade that deliberately keeps the table.
 
 The realdb harness builds its control plane with ``create_all``, so
 ``workspace_closures`` exists there without the revision ever executing.
 Nothing else proves 0117 creates it on a control plane at the previous schema,
-re-runs harmlessly, reverses, and no-ops on a tenant database. Always left
+re-runs harmlessly, keeps its rows on a downgrade, and no-ops on a tenant
+database. Always left
 upgraded so later tests see the current schema. Whole-schema equality with the
 model is `test_schema_build_parity.py`'s job.
 """
@@ -59,7 +61,9 @@ async def test_0117_creates_the_table_on_a_control_plane_at_the_previous_schema(
     mig = _load()
     engine = create_async_engine(realdb.control_db_url())
     try:
-        await _run(engine, mig.downgrade)
+        # The previous schema: the table absent.
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE IF EXISTS workspace_closures"))
         assert not await _table_exists(engine)
 
         await _run(engine, mig.upgrade)
@@ -87,6 +91,21 @@ async def test_0117_creates_the_table_on_a_control_plane_at_the_previous_schema(
         # are deleted by the closure it records.
         assert unique == 1
         assert fks == 0
+    finally:
+        await _run(engine, mig.upgrade)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_0117_downgrade_keeps_the_closure_records(realdb):
+    """Each row is the only evidence a deleted workspace's closure was asked
+    for, and the operator's backup queue: a downgrade must not drop them."""
+    mig = _load()
+    engine = create_async_engine(realdb.control_db_url())
+    try:
+        await _run(engine, mig.upgrade)
+        await _run(engine, mig.downgrade)
+        assert await _table_exists(engine)
     finally:
         await _run(engine, mig.upgrade)
         await engine.dispose()

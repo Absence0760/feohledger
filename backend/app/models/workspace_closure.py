@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -49,6 +49,11 @@ class WorkspaceClosure(Base):
     )
     slug: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     requested_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # The requester's role NAMES at the moment of the closure (e.g. ["admin"]),
+    # because the user row they would be read from is deleted by it. Names
+    # only: no address, no display name, no source IP — the IP is on the
+    # shipped `organization.closing` audit event, like every other audit row.
+    requested_by_roles: Mapped[list | None] = mapped_column(JSONB)
     # `api/auth.require_sensitive_step_up`'s answer: totp | passkey |
     # mfa_off_local (the local-dev skip, named so it is never mistaken for a
     # verified proof).
@@ -61,6 +66,14 @@ class WorkspaceClosure(Base):
     documents_removed: Mapped[int | None] = mapped_column(Integer)
     database_dropped: Mapped[bool | None] = mapped_column(Boolean)
     control_rows_removed: Mapped[int | None] = mapped_column(Integer)
+    # The last time a run of this closure failed part-way, and the exception
+    # CLASS (never its message). The tenant's own log may already be gone when
+    # that happens, so this is where the failure is recorded.
+    last_failure: Mapped[str | None] = mapped_column(String(64))
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Set by an operator once the tenant's backup objects are deleted (see the
     # module docstring). NULL on a completed closure = still owed.
     backups_cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Who did: the operator identifier `scripts/workspace_closures.py
+    # mark-cleared --operator` requires (a handle or ticket, not an address).
+    backups_cleared_by: Mapped[str | None] = mapped_column(String(100))

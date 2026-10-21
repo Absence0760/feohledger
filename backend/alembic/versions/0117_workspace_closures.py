@@ -58,6 +58,7 @@ def upgrade() -> None:
             organization_id uuid NOT NULL,
             slug varchar(100) NOT NULL,
             requested_by_user_id uuid NOT NULL,
+            requested_by_roles jsonb,
             step_up_proof varchar(20) NOT NULL,
             status varchar(20) NOT NULL,
             started_at timestamptz NOT NULL DEFAULT now(),
@@ -65,7 +66,10 @@ def upgrade() -> None:
             documents_removed integer,
             database_dropped boolean,
             control_rows_removed integer,
+            last_failure varchar(64),
+            last_failure_at timestamptz,
             backups_cleared_at timestamptz,
+            backups_cleared_by varchar(100),
             CONSTRAINT workspace_closures_pkey PRIMARY KEY (id),
             CONSTRAINT workspace_closures_organization_id_key UNIQUE (organization_id)
         )
@@ -75,6 +79,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if not _is_control_db():
-        return
-    op.execute("DROP TABLE IF EXISTS workspace_closures")
+    """No rollback, deliberately.
+
+    Every row in this table records a workspace that no longer exists: it is the
+    only durable evidence that its owner asked for the deletion and what it
+    removed, and the operator's queue for the backups the DPA promises to delete
+    within 60 days. Dropping it on a downgrade would destroy both, and nothing
+    in the older code reads it, so leaving it in place costs nothing. Remove it
+    by hand, after every listed closure's backups are cleared, if ever needed.
+    """

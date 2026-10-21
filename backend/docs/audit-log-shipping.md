@@ -112,8 +112,23 @@ database is about to be dropped, and an unshipped row would be lost with it. The
 closure writes its `organization.closing` row, flushes, and refuses to delete
 anything if the flush fails. With `FEOH_AUDIT_SHIPPING_ENABLED` off it is not
 called and the closure's durable record is the control-plane
-`workspace_closures` row alone. A flush racing the periodic tick can ship a row
-twice, the same at-least-once seam as everywhere else here.
+`workspace_closures` row alone — and a DEPLOYED environment without a real
+(non-`mock`) sink refuses the closure outright (`audit_archive_unavailable`). A
+flush racing the periodic tick can ship a row twice, the same at-least-once seam
+as everywhere else here.
+
+After the flush the closure **seals** the table: `LOCK TABLE audit_log IN
+EXCLUSIVE MODE` on a connection held until the database is dropped. A row
+committed between the flush and the seal is seen under the seal, which is
+released and the flush repeats (`SEAL_ATTEMPTS`), so the drop never takes a
+committed row the archive lacks; a write after the seal waits and fails with
+the database, reported at ERROR by `audit_dispatch`. Queued in-process writes are
+awaited first (`audit_dispatch.settle_auth_audits`, which never cancels them).
+
+**`lambda` audit mode cannot give that guarantee**: a row can still be in SQS,
+not yet in the tenant's table, when the flush runs, and one tenant's messages
+cannot be seen or drained. A deployed closure in that mode is refused
+(`audit_queue_unverifiable`; `docs/followups.md`).
 
 ## Configuration
 

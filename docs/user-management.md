@@ -179,8 +179,20 @@ workspace's side:
   transactions, bank statements, tax filings or records, Positive Pay files,
   e-invoices, goods receipts, stock pushed to a commerce platform, contracts
   that have been in force, accepted discounts, approved supplier bank or tax
-  changes, data-subject request records, a paid subscription, a partner
-  relationship or a custom domain. Those go to support.
+  changes, data-subject request records, supplier statement reconciliations,
+  approved pre-approvals / requisitions / intake requests, received or closed
+  purchase orders, a paid subscription, a partner relationship or a custom
+  domain. Those go to support. Before anything is asked, the page also lists
+  what a closure WOULD delete (counts of invoices, vendors, purchase orders and
+  so on), so the decision is an informed one.
+
+  **What the deployment must provide.** In a deployed environment the closure
+  needs `FEOH_MFA_ENABLED` on (it takes a second factor, and the page says so
+  instead of offering a close that cannot succeed), a real write-once audit
+  archive (`FEOH_AUDIT_SHIPPING_ENABLED` with non-`mock` providers — the trail is
+  shipped and sealed before the database is dropped), and `local` audit mode. A
+  deployment missing any of these refuses every self-service closure with that
+  reason, and support closes the workspace. Local dev needs none of them.
   The administrator types the workspace's slug back and, where MFA is on,
   confirms a code or a passkey (a password alone is not enough, and an account
   with no second factor enrolls one first). `POST /api/organization/close`;

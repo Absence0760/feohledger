@@ -42,18 +42,21 @@ oldest first. The oldest is closest to the 60-day deadline.
 2. **Mark it done**:
 
    ```bash
-   docker compose … exec -T api python scripts/workspace_closures.py mark-cleared <organization-id>
+   docker compose … exec -T api python scripts/workspace_closures.py mark-cleared <organization-id> --operator <your-handle>
    ```
 
-   The organisation id `list` printed, not the slug. Exit code 4 means no
+   The organisation id `list` printed, not the slug, and `--operator` (required)
+   is recorded on the row with the time — a handle or a ticket reference, not an
+   email address. Exit code 4 means no
    finished closure of that organisation is still owed (already marked,
    mistyped, or a workspace that still exists — check `list`).
 
-   **Until you do this the slug stays taken**: signup and partner provisioning
-   refuse it, because a new workspace under it would get the same
-   `feoh_<slug>` database name and its backups would be removed with the old
-   one's. `scripts/create_tenant.py` does not consult the queue — never reuse a
-   closed slug by hand while it is listed here.
+   **Until you do this the slug stays taken**, and for 90 days from the
+   closure regardless (`utils/slug.CLOSED_SLUG_COOLDOWN`): a new workspace under
+   it would get the same `feoh_<slug>` database name, and old bookmarks, IdP
+   redirect URIs and invite emails would point at it. The hold is in
+   `provision_tenant`, so `scripts/create_tenant.py` and `deploy/add-tenant.sh`
+   refuse a held slug too (exit 2).
 
 ## What stays, on purpose
 
@@ -71,9 +74,10 @@ oldest first. The oldest is closest to the 60-day deadline.
 ## When a closure did not finish
 
 A closure that failed part-way answers the administrator with "did not finish,
-try again", and a retry by them completes it. If they have given up, the row
-shows `status = started` in the control plane and the workspace may be
-half-deleted. Finish it with the ordinary operator deletion
+try again", and a retry by them completes it. If they have given up, `list`
+shows it under "began and did not finish", with the exception class of the
+last failure. The database goes first, so a failed drop leaves the workspace
+whole; a failure after the drop leaves a workspace that is already unusable. Finish it with the ordinary operator deletion
 (`deploy/remove-tenant.sh <slug>`, which is idempotent), then set the row's
 status yourself only after confirming nothing is left
 (`scripts/delete_tenant.py --slug <slug> --dry-run` exits 4).

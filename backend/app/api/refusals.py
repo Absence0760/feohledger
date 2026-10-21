@@ -206,6 +206,15 @@ def workspace_close_refused_detail(blockers: list[str]) -> dict:
     )
 
 
+#: Under the closure's lock, the requester was no longer an active administrator
+#: of the workspace (deactivated, demoted or removed since the request began).
+#: A 403; nothing was deleted.
+WORKSPACE_CLOSE_ACTOR_NOT_ADMIN = "workspace_close_actor_not_admin"
+WORKSPACE_CLOSE_ACTOR_NOT_ADMIN_DETAIL = coded_refusal(
+    WORKSPACE_CLOSE_ACTOR_NOT_ADMIN,
+    "Only an active administrator of this workspace can close it.",
+)
+
 #: Another closure of the same workspace is running. A 409.
 WORKSPACE_CLOSE_IN_PROGRESS = "workspace_close_in_progress"
 WORKSPACE_CLOSE_IN_PROGRESS_DETAIL = coded_refusal(
