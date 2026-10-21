@@ -152,6 +152,16 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # has_gr, gr_id, issues}. Populated by `services.invoice_warnings.refresh_warnings`
     # whenever the invoice changes. NULL when the invoice has no `po_number`.
     po_match: Mapped[dict | None] = mapped_column(JSONB)
+    # The bill of record in the ERP: the document id the adapter returned when a
+    # push was confirmed (`services/erp._call_erp`, the one writer), e.g. a Xero
+    # InvoiceID or a QuickBooks Bill Id. NULL until a push succeeds. Kept across
+    # a payment void (the bill is still in the ERP) and overwritten by a later
+    # confirmed push (cleared if that push reports no id).
+    # `erp_document_url` is the provider's deep link to it, built once from the
+    # adapter config that posted it (`erp_adapters.deep_links`); NULL for a
+    # provider with no stable deep link. Migration 0117.
+    erp_document_id: Mapped[str | None] = mapped_column(String(255))
+    erp_document_url: Mapped[str | None] = mapped_column(String(1024))
     # Free-form per-invoice metadata bag. Currently holds the cached
     # audit-log summary under `meta["audit_summary"]`:
     #   {"text": str, "confidence_context": str|None,

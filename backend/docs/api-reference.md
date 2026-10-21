@@ -638,6 +638,13 @@ must not keep pointing at a vendor nothing visible corroborates.
 `GET /api/invoices` and `GET /api/invoices/{id}` expose the resolved
 `vendor_id` so the UI can offer only eligible targets.
 
+Both also carry `erp_document_id` and `erp_document_url`: the bill the invoice
+was posted as in the ERP (a Xero InvoiceID, a QuickBooks Bill Id) and the
+provider's deep link to it. Both are null until a push is confirmed, and the URL
+stays null for a provider with no stable deep link. Neither is writable through
+the API: only `services/erp` sets them (`erp-integration.md` § The invoice
+names its bill in the ERP).
+
 ## Tax / 1099
 
 | Method | Path                                    | Roles | Description |

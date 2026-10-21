@@ -1603,6 +1603,67 @@ async def test_a_success_clears_an_earlier_unknown_and_names_the_bill():
 
 
 @pytest.mark.asyncio
+async def test_a_success_stamps_the_bill_and_its_deep_link_on_the_invoice():
+    """The invoice row carries the bill of record, so the invoice can link to
+    it: found live, a Xero push left the bill id only in state_data and the
+    audit row, where no screen showed it."""
+    from app.services.erp import _call_erp
+    from app.services.erp_adapters.base import ErpPostResult
+
+    bill = "8f1c2a3b-0000-4000-8000-1234567890ab"
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return ErpPostResult(success=True, erp_document_id=bill, erp_document_number="7")
+
+    inv = _invoice()
+    config = {"type": "xero", "integration_method": "direct"}
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        await _call_erp(_line_items_db([]), inv, config, instance=_instance(state_data={}))
+    assert inv.erp_document_id == bill
+    assert inv.erp_document_url == (
+        f"https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={bill}"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "kept"),
+    [
+        # A failure that left a bill names an orphan, not the bill of record,
+        # and leaves the earlier bill of record alone.
+        ({"success": False, "erp_document_id": "ORPHAN-1", "retryable": False}, "EARLIER"),
+        # A number is not an id, and "UNKNOWN" is what the reference falls back
+        # to. A confirmed push with no id clears the pair: the earlier id may
+        # name another ERP's bill if the org has switched.
+        ({"success": True, "erp_document_number": "7"}, None),
+        ({"success": True}, None),
+    ],
+)
+async def test_only_a_confirmed_id_is_stamped_on_the_invoice(result, kept):
+    """Only the ERP's id is stamped, and only by a confirmed push."""
+    from app.services.erp import _call_erp
+    from app.services.erp_adapters.base import ErpPostResult
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return ErpPostResult(**result)
+
+    inv = _invoice()
+    inv.erp_document_id = "EARLIER"
+    inv.erp_document_url = None
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        call = _call_erp(_line_items_db([]), inv, {"type": "x"}, instance=_instance())
+        if result["success"]:
+            await call
+        else:
+            with pytest.raises(ErpPostRefusedError):
+                await call
+    assert inv.erp_document_id == kept
+    assert inv.erp_document_url is None
+
+
+@pytest.mark.asyncio
 async def test_call_erp_refuses_a_bill_due_before_it_is_dated():
     """Live QuickBooks sandbox, 2026-10-20: a bill dated after its due date
     posted, and QuickBooks' own UI then flagged it invalid. Whatever path made

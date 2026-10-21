@@ -107,7 +107,7 @@ decimal comparison rather than binary drift.
 ### Tenant Tables
 
 #### Invoice Pipeline
-- `invoices` — master record (invoice_number, vendor_name, amount, currency, due_date, status, file_url, vendor_address, vendor_tax_id, ship_to_address, tax_rate, payment_method, reference_number, assigned_to_id, assigned_to, approved_by, rejected_by, **warnings** JSONB, **po_match** JSONB, **meta** JSONB)
+- `invoices` — master record (invoice_number, vendor_name, amount, currency, due_date, status, file_url, vendor_address, vendor_tax_id, ship_to_address, tax_rate, payment_method, reference_number, assigned_to_id, assigned_to, approved_by, rejected_by, **warnings** JSONB, **po_match** JSONB, **meta** JSONB, **erp_document_id** / **erp_document_url** — the bill of record in the ERP and its deep link, set only by a confirmed push, migration 0117)
   - `meta` is a free-form per-invoice metadata bag. Currently holds the cached audit-log summary under `meta["audit_summary"]` = `{text, confidence_context, source_fingerprint: {count, last_at}, generated_at, model}` — regenerated lazily when the audit-log fingerprint changes. No PII / banking data. See [`audit-summary.md`](audit-summary.md).
 - `invoice_line_items` — individual lines (description, qty, unit_price, tax, total)
 - `invoice_extraction_results` — AI extraction output per attempt (method, confidence, raw JSON, **priors_metadata** — summary of vendor cache overrides + RAG neighbors applied during extraction)
@@ -190,6 +190,7 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0006     | Tenant  | `invoices`   | Adds `invoices.po_match` JSONB column (latest 2/3-way PO match result).                                                  |
 | 0007     | Tenant  | `payments`   | Adds `payments.provider`, `provider_payment_id`, `failure_reason`, `submitted_at`, `completed_at` (adapter lifecycle).   |
 | 0022     | Tenant  | `vendors`    | Creates `vendor_change_requests` (supplier-portal staged bank/tax changes pending AP approval) + a partial index on `status='pending'`. |
+| 0117     | Tenant  | `invoices`   | Adds `invoices.erp_document_id` varchar(255) + `erp_document_url` varchar(1024); backfills the id from the invoice's single workflow instance's `state_data.erp_reference` (not `UNKNOWN`), never the URL (decisions §293). |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).
 
