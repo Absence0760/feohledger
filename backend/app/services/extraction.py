@@ -8,6 +8,7 @@ Tracks usage for billing when platform mode is used.
 
 import functools
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -25,7 +26,7 @@ from app.services.decimal_convention import (
     apply_convention,
     detect_convention,
 )
-from app.services.extraction_adapters.base import ExtractionResult
+from app.services.extraction_adapters.base import ExtractedLineItem, ExtractionResult
 from app.services.invoice_warning_catalog import warning
 from app.services.workflow_engine import (
     advance_workflow,
@@ -862,23 +863,7 @@ async def run_extraction(
 
             line_item = InvoiceLineItem(
                 invoice_id=invoice.id,
-                line_number=li.line_number,
-                item_code=li.item_code.value if li.item_code.value else None,
-                description=li.description.value if li.description.value else None,
-                quantity=(
-                    _clean_decimal(li.quantity.value, amount_convention)
-                    if li.quantity.value
-                    else None
-                ),
-                unit_price=(
-                    _clean_decimal(li.unit_price.value, amount_convention)
-                    if li.unit_price.value
-                    else None
-                ),
-                tax=_clean_decimal(li.tax.value, amount_convention) if li.tax.value else None,
-                total=(
-                    _clean_decimal(li.total.value, amount_convention) if li.total.value else None
-                ),
+                **extracted_line_values(li, amount_convention),
                 gl_account=li_gl,
             )
             db.add(line_item)
@@ -1294,6 +1279,18 @@ _CURRENCY_SYMBOLS = "$\u20ac\u00a3\u00a5\u20b9\u20bd\u20a9\u0e3f\u20aa\u20a6"
 # thousands separator in French convention (``1 234,56``).
 _NUMERIC_WHITESPACE = (" ", "\t", "\u00a0", "\u202f")
 
+# An ISO 4217-shaped currency code written beside the figure — ``EUR 8.739,84``,
+# ``1,234.56 USD``. A model transcribing the printed total keeps the code the
+# page prints, and left in place it made the whole token unparseable: the
+# invoice's ``amount`` silently stayed empty and every self-check that needs it
+# skipped (issue #575). Like a symbol it is decoration; the currency itself is
+# read from the ``currency`` field.
+_CURRENCY_CODE_AFFIX = re.compile(r"^[A-Z]{3}(?=[\s\d.,(+-])|(?<=[\d.,)\s])[A-Z]{3}$")
+
+# Swiss grouping: ``1'234.50`` / ``1’234.50``. An apostrophe is never a decimal
+# point, so between a digit and a three-digit group it is dropped like a space.
+_APOSTROPHE_GROUP = re.compile(r"(?<=\d)['\u2019](?=\d{3}(?:\D|$))")
+
 # The money fields whose tokens vote on the document's decimal convention.
 # Deliberately money only: `tax_rate` is a percentage and `quantity` a count,
 # and neither is written under an amount's grouping habits.
@@ -1322,8 +1319,12 @@ def _amount_core(val: str | None) -> str | None:
 
     for sym in _CURRENCY_SYMBOLS:
         s = s.replace(sym, "")
+    s = _CURRENCY_CODE_AFFIX.sub("", s.strip()).strip()
+    if s.startswith("(") and s.endswith(")"):
+        s = "-" + s[1:-1].strip()  # "EUR (12.50)" — the code sat outside the parentheses
     for ws in _NUMERIC_WHITESPACE:
         s = s.replace(ws, "")
+    s = _APOSTROPHE_GROUP.sub("", s)
     s = s.replace("%", "")
     # Unicode minus → ASCII minus
     s = s.replace("\u2212", "-")
@@ -1382,6 +1383,50 @@ def _clean_decimal(val: str | None, convention: AmountConvention | None = None) 
         return Decimal(apply_convention(core, convention))
     except Exception:
         return None
+
+
+def extracted_line_values(
+    li: ExtractedLineItem, convention: AmountConvention | None = None
+) -> dict:
+    """The ``InvoiceLineItem`` column values one extracted line is stored as.
+
+    The line-level twin of :func:`_apply_extraction`, and the only place a
+    model's line is turned into column values — ``run_extraction`` persists
+    exactly this, and the golden contract tests assert exactly this.
+
+    It used to be inlined with a ``value if value else None`` guard per field,
+    which got three things wrong on real model output (issue #575):
+
+    * text fields skipped the sentinel filter the header uses, so a leaked
+      ``"string or null"`` or ``"N/A"`` was stored as an item code;
+    * a JSON **number** — a model writing a SKU as ``4411`` — reached the
+      ``String`` column as an ``int``, which asyncpg refuses, failing the whole
+      extraction over one item code;
+    * a JSON ``0`` is falsy, so a real zero tax or total was stored as NULL.
+
+    Money goes through :func:`_clean_decimal` under the document's convention,
+    the same reading the header and the self-correction pass use.
+    """
+    return {
+        "line_number": _clean_line_number(li.line_number),
+        "item_code": _clean_string(li.item_code.value),
+        "description": _clean_string(li.description.value),
+        "quantity": _clean_decimal(li.quantity.value, convention),
+        "unit_price": _clean_decimal(li.unit_price.value, convention),
+        "tax": _clean_decimal(li.tax.value, convention),
+        "total": _clean_decimal(li.total.value, convention),
+    }
+
+
+def _clean_line_number(val) -> int | None:
+    """A model's ``line_number`` as an int for the ``Integer`` column, or None."""
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, str) and val.strip().isdigit():
+        return int(val.strip())
+    return None
 
 
 def _clean_string(val: str | None) -> str | None:
