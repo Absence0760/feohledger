@@ -36,6 +36,16 @@ import pytest
         ("£99.99", Decimal("99.99")),
         ("¥10000", Decimal("10000")),
         ("-15.00", Decimal("-15.00")),
+        # An ISO code transcribed beside the figure used to make the whole token
+        # unparseable, silently dropping the invoice amount (issue #575).
+        ("EUR 8.739,84", Decimal("8739.84")),
+        ("1,234.56 USD", Decimal("1234.56")),
+        ("GBP£99.99", Decimal("99.99")),
+        ("EUR (12.50)", Decimal("-12.50")),
+        ("JPY ¥176,440", Decimal("176440")),
+        # Swiss apostrophe grouping.
+        ("CHF 1\u2019234.50", Decimal("1234.50")),
+        ("1'234'567.00", Decimal("1234567.00")),
     ],
 )
 def test_clean_decimal_parses_real_world_inputs(raw, expected):
@@ -60,6 +70,11 @@ def test_clean_decimal_parses_real_world_inputs(raw, expected):
         "abc",
         "$$$",
         "1.2.3",
+        # Only an uppercase three-letter code beside a number is decoration.
+        "USD",
+        "12abc",
+        "usd1,200.00",
+        "12'5",
     ],
 )
 def test_clean_decimal_returns_none_for_garbage(raw):
@@ -187,3 +202,45 @@ def test_normalize_payment_method_returns_none_for_unknown(raw):
     from app.services.extraction import _normalize_payment_method
 
     assert _normalize_payment_method(raw) is None
+
+
+# ---------- extracted_line_values -----------------------------------------
+
+
+def test_extracted_line_values_cleans_what_real_models_return():
+    """A numeric SKU is text, a sentinel is nothing, a JSON zero is a zero.
+
+    Each was wrong when the line columns were filled inline (issue #575): the
+    int reached a ``String`` column (asyncpg refuses it, failing the read), the
+    sentinel was stored verbatim, and ``0`` was falsy so it became NULL.
+    """
+    from app.services.extraction import extracted_line_values
+    from app.services.extraction_adapters.base import ExtractedField, ExtractedLineItem
+
+    li = ExtractedLineItem(
+        line_number="3",
+        item_code=ExtractedField(4411, 0.8),
+        description=ExtractedField("string or null", 0.2),
+        quantity=ExtractedField(2, 0.9),
+        unit_price=ExtractedField(24.5, 0.9),
+        tax=ExtractedField(0, 0.9),
+        total=ExtractedField("EUR 49,00", 0.9),
+    )
+    assert extracted_line_values(li, "eu") == {
+        "line_number": 3,
+        "item_code": "4411",
+        "description": None,
+        "quantity": Decimal("2"),
+        "unit_price": Decimal("24.5"),
+        "tax": Decimal("0"),
+        "total": Decimal("49.00"),
+    }
+
+
+@pytest.mark.parametrize(
+    "raw, expected", [(7, 7), ("12", 12), (None, None), (True, None), ("a", None)]
+)
+def test_extracted_line_number_is_an_int_or_none(raw, expected):
+    from app.services.extraction import _clean_line_number
+
+    assert _clean_line_number(raw) == expected
