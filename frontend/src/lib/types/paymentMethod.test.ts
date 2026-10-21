@@ -26,7 +26,8 @@ const BACKEND_PAYMENT_METHODS = [
 	'virtual_card',
 	'bacs',
 	'faster_payments',
-	'chaps'
+	'chaps',
+	'card'
 ] as const;
 
 describe('PAYMENT_METHODS', () => {
