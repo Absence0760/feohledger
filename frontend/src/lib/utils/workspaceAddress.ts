@@ -1,7 +1,11 @@
 /**
- * "Find your workspace" on the platform apex: turn what a returning customer
- * types into the sign-in page of their own workspace (`/find-workspace`,
- * issue #635 finding 4).
+ * The workspace address (the tenant slug) as a visitor types it — the one
+ * client-side owner of its format rule, which mirrors
+ * `backend/app/utils/slug.py::validate_slug_format`. Two pages use it:
+ * `/signup`, which checks a NEW address as it is typed, and "Find your
+ * workspace" on the platform apex, which turns what a returning customer types
+ * into the sign-in page of their own workspace (`/find-workspace`, issue #635
+ * finding 4). Change the rule here and in `slug.py` together.
  *
  * **The visitor names the workspace; nothing is looked up.** There is no
  * email → workspace search, and there must not be one: an endpoint that answers
@@ -30,8 +34,20 @@ export type WorkspaceAddressProblem =
 	| 'endHyphen'
 	| 'doubleHyphen';
 
-const SLUG_MIN = 3;
-const SLUG_MAX = 30;
+/** The length bounds of `SLUG_PATTERN` (`^[a-z][a-z0-9-]{2,29}$`). */
+export const WORKSPACE_ADDRESS_MIN = 3;
+export const WORKSPACE_ADDRESS_MAX = 30;
+
+/**
+ * What a visitor types into an address field, kept to the characters an
+ * address can hold: lowercased, with everything but `a–z`, `0–9` and `-`
+ * dropped as it is typed. For a field that only ever holds a slug (signup);
+ * `/find-workspace` takes a pasted URL too, so it uses
+ * {@link normalizeWorkspaceInput} instead.
+ */
+export function cleanWorkspaceAddressTyping(raw: string): string {
+	return raw.toLowerCase().replace(/[^a-z0-9-]/g, '');
+}
 
 /**
  * The host part a template puts after the slug — `https://{slug}.feohledger.com`
@@ -93,8 +109,8 @@ export function workspaceAddressProblem(slug: string): WorkspaceAddressProblem |
 	if (!slug) return 'empty';
 	if (!/^[a-z]/.test(slug)) return 'startLetter';
 	if (!/^[a-z0-9-]+$/.test(slug)) return 'characters';
-	if (slug.length < SLUG_MIN) return 'tooShort';
-	if (slug.length > SLUG_MAX) return 'tooLong';
+	if (slug.length < WORKSPACE_ADDRESS_MIN) return 'tooShort';
+	if (slug.length > WORKSPACE_ADDRESS_MAX) return 'tooLong';
 	if (slug.endsWith('-')) return 'endHyphen';
 	if (slug.includes('--')) return 'doubleHyphen';
 	return null;

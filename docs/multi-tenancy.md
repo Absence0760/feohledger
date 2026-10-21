@@ -28,7 +28,7 @@ The apex (`feohledger.com`, `localhost:7777`) has no sign-in form: a user
 belongs to one workspace and signs in at its host. The landing page's **Sign
 in** links, and an apex `/login`, go to `/find-workspace`, which asks for the
 workspace address, checks its format (the client half of `utils/slug.py`, in
-`frontend/src/lib/marketing/workspaceAddress.ts`) and sends the browser to that
+`frontend/src/lib/utils/workspaceAddress.ts`) and sends the browser to that
 workspace's `/login`, built from `tenant_url_template` in `GET
 /api/public-config`. A full domain that is not the platform's — a workspace on its own custom
 domain — is offered back as a link to that host's `/login` rather than refused

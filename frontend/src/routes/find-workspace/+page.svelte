@@ -14,7 +14,7 @@
 		workspaceAddressProblem,
 		workspaceLoginUrl,
 		type WorkspaceAddressProblem
-	} from '#lib/marketing/workspaceAddress.ts';
+	} from '#lib/utils/workspaceAddress.ts';
 	import { DEFAULT_PRODUCT_NAME } from '#lib/stores/brandTheme.ts';
 	import { hasTenantContext } from '#lib/tenant.ts';
 	import type { PublicConfig } from '#lib/types/publicConfig.ts';
@@ -29,7 +29,7 @@
 	 * **The visitor types the address; nothing is looked up.** An email →
 	 * workspace search would tell anyone whether a person is a customer, and
 	 * where — an account-enumeration oracle on a public page. See
-	 * `#lib/marketing/workspaceAddress.ts` and docs/multi-tenancy.md.
+	 * `#lib/utils/workspaceAddress.ts` and docs/multi-tenancy.md.
 	 */
 
 	const PROBLEM_KEYS: Record<WorkspaceAddressProblem, MessageKey> = {

@@ -15,6 +15,14 @@
 	import type { ResolvedTheme } from '#lib/theme.ts';
 	import { legalTitle } from '#lib/legal/pages.ts';
 	import type { PublicConfig } from '#lib/types/publicConfig.ts';
+	import {
+		WORKSPACE_ADDRESS_MAX,
+		WORKSPACE_ADDRESS_MIN,
+		cleanWorkspaceAddressTyping,
+		tenantHostSuffix,
+		workspaceAddressProblem,
+		type WorkspaceAddressProblem
+	} from '#lib/utils/workspaceAddress.ts';
 
 	interface StartResponse {
 		status: string;
@@ -98,14 +106,10 @@
 			}
 			captchaSitekey = cfg.hcaptcha_sitekey || '';
 			if (captchaSitekey) loadHCaptcha();
-			if (cfg.tenant_url_template) {
-				// Strip protocol + split on {slug} to get just the host-suffix portion.
-				const noProtocol = cfg.tenant_url_template.replace(/^https?:\/\//, '');
-				const parts = noProtocol.split('{slug}');
-				if (parts.length === 2) {
-					tenantUrlSuffix = parts[1];
-					tenantExampleHost = `acme${parts[1]}`;
-				}
+			const suffix = tenantHostSuffix(cfg.tenant_url_template);
+			if (suffix) {
+				tenantUrlSuffix = suffix;
+				tenantExampleHost = `acme${suffix}`;
 			}
 		} catch {
 			// Non-fatal — backend may be unreachable; form will surface errors on submit.
@@ -167,24 +171,29 @@
 	}
 
 	/**
-	 * The client-side half of `backend/app/utils/slug.py::validate_slug_format`
-	 * — the same rule, checked as the visitor types and in their language,
-	 * instead of after a round trip in the server's English. The reserved-word
-	 * list is left to the availability check, which reports it: it is the
-	 * server's to extend. Length is the input's own `minlength`/`maxlength`, and
-	 * the character set is enforced by the clean-up in `onSlugInput`.
+	 * What this form SAYS about each way an address can break the rule, which
+	 * `#lib/utils/workspaceAddress.ts` owns (the client half of
+	 * `backend/app/utils/slug.py::validate_slug_format`, shared with
+	 * `/find-workspace`) — checked as the visitor types and in their language,
+	 * instead of after a round trip in the server's English. The problems with
+	 * no entry are the field's own business: an empty or short address is the
+	 * input's `required`/`minlength`, a long one its `maxlength`, and a stray
+	 * character is dropped as it is typed. The reserved-word list is left to the
+	 * availability check, which reports it: it is the server's to extend.
 	 */
+	const SLUG_PROBLEM_KEYS: Partial<Record<WorkspaceAddressProblem, MessageKey>> = {
+		startLetter: 'auth.signup.slugStartLetter',
+		endHyphen: 'auth.signup.slugEndHyphen',
+		doubleHyphen: 'auth.signup.slugDoubleHyphen'
+	};
+
 	function slugFormatProblem(value: string): MessageKey | null {
-		if (!value) return null;
-		if (!/^[a-z]/.test(value)) return 'auth.signup.slugStartLetter';
-		if (value.length < 3) return null;
-		if (value.endsWith('-')) return 'auth.signup.slugEndHyphen';
-		if (value.includes('--')) return 'auth.signup.slugDoubleHyphen';
-		return null;
+		const problem = workspaceAddressProblem(value);
+		return problem ? (SLUG_PROBLEM_KEYS[problem] ?? null) : null;
 	}
 
 	function onSlugInput() {
-		slug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '');
+		slug = cleanWorkspaceAddressTyping(slug);
 		slugError = null;
 		slugStatus = 'idle';
 		if (slugCheckTimer) clearTimeout(slugCheckTimer);
@@ -192,12 +201,12 @@
 		// address, so it is said at once. A trailing hyphen usually is ("my-"
 		// on the way to "my-co"), so that waits for the pause like the
 		// availability check does.
-		if (slug && !/^[a-z]/.test(slug)) {
+		if (workspaceAddressProblem(slug) === 'startLetter') {
 			slugStatus = 'bad';
 			slugError = m('auth.signup.slugStartLetter');
 			return;
 		}
-		if (slug.length < 3) return;
+		if (slug.length < WORKSPACE_ADDRESS_MIN) return;
 		slugStatus = 'checking';
 		slugCheckTimer = setTimeout(checkSlug, 400);
 	}
@@ -580,8 +589,8 @@
 						bind:value={slug}
 						oninput={onSlugInput}
 						required
-						minlength="3"
-						maxlength="30"
+						minlength={WORKSPACE_ADDRESS_MIN}
+						maxlength={WORKSPACE_ADDRESS_MAX}
 						placeholder="acme"
 						autocapitalize="off"
 						autocorrect="off"

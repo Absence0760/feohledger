@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+	WORKSPACE_ADDRESS_MAX,
+	WORKSPACE_ADDRESS_MIN,
+	cleanWorkspaceAddressTyping,
 	normalizeWorkspaceInput,
 	ownDomainHost,
 	tenantHostSuffix,
@@ -102,5 +106,32 @@ describe('ownDomainHost', () => {
 		for (const value of ['acme', 'feohledger.com', 'x.y.feohledger.com', 'ac me.com', 'acme.', '.com', 'a_b.com']) {
 			expect(ownDomainHost(value, suffix), value).toBeNull();
 		}
+	});
+});
+
+describe('cleanWorkspaceAddressTyping', () => {
+	it('keeps only what an address can hold, lowercased', () => {
+		expect(cleanWorkspaceAddressTyping('Acme Corp_2!')).toBe('acmecorp2');
+		expect(cleanWorkspaceAddressTyping('my-co')).toBe('my-co');
+		expect(cleanWorkspaceAddressTyping('ÄCME')).toBe('cme');
+	});
+
+	it('leaves the format rule to workspaceAddressProblem', () => {
+		// A leading digit or hyphen is kept, so the page can SAY why it is wrong.
+		expect(cleanWorkspaceAddressTyping('9lives')).toBe('9lives');
+		expect(workspaceAddressProblem(cleanWorkspaceAddressTyping('-Acme'))).toBe('startLetter');
+	});
+});
+
+describe('the bounds mirror backend/app/utils/slug.py', () => {
+	it('is SLUG_PATTERN = ^[a-z][a-z0-9-]{2,29}$', () => {
+		const slugPy = readFileSync(
+			new URL('../../../../backend/app/utils/slug.py', import.meta.url),
+			'utf8'
+		);
+		const m = slugPy.match(/SLUG_PATTERN = re\.compile\(r"\^\[a-z\]\[a-z0-9-\]\{(\d+),(\d+)\}\$"\)/);
+		expect(m, 'SLUG_PATTERN changed shape — update workspaceAddress.ts with it').not.toBeNull();
+		expect(WORKSPACE_ADDRESS_MIN).toBe(Number(m![1]) + 1);
+		expect(WORKSPACE_ADDRESS_MAX).toBe(Number(m![2]) + 1);
 	});
 });
