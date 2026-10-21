@@ -67,10 +67,11 @@ from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
+from app.db_engine import create_async_engine
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.recurring_invoice import (

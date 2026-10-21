@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/feohledger"
     tenant_db_prefix: str = "feoh_"
+    # FEOH_DATABASE_IAM_AUTH: sign in to the database with an RDS IAM auth token
+    # minted per connection instead of a password in the URL (`app/db_engine.py`,
+    # docs/decisions.md §310). Off by default, so a laptop and CI keep password
+    # auth against the local container (guard rail 7). On, `database_url` must
+    # carry NO password and TLS must be verify-full — checked at boot below, and
+    # again by the engine factory itself on paths that never load settings
+    # (the Lambda handlers). The factory reads the same variable from the
+    # environment; Settings has no env_file, so the two cannot disagree.
+    database_iam_auth: bool = False
 
     # Auth / JWT
     secret_key: str = "change-me-in-production"
@@ -1093,6 +1102,19 @@ class Settings(BaseSettings):
     def is_deployed(self) -> bool:
         """True for any deployed (non local-dev / non-CI) environment."""
         return self.environment.strip().lower() not in _NON_DEPLOYED_ENVS
+
+    @model_validator(mode="after")
+    def _validate_database_iam_auth(self) -> "Settings":
+        # Fail closed at boot: with IAM auth on, a password still in the URL is a
+        # second, long-lived way in, and anything short of verify-full would send
+        # the bearer token to an unverified server. The message never echoes the
+        # URL. Imported here, not at module top, to keep config's import graph
+        # free of SQLAlchemy for the modules that only want settings.
+        if self.database_iam_auth:
+            from app.db_engine import validate_iam_database_url
+
+            validate_iam_database_url(self.database_url)
+        return self
 
     @model_validator(mode="after")
     def _validate_extraction_provider(self) -> "Settings":

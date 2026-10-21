@@ -99,12 +99,36 @@ resource "aws_iam_role_policy_attachment" "app_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# The region the RDS IAM-auth resource ARN names. The account comes from
+# kms.tf's aws_caller_identity, so nothing about the account is hardcoded.
+data "aws_region" "current" {}
+
+# The database role the app signs in as with an IAM auth token
+# (backend/app/db_engine.py, deploy/db-role-cutover.sh, docs/decisions.md §310).
+# Not a variable: the cutover script creates exactly this role, and widening the
+# grant to another name should be a reviewed change here, not a tfvars edit.
+locals {
+  db_app_role = "feoh_app"
+}
+
 data "aws_iam_policy_document" "app_permissions" {
   # deploy/decrypt-env.sh decrypts prod.sops.yaml with the sops key.
   statement {
     sid       = "DecryptSopsSecrets"
     actions   = ["kms:Decrypt"]
     resources = [data.aws_kms_alias.sops.target_key_arn]
+  }
+
+  # The app (and the deploy scripts' pg tools, on the VM) sign in to RDS as the
+  # app role with a 15-minute IAM token instead of a password. Scoped to that
+  # one database user on this one instance — not `dbuser:*/*`, and never the
+  # master user, which stays password-only for break-glass. The ARN names the
+  # instance's resource id (db-XXXX), not its identifier, so a point-in-time
+  # restore to a new instance needs this re-applied against the new one.
+  statement {
+    sid       = "ConnectAsAppRole"
+    actions   = ["rds-db:connect"]
+    resources = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_instance.main.resource_id}/${local.db_app_role}"]
   }
 
   # The three data buckets default to SSE-KMS under the app key, and S3 checks

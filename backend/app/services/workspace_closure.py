@@ -72,13 +72,14 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, exists, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import NullPool
 
 from app.api.deps import ROLE_ADMIN
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory, forget_tenant_engine
+from app.db_engine import create_async_engine
 from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES
 from app.models.organization import Organization
 from app.models.user import User

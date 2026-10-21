@@ -150,9 +150,10 @@ async def receive_peppol_message(
 
     # Short-lived tenant session — identical shape to email-intake. pool_size=1
     # keeps us under PostgreSQL's connection limit; disposed in `finally`.
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url
+    from app.db_engine import create_async_engine
     from app.models.entity import Entity
     from app.services.extraction_dispatch import dispatch_extraction
     from app.services.storage import _put_object, invoice_file_url

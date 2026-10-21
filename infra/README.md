@@ -202,7 +202,7 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 
 - **No SSH.** Port 22 is closed and there is no key pair; you reach the VM with Session Manager: `aws ssm start-session --target <app_instance_id> --profile feohledger` (needs the Session Manager plugin for the AWS CLI installed locally).
 - **The VM holds no AWS keys.** Its instance role can decrypt the sops secrets, read and write the three data buckets under the app key, and send mail as the platform domain — nothing else.
-- **The database is private.** Private subnets with no internet route, reachable only from the VM's security group, encrypted with the app key, TLS forced (`rds.force_ssl`), deletion-protected, IAM database authentication enabled (password login still works beside it; the app uses the password today), and restorable to any point in the last `db_backup_retention_days` (default 7). The nightly logical dumps (`../deploy/backup.sh`) keep 90 days beyond that.
+- **The database is private.** Private subnets with no internet route, reachable only from the VM's security group, encrypted with the app key, TLS forced (`rds.force_ssl`), deletion-protected, IAM database authentication enabled — the app signs in as the `feoh_app` role with a per-connection token, and the VM role's `rds-db:connect` names that one user on this one instance (`compute.tf`, `../docs/decisions.md` §310); the master keeps password login for break-glass only — and restorable to any point in the last `db_backup_retention_days` (default 7). The nightly logical dumps (`../deploy/backup.sh`) keep 90 days beyond that.
 - **DNS.** `api.` points at the VM's Elastic IP. The apex and `*.` (every tenant) do too until `frontend_on_cloudfront` moves them to the SPA's CloudFront distribution (§ Frontend on CloudFront).
 - **Alarms** go to `alert_emails` through SNS — each address must click AWS's confirmation link once. The VM recovers itself onto new hardware on a host failure and reboots on a guest failure.
 
@@ -211,15 +211,15 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 **First apply — operator steps.** Steps 2–3 touch a secret, so they are yours to run; nothing here prints it.
 
 1. Add `alert_emails = ["…"]` to `prod.tfvars` (it has no default — the repo is public).
-2. Create the password once in `infra-secrets` (a 48-hex-character value is URL-safe, which it must be because it is embedded in `FEOH_DATABASE_URL`): `cd ~/github/infra-secrets && AWS_PROFILE=feohledger sops feohledger/terraform.sops.yaml`, and add a `db_master_password:` key set to the output of `openssl rand -hex 24`.
+2. Create the master password once in `infra-secrets` (a 48-hex-character value is URL-safe, which it must be because the break-glass `FEOH_DATABASE_URL` embeds it): `cd ~/github/infra-secrets && AWS_PROFILE=feohledger sops feohledger/terraform.sops.yaml`, and add a `db_master_password:` key set to the output of `openssl rand -hex 24`.
 3. Plan and apply with the password passed in from sops (one line each):
    `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan`
    then `AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform apply tfplan`.
    An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice.
 4. Confirm the SNS subscription email AWS sends to each alert address.
-5. Then the VM side: `../deploy/README.md` (bootstrap, the sops env with `FEOH_DATABASE_URL` pointing at the `db_address` output, first deploy).
+5. Then the VM side: `../deploy/README.md` (bootstrap, the sops env with `FEOH_DATABASE_URL` pointing at the `db_address` output, first deploy, then § Database role to move the app onto `feoh_app`).
 
-**Rotating the database password**: put the new value in `terraform.sops.yaml`, bump `db_master_password_version` in `prod.tfvars`, apply as in step 3, then update the password inside `FEOH_DATABASE_URL` in `prod.sops.yaml` and redeploy. Between the apply and the redeploy the app cannot connect, so do both in one sitting.
+**Rotating the master password**: put the new value in `terraform.sops.yaml`, bump `db_master_password_version` in `prod.tfvars`, and apply as in step 3. Once the app is on `feoh_app` (`../deploy/README.md` § Database role) nothing on the VM holds the master password, so the app keeps running through it. Before that cutover the password was inside `FEOH_DATABASE_URL` in `prod.sops.yaml` too, and had to be changed there and redeployed in the same sitting. `../docs/secrets-rotation.md` § RDS master password.
 
 ## Release deploys
 
@@ -359,7 +359,7 @@ rollback.
 
 This repo is **public**, so it holds no secret — not even an encrypted one (`../docs/decisions.md` §12, §165). The project's secrets live sops-encrypted in the private `Absence0760/infra-secrets` repo under `feohledger/`, keyed by `alias/feohledger-sops`. The estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created that key in the FeohLedger account, alongside the state bucket and the deploy role; this module neither creates nor manages it.
 
-The one secret this module handles is the RDS master password, and it handles it without storing it: an ephemeral variable feeding a write-only attribute, supplied from `infra-secrets/feohledger/terraform.sops.yaml` at apply time (§ Workload stack). The earlier plan here — a `carlpett/sops` `sops_file` data source — was dropped because a data source's value lands in state in plaintext; the write-only path keeps it out of state and plan files entirely. Every other variable is operator config, not a credential. Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
+The one secret this module handles is the RDS master password (break-glass only — the app signs in with IAM tokens, `../docs/decisions.md` §310), and it handles it without storing it: an ephemeral variable feeding a write-only attribute, supplied from `infra-secrets/feohledger/terraform.sops.yaml` at apply time (§ Workload stack). The earlier plan here — a `carlpett/sops` `sops_file` data source — was dropped because a data source's value lands in state in plaintext; the write-only path keeps it out of state and plan files entirely. Every other variable is operator config, not a credential. Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
 
 ## Tearing everything down
 

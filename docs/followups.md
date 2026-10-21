@@ -214,7 +214,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**134 open: 116 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**134 open: 115 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1343,19 +1343,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       flake. **Durable fix:** the same `-h 127.0.0.1` on each, in one change.
       **Trigger:** the next change to either compose file or CI's service
       containers, or the first unexplained "shutting down" on a fresh volume.
-- [ ] **(c) The app still signs in to RDS with the master password.** IAM
-      database authentication is now enabled on the instance
-      (`infra/database.tf`, closing Trivy AWS-0176, 2026-10-09), but it is
-      additive: `FEOH_DATABASE_URL` still carries the `postgres` master
-      password, so a leaked deploy env is still a working database login, and
-      the app runs as the superuser that can `CREATE DATABASE`. **Durable fix:**
-      a dedicated app role granted `rds_iam`, the VM instance role given
-      `rds-db:connect` on it, and the async engines minting a token per new
-      connection (asyncpg's `password` accepts a callable; tokens live 15
-      minutes, so it must be per-connection, not per-process), with tenant
-      provisioning keeping a separate, narrower path for `CREATE DATABASE`.
-      **Trigger:** the next rotation of `db_master_password`, or before the
-      first customer's data lands on the instance, whichever comes first.
 
 ### Surfaced by enforcing the plan feature gates (2026-10-07, decisions §258)
 
@@ -2269,6 +2256,17 @@ as oversights.
       comes first.
 
 ## (b) Operator steps on merged code
+
+- [ ] **Move production onto the IAM-authenticated `feoh_app` role, then rotate
+      the master password.** The code, the cutover script and the
+      `rds-db:connect` grant are merged (decisions §310), and nothing changes
+      until the operator runs them. Production still signs in as the RDS master
+      with its password in the VM's env. Steps, verification and rollback:
+      `deploy/README.md` § Database role. In order: `terraform apply`, then
+      `./db-role-cutover.sh` and `--verify-login` on the VM, then switch
+      `FEOH_DATABASE_URL` / `FEOH_DATABASE_IAM_AUTH` in `prod.sops.yaml` and
+      redeploy, then rotate `db_master_password`. **Trigger:** before the first
+      customer's data lands on the instance.
 
 - [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
       Accounting and Blackbaud.** Until then those ERPs connect only when a

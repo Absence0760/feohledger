@@ -8,8 +8,9 @@
 #
 # Usage: psql.sh [psql args…]    e.g. ./psql.sh -d feohledger -Atc "SELECT slug FROM organizations"
 # With no -d, psql connects to the database named after the user (container:
-# `postgres`; RDS: the master user's name, which usually does not exist) — so
-# pass -d. Non-interactive (no TTY — it pipes, like backup.sh's calls): give
+# `postgres`; RDS: the URL's user — `feoh_app` after the cutover, the master
+# before it — neither of which names a database) — so pass -d. On RDS with IAM
+# auth each run mints its own token (deploy/lib.sh). Non-interactive (no TTY — it pipes, like backup.sh's calls): give
 # it -c or SQL on stdin. For an interactive session in container mode use
 # `./compose.sh exec postgres psql -U postgres`.
 set -euo pipefail

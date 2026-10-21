@@ -538,6 +538,7 @@ backend/
 │   ├── main.py              # FastAPI app, CORS, router includes, lifespan
 │   ├── config.py            # Pydantic Settings (FEOH_ prefix env vars)
 │   ├── database.py          # Control engine + per-tenant engine pool
+│   ├── db_engine.py         # THE engine / raw-connection factory (RDS IAM tokens; decisions §310)
 │   ├── redis.py             # Redis connection + token blocklist
 │   ├── tenant.py            # X-Tenant-Slug → tenant DB session
 │   ├── api/                 # FastAPI routers (one per domain) + deps.py
