@@ -368,6 +368,50 @@ def test_restore_fails_when_pg_restore_fails(tmp_path: Path) -> None:
     assert "restore complete" not in result.stdout
 
 
+IAM_ENV = (
+    "FEOH_DATABASE_URL=postgresql+asyncpg://feoh_app@db.example.internal:5432/feohledger\n"
+    "FEOH_DATABASE_IAM_AUTH=true\nPGSSLMODE=verify-full\n"
+    "APP_DOMAIN=app.example.com\nBACKUP_S3_BUCKET=feoh-backups\nAWS_REGION=us-east-1\n"
+)
+
+
+def test_restore_refuses_the_iam_app_role_before_touching_anything(tmp_path: Path) -> None:
+    """The app role cannot recreate pgvector, so a logical restore is the
+    master's (docs/decisions.md §304)."""
+    d = _deploy(tmp_path, "restore.sh")
+    d.env_file(IAM_ENV)
+
+    result = d.run("2026-10-19")
+
+    assert result.returncode != 0
+    assert "db-role-cutover.sh" in result.stderr and "master" in result.stderr
+    assert d.calls() == [], "a refused restore still ran a tool"
+
+
+def test_a_break_glass_restore_runs_as_the_master_and_leaves_the_api_stopped(
+    tmp_path: Path,
+) -> None:
+    """With the master URL in the shell for this one run, the restore proceeds —
+    and never rolls the api back up, which would hand it that master URL."""
+    d = _deploy(tmp_path, "restore.sh")
+    d.env_file(IAM_ENV)
+    d.rule("aws", "s3 ls", 0, DUMP_LISTING)
+
+    result = d.run(
+        "2026-10-19",
+        extra_env={
+            "FEOH_DATABASE_URL": "postgresql+asyncpg://postgres:pw@db.example.internal/feohledger",
+            "FEOH_DATABASE_IAM_AUTH": "false",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert d.called("pg_restore")
+    assert d.called("stop api")
+    assert not d.called("up -d --wait"), "the api came back up on the master's URL"
+    assert "./db-role-cutover.sh" in result.stdout and "api is left STOPPED" in result.stdout
+
+
 def test_restore_with_no_dumps_for_the_date_fails(tmp_path: Path) -> None:
     d = _deploy(tmp_path, "restore.sh")
     d.env_file(EXTERNAL_ENV)

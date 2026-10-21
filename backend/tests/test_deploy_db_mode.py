@@ -45,6 +45,17 @@ printf '%s\\n' "$@" > "$STUB_DIR/argv"
 env > "$STUB_DIR/env"
 """
 
+# The AWS CLI on the VM, for IAM mode: records each call and prints a token
+# that names its call number, so a test can tell one mint from the next.
+AWS_STUB = """#!/bin/sh
+n=$(cat "$STUB_DIR/aws_calls" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$STUB_DIR/aws_calls"
+printf '%s\\n' "$@" > "$STUB_DIR/aws_argv"
+[ "${AWS_STUB_FAIL:-0}" = 1 ] && { echo "stub aws: no credentials" >&2; exit 255; }
+printf 'tok-%s\\n' "$n"
+"""
+
 
 class Lib:
     """A scratch `deploy/` holding lib.sh, a `.env`, and a stub `docker`."""
@@ -58,6 +69,9 @@ class Lib:
         stub = self.bin / "docker"
         stub.write_text(DOCKER_STUB)
         stub.chmod(0o755)
+        aws = self.bin / "aws"
+        aws.write_text(AWS_STUB)
+        aws.chmod(0o755)
         self.stub_dir = root
 
     def run(
@@ -77,6 +91,13 @@ class Lib:
 
     def docker_argv(self) -> list[str]:
         return (self.stub_dir / "argv").read_text().split("\n")[:-1]
+
+    def aws_argv(self) -> list[str]:
+        return (self.stub_dir / "aws_argv").read_text().split("\n")[:-1]
+
+    def aws_calls(self) -> int:
+        path = self.stub_dir / "aws_calls"
+        return int(path.read_text()) if path.exists() else 0
 
     def docker_env(self) -> dict[str, str]:
         lines = (self.stub_dir / "env").read_text().splitlines()
@@ -139,6 +160,102 @@ def test_pg_tools_get_the_password_through_the_environment_only(lib: Lib) -> Non
     assert lib.docker_env()["PGPASSWORD"] == "p@ss/w0rd"
 
 
+# ── IAM auth (docs/decisions.md §304) ────────────────────────────────────────
+
+IAM_DOTENV = (
+    f"FEOH_DATABASE_URL=postgresql+asyncpg://feoh_app@{RDS_HOST}:5432/feohledger\n"
+    "FEOH_DATABASE_IAM_AUTH=true\nAWS_REGION=us-east-1\nPGSSLMODE=verify-full\n"
+)
+
+
+def test_iam_mode_mints_a_token_per_tool_run_through_the_environment(lib: Lib) -> None:
+    result = lib.run(
+        "feoh_load_db_mode\nfeoh_pg psql -c 1\nfeoh_pg pg_dump -d feoh_acme\n"
+        'printf "%s" "$FEOH_DB_IAM"\n',
+        IAM_DOTENV,
+        env={"PGPASSWORD": "stale-from-the-shell"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "1"
+    assert lib.aws_calls() == 2, "each pg tool run must get its own token"
+    assert lib.aws_argv() == [
+        "rds",
+        "generate-db-auth-token",
+        "--hostname",
+        RDS_HOST,
+        "--port",
+        "5432",
+        "--username",
+        "feoh_app",
+        "--region",
+        "us-east-1",
+        "--output",
+        "text",
+    ]
+    argv = lib.docker_argv()
+    assert "PGUSER=feoh_app" in argv and "PGPASSWORD" in argv
+    assert not any("tok-" in a for a in argv), argv
+    assert lib.docker_env()["PGPASSWORD"] == "tok-2"
+
+
+def test_iam_mode_refuses_a_url_with_a_password_without_printing_it(lib: Lib) -> None:
+    dotenv = IAM_DOTENV.replace("feoh_app@", "postgres:s3cr3tpw@")
+    result = lib.run("feoh_load_db_mode\n", dotenv)
+    assert result.returncode != 0
+    assert "carries a password" in result.stderr
+    assert "s3cr3tpw" not in result.stderr + result.stdout
+
+
+def test_a_password_less_url_without_iam_auth_is_refused(lib: Lib) -> None:
+    result = lib.run("feoh_load_db_mode\n", IAM_DOTENV.replace("FEOH_DATABASE_IAM_AUTH=true", ""))
+    assert result.returncode != 0
+    assert "FEOH_DATABASE_IAM_AUTH" in result.stderr
+
+
+def test_iam_mode_needs_a_region_to_sign_for(lib: Lib) -> None:
+    result = lib.run("feoh_load_db_mode\n", IAM_DOTENV.replace("AWS_REGION=us-east-1", ""))
+    assert result.returncode != 0
+    assert "AWS_REGION" in result.stderr
+
+
+@pytest.mark.parametrize("mode", ["", "prefer", "require", "verify-ca"])
+def test_iam_mode_refuses_to_send_a_token_without_verify_full(lib: Lib, mode: str) -> None:
+    """Checked at tool time too, not only by decrypt-env.sh: a shell override
+    must not send the bearer token under a weaker mode."""
+    dotenv = IAM_DOTENV.replace("PGSSLMODE=verify-full\n", f"PGSSLMODE={mode}\n" if mode else "")
+    result = lib.run("feoh_load_db_mode\nfeoh_pg psql -c 1\n", dotenv)
+    assert result.returncode != 0
+    assert "verify-full" in result.stderr
+    assert lib.aws_calls() == 0, "a token was minted for an unverified connection"
+
+
+def test_a_failed_mint_runs_no_tool(lib: Lib) -> None:
+    result = lib.run(
+        "feoh_load_db_mode\nfeoh_pg psql -c 1\n", IAM_DOTENV, env={"AWS_STUB_FAIL": "1"}
+    )
+    assert result.returncode != 0
+    assert "IAM auth token" in result.stderr
+    assert not (lib.stub_dir / "argv").exists(), "a tool ran without a token"
+
+
+def test_the_shell_can_switch_iam_off_for_a_break_glass_command(lib: Lib) -> None:
+    """The documented break-glass: the master URL and FEOH_DATABASE_IAM_AUTH=false
+    in the shell for one command, as compose reads them for the api too."""
+    master = f"postgresql+asyncpg://postgres:pw@{RDS_HOST}/feohledger"
+    result = lib.run(
+        'feoh_load_db_mode\nprintf "%s|%s" "$FEOH_DB_IAM" "$FEOH_PGUSER"\n',
+        IAM_DOTENV,
+        env={"FEOH_DATABASE_URL": master, "FEOH_DATABASE_IAM_AUTH": "false"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0|postgres"
+
+
+def test_the_api_gets_the_iam_flag_by_interpolation_like_the_url() -> None:
+    env = _services()["api"]["environment"]
+    assert env["FEOH_DATABASE_IAM_AUTH"] == "${FEOH_DATABASE_IAM_AUTH:-false}"
+
+
 def test_local_mode_execs_into_the_container_as_before(lib: Lib) -> None:
     result = lib.run(
         "feoh_load_db_mode\nfeoh_pg pg_dump -Fc -d feoh_acme\n", "POSTGRES_PASSWORD=x\n"
@@ -173,6 +290,7 @@ COMPOSE_SCRIPTS = [
     "remove-tenant.sh",
     "compose.sh",
     "psql.sh",
+    "db-role-cutover.sh",
 ]
 
 

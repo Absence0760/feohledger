@@ -109,6 +109,13 @@ services:
       # warning on every compose call (compose v2 expands it even when unused);
       # decrypt-env.sh is what refuses it empty in container mode.
       FEOH_DATABASE_URL: ${FEOH_DATABASE_URL:-postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-}@postgres:5432/feohledger}
+      # RDS IAM auth (docs/decisions.md §304): on, the URL above names the app
+      # role with NO password and the app mints a 15-minute token per new
+      # connection from the instance profile. Interpolated here rather than left
+      # to env_file so the shell overrides it exactly as it overrides the URL —
+      # deploy/lib.sh reads both with that same precedence, and the two must
+      # never disagree about how the stack signs in.
+      FEOH_DATABASE_IAM_AUTH: ${FEOH_DATABASE_IAM_AUTH:-false}
       FEOH_REDIS_URL: ${FEOH_REDIS_URL:-redis://redis:6379}
       # Database TLS, read by asyncpg for every connection the app opens —
       # engines, tenant engines, the raw CREATE/DROP DATABASE connection — as
