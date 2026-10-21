@@ -381,7 +381,11 @@
 
 	{#if error}
 		<LoadError message={m('dashboard.error.loadFailed')} onretry={load} testId="dashboard-error" />
-	{:else if loading}
+	{:else if loading || (isEmptyEntity && entityStore.namePending)}
+		<!-- Also while an empty entity's NAME is still on its way: the heading
+		     names it, and a stand-in ("this entity") that is then swapped for
+		     the real name is a flash, not a state (#635). The KPI row above is
+		     unaffected — it hands off on `data` alone (decisions §125/§154). -->
 		<p class="loading">{m('common.loading')}</p>
 	{:else if isEmptyEntity}
 		<!-- An established workspace, a subsidiary with nothing in it yet. -->

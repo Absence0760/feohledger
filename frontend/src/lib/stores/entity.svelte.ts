@@ -42,6 +42,14 @@ class EntityStore {
 	selectedId = $state<string>(getStoredEntitySelection());
 	loading = $state(false);
 	/**
+	 * True once a load of the list has FINISHED — succeeded or failed. Until
+	 * then a selected entity's name is not known yet, as opposed to not
+	 * knowable; a surface that names the entity (the dashboard's empty-entity
+	 * heading) waits on this rather than rendering a placeholder that is then
+	 * replaced (#635).
+	 */
+	settled = $state(false);
+	/**
 	 * The entity that WAS selected until this load found it deactivated.
 	 *
 	 * Set by {@link ensureLoaded} at the moment it drops the selection back to
@@ -102,6 +110,15 @@ class EntityStore {
 		return this.selected?.id ?? this.entities.find((e) => e.is_default)?.id ?? null;
 	}
 
+	/**
+	 * A specific entity is selected but its name has not arrived yet — the
+	 * list is still loading. False for the consolidated view (it has no name to
+	 * wait for) and after a failed load (the name will not come).
+	 */
+	get namePending(): boolean {
+		return this.selectedId !== ALL_ENTITIES && !this.selected && !this.settled;
+	}
+
 	/** Label for the current selection (switcher button text). */
 	get selectedLabel(): string {
 		return this.selected?.name ?? 'All entities';
@@ -121,6 +138,7 @@ class EntityStore {
 				// Non-fatal: without the list the switcher just doesn't render.
 			} finally {
 				this.loading = false;
+				this.settled = true;
 				this.#inflight = null;
 			}
 		})();
@@ -183,6 +201,7 @@ class EntityStore {
 		this.entities = [];
 		this.deactivatedSelection = null;
 		this.selectedId = getStoredEntitySelection();
+		this.settled = false;
 		this.#loaded = false;
 		this.#inflight = null;
 	}

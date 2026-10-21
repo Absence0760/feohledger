@@ -222,21 +222,45 @@ test.describe('dashboard — an empty entity on an established workspace', () =>
 		await expect(page.getByTestId('dashboard-empty-state')).toHaveCount(0);
 		await expect(page.getByTestId('dashboard-setup')).toHaveCount(0);
 
-		// Accessible in both themes, at desktop and phone width. The sidebar's
-		// entity switcher is excluded: with an entity selected its "Entity" hint
-		// measures 3.41:1 in the dark theme — a defect in
-		// `layout/EntitySwitcher.svelte`, outside this page, flagged for its own
-		// fix rather than hidden by a different test setup.
-		const exclude = ['.entity-btn'];
+		// Accessible in both themes, at desktop and phone width — the sidebar's
+		// entity switcher included, with an entity selected. Its "Entity" hint
+		// once measured 3.41:1 here in the dark theme: the button animated its
+		// background across the theme change and the scan landed mid-fade
+		// (`layout/EntitySwitcher.svelte`, #635).
+		// Desktop first: a phone width collapses the sidebar to its rail, which
+		// has no hint to measure, and widening again does not re-expand it.
 		for (const colorScheme of ['dark', 'light'] as const) {
 			await page.emulateMedia({ colorScheme });
-			await page.setViewportSize({ width: 1280, height: 720 });
-			await expectNoA11yViolations(page, { exclude });
-			await page.setViewportSize({ width: 390, height: 844 });
+			await expect(page.locator('.entity-hint')).toBeVisible();
+			await expectNoA11yViolations(page);
+		}
+		await page.setViewportSize({ width: 390, height: 844 });
+		for (const colorScheme of ['dark', 'light'] as const) {
+			await page.emulateMedia({ colorScheme });
 			await expect(empty).toBeVisible();
-			await expectNoA11yViolations(page, { exclude });
+			await expectNoA11yViolations(page);
 		}
 		await page.setViewportSize({ width: 1280, height: 720 });
+
+		// The heading never stands in for the name. Hold the entity list back
+		// so the dashboard's figures land first: the block under the KPI row
+		// stays in its pending state rather than reading "this entity" and
+		// then swapping the real name in (#635).
+		let release!: () => void;
+		const listHeld = new Promise<void>((resolve) => (release = resolve));
+		const isEntityList = (url: URL) => url.pathname === '/api/entities';
+		await page.route(isEntityList, async (route) => {
+			await listHeld;
+			await route.fallback();
+		});
+		await page.reload();
+		await expect(page.locator('.kpi-row .kpi[data-kpi-state="value"]').first()).toBeVisible();
+		await expect(page.locator('p.loading')).toBeVisible();
+		await expect(empty).toHaveCount(0);
+		await expect(page.getByText('No invoices for this entity yet')).toHaveCount(0);
+		release();
+		await expect(empty.getByText(`No invoices for ${name} yet`, { exact: true })).toBeVisible();
+		await page.unroute(isEntityList);
 
 		// Back to the consolidated view, so nothing else in this worker runs
 		// scoped to an entity this test is about to delete.
