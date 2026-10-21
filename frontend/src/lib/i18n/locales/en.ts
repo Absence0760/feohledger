@@ -3322,6 +3322,11 @@ export const en = {
 	'auth.verify.alreadyVerified': "You already confirmed this email, so your workspace is set up. To choose your password, use the link in your welcome email, or Forgot password on the sign-in page.",
 	'auth.verify.goToSignIn': "Go to sign in",
 	'auth.verify.existingHeading': "You already have a workspace",
+	'auth.verify.expiredHeading': "This link has expired",
+	'auth.verify.expiredSub':
+		"Verification links work once and last 24 hours. Start over and we'll email you a fresh one.",
+	'auth.verify.expiredSignInHint':
+		"Already set up your workspace? Sign in at its own address — it's in your welcome email.",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the

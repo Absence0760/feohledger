@@ -3082,6 +3082,11 @@ export const messages = {
 	'auth.verify.alreadyVerified': "このメールアドレスは確認済みのため、ワークスペースは作成されています。パスワードは、ウェルカムメールのリンクか、サインインページの「パスワードをお忘れの方」から設定してください。",
 	'auth.verify.goToSignIn': "サインインへ",
 	'auth.verify.existingHeading': "ワークスペースはすでにあります",
+	'auth.verify.expiredHeading': "このリンクは期限切れです",
+	'auth.verify.expiredSub':
+		"確認リンクは 1 回のみ使用でき、有効期限は 24 時間です。最初からやり直すと、新しいリンクをメールでお送りします。",
+	'auth.verify.expiredSignInHint':
+		"ワークスペースの設定はお済みですか？ワークスペース専用のアドレスからサインインしてください。アドレスはウェルカムメールに記載されています。",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the

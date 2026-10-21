@@ -6,7 +6,8 @@
 	import { SIGNUP_EMAIL_HAS_WORKSPACE } from '#lib/api/codedRefusals.ts';
 	import { ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { onMount, untrack } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface CompleteResponse {
@@ -26,7 +27,13 @@
 		already_verified?: boolean;
 	}
 
-	let phase = $state<'pending' | 'success' | 'error'>('pending');
+	// `expired` is the backend's uniform 410: a link that is unknown, past its
+	// 24 hours, or spent without having created a workspace. The three are
+	// indistinguishable by design (`api/signup.py::_INVALID_LINK`), so the page
+	// keys on the status alone and says the one thing true of all of them.
+	const TOKEN_STATE_KEY = 'verifyToken';
+
+	let phase = $state<'pending' | 'success' | 'expired' | 'error'>('pending');
 	let result = $state<CompleteResponse | null>(null);
 	let errorMessage = $state<string>('');
 	// The address already has an account (`signup_email_has_workspace`): the
@@ -38,8 +45,45 @@
 		result ? ownWorkspaceSignInUrl({ sign_in_url: result.sign_in_url }) : null
 	);
 
+	/**
+	 * Drop `?token=` from the address bar once the request carrying it has
+	 * been answered, so the link is not left in the browser's history list, a
+	 * copied URL or a screenshot. The token moves into this tab's own history
+	 * entry instead (`persistState`), which no copy or share carries but a
+	 * reload restores — so a reload still re-sends it and gets the backend's
+	 * re-answer for a spent link (decisions §292) rather than "no token".
+	 *
+	 * A shallow, replacing `goto` (SvelteKit's successor to `replaceState`):
+	 * no navigation, no new history entry. Run after the round trip rather
+	 * than before it, because the router refuses until it has started, which
+	 * on a first load is after the components mount. The one queued retry is
+	 * the `ErpConnectionPanel` arrangement, for a router that is still not up.
+	 */
+	function stripToken(token: string, retry = true) {
+		const url = new URL(untrack(() => page.url.href));
+		if (!url.searchParams.has('token')) return;
+		url.searchParams.delete('token');
+		const state: Record<string, unknown> = { ...untrack(() => page.state), [TOKEN_STATE_KEY]: token };
+		goto(`${url.pathname}${url.search}${url.hash}`, {
+			state,
+			shallow: true,
+			replace: true,
+			persistState: true
+		}).catch(() => {
+			if (retry) setTimeout(() => stripToken(token, false), 0);
+		});
+	}
+
+	/** The token: from the link, or from this tab's history entry after a reload. */
+	function readToken(): string | null {
+		const fromUrl = page.url.searchParams.get('token');
+		if (fromUrl) return fromUrl;
+		const kept = (page.state as Record<string, unknown>)[TOKEN_STATE_KEY];
+		return typeof kept === 'string' && kept ? kept : null;
+	}
+
 	onMount(async () => {
-		const token = page.url.searchParams.get('token');
+		const token = readToken();
 		if (!token) {
 			phase = 'error';
 			errorMessage = m('auth.verify.noToken');
@@ -49,12 +93,18 @@
 			result = await api.post<CompleteResponse>('/api/signup/complete', { token });
 			phase = 'success';
 		} catch (err) {
-			phase = 'error';
-			errorMessage = err instanceof Error ? err.message : m('auth.verify.failed');
-			existingWorkspaceUrl =
-				err instanceof ApiError && err.code === SIGNUP_EMAIL_HAS_WORKSPACE
-					? ownWorkspaceSignInUrl(err.params)
-					: null;
+			if (err instanceof ApiError && err.status === 410) {
+				phase = 'expired';
+			} else {
+				phase = 'error';
+				errorMessage = err instanceof Error ? err.message : m('auth.verify.failed');
+				existingWorkspaceUrl =
+					err instanceof ApiError && err.code === SIGNUP_EMAIL_HAS_WORKSPACE
+						? ownWorkspaceSignInUrl(err.params)
+						: null;
+			}
+		} finally {
+			stripToken(token);
 		}
 	});
 </script>
@@ -86,6 +136,9 @@
 						{m('auth.verify.successSubPre')}<strong>{result.admin_email}</strong>{m('auth.verify.successSubPost')}
 					</p>
 				{/if}
+			{:else if phase === 'expired'}
+				<h1>{m('auth.verify.expiredHeading')}</h1>
+				<p class="sub">{m('auth.verify.expiredSub')}</p>
 			{:else if existingWorkspaceUrl}
 				<h1>{m('auth.verify.existingHeading')}</h1>
 			{:else}
@@ -115,6 +168,12 @@
 			{:else}
 				<p class="note">{m('auth.verify.noLink')}</p>
 			{/if}
+		{:else if phase === 'expired'}
+			<!-- The 410 names no workspace (that would make it an oracle for which
+			     links once existed), so the way in for someone who did finish is
+			     their workspace's own address, which their welcome email holds. -->
+			<a class="primary" href="/signup">{m('auth.verify.startOver')}</a>
+			<p class="note">{m('auth.verify.expiredSignInHint')}</p>
 		{:else}
 			<p class="error">{errorMessage}</p>
 			{#if existingWorkspaceUrl}

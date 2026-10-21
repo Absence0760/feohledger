@@ -3148,6 +3148,11 @@ export const messages = {
 	'auth.verify.alreadyVerified': "Sie haben diese E-Mail-Adresse bereits bestätigt, Ihr Arbeitsbereich ist also eingerichtet. Ihr Passwort legen Sie über den Link in Ihrer Willkommens-E-Mail fest oder über „Passwort vergessen“ auf der Anmeldeseite.",
 	'auth.verify.goToSignIn': "Zur Anmeldung",
 	'auth.verify.existingHeading': "Sie haben bereits einen Arbeitsbereich",
+	'auth.verify.expiredHeading': "Dieser Link ist abgelaufen",
+	'auth.verify.expiredSub':
+		"Bestätigungslinks funktionieren nur einmal und sind 24 Stunden gültig. Klicken Sie auf „Von vorne beginnen“, dann senden wir Ihnen einen neuen per E-Mail.",
+	'auth.verify.expiredSignInHint':
+		"Ihr Arbeitsbereich ist bereits eingerichtet? Melden Sie sich unter seiner eigenen Adresse an — sie steht in Ihrer Willkommens-E-Mail.",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the

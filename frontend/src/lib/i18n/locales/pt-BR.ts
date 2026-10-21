@@ -3145,6 +3145,11 @@ export const messages = {
 	'auth.verify.alreadyVerified': "Você já confirmou este e-mail, então seu espaço de trabalho está pronto. Para escolher sua senha, use o link do seu e-mail de boas-vindas ou \"Esqueci minha senha\" na página de login.",
 	'auth.verify.goToSignIn': "Ir para o login",
 	'auth.verify.existingHeading': "Você já tem um espaço de trabalho",
+	'auth.verify.expiredHeading': "Este link expirou",
+	'auth.verify.expiredSub':
+		"Links de verificação funcionam uma única vez e duram 24 horas. Comece de novo e enviaremos um novo por e-mail.",
+	'auth.verify.expiredSignInHint':
+		"Já configurou seu espaço de trabalho? Entre pelo endereço dele — ele está no seu e-mail de boas-vindas.",
 	// The four built-in roles. Shared by `/admin`'s user rows + role
 	// checkboxes, its system-roles table, and `/profile`'s Account card —
 	// ONE vocabulary, so no surface can name a role differently from the
