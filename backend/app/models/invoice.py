@@ -159,7 +159,7 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # confirmed push (cleared if that push reports no id).
     # `erp_document_url` is the provider's deep link to it, built once from the
     # adapter config that posted it (`erp_adapters.deep_links`); NULL for a
-    # provider with no stable deep link. Migration 0117.
+    # provider with no stable deep link. Migration 0118.
     erp_document_id: Mapped[str | None] = mapped_column(String(255))
     erp_document_url: Mapped[str | None] = mapped_column(String(1024))
     # Free-form per-invoice metadata bag. Currently holds the cached

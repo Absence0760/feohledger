@@ -88,7 +88,12 @@ const KEYS: Record<string, MessageKey> = {
 	amount_not_positive: 'erpRefusal.amountNotPositive',
 	job_unconfirmed: 'erpRefusal.jobUnconfirmed',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
-	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport'
+	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
+	// A FeohLedger payment written back to the ERP (decisions §295)
+	payment_account_not_mapped: 'erpRefusal.paymentAccountNotMapped',
+	bill_not_in_erp: 'erpRefusal.billNotInErp',
+	payment_exceeds_balance: 'erpRefusal.paymentExceedsBalance',
+	bill_payment_voided: 'erpRefusal.billPaymentVoided'
 };
 
 /** The sentences that name Intuit's numeric fault code as `{code}`. */

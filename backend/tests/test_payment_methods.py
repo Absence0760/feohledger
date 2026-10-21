@@ -238,3 +238,28 @@ def test_no_module_hand_rolls_the_international_rail_set():
         f"{offenders}. Import INTERNATIONAL_PAYMENT_METHODS / "
         "is_international_payment_method from app/services/payment_methods.py."
     )
+
+
+def test_card_is_a_record_only_rail_off_the_1099():
+    """`card` — a company card used outside FeohLedger (decisions §295): off
+    the 1099 like `virtual_card`, recordable, and refused on every payment
+    FeohLedger would dispatch (a standalone payment and a run item)."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.api.payments import CreatePaymentRunItem
+    from app.schemas.payment import PaymentCreate, RecordPaymentOutsideRequest
+    from app.services.payment_methods import CARD_PAYMENT_METHODS, IRS_1099_REPORTABLE_METHODS
+
+    assert "card" in CARD_PAYMENT_METHODS and "card" not in IRS_1099_REPORTABLE_METHODS
+    with pytest.raises(ValidationError):
+        PaymentCreate(invoice_id="x", method="card")
+    with pytest.raises(ValidationError):
+        CreatePaymentRunItem(invoice_id="x", method="card")
+    recorded = RecordPaymentOutsideRequest(
+        invoice_id="00000000-0000-0000-0000-000000000001",
+        method="card",
+        reference="AMEX-1",
+        paid_on="2026-10-01",
+    )
+    assert recorded.method == "card"

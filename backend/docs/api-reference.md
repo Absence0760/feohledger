@@ -409,7 +409,8 @@ All require `admin`.
 | `PATCH`  | `/api/admin/users/{id}`  | Update user (name, email, roles, active). Only fields whose value differs are applied and audited. `password` → `422 admin_password_field_removed` |
 | `POST`   | `/api/admin/users/{id}/reset-password` | Reset to a generated temp (`must_change_password=true`), revoke the user's sessions, return `temporary_password` once (same shape as create) plus `sessions_revoked` (false if the forced logout failed after the commit — the reset stands and the temp is still returned). Org-scoped, out-rank guarded, not self (`400 admin_password_reset_self`), audited `user.password_reset` |
 | `POST`   | `/api/admin/users/{id}/revoke-sessions` | Force-log-out a user without changing their account. Org-scoped (foreign user → 404), idempotent, audited `user.sessions_revoked` |
-| `DELETE` | `/api/admin/users/{id}`  | Permanently delete a user |
+| `DELETE` | `/api/admin/users/{id}`  | Permanently delete a user. `409` for yourself, a user still referenced by in-flight work, or the org's last active admin; `503` (nothing deleted) if the `user.deleted` audit row cannot be written |
+| `POST`   | `/api/admin/users/bulk-delete` | `{user_ids: [...]}` → `{deleted: [...], failed: [{user_id, reason, references}]}`; `reason` is `not_found` \| `self` \| `forbidden` \| `blocked` \| `last_admin` \| `audit_unavailable` |
 
 ## ERP Inbound Webhook
 

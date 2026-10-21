@@ -170,6 +170,50 @@ async def test_send_to_erp_happy_path_walks_approved_to_done():
     assert inst.state_data["erp_retries"] == 1
 
 
+@pytest.mark.asyncio
+async def test_a_status_synced_erp_leaves_the_bill_payable_at_posted_in_erp():
+    """Decisions §295: when the ERP's payment status flows back (QuickBooks
+    with status sync on), a confirmed push lands at `posted_in_erp` — payable,
+    so the ERP-paid path can move it to `paid` — instead of closing at `done`."""
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    inst = _instance()
+    recorder = _AuditRecorder()
+    db = AsyncMock()
+    config = {"type": "quickbooks_online", "integration_method": "direct"}
+
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", AsyncMock(return_value="501")),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+        patch("app.services.erp.complete_workflow", AsyncMock()),
+        patch("app.services.erp.status_sync_active", return_value=True) as active,
+    ):
+        await send_to_erp_internal(db, inv, erp_config=config)
+
+    active.assert_called_once_with(config)
+    assert inv.status == InvoiceStatus.posted_in_erp
+    assert recorder.transitions() == [
+        ("sending_to_erp", "sent_to_erp"),
+        ("sent_to_erp", "posted_in_erp"),
+    ]
+
+
+def test_status_sync_needs_the_flag_and_an_adapter_that_reports_back(monkeypatch):
+    from app.config import settings
+    from app.services.erp_status_sync import status_sync_active
+
+    qbo = {"type": "quickbooks_online", "integration_method": "direct"}
+    netsuite = {"type": "netsuite", "integration_method": "direct"}
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", False)
+    assert status_sync_active(qbo) is False
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    assert status_sync_active(qbo) is True
+    # An ERP whose payments never flow back keeps closing at `done`.
+    assert status_sync_active(netsuite) is False
+    assert status_sync_active(None) is False
+    assert status_sync_active({"type": "no_such_erp", "integration_method": "direct"}) is False
+
+
 # ---------------------------------------------------------------------------
 # send_to_erp_internal — retry exhaustion.
 # ---------------------------------------------------------------------------
@@ -514,6 +558,9 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
         PENDING_JOB_KEY: None,
         OUTCOME_UNKNOWN_KEY: False,
         "erp_reference": "FE-9",
+        # The connection realm the bill lives in (§295) — `merge_dev:` for the
+        # default config these tests send with.
+        "erp_realm": "merge_dev:",
     }
 
 
@@ -1037,6 +1084,7 @@ async def test_call_erp_success_clears_an_earlier_orphan():
         "erp_retries": 0,
         OUTCOME_UNKNOWN_KEY: False,
         "erp_reference": "XERO-BILL-7",
+        "erp_realm": "merge_dev:",
     }
 
 

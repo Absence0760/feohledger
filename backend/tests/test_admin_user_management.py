@@ -1175,4 +1175,190 @@ async def test_admin_can_self_demote_when_another_active_admin_exists(realdb):
                 headers=second_auth,
             )
             assert restore.status_code == 200, restore.text
-            await c.delete(f"/api/admin/users/{second_id}", headers=second_auth)
+            # As the restored original admin: the second admin deleting
+            # itself is "Cannot delete yourself" (409), which this cleanup
+            # used to send unchecked — leaking an active admin into org A and
+            # silently defeating every later sole-admin test in the session.
+            cleanup = await c.delete(f"/api/admin/users/{second_id}")
+            assert cleanup.status_code == 204, cleanup.text
+
+
+# --------------------------------------------------------------------------
+# Persona-admin finding: who was deleted, and what a change was FROM. The
+# `user.deleted` row used to carry only the bare id of a row that no longer
+# exists, the bulk path wrote it after the commit (a failed write lost it while
+# the delete stood), and `user.updated` recorded only the new role list.
+# --------------------------------------------------------------------------
+
+
+async def _audit_rows(realdb, action, entity_id):
+    async with realdb.sessionmaker("a")() as s:
+        return (
+            (
+                await s.execute(
+                    select(AuditLog)
+                    .where(
+                        AuditLog.action == action,
+                        AuditLog.entity_id == uuid.UUID(str(entity_id)),
+                    )
+                    .order_by(AuditLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _user_exists(realdb, user_id) -> bool:
+    from app.models.user import User
+
+    async with realdb.control_sessionmaker()() as s:
+        return await s.get(User, uuid.UUID(str(user_id))) is not None
+
+
+async def _invite(c, *, roles):
+    email = f"audit-{uuid.uuid4().hex[:8]}@acme.test"
+    resp = await c.post(
+        "/api/admin/users", json={"email": email, "full_name": "Audit Subject", "role_names": roles}
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"], email
+
+
+@pytest.mark.asyncio
+async def test_user_deleted_row_says_who_the_account_was(realdb):
+    async with realdb.client(key="a", role="admin") as c:
+        target_id, email = await _invite(c, roles=["ap_clerk"])
+        assert (await c.delete(f"/api/admin/users/{target_id}")).status_code == 204
+
+    (row,) = await _audit_rows(realdb, "user.deleted", target_id)
+    assert row.details == {"email": email, "role_names": ["ap_clerk"], "was_active": True}
+
+
+@pytest.mark.asyncio
+async def test_a_delete_the_trail_cannot_record_is_not_made(realdb):
+    """The record is written before the delete commits; a failed write refuses it."""
+
+    async def _down(**_kwargs):
+        raise RuntimeError("tenant DB unavailable")
+
+    async with realdb.client(key="a", role="admin") as c:
+        target_id, _ = await _invite(c, roles=[])
+        # Scoped patches, never `monkeypatch.undo()`: that would also undo the
+        # autouse Redis stub, and the next request would reach a real client.
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.api.admin.record_auth_audit_or_raise", _down)
+            resp = await c.delete(f"/api/admin/users/{target_id}")
+        assert resp.status_code == 503, resp.text
+        assert await _user_exists(realdb, target_id)
+        assert await _audit_rows(realdb, "user.deleted", target_id) == []
+        assert (await c.delete(f"/api/admin/users/{target_id}")).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_records_each_row_with_its_identity(realdb):
+    async with realdb.client(key="a", role="admin") as c:
+        first_id, first_email = await _invite(c, roles=["ap_clerk"])
+        second_id, second_email = await _invite(c, roles=[])
+        resp = await c.post(
+            "/api/admin/users/bulk-delete", json={"user_ids": [first_id, second_id]}
+        )
+    assert resp.status_code == 200, resp.text
+    assert sorted(resp.json()["deleted"]) == sorted([first_id, second_id])
+
+    (first,) = await _audit_rows(realdb, "user.deleted", first_id)
+    (second,) = await _audit_rows(realdb, "user.deleted", second_id)
+    assert first.details == {"email": first_email, "role_names": ["ap_clerk"], "was_active": True}
+    assert second.details == {"email": second_email, "role_names": [], "was_active": True}
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_keeps_a_row_whose_record_cannot_be_written(realdb):
+    """Each row's delete and its record stand or fall together: a failed write
+    undoes only that row's delete, and the rest of the batch still lands."""
+    from app.services import audit_dispatch
+
+    real_write = audit_dispatch.record_auth_audit_or_raise
+
+    async with realdb.client(key="a", role="admin") as c:
+        kept_id, _ = await _invite(c, roles=[])
+        gone_id, _ = await _invite(c, roles=[])
+
+        async def _fail_for_kept(**kwargs):
+            if str(kwargs["entity_id"]) == kept_id:
+                raise RuntimeError("tenant DB unavailable")
+            await real_write(**kwargs)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.api.admin.record_auth_audit_or_raise", _fail_for_kept)
+            resp = await c.post(
+                "/api/admin/users/bulk-delete", json={"user_ids": [kept_id, gone_id]}
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["deleted"] == [gone_id]
+        assert body["failed"] == [
+            {"user_id": kept_id, "reason": "audit_unavailable", "references": None}
+        ]
+        assert await _user_exists(realdb, kept_id)
+        assert not await _user_exists(realdb, gone_id)
+        assert (await c.delete(f"/api/admin/users/{kept_id}")).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_user_updated_records_roles_active_and_email_before_and_after(realdb, monkeypatch):
+    async def _fake_revoke(_user_id):
+        return []
+
+    monkeypatch.setattr("app.api.admin.revoke_user_sessions", _fake_revoke)
+    async with realdb.client(key="a", role="admin") as c:
+        target_id, email = await _invite(c, roles=["ap_clerk"])
+        new_email = f"renamed-{uuid.uuid4().hex[:8]}@acme.test"
+        resp = await c.patch(
+            f"/api/admin/users/{target_id}",
+            json={"role_names": ["ap_manager"], "is_active": False, "email": new_email},
+        )
+        assert resp.status_code == 200, resp.text
+        await c.delete(f"/api/admin/users/{target_id}")
+
+    (row,) = await _audit_rows(realdb, "user.updated", target_id)
+    details = row.details
+    assert sorted(details["changed_fields"]) == ["email", "is_active", "role_names"]
+    assert details["previous_role_names"] == ["ap_clerk"]
+    assert details["role_names"] == ["ap_manager"]
+    assert details["previous_is_active"] is True
+    assert details["is_active"] is False
+    assert details["previous_email"] == email
+    assert details["email"] == new_email
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_reports_a_last_admin_refusal_per_row(realdb):
+    """Through HTTP a bulk delete can only hit the last-admin guard under
+    concurrency (the caller is an admin and is never deleted), which
+    `tests/test_admin_lockout.py` drives for real. Here the guard's verdict is
+    forced so the per-row mapping is pinned: that row fails as `last_admin`,
+    is not deleted, and the rest of the batch still lands."""
+    from app.services.admin_lockout import LastAdminLockout
+
+    async with realdb.client(key="a", role="admin") as c:
+        refused_id, _ = await _invite(c, roles=["admin"])
+        gone_id, _ = await _invite(c, roles=[])
+
+        async def _refuse_one(_db, *, target_id, **_kwargs):
+            if str(target_id) == refused_id:
+                raise LastAdminLockout()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.api.admin.guard_against_last_admin_lockout", _refuse_one)
+            resp = await c.post(
+                "/api/admin/users/bulk-delete", json={"user_ids": [refused_id, gone_id]}
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["deleted"] == [gone_id]
+        assert body["failed"] == [
+            {"user_id": refused_id, "reason": "last_admin", "references": None}
+        ]
+        assert await _user_exists(realdb, refused_id)
+        assert (await c.delete(f"/api/admin/users/{refused_id}")).status_code == 204

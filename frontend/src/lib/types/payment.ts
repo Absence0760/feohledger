@@ -220,7 +220,8 @@ export type PaymentMethod =
 	| 'virtual_card'
 	| 'bacs'
 	| 'faster_payments'
-	| 'chaps';
+	| 'chaps'
+	| 'card';
 
 export const PAYMENT_METHODS: PaymentMethod[] = [
 	'ach',
@@ -229,7 +230,8 @@ export const PAYMENT_METHODS: PaymentMethod[] = [
 	'virtual_card',
 	'bacs',
 	'faster_payments',
-	'chaps'
+	'chaps',
+	'card'
 ];
 
 /**
@@ -250,7 +252,8 @@ export const PAYMENT_METHOD_LABEL_KEYS: Record<PaymentMethod, MessageKey> = {
 	virtual_card: 'payments.method.virtualCard',
 	bacs: 'payments.method.bacs',
 	faster_payments: 'payments.method.fasterPayments',
-	chaps: 'payments.method.chaps'
+	chaps: 'payments.method.chaps',
+	card: 'payments.method.card'
 };
 
 /**

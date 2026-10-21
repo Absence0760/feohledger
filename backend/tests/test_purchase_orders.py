@@ -557,6 +557,123 @@ async def test_sync_erp_currency_is_erp_owned_but_silence_never_erases_it(realdb
     assert body["created"] == 2
 
 
+async def _vendor_of(realdb, po_number: str) -> uuid.UUID | None:
+    async with realdb.sessionmaker("a")() as s:
+        return (
+            await s.execute(
+                select(PurchaseOrder.vendor_id).where(PurchaseOrder.po_number == po_number)
+            )
+        ).scalar_one()
+
+
+async def test_sync_erp_links_vendor_by_erp_id_before_name(realdb, monkeypatch):
+    """The ERP's supplier id wins over the name: a vendor renamed on our side
+    still links, and a second vendor merely sharing the ERP's name does not."""
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        by_id = Vendor(name="Feoh Supplies (renamed)", erp_vendor_id="c-1", organization_id=org_id)
+        by_name = Vendor(name="Feoh Test Supplies Inc", organization_id=org_id)
+        s.add_all([by_id, by_name])
+        await s.commit()
+        by_id_id, by_name_id = by_id.id, by_name.id
+
+    await _sync_with_payloads(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(
+                po_number="ERP-ID",
+                vendor_name="Feoh Test Supplies Inc",
+                vendor_erp_id="c-1",
+                total=Decimal("250.00"),
+            ),
+            # An id no vendor holds falls back to the name.
+            PoPayload(
+                po_number="ERP-NAME",
+                vendor_name="Feoh Test Supplies Inc",
+                vendor_erp_id="c-unknown",
+                total=Decimal("250.00"),
+            ),
+        ],
+    )
+
+    assert await _vendor_of(realdb, "ERP-ID") == by_id_id
+    assert await _vendor_of(realdb, "ERP-NAME") == by_name_id
+
+
+async def test_sync_erp_ignores_an_id_link_made_in_another_erp_company(realdb, monkeypatch):
+    """QuickBooks reuses small ids across companies, so a vendor linked as "56"
+    under the sandbox is not the production company's "56": the PO falls back
+    to the name, as the invoice push refuses the same stale link."""
+    from app.api import purchase_orders
+    from app.services.erp_adapters.base import PoPayload
+
+    monkeypatch.setattr(purchase_orders, "connection_realm", lambda _cfg: "qbo:prod")
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        stale = Vendor(
+            name="Sandbox Vendor",
+            erp_vendor_id="56",
+            erp_link_realm="qbo:sandbox",
+            organization_id=org_id,
+        )
+        by_name = Vendor(name="Acme", organization_id=org_id)
+        s.add_all([stale, by_name])
+        await s.commit()
+        by_name_id = by_name.id
+
+    await _sync_with_payloads(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="QBO-1", vendor_name="Acme", vendor_erp_id="56", total=Decimal("1"))],
+    )
+
+    assert await _vendor_of(realdb, "QBO-1") == by_name_id
+
+
+async def test_sync_erp_fills_a_missing_vendor_on_resync_and_never_repoints(realdb, monkeypatch):
+    """A PO synced before its supplier gets linked by the next sync once the
+    vendor exists; a vendor already on a PO is left alone."""
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        chosen = Vendor(name="Chosen By A Person", organization_id=org_id)
+        s.add(chosen)
+        await s.commit()
+        chosen_id = chosen.id
+    await _add_po(mk, org_id, po_number="ERP-UNLINKED", total=Decimal("250.00"))
+    await _add_po(mk, org_id, po_number="ERP-LINKED", total=Decimal("250.00"), vendor_id=chosen_id)
+    async with mk() as s:
+        synced = Vendor(name="Feoh Test Supplies Inc", erp_vendor_id="c-1", organization_id=org_id)
+        s.add(synced)
+        await s.commit()
+        synced_id = synced.id
+
+    payloads = [
+        PoPayload(
+            po_number=n,
+            vendor_name="Feoh Test Supplies Inc",
+            vendor_erp_id="c-1",
+            total=Decimal("250.00"),
+        )
+        for n in ("ERP-UNLINKED", "ERP-LINKED")
+    ]
+    body = await _sync_with_payloads(realdb, monkeypatch, payloads)
+
+    assert await _vendor_of(realdb, "ERP-UNLINKED") == synced_id
+    assert await _vendor_of(realdb, "ERP-LINKED") == chosen_id
+    # Filling the link is a change; the untouched PO is skipped.
+    assert (body["updated"], body["skipped"], body["created"]) == (1, 1, 0)
+
+    # Nothing left to fill: a third sync changes nothing.
+    again = await _sync_with_payloads(realdb, monkeypatch, payloads)
+    assert (again["updated"], again["skipped"]) == (0, 2)
+
+
 async def test_sync_erp_isolated_per_tenant(realdb):
     """A sync against tenant A leaves tenant B's PO table empty."""
     await _set_org_erp(

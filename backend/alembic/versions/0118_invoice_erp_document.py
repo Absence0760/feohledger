@@ -9,8 +9,8 @@ reads showed it, so there was no way from the invoice to its bill in the ERP.
 The invoice row now carries the id, and the provider's deep link where one is
 stable (``app/services/erp_adapters/deep_links.py``).
 
-Revision ID: 0117_invoice_erp_document
-Revises: 0116_exception_fingerprint
+Revision ID: 0118_invoice_erp_document
+Revises: 0117_erp_oauth_company_index
 Create Date: 2026-10-20
 
 25 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
@@ -35,15 +35,15 @@ cannot be told apart afterwards.
 ``erp_document_url`` is NOT backfilled: it depends on which adapter posted the
 bill (and, for QuickBooks, sandbox vs production), which the tenant database
 does not record — the ERP config lives on the control plane and may have
-changed since. A pre-0117 invoice shows its id without a link.
+changed since. A pre-0118 invoice shows its id without a link.
 """
 
 from sqlalchemy import text
 
 from alembic import op
 
-revision = "0117_invoice_erp_document"
-down_revision = "0116_exception_fingerprint"
+revision = "0118_invoice_erp_document"
+down_revision = "0117_erp_oauth_company_index"
 branch_labels = None
 depends_on = None
 

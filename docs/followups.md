@@ -39,10 +39,27 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-20 — storing the ERP document id on the invoice
-(decisions §301) opened two (c) entries, the deep link not choosing the ERP
+**Last reconciled:** 2026-10-21 — storing the ERP document id on the invoice
+(decisions §302) opened two (c) entries, the deep link not choosing the ERP
 organisation/company and the ERP webhook's id-only path, taking the file from
-118 → 120. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
+121 → 123. Before that, 2026-10-21 — merging main (QuickBooks status sync, Xero
+Disconnect) into the PO vendor-link branch; both sides' entries kept, taking
+the file to 121. Before that, 2026-10-20 — the live Xero Demo Company test opened two
+(c) entries (unapproved ERP POs syncing as open, and the adapters that still
+link a PO's vendor by name only), taking the file from 117 → 119. Before that,
+2026-10-21 — merging main's Xero Disconnect fix into the QuickBooks status-sync
+branch kept both sides' entries. Before that, 2026-10-20 — fixing Xero's Disconnect so it revokes the
+grant opened one (c) entry (Sage Accounting and Blackbaud still don't), taking
+the file from 117 → 118. Before that, 2026-10-20 — QuickBooks Phases 3–5 (decisions §295)
+narrowed the QuickBooks entry to the header-only-tax product call, closed the
+"ERP-reported payment is dated the day the webhook arrives" (c) entry, and
+opened one (c) (a bill paid in QuickBooks while a run is already executing) and
+one (b) (turning status sync on in production), taking the file from 117 → 118;
+the dispatch-time ERP check (decisions §296) then closed that (c) and opened
+one for a NACHA file's bills being read only at export, 118 → 118.
+Before that, 2026-10-20 — the admin persona's user-management fixes
+(decisions §293) closed the (c) entry "A SCIM deactivation writes no audit
+row", taking the file from 118 → 117. Before that, 2026-10-20 — fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
 §291) opened two (c) entries, multi-workspace membership and the SAML ACS's
@@ -176,7 +193,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**120 open: 104 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**123 open: 106 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1224,7 +1241,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       2026-10-20, again not taken:** the settings and portal slices (§300)
       generalised that to one file per catalogue kind; the total measured 1034
       of 1075 (down from 1050), still not binding, and the change was scoped to
-      the per-chunk ceiling that was.
+      the per-chunk ceiling that was. **Fired a third time 2026-10-20, not
+      taken:** the workflow became a reusable workflow called from `ci.yml` so
+      the budget gates merges through `CI gate` (decisions §301). That change
+      was deliberately limited to the trigger, with the measurement and the
+      numbers left exactly as they were, and the total is still not binding.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
@@ -1239,16 +1260,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       widget tests and the l10n strings in every ARB. **Trigger:** the first pilot
       customer whose approvers use the mobile app, or the next mobile payments
       change, whichever comes first.
-- [ ] **(c) An ERP-reported payment is dated the day the webhook arrives.** The
-      inbound `Paid` payload carries no payment date, so
-      `erp_webhook._record_erp_reported_payment` books `paid_on = utc_today()` and
-      `method = NULL` (reportable). A bill paid on 31 December and reported on
-      2 January lands in the wrong 1099 year, and a card payment made in the ERP
-      would be counted as reportable. **Durable fix:** accept an optional
-      `paid_on` and `payment_method` in the ERP webhook body (and map them in each
-      ERP adapter's status poll), validate them like the user endpoint does, and
-      fall back to the arrival date only when absent. **Trigger:** the first
-      ERP-led pilot customer, or the first year-end with ERP-reported payments.
 - [ ] **(c) The NACHA file is always unbalanced.** `services/nacha.py` writes
       credits only, which most ODFIs expect from a corporate originator, but some
       banks require a balanced file (an offsetting debit to the originator's own
@@ -1260,16 +1271,26 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 
 ### Surfaced by scoping the QuickBooks Online adapter (2026-10-07)
 
-- [ ] **(c) QuickBooks Online: webhooks, a reconciliation sweep and BillPayment
-      write-back.** Phases 0–2 of `backend/docs/quickbooks-online-adapter.md`
-      shipped with the US + South Africa ERP work (decisions §269–§270): ERP ids on
-      the payload, the shared OAuth connect flow, and the adapter. Still open:
-      Phase 3 (CloudEvents webhooks routed by an `erp_connections` realm index,
-      plus a CDC reconciliation sweep), Phase 4 (`post_payment` → BillPayment),
-      Phase 5 (an admin notice before the refresh token expires), and the
-      product call on bills whose tax is stated only on the header (refused
-      today as `amount_mismatch`). **Durable fix:** the phases as scoped in that
-      doc. **Trigger:** the first pilot customer on QuickBooks.
+- [ ] **(c) QuickBooks Online: bills whose tax is stated only on the header.**
+      Phases 0–5 of `backend/docs/quickbooks-online-adapter.md` are built
+      (decisions §269–§270, §284–§287, §295). What is left is the product call
+      on several tax-exclusive lines with header-only tax, refused today as
+      `tax_not_itemised` / `amount_mismatch` (open question 2 of that doc,
+      alongside non-US `TxnTaxDetail`). **Durable fix:** decide whether to
+      apportion header tax across lines or keep refusing, then build it in the
+      shared `bill_lines` rules so every adapter follows. **Trigger:** the first
+      pilot customer on QuickBooks whose bills carry header-only tax.
+- [ ] **(c) A NACHA file's bills are read once, at export.** The dispatch-time
+      QuickBooks check (decisions §296) reads each bill when the file is built,
+      but the money moves when a person uploads it to the bank, hours or days
+      later; a bill paid in QuickBooks in between is paid twice. The export also
+      reads its bills one after another while holding the run and every invoice
+      lock (about a second each, so a large file holds them for minutes).
+      **Durable fix:** read the file's bills concurrently under a bounded
+      semaphore once the locks are taken, and offer a "verify before upload"
+      step (re-read the run's bills; void and regenerate the file when any is no
+      longer open). **Trigger:** the first record-only tenant on QuickBooks with
+      status sync on, or a NACHA run over ~50 payments.
 
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
@@ -1335,19 +1356,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       Scale customer who asks for it, or before the pricing page next lists it
       — whichever is first; until then the listing should be qualified or
       dropped (owned by the pricing-page work, issue #426).
-- [ ] **(c) A SCIM deactivation writes no audit row.** `api/scim.py`'s PUT
-      (`active: false`), PATCH (`active` replace / remove) and DELETE all set
-      `User.is_active = False` with no `user.deactivated`-style audit row, where
-      the admin path (`/api/admin/users`) audits the same change. Access is
-      still cut at once — `get_current_user` refuses an inactive user, so the
-      leaver's live JWTs stop working — so this is a SOX trail gap, not an
-      access gap. Pre-existing; the plan-gate review noticed it because §258
-      keeps deprovisioning open on every plan. **Durable fix:** one helper in
-      `api/scim.py` that every deactivating branch calls, writing a PII-free
-      audit row (actor `None`, `details.source: "scim"`) through
-      `dispatch_auth_audit`, plus `revoke_user_sessions` for parity with the
-      admin path; a test per branch. **Trigger:** the next change to
-      `api/scim.py`, or before the first SCIM-provisioned customer.
 
 ### Receiving, ERP depth and commerce sync (2026-10-07, roadmap Priority 14, decisions §260)
 
@@ -1880,7 +1888,53 @@ scope (§260) — do not fold them into any of these.
       request from someone who cannot find their workspace, or before signup
       is advertised beyond the pilot.
 
-### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §301)
+### Surfaced by the live Xero Demo Company test (2026-10-20)
+
+Linking a synced purchase order to its vendor by the ERP's supplier id (and
+filling a missing link on a re-sync) landed with the test. Two gaps it exposed
+stay open.
+
+- [ ] **(c) An unapproved ERP purchase order syncs as `open` and can be
+      matched.** `PurchaseOrder.status` has three values (open / closed /
+      cancelled), so Xero's `DRAFT` and `SUBMITTED` and NetSuite's Pending
+      Supervisor Approval (`A`) all land as `open`. In the Demo Company, a
+      Draft PO showed as OPEN. An invoice can then pass 2/3-way match against
+      an order nobody in the ERP has approved. **Durable fix:** decide between
+      skipping not-yet-issued POs in each `list_pos` (they arrive once
+      approved, and the existing upsert refreshes the status) and adding an
+      unissued status that `po_matching` refuses. Both change the PO
+      vocabulary every adapter maps onto, so record the choice in
+      decisions.md. **Trigger:** before the first tenant matches invoices
+      against live Xero or NetSuite POs, or the next change to the PO status
+      vocabulary.
+- [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
+      Only Xero and QuickBooks fill `PoPayload.vendor_erp_id`. NetSuite,
+      Business Central, Merge.dev, Sage Intacct, Sage Accounting ZA, SYSPRO
+      and Blackbaud FE NXT fall back to `vendor_name`, which a rename on
+      either side breaks, and which picks the wrong row when two vendors share
+      a name. **Durable fix:** read each ERP's supplier id on the PO (the same
+      id its `list_vendors` reports) into `vendor_erp_id`. **Trigger:** the
+      next change to that adapter's `list_pos`.
+
+### Surfaced by Xero's Disconnect leaving the grant live (2026-10-20)
+
+Xero's adapter had no revoke URL, so Disconnect cleared our tokens and audited
+`revoked: false` while the org stayed connected at Xero. The live Demo Company
+showed it "Already connected" on the next consent. Xero now revokes; two
+providers still have the same gap.
+
+- [ ] **(c) Sage Accounting and Blackbaud FE NXT do not revoke on Disconnect.**
+      Their `OAuthProviderSpec` has no `revoke_url`, so `erp_oauth.revoke`
+      returns False without calling out: the refresh token stays valid at the
+      provider until it expires, and the tenant still lists the app as
+      connected there. **Durable fix:** set each provider's documented
+      revocation endpoint (and a `*_revoke_url` override for fake-erp, with a
+      fake revocation route), or record in the spec that the provider has
+      none and make the Disconnect message say the grant must be removed at
+      the provider. **Trigger:** the next change to either adapter's OAuth
+      spec, or before either provider's platform app goes live.
+
+### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §302)
 
 - [ ] **(c) The ERP deep link opens in whichever organisation / company the
       user last had open.** `erp_adapters/deep_links.py` builds Xero's
@@ -2024,6 +2078,19 @@ as oversights.
       secret, subscription key) in `infra-secrets/feohledger/prod.sops.yaml`.
       **Trigger:** before selling ERP sync (on any plan, Free included since
       decisions §281) to customers on those ERPs. The login-CSRF (c) entry above must land first.
+
+- [ ] **Turn on QuickBooks status sync in production.** Built and off by
+      default (decisions §295). In the Intuit developer portal, on the
+      production app: Webhooks → endpoint
+      `FEOH_API_PUBLIC_URL/api/erp/webhook/quickbooks`, CloudEvents format,
+      the Bill and BillPayment entities; copy the app's verifier token into
+      `infra-secrets/feohledger/prod.sops.yaml` as
+      `FEOH_ERP_QBO_WEBHOOK_VERIFIER_TOKEN` (never into this repo). Then set
+      `FEOH_ERP_STATUS_SYNC_ENABLED=true` and
+      `FEOH_ERP_CONNECTION_HEALTH_ENABLED=true` in the deployed env, after
+      migration 0117 has run (the deploy's own migration step). **Trigger:**
+      before the first pilot customer on QuickBooks pays a bill through
+      FeohLedger.
 
 - [ ] **Create the five published contact aliases.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) `/legal/*` tells readers to
       write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on

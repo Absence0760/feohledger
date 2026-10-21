@@ -193,6 +193,7 @@ export const messages = {
 	'profile.notifications.event.chatMessage': 'サプライヤーチャットの新着メッセージ',
 	'profile.notifications.event.cashShortfallProjected': '資金不足の予測',
 	'profile.notifications.event.aiInvoiceUsage': 'AI読み取り請求書の利用状況',
+	'profile.notifications.event.erpConnectionExpiring': "ERP 接続の再接続が必要",
 	'profile.notifications.inAppFor': '「{event}」のアプリ内通知',
 	'profile.notifications.emailFor': '「{event}」のメール通知',
 
@@ -640,6 +641,7 @@ export const messages = {
 	'payments.method.bacs': 'BACS',
 	'payments.method.fasterPayments': 'Faster Payments',
 	'payments.method.chaps': 'CHAPS',
+	'payments.method.card': "カード (FeohLedger 外)",
 
 	'payments.quotes.open': '経路を比較',
 	'payments.quotes.openAria': '請求書 {invoice}: {action}',
@@ -4680,6 +4682,10 @@ export const messages = {
 	'erpRefusal.referenceInvalid': "受け付けられない仕入先または勘定科目を参照しているため、{provider} がこの請求を拒否しました（Intuit エラー {code}）。仕入先と請求のすべての勘定科目が {provider} に存在し有効であることを確認し、再同期してから再試行してください。",
 	'erpRefusal.companySubscriptionInactive': "会社のサブスクリプションが終了、解約、または支払いの問題があるため、{provider} がこの請求を拒否しました。{provider} で解決してから再試行してください。",
 	'erpRefusal.intuitFault': "{provider} がこの請求を拒否しました（Intuit エラー {code}）。請求の内容を {provider} と照らし合わせて修正してから再試行してください。失敗が続く場合は、管理者にエラーコードを伝えてください。",
+	'erpRefusal.paymentAccountNotMapped': "この支払いは {provider} に送られていません。記録元の勘定科目が設定されていないためです。組織 → ERP 連携で請求書の支払い用勘定を選び、支払いの同期をやり直してください。",
+	'erpRefusal.billNotInErp': "この支払いの対象だった請求書が {provider} にもうありません (削除されています)。そのため支払いは記録されていません。{provider} で請求書を確認してください。",
+	'erpRefusal.paymentExceedsBalance': "{provider} 上の請求書の未払残高がこの支払いより少ないため、記録すると過払いになります。{provider} で支払済みの額を確認してください。",
+	'erpRefusal.billPaymentVoided': "この支払いは {provider} に記録された後、そこで取り消されたため、再度記録はしません。請求書が支払済みかどうかは {provider} で判断してください。",
 	'erpRefusal.exceptionBlocksExport': "この請求書には未解決の例外（{type}）があります。「例外」で解決または却下してから、ERP に送信してください。",
 	'erpRefusal.exceptionBlocksExportPossiblyPosted': "この請求書には未解決の例外（{type}）があり、以前の送信で ERP に請求書が既に作成されている可能性があります。支払われる前に ERP を確認し、「例外」で例外を解決または却下してください。",
 	'glAccounts.toast.synced': "新規 {created} 件、更新 {updated} 件の勘定科目を同期しました。",
