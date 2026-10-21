@@ -528,7 +528,7 @@ export const GLOSSARY: GlossaryEntry[] = [
 	{
 		id: 'erp-sync',
 		category: 'platform',
-		long: 'Keeping FeohLedger and your ERP (your main accounting system) in step. Approved invoices are sent to the ERP, showing {ui:invoices.status.sendingToErp}, {ui:invoices.status.sentToErp} and then {ui:invoices.status.postedInErp}. Payments are written back after they are made, and vendors, GL accounts and POs can be brought in from the ERP.\n\nWhich ERP you use, and how, is set by an admin. If a sync step fails, the invoice shows it so it can be retried rather than silently missed.',
+		long: 'Keeping FeohLedger and your ERP (your main accounting system) in step. Approved invoices are sent to the ERP, showing {ui:invoices.status.sendingToErp} and then {ui:invoices.status.sentToErp}, where they wait for the ERP to pay them; when it does, FeohLedger reads the payment back and records it. A payment FeohLedger makes itself is written back to the ERP, and vendors, GL accounts and POs can be brought in from the ERP.\n\nWhich ERP you use, and how, is set by an admin. If a sync step fails, the invoice shows it so it can be retried rather than silently missed.',
 		aliases: ['ERP integration', 'ERP export', 'accounting sync', 'posting'],
 		related: ['gl-coding', 'purchase-order', 'workflow']
 	},

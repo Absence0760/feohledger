@@ -41,8 +41,9 @@ a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-20 — syncing ERP-paid bills back (decisions §303)
 narrowed the ERP polling/void (c) entry to the still-open void/recall gap and
-opened two (c) entries, SYSPRO's paid read and a UI action for the on-demand
-ERP status check, taking the file from 118 → 120. Before that, 2026-10-20 —
+opened three (c) entries, the paid amount/date the other adapters don't read,
+SYSPRO's paid read and a UI action for the on-demand ERP status check, taking
+the file from 118 → 121. Before that, 2026-10-20 —
 fixing signup's dead ends (decisions §292)
 opened one (c) entry, the missing self-service "find my workspace" recovery,
 taking the file from 117 → 118. Before that, 2026-10-20 — the cross-workspace identity fixes (decisions
@@ -177,7 +178,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**120 open: 104 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
+**121 open: 105 (c) · 10 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1500,6 +1501,19 @@ scope (§260) — do not fold them into any of these.
       `sent_to_erp → approved` edge so it can be corrected and re-pushed or
       paid; the sweep then stops polling it. **Trigger:** the first customer
       who needs to recall a pushed bill, or the live void test now pending.
+- [ ] **(c) Most ERP adapters report "paid" without the amount or date paid.**
+      Only Xero (`AmountPaid`, `FullyPaidOnDate`) and QuickBooks (the cash its
+      BillPayments put against the bill) fill `ErpBillStatus.amount_paid` /
+      `paid_on` (§303). For NetSuite, Business Central, Sage Accounting, Sage
+      Intacct, FE NXT, Sage ZA and Merge.dev the ERP's own paid status is
+      trusted: a bill part-settled by a credit applied in the ERP is booked at
+      FeohLedger's full net owed, and the payment is dated the day of the poll
+      (a year-end payment can land in the next 1099 year). **Durable fix:** read
+      each ERP's applied-payment records (NetSuite `vendorPayment` apply list,
+      BC `vendorPayments`, Sage `artefact_payments`, Intacct `ap-payment`, FE NXT
+      payments, Sage ZA `SupplierPayment` allocations, Merge `payments`) and
+      return the cash for the bill and its date. **Trigger:** the first tenant
+      on one of those ERPs relying on the status sweep, or its sandbox access.
 - [ ] **(c) SYSPRO bills never read as paid on a status poll.** SYSPRO's
       `ApInvoice` states only a balance and has no paid status, so since §303
       a zero balance reads `settled_no_payment` and is flagged, not recorded;

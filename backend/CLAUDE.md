@@ -601,7 +601,7 @@ VALID_TRANSITIONS = {
     approved:           {sending_to_erp, payment_scheduled, done},
     rejected:           {ready_for_review, new},
     sending_to_erp:     {sent_to_erp, failed},
-    sent_to_erp:        {posted_in_erp, done},
+    sent_to_erp:        {posted_in_erp},      # a push rests here until the ERP pays it (§303)
     posted_in_erp:      {payment_scheduled, done},
     payment_scheduled:  {paid, approved},      # void → back to approved
     paid:               {done, approved},      # void → back to approved

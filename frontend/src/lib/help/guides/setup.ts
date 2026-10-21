@@ -364,7 +364,7 @@ export const SETUP_GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'The invoice then moves through {ui:invoices.status.sendingToErp}, {ui:invoices.status.sentToErp} and {ui:invoices.status.postedInErp} as the ERP accepts and posts it. Once a payment for it settles, the ERP is told and the invoice moves to {ui:invoices.status.paid}.'
+						text: 'The invoice moves through {ui:invoices.status.sendingToErp} to {ui:invoices.status.sentToErp} once the ERP accepts the bill, and waits there: the ERP now pays it, so it never appears in the FeohLedger payment queue. When the ERP reports the bill paid (its webhook, or FeohLedger checking the ERP on a timer), FeohLedger records that payment and the invoice moves to {ui:invoices.status.paid}. A bill the ERP shows cancelled, or cleared without a payment, is flagged in Exceptions instead.'
 					}
 				]
 			},

@@ -306,7 +306,7 @@ adapter resolved exactly as the push resolves it):
 
 | ERP status | What happens |
 |---|---|
-| `paid` | Recorded as a payment made outside FeohLedger (`record_erp_reported_payment`, the webhook's path). A refusal opens the blocking `payment_reconciliation` once and retries each tick, so it lands once the cause is cleared. |
+| `paid` | Recorded as a payment made outside FeohLedger (`record_erp_reported_payment`, the webhook's path). A paid amount the adapter states (Xero `AmountPaid`, QuickBooks' attributable BillPayment cash) must equal FeohLedger's net owed, else refused; the payment is dated the ERP's paid date when it states one. A refusal opens the blocking `payment_reconciliation` once and retries each tick; it records once a person has cleared the cause and resolved that flag. |
 | `cancelled` | `erp_reconciliation` exception (money may be in flight); the invoice is not transitioned. Raised once per reported status. |
 | `settled_no_payment` | `erp_reconciliation` exception: nothing is owing but the ERP records no payment (a credit note, a write-off). Nothing is recorded. Raised once per reported status. |
 | `open`, `partially_paid`, `draft`, `unknown` | Nothing. Partial payments are not recorded. |

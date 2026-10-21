@@ -13020,11 +13020,45 @@ every poll `open` and never fabricates a payment. Each tick:
 It never moves money. Idempotency:
 
 - `paid` takes the invoice out of the candidate set;
-- a refused record retries each tick, so it lands by itself once the cause is
-  cleared. Its exception opens once (the open-exception dedup);
+- a refused record retries each tick and opens its blocking exception once (the
+  open-exception dedup). Once a person has cleared the cause and resolved that
+  exception (it blocks the record too), the next tick records it;
 - a `cancelled` or `settled_no_payment` flag is raised once per reported status,
   remembered on `WorkflowInstance.state_data["erp_status_flagged"]`, so
   resolving the flag isn't answered by the same flag on the next tick.
+
+**A money-path review closed four more doors before this landed.**
+
+- **The amount and date are the ERP's when it states them.** Recording at
+  FeohLedger's net owed would book a bill the ERP part-settled with its own
+  credit (Xero: 400 credited, 600 paid, `PAID`) as 1,000 of cash.
+  `get_bill_status` returns an `ErpBillStatus` carrying the cash paid and its
+  date where the adapter can read them: Xero's `AmountPaid` /
+  `FullyPaidOnDate`, and QuickBooks' BillPayments. A QuickBooks payment that
+  also pays another bill or applies a vendor credit can't be attributed and
+  reads `settled_no_payment`. A stated amount must equal the net owed or the
+  record is refused (`external_payment_amount_mismatch`, so blocking), and the
+  payment is dated the ERP's paid date, which keeps a 31 December payment in
+  its own 1099 year. The other adapters still trust the ERP's paid status
+  alone; that gap is tracked in `docs/followups.md`.
+- **Voiding a payment on a pushed invoice blocks re-payment.** The void sends
+  `paid → approved`, which is payable, while the ERP still holds the bill and
+  may have paid it. `payments.void_payment` now opens the blocking
+  `payment_reconciliation` in the same transaction when the invoice carries an
+  `erp_reference`.
+- **`sent_to_erp → done` is removed.** Nothing takes it now, and `/complete`'s
+  fall-through (or a bulk status move) could otherwise close a pushed bill to
+  the terminal `done` with no payment, which is the exact stranding this
+  decision exists to remove.
+- **A payable invoice the ERP no longer claims is blocked.** The non-blocking
+  `erp_reconciliation` is right for `sent_to_erp`, which is not payable. At
+  `posted_in_erp`, a `cancelled` or `settled_no_payment` report opens
+  `payment_reconciliation` instead, for the same reason every paid-refusal
+  does.
+
+One door stays open and pre-dates this decision. The push does not refuse an
+invoice FeohLedger is already paying (a live card, a staged or exported run).
+It is diagnosed in `docs/known-issues.md`.
 
 **It asks only the ERP company that holds the bill.** The push now records
 `erp_adapter` and `erp_realm` (§284's connection realm) beside `erp_reference`.

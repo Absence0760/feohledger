@@ -158,5 +158,13 @@ FEOH_SIGNUP_ENABLED: "false"
 # reporting only, never a charge — and with the default `mock` provider it
 # bills nothing — so it stays on in every deployment.
 FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED: "true"
+
+# ── ERP status sync (decisions §303) ──
+# A pushed invoice waits at "Sent to ERP" until the ERP pays it. Without this
+# sweep (or an ERP that calls our webhook — Xero's native webhooks can't) a bill
+# paid in the ERP never reaches FeohLedger. It records what the ERP already did
+# and never moves money; a tenant on the `mock` ERP is answered "open".
+FEOH_ERP_STATUS_SYNC_ENABLED: "true"
+# FEOH_ERP_STATUS_SYNC_INTERVAL_SECONDS: "900"
 # FEOH_BILLING_PROVIDER: "stripe_billing"
 # FEOH_BILLING_STRIPE_API_KEY: ""

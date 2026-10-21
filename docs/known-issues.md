@@ -52,6 +52,34 @@ goes to [decisions.md](decisions.md).
 
 ---
 
+## An invoice FeohLedger is already paying can still be pushed to the ERP
+
+**Found 2026-10-20**, in the money-path review of the ERP status sync
+(decisions §303), whose premise is that a pushed bill is the ERP's to pay.
+
+**Symptom.** `POST /api/invoices/{id}/send-to-erp` (and `/complete` with the
+ERP step on, and `/retry-erp`) refuse only on an open duplicate or fraud
+exception (`services/erp_export_gate`). An `approved` invoice that already has
+a live virtual card, or a payment staged in a draft run — including a run whose
+NACHA file was exported to the customer's bank — can still be pushed. The ERP
+then holds a payable bill while the card or the bank upload pays the supplier
+too. `dispatch_preflight` stops a further FeohLedger dispatch (the invoice is no
+longer payable once pushed), but it cannot recall a card already issued or a
+bank file already uploaded.
+
+**Root cause.** The push gate asks "is the liability in question?" (§286), not
+"is FeohLedger already paying it?". §303 closed the other direction — a pushed
+invoice is never in the queue, a run or a card — but not this one.
+
+**Durable fix.** Refuse the push, at the three doors and at `_call_erp`'s
+chokepoint, when `external_payment`'s live-payment, in-run or live-card gates
+would fire (one shared predicate), with a coded refusal the invoice modal
+localizes in all six locales. **Trigger:** the next change to
+`services/erp_export_gate`, or before the first tenant uses both a payment rail
+(or NACHA export) and the ERP push.
+
+---
+
 ## The app renders nothing when the browser blocks site storage
 
 **Found 2026-10-20**, building the light theme (decisions §289), whose own

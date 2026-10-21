@@ -53,7 +53,6 @@ approved ─────────> done                     (no further steps
 sending_to_erp ───> sent_to_erp              (ERP confirmed)
 sending_to_erp ───> failed                   (ERP rejected or timed out)
 sent_to_erp ──────> posted_in_erp            (ERP reports it paid — recorded through external_payment, same transaction walks on to paid)
-sent_to_erp ──────> done                     (legal edge; nothing takes it since §303)
 posted_in_erp ────> payment_scheduled        (payment run picks up the invoice)
 posted_in_erp ────> done                     (no payment step in workflow)
 payment_scheduled > paid                     (processor settles the payment)
