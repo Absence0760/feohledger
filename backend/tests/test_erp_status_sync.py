@@ -626,18 +626,29 @@ async def test_voiding_the_erps_payment_does_not_reopen_the_bill_for_payment(rea
     assert voided.status_code == 200, voided.text
     assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.approved
     assert run.status_code != 201, run.text
-    flags = [e.exception_type for e in await _exceptions(realdb, inv_id)]
-    assert "payment_reconciliation" in flags
+    [flag] = [
+        e for e in await _exceptions(realdb, inv_id) if e.exception_type == "payment_reconciliation"
+    ]
+    # The voider is the flag's raiser, so they cannot clear it and send the
+    # invoice back into a run themselves (decisions §169-§170).
+    assert flag.raised_by_user_id == realdb.info("a").users["admin"]
 
 
-async def test_a_pushed_invoice_cannot_be_closed_to_done(realdb, erp):
-    """`sent_to_erp → done` is gone: `/complete` used to fall through to it and
-    strand a pushed bill in the terminal `done`, where no ERP payment lands."""
-    inv_id = await _seed(realdb, number="SYNC-COMPLETE", state_data=_pushed_state("R-C"))
+@pytest.mark.parametrize("status", [InvoiceStatus.sent_to_erp, InvoiceStatus.posted_in_erp])
+async def test_a_bill_the_erp_holds_cannot_be_closed_to_done(realdb, erp, status):
+    """`sent_to_erp → done` and `posted_in_erp → done` are gone: `/complete`
+    used to fall through to them and strand a bill the ERP holds in the
+    terminal `done`, where no ERP payment lands."""
+    inv_id = await _seed(
+        realdb,
+        number=f"SYNC-COMPLETE-{status.value}",
+        status=status,
+        state_data=_pushed_state("R-C"),
+    )
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post(f"/api/invoices/{inv_id}/complete")
     assert resp.status_code == 409, resp.text
-    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.sent_to_erp
+    assert (await _invoice(realdb, inv_id)).status == status
 
 
 async def test_the_route_reports_an_unreachable_erp_without_its_body(realdb, erp):

@@ -57,8 +57,16 @@ async def open_erp_reconciliation_exception(
     org_id,
     description: str,
     exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
+    raised_by_user_id=None,
 ) -> bool:
     """Open ONE exception of ``exception_type`` for human review, PII-free.
+
+    ``raised_by_user_id`` names the employee whose own act the flag asks a
+    second person to look at (``exceptions.raised_by_user_id``, decisions
+    §169-§170), so they cannot clear it themselves. None for every report on
+    the ERP's word — the webhook (HMAC-authenticated) and the status sweep —
+    where no control-plane user acted; the voider for
+    :func:`flag_void_of_erp_held_bill`.
 
     **Idempotent.** Skips when an OPEN or ESCALATED exception of the same type
     already exists for this invoice, so two distinct ERP events — or every tick
@@ -87,9 +95,7 @@ async def open_erp_reconciliation_exception(
         status="open",
         organization_id=org_id,
         invoice=invoice,
-        # Raised on the ERP's word — an HMAC-authenticated webhook or the
-        # status sweep's own read — never a control-plane user's act.
-        raised_by_user_id=None,
+        raised_by_user_id=raised_by_user_id,
     )
     return True
 
@@ -202,6 +208,7 @@ async def flag_void_of_erp_held_bill(
     *,
     org_id,
     payment_id,
+    voided_by,
 ) -> bool:
     """A payment on an invoice the ERP holds as a bill was voided: block re-payment.
 
@@ -211,8 +218,10 @@ async def flag_void_of_erp_held_bill(
     has paid it. A FeohLedger run would then pay the supplier a second time. So
     a void on a pushed invoice (its workflow carries an `erp_reference`) opens
     the blocking `payment_reconciliation` in the void's own transaction, and a
-    person decides whether FeohLedger may pay it (decisions §303). Returns
-    whether a flag was opened. Never commits.
+    person decides whether FeohLedger may pay it (decisions §303). The voider
+    is stamped as the flag's raiser, so they cannot clear it and send the
+    invoice back into a run themselves. Returns whether a flag was opened.
+    Never commits.
     """
     from app.services.workflow_engine import get_workflow_instance
 
@@ -226,6 +235,7 @@ async def flag_void_of_erp_held_bill(
         invoice,
         org_id=org_id,
         exception_type=ERP_PAID_UNRECORDED_EXCEPTION_TYPE,
+        raised_by_user_id=voided_by,
         description=(
             f"A payment ({payment_id}) was voided on an invoice whose bill is held in the "
             f"ERP (erp_document_id={reference}). If the ERP paid it, paying it here pays "

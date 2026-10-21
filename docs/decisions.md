@@ -13142,17 +13142,19 @@ It never moves money. Idempotency:
   reads `settled_no_payment`. A stated amount must equal the net owed or the
   record is refused (`external_payment_amount_mismatch`, so blocking), and the
   payment is dated the ERP's paid date, which keeps a 31 December payment in
-  its own 1099 year. The other adapters still trust the ERP's paid status
-  alone; that gap is tracked in `docs/followups.md`.
+  its own 1099 year. This check is the sweep's (and the on-demand route's):
+  the webhook's `Paid` carries no amount, and the other adapters still trust
+  the ERP's paid status alone. Both gaps are tracked in `docs/followups.md`.
 - **Voiding a payment on a pushed invoice blocks re-payment.** The void sends
   `paid → approved`, which is payable, while the ERP still holds the bill and
   may have paid it. `payments.void_payment` now opens the blocking
   `payment_reconciliation` in the same transaction when the invoice carries an
   `erp_reference`.
-- **`sent_to_erp → done` is removed.** Nothing takes it now, and `/complete`'s
-  fall-through (or a bulk status move) could otherwise close a pushed bill to
-  the terminal `done` with no payment, which is the exact stranding this
-  decision exists to remove.
+- **`sent_to_erp → done` and `posted_in_erp → done` are removed.** Nothing
+  takes them now, and `/complete`'s fall-through (or a bulk status move) could
+  otherwise close a bill the ERP holds to the terminal `done` with no payment,
+  which is the exact stranding this decision exists to remove. Every derived
+  set still holds: `posted_in_erp` reaches `payment_scheduled`.
 - **A payable invoice the ERP no longer claims is blocked.** The non-blocking
   `erp_reconciliation` is right for `sent_to_erp`, which is not payable. At
   `posted_in_erp`, a `cancelled` or `settled_no_payment` report opens

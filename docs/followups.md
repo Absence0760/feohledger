@@ -1497,7 +1497,10 @@ scope (§260) — do not fold them into any of these.
       Intacct, FE NXT, Sage ZA and Merge.dev the ERP's own paid status is
       trusted: a bill part-settled by a credit applied in the ERP is booked at
       FeohLedger's full net owed, and the payment is dated the day of the poll
-      (a year-end payment can land in the next 1099 year). **Durable fix:** read
+      (a year-end payment can land in the next 1099 year). The ERP **webhook's**
+      `Paid` carries neither for any ERP, so it books the net owed, dated
+      today; it should re-read the bill through `get_bill_status` before
+      recording (outside the row lock, as the sweep does). **Durable fix:** read
       each ERP's applied-payment records (NetSuite `vendorPayment` apply list,
       BC `vendorPayments`, Sage `artefact_payments`, Intacct `ap-payment`, FE NXT
       payments, Sage ZA `SupplierPayment` allocations, Merge `payments`) and

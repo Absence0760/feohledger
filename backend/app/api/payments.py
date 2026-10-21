@@ -1792,7 +1792,9 @@ async def void_payment(
         # paid — the bill: block re-payment until a person checks (§303).
         from app.services.erp_reported_status import flag_void_of_erp_held_bill
 
-        await flag_void_of_erp_held_bill(db, invoice, org_id=org.id, payment_id=payment.id)
+        await flag_void_of_erp_held_bill(
+            db, invoice, org_id=org.id, payment_id=payment.id, voided_by=user.id
+        )
 
     from app.services.audit_dispatch import dispatch_audit
 

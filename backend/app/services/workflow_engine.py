@@ -60,10 +60,9 @@ VALID_TRANSITIONS: dict[InvoiceStatus, set[InvoiceStatus]] = {
     # with no payment is exactly the stranding that decision removed — no later
     # ERP payment could land. It leaves only on the way to `paid`.
     InvoiceStatus.sent_to_erp: {InvoiceStatus.posted_in_erp},
-    InvoiceStatus.posted_in_erp: {
-        InvoiceStatus.payment_scheduled,
-        InvoiceStatus.done,
-    },
+    # No `posted_in_erp → done` either, for the same reason: the ERP holds the
+    # bill, and closing it to `done` with no payment strands it there.
+    InvoiceStatus.posted_in_erp: {InvoiceStatus.payment_scheduled},
     InvoiceStatus.payment_scheduled: {InvoiceStatus.paid, InvoiceStatus.approved},
     InvoiceStatus.paid: {InvoiceStatus.done, InvoiceStatus.approved},
     InvoiceStatus.done: set(),  # terminal

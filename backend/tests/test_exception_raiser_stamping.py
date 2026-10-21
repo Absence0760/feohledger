@@ -65,11 +65,6 @@ _NO_RAISING_ACTOR: dict[str, str] = {
         "the rail settled for an amount we did not book — the discrepancy is the "
         "processor's, arriving on a webhook"
     ),
-    "app/services/erp_reported_status.py": (
-        "raised on the ERP's word — the inbound ERP webhook (the tenant's ERP, "
-        "authenticated by HMAC) or the ERP status sweep's own read; no control-plane "
-        "user acted"
-    ),
     "app/api/payments.py": (
         "the sanctions/KYC screening verdict raised the hold, not the operator who "
         "dispatched the payment; two of the four call sites are unattended retry paths"
@@ -88,6 +83,12 @@ _NO_RAISING_ACTOR: dict[str, str] = {
 # vendor bank-detail change is what re-points the money, and the flag exists to
 # get a second pair of eyes on that act.
 _MUST_STAMP_AN_ACTOR: dict[str, str] = {
+    "app/services/erp_reported_status.py": (
+        "threads its caller's actor through: the voider of a payment on a bill the ERP "
+        "holds (decisions §303) is what that blocking flag asks someone else to check; "
+        "the webhook and status-sweep callers pass None, since a report on the ERP's "
+        "word is no control-plane user's act"
+    ),
     "app/api/vendors.py": (
         "the bank-change approver — the one raise site where the signed-in actor is "
         "genuinely what the flag asks someone else to check, and the axis the "

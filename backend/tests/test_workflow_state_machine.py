@@ -125,6 +125,8 @@ def test_a_pushed_invoice_leaves_sent_to_erp_only_on_the_way_to_paid():
     payment, the very stranding §303 removed. Its one way out is the posting
     the ERP's recorded payment walks through."""
     assert VALID_TRANSITIONS[InvoiceStatus.sent_to_erp] == {InvoiceStatus.posted_in_erp}
+    # Nor from `posted_in_erp`: the ERP still holds the bill there too.
+    assert VALID_TRANSITIONS[InvoiceStatus.posted_in_erp] == {InvoiceStatus.payment_scheduled}
 
 
 def test_rejected_can_only_target_review_or_new():
