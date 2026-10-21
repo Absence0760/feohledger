@@ -282,8 +282,10 @@ are the same traversal with different triggers.
 Objects are deleted **before** the caller commits. The DB row is the only thing
 that knows a document's storage key, so committing the null first and then
 failing the delete would orphan the object beyond any future reach — the same
-argument `services/tenant_deletion` makes for the whole-tenant case, in the same
-direction (documents → database).
+argument `services/tenant_deletion` makes for keeping the control-plane row
+(which names the storage prefix) until the documents are gone. (For a whole
+tenant the database now goes before the documents — decisions §294 — because
+there the prefix is the org id, which outlives the drop.)
 
 A pointer is nulled only for a key that actually went. A failed delete therefore
 leaves the row pointing at a real object, the next run retries it, and

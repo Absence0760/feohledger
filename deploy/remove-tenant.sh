@@ -12,7 +12,7 @@
 #
 #   1. Caddy host block + reload  — stop serving before anything is destroyed,
 #      so nobody meets a half-deleted tenant.
-#   2. scripts/delete_tenant.py   — documents, then the tenant DB, then the
+#   2. scripts/delete_tenant.py   — the tenant DB, then documents, then the
 #      control-plane rows (see that module for why THAT order).
 #   3. Backup objects             — last, because until the live data is gone
 #      the backups are still the thing you would restore from if a step failed.

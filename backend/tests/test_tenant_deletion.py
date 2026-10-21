@@ -119,7 +119,7 @@ class _FakePlan:
 
 
 @pytest.mark.asyncio
-async def test_documents_go_before_the_database_and_the_control_row():
+async def test_the_database_goes_first_then_documents_then_the_control_row():
     org_id = uuid.uuid4()
     plan = _FakePlan(
         organization_id=org_id,
@@ -134,7 +134,7 @@ async def test_documents_go_before_the_database_and_the_control_row():
     async def _sweep(prefix):
         assert prefix == f"{org_id}/"
         order.append("storage")
-        return 4
+        return 4 if order.count("storage") == 1 else 0
 
     async def _drop(db_name):
         assert db_name == "feoh_ordertest"
@@ -165,13 +165,90 @@ async def test_documents_go_before_the_database_and_the_control_row():
     ):
         result = await delete_tenant("ordertest")
 
-    assert order == ["storage", "database", "control"], (
-        "the control-plane row is the only place the object-storage prefix (the org "
-        "id) is written down — deleting it before the sweep would make the documents "
-        "unfindable if the sweep then failed"
+    assert order == ["database", "storage", "storage", "control"], (
+        "the database goes first, so a drop that fails leaves a whole workspace "
+        "rather than one whose files are gone (decisions §294); the sweep runs twice "
+        "for an object PUT mid-listing; and the control-plane row — the only place "
+        "the object-storage prefix is written down — goes last (decisions §179)"
     )
     assert result.objects_deleted == 4
     assert result.database_dropped is True
+
+
+@pytest.mark.asyncio
+async def test_a_drop_that_fails_leaves_the_documents_in_place():
+    org_id = uuid.uuid4()
+    plan = _FakePlan(
+        organization_id=org_id,
+        slug="dropfail",
+        name="Drop Fail",
+        db_name="feoh_dropfail",
+        database_exists=True,
+        control_rows={"users": 1},
+    )
+    sweep = AsyncMock(return_value=3)
+
+    async def _drop(db_name):
+        raise RuntimeError("database is being accessed by other users")
+
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
+        patch.object(tenant_deletion.storage, "delete_prefix", sweep),
+        patch.object(tenant_deletion, "_drop_postgres_database", _drop),
+        pytest.raises(RuntimeError),
+    ):
+        await delete_tenant("dropfail")
+    sweep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_object_put_after_the_first_listing_is_swept_by_the_second():
+    """An upload in flight when the database went may PUT its object after the
+    first listing; the second pass removes it, and nothing can commit after."""
+    org_id = uuid.uuid4()
+    plan = _FakePlan(
+        organization_id=org_id,
+        slug="latepu",
+        name="Late Put",
+        db_name="feoh_latepu",
+        database_exists=False,
+        control_rows={},
+    )
+    bucket = {f"{org_id}/a.pdf"}
+    passes = 0
+
+    async def _sweep(prefix):
+        nonlocal passes
+        passes += 1
+        found = {k for k in bucket if k.startswith(prefix)}
+        bucket.difference_update(found)
+        if passes == 1:
+            bucket.add(f"{org_id}/late.pdf")  # PUT lands after the listing
+        return len(found)
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def begin(self):
+            return self
+
+        async def execute(self, *_args, **_kwargs):
+            result = AsyncMock()
+            result.rowcount = 0
+            return result
+
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
+        patch.object(tenant_deletion.storage, "delete_prefix", _sweep),
+        patch.object(tenant_deletion, "control_session_factory", lambda: _Session()),
+    ):
+        result = await delete_tenant("latepu")
+    assert bucket == set()
+    assert result.objects_deleted == 2
 
 
 @pytest.mark.asyncio
@@ -312,7 +389,8 @@ async def test_delete_tenant_removes_every_trace_from_the_control_plane(
         with patch.object(tenant_deletion.storage, "delete_prefix", _sweep):
             result = await delete_tenant(slug)
 
-        assert swept == [f"{org_id}/"]
+        # Twice: the second pass catches an object PUT during the first listing.
+        assert swept == [f"{org_id}/", f"{org_id}/"]
         assert result.database_dropped is True
 
         async with mk() as s:

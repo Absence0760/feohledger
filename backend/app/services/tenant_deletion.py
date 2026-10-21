@@ -6,19 +6,28 @@ deletion destroys the tenant database, the control-plane organisation and user
 records, and the object-storage key prefix holding uploaded documents, within
 60 days. Clause 10 of the Terms says the same to the customer signing it.
 
-**The order is load-bearing, and it is not the obvious one.** Object storage
-first, then the database, then the control-plane rows:
+**The order is load-bearing, and it is not the obvious one.** The database
+first, then object storage, then the control-plane rows:
 
-    documents  →  feoh_<slug>  →  organizations / users / …
+    feoh_<slug>  →  documents  →  organizations / users / …
 
 The instinct is to remove the control-plane row first, because that is what
 makes a tenant reachable. Doing so is unrecoverable. Every object key is
 ``{org_id}/…`` and the organisation row is the only thing that knows that id —
 delete it and then fail on the sweep, and there is no longer any way to find
-the documents that were supposed to go. Ordered this way, every step is
-idempotent and a partial failure is simply re-run: the prefix sweep finds
-nothing, ``DROP DATABASE IF EXISTS`` is a no-op, and the control-plane
-transaction finishes the job.
+the documents that were supposed to go (decisions §179).
+
+The database goes before the documents (decisions §294, which reversed the
+original documents-first order). Both steps are irreversible, but only one
+order leaves a coherent state when the other fails: a database that would not
+drop after its documents were swept was a LIVE workspace whose invoices pointed
+at files that no longer existed, while documents that would not sweep after the
+drop belong to a workspace that is already unusable, under a prefix the org row
+still names, and a re-run removes them. Dropping first also means no upload can
+commit while the sweep runs, and the sweep makes a second pass for an object an
+in-flight request PUT after the first listing. Every step is idempotent and a
+partial failure is simply re-run: ``DROP DATABASE IF EXISTS`` is a no-op, the
+prefix sweep finds nothing, and the control-plane transaction finishes the job.
 
 The transient this trades for is real and accepted: between the database drop
 and the control-plane delete, the organisation row points at a database that is
@@ -275,22 +284,27 @@ async def delete_tenant(
 
     _assert_safe_db_name(plan.db_name)
 
-    # 1. Documents. Must precede the control-plane delete: the org id is the
-    #    prefix, and the org row is the only place it is written down.
-    prefix = f"{plan.organization_id}/"
-    objects_deleted = await storage.delete_prefix(prefix)
-    logger.info(
-        "[tenant-deletion] %s: removed %d object(s) under %s", slug, objects_deleted, prefix
-    )
-
-    # 2. The tenant database, with every invoice, vendor, payment and audit row
+    # 1. The tenant database, with every invoice, vendor, payment and audit row
     #    in it. WITH (FORCE) terminates live connections — a session still open
-    #    on a tenant being deleted must not be able to veto the deletion.
+    #    on a tenant being deleted must not be able to veto the deletion. First,
+    #    so a drop that fails leaves the workspace whole (see the docstring).
     database_dropped = False
     if plan.database_exists:
         await _drop_postgres_database(plan.db_name)
         database_dropped = True
         logger.info("[tenant-deletion] %s: dropped database %s", slug, plan.db_name)
+
+    # 2. Documents. Must precede the control-plane delete: the org id is the
+    #    prefix, and the org row is the only place it is written down. Two
+    #    passes: a request that was mid-upload when the database went may have
+    #    PUT its object after the first listing; nothing can commit a new one
+    #    now that the database is gone, so the second pass is the last word.
+    prefix = f"{plan.organization_id}/"
+    objects_deleted = await storage.delete_prefix(prefix)
+    objects_deleted += await storage.delete_prefix(prefix)
+    logger.info(
+        "[tenant-deletion] %s: removed %d object(s) under %s", slug, objects_deleted, prefix
+    )
 
     # 3. The control plane, in one transaction: either the tenant is gone from
     #    it or nothing changed, never a half-deleted org.
