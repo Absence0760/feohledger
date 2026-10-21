@@ -12911,7 +12911,7 @@ Tests: `frontend/src/lib/i18n/slices.test.ts`,
 `test_erp_catalog.py` / `test_commerce_adapters.py`, which now read the
 settings slice for the form labels they check.
 
-## 294. An administrator can close an unused workspace, which releases its addresses; anything that must be kept goes to support (migration 0117, 2026-10-20)
+## 294. An administrator can close an unused workspace, which releases its addresses; anything that must be kept goes to support (migrations 0117, 0118, 2026-10-20)
 
 **The dead end.** Since §291 an address names one account in one workspace.
 Someone who signs up with an address, abandons the trial, and is later added to
@@ -12919,145 +12919,229 @@ another workspace with it is refused `email_in_other_workspace`, and deleting a
 workspace was operator-only (`scripts/delete_tenant.py`), so the only way out
 was support. Reproduced end to end in `backend/tests/test_workspace_closure.py`
 (provision a trial, refuse the address in a second workspace, close the trial,
-accept the address). Phase 0 of #614; it does not depend on multi-workspace
-membership.
+accept the address; and through signup: the same address signs up again, §292's
+refusal no longer finding it). Phase 0 of #614; it does not depend on
+multi-workspace membership.
 
 **The call: a self-service close for an administrator, fail-closed to the
 unused workspace, and nothing else.** `POST /api/organization/close` (admin
 role, not a permission: closing is not a splittable duty). It deletes the
-workspace through `services/tenant_deletion.delete_tenant` unchanged —
-documents, tenant database, control-plane rows — and deleting the user rows is
-what frees the addresses. It is refused, by stable code, whenever the workspace
-holds:
+workspace through `services/tenant_deletion.delete_tenant`, and deleting the
+user rows is what frees the addresses. `GET` is the preflight the page reads
+first: the blockers, and — so the irreversible action is an informed one — a
+count per class of what WILL be deleted (invoices, vendors, purchase orders,
+credit memos, expense reports, contracts, exceptions, deactivated accounts).
+
+**What refuses it**, each by a stable code the page states, and the way forward
+for every one is support:
 
 - records with a retention obligation or an effect outside the workspace: an
   approved invoice (status past review, or `approved_by` set, which also
-  catches an approved invoice whose ERP send failed), any payment, payment run
-  or virtual card, an applied credit memo, an approved or reimbursed expense
-  report, imported card transactions or bank statements, 1099 filings, VAT /
-  GST / withholding records, Positive Pay files, sent or received e-invoices,
-  goods receipts, stock pushed to a commerce platform, a contract that has
-  been in force, an accepted early-payment discount, an approved supplier
-  bank or tax change, and a data-subject request record;
+  catches one whose ERP send failed); any payment, payment run or virtual card;
+  an applied credit memo; an approved or reimbursed expense report or an
+  approved spend pre-approval; imported card transactions or bank statements;
+  supplier statement reconciliations (`backend/docs/privacy.md` keeps their
+  files as evidence); 1099 filings, VAT / GST / withholding records, Positive
+  Pay files, sent or received e-invoices; a purchase order that has been
+  received or closed; an approved or converted requisition or intake request;
+  goods receipts and stock pushed to a commerce platform; a contract that was
+  ever in force; an accepted discount; an approved supplier bank or tax change;
+  a data-subject request record;
 - other people's accounts: another **active** user (another administrator can
   remove the caller instead, which frees the address the same way), or a
   supplier-portal login;
 - a commercial relationship: a live subscription the billing provider knows
   about, or an active / past-due one on a priced plan; a partner parent or a
-  partner-managed child (the partner closes it);
+  partner-managed child;
 - operator-side state: a registered custom domain;
+- a deployment that cannot keep the promises below: MFA switched off in a
+  deployed environment (`require_sensitive_step_up` would refuse every attempt,
+  so the page says so up front), no real write-once audit archive configured
+  (shipping off, no sink, or `mock` among the sinks), or `lambda` audit mode
+  (an audit row can still be in SQS, invisible and undrainable per tenant, when
+  the database is dropped; tracked in `docs/followups.md`). Local dev and CI
+  are exempt, as from every MFA check (guard rail 7);
 - and, fail-closed, any check that cannot be evaluated (`records_unverifiable`).
 
-Deliberately **not** blockers, because a trial plausibly holds them and
-nothing is lost that exists nowhere else: vendors, GL accounts and purchase
-orders (typically pulled from an ERP, which stays the record), draft or
-rejected work of every kind, exceptions, and sanctions-screening results
-(evidence that matters once a payment exists, which blocks on its own). The
-tenant's audit log goes with it; where audit shipping is on it is shipped to
-the archive first (below), and where it is off — local dev, or a deployment
-that never enabled it — the control-plane closure row is the only record that
-survives, which is the same as an operator deletion today.
+**Every tenant table is decided, not remembered.** `TENANT_CHECKS` and
+`CLOSURE_ALLOWED` (table → reason, the shape of
+`tenant_deletion.CONTROL_TABLES_EXEMPT`) together cover every tenant table
+exactly once, and a test fails on a table in neither, so the next table cannot
+reach a closure without someone deciding whether it is a record that must be
+kept. Allowed, with the reasons in the code: children of a guarded parent;
+master and reference data (vendors, GL accounts, entities, policies, budgets,
+catalogues) — a trial plausibly holds them, and an approved bank change blocks
+on its own; configuration (workflows, reports, mappings, templates — every
+invoice a template generated is guarded as an invoice); open, draft, rejected
+and cancelled work of every kind, including an **untouched purchase order**:
+native POs exist (`requisition_service.convert_requisition_to_po`, a
+contract's create-PO, intake) and others are pulled from an ERP, but an order
+nothing has happened to records an intent to buy, while everything that makes
+it a transaction — a receipt, an approved requisition, a contract in force, an
+approved invoice, a payment — blocks; exceptions and agent decisions (a cleared
+payment-blocking exception matters once a payment exists, which blocks);
+sanctions-screening results (the same); notifications and chat history; and
+the audit log itself, shipped and sealed first (below).
 
-The refusal names its blockers and the page says support closes it. The
-blockers are the line between "a trial nobody used" and "a ledger someone
-kept"; the second is the customer's financial record, and destroying it on one
-administrator's say-so — or one stolen session's — is not a self-service
-action. The DPA § 13 deletion path still serves it, through support.
+**A contract's evidence is `activated_at`, not its status.** `/cancel` is
+allowed from `active`, so a contract that bound the parties could read as a
+draft; `signed_date` is optional input. Migration 0118 adds `activated_at`,
+stamped on first activation and never cleared, backfilled from the first
+`contract.active` audit row, else from a status that says the contract has
+been in force.
 
-**What makes it safe to hand to a customer.**
-1. **A second factor, not the password**: `require_sensitive_step_up`
-   (operation `workspace_close`), as the unmasked DSAR export (§182) uses. An
-   account with no second factor is refused, not exempted; enrolling one needs
-   no step-up. The cost is that an abandoned-trial owner enrolls an
-   authenticator or passkey once before closing, which we accept for an action
-   that cannot be undone. The slug is typed back first.
-2. **Nothing checked can change before the delete.** The control-plane checks
-   run under `FOR UPDATE` on the organisation row, held until the control-plane
-   rows are deleted in that same transaction (`delete_tenant(control_session=…)`):
-   every insert referencing the organisation — an invite, a SCIM or SSO
-   provision, a subscription — takes `FOR KEY SHARE` on that row for its
-   foreign key, and every `settings` writer takes `FOR UPDATE`, so all of them
-   wait. An UPDATE of a row that already exists does not touch the org row (a
-   billing webhook moving the free subscription onto a priced plan, a user
-   reactivated), so the organisation's `subscriptions` and `users` rows are
-   locked `FOR UPDATE` as well. The tenant checks run again in a transaction holding `SHARE` locks on
-   every guarded table, kept open until `DROP DATABASE … WITH (FORCE)`
-   terminates it, so no approval or payment can land in between. Either lock
-   not coming within 5 s is `records_unverifiable`, and an unrelated writer
-   that collides with the table locks can fail its own transaction — accepted,
-   for a workspace the guards say is unused. Two closures of one workspace
-   serialize on a transaction-scoped advisory lock (`409
-   workspace_close_in_progress`). The control-plane transaction stays open
-   while documents are swept and the database dropped; a server-side
-   `idle_in_transaction_session_timeout` (none is set today) killing it would
-   end as `workspace_close_incomplete`, which the resume path finishes. The
-   route also checks the account belongs to
-   the workspace itself, since `get_tenant` skips a token with no `org` claim.
-3. **A record that outlives the tenant.** The tenant's audit log dies with its
-   database, so an `organization.closing` row is written there and, where audit
-   shipping is on, the tenant's whole unshipped trail is flushed to the
-   write-once archive (`audit_log_shipper.flush_tenant`) before anything is
-   deleted; a failure refuses with `503 workspace_close_audit_unavailable` and
-   deletes nothing. A control-plane `workspace_closures` row (migration 0117;
-   no foreign keys, no address, no name — ids, slug, proof, counts) records the
-   closure independently of shipping being configured, and is exempt from the
-   tenant deletion it describes (`CONTROL_TABLES_EXEMPT`). It reads `completed`
-   in the same transaction that deletes the organisation, so the two cannot
-   disagree.
-4. **Resumable.** If the deletion fails part-way it answers `503
-   workspace_close_incomplete`; a retry finishes it. A retry whose database is
-   already gone, with a `started` closure row, goes straight to the deletion
-   instead of refusing on a database it cannot read.
+**The step-up is a second factor, not the password**: `require_sensitive_step_up`
+(operation `workspace_close`), as the unmasked DSAR export uses (§182). An
+account with no second factor is refused, not exempted; enrolling one needs no
+step-up. The slug is typed back first.
 
-**The backup leg stays the operator's.** The API cannot reach the backup
-bucket, and `/legal/dpa` § 13 promises backups go within 60 days. The closure
-row's `backups_cleared_at` is the queue: `scripts/workspace_closures.py list`,
-then `deploy/remove-tenant.sh <slug>` (its backup and Caddy legs run on a tenant
-that is already gone), then `mark-cleared <organization-id>`
-(`docs/founder-runbooks/workspace-closure.md`). Until then the slug stays taken
-(`utils/slug.ensure_slug_available`, so signup and partner provisioning): a new
-workspace under it would reuse `feoh_<slug>`, and its nightly dumps would share
-the closed one's name — removing one would remove both.
+**Nothing checked can change before the delete.** The control-plane checks run
+under `FOR UPDATE` on the organisation row, held until the control-plane rows
+are deleted in that same transaction (`delete_tenant(control_session=…)`):
+every insert referencing the organisation — an invite, a SCIM or SSO provision,
+a subscription — takes `FOR KEY SHARE` on that row for its foreign key, and
+every `settings` writer takes `FOR UPDATE`, so all of them wait. An UPDATE of a
+row that already exists does not touch the organisation row (a billing webhook
+moving the free subscription onto a priced plan, a reactivated user), so the
+organisation's `subscriptions` and `users` rows are locked too. **The actor is
+re-validated under that lock** — still present, active, in the organisation
+and an admin — and refused (`403 workspace_close_actor_not_admin`) if not. The
+tenant checks run again in a transaction holding `SHARE` locks on every guarded
+table, kept open until `DROP DATABASE … WITH (FORCE)` terminates it. Either
+lock not coming within 5 s is `records_unverifiable`; an unrelated writer that
+collides with the table locks can fail its own transaction, accepted for a
+workspace the guards say is unused. Two closures serialize on a
+transaction-scoped advisory lock (`409 workspace_close_in_progress`). The
+control-plane transaction stays open across the drop and the document sweep; a
+server-side `idle_in_transaction_session_timeout` (none is set) killing it would
+end as `workspace_close_incomplete`, which the resume path finishes. The route
+also checks the account belongs to the workspace, since `get_tenant` skips a
+token with no `org` claim.
+
+**No audit row is lost with the database.** An `organization.closing` row is
+written first, synchronously in every audit mode, carrying the source IP and
+the actor's role names the way auth rows carry an IP. Where shipping is on, the
+process's queued audit writes are awaited (`audit_dispatch.settle_auth_audits`),
+the tenant's trail is flushed to the archive (`audit_log_shipper.flush_tenant`),
+and the table is then **sealed**: `LOCK TABLE audit_log IN EXCLUSIVE MODE` on a
+connection held until the drop. If a row committed between the flush and the
+seal it is seen under the seal, which is released and the round repeats (three
+rounds, then refuse). After the seal a write waits and fails with the database,
+which `audit_dispatch` reports at ERROR — a write that never committed, never a
+committed row the archive lacks. Any failure here is `503
+workspace_close_audit_unavailable` with nothing deleted, and is logged with ids
+only rather than audited into the tenant, because the audit path is what just
+failed.
+
+**The record that outlives the tenant** is a control-plane `workspace_closures`
+row (migration 0117; no foreign keys, no address, no name, no IP — ids, slug,
+the requester's role names, proof, counts). It reads `completed` in the same
+transaction that deletes the organisation. Refusals and a closure already
+running are audited into the tenant's own log (it still exists); a closure that
+fails part-way records the exception class on the row (`last_failure`, the
+tenant's log may be gone) and an id-only ERROR line. Its downgrade is a
+deliberate no-op: the rows are the only evidence of deletions that happened and
+the operator's backup queue.
+
+**The deletion order changes for every caller: database, then documents, then
+the control plane.** §179 put documents first; the reasoning there was only
+that the control-plane row (which names the storage prefix) must go last, and
+that still holds. But documents-first meant a drop that failed left a LIVE
+workspace whose invoices pointed at deleted files. Database-first, a failed drop
+leaves the workspace whole, and a failed sweep leaves a workspace that is
+already unusable under a prefix the org row still names, which a re-run (or the
+closure's resume path: database gone plus a `started` row) finishes. With the
+database gone no upload can commit, and the sweep makes a second pass for an
+object an in-flight request PUT during the first listing. `scripts/delete_tenant.py`
+and `deploy/remove-tenant.sh` inherit it unchanged otherwise.
+
+**After the commit**, the deleted accounts' Redis state is cleared
+(`services/credential_cleanup`): live sessions blocklisted and their set and
+metadata deleted, a pending TOTP enrollment, an email OTP, passkey challenges,
+and any unspent reset / set-password link (found by scanning the reset prefix,
+since those keys are digests of the token). Best-effort: the tokens are already
+inert against deleted user rows.
+
+**The slug is held** — by `utils/slug.ensure_slug_not_held`, called from
+`provision_tenant` itself so signup, partner provisioning and the operator CLI
+behind `deploy/add-tenant.sh` all get it — until an operator has removed the
+backups (a new tenant would reuse `feoh_<slug>`, and removing the old dumps
+would remove the new) **and** `CLOSED_SLUG_COOLDOWN` (90 days, covering the
+backup retention cycle and so beyond the DPA's 60-day window) has passed, so
+bookmarks, IdP redirect URIs, invite and approval emails cannot point at a new
+owner early. Signup states it with its own code, `signup_slug_held`, not "taken".
+`scripts/workspace_closures.py list` is the operator's queue (owed backups, and
+closures that never finished); `mark-cleared <organization-id> --operator
+<handle>` records who removed them and when (runbook:
+`docs/founder-runbooks/workspace-closure.md`).
+
+**A reused slug inherits nothing addressed to its old owner.** PEPPOL inbound
+was the one route where it would have: the signing key is platform-wide, so the
+path was the only binding, and it named the slug. It now names the organisation
+id (`POST /api/peppol/inbound/{organization_id}`), which no later tenant can
+hold; a delivery addressed by slug is the silent 204 of an unknown tenant. The
+siblings were checked: email / Slack / Teams approval tokens name a user and an
+invoice that exist only in the closed tenant (refused, tested); payment, card
+and ERP webhooks verify a per-tenant secret deleted with the organisation;
+punch-out returns match a session in the tenant database; email intake keys on
+a per-tenant random token. None was changed.
+
+**The sign-in page of a closed workspace** renders its notice
+(`/login?reason=workspace_closed`) from the URL alone; its only calls, the SSO
+and SAML config probes, answer 404 for the deleted tenant, which the page
+already treats as "no SSO" (tested against a really-deleted tenant).
 
 **Rejected: a sweep deleting unverified or abandoned trials past N days.**
-Unverified signups never become accounts (§283: the workspace is provisioned
-only at `/signup/complete`), so they hold no address and there is nothing to
-release. A verified-but-idle workspace is a customer's data under the DPA,
-deleted on the customer's instruction or after termination plus notice, and
-"idle" is not an instruction: nothing in the code records a trial as ended
-(the baseline subscription is the free plan, `active`, with no `trial_end`), so a
-sweep would be choosing on its own which customers to delete, unattended and
-irreversibly. It also is not needed for the dead end, because whoever is
-refused controls the address and can sign in to the abandoned workspace
-(forgot-password works for a passwordless signup admin) and close it. Leaving
-abandoned workspaces forever is a separate, storage-limitation question,
-tracked in `docs/followups.md`.
+Unverified signups never become accounts (the workspace is provisioned only at
+`/signup/complete`), so they hold no address. A verified-but-idle workspace is a
+customer's data under the DPA, deleted on the customer's instruction or after
+termination plus notice, and "idle" is not an instruction: nothing records a
+trial as ended (the baseline subscription is the free plan, `active`, with no
+`trial_end`). It is not needed for the dead end either: whoever is refused
+controls the address and can sign in to the abandoned workspace and close it.
+Abandoned workspaces kept forever are a storage-limitation question, tracked in
+`docs/followups.md`.
 
-**Rejected: a support runbook only.** It is the status quo the dead end
-describes, and it costs an operator a destructive manual run for the most common
-case — an empty trial — that the guards above make safe to self-serve.
+**Rejected: a support runbook only** — the status quo, at the cost of an
+operator's destructive manual run for the commonest case, an empty trial.
 
 **Rejected: the password as the step-up.** Factor management accepts it (§191)
 because what it protects is the factor; here the output is the destruction of
-everything in the workspace, which is the DSAR export's reasoning, not the
-factor change's.
+everything in the workspace, which is the DSAR export's reasoning.
 
-**Also changed:** the `email_in_other_workspace` sentence now says the other
-workspace's administrator can close it to free the address — the remedy the
-inviter can pass on without learning anything new about the other workspace.
+**Also changed:** the `email_in_other_workspace` sentence says the other
+workspace's administrator can close it to free the address.
 
-Numbered §294 on the assumption that #611 and #612 land as §292 and §293.
+**Where its strings live (§300).** The panel's strings are `org.close.*` and
+`org.section.close`, in the settings slice that /organization loads. Everything a
+route without that slice can render stays in the main catalogue: the coded
+refusals (`refusal.workspaceClose*`, `refusal.signupSlugHeld`), and the
+`/login?reason=workspace_closed` notice. `api/codedRefusals.ts` reads a refusal's
+blocker list through the key-free `types/workspaceClosureRefusal.ts`, never
+`types/workspaceClosure.ts`, so the registry every route imports names no slice
+key (`i18n/slices.test.ts`).
+
+#611 landed as §292. §293 is reserved for #612, still open.
 
 Tests: `backend/tests/test_workspace_closure.py` (each record class through a
-real row built from the model, what must NOT block, each control-plane blocker,
-admin-only and unauthenticated refusals, the dead end released, the token
-dead after, the confirmation, a record written after the preflight still
-refused under lock with its audit row, a second user, the concurrency lock, an
-unshippable trail deleting nothing, the trail shipped before the drop, a
-half-finished closure finished by a retry, the second factor with MFA on, the
-operator queue keyed by organisation id, the slug held until backups go, a
-tenant write and a user invite each held off by the locks until the delete, and
-a token with no workspace claim), `backend/tests/test_migration_0117_workspace_closures.py`,
+real row built from the model; what must not block; the table classification;
+each control-plane and deployment blocker; the inventory; admin-only and
+unauthenticated refusals; the dead end released through admin create and
+through signup; the resting slug's own code at slug-check and `/complete`; the
+closed workspace's spent link as the uniform 410; the confirmation; the actor
+re-validated under the lock; a record written after the preflight refused under
+lock with its audit row; the concurrency lock and its audit row; an unshippable
+trail, a trail that keeps growing, and a row committed between flush and seal;
+a drop that fails leaving the documents, recorded and finished by a retry; the
+resume path; the second factor with MFA on; Redis cleared; the closed sign-in
+page's probes; the operator queue, `--operator` and the cooldown; the operator
+CLI refused a held slug; a reused slug inheriting no approval email; a token
+with no workspace claim; a tenant write, an invite and a subscription or user
+update each held off until the delete), `backend/tests/test_tenant_deletion.py`
+(the order, a failed drop leaving documents, the second pass),
+`backend/tests/test_peppol_inbound.py` (a slug addresses nothing),
+`backend/tests/test_migration_0117_workspace_closures.py`,
+`backend/tests/test_migration_0118_contract_activated_at.py`,
 `backend/tests/test_audit_log_shipper.py` (`flush_tenant`),
 `frontend/src/lib/types/workspaceClosure.test.ts`,
 `frontend/src/lib/api/codedRefusals.test.ts`,
