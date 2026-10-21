@@ -1,7 +1,10 @@
 <script lang="ts">
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
+	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
+	import { tick } from 'svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -21,29 +24,36 @@
 	let confirmPassword = $state('');
 	let error = $state('');
 	let submitting = $state(false);
+	let submitted = $state(false);
+	let currentInput = $state<HTMLInputElement | null>(null);
+	let newFields = $state<ReturnType<typeof NewPasswordFields> | null>(null);
+	// The server's refusals of one field, shown beside it until it is edited:
+	// a wrong current/temporary password (400), a new password it would not
+	// take (422). Anything else is not about a field and goes in the banner.
+	let currentServerError = $state('');
+	let newServerError = $state('');
 
-	let strengthHints = $derived.by(() => {
-		const hints: Array<{ label: string; ok: boolean }> = [];
-		hints.push({ label: m('auth.changePassword.strength.length'), ok: newPassword.length >= 12 });
-		hints.push({ label: m('auth.changePassword.strength.upper'), ok: /[A-Z]/.test(newPassword) });
-		hints.push({ label: m('auth.changePassword.strength.lower'), ok: /[a-z]/.test(newPassword) });
-		hints.push({ label: m('auth.changePassword.strength.digit'), ok: /[0-9]/.test(newPassword) });
-		return hints;
-	});
-
-	let allStrong = $derived(strengthHints.every((h) => h.ok));
+	// A forced change (an admin-created account, or an admin reset) is signed
+	// in with the temporary password from the email — the user has never had
+	// a "current" password, so the field says which one it wants.
+	let forced = $derived(auth.user?.must_change_password ?? false);
+	let currentError = $derived(
+		submitted && currentPassword === ''
+			? forced
+				? m('auth.changePassword.temporaryRequired')
+				: m('auth.changePassword.currentRequired')
+			: currentServerError
+	);
 
 	async function onSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
-		if (newPassword !== confirmPassword) {
-			error = m('auth.changePassword.mismatch');
-			return;
-		}
-		if (!allStrong) {
-			error = m('auth.changePassword.tooWeak');
-			return;
-		}
+		submitted = true;
+		// Every field is marked at once; focus goes to the first bad one.
+		const currentOk = currentPassword !== '';
+		const newOk = newFields?.validate(currentOk) ?? false;
+		if (!currentOk) currentInput?.focus();
+		if (!currentOk || !newOk) return;
 		submitting = true;
 		try {
 			await api.post<UserResponse>('/api/auth/change-password', {
@@ -55,7 +65,21 @@
 			// opening (the root layout passes it as `?next=`).
 			goto(postLoginTarget(nextFromParams(page.url.searchParams)));
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('auth.changePassword.failed');
+			// The one 400 this endpoint raises is a wrong current password; a 422
+			// is the new password refused (`api/auth.py::change_password`).
+			if (err instanceof ApiError && err.status === 400) {
+				currentServerError = forced
+					? m('auth.changePassword.temporaryIncorrect')
+					: m('auth.changePassword.currentIncorrect');
+				await tick();
+				currentInput?.focus();
+			} else if (err instanceof ApiError && err.status === 422) {
+				newServerError = err.message;
+				await tick();
+				newFields?.focusNew();
+			} else {
+				error = err instanceof Error ? err.message : m('auth.changePassword.failed');
+			}
 		} finally {
 			submitting = false;
 		}
@@ -71,7 +95,7 @@
 </svelte:head>
 
 <AuthShell>
-	<form class="change-form" onsubmit={onSubmit}>
+	<form class="change-form" onsubmit={onSubmit} novalidate>
 		<div class="head">
 			<BrandMark size={40} />
 			<h1>{m('auth.changePassword.heading')}</h1>
@@ -106,45 +130,32 @@
 			aria-hidden="true"
 		/>
 
-		<label>
-			<span>{m('auth.changePassword.currentPassword')}</span>
-			<input
-				type="password"
-				bind:value={currentPassword}
-				required
-				autocomplete="current-password"
-			/>
-		</label>
+		<PasswordInput
+			id="change-current"
+			label={forced
+				? m('auth.changePassword.temporaryPassword')
+				: m('auth.changePassword.currentPassword')}
+			bind:value={currentPassword}
+			bind:input={currentInput}
+			autocomplete="current-password"
+			required
+			error={currentError}
+			oninput={() => (currentServerError = '')}
+		/>
 
-		<label>
-			<span>{m('auth.changePassword.newPassword')}</span>
-			<input
-				type="password"
-				bind:value={newPassword}
-				required
-				autocomplete="new-password"
-				minlength="12"
-			/>
-		</label>
+		<NewPasswordFields
+			bind:this={newFields}
+			idPrefix="change"
+			newLabel={m('auth.changePassword.newPassword')}
+			confirmLabel={m('auth.changePassword.confirmPassword')}
+			bind:newPassword
+			bind:confirmPassword
+			bind:serverError={newServerError}
+		/>
 
-		<ul class="strength">
-			{#each strengthHints as hint}
-				<li class:ok={hint.ok}>{hint.ok ? '✓' : '·'} {hint.label}</li>
-			{/each}
-		</ul>
-
-		<label>
-			<span>{m('auth.changePassword.confirmPassword')}</span>
-			<input
-				type="password"
-				bind:value={confirmPassword}
-				required
-				autocomplete="new-password"
-				minlength="12"
-			/>
-		</label>
-
-		<button type="submit" disabled={submitting || !allStrong || newPassword !== confirmPassword}>
+		<!-- Enabled whatever is typed: a submit says what is wrong, beside the
+		     field. A disabled button said nothing at all (issue #635 #14). -->
+		<button type="submit" disabled={submitting}>
 			{submitting ? m('auth.changePassword.submitting') : m('auth.changePassword.submit')}
 		</button>
 
@@ -154,8 +165,8 @@
 
 <style>
 	/* Field chrome, the submit button, the error banner and the entrance come
-	   from AuthShell; this is only the strength checklist and the sign-out
-	   escape hatch. */
+	   from AuthShell; the new-password pair and its checklist from
+	   NewPasswordFields. This is only the sign-out escape hatch. */
 	.change-form {
 		display: flex;
 		flex-direction: column;
@@ -173,30 +184,6 @@
 		font-size: 0.93rem;
 		line-height: 1.55;
 		color: var(--text-muted);
-	}
-	.strength {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 6px 12px;
-		margin: -6px 0 0;
-		padding: 0;
-		list-style: none;
-		font-size: 0.8rem;
-		color: var(--text-muted);
-	}
-	.strength li {
-		transition: color 0.2s;
-	}
-	/* --success, not the old literal #2e9960: a hint turning green is the one
-	   state change on this page, and the token is what is calibrated against
-	   --bg (6.17:1). */
-	.strength li.ok {
-		color: var(--success);
-	}
-	@media (max-width: 420px) {
-		.strength {
-			grid-template-columns: 1fr;
-		}
 	}
 	.secondary {
 		min-height: 46px;

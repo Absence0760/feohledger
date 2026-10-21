@@ -116,6 +116,39 @@ test.describe('/login/reset-password', () => {
 		await expect(success).toBeFocused();
 	});
 
+	test('a mismatched confirmation is named beside the field on submit, and nothing is sent', async ({
+		page
+	}) => {
+		// #635 #14: Submit used to stay disabled until the two matched, so this
+		// message could never appear. Now Submit is enabled and says why.
+		await stubCheck(page, 'someone@acme.example');
+		let posted = false;
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) => {
+				posted = true;
+				return route.fulfill({ json: { message: 'ok' } });
+			}
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+
+		const newPw = page.getByLabel('New password', { exact: true });
+		const confirm = page.getByLabel('Confirm new password', { exact: true });
+		await newPw.fill('BrandNewPassw0rd!42');
+		await confirm.fill('BrandNewPassw0rd!43');
+		const submit = page.getByRole('button', { name: /Reset password/i });
+		await expect(submit).toBeEnabled();
+		await submit.click();
+
+		await expect(confirm).toBeFocused();
+		await expect(confirm).toHaveAttribute('aria-invalid', 'true');
+		await expect(confirm).toHaveAccessibleDescription('Passwords do not match.');
+		await expect(newPw).not.toHaveAttribute('aria-invalid', 'true');
+		// Still the form: the refusal was the page's own, not the server's.
+		await expect(page.locator('input[autocomplete="new-password"]')).toHaveCount(2);
+		expect(posted).toBe(false);
+	});
+
 	test('opening the link (again and again) never redeems it — only the submit does', async ({
 		page
 	}) => {
@@ -225,6 +258,30 @@ test.describe('/login/reset-password', () => {
 		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
 		await expect(page.locator('input[type="password"]')).toHaveCount(2);
 		await expect(page.getByText(/invalid or has expired/i)).toHaveCount(0);
+	});
+
+	test('a new password the server refuses is named beside the field, not in the banner', async ({
+		page
+	}) => {
+		await stubCheck(page, 'weak@acme.example');
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) =>
+				route.fulfill({ status: 422, json: { detail: 'Password must contain a digit.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+
+		const newPw = page.getByLabel('New password', { exact: true });
+		await newPw.fill('BrandNewPassw0rd!42');
+		await page.getByLabel('Confirm new password', { exact: true }).fill('BrandNewPassw0rd!42');
+		await page.getByRole('button', { name: /Reset password/i }).click();
+
+		await expect(newPw).toBeFocused();
+		await expect(newPw).toHaveAttribute('aria-invalid', 'true');
+		await expect(newPw).toHaveAccessibleDescription(/^Password must contain a digit\./);
+		// Editing the field clears the server's verdict on the old value.
+		await newPw.fill('BrandNewPassw0rd!43');
+		await expect(newPw).not.toHaveAttribute('aria-invalid', 'true');
 	});
 
 	test('set mode: a password manager can save the new password under the account', async ({

@@ -3049,7 +3049,6 @@ export const messages = {
 	'auth.resetPassword.submitting': 'Réinitialisation...',
 	'auth.resetPassword.success':
 		'Votre mot de passe a été réinitialisé. Vous pouvez maintenant vous connecter.',
-	'auth.resetPassword.mismatch': 'Les mots de passe ne correspondent pas.',
 	'auth.resetPassword.missingToken':
 		"Ce lien de réinitialisation n'a pas de jeton. Veuillez utiliser le lien de votre e-mail.",
 	'auth.resetPassword.invalidToken':
@@ -3159,6 +3158,16 @@ export const messages = {
 	'auth.changePassword.tooWeak': 'Le mot de passe ne respecte pas les exigences de complexité.',
 	'auth.changePassword.failed': 'Échec du changement de mot de passe.',
 	'auth.changePassword.currentPassword': 'Mot de passe actuel',
+	'auth.changePassword.temporaryPassword': 'Mot de passe temporaire (reçu par e-mail)',
+	'auth.changePassword.currentRequired': 'Saisissez votre mot de passe actuel.',
+	'auth.changePassword.temporaryRequired': 'Saisissez le mot de passe temporaire reçu par e-mail.',
+	'auth.changePassword.currentIncorrect': "Ce n'est pas votre mot de passe actuel.",
+	'auth.changePassword.temporaryIncorrect': "Ce n'est pas le mot de passe temporaire reçu par e-mail.",
+	'auth.password.show': 'Afficher le mot de passe',
+	'auth.password.rulesLead': 'Votre nouveau mot de passe doit contenir :',
+	'auth.password.ruleMet': 'respecté',
+	'auth.password.ruleUnmet': 'pas encore respecté',
+	'auth.password.confirmRequired': 'Saisissez à nouveau le nouveau mot de passe.',
 	'auth.changePassword.newPassword': 'Nouveau mot de passe',
 	'auth.changePassword.confirmPassword': 'Confirmer le nouveau mot de passe',
 	'auth.changePassword.strength.length': 'au moins 12 caractères',

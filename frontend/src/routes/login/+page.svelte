@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
@@ -179,10 +180,13 @@
 				<span>{m('auth.login.email')}</span>
 				<input type="email" bind:value={email} required autocomplete="username" />
 			</label>
-			<label>
-				<span>{m('auth.login.password')}</span>
-				<input type="password" bind:value={password} required autocomplete="current-password" />
-			</label>
+			<PasswordInput
+				id="login-password"
+				label={m('auth.login.password')}
+				bind:value={password}
+				required
+				autocomplete="current-password"
+			/>
 
 			<button type="submit" disabled={loading}>
 				{loading ? m('auth.login.signingIn') : m('auth.login.signIn')}

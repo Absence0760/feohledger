@@ -1093,6 +1093,19 @@ inherit it for free. Reuse these; don't re-solve them per page.
   forgot/reset-password pages do. Guard: `src/lib/a11y/liveRegionAudit.test.ts`
   (Svelte-AST scan of every `{#if}`-rendered `error` / `message` / `msg` /
   `success` element; the two non-feedback matches are an explained allowlist).
+- **Field validation** (WCAG 3.3.1, 3.3.3) — keep Submit **enabled** and
+  validate on submit: a Submit disabled until the form is valid gives no reason,
+  and any message it guards can never appear (issue #635 #14). On submit, mark
+  every bad field (`aria-invalid`, its message beside it and first in its
+  `aria-describedby`) and move focus to the first one — focus is what reads the
+  message, so don't also put it in a live region. A server refusal that is
+  about one field (a wrong current password, a refused new one) goes beside
+  that field the same way and clears when it is edited; only what belongs to
+  no field stays in the banner. A message that appears while focus is elsewhere
+  (a confirmation mismatch shown on blur) is the one case for a polite live
+  region, rendered empty up front. Reference: `auth/PasswordInput.svelte`,
+  `auth/NewPasswordFields.svelte`, `/change-password`. Help text such as a
+  rules checklist is linked by `aria-describedby` too, after the error.
 - **Tabs** (`ui/Tabs.svelte`; WAI-ARIA tabs) — roving `tabindex`
   (active=0, others=-1) + Arrow/Home/End key navigation, plus the
   existing `role=tablist/tab` + `aria-selected` + `aria-controls`. The

@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import AuthCard from '#lib/components/auth/AuthCard.svelte';
+	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
 	import { api, ApiError } from '#lib/api.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { signInHref } from '#lib/utils/prefillEmail.ts';
@@ -22,6 +23,9 @@
 	let confirmPassword = $state('');
 	let error = $state('');
 	let submitting = $state(false);
+	let newFields = $state<ReturnType<typeof NewPasswordFields> | null>(null);
+	// A new password the server refused (422), shown beside its field.
+	let newServerError = $state('');
 	let successEl = $state<HTMLParagraphElement | null>(null);
 	let invalidEl = $state<HTMLDivElement | null>(null);
 	// The link died on submit rather than on load: the explanation is then
@@ -62,19 +66,6 @@
 		}
 	}
 
-	// Same complexity checklist `routes/change-password/+page.svelte` shows —
-	// reused message keys so the two forms don't drift on wording.
-	let strengthHints = $derived.by(() => {
-		const hints: Array<{ label: string; ok: boolean }> = [];
-		hints.push({ label: m('auth.changePassword.strength.length'), ok: newPassword.length >= 12 });
-		hints.push({ label: m('auth.changePassword.strength.upper'), ok: /[A-Z]/.test(newPassword) });
-		hints.push({ label: m('auth.changePassword.strength.lower'), ok: /[a-z]/.test(newPassword) });
-		hints.push({ label: m('auth.changePassword.strength.digit'), ok: /[0-9]/.test(newPassword) });
-		return hints;
-	});
-
-	let allStrong = $derived(strengthHints.every((h) => h.ok));
-
 	let heading = $derived(
 		setMode ? m('auth.resetPassword.setHeading') : m('auth.resetPassword.heading')
 	);
@@ -82,13 +73,9 @@
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
-		if (newPassword !== confirmPassword) {
-			error = m('auth.resetPassword.mismatch');
-			return;
-		}
-		if (!allStrong) {
-			return;
-		}
+		// Marks each bad field beside itself and focuses the first one — the
+		// same rules and messages as /change-password (NewPasswordFields).
+		if (!newFields?.validate()) return;
 		submitting = true;
 		try {
 			await api.post('/api/auth/reset-password', { token, new_password: newPassword });
@@ -106,8 +93,9 @@
 			// the same status the load-time check answers. A token that died after
 			// the page loaded is the same dead link, so it gets the same screen and
 			// its way forward, a fresh link — not a banner over a form that can
-			// never succeed. Anything else (a 422 weak password, a 429) rides the
-			// backend's own detail text and leaves the form to retry.
+			// never succeed. A 422 is the new password refused, and goes beside
+			// that field; anything else (a 429) rides the backend's own detail
+			// text in the banner and leaves the form to retry.
 			if (err instanceof ApiError && err.status === 400) {
 				invalidOnSubmit = true;
 				phase = 'invalid';
@@ -115,6 +103,10 @@
 				// explanation so it is announced (as the success branch does).
 				await tick();
 				invalidEl?.focus();
+			} else if (err instanceof ApiError && err.status === 422) {
+				newServerError = err.message;
+				await tick();
+				newFields?.focusNew();
 			} else {
 				error = err instanceof Error ? err.message : m('auth.resetPassword.invalidToken');
 			}
@@ -143,7 +135,7 @@
 		</p>
 		<a class="link-btn" href={signInHref(accountEmail)}>{m('auth.resetPassword.goToLogin')}</a>
 	{:else if phase === 'ready'}
-		<form onsubmit={handleSubmit}>
+		<form onsubmit={handleSubmit} novalidate>
 			<!-- Password managers file a new password under the username field in
 			     the same form; without one they save it against no account, or not
 			     at all. Hidden, read-only, out of the tab order and the
@@ -159,35 +151,19 @@
 				aria-hidden="true"
 			/>
 
-			<label>
-				<span>{m('auth.resetPassword.newPassword')}</span>
-				<input
-					type="password"
-					bind:value={newPassword}
-					required
-					autocomplete="new-password"
-					minlength="12"
-				/>
-			</label>
+			<NewPasswordFields
+				bind:this={newFields}
+				idPrefix="reset"
+				newLabel={m('auth.resetPassword.newPassword')}
+				confirmLabel={m('auth.resetPassword.confirmPassword')}
+				bind:newPassword
+				bind:confirmPassword
+				bind:serverError={newServerError}
+			/>
 
-			<ul class="strength">
-				{#each strengthHints as hint}
-					<li class:ok={hint.ok}>{hint.ok ? '✓' : '·'} {hint.label}</li>
-				{/each}
-			</ul>
-
-			<label>
-				<span>{m('auth.resetPassword.confirmPassword')}</span>
-				<input
-					type="password"
-					bind:value={confirmPassword}
-					required
-					autocomplete="new-password"
-					minlength="12"
-				/>
-			</label>
-
-			<button type="submit" disabled={submitting || !allStrong || newPassword !== confirmPassword}>
+			<!-- Enabled whatever is typed: a submit says what is wrong, beside
+			     the field (issue #635 #14). -->
+			<button type="submit" disabled={submitting}>
 				{submitting
 					? m('auth.resetPassword.submitting')
 					: setMode
@@ -221,16 +197,6 @@
 </AuthCard>
 
 <style>
-	.strength {
-		margin: -8px 0 0;
-		padding: 0 0 0 4px;
-		list-style: none;
-		font-size: 0.78rem;
-		color: var(--text-muted);
-	}
-	.strength li.ok {
-		color: var(--success);
-	}
 	.invalid {
 		display: flex;
 		flex-direction: column;
