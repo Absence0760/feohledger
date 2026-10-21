@@ -574,6 +574,8 @@ export const messages = {
 	'admin.users.fail.openInvoices': '{n, plural, other {未処理の請求書 # 件}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, other {保留中の承認 # 件}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, other {アクティブなワークフロー # 件}}',
+	'admin.users.fail.lastAdmin': '組織で最後の有効な管理者です',
+	'admin.users.fail.auditUnavailable': '監査ログに記録できなかったため削除されていません',
 	'admin.users.modal.invite.aria': 'ユーザーを招待',
 	'admin.users.modal.invite.heading': 'ユーザーを招待',
 	'admin.users.modal.invite.hint': '仮パスワードが自動的に生成されます。',

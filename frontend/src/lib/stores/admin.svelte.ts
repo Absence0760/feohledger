@@ -229,7 +229,7 @@ function createAdminStore() {
 
 	interface BulkDeleteFailure {
 		user_id: string;
-		reason: 'not_found' | 'self' | 'blocked';
+		reason: 'not_found' | 'self' | 'forbidden' | 'blocked' | 'last_admin' | 'audit_unavailable';
 		references: {
 			open_invoice_assignments: number;
 			pending_approval_steps: number;

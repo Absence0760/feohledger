@@ -582,6 +582,8 @@ export const messages = {
 	'admin.users.fail.openInvoices': '{n, plural, one {# facture ouverte} other {# factures ouvertes}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# approbation en attente} other {# approbations en attente}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, one {# flux de travail actif} other {# flux de travail actifs}}',
+	'admin.users.fail.lastAdmin': 'dernier administrateur actif de l’organisation',
+	'admin.users.fail.auditUnavailable': 'impossible à consigner dans le journal d’audit, donc non supprimé',
 	'admin.users.modal.invite.aria': 'Inviter un utilisateur',
 	'admin.users.modal.invite.heading': 'Inviter un utilisateur',
 	'admin.users.modal.invite.hint': 'Un mot de passe temporaire sera généré automatiquement.',

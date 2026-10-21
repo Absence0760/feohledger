@@ -582,6 +582,8 @@ export const messages = {
 	'admin.users.fail.openInvoices': '{n, plural, one {# offene Rechnung} other {# offene Rechnungen}}',
 	'admin.users.fail.pendingApprovals': '{n, plural, one {# ausstehende Genehmigung} other {# ausstehende Genehmigungen}}',
 	'admin.users.fail.activeWorkflows': '{n, plural, one {# aktiver Workflow} other {# aktive Workflows}}',
+	'admin.users.fail.lastAdmin': 'letzter aktiver Administrator der Organisation',
+	'admin.users.fail.auditUnavailable': 'nicht im Prüfprotokoll erfasst, daher nicht gelöscht',
 	'admin.users.modal.invite.aria': 'Benutzer einladen',
 	'admin.users.modal.invite.heading': 'Benutzer einladen',
 	'admin.users.modal.invite.hint': 'Ein temporäres Passwort wird automatisch generiert.',
