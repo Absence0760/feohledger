@@ -95,25 +95,52 @@ RESERVED_SLUGS: frozenset[str] = frozenset(
 )
 
 
+#: The stable codes a :class:`SlugError` carries, one per rule. A client
+#: states the refusal in the reader's language on the code (`api/signup.py`
+#: sends it as a coded refusal and as the slug-check's `code`); the English
+#: message is the fallback for a client that predates one. User-facing text
+#: calls this a "workspace address" — the field the visitor typed it into —
+#: never a "slug".
+SLUG_REQUIRED = "slug_required"
+SLUG_FORMAT = "slug_format"
+SLUG_RESERVED = "slug_reserved"
+SLUG_HYPHEN_EDGE = "slug_hyphen_edge"
+SLUG_DOUBLE_HYPHEN = "slug_double_hyphen"
+SLUG_TAKEN = "slug_taken"
+
+
 class SlugError(ValueError):
-    """Raised when a slug fails validation."""
+    """Raised when a slug fails validation.
+
+    ``code`` names the rule that refused it (one of the ``SLUG_*`` constants);
+    ``str(exc)`` is the English sentence every caller that prints it shows (the
+    partner API, ``scripts/create_tenant.py``), worded for a person: a
+    "workspace address", not a "slug".
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def validate_slug_format(slug: str) -> None:
     """Check structural rules. Raises SlugError on any violation."""
     if not slug:
-        raise SlugError("Slug is required.")
+        raise SlugError(SLUG_REQUIRED, "Enter a workspace address.")
     if not SLUG_PATTERN.match(slug):
         raise SlugError(
-            "Slug must be 3-30 characters, lowercase letters/digits/hyphens, "
-            "starting with a letter."
+            SLUG_FORMAT,
+            "A workspace address must be 3-30 characters, lowercase letters, digits or "
+            "hyphens, starting with a letter.",
         )
     if slug in RESERVED_SLUGS:
-        raise SlugError(f"'{slug}' is reserved and cannot be used.")
+        raise SlugError(SLUG_RESERVED, f"'{slug}' is reserved and cannot be used.")
     if slug.startswith("-") or slug.endswith("-"):
-        raise SlugError("Slug cannot start or end with a hyphen.")
+        raise SlugError(SLUG_HYPHEN_EDGE, "A workspace address can't start or end with a hyphen.")
     if "--" in slug:
-        raise SlugError("Slug cannot contain consecutive hyphens.")
+        raise SlugError(
+            SLUG_DOUBLE_HYPHEN, "A workspace address can't contain two hyphens in a row."
+        )
 
 
 async def ensure_slug_available(slug: str, db: AsyncSession) -> None:
@@ -121,4 +148,4 @@ async def ensure_slug_available(slug: str, db: AsyncSession) -> None:
     validate_slug_format(slug)
     result = await db.execute(select(Organization.id).where(Organization.slug == slug))
     if result.scalar_one_or_none() is not None:
-        raise SlugError(f"'{slug}' is already taken.")
+        raise SlugError(SLUG_TAKEN, f"'{slug}' is already taken.")

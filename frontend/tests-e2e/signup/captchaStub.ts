@@ -9,6 +9,8 @@ export interface StartBody {
 	admin_name: string;
 	admin_email: string;
 	captcha_token: string | null;
+	/** The visitor's UI locale: the emails are written in it. */
+	locale?: string;
 }
 
 export interface CaptchaStubOptions {

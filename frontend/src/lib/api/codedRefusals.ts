@@ -22,8 +22,10 @@
  *    recording a payment made outside FeohLedger, the NACHA bank file), and
  *    the plan-feature 402 every tier gate answers with, recording or
  *    cancelling a goods receipt, an ERP send refused for an open duplicate
- *    or fraud exception (stated by `api/erpRefusals.ts`), and an ERP sync
- *    refused because the connection is gone or the listing is incomplete;
+ *    or fraud exception (stated by `api/erpRefusals.ts`), an ERP sync
+ *    refused because the connection is gone or the listing is incomplete,
+ *    and every self-service signup refusal (the workspace address, the
+ *    email and name checks, the captcha, the verification link);
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -71,6 +73,17 @@ export const INVOICE_STALE_APPROVAL = 'invoice_stale_approval';
  *  (`backend/app/api/signup.py::SIGNUP_EMAIL_HAS_WORKSPACE`). `/verify`
  *  branches on it to link the existing workspace's sign-in page. */
 export const SIGNUP_EMAIL_HAS_WORKSPACE = 'signup_email_has_workspace';
+
+/**
+ * The `/api/signup/*` refusals that are about ONE form field carry
+ * `params.field`, the `SignupStartRequest` field name, so the signup page can
+ * put the (already localized) sentence under that field
+ * (`backend/app/api/signup.py`). `null` when the refusal names no field.
+ */
+export function refusalField(params: Record<string, unknown>): string | null {
+	const field = params.field;
+	return typeof field === 'string' && field ? field : null;
+}
 
 /** `POST /api/invoices/{id}/complete` refused for blank required fields
  *  (`backend/app/api/workflow.py::INVOICE_REQUIRED_FIELDS_MISSING`). */
@@ -258,6 +271,14 @@ const fixed =
 	(_params, t) =>
 		t(key);
 
+/** A workspace-address refusal that names the address (`params.slug`). */
+const slugNamed =
+	(key: MessageKey): Builder =>
+	(params, t) => {
+		const slug = str(params, 'slug');
+		return slug === null ? null : t(key, { slug });
+	};
+
 const BUILDERS: Record<string, Builder> = {
 	// `services/approval_chain.py`
 	approval_segregation: fixed('refusal.approvalSegregation'),
@@ -368,6 +389,26 @@ const BUILDERS: Record<string, Builder> = {
 			? t('refusal.signupEmailHasWorkspace', { url })
 			: t('refusal.signupEmailHasWorkspaceNoLink');
 	},
+	// `api/signup.py` — the self-service signup form and `/verify`. The
+	// workspace-address rules are `utils/slug.py`'s (the slug-check reports
+	// the same codes, with the address it checked as `slug`); the captcha's
+	// are `utils/hcaptcha.py`'s. User-facing text says "workspace address",
+	// never "slug".
+	slug_required: fixed('refusal.slugRequired'),
+	slug_format: fixed('refusal.slugFormat'),
+	slug_reserved: slugNamed('refusal.slugReserved'),
+	slug_hyphen_edge: fixed('refusal.slugHyphenEdge'),
+	slug_double_hyphen: fixed('refusal.slugDoubleHyphen'),
+	slug_taken: slugNamed('refusal.slugTaken'),
+	signup_email_invalid: fixed('refusal.signupEmailInvalid'),
+	signup_name_has_link: fixed('refusal.signupNameHasLink'),
+	captcha_required: fixed('refusal.captchaRequired'),
+	captcha_unavailable: fixed('refusal.captchaUnavailable'),
+	captcha_failed: fixed('refusal.captchaFailed'),
+	signup_email_send_failed: fixed('refusal.signupEmailSendFailed'),
+	signup_link_invalid: fixed('refusal.signupLinkInvalid'),
+	signup_unavailable: fixed('refusal.signupUnavailable'),
+	signup_provisioning_failed: fixed('refusal.signupProvisioningFailed'),
 	// `api/payments.py::_refuse_record_only` — every dispatching endpoint on a
 	// tenant whose payments are recorded, never sent. `params.reason` says why
 	// the mode resolved so; the sentence is the same for every reason.

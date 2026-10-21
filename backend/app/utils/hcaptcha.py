@@ -22,8 +22,22 @@ logger = logging.getLogger(__name__)
 SITEVERIFY_URL = "https://hcaptcha.com/siteverify"
 
 
+#: Why a captcha was refused — the code signup's coded refusal carries, so the
+#: form states it in the reader's language (`api/signup.py`).
+CAPTCHA_REQUIRED = "captcha_required"
+CAPTCHA_UNAVAILABLE = "captcha_unavailable"
+CAPTCHA_FAILED = "captcha_failed"
+
+
 class CaptchaError(ValueError):
-    """Raised when the submitted captcha token is invalid or missing."""
+    """Raised when the submitted captcha token is invalid or missing.
+
+    ``code`` is one of the ``CAPTCHA_*`` constants; ``str(exc)`` the English.
+    """
+
+    def __init__(self, message: str, code: str = CAPTCHA_FAILED) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 async def verify_captcha(token: str | None, remote_ip: str | None = None) -> None:
@@ -36,7 +50,7 @@ async def verify_captcha(token: str | None, remote_ip: str | None = None) -> Non
         return
 
     if not token:
-        raise CaptchaError("Captcha is required.")
+        raise CaptchaError("Captcha is required.", CAPTCHA_REQUIRED)
 
     data = {"secret": settings.hcaptcha_secret, "response": token}
     if remote_ip:
@@ -51,9 +65,11 @@ async def verify_captcha(token: str | None, remote_ip: str | None = None) -> Non
         # Log the class only — the exception text can embed the request URL /
         # response body (which carries the client-supplied token).
         logger.warning("hCaptcha network error: %s", type(exc).__name__)
-        raise CaptchaError("Captcha verification is temporarily unavailable.") from exc
+        raise CaptchaError(
+            "Captcha verification is temporarily unavailable.", CAPTCHA_UNAVAILABLE
+        ) from exc
 
     if not payload.get("success"):
         error_codes = payload.get("error-codes", [])
         logger.info("hCaptcha rejected token: %s", error_codes)
-        raise CaptchaError("Captcha verification failed. Please try again.")
+        raise CaptchaError("Captcha verification failed. Please try again.", CAPTCHA_FAILED)

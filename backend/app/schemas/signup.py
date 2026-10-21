@@ -8,14 +8,17 @@ class SignupStartRequest(BaseModel):
     admin_email: str = Field(..., min_length=3, max_length=320)
     # hCaptcha response token from the widget.
     captcha_token: str | None = None
-    # Optional email-copy language for the verification + welcome emails. Any
-    # unsupported / absent value falls back to English (normalize_locale). The
-    # frontend signup form passing this is a deferred follow-up (frontend track).
+    # Email-copy language for the verification + welcome emails: the signup
+    # form sends the visitor's UI locale. Any unsupported / absent value falls
+    # back to English (normalize_locale) — never a refusal.
     locale: str | None = Field(default=None, max_length=16)
 
 
 class SignupStartResponse(BaseModel):
     status: str = "verification_email_sent"
+    # English, for API clients. The signup page states its own confirmation in
+    # the visitor's language from the address it submitted; it does not render
+    # this.
     message: str
 
 
@@ -47,4 +50,7 @@ class SignupCompleteResponse(BaseModel):
 class SlugCheckResponse(BaseModel):
     slug: str
     available: bool
+    # Why it is unavailable: `reason` is the English sentence, `code` the
+    # `utils/slug.SLUG_*` rule a client localizes on. Both None when available.
     reason: str | None = None
+    code: str | None = None

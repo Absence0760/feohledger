@@ -21,7 +21,8 @@ import {
 	PLAN_FEATURE_REQUIRED,
 	SIGNUP_EMAIL_HAS_WORKSPACE,
 	codedRefusalText,
-	localizeApiDetail
+	localizeApiDetail,
+	refusalField
 } from './codedRefusals';
 
 const translator =
@@ -582,5 +583,51 @@ describe('the ERP send refused for an open duplicate or fraud exception (§286)'
 				enT
 			)
 		).toContain('an earlier attempt may already have created the bill in the ERP');
+	});
+});
+
+describe('the self-service signup refusals (issue #635 finding 18)', () => {
+	const FIXED: [string, MainMessageKey][] = [
+		['slug_required', 'refusal.slugRequired'],
+		['slug_format', 'refusal.slugFormat'],
+		['slug_hyphen_edge', 'refusal.slugHyphenEdge'],
+		['slug_double_hyphen', 'refusal.slugDoubleHyphen'],
+		['signup_email_invalid', 'refusal.signupEmailInvalid'],
+		['signup_name_has_link', 'refusal.signupNameHasLink'],
+		['captcha_required', 'refusal.captchaRequired'],
+		['captcha_unavailable', 'refusal.captchaUnavailable'],
+		['captcha_failed', 'refusal.captchaFailed'],
+		['signup_email_send_failed', 'refusal.signupEmailSendFailed'],
+		['signup_link_invalid', 'refusal.signupLinkInvalid'],
+		['signup_unavailable', 'refusal.signupUnavailable'],
+		['signup_provisioning_failed', 'refusal.signupProvisioningFailed']
+	];
+
+	it.each(FIXED)('%s is stated in the reader\'s language', (code, key) => {
+		expect(codedRefusalText(code, { field: 'slug' }, deT)).toBe(de[key]);
+		expect(codedRefusalText(code, {}, enT)).toBe(en[key]);
+	});
+
+	it('names the workspace address in the reserved / taken refusals', () => {
+		expect(codedRefusalText('slug_taken', { field: 'slug', slug: 'acme' }, enT)).toBe(
+			'“acme” is already taken. Choose another workspace address.'
+		);
+		expect(codedRefusalText('slug_reserved', { slug: 'admin' }, deT)).toBe(
+			de['refusal.slugReserved'].replace('{slug}', 'admin')
+		);
+		// No address to name: the server's sentence, never a blank.
+		expect(codedRefusalText('slug_taken', {}, enT)).toBeNull();
+	});
+
+	it('never calls the workspace address a "slug" in any locale', () => {
+		for (const [, key] of FIXED) expect(en[key].toLowerCase()).not.toContain('slug');
+		expect(interpolate(en['refusal.slugTaken'], { slug: 'x' }, 'en')).not.toMatch(/slug/i);
+		expect(interpolate(en['refusal.slugReserved'], { slug: 'x' }, 'en')).not.toMatch(/slug/i);
+	});
+
+	it('reads the form field a refusal is about', () => {
+		expect(refusalField({ field: 'admin_email' })).toBe('admin_email');
+		expect(refusalField({})).toBeNull();
+		expect(refusalField({ field: 3 })).toBeNull();
 	});
 });

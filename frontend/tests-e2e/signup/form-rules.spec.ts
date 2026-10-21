@@ -1,6 +1,6 @@
 import { expectNoA11yViolations } from '../a11y/axe-helper';
 import { expect, NO_TENANT_BASE, test } from '../fixtures/helpers';
-import { fillSignupForm, stubCaptcha } from './captchaStub';
+import { captchaEvent, fillSignupForm, stubCaptcha } from './captchaStub';
 
 /**
  * The signup form enforces the server's rules before the server has to, and
@@ -199,4 +199,130 @@ test('a 422 naming the slug lands on the address field; items naming no field st
 	await expect(slug).toBeFocused();
 	// The left-over keeps its field name, since it is shown away from any field.
 	await expect(page.locator('.error')).toHaveText('locale: Must be at most 16 characters.');
+});
+
+/**
+ * The server's refusals are CODED (`backend/app/api/signup.py`, issue #635
+ * finding 18): each carries `params.field`, which puts it under its field, and
+ * its code, from which it is stated in the reader's language — never the
+ * server's English, and never the word "slug". The bodies below are exactly
+ * what `coded_refusal` serializes; the backend half is pinned in
+ * `backend/tests/test_signup.py`.
+ */
+test.describe('coded refusals, read in German', () => {
+	test.beforeEach(async ({ page }) => {
+		await page.addInitScript(() => {
+			try {
+				localStorage.setItem('feoh_locale', 'de');
+			} catch {
+				// about:blank — ignore
+			}
+		});
+	});
+
+	const refusal = (code: string, message: string, params: Record<string, string>) => ({
+		detail: { code, message, params }
+	});
+
+	test('each lands on its field, in German, and the form sends the locale for the emails', async ({
+		page
+	}) => {
+		const { submissions } = await stubCaptcha(page, {
+			start: (n) =>
+				[
+					{
+						status: 409,
+						json: refusal('slug_taken', "'rulesco' is already taken.", {
+							field: 'slug',
+							slug: 'rulesco'
+						})
+					},
+					{
+						status: 422,
+						json: refusal('signup_email_invalid', 'Enter a valid email address.', {
+							field: 'admin_email'
+						})
+					},
+					{
+						status: 422,
+						json: refusal('signup_name_has_link', "Your name can't contain a web or email address.", {
+							field: 'admin_name'
+						})
+					}
+				][n - 1]
+		});
+		await page.goto('/signup');
+		await page.locator('#signup-company').fill(FORM.company);
+		await page.locator('#signup-slug').fill(FORM.slug);
+		await page.locator('#signup-name').fill(FORM.name);
+		await page.locator('#signup-email').fill(FORM.email);
+		await expect(page.locator('small.hint.ok')).toBeVisible();
+		const submit = page.locator('form.signup-form button[type="submit"]');
+		const send = async () => {
+			await captchaEvent(page, 'solve', 't');
+			await submit.click();
+		};
+
+		await send();
+		await expect(page.locator('#slug-hint')).toHaveText(
+			'„rulesco“ ist bereits vergeben. Wählen Sie eine andere Arbeitsbereichsadresse.'
+		);
+		await expect(page.locator('#signup-slug')).toBeFocused();
+		await expect(page.locator('.error')).toHaveCount(0);
+		expect(submissions[0].locale).toBe('de');
+
+		await page.locator('#signup-slug').fill('rulesco2');
+		await expect(page.locator('small.hint.ok')).toBeVisible();
+		await send();
+		await expect(page.locator('#signup-email-error')).toHaveText(
+			'Geben Sie eine gültige E-Mail-Adresse ein.'
+		);
+		await expect(page.locator('#signup-email')).toBeFocused();
+
+		await send();
+		await expect(page.locator('#signup-name-error')).toHaveText(
+			'Ihr Name darf keine Web- oder E-Mail-Adresse enthalten.'
+		);
+		await expect(page.locator('#signup-name')).toBeFocused();
+		await expect(page.locator('.error')).toHaveCount(0);
+		await expect(page.locator('body')).not.toContainText(/slug/i);
+	});
+
+	test('the live address check states its refusal in German too', async ({ page }) => {
+		await stubCaptcha(page);
+		// Registered after the stub's own slug-check route, so it answers first.
+		await page.route(
+			(url) => url.pathname === '/api/signup/slug-check',
+			(route) =>
+				route.fulfill({
+					json: {
+						slug: 'support',
+						available: false,
+						reason: "'support' is reserved and cannot be used.",
+						code: 'slug_reserved'
+					}
+				})
+		);
+		await page.goto('/signup');
+		await page.locator('#signup-slug').fill('support');
+		await expect(page.locator('#slug-hint')).toHaveText(
+			'„support“ ist reserviert. Wählen Sie eine andere Arbeitsbereichsadresse.'
+		);
+	});
+
+	test('the confirmation is written in German from the address it went to', async ({ page }) => {
+		await stubCaptcha(page);
+		await page.goto('/signup');
+		await page.locator('#signup-company').fill(FORM.company);
+		await page.locator('#signup-slug').fill(FORM.slug);
+		await page.locator('#signup-name').fill(FORM.name);
+		await page.locator('#signup-email').fill(FORM.email);
+		await expect(page.locator('small.hint.ok')).toBeVisible();
+		await captchaEvent(page, 'solve', 't');
+		await page.locator('form.signup-form button[type="submit"]').click();
+		// The stub's `message` is English; the page states its own.
+		await expect(page.locator('p.lead')).toHaveText(
+			`Wir haben einen Bestätigungslink an ${FORM.email} gesendet. Klicken Sie innerhalb von 24 Stunden darauf, um Ihren Arbeitsbereich fertig einzurichten.`
+		);
+	});
 });

@@ -121,7 +121,36 @@ VERIFICATION_TTL = timedelta(hours=24)
 #: /complete for an address that already has an account (decisions §292).
 SIGNUP_EMAIL_HAS_WORKSPACE = "signup_email_has_workspace"
 
+# Every other refusal on this router is coded too (`api/refusals.coded_refusal`),
+# so the signup and verify pages state it in the visitor's language instead of
+# this module's English (issue #635 finding 18). A refusal about one form field
+# carries `params.field` — the `SignupStartRequest` field name — so the page
+# can put it under that field. The workspace-address refusals take their code
+# from `utils/slug.SlugError.code`; the captcha's from `utils/hcaptcha`. Each
+# code is exactly as specific as the English it replaces: none of them says
+# anything about which addresses have accounts (that stays /complete's, after
+# the mailbox is proven — decisions §292).
+SIGNUP_EMAIL_INVALID = "signup_email_invalid"
+SIGNUP_NAME_HAS_LINK = "signup_name_has_link"
+SIGNUP_EMAIL_SEND_FAILED = "signup_email_send_failed"
+SIGNUP_LINK_INVALID = "signup_link_invalid"
+SIGNUP_UNAVAILABLE = "signup_unavailable"
+SIGNUP_PROVISIONING_FAILED = "signup_provisioning_failed"
+
 _INVALID_LINK = "This verification link is invalid or has expired. Please sign up again."
+
+
+def _invalid_link() -> HTTPException:
+    """The uniform 410 for every token that cannot be acted on."""
+    return HTTPException(status_code=410, detail=coded_refusal(SIGNUP_LINK_INVALID, _INVALID_LINK))
+
+
+def _slug_refusal(status_code: int, exc: SlugError, slug: str) -> HTTPException:
+    """A workspace-address refusal, about the form's address field."""
+    return HTTPException(
+        status_code=status_code,
+        detail=coded_refusal(exc.code, str(exc), field="slug", slug=slug),
+    )
 
 
 def _tenant_url(slug: str) -> str:
@@ -145,7 +174,12 @@ def _validate_email_shape(email: str) -> None:
     # `app/utils/emails.py` owns the rule; partner provisioning and the
     # scheduled-report recipient list read the same one.
     if not looks_like_email(email):
-        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                SIGNUP_EMAIL_INVALID, "Enter a valid email address.", field="admin_email"
+            ),
+        )
 
 
 # What a mail client would turn into a link on its own: a scheme, `www.`, an
@@ -161,7 +195,12 @@ _LINK_LIKE_NAME = re.compile(r"://|www\.|[@/\\]|\w\.[a-z]{2,}", re.IGNORECASE)
 def _validate_admin_name(name: str) -> None:
     if _LINK_LIKE_NAME.search(name):
         raise HTTPException(
-            status_code=422, detail="Your name can't contain a web or email address."
+            status_code=422,
+            detail=coded_refusal(
+                SIGNUP_NAME_HAS_LINK,
+                "Your name can't contain a web or email address.",
+                field="admin_name",
+            ),
         )
 
 
@@ -186,7 +225,7 @@ async def slug_check(
         await ensure_slug_available(slug, db)
         return SlugCheckResponse(slug=slug, available=True)
     except SlugError as exc:
-        return SlugCheckResponse(slug=slug, available=False, reason=str(exc))
+        return SlugCheckResponse(slug=slug, available=False, reason=str(exc), code=exc.code)
 
 
 @router.post("/start", response_model=SignupStartResponse)
@@ -209,7 +248,7 @@ async def signup_start(
     try:
         validate_slug_format(body.slug)
     except SlugError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise _slug_refusal(422, exc, body.slug) from exc
 
     # 2b. Per-EMAIL rate limit (keyed on the target address, normalised) so an
     #     attacker rotating IPs can't bomb one victim with verification emails.
@@ -227,13 +266,13 @@ async def signup_start(
     try:
         await verify_captcha(body.captcha_token, client_ip)
     except CaptchaError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=coded_refusal(exc.code, str(exc))) from exc
 
     # 4. Availability check at start-time (best-effort; re-checked at complete).
     try:
         await ensure_slug_available(body.slug, db)
     except SlugError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _slug_refusal(409, exc, body.slug) from exc
 
     # 5. Drop any prior un-consumed verifications for this email so a "resend"
     #    replaces rather than accumulates (caps unbounded pending-row growth,
@@ -301,7 +340,10 @@ async def signup_start(
         logger.exception("Failed to send verification email (verification id=%s)", verification.id)
         raise HTTPException(
             status_code=502,
-            detail="Couldn't send the verification email. Please try again.",
+            detail=coded_refusal(
+                SIGNUP_EMAIL_SEND_FAILED,
+                "Couldn't send the verification email. Please try again.",
+            ),
         ) from exc
 
     return SignupStartResponse(
@@ -339,7 +381,7 @@ async def signup_complete(
     # expired, or spent with nothing to show for it) — a distinct 404-vs-410
     # would let a scraper tell a token that never existed from one that did.
     if verification is None or verification.expires_at < datetime.now(UTC):
-        raise HTTPException(status_code=410, detail=_INVALID_LINK)
+        raise _invalid_link()
 
     # 1b. A spent link is re-answered, never re-run (decisions §292): the page
     #     redeems on load, so a reload, a second tab or a mail scanner that ran
@@ -361,7 +403,7 @@ async def signup_complete(
     try:
         await ensure_slug_available(verification.slug, db)
     except SlugError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _slug_refusal(409, exc, verification.slug) from exc
 
     # 2b. Refuse BEFORE provisioning when there is nowhere to send the admin.
     #     The admin will have no password, and both the set-password link and
@@ -376,7 +418,10 @@ async def signup_complete(
         )
         raise HTTPException(
             status_code=503,
-            detail="Workspace creation is temporarily unavailable. Please try again later.",
+            detail=coded_refusal(
+                SIGNUP_UNAVAILABLE,
+                "Workspace creation is temporarily unavailable. Please try again later.",
+            ),
         )
 
     # 3. Provision the tenant. The admin gets NO password: they choose their
@@ -415,11 +460,14 @@ async def signup_complete(
             await ensure_slug_available(verification.slug, db)
         except SlugError as slug_exc:
             logger.warning("Provisioning lost a slug race (slug=%s)", slug)
-            raise HTTPException(status_code=409, detail=str(slug_exc)) from exc
+            raise _slug_refusal(409, slug_exc, slug) from exc
         logger.exception("Provisioning failed for slug=%s", slug)
         raise HTTPException(
             status_code=500,
-            detail=("Something went wrong while creating your workspace. Please contact support."),
+            detail=coded_refusal(
+                SIGNUP_PROVISIONING_FAILED,
+                "Something went wrong while creating your workspace. Please contact support.",
+            ),
         ) from exc
 
     # 4. Mark verification consumed (same txn as the commits already made by
@@ -571,7 +619,7 @@ async def _answer_spent_link(
             already_verified=True,
         )
     await _refuse_if_email_has_account(db, verification)
-    raise HTTPException(status_code=410, detail=_INVALID_LINK)
+    raise _invalid_link()
 
 
 async def _mint_set_password_url(slug: str, user_id: uuid.UUID) -> str | None:

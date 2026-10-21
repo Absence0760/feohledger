@@ -8,7 +8,8 @@
 	import { tick, untrack } from 'svelte';
 	import { api, ApiError, formatApiDetail } from '#lib/api.ts';
 	import { onMount } from 'svelte';
-	import { m } from '#lib/i18n/store.svelte.ts';
+	import { currentLocale, m } from '#lib/i18n/store.svelte.ts';
+	import { codedRefusalText, refusalField } from '#lib/api/codedRefusals.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { theme } from '#lib/stores/theme.svelte.ts';
 	import type { ResolvedTheme } from '#lib/theme.ts';
@@ -23,7 +24,10 @@
 	interface SlugCheckResponse {
 		slug: string;
 		available: boolean;
+		// Why not: the English sentence, and the rule's code to state it in
+		// the reader's language (`backend/app/utils/slug.py::SLUG_*`).
 		reason?: string | null;
+		code?: string | null;
 	}
 
 	let companyName = $state('');
@@ -45,7 +49,9 @@
 	// Host/port suffix shown after the slug input, derived from the backend
 	// tenant_url_template (e.g. "http://{slug}.localhost:7777" → ".localhost:7777").
 	let tenantUrlSuffix = $state<string>('.localhost:7777');
-	let tenantExampleHost = $state<string>('your-slug.localhost:7777');
+	// An example address, not a placeholder word: "your-slug" put the internal
+	// name in front of every visitor, in every language (issue #635 finding 18).
+	let tenantExampleHost = $state<string>('acme.localhost:7777');
 
 	let slugStatus = $state<'idle' | 'checking' | 'ok' | 'bad'>('idle');
 	let slugError = $state<string | null>(null);
@@ -64,7 +70,10 @@
 	// A server refusal about one field, shown under that field. The slug's
 	// lives in `slugError` instead, with its live availability state.
 	let fieldErrors = $state<Partial<Record<Exclude<Field, 'slug'>, string>>>({});
-	let successMessage = $state<string | null>(null);
+	// The address the verification email went to, once `/start` accepted the
+	// form. The confirmation is stated here, in the visitor's language, from
+	// that address — not from the server's English `message`.
+	let sentTo = $state<string | null>(null);
 
 	// `FEOH_SIGNUP_ENABLED` off: every `/api/signup/*` route answers 404, so the
 	// form could only ever be refused. Set from `/api/public-config` and only on
@@ -95,7 +104,7 @@
 				const parts = noProtocol.split('{slug}');
 				if (parts.length === 2) {
 					tenantUrlSuffix = parts[1];
-					tenantExampleHost = `your-slug${parts[1]}`;
+					tenantExampleHost = `acme${parts[1]}`;
 				}
 			}
 		} catch {
@@ -209,7 +218,10 @@
 				slugError = null;
 			} else {
 				slugStatus = 'bad';
-				slugError = res.reason || m('auth.signup.slugUnavailable');
+				slugError =
+					(res.code ? codedRefusalText(res.code, { slug: res.slug }, m) : null) ??
+					res.reason ??
+					m('auth.signup.slugUnavailable');
 			}
 		} catch {
 			slugStatus = 'idle';
@@ -221,14 +233,14 @@
 	 *
 	 * This used to be `<a href="/signup">` — a link to the page already showing.
 	 * A client-routed SPA reuses the mounted component for a same-route
-	 * navigation, so `successMessage` survived and the click did nothing: a user
+	 * navigation, so the confirmation survived and the click did nothing: a user
 	 * whose verification email never arrived had no way back to the form short
 	 * of a hard reload. Resetting the state is the navigation that link was
 	 * trying to be. The values are kept and focus lands on the email field,
 	 * because a mistyped address is the likeliest reason nothing arrived.
 	 */
 	async function backToForm() {
-		successMessage = null;
+		sentTo = null;
 		error = '';
 		// The token the first submission carried has been spent server-side.
 		// Kept, it would satisfy the client-side "captcha required" check and
@@ -333,11 +345,13 @@
 	 * Returns the refusal's left-over text for the top banner — `null` when
 	 * every part of it found a field.
 	 *
-	 * Two shapes are about one field: the 409 (`/start` refuses only a taken
-	 * slug with it — the address-already-has-a-workspace 409 is `/complete`'s),
-	 * and a Pydantic 422, whose items name their field in `loc`. Anything else
-	 * — a rate limit, the captcha, the email failing to send, a plain-string
-	 * 422 that names no field — stays in the banner.
+	 * Three shapes are about one field: a coded refusal whose `params.field`
+	 * names it (every field refusal `/start` makes — the workspace address, the
+	 * email, the name; its text is already localized from its code), a Pydantic
+	 * 422, whose items name their field in `loc`, and — from a backend that
+	 * predates the codes — a bare 409, which `/start` only answers for a taken
+	 * address. Anything else — a rate limit, the captcha, the email failing to
+	 * send — stays in the banner.
 	 */
 	async function showRefusal(err: unknown): Promise<string | null> {
 		if (!(err instanceof ApiError)) {
@@ -345,7 +359,17 @@
 		}
 		let first: Field | null = null;
 		let leftOver: string | null = err.message;
-		if (err.status === 409) {
+		const coded = refusalField(err.params);
+		if (coded !== null && Object.hasOwn(FIELD_INPUT_IDS, coded)) {
+			first = coded as Field;
+			if (first === 'slug') {
+				slugStatus = 'bad';
+				slugError = err.message;
+			} else {
+				fieldErrors[first] = err.message;
+			}
+			leftOver = null;
+		} else if (err.status === 409) {
 			slugStatus = 'bad';
 			slugError = err.message;
 			first = 'slug';
@@ -416,14 +440,16 @@
 		}
 		submitting = true;
 		try {
-			const res = await api.post<StartResponse>('/api/signup/start', {
+			await api.post<StartResponse>('/api/signup/start', {
 				company_name: companyName,
 				slug,
 				admin_name: adminName,
 				admin_email: adminEmail,
 				captcha_token: captchaToken,
+				// The verification and welcome emails are written in it.
+				locale: currentLocale()
 			});
-			successMessage = res.message;
+			sentTo = adminEmail;
 			// The submit button had focus, and it has just been removed from the
 			// DOM along with the form — which drops focus to <body> and leaves a
 			// screen reader with nothing to say. Land it on the confirmation's
@@ -488,14 +514,14 @@
 			</div>
 			<p class="sub">{m('auth.signup.closedBody')}</p>
 		</div>
-	{:else if successMessage}
+	{:else if sentTo}
 		<!-- Focus is moved to this heading on arrival (see onSubmit): the form it
 		     replaces took the focused button with it. `tabindex="-1"` makes it a
 		     programmatic focus target without adding a tab stop. -->
 		<div class="auth-stack success">
 			<div class="success-icon" aria-hidden="true"><IconMail /></div>
 			<h1 tabindex="-1" bind:this={successHeading}>{m('auth.signup.successHeading')}</h1>
-			<p class="lead">{successMessage}</p>
+			<p class="lead">{m('auth.signup.successLead', { email: sentTo })}</p>
 			<p class="sub next">{m('auth.signup.successNext')}</p>
 			<p class="sub">
 				{m('auth.signup.successSpamPre')}<button type="button" class="link-btn" onclick={backToForm}
