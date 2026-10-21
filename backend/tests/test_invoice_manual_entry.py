@@ -8,6 +8,7 @@ a file (409), and it never triggers extraction — a manually-entered invoice
 stays exactly as keyed in.
 """
 
+import uuid
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -83,6 +84,13 @@ async def test_manual_create_then_self_approve_is_blocked_by_segregation(realdb)
         )
         assert create.status_code == 201, create.text
         invoice_id = create.json()["id"]
+
+        # Into review, where the approve door accepts a decision at all
+        # (`review.refuse_unless_in_review`) — so the 403 below is the
+        # segregation gate, not the stage.
+        async with realdb.sessionmaker("a")() as s:
+            (await s.get(Invoice, uuid.UUID(invoice_id))).status = InvoiceStatus.ready_for_review
+            await s.commit()
 
         resp = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
     assert resp.status_code == 403, resp.text

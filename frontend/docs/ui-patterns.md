@@ -706,6 +706,57 @@ adding a `<svelte:window onclick>` that clears `confirmDeleteId` when
 the click target is not within `.row-action`. See
 `routes/admin/+page.svelte` for the canonical implementation.
 
+### Whether to offer an action: read the server's verdict (issue #575)
+
+A page must not decide whether to show Approve, Execute, Void, Resolve, … by
+**restating the endpoint's rule** — a status list, a role list,
+`uploaded_by_id !== me`. Every such copy drifted from the server in its own
+way: the uploader was offered an Approve that 403'd, a run's creator an Execute
+that 403'd, an unverified vendor's invoice no way to be recorded paid at all
+(#573), an `active` vendor no Reject that both endpoints accept.
+
+Instead the backend ships a **verdict** beside the row, computed by running the
+same gate function the endpoint raises from, so the two cannot disagree:
+`null` when the endpoint would accept the caller, else the coded refusal
+(`{code, message, params}`) it would answer with. Read it through
+`#lib/api/actionVerdicts.ts`:
+
+- `isAllowed(verdict)` — the control may be pressed (`verdict === null`).
+- `isOffered(verdict)` — the control is rendered at all: false while the verdict
+  has not arrived (`undefined` — **fail closed**) and for `role_not_permitted`,
+  a reason the reader cannot act on.
+- `refusalText(verdict, m)` — the reason, localized from its code through
+  `api/codedRefusals.ts` (falling back to the server's English). Render it
+  beside a disabled control when the reader can act on it ("a colleague must
+  approve this").
+
+Never add a second check beside the verdict — that is the copy it replaces.
+Org-level configuration the server states elsewhere (the execution mode, read
+once from `GET /api/payments/execution-mode`) is not a row property and stays a
+separate, documented gate. A mutation response that lacks the verdict must not
+be read as "allowed": carry the row's verdict only while what it judged is
+unchanged, otherwise drop it until the next list read
+(`routes/vendors/+page.svelte::applyVendorUpdate`).
+
+Where each verdict lives (backend gate → field):
+
+| Page | Field | Gate(s) the endpoint raises from |
+|---|---|---|
+| Payment queue | `record_outside_refusal` | `services/external_payment.record_outside_refusals` (#573) |
+| Payment history | `void_refusal`, `release_refusal`, `dismiss_refusal` | `payment_controls.payment_void_refusal`, `.compliance_hold_refusal` |
+| Run dialog | `actions.{approve,execute,cancel}` | `payment_controls.run_{approve,execute,cancel}_refusal` |
+| Invoice modal | `GET /api/invoices/{id}/review-actions` | `review.review_refusals` (the approve gates, on a scratch chain) |
+| Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
+| Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
+| Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
+| Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
+
+Each is pinned by a backend parity test that, for every seeded role and row
+state, asks both sides — the verdict and the real POST — and fails unless they
+agree (`tests/test_payment_action_verdicts.py`,
+`tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
+`tests/test_payment_queue_blocked.py`). A new verdict ships with one.
+
 ### Clickable rows (`RowLink` + `isRowOpenClick`)
 
 A list row that has a detail/edit destination opens it **by clicking the

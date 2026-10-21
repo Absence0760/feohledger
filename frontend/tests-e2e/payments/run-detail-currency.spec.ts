@@ -59,6 +59,9 @@ function runDetail(id: string, currency: string | null, legCurrency: string | nu
 		cfo_approved_by: null,
 		cfo_approved_at: null,
 		payment_count: 2,
+		// The caller's verdicts (`run_action_refusals`): everything open, so the
+		// footer renders Execute and Cancel.
+		actions: { approve: null, execute: null, cancel: null },
 		payments: [
 			{
 				id: `${id}-leg-1`,

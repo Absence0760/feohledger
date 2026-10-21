@@ -39,9 +39,10 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (the ERP document id on the
-invoice, auto-send on approval) into the workspace-closure branch; both sides'
-entries kept, taking the file to 128. Before that, 2026-10-21 — storing the ERP document id on the invoice
+**Last reconciled:** 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
+decisions §305) opened three (c) entries — the modal's assignee clause, bulk
+status approving a draft past review, and the pages still restating server
+predicates — taking the file from 126 → 129. Before that, 2026-10-21 — storing the ERP document id on the invoice
 (decisions §302) opened two (c) entries, the deep link not choosing the ERP
 organisation/company and the ERP webhook's id-only path, taking the file from
 124 → 126. Before that, 2026-10-21 — auto-sending an approved invoice to the ERP
@@ -205,7 +206,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**128 open: 110 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**131 open: 113 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2041,6 +2042,64 @@ providers still have the same gap.
       than guessed. **Trigger:** wiring a provider whose webhook does not echo
       our correlation id (QuickBooks / Xero change notifications carry only
       the entity id).
+
+### Surfaced by the UI action-verdict pass (2026-10-21, issue #575 § One rule, one place, decisions §305)
+
+- [ ] **(c) The invoice modal still hides Approve / Reject from a reviewer the
+      invoice is not assigned to, and the server accepts them.** The modal's
+      `isAssignedElsewhere` clause in `InvoiceModal.svelte` is the one
+      restated rule left beside the `review-actions` verdict: `POST
+      /api/invoices/{id}/approve|reject` accept any holder of `invoice.approve`
+      who passes the approval gates, assignment or not. So the page and the
+      server disagree in the safe direction (a working control is hidden, none
+      that 403s is shown). **Durable fix:** a product call — either enforce
+      assignment server-side (a new gate in `review._identity_gates`, which
+      `review_refusals` then reports) or drop the clause and let any qualified
+      approver act. **Trigger:** the next change to reviewer assignment, or a
+      reviewer reporting they cannot act on an invoice assigned to an absent
+      colleague.
+
+- [ ] **(c) Bulk status can still approve a `new` draft past review.** The
+      four review-decision doors (in-app approve / reject, email, Slack,
+      Teams) now refuse an invoice that is not `ready_for_review`
+      (`review.awaiting_review`), but `POST /api/invoices/bulk/status` with
+      `status=approved` still moves a `new` invoice straight to `approved`
+      (`new → approved` is a legal transition for it), through the same approve
+      gates — so segregation and the money limits hold, the review stage does
+      not. **Durable fix:** a product call — either the bulk approve branch
+      skips non-`ready_for_review` rows with a reported reason (it already
+      skips-and-reports), or `new → approved` is documented as the manager's
+      deliberate direct approval and kept. **Trigger:** the next change to bulk
+      status, or an auditor asking whether every approval passed review.
+
+- [ ] **(c) Other pages still restate server predicates to decide whether to
+      offer an action.** Converted so far: payment queue record-outside (#573);
+      History Void / Release / Dismiss; run Approve / Execute / Cancel; invoice
+      Approve / Reject; exception Resolve / Dismiss / Escalate; credit-memo
+      Apply / Edit / Void; vendor Verify / Reject; bank-change Approve. Still
+      restating (each a status list and/or role / permission / self check):
+      payments History **Accept settlement** (`canAcceptSettlement`) and Runs
+      **Retry ERP sync** (`canSyncRunErp`); `RunDetailModal`'s record-run-as-paid
+      / NACHA download / regenerate / bank-rejected controls; `InvoiceModal`'s
+      **Submit / Complete** (`canSubmitStatus`) and **Retry ERP**
+      (`canRetryErp`); expense reports' approve / reject / submit (`expenses`,
+      including the `employee_user_id` self-approval check) and corporate-card
+      match / create-expense; intake approve / reject / convert; requisition
+      submit / convert / cancel; discount-offer accept / decline; experiment
+      start; adaptive-suggestion dismiss. **Mobile** restates the same rules and
+      reads none of the verdicts yet: `payment_queue_screen._canApproveRun`
+      (`isCfo` + status, no maker-checker), `invoice_detail_screen`'s approve
+      (`canApproveInvoice` only), and the vendor verify / reject and exception
+      resolve actions (status + role). The list verdicts ride the same list
+      reads, and the invoice one is `GET /api/invoices/{id}/review-actions`.
+      **Durable fix:** the same shape as the
+      converted ones — a gate function the endpoint raises from, a `*_refusal`
+      verdict on the row built from it, a parity test per role × row state, and
+      the page reading `#lib/api/actionVerdicts.ts`
+      (`frontend/docs/ui-patterns.md` § Whether to offer an action). Money-path
+      ones (settlement, ERP sync, run record / NACHA, expense approval) first.
+      **Trigger:** the next change to any of those controls, or a report of a
+      button that 403s / 409s.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

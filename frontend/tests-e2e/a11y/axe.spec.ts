@@ -214,7 +214,10 @@ test.describe('accessibility — authenticated app (WCAG 2.2 AA)', () => {
 								status: 'open',
 								applied_at: null,
 								applied_by: null,
-								created_at: '2026-01-01T00:00:00Z'
+								created_at: '2026-01-01T00:00:00Z',
+								// The caller's verdicts (`memo_action_refusals`): the page
+								// offers Apply from these alone (issue #575).
+								actions: { apply: null, edit: null, void: null }
 							}
 						],
 						total: 1,

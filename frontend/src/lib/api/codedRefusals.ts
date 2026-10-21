@@ -265,6 +265,13 @@ const BUILDERS: Record<string, Builder> = {
 	approval_segregation_receiver: fixed('refusal.approvalSegregationReceiver'),
 	approval_level_reuse: fixed('refusal.approvalLevelReuse'),
 	approval_not_named_approver: fixed('refusal.approvalNotNamedApprover'),
+	// `services/review.py::refuse_unless_in_review`
+	invoice_not_in_review: fixed('refusal.invoiceNotInReview'),
+	// `services/payment_controls.py` — the run dialog's `actions` verdict
+	payment_run_segregation: fixed('refusal.paymentRunSegregation'),
+	// `api/vendors.py::change_request_approve_refusal` — the queue's verdict
+	vendor_change_self_requested: fixed('refusal.vendorChangeSelfRequested'),
+	vendor_change_self_provisioned: fixed('refusal.vendorChangeSelfProvisioned'),
 	// `services/review.py::_enforce_approval_thresholds`
 	approval_max_amount_exceeded: (p, t) => approvalGate(p, t, 'refusal.approvalMaxExceeded', null),
 	approval_max_amount_misconfigured: fixed('refusal.approvalMaxMisconfigured'),

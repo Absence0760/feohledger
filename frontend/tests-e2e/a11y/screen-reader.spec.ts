@@ -1,3 +1,4 @@
+import type { VendorChangeRequest } from '#lib/types/vendor.ts';
 import { expect, test } from '../fixtures/helpers';
 
 /**
@@ -121,15 +122,18 @@ test.describe('screen-reader navigability — core flow', () => {
 			change_type: 'bank_details',
 			status: 'pending',
 			proposed_value: { bank_name: 'Focus Bank', account_last4: '1234' },
-			// A portal-submitted request, so the admin is not the proposer and
-			// the segregation-of-duties gate leaves Approve enabled.
+			// A portal-submitted request, so the admin is not the proposer…
 			requested_by_vendor_user_id: '00000000-0000-4000-b002-0000000000f1',
 			requested_by_user_id: null,
 			reviewed_by_user_id: null,
 			reviewed_at: null,
 			review_note: null,
-			created_at: '2026-01-01T00:00:00Z'
-		};
+			created_at: '2026-01-01T00:00:00Z',
+			// …and the server's verdict on approving it is "accepted". The page
+			// offers Approve from this field alone (issue #575), so a row without
+			// it renders no Approve at all.
+			approve_refusal: null
+		} satisfies VendorChangeRequest;
 		let approved = false;
 		await page.route(
 			(url) =>

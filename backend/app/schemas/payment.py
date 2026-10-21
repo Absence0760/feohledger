@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.money import MoneyAmount, OptionalExactMoneyInput, OptionalMoneyAmount
 from app.services.card_issuance import CardCancelDisposition
 
@@ -301,8 +302,30 @@ class PaymentResponse(BaseModel):
         )
 
 
+class PaymentListItem(PaymentResponse):
+    """A History-tab row: the payment plus the caller's verdict on its actions.
+
+    Each ``*_refusal`` is the coded refusal (``{code, message, params}``) the
+    endpoint would answer the caller with, or ``None`` when it would accept —
+    computed by ``api/payments.payment_row_verdicts`` from each endpoint's own
+    permission and gate, so the page offers a control exactly when its field is
+    ``None`` (issue #575):
+
+    * ``void_refusal`` — ``POST /api/payments/{id}/void``;
+    * ``release_refusal`` / ``dismiss_refusal`` — ``POST
+      /api/payments/{id}/compliance/release`` / ``dismiss``.
+
+    Required, not defaulted: a ``None`` nobody computed would read as
+    "allowed".
+    """
+
+    void_refusal: CodedRefusal | None
+    release_refusal: CodedRefusal | None
+    dismiss_refusal: CodedRefusal | None
+
+
 class PaymentListResponse(BaseModel):
-    items: list[PaymentResponse]
+    items: list[PaymentListItem]
     total: int
     page: int
     page_size: int

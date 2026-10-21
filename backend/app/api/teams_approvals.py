@@ -275,10 +275,12 @@ async def _apply_teams_action(
 
     Mirrors ``slack_approvals._apply_slack_action``, ``org_settings`` included —
     the same approval decision must read the same org config on every door."""
+    from app.services.review import awaiting_review
     from app.services.workflow_engine import get_invoice_for_update
 
     invoice = await get_invoice_for_update(db, decoded.invoice_id)
-    if invoice.status != InvoiceStatus.ready_for_review:
+    # The one review-stage predicate every decision door reads.
+    if not awaiting_review(invoice):
         return False, "This invoice is no longer awaiting review."
     # The message's figures, checked against the row under the lock — an edit
     # since the post was sent is re-reviewed in the app, not approved from chat.

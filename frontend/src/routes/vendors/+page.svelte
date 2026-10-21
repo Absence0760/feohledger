@@ -32,6 +32,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import { PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { importVendorsCsv, type PortalInviteResult } from '#lib/api/vendors.ts';
@@ -152,7 +153,21 @@
 		// reappearing, a fresh screening verdict going back to stale). Retire
 		// every pre-edit request before applying.
 		fetchSequence.supersedeInFlight();
-		vendors = vendors.map((v) => (v.id === updated.id ? updated : v));
+		// The mutation responses are plain `VendorResponse`s, without the list
+		// row's `status_actions` verdict. Keep the row's verdict while the
+		// vendor's status is unchanged (the reader and the row the server judged
+		// are the same); on a status change drop it, so Verify / Reject stay
+		// withheld (fail closed) until the next list read re-asks the server.
+		vendors = vendors.map((v) =>
+			v.id === updated.id
+				? {
+						...updated,
+						status_actions:
+							updated.status_actions ??
+							(updated.status === v.status ? v.status_actions : undefined)
+					}
+				: v
+		);
 		if (detailVendor && detailVendor.id === updated.id) detailVendor = updated;
 	}
 	// Search + status filter are URL-backed (`?search=&status=`) alongside sort
@@ -517,6 +532,9 @@
 		}
 	}
 
+	/** The row whose Reject is armed (one click from committing), or null. */
+	let rejectArmedId = $state<string | null>(null);
+
 	async function rejectVendor(id: string) {
 		try {
 			const rejected = await rejectVendorRequest(id);
@@ -584,6 +602,15 @@
 			statusFilter === 'all'
 	);
 </script>
+
+<svelte:window
+	onclick={(e) => {
+		// Outside-click un-arms a pending Reject confirmation.
+		if (rejectArmedId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+			rejectArmedId = null;
+		}
+	}}
+/>
 
 <PageHeader title={m('vendors.title')}>
 	{#snippet actions()}
@@ -726,9 +753,30 @@
 					     it works too. -->
 					<td class="actions">
 						{#if canManageVendors}
-							{#if v.status === 'unverified'}
+							<!-- Offered exactly when the server's verdict allows it
+							     (`status_actions`, from the table `/verify`, `/reject`
+							     and bulk status share) — Reject used to be hidden on an
+							     `active` vendor every one of them accepts (issue #575). -->
+							{#if isAllowed(v.status_actions?.verify)}
 								<RowAction variant="success" onclick={() => verifyVendor(v.id)}>{m('vendors.row.verify')}</RowAction>
-								<RowAction variant="danger" onclick={() => rejectVendor(v.id)}>{m('vendors.row.reject')}</RowAction>
+							{/if}
+							{#if isAllowed(v.status_actions?.reject)}
+								<!-- Armed two-click: rejecting an ACTIVE vendor stops its
+								     payments and revokes its live cards, so the first click
+								     only arms (the shape the change-request queue uses). -->
+								<RowAction
+									variant="danger"
+									armed={rejectArmedId === v.id}
+									onclick={(e) => {
+										e.stopPropagation();
+										if (rejectArmedId === v.id) {
+											rejectArmedId = null;
+											rejectVendor(v.id);
+										} else rejectArmedId = v.id;
+									}}
+								>
+									{rejectArmedId === v.id ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
+								</RowAction>
 							{/if}
 							<RowAction onclick={() => openBankEditor(v)}>
 								{v.bank_details?.counterparty_id ? m('vendors.row.bankSet') : m('vendors.row.bank')}

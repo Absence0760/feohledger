@@ -22,6 +22,8 @@ from app.api.deps import (
     ROLE_AP_MANAGER,
     ROLE_CFO,
     get_org_id,
+    holds_any_permission,
+    holds_any_role,
     require_permission,
     require_roles,
 )
@@ -51,6 +53,7 @@ from app.models.virtual_card import CardRebate, VirtualCard
 from app.schemas.payment import (
     RECORD_ONLY_PAYMENT_METHODS,
     PaymentCreate,
+    PaymentListItem,
     PaymentListResponse,
     PaymentResponse,
     PaymentRunListResponse,
@@ -105,6 +108,11 @@ from app.services.payment_controls import (
     CFO_REASON_THRESHOLD_UNPARSEABLE,
     cfo_approval_decision,
     check_run_segregation,
+    compliance_hold_refusal,
+    payment_void_refusal,
+    run_approve_refusal,
+    run_cancel_refusal,
+    run_execute_refusal,
 )
 from app.services.payment_execution_mode import resolve_execution_mode
 from app.services.payment_runs import (
@@ -493,6 +501,44 @@ def _payment_list_filters(
     return query
 
 
+def _verdict(permitted: bool, refusal) -> dict | None:
+    """An action verdict: the coded ``role_not_permitted`` when the endpoint's
+    permission dependency would refuse, else the gate's coded refusal or
+    ``None``."""
+    from app.api.refusals import role_not_permitted
+
+    if not permitted:
+        return role_not_permitted()
+    return refusal.verdict() if refusal is not None else None
+
+
+def payment_row_verdicts(payment: Payment, user: User) -> dict:
+    """What the History row's three actions would answer ``user``, each the
+    endpoint's permission (``holds_any_permission``, the predicate
+    ``require_permission`` enforces) then the gate it raises from:
+
+    * ``void_refusal`` — ``POST /{id}/void``: ``payment.void`` +
+      ``payment_controls.payment_void_refusal``;
+    * ``release_refusal`` — ``POST /{id}/compliance/release``:
+      ``payment.execute`` + ``payment_controls.compliance_hold_refusal``;
+    * ``dismiss_refusal`` — ``POST /{id}/compliance/dismiss``:
+      ``payment.void`` + the same hold gate.
+
+    Release also refuses on a record-only tenant (``payments_record_only``) —
+    org configuration the page reads once from ``GET /execution-mode``, not a
+    row property.
+    """
+    may_void = holds_any_permission(user, {PERM_PAYMENT_VOID})
+    return {
+        "void_refusal": _verdict(may_void, payment_void_refusal(payment)),
+        "release_refusal": _verdict(
+            holds_any_permission(user, {PERM_PAYMENT_EXECUTE}),
+            compliance_hold_refusal(payment, "release"),
+        ),
+        "dismiss_refusal": _verdict(may_void, compliance_hold_refusal(payment, "dismiss")),
+    }
+
+
 @router.get("", response_model=PaymentListResponse)
 async def list_payments(
     pagination: PaginationParams = Depends(pagination_params),
@@ -558,7 +604,15 @@ async def list_payments(
     rows = result.all()
 
     return PaymentListResponse(
-        items=[PaymentResponse.from_db(p, inv, card) for p, inv, card in rows],
+        items=[
+            PaymentListItem(
+                **PaymentResponse.from_db(p, inv, card).model_dump(),
+                # What void / release / dismiss would answer the caller: each
+                # endpoint's permission, then the gate it raises from.
+                **payment_row_verdicts(p, user),
+            )
+            for p, inv, card in rows
+        ],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
@@ -1695,13 +1749,11 @@ async def void_payment(
     # transitions it (`_lock_payment_invoice`).
     payment = await _get_scoped_payment(db, payment_id, entity_id, for_update=True)
 
-    if payment.status in ("voided", "cancelled"):
-        raise HTTPException(status_code=409, detail=f"Payment already {payment.status}")
-    if payment.status == "failed":
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot void a failed payment (it never settled)",
-        )
+    # Only money that has left, or is leaving, the rail — the ONE definition the
+    # History list's `void_refusal` is read from (`payment_void_refusal`).
+    refusal = payment_void_refusal(payment)
+    if refusal is not None:
+        raise refusal.http()
 
     # Bounded: refused before the processor is asked to reverse anything, so a
     # 409 here leaves the payment exactly as it was (the request rolls back).
@@ -2458,13 +2510,11 @@ async def release_compliance_hold(
     response reflects that, rather than silently forcing money to move.
     """
     payment = await _get_scoped_payment(db, payment_id, entity_id, for_update=True)
-    if payment.status != "pending_compliance":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Can only release a payment stuck 'pending_compliance', not '{payment.status}'"
-            ),
-        )
+    # Only a held payment — the ONE definition the History list's
+    # `release_refusal` is read from (`payment_controls.compliance_hold_refusal`).
+    refusal = compliance_hold_refusal(payment, "release")
+    if refusal is not None:
+        raise refusal.http()
 
     invoice = (
         await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
@@ -2596,13 +2646,11 @@ async def dismiss_compliance_hold(
     (e.g. a genuine sanctions match, or a decision to pay this vendor a
     different way) and decided this payment should not proceed as-is."""
     payment = await _get_scoped_payment(db, payment_id, entity_id, for_update=True)
-    if payment.status != "pending_compliance":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Can only dismiss a payment stuck 'pending_compliance', not '{payment.status}'"
-            ),
-        )
+    # Only a held payment — the ONE definition the History list's
+    # `dismiss_refusal` is read from (`payment_controls.compliance_hold_refusal`).
+    refusal = compliance_hold_refusal(payment, "dismiss")
+    if refusal is not None:
+        raise refusal.http()
 
     invoice = (
         await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
@@ -3347,10 +3395,41 @@ async def create_payment_run(
     }
 
 
+#: Who may sign off / cancel a run — the dependencies on `POST /runs/{id}/approve`
+#: and `/cancel`, and what `run_action_refusals` asks, from one definition.
+RUN_APPROVE_ROLES = (ROLE_CFO,)
+RUN_CANCEL_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
+
+
+def run_action_refusals(run: PaymentRun, user: User, org: Organization) -> dict:
+    """What ``POST /runs/{id}/approve``, ``/execute`` and ``/cancel`` would
+    answer ``user`` for ``run`` right now — each the coded refusal (``{code,
+    message, params}``) or ``None``. The run dialog offers a control exactly
+    when its entry is ``None`` (issue #575).
+
+    Each is the endpoint's own dependency predicate (``holds_any_role`` /
+    ``holds_any_permission`` over the same role / permission set) followed by
+    the endpoint's own gate function (``payment_controls.run_*_refusal``).
+    """
+    payment_config = (org.settings or {}).get("payments")
+    return {
+        "approve": _verdict(
+            holds_any_role(user, RUN_APPROVE_ROLES),
+            run_approve_refusal(run, user.id, payment_config),
+        ),
+        "execute": _verdict(
+            holds_any_permission(user, {PERM_PAYMENT_EXECUTE}),
+            run_execute_refusal(run, user.id, payment_config),
+        ),
+        "cancel": _verdict(holds_any_role(user, RUN_CANCEL_ROLES), run_cancel_refusal(run)),
+    }
+
+
 @router.get("/runs/{run_id}")
 async def get_payment_run(
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     # `RunDetailModal.svelte` fetches this on open — it's the load-bearing
     # read that puts the Execute button (itself gated on `payment.execute`)
     # on screen at all. Same exact-match reasoning as the list above.
@@ -3453,6 +3532,10 @@ async def get_payment_run(
         "retryable_failures": sum(
             1 for p in active if p.status in RETRYABLE_PAYMENT_STATUSES and is_retry_safe(p)
         ),
+        # The caller's verdict on the three draft-run decisions, from the gates
+        # those endpoints raise from (`run_action_refusals`). Read off the
+        # STORED status, which is what the endpoints compare.
+        "actions": run_action_refusals(run, user, org),
         "payments": payments,
     }
 
@@ -3476,7 +3559,7 @@ async def approve_payment_run(
     # this specific sign-off without the full CFO title — just not via the
     # same catalog entry `POST /runs` uses; that would need a distinct
     # permission (e.g. `payment_run.cfo_signoff`) if ever wanted.
-    user: User = Depends(require_roles(ROLE_CFO)),
+    user: User = Depends(require_roles(*RUN_APPROVE_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """CFO sign-off on a draft run. Only valid from `draft` AND
@@ -3488,26 +3571,11 @@ async def approve_payment_run(
     # lands, breaking non-repudiation of the money-control gate. The lock
     # serialises them so the second sees the first's commit and 409s.
     run = await _get_scoped_run(db, run_id, entity_id, for_update=True)
-    if run.status != "draft":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Can only approve 'draft' runs, not '{run.status}'",
-        )
-    if not run.requires_cfo_approval:
-        raise HTTPException(
-            status_code=409,
-            detail="This run does not require CFO approval",
-        )
-    if run.cfo_approved_at is not None:
-        raise HTTPException(status_code=409, detail="Run is already CFO-approved")
-    # Maker-checker: the user who created the run cannot also sign it off — a
-    # self-approval defeats the entire purpose of the CFO gate.
-    check_run_segregation(
-        run.initiated_by,
-        user.id,
-        (org.settings or {}).get("payments"),
-        action="approve",
-    )
+    # Draft, needs and lacks a CFO sign-off, not the run's creator — the ONE
+    # definition `GET /runs/{id}`'s `actions.approve` is read from.
+    refusal = run_approve_refusal(run, user.id, (org.settings or {}).get("payments"))
+    if refusal is not None:
+        raise refusal.http()
 
     now = datetime.now(UTC)
     run.cfo_approved_by = user.id
@@ -3540,7 +3608,7 @@ async def cancel_payment_run(
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*RUN_CANCEL_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Cancel a draft run before it executes. Only valid from `draft`;
@@ -3556,11 +3624,9 @@ async def cancel_payment_run(
     # canceller blocks until /execute commits, re-reads `executing`, and 409s
     # before deleting anything.
     run = await _get_scoped_run(db, run_id, entity_id, for_update=True)
-    if run.status != "draft":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Can only cancel 'draft' runs, not '{run.status}'",
-        )
+    refusal = run_cancel_refusal(run)
+    if refusal is not None:
+        raise refusal.http()
 
     pay_result = await db.execute(select(Payment).where(Payment.payment_run_id == run_id))
     payments = pay_result.scalars().all()
@@ -4462,29 +4528,11 @@ async def execute_payment_run(
     # `PaymentPayload.correlation_id` — defense in depth for processors that
     # honor it, e.g. Modern Treasury / Column.)
     run = await _get_scoped_run(db, run_id, entity_id, for_update=True)
-    if run.status != "draft":
-        raise HTTPException(
-            status_code=409, detail=f"Can only execute 'draft' runs, not '{run.status}'"
-        )
-    # Maker-checker: the user who created the run cannot also execute it (the
-    # money-movement step). Default-on; per-org opt-out for single-operator
-    # accounts. The role/permission split can't enforce this — one user holding
-    # both perms (the default ap_manager) would otherwise run the whole payment
-    # lifecycle solo.
-    check_run_segregation(
-        run.initiated_by,
-        user.id,
-        (org.settings or {}).get("payments"),
-        action="execute",
-    )
-    if run.requires_cfo_approval and run.cfo_approved_at is None:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "This run exceeds the org's CFO-approval threshold and is awaiting "
-                "sign-off from a user with the CFO role."
-            ),
-        )
+    # Draft, not the run's creator (maker-checker), CFO-signed when required —
+    # the ONE definition `GET /runs/{id}`'s `actions.execute` is read from.
+    refusal = run_execute_refusal(run, user.id, (org.settings or {}).get("payments"))
+    if refusal is not None:
+        raise refusal.http()
 
     # Resolve the processor BEFORE claiming the run. An unsupported
     # `settings.payments.provider` can dispatch nothing, so refusing here
