@@ -180,7 +180,7 @@
 		font-size: 0.8rem;
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.15s;
+		transition: border-color 0.15s;
 		font-family: inherit;
 	}
 

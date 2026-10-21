@@ -621,7 +621,7 @@
 		font-weight: 500;
 		cursor: pointer;
 		font-family: inherit;
-		transition: all 0.15s;
+		transition: border-color 0.15s;
 	}
 	.btn-lifecycle:hover { border-color: var(--accent); color: var(--accent); }
 	.btn-lifecycle:disabled { opacity: 0.6; cursor: not-allowed; }
