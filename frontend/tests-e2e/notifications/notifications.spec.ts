@@ -20,6 +20,22 @@ test.describe('notification center', () => {
 		clearNotifications(me);
 	});
 
+	test('over 99 unread, the bell names what its badge shows (WCAG 2.5.3)', async ({ page }) => {
+		await signInAndWait(page);
+		const me = await currentUserId(page);
+		const org = orgId();
+		clearNotifications(me);
+		seedNotifications(me, org, 120);
+
+		await page.goto('/notifications');
+		await expect(page.locator('.bell-badge')).toHaveText('99+', { timeout: 15_000 });
+		// The accessible name carries the visible text, as label-in-name requires;
+		// it used to say "120 unread" beside a badge reading "99+".
+		await expect(page.locator('.bell-btn')).toHaveAccessibleName('Notifications, 99+ unread');
+
+		clearNotifications(me);
+	});
+
 	test('mark one read decrements the badge and updates the row', async ({ page }) => {
 		await signInAndWait(page);
 		const me = await currentUserId(page);
