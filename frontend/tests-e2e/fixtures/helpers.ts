@@ -33,7 +33,8 @@ const _thisDir = path.dirname(_thisFile);
  * so most specs need no further changes.
  *
  * Auth storage state: a worker-scoped `storageState` fixture lazy-
- * creates `.auth/<tenantSlug>-admin.json` on first use by signing the
+ * creates `.auth/<tenantSlug>-admin@<run key>.json` (see
+ * `_authStateFile`) on first use by signing the
  * worker's admin into a temporary context. Every subsequent test in
  * that worker boots the page with the JWT already in localStorage —
  * no `signInAndWait` needed in `beforeEach`. Specs that need a fresh
@@ -43,6 +44,26 @@ const _thisDir = path.dirname(_thisFile);
  */
 
 const AUTH_DIR = path.resolve(_thisDir, '../.auth');
+
+/**
+ * The saved-login file for one tenant, keyed by the web origin AND the API base
+ * the run points at — not by the tenant alone.
+ *
+ * A storageState file records localStorage per ORIGIN, port included, and the
+ * JWT inside it is only valid against the backend that minted it. Keyed on the
+ * slug alone, two runs on different ports (two worktrees, or two sessions in
+ * one worktree — `E2E_WEB_ORIGIN` / `PUBLIC_API_URL`, tests-e2e/README.md §
+ * Running from a worktree) shared `.auth/e2e1-admin.json`: whichever wrote last
+ * left a file holding the OTHER port's origin, the token probe still passed
+ * (same tenant, possibly the same backend), and every signed-in spec in the
+ * reading run booted with no token for its own origin and bounced to /login.
+ */
+function _authStateFile(tenantSlug: string): string {
+	const runKey = `${WEB_ORIGIN}__${_API_BASE}`
+		.replace(/https?:\/\//g, '')
+		.replace(/[^A-Za-z0-9.-]+/g, '_');
+	return path.join(AUTH_DIR, `${tenantSlug}-admin@${runKey}.json`);
+}
 
 // Exported so `fixtures/globalSetup.ts` (the workflow-definition shape guard,
 // see docs/known-issues.md § "Workflow-mutating e2e specs can strand a tenant
@@ -204,16 +225,19 @@ function watchForStubbedModules(page: Page): string[] {
 
 /**
  * Read the auth_token value out of a persisted storageState JSON
- * (format: `{origins:[{localStorage:[{name,value}]}]}`).
- * Returns null when the file is missing, malformed, or holds no token.
+ * (format: `{origins:[{origin,localStorage:[{name,value}]}]}`), for ONE origin.
+ * Returns null when the file is missing, malformed, or holds no token for
+ * `forOrigin` — a token stored under another origin is useless to this run,
+ * because the browser only hands localStorage to the origin that wrote it.
  */
-function _readStoredToken(file: string): string | null {
+function _readStoredToken(file: string, forOrigin: string): string | null {
 	try {
 		const raw = fs.readFileSync(file, 'utf8');
 		const parsed = JSON.parse(raw) as {
-			origins?: Array<{ localStorage?: Array<{ name: string; value: string }> }>;
+			origins?: Array<{ origin?: string; localStorage?: Array<{ name: string; value: string }> }>;
 		};
 		for (const origin of parsed.origins ?? []) {
+			if (origin.origin !== forOrigin) continue;
 			for (const entry of origin.localStorage ?? []) {
 				if (entry.name === 'auth_token') return entry.value;
 			}
@@ -260,9 +284,9 @@ async function _ensureAdminStorageState(
 	tenantSlug: string,
 	creds: TenantCreds
 ): Promise<string> {
-	const file = path.join(AUTH_DIR, `${tenantSlug}-admin.json`);
+	const file = _authStateFile(tenantSlug);
 	if (fs.existsSync(file)) {
-		const token = _readStoredToken(file);
+		const token = _readStoredToken(file, tenantOrigin(tenantSlug));
 		if (token && (await _isStoredTokenValid(token, tenantSlug))) {
 			return file;
 		}

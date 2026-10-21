@@ -319,6 +319,34 @@ anchored to the tenant root rather than matching any page below it, and that
 `escapeRegExp` escapes backslashes, so one tenant's pattern can never be
 satisfied by another tenant's origin.
 
+Two more things are per-origin, and both used to be shared by every run in one
+checkout — each made a run on its own port sign in against the wrong state and
+bounce every signed-in spec to `/login`:
+
+- **SvelteKit's generated env modules.** `vite dev` writes the resolved
+  `PUBLIC_API_URL` into `<outDir>/generated/dev/env/*` when it starts, and every
+  dev server watching that file reloads from it. With one `.svelte-kit` per
+  checkout, a second dev server (another session's e2e run, or a `pnpm dev`)
+  overwrote the first one's value, and the first server's pages then called the
+  second's backend. `playwright.config.ts` now passes `SVELTEKIT_OUT_DIR=
+  .svelte-kit/e2e-<port>` to the dev server it starts, and `vite.config.ts` hands
+  that to SvelteKit as `outDir` — so each e2e dev server owns its generated
+  files. It is under `.svelte-kit/`, so already gitignored, and SvelteKit's
+  watcher ignores every sibling of `<outDir>/generated`, so the default server
+  does not react to it either. Preview runs (CI) keep the default, because
+  `vite preview` serves the `<outDir>/output` that `pnpm build` wrote. If you
+  hand-start a second `vite dev` in one checkout, give it its own
+  `SVELTEKIT_OUT_DIR` the same way (`docs/environment.md`).
+- **The saved admin login** (`.auth/`). A storageState file holds localStorage
+  per origin, port included, and its JWT is only valid against the backend
+  that issued it. The file was keyed by tenant alone (`e2e1-admin.json`), so two
+  runs on different ports overwrote each other's, the token probe still passed,
+  and the reading run booted with no token for its own origin. It is now
+  `<slug>-admin@<web origin>_<api base>.json`
+  (`fixtures/helpers.ts::_authStateFile`), and the token is read only from the
+  entry for the run's own tenant origin. Old `<slug>-admin.json` files are
+  simply never read again; delete them whenever you like.
+
 Three things stay shared and are NOT covered by these variables:
 
 - **The databases.** Every session still shares one Postgres, so pin a distinct
@@ -775,7 +803,7 @@ same origin so the vanity `Host` reaches the backend. See
 ## Storage-state (future)
 
 The auth-storage-state pattern (sign each user in once, persist to
-`.auth/<user>.json`, then `test.use({ storageState })` per spec) is
+`.auth/<user>@<origin>.json`, then `test.use({ storageState })` per spec) is
 already the default (`fixtures/helpers.ts::_ensureAdminStorageState`),
 just lazy per-worker rather than precomputed for every seeded user
 up front — login is fast enough that this is fine. A `globalSetup`
