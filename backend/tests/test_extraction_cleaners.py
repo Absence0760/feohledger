@@ -244,3 +244,147 @@ def test_extracted_line_number_is_an_int_or_none(raw, expected):
     from app.services.extraction import _clean_line_number
 
     assert _clean_line_number(raw) == expected
+
+
+# ---------- printed currency codes -----------------------------------------
+#
+# Stripping the ISO code made `GBP 9,500.00` parse — and then threw the code
+# away, so with no `currency` field the row kept the upload's `USD` and a
+# GBP 9,500 invoice was gated as USD 9,500 (decisions §302). The code is the
+# document's own statement of the currency and is now weighed, not discarded.
+
+
+@pytest.mark.parametrize(
+    "raw, value, codes",
+    [
+        ("GBP 9,500.00", Decimal("9500.00"), {"GBP"}),
+        ("1,234.56 USD", Decimal("1234.56"), {"USD"}),
+        ("EUR (12.50)", Decimal("-12.50"), {"EUR"}),
+        ("$1,234.56", Decimal("1234.56"), set()),
+        ("USD 100 EUR", Decimal("100"), {"USD", "EUR"}),
+        # A code beside something that is not a number names no number's currency.
+        ("EUR abc", None, set()),
+        ("USD", None, set()),
+    ],
+)
+def test_clean_decimal_and_codes_returns_the_stripped_code(raw, value, codes):
+    from app.services.extraction import _clean_decimal, _clean_decimal_and_codes
+
+    got_value, got_codes = _clean_decimal_and_codes(raw)
+    assert got_value == value
+    assert got_codes == frozenset(codes)
+    # `_clean_decimal` is the magnitude half of the same reading.
+    assert _clean_decimal(raw) == value
+
+
+def _currency_result(*, currency, amount, subtotal=None, line_total=None):
+    from app.services.extraction_adapters.base import (
+        ExtractedField,
+        ExtractedLineItem,
+        ExtractionResult,
+    )
+
+    lines = []
+    if line_total is not None:
+        lines.append(
+            ExtractedLineItem(
+                line_number=1,
+                quantity=ExtractedField("1", 0.9),
+                unit_price=ExtractedField(line_total, 0.9),
+                total=ExtractedField(line_total, 0.9),
+            )
+        )
+    return ExtractionResult(
+        success=True,
+        overall_confidence=0.97,
+        amount=ExtractedField(amount, 0.97),
+        subtotal=ExtractedField(subtotal, 0.9),
+        tax_rate=ExtractedField("20%", 0.9),
+        currency=ExtractedField(currency, 0.97),
+        line_items=lines,
+    )
+
+
+def _placeholder_invoice():
+    """What `POST /api/workflow/upload` creates before extraction runs."""
+    from app.models.invoice import Invoice
+
+    return Invoice(amount=Decimal("0"), currency="USD")
+
+
+def test_a_printed_code_is_the_currency_when_the_field_is_empty():
+    from app.services.extraction import _apply_extraction
+
+    invoice = _placeholder_invoice()
+    _apply_extraction(invoice, _currency_result(currency=None, amount="GBP 9,500.00"))
+    assert invoice.amount == Decimal("9500.00")
+    assert invoice.currency == "GBP"  # not the placeholder's USD
+
+
+def test_a_printed_code_that_contradicts_the_field_leaves_the_money_unread():
+    from app.services.extraction import _apply_extraction
+
+    invoice = _placeholder_invoice()
+    _apply_extraction(
+        invoice, _currency_result(currency="EUR", amount="USD 1,000.00", subtotal="1,000.00")
+    )
+    # Neither EUR 1,000 nor USD 1,000: the amount stays at the placeholder, so
+    # `missing_amount` fires and `decide_auto_approve` refuses it.
+    assert invoice.amount == Decimal("0")
+    assert getattr(invoice, "subtotal", None) is None
+    assert invoice.currency == "USD"  # untouched — neither half is written
+    # tax_rate is a percentage, not money, and is still read.
+    assert invoice.tax_rate == Decimal("20")
+
+
+def test_two_amounts_printing_different_codes_leave_the_money_unread():
+    from app.services.extraction import _apply_extraction
+
+    invoice = _placeholder_invoice()
+    _apply_extraction(
+        invoice, _currency_result(currency=None, amount="GBP 9,500.00", line_total="USD 9,500.00")
+    )
+    assert invoice.amount == Decimal("0")
+    assert invoice.currency == "USD"
+
+
+def test_a_printed_code_that_agrees_with_the_field_reads_normally():
+    from app.services.extraction import _apply_extraction
+
+    invoice = _placeholder_invoice()
+    _apply_extraction(
+        invoice, _currency_result(currency="gbp.", amount="GBP 9,500.00", subtotal="7,916.67")
+    )
+    assert invoice.amount == Decimal("9500.00")
+    assert invoice.subtotal == Decimal("7916.67")
+    assert invoice.currency == "GBP"
+
+
+def test_no_code_anywhere_keeps_the_rows_currency():
+    """Unchanged: nothing names a currency, so nothing is written over the row's."""
+    from app.services.extraction import _apply_extraction
+
+    invoice = _placeholder_invoice()
+    _apply_extraction(invoice, _currency_result(currency="US Dollars", amount="1,000.00"))
+    assert invoice.amount == Decimal("1000.00")
+    assert invoice.currency == "USD"
+
+
+@pytest.mark.parametrize(
+    "field, printed, conflict, currency",
+    [
+        (None, frozenset(), False, None),
+        ("EUR", frozenset(), False, "EUR"),
+        (None, frozenset({"GBP"}), False, "GBP"),
+        ("GBP", frozenset({"GBP"}), False, "GBP"),
+        ("EUR", frozenset({"USD"}), True, None),
+        (None, frozenset({"USD", "GBP"}), True, None),
+        ("GBP", frozenset({"USD", "GBP"}), True, None),
+    ],
+)
+def test_currency_evidence_truth_table(field, printed, conflict, currency):
+    from app.services.extraction import CurrencyEvidence
+
+    evidence = CurrencyEvidence(field_currency=field, printed_codes=printed)
+    assert evidence.conflict is conflict
+    assert evidence.currency == currency

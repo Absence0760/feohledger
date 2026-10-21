@@ -531,6 +531,8 @@ export const messages = {
 	'invoices.warning.selfCorrectionTotalReconciliation': '金額が一致しません: 小計（{subtotal}）+ 税（{tax}）+ 送料（{shipping}）− 割引（{discount}）= {expected} ですが、合計は {amount} です。',
 	'invoices.warning.selfCorrectionDateOrdering': '支払期限（{dueDate}）が請求日（{invoiceDate}）より前です。',
 	'invoices.warning.selfCorrectionLineItemsSum': '明細合計（{lineItemsTotal}）が請求金額（{amount}）と一致しません。',
+	'invoices.warning.selfCorrectionCurrencyConflict': '金額は {printedCurrency} で記載されていますが、請求書の通貨は {fieldCurrency} です。金額は空欄のままです。書類から入力してください。',
+	'invoices.warning.selfCorrectionCurrencyMixed': '金額が複数の通貨（{printedCurrencies}）で記載されています。金額は空欄のままです。書類から入力してください。',
 	'invoices.warning.selfCorrectionLineItemMath': '明細 {lineNumber}: {quantity} × {unitPrice} = {expected} ですが、合計は {total} です。',
 	'invoices.warning.glCodesNotInChart': 'AI が提案した勘定科目が有効な勘定科目表にありません: {codes}',
 	'invoices.warning.glCodeStalePrior': 'この仕入先のキャッシュされた勘定科目「{code}」は有効な勘定科目表にありません。',

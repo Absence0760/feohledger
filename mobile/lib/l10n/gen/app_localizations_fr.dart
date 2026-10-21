@@ -2987,6 +2987,19 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  ) {
+    return 'Les montants sont libellés en $printedCurrency, mais la devise de la facture indique $fieldCurrency. Les montants ont été laissés vides — saisissez-les depuis le document.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies) {
+    return 'Les montants sont libellés dans plusieurs devises ($printedCurrencies). Les montants ont été laissés vides — saisissez-les depuis le document.';
+  }
+
+  @override
   String invoiceWarningSelfCorrectionLineItemMath(
     String lineNumber,
     String quantity,

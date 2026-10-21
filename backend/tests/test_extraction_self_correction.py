@@ -571,3 +571,51 @@ async def test_every_violation_is_json_safe():
         assert violation["type"] == "extraction_self_correction"
         for value in violation["params"].values():
             assert isinstance(value, (str, int)), (violation["code"], value)
+
+
+# ---------------------------------------------------------------------------
+# currency_evidence — the document contradicts itself about its currency
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_printed_code_contradicting_the_currency_field_is_flagged():
+    """`_apply_extraction` leaves the money unread (decisions §302); this pass
+    tells the reviewer why and docks the confidence the auto-approve gate reads."""
+    result = _result(amount=_field("USD 1,000.00"), currency=_field("EUR"))
+    report = await run_self_correction(result)
+
+    [v] = [v for v in report.violations if v["check"] == "currency_evidence"]
+    assert v["code"] == "self_correction_currency_conflict"
+    assert v["params"] == {"printedCurrency": "USD", "fieldCurrency": "EUR"}
+    assert v["type"] == "extraction_self_correction"
+    assert "amount" in report.confidence_penalties
+    assert "currency" in report.confidence_penalties
+
+
+@pytest.mark.asyncio
+async def test_amounts_printing_different_codes_are_flagged():
+    result = _result(
+        amount=_field("GBP 9,500.00"),
+        line_items=[_line_item("1", "9,500.00", "USD 9,500.00")],
+    )
+    report = await run_self_correction(result)
+
+    [v] = [v for v in report.violations if v["check"] == "currency_evidence"]
+    assert v["code"] == "self_correction_currency_mixed"
+    assert v["params"] == {"printedCurrencies": "GBP, USD"}
+
+
+@pytest.mark.parametrize(
+    "amount, currency",
+    [
+        ("GBP 9,500.00", None),  # the code is the currency — no contradiction
+        ("GBP 9,500.00", "GBP"),  # agreement
+        ("9,500.00", "EUR"),  # nothing printed
+    ],
+)
+@pytest.mark.asyncio
+async def test_consistent_currency_evidence_is_not_flagged(amount, currency):
+    result = _result(amount=_field(amount), currency=_field(currency))
+    report = await run_self_correction(result)
+    assert not any(v["check"] == "currency_evidence" for v in report.violations)

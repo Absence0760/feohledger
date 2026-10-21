@@ -288,6 +288,48 @@ def _check_line_item_math(
         report.confidence_penalties[f"line_items[{i}].total"] = round(-CONFIDENCE_PENALTY, 2)
 
 
+def _check_currency_evidence(
+    result: ExtractionResult,
+    report: SelfCorrectionReport,
+    convention: AmountConvention | None = None,
+) -> None:
+    """The currency codes printed on the amounts agree with each other and with
+    the ``currency`` field.
+
+    ``_apply_extraction`` already refuses to write header money from a document
+    that contradicts itself about its currency (``CurrencyEvidence``,
+    `decisions.md` §302) — that half is not optional and does not depend on
+    this pass. This check is the half that tells the reviewer WHY the amount is
+    blank, and docks ``amount`` / ``currency`` so the score the auto-approve
+    gate reads says the read is suspect.
+    """
+    from app.services.extraction import extraction_currency_evidence
+
+    evidence = extraction_currency_evidence(result, convention)
+    if not evidence.conflict:
+        return
+    printed = sorted(evidence.printed_codes)
+    if len(printed) > 1:
+        finding = warning(
+            "self_correction_currency_mixed",
+            "warning",
+            # Codes are identifiers, joined with the ASCII separator (§148).
+            printedCurrencies=", ".join(printed),
+        )
+    else:
+        finding = warning(
+            "self_correction_currency_conflict",
+            "warning",
+            printedCurrency=printed[0],
+            fieldCurrency=evidence.field_currency,
+        )
+    report.violations.append(
+        {**finding, "check": "currency_evidence", "fields_affected": ["amount", "currency"]}
+    )
+    for f in ("amount", "currency"):
+        _penalize(result, report, f)
+
+
 # ------------------------------------------------------------------
 # Public API
 # ------------------------------------------------------------------
@@ -315,6 +357,7 @@ async def run_self_correction(
     # tokens `_apply_extraction` read, so the checker and the writer agree.
     convention = extraction_amount_convention(result)
 
+    _check_currency_evidence(result, report, convention)
     _check_total_reconciliation(result, report, convention)
     _check_date_ordering(
         result, report, convention, day_first=resolve_day_first_preference(org_settings)

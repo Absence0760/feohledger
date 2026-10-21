@@ -4560,6 +4560,21 @@ abstract class AppLocalizations {
     String amount,
   );
 
+  /// No description provided for @invoiceWarningSelfCorrectionCurrencyConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Amounts are printed in {printedCurrency}, but the invoice currency reads {fieldCurrency}. The amounts were left blank — enter them from the document.'**
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  );
+
+  /// No description provided for @invoiceWarningSelfCorrectionCurrencyMixed.
+  ///
+  /// In en, this message translates to:
+  /// **'Amounts are printed in more than one currency ({printedCurrencies}). The amounts were left blank — enter them from the document.'**
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies);
+
   /// No description provided for @invoiceWarningSelfCorrectionLineItemMath.
   ///
   /// In en, this message translates to:

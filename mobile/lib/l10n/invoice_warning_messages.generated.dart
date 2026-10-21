@@ -173,6 +173,11 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'lineItemsTotal': 'number',
     'amount': 'number',
   },
+  'self_correction_currency_conflict': {
+    'printedCurrency': 'text',
+    'fieldCurrency': 'text',
+  },
+  'self_correction_currency_mixed': {'printedCurrencies': 'text'},
   'self_correction_line_item_math': {
     'lineNumber': 'count',
     'quantity': 'number',
@@ -646,6 +651,21 @@ String? _localizeWarningCode(
       final amount = _number(p['amount'], currency);
       if (amount == null) return null;
       return l.invoiceWarningSelfCorrectionLineItemsSum(lineItemsTotal, amount);
+    // Amounts are printed in {printedCurrency}, but the invoice currency reads {fieldCurrency}. The amounts were left blank — enter them from the document.
+    case 'self_correction_currency_conflict':
+      final printedCurrency = _text(p['printedCurrency'], currency);
+      if (printedCurrency == null) return null;
+      final fieldCurrency = _text(p['fieldCurrency'], currency);
+      if (fieldCurrency == null) return null;
+      return l.invoiceWarningSelfCorrectionCurrencyConflict(
+        printedCurrency,
+        fieldCurrency,
+      );
+    // Amounts are printed in more than one currency ({printedCurrencies}). The amounts were left blank — enter them from the document.
+    case 'self_correction_currency_mixed':
+      final printedCurrencies = _text(p['printedCurrencies'], currency);
+      if (printedCurrencies == null) return null;
+      return l.invoiceWarningSelfCorrectionCurrencyMixed(printedCurrencies);
     // Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.
     case 'self_correction_line_item_math':
       final lineNumber = _text(p['lineNumber'], currency);

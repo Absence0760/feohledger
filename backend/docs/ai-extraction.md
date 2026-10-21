@@ -238,6 +238,32 @@ statement cell can't drift apart:
   cleaners and into `run_self_correction`, so the header, the lines and the
   checker can't be read under different rules.
 
+### A currency code printed beside the figure
+
+A model transcribing the printed total often keeps the code the page prints:
+`GBP 9,500.00`, `1,234.56 USD`. `_amount_core_and_codes` strips the code so the
+magnitude parses, and **returns it** — it is the document stating that figure's
+currency, not decoration (`docs/decisions.md` §302). `extraction_currency_evidence`
+collects the codes from every money token that parses (the same header + line
+set the convention vote reads) and weighs them against the model's `currency`
+field (`CurrencyEvidence`):
+
+| `currency` field | Codes printed on the amounts | Result |
+|---|---|---|
+| `GBP` | none, or `GBP` | currency `GBP`, money read |
+| empty / not a code | `GBP` | currency `GBP` from the code — never the upload's `USD` placeholder |
+| `EUR` | `USD` | **conflict** — no header money is written, currency left as it was |
+| any | `GBP` and `USD` | **conflict** — same |
+| empty | none | row keeps its currency (see `docs/followups.md` on the `USD` default) |
+
+On a conflict the amount stays at the upload's `0`, so `missing_amount` fires
+and `decide_auto_approve` refuses it — a zero or negative amount never
+auto-approves on either trigger. `tax_rate` (a percentage) is still read. The
+self-correction pass names the conflict to the reviewer
+(`self_correction_currency_conflict` / `self_correction_currency_mixed`) and
+docks `amount` / `currency`. A symbol (`€`, `$`) is not evidence — `$` alone
+names a dozen currencies.
+
 ### Date disambiguation (DD/MM vs MM/DD)
 
 A numeric date like `03/04/2026` is the same class of problem as the amount
@@ -276,7 +302,7 @@ CSV and PDF-statement intake paths, via `parse_date`).
 
 Runs after `_apply_extraction()`, before line items are saved. Implemented in `services/extraction_self_correction.py`.
 
-**Invariant checks (4):**
+**Invariant checks (5):**
 
 1. **Total reconciliation** — `|subtotal + tax_amount + shipping_amount - discount_amount - amount| / amount <= 2%` (skipped when no subtotal was extracted)
 2. **Date ordering** — `due_date >= invoice_date`, with both dates read by
@@ -300,6 +326,11 @@ Runs after `_apply_extraction()`, before line items are saved. Implemented in `s
    `quantity * unit_price + tax` — a Net / VAT / Gross invoice whose model read
    reports the net unit price and the gross line total is consistent, and was
    flagged on every line until #575.
+5. **Currency evidence** — the ISO codes printed on the amounts agree with each
+   other and with the `currency` field (see *A currency code printed beside the
+   figure* above). The writer already refused the money on a conflict, whether
+   or not this pass runs; this check is what tells the reviewer why, and it
+   docks `amount` and `currency`.
 
 **On violation:**
 

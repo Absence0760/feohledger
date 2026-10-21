@@ -419,3 +419,57 @@ async def test_golden_inconsistent_read_is_flagged(monkeypatch):
     mismatch = reconcile_line_totals(invoice, sum(v["total"] for v in lines))
     assert mismatch is not None
     assert mismatch["line_items_total"] == "1850.00"
+
+
+# --------------------------------------------------------------------------- #
+# The printed ISO code is currency evidence (decisions §302)
+# --------------------------------------------------------------------------- #
+
+
+def _with_currency_field(response: dict, value: str | None) -> dict:
+    """``response`` with the model's ``currency`` answer replaced by ``value``.
+
+    The eur_multipage read prints ``EUR 8.739,84`` on the total; only the
+    separate currency field changes, so the replay is otherwise byte-for-byte
+    the recorded one.
+    """
+    response = json.loads(json.dumps(response))
+    block = response["content"][0]
+    body = json.loads(block["text"])
+    body["currency"] = {"value": value, "confidence": 0.0 if value is None else 0.97}
+    block["text"] = json.dumps(body)
+    return response
+
+
+async def _run_response(monkeypatch, case: Golden, response: dict):
+    pdf, _ = _load(case)
+    _replay(monkeypatch, response)
+    adapter = ClaudeVisionAdapter({"api_key": "sk-ant-golden-test", "model": "claude-sonnet-5-5"})
+    result = await adapter.extract(file_bytes=pdf, mime_type="application/pdf")
+    assert result.success, result.error
+    invoice = Invoice(amount=D("0"), currency="USD")  # the upload placeholder
+    _apply_extraction(invoice, result, extraction_amount_convention(result))
+    return result, invoice
+
+
+_EUR = next(c for c in CORRECT_CASES if c.name == "eur_multipage")
+
+
+async def test_golden_printed_code_supplies_a_missing_currency(monkeypatch):
+    _, response = _load(_EUR)
+    _, invoice = await _run_response(monkeypatch, _EUR, _with_currency_field(response, None))
+    assert invoice.amount == _EUR.header["amount"]
+    # From "EUR 8.739,84" — not the placeholder's USD.
+    assert invoice.currency == "EUR"
+
+
+async def test_golden_printed_code_contradicting_the_field_leaves_money_unread(monkeypatch):
+    _, response = _load(_EUR)
+    result, invoice = await _run_response(monkeypatch, _EUR, _with_currency_field(response, "USD"))
+    assert invoice.amount == D("0")
+    assert invoice.subtotal is None and invoice.tax_amount is None
+    assert invoice.currency == "USD"  # the placeholder, untouched — not "read as USD"
+
+    report = await run_self_correction(result)
+    codes = {v["code"] for v in report.violations}
+    assert "self_correction_currency_conflict" in codes

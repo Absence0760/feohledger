@@ -2021,6 +2021,25 @@
       }
     }
   },
+  "invoiceWarningSelfCorrectionCurrencyConflict": "Amounts are printed in {printedCurrency}, but the invoice currency reads {fieldCurrency}. The amounts were left blank — enter them from the document.",
+  "@invoiceWarningSelfCorrectionCurrencyConflict": {
+    "placeholders": {
+      "printedCurrency": {
+        "type": "String"
+      },
+      "fieldCurrency": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningSelfCorrectionCurrencyMixed": "Amounts are printed in more than one currency ({printedCurrencies}). The amounts were left blank — enter them from the document.",
+  "@invoiceWarningSelfCorrectionCurrencyMixed": {
+    "placeholders": {
+      "printedCurrencies": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningSelfCorrectionLineItemMath": "Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.",
   "@invoiceWarningSelfCorrectionLineItemMath": {
     "placeholders": {
