@@ -60,7 +60,6 @@ export const messages = {
 	'portal.changePassword.confirm': 'Confirmar nova senha',
 	'portal.changePassword.save': 'Salvar senha',
 	'portal.changePassword.saving': 'Salvando...',
-	'portal.changePassword.mismatch': 'As senhas não coincidem.',
 	'portal.changePassword.failed': 'Falha na alteração',
 
 	// Faturas do portal (routes/portal/invoices/+page.svelte)

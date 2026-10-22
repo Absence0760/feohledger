@@ -508,7 +508,7 @@ describe('the plan-feature refusal', () => {
 	it('names the feature and the tier that grants it, in the reader’s language', () => {
 		expect(codedRefusalText(PLAN_FEATURE_REQUIRED, { feature: 'scim' }, enT)).toBe(
 			'SCIM user provisioning is not included in your plan. It is available on the Scale ' +
-				'plan — upgrade in Billing to use it.'
+				'plan — upgrade under Settings → Subscription to use it.'
 		);
 		const out = codedRefusalText(PLAN_FEATURE_REQUIRED, { feature: 'sso' }, deT) ?? '';
 		expect(out).toContain(de['planFeature.sso']);

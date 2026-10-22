@@ -14320,6 +14320,21 @@ locale-wide rule: no two sidebar rows share a name, and within a group no two
 tabs (nor a tab and its group) read the same, in any of the six catalogues.
 `tests-e2e/smoke/section-nav.spec.ts` checks the rendered sidebar.
 
+**The page and every pointer to it say "Subscription".** The rename left the
+`/billing` heading (`billing.title`) on "Billing" while the nav said
+"Subscription", and the messages that send a user there — the public pricing
+page's "starts on Free" line, the plan-feature refusal
+(`refusal.planFeatureRequired`), both AI-reading-paused invoice warnings and
+the three AI-usage notices (80%, 100%, spending cap) — named a "Billing" page no row is
+called. The name a user hunts for is the one in the sidebar, so the heading
+now matches the nav label in every locale, and each pointer names the path,
+**Settings → Subscription** (translated with each locale's own nav labels), since
+the row sits inside the Settings group. The backend's English for the same
+warnings (`invoice_warning_catalog.py`, regenerated into the web and mobile
+code maps) and the notices (`notification_templates.py`) changed with them, as
+did the mobile ARB copies of the two warnings. The route stays `/billing`;
+only words changed.
+
 **Partner Admin is NOT hidden yet — it needs a product call.** The finding
 asked to hide it unless the workspace is a partner. There is no partner flag:
 `GET /api/partner`'s `is_partner` is *derived* — true once the org parents at

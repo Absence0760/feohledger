@@ -121,7 +121,7 @@ test.describe('/billing (admin)', () => {
 	});
 
 	test('renders the billing surface header', async ({ page }) => {
-		await expect(page.getByRole('heading', { name: 'Billing' })).toBeVisible();
+		await expect(page.getByRole('heading', { level: 1, name: 'Subscription', exact: true })).toBeVisible();
 	});
 
 	test('with no subscription, shows the friendly empty state + usage meters', async ({ page }) => {
@@ -563,7 +563,7 @@ test.describe('/billing (clerk — not authorized)', () => {
 		await page.goto('/billing');
 		// admin/cfo only — the page waits for /me then bounces the clerk to root.
 		await page.waitForURL(TENANT_ROOT_URL, { timeout: 15_000 });
-		await expect(page.getByRole('heading', { name: 'Billing' })).toHaveCount(0);
+		await expect(page.getByRole('heading', { level: 1, name: 'Subscription', exact: true })).toHaveCount(0);
 
 		// The clerk also can't reach the Subscription tab (it's admin/cfo-only,
 		// and they were bounced to the dashboard, which has no section tabs).

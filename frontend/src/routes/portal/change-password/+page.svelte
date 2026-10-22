@@ -1,27 +1,59 @@
 <script lang="ts">
+	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
+	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
+	import { ApiError } from '#lib/api.ts';
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let currentPassword = $state('');
 	let newPassword = $state('');
-	let confirm = $state('');
+	let confirmPassword = $state('');
 	let error = $state('');
 	let loading = $state(false);
+	let submitted = $state(false);
+	let currentInput = $state<HTMLInputElement | null>(null);
+	let newFields = $state<ReturnType<typeof NewPasswordFields> | null>(null);
+	// The server's refusals of one field, shown beside it until it is edited:
+	// a wrong current password (400), a new password it would not take (422,
+	// `validate_password_complexity` — the same rules the employee forms check,
+	// `api/portal_auth.py::portal_change_password`). Anything else is not about
+	// a field and goes in the banner.
+	let currentServerError = $state('');
+	let newServerError = $state('');
+
+	let currentError = $derived(
+		submitted && currentPassword === ''
+			? m('auth.changePassword.currentRequired')
+			: currentServerError
+	);
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
-		if (newPassword !== confirm) {
-			error = m('portal.changePassword.mismatch');
-			return;
-		}
+		submitted = true;
+		// Every field is marked at once; focus goes to the first bad one.
+		const currentOk = currentPassword !== '';
+		const newOk = newFields?.validate(currentOk) ?? false;
+		if (!currentOk) currentInput?.focus();
+		if (!currentOk || !newOk) return;
 		loading = true;
 		try {
 			await portalAuth.changePassword(currentPassword, newPassword);
 			goto('/portal/invoices');
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('portal.changePassword.failed');
+			if (err instanceof ApiError && err.status === 400) {
+				currentServerError = m('auth.changePassword.currentIncorrect');
+				await tick();
+				currentInput?.focus();
+			} else if (err instanceof ApiError && err.status === 422) {
+				newServerError = err.message;
+				await tick();
+				newFields?.focusNew();
+			} else {
+				error = err instanceof Error ? err.message : m('portal.changePassword.failed');
+			}
 		} finally {
 			loading = false;
 		}
@@ -29,7 +61,7 @@
 </script>
 
 <div class="page">
-	<form class="card" onsubmit={handleSubmit}>
+	<form class="card" onsubmit={handleSubmit} novalidate>
 		<h1>{m('portal.changePassword.title')}</h1>
 		<p class="hint">{m('portal.changePassword.hint')}</p>
 
@@ -52,29 +84,27 @@
 			tabindex="-1"
 			aria-hidden="true"
 		/>
-		<label>
-			<span>{m('portal.changePassword.current')}</span>
-			<input
-				type="password"
-				bind:value={currentPassword}
-				required
-				autocomplete="current-password"
-			/>
-		</label>
-		<label>
-			<span>{m('portal.changePassword.new')}</span>
-			<input
-				type="password"
-				bind:value={newPassword}
-				required
-				minlength="12"
-				autocomplete="new-password"
-			/>
-		</label>
-		<label>
-			<span>{m('portal.changePassword.confirm')}</span>
-			<input type="password" bind:value={confirm} required autocomplete="new-password" />
-		</label>
+		<PasswordInput
+			id="portal-change-current"
+			label={m('portal.changePassword.current')}
+			bind:value={currentPassword}
+			bind:input={currentInput}
+			autocomplete="current-password"
+			required
+			error={currentError}
+			oninput={() => (currentServerError = '')}
+		/>
+		<NewPasswordFields
+			bind:this={newFields}
+			idPrefix="portal-change"
+			newLabel={m('portal.changePassword.new')}
+			confirmLabel={m('portal.changePassword.confirm')}
+			bind:newPassword
+			bind:confirmPassword
+			bind:serverError={newServerError}
+		/>
+		<!-- Enabled whatever is typed: a submit says what is wrong, beside the
+		     field (issue #635 #14, the same as the employee forms). -->
 		<button type="submit" disabled={loading}>
 			{loading ? m('portal.changePassword.saving') : m('portal.changePassword.save')}
 		</button>
@@ -115,26 +145,35 @@
 		border-radius: 4px;
 		font-size: 0.85rem;
 	}
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	label span {
+	/* The fields are PasswordInput / NewPasswordFields, so their label and
+	   input are those components' elements: reach them through `:global()`,
+	   wrapped in `:where()` so the components' own rules (the room the
+	   show-password toggle needs) still win on specificity. */
+	.card :global(:where(.password-field label > span)) {
 		font-size: 0.78rem;
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
 		color: var(--text-muted);
 	}
-	input {
+	.card :global(:where(.password-field input:not([type='checkbox']):not([type='radio']))) {
+		width: 100%;
 		background: var(--bg);
 		border: 1px solid var(--border);
 		border-radius: 4px;
 		padding: 10px 12px;
 		font-size: 0.9rem;
 		color: var(--text);
+		font-family: inherit;
 	}
-	button {
+	.card :global(:where(.password-field input:not([type='checkbox']):not([type='radio']):focus)) {
+		outline: none;
+		border-color: var(--accent);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
+	}
+	.card :global(:where(.password-field input[aria-invalid='true'])) {
+		border-color: var(--danger);
+	}
+	button[type='submit'] {
 		margin-top: 8px;
 		padding: 10px;
 		border-radius: 4px;
@@ -144,7 +183,7 @@
 		font-weight: 500;
 		cursor: pointer;
 	}
-	button:disabled {
+	button[type='submit']:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
 	}

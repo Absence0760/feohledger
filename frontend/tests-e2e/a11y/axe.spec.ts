@@ -109,7 +109,7 @@ const AUTHED_ROUTES: { path: string; name: string; ready?: string }[] = [
 	// The headings are the ones the existing specs for these routes already
 	// select on (`tests-e2e/{billing,reports,cfo}/`), so a title change breaks
 	// them together rather than silently skipping the scan here.
-	{ path: '/billing', name: 'billing', ready: 'Billing' },
+	{ path: '/billing', name: 'billing', ready: 'Subscription' },
 	{ path: '/reports', name: 'report builder', ready: 'Report Builder' },
 	{ path: '/experiments', name: 'workflow experiments', ready: 'Workflow Experiments' },
 	{ path: '/cfo', name: 'cash flow', ready: 'Cash Flow' },

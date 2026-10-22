@@ -209,8 +209,8 @@ def render_ai_invoice_usage(
         body = (
             f"This month's AI-read invoice overage has reached your spending cap of {cap_text}. "
             "AI reading is paused until next month: new invoices are still created and wait "
-            "for manual entry, and approvals and payments are unaffected. Raise the cap on "
-            "the Billing page to resume AI reading now."
+            "for manual entry, and approvals and payments are unaffected. Raise the cap "
+            "under Settings → Subscription to resume AI reading now."
         )
     elif notice == AI_NOTICE_100:
         title = f"All {included:,} AI-read invoices for {period} are used"
@@ -218,12 +218,13 @@ def render_ai_invoice_usage(
             tail = (
                 "AI reading is now paused until next month: new invoices are still created "
                 "and wait for manual entry, and approvals and payments are unaffected. "
-                "Upgrade your plan on the Billing page to keep AI reading on."
+                "Upgrade your plan under Settings → Subscription to keep AI reading on."
             )
         else:
             tail = (
                 f"Each further AI-read invoice this month is billed at {currency} "
-                f"{overage_unit_price}. Set or review a monthly spending cap on the Billing page."
+                f"{overage_unit_price}. Set or review a monthly spending cap under "
+                "Settings → Subscription."
             )
         body = (
             f"Your organization has used all {included:,} AI-read invoices included "
@@ -234,7 +235,8 @@ def render_ai_invoice_usage(
         if pauses:
             tail = (
                 "When the allowance is used, AI reading pauses until next month and new "
-                "invoices wait for manual entry. Upgrade your plan on the Billing page to avoid it."
+                "invoices wait for manual entry. Upgrade your plan under "
+                "Settings → Subscription to avoid it."
             )
         else:
             tail = (

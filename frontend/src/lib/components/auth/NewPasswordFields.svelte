@@ -96,6 +96,17 @@
 		return true;
 	}
 
+	/**
+	 * Back to the untouched state, for a form that stays on screen after a
+	 * successful save (the profile's Password card) and clears its values:
+	 * without it the emptied fields would be marked as a failed submit.
+	 */
+	export function reset(): void {
+		submitted = false;
+		confirmTouched = false;
+		serverError = '';
+	}
+
 	/** Put focus on the new-password field — after a server refusal of it. */
 	export function focusNew(): void {
 		newInput?.focus();

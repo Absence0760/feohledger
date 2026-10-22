@@ -594,7 +594,7 @@ A refused read is **not a failure**. The invoice:
 - gets a coded, localizable warning — `ai_allowance_reached` (with the
   allowance as `included`) or `ai_spend_cap_reached`, type
   `ai_reading_paused` — telling the user AI reading is paused and how to resume
-  (upgrade the plan / raise the cap on the Billing page);
+  (upgrade the plan / raise the cap under Settings → Subscription);
 - transitions `pending → new` (`invoice.ai_reading_paused` audit row) — the
   draft state an extraction-disabled upload is left in — so it is keyed by hand
   and then submitted, approved, matched and paid like any other invoice.

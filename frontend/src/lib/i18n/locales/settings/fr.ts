@@ -1077,7 +1077,7 @@ export const messages = {
 	'billing.pm.loading': 'Chargement des moyens de paiement…',
 	'billing.pm.starting': 'Démarrage…',
 	'billing.retry': 'Réessayer',
-	'billing.title': 'Facturation',
+	'billing.title': 'Abonnement',
 	'billing.usage.aria': 'Utilisation à ce jour',
 	'billing.usage.billableExtractions': 'Extractions facturables',
 	'billing.usage.cardRebates': 'Remises sur cartes',

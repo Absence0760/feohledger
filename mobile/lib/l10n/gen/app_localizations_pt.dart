@@ -2711,12 +2711,12 @@ class AppLocalizationsPt extends AppLocalizations {
       other: '$included notas lidas por IA',
       one: '$included nota lida por IA',
     );
-    return 'Leitura por IA pausada: a cota mensal de $_temp0 foi usada. Insira os dados manualmente ou faça upgrade do plano na página Faturamento.';
+    return 'Leitura por IA pausada: a cota mensal de $_temp0 foi usada. Insira os dados manualmente ou faça upgrade do plano em Configurações → Assinatura.';
   }
 
   @override
   String get invoiceWarningAiSpendCapReached =>
-      'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite na página Faturamento.';
+      'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite em Configurações → Assinatura.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>
@@ -5837,12 +5837,12 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
       other: '$included notas lidas por IA',
       one: '$included nota lida por IA',
     );
-    return 'Leitura por IA pausada: a cota mensal de $_temp0 foi usada. Insira os dados manualmente ou faça upgrade do plano na página Faturamento.';
+    return 'Leitura por IA pausada: a cota mensal de $_temp0 foi usada. Insira os dados manualmente ou faça upgrade do plano em Configurações → Assinatura.';
   }
 
   @override
   String get invoiceWarningAiSpendCapReached =>
-      'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite na página Faturamento.';
+      'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite em Configurações → Assinatura.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>

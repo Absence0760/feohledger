@@ -58,7 +58,6 @@ export const enPortal = {
 	'portal.changePassword.confirm': 'Confirm new password',
 	'portal.changePassword.save': 'Save password',
 	'portal.changePassword.saving': 'Saving...',
-	'portal.changePassword.mismatch': 'Passwords do not match.',
 	'portal.changePassword.failed': 'Change failed',
 
 	// Portal invoices (routes/portal/invoices/+page.svelte)

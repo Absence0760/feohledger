@@ -140,7 +140,13 @@ surfaces, through the HTTP login route).
 
 ## Auth Flow
 
-1. User visits a tenant subdomain (e.g., `acme.localhost:7777`)
+1. User visits a tenant subdomain (e.g., `acme.localhost:7777`). Someone who
+   starts at the apex instead (its **Sign in** links, or an apex `/login`)
+   lands on `/find-workspace`, which takes the **workspace address** and
+   redirects to that workspace's `/login`. It deliberately does no email
+   lookup: mapping an address to a workspace would tell anyone whether that
+   person is a customer, and where. Details: `docs/multi-tenancy.md` § Signing
+   in from the apex.
 2. Frontend extracts the tenant slug from the subdomain
 3. User submits email/password at `/login`
 4. Frontend POSTs `{ email, password }` to `/api/auth/login`

@@ -2721,12 +2721,12 @@ class AppLocalizationsFr extends AppLocalizations {
       other: '$included factures lues par IA',
       one: '$included facture lue par IA',
     );
-    return 'Lecture IA en pause : le quota mensuel de $_temp0 est épuisé. Saisissez les informations manuellement ou passez à une offre supérieure sur la page Facturation.';
+    return 'Lecture IA en pause : le quota mensuel de $_temp0 est épuisé. Saisissez les informations manuellement ou passez à une offre supérieure dans Paramètres → Abonnement.';
   }
 
   @override
   String get invoiceWarningAiSpendCapReached =>
-      'Lecture IA en pause : le plafond de dépenses IA de ce mois est atteint. Saisissez les informations manuellement ou relevez le plafond sur la page Facturation.';
+      'Lecture IA en pause : le plafond de dépenses IA de ce mois est atteint. Saisissez les informations manuellement ou relevez le plafond dans Paramètres → Abonnement.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>

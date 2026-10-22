@@ -1095,7 +1095,7 @@ export const enSettings = {
 	'billing.pm.loading': 'Loading payment methods…',
 	'billing.pm.starting': 'Starting…',
 	'billing.retry': 'Retry',
-	'billing.title': 'Billing',
+	'billing.title': 'Subscription',
 	'billing.usage.aria': 'Usage to date',
 	'billing.usage.billableExtractions': 'Billable extractions',
 	'billing.usage.cardRebates': 'Card rebates',

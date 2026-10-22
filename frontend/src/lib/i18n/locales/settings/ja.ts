@@ -1069,7 +1069,7 @@ export const messages = {
 	'billing.pm.loading': '支払い方法を読み込み中…',
 	'billing.pm.starting': '開始中…',
 	'billing.retry': '再試行',
-	'billing.title': '請求',
+	'billing.title': 'サブスクリプション',
 	'billing.usage.aria': '現在までの使用量',
 	'billing.usage.billableExtractions': '課金対象の抽出',
 	'billing.usage.cardRebates': 'カードリベート',

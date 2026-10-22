@@ -1077,7 +1077,7 @@ export const messages = {
 	'billing.pm.loading': 'Zahlungsmethoden werden geladen…',
 	'billing.pm.starting': 'Wird gestartet…',
 	'billing.retry': 'Erneut versuchen',
-	'billing.title': 'Abrechnung',
+	'billing.title': 'Abonnement',
 	'billing.usage.aria': 'Bisherige Nutzung',
 	'billing.usage.billableExtractions': 'Abrechenbare Extraktionen',
 	'billing.usage.cardRebates': 'Kartenrückvergütungen',

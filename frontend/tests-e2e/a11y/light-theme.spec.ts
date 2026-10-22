@@ -183,7 +183,7 @@ const LIGHT_AUTHED_ROUTES: { path: string; name: string; ready: string }[] = [
 	{ path: '/payments', name: 'payments', ready: 'Payments' },
 	{ path: '/exceptions', name: 'exceptions queue', ready: 'Exceptions' },
 	{ path: '/admin/api-keys', name: 'admin API keys', ready: 'API Keys' },
-	{ path: '/billing', name: 'billing', ready: 'Billing' },
+	{ path: '/billing', name: 'billing', ready: 'Subscription' },
 	{ path: '/profile?section=appearance', name: 'profile appearance', ready: 'Appearance' },
 	{ path: '/help', name: 'help centre', ready: 'Follow an invoice' },
 	{ path: '/help/guides/run-payments', name: 'help guide with a diagram', ready: 'Run a payment run' }

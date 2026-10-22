@@ -387,12 +387,12 @@ Grouped into subfolders by role; import with the full path
 component the second time you would duplicate one.**
 
 - `help/` — `HelpTip` (the ⓘ toggletip: `<HelpTip term="glossary-id" />`; `KpiCard helpTerm` / DataTable column `help` forward one) `RichText` `HelpNav` `HelpCrumbs` `InvoiceLifecycle` `EnglishNotice` `diagrams/` — placement rules in `docs/ui-patterns.md` § Contextual help
-- `ui/` — primitives: `PageHeader` (renders the page's "How this page works" link) `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `SegmentedControl` `ThemePicker` `FieldWarning` `SecretReveal` `BrandMark` `PlanUpgradeNotice` (a setting the plan lacks — decisions §258)
+- `ui/` — primitives: `PageHeader` (renders the page's "How this page works" link) `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `SegmentedControl` `ThemePicker` `FieldWarning` `SecretReveal` `BrandMark` `PlanUpgradeNotice` (a setting the plan lacks — decisions §258) `LoadError` (a failed load stated in place, with Retry — never a toast alone) `SetupChecklist` (setup steps, each linked, `done` true / false / null — decisions §315)
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `InvoicePicker` (both over `ui/SearchPicker`) `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
 - marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail`
-- auth: `AuthShell` (every pre-auth employee page) `AuthCard` `AuthBrandMark` (the form-column mark; a home link on the apex only) `AuthCallback` (the SSO / SAML return page)
+- auth: `AuthShell` (every pre-auth employee page) `AuthCard` `AuthBrandMark` (the form-column mark; a home link on the apex only) `AuthCallback` (the SSO / SAML return page) `PasswordInput` (every password field, with the show-password toggle and a field-level error — employee and supplier portal) `NewPasswordFields` (new + confirm + the rules checklist from `#lib/utils/passwordRules.ts`; Submit stays enabled, `validate()` marks each field)
 
 Two invariants the library enforces, worth knowing before you call anything:
 
