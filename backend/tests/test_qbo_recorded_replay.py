@@ -318,6 +318,8 @@ def test_every_committed_recording_is_already_scrubbed(name):
 #: Keys whose values are a QuickBooks record id (short, company-local).
 _ID_KEYS = frozenset({"Id", "TxnId", "value", "intuitentityid", "SyncToken"})
 _LONG_NUMBER = re.compile(r"\d{9,}")
+#: Our own correlation / payment ids are UUIDs, whose hex runs can be all digits.
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
 def _long_numbers(value, key: str = ""):
@@ -329,8 +331,18 @@ def _long_numbers(value, key: str = ""):
     elif isinstance(value, list):
         for v in value:
             yield from _long_numbers(v, key)
-    elif isinstance(value, str) and key not in _ID_KEYS and _LONG_NUMBER.search(value):
+    elif (
+        isinstance(value, str) and key not in _ID_KEYS and _LONG_NUMBER.search(_UUID.sub("", value))
+    ):
         yield key, value
+
+
+def test_the_company_number_check_ignores_our_uuids_and_catches_a_realm():
+    note = "FeohLedger 9d48efd8-8e2f-4dfb-8750-4346209762f8 FeohLedger recorder"
+    assert not list(_long_numbers({"PrivateNote": note, "Id": _REAL_REALM}))
+    assert list(_long_numbers({"source": f"intuit.{_REAL_REALM}"})) == [
+        ("source", f"intuit.{_REAL_REALM}")
+    ]
 
 
 def test_a_recording_is_whole_or_absent():
