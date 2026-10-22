@@ -288,7 +288,11 @@ test.describe('signing in on another workspace’s page', () => {
 		await page.waitForURL(`${ACME_BASE}/login?reason=other_workspace`);
 		// Information, not a failure: a neutral notice in a polite live region,
 		// worded so it never claims this page is the user's own workspace.
-		const status = page.locator('.login-form [role="status"]');
+		// The form has a second status region (the SSO-config loading line), so
+		// name the one carrying the notice.
+		const status = page
+			.locator('.login-form [role="status"]')
+			.filter({ has: page.locator('.info') });
 		await expect(status).toHaveAttribute('aria-live', 'polite');
 		await expect(status.locator('.info')).toHaveText(
 			"You were signed out because your session belonged to a different workspace. Sign in here, or on your own workspace's page."
