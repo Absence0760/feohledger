@@ -79,7 +79,8 @@ def test_catalogue_entries_are_well_formed():
             assert isinstance(f["secret"], bool) and isinstance(f["required"], bool)
             # The form drops "saved" from secrets when a destination field
             # changes; it learns which fields those are from this flag only.
-            assert f["destination"] is (f["name"] in catalog.DESTINATION_KEYS), f
+            # The backend's own rule (`destination_keys`) reads the same flag.
+            assert f["destination"] is (f["name"] in catalog.destination_keys(_block(entry))), f
         if entry["auth"] == "oauth":
             # OAuth providers: the BYO-app pair is optional, never required.
             assert not any(f["required"] for f in entry["fields"] if f["secret"])
@@ -326,9 +327,105 @@ def test_destination_keys_cover_every_host_naming_catalogue_field():
             name = f["name"]
             if name.endswith("_url") or "host" in name or name == "url":
                 assert name in catalog.DESTINATION_KEYS, name
+                # ...and for its own provider: a host field can never opt out.
+                assert f["destination"] is True, (entry["key"], name)
+                assert name in catalog.destination_keys(_block(entry)), (entry["key"], name)
+
+
+#: Every (provider, field) that opts OUT of the by-name destination default.
+#: Each needs evidence that no value of the field moves a credential off the
+#: vendor's own hosts (decisions §316); adding one means adding it here.
+REVIEWED_DESTINATION_OPT_OUTS = {("quickbooks_online", "environment")}
+
+
+def test_destination_opt_outs_are_the_reviewed_ones():
+    opt_outs = {
+        (entry["key"], f["name"])
+        for entry in catalog.all_providers()
+        for f in entry["fields"]
+        if f["name"] in catalog.DESTINATION_KEYS and not f["destination"]
+    }
+    assert opt_outs == REVIEWED_DESTINATION_OPT_OUTS
+
+
+def test_business_central_environment_stays_a_destination():
+    """BC's environment is a URL path segment: another value is other books."""
+    bc = catalog.provider("dynamics_365_bc")
+    env = next(f for f in bc["fields"] if f["name"] == "environment")
+    assert env["destination"] is True
+    assert "environment" in catalog.destination_keys(_block(bc))
+
+
+def test_an_undeclared_key_keeps_the_by_name_default():
+    """Narrowing is per declared field only: QuickBooks, which renders no
+    `base_url`, still treats it as a destination, as does an unknown ERP."""
+    qbo = catalog.destination_keys({"type": "quickbooks_online", "integration_method": "direct"})
+    assert qbo == catalog.DESTINATION_KEYS - {"environment"}
+    unknown = catalog.destination_keys({"type": "nope", "integration_method": "direct"})
+    assert unknown == catalog.DESTINATION_KEYS
+    assert catalog.destination_keys(None) == catalog.DESTINATION_KEYS
+    # Routed through Merge.dev, the QuickBooks opt-out does not apply.
+    merge_qbo = catalog.destination_keys({"type": "quickbooks_online"})
+    assert merge_qbo == catalog.DESTINATION_KEYS
+
+
+QBO = {
+    "type": "quickbooks_online",
+    "integration_method": "direct",
+    "client_id": "byo-client",
+    "environment": "production",
+}
+
+
+@pytest.mark.parametrize("new_env", ["sandbox", "", "production "])
+def test_a_quickbooks_environment_change_is_the_same_connection(new_env):
+    """Production → sandbox picks another Intuit host, not another destination:
+    the bring-your-own-app client_secret stays. (v0.1.6: it was dropped, so a
+    sandbox connection could not be saved.)"""
+    incoming = {**QBO, "environment": new_env}
+    assert catalog.same_connection(QBO, incoming)
+    assert catalog.secrets_to_drop(QBO, incoming) == frozenset()
+
+
+@pytest.mark.parametrize(
+    "key, new_value",
+    [("base_url", "https://attacker.tld"), ("company_id", "other"), ("tenant_id", "t2")],
+)
+def test_quickbooks_still_drops_on_an_undeclared_destination_key(key, new_value):
+    """The opt-out is `environment` only: a host key added to a QuickBooks
+    block is still a new destination."""
+    assert not catalog.same_connection(QBO, {**QBO, key: new_value})
+    drop = catalog.secrets_to_drop(QBO, {**QBO, key: new_value})
+    assert "client_secret" in drop
+    assert "webhook_signing_secret" not in drop
+
+
+BC = {
+    "type": "dynamics_365_bc",
+    "integration_method": "direct",
+    "environment": "production",
+    "tenant_id": "t",
+    "client_id": "c",
+    "company_id": "co",
+}
+
+
+@pytest.mark.parametrize(
+    "key, new_value", [("environment", "sandbox"), ("base_url", "https://attacker.tld")]
+)
+def test_a_business_central_environment_or_base_url_change_drops(key, new_value):
+    assert not catalog.same_connection(BC, {**BC, key: new_value})
+    assert "client_secret" in catalog.secrets_to_drop(BC, {**BC, key: new_value})
 
 
 # ---------- the endpoints ----------------------------------------------------
+
+
+def _block(entry: dict) -> dict:
+    """A minimal `settings.erp` block selecting catalogue `entry`."""
+    if entry["key"] == catalog.METHOD_MERGE_DEV:
+        return {"type": "other", "integration_method": catalog.METHOD_MERGE_DEV}
+    return {"type": entry["key"], "integration_method": catalog.METHOD_DIRECT}
 
 
 async def _seed_erp(realdb, block: dict, secrets: dict | None = None, key: str = "a") -> None:
@@ -602,6 +699,50 @@ async def test_test_erp_keeps_stored_secrets_when_only_a_non_destination_field_c
     assert resp.status_code == 200, resp.text
     assert seen["operator_password"] == "opw-STORED"
     assert seen["posting_period"] == "P"
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+async def test_patch_switching_quickbooks_to_sandbox_keeps_the_byo_app_secret(realdb):
+    """The v0.1.6 bug end to end: production → sandbox persists, and the sealed
+    client_secret of the tenant's own Intuit app survives the save."""
+    await _seed_erp(realdb, dict(QBO), {"client_secret": "qbo-STORED"})
+    async with realdb.client(key="a", role="admin") as c:
+        shown = (await c.get("/api/organization")).json()["settings"]["erp"]
+        resp = await c.patch(
+            "/api/organization",
+            json={"settings": {"erp": {**shown, "environment": "sandbox"}}},
+        )
+    assert resp.status_code == 200, resp.text
+    assert (await _stored_erp(realdb))["environment"] == "sandbox"
+    assert await _sealed(realdb) == {"client_secret": "qbo-STORED"}
+    assert await _audit_rows(realdb, "organization.credentials_updated") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+async def test_test_erp_uses_the_byo_app_secret_across_a_quickbooks_environment_change(
+    realdb, monkeypatch
+):
+    """Test Connection on the unsaved sandbox form still gets the sealed secret."""
+    from app.services.erp_adapters import quickbooks_online
+
+    seen: dict = {}
+
+    async def fake_test_connection(self):
+        seen.update(self.config)
+        return True
+
+    monkeypatch.setattr(
+        quickbooks_online.QuickBooksOnlineAdapter, "test_connection", fake_test_connection
+    )
+    await _seed_erp(realdb, dict(QBO), {"client_secret": "qbo-STORED"})
+    async with realdb.client(key="a", role="admin") as c:
+        shown = (await c.get("/api/organization")).json()["settings"]["erp"]
+        resp = await c.post("/api/organization/test-erp", json={**shown, "environment": "sandbox"})
+    assert resp.status_code == 200, resp.text
+    assert seen["environment"] == "sandbox"
+    assert seen["client_secret"] == "qbo-STORED"
 
 
 @pytest.mark.asyncio

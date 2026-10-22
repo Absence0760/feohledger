@@ -14618,3 +14618,67 @@ established workspace); `frontend/src/lib/utils/onboarding.test.ts`;
 `frontend/tests-e2e/dashboard/first-run.spec.ts` (checklist, done states,
 non-admin views, retirement and the entity case against the real backend, axe
 in both themes); `frontend/tests-e2e/organization/getting-started.spec.ts`.
+
+## 316. A QuickBooks environment change is not a new destination; destination-ness is per provider (2026-10-22)
+
+**What broke.** In v0.1.6 a tenant connected by OAuth to a QuickBooks Online
+*sandbox* company, using its own Intuit app (per-tenant `client_id` + sealed
+`client_secret`, no platform app), could not switch Environment from
+Production to Sandbox. §271 made `environment` a destination key for every
+ERP by name, so the form stopped counting the stored `client_secret` as saved,
+`missingRequired` blocked Save (the own-app pair is required when no platform
+app exists), nothing persisted, and Test Connection went on calling the
+production host with the sandbox company's tokens.
+
+**Why `environment` is not a destination for QuickBooks.** The rule §271
+protects is that an admin (or a stolen admin session) must not be able to send
+a stored secret to a host of their choosing. The QuickBooks adapter maps
+`environment == "sandbox"` to `sandbox-quickbooks.api.intuit.com` and every
+other value to `quickbooks.api.intuit.com`; the authorize, token and revoke
+endpoints (`QBO_OAUTH`) are Intuit constants that no setting reaches. No value
+of the field can send the client secret, or the OAuth tokens, anywhere but
+Intuit. Dropping the secret on a switch protected nothing and broke the only
+way to test against a sandbox company.
+
+**Business Central's `environment` stays a destination.** It is a URL path
+segment (`{base}/{environment}/api/v2.0/companies(...)`) — a different value is
+different books in the customer's tenant, which is exactly what §271 means by a
+new destination. No other ERP catalogue entry declares `environment`.
+
+**The shape.** Destination-ness is now decided per provider from one flag. The
+catalogue's `_field(..., destination=...)` defaults to membership of the
+by-name `DESTINATION_KEYS`; QuickBooks declares `environment` with
+`destination=False`. `catalog.destination_keys(block)` is `DESTINATION_KEYS`
+plus the provider's fields marked destination, minus those it marks not, and
+`same_connection` / `secrets_to_drop` (so the save, and the test-erp secret
+fill) use it. The settings form already read the same per-field flag from
+`GET /organization/erp/providers`, so the frontend needed no logic change.
+
+- **Narrowing is opt-in per declared field, never inferred from what a form
+  renders.** A key the provider does not declare keeps the by-name default:
+  a `base_url` added to a QuickBooks block through the API is still a new
+  destination. A block routed through Merge.dev gets no opt-out.
+- **A host-naming field can never opt out** (`*_url` / `*host*`), and
+  `tests/test_erp_catalog.py` pins the list of opt-outs, so adding one is a
+  reviewed change with its own evidence.
+
+**Considered and rejected.**
+- *Removing `environment` from `DESTINATION_KEYS` globally.* It would open
+  Business Central, and any future provider that builds a URL from the value.
+- *Deriving the keys only from each provider's rendered fields.* Fails open
+  for a key an adapter reads that the form does not show.
+- *Carrying the same change to commerce.* Square's `environment` has the same
+  host-pair shape, but a Square access token is issued per environment, so
+  asking for it again on a switch is the right prompt there, not a bug. Left as
+  is.
+
+Intuit issues separate development and production keys for one app, so a
+switch may still need a new secret; the admin can type one. That is a
+credential choice, not a destination, and the form no longer forces it.
+
+Tests: `backend/tests/test_erp_catalog.py` (QuickBooks environment keeps the
+secret and is the same connection; an undeclared host key on a QuickBooks block
+still drops; Business Central environment and `base_url` still drop; the
+opt-out list is pinned; the PATCH and test-erp round trips against the real
+backend); `frontend/src/lib/types/erpConnection.test.ts` (QuickBooks keeps the
+secret counted as saved and Save unblocked; Business Central asks again).

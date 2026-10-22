@@ -34,6 +34,9 @@ export interface ErpProviderField {
 	 * Says where the stored secrets are sent (a host, account, tenant,
 	 * company or environment). Changing one starts a new connection: the
 	 * backend keeps no stored secret across it, so neither does the form.
+	 * Decided per provider by the backend catalogue, which applies the same
+	 * flag itself (`catalog.destination_keys`): Business Central's
+	 * `environment` is one, QuickBooks' (two Intuit hosts) is not.
 	 */
 	destination?: boolean;
 }
