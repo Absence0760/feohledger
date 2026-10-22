@@ -876,10 +876,9 @@
 		try {
 			voided = await voidPayment(voidTarget.id, reason);
 		} catch (err) {
+			voiding = false;
 			toast(errorMessage(err, m('payments.void.failed')), 'error');
 			return;
-		} finally {
-			voiding = false;
 		}
 		// The void has landed. Nothing below may report it as failed: the
 		// refresh is outside the try, as in `commitCardCancelRetry`, and reports
@@ -894,6 +893,9 @@
 			closeVoid();
 		}
 		voidReason = '';
+		// Re-enabled only once the dialog has left the submit state, so no
+		// second submit can reach a void that already landed.
+		voiding = false;
 		await reloadAfterVoid();
 	}
 
