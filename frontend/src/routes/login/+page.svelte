@@ -176,7 +176,7 @@
 			<AuthBrandMark />
 			<h1>{m('auth.login.heading')}</h1>
 			{#if workspaceHost}
-				<p class="subtitle workspace">{m('auth.login.workspace', { workspace: workspaceHost })}</p>
+				<p class="subtitle workspace-host">{m('auth.login.workspace', { workspace: workspaceHost })}</p>
 			{:else}
 				<p class="subtitle">{m('auth.login.subtitle')}</p>
 			{/if}
@@ -290,7 +290,7 @@
 		color: var(--text-muted);
 	}
 	/* A host can be long and has no spaces to break at. */
-	.subtitle.workspace {
+	.subtitle.workspace-host {
 		overflow-wrap: anywhere;
 	}
 

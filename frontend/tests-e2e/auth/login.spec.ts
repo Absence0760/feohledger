@@ -93,6 +93,21 @@ test.describe('/login — heading, title and workspace', () => {
 		);
 	});
 
+	// The workspace line once carried the class `workspace`, which is also
+	// app.css's global page-shell class (`min-height: 100vh` plus padding). The
+	// line grew to the full window height and pushed the whole form below the
+	// fold. Every other spec fills the fields by locator, and Playwright
+	// scrolls to them first, so nothing noticed until a person opened the page.
+	test('the sign-in fields are on screen without scrolling, in a short window', async ({
+		page
+	}) => {
+		await page.setViewportSize({ width: 1252, height: 585 });
+		await page.goto('/login');
+		await expect(page.locator('form.login-form .subtitle')).toContainText('Workspace:');
+		await expect(page.getByRole('textbox', { name: 'Email' })).toBeInViewport();
+		await expect(page.getByLabel('Password', { exact: true })).toBeInViewport();
+	});
+
 	test('the heading and tab title follow the reader\'s language', async ({ page }) => {
 		await page.addInitScript(() => localStorage.setItem('feoh_locale', 'de'));
 		await page.goto('/login');
