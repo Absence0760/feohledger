@@ -65,7 +65,7 @@ async function openFromSidebar(page: Page, href: string) {
 	const link = page.locator(`aside.sidebar a[href="${href}"]`).first();
 	await expect(link).toBeVisible();
 	await link.click();
-	await expect(page).toHaveURL(new RegExp(`${href.replace(/\//g, '\\/')}(\\?|$)`));
+	await expect(page).toHaveURL((url) => url.pathname === href);
 }
 
 async function top(locator: Locator): Promise<number> {
