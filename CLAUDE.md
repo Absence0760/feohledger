@@ -58,6 +58,8 @@ pnpm mail:up                  # Mailpit SMTP sink + web inbox (:1025/:8025, opt-
 pnpm erp:up                   # fake ERP server (fake-erp :12112, opt-in `erp` profile) for merge_dev/netsuite/dynamics_365_bc adapter e2e (erp:down / erp:logs too)
 pnpm test:erp                 # ERP adapter e2e (tests-e2e/erp/) — real HTTP against fake-erp; skips if it's down
 pnpm test:erp:xero-live       # opt-in, read-only contract check against REAL Xero (connected acme tenant); local only, never CI
+pnpm test:erp:qbo-live        # same for REAL QuickBooks Online (acme connected to a sandbox company); read-only, local only, never CI
+pnpm gen:qbo-recordings       # record scrubbed real QuickBooks payment shapes from a SANDBOX company (writes there) into tools/fake-erp/fixtures/qbo_recorded/ for CI's replay
 pnpm commerce:up              # fake commerce platforms (fake-commerce :12113, opt-in `commerce` profile) for the commerce adapters (commerce:down / commerce:logs too)
 pnpm test:commerce            # commerce e2e (tests-e2e/commerce/) — mock path always; provider specs skip if fake-commerce is down
 pnpm day-one:up               # day-one rehearsal (#575): EMPTY Postgres → deploy's own migration step → production-shaped API → add-tenant → re-run must be a no-op (own ports; day-one:down / day-one:logs)

@@ -352,6 +352,35 @@ Decisions §295; the phase-by-phase account is
   `payment_reconciliation`; unreadable → held `erp_bill_unverified`, never paid
   blind. The NACHA export runs the same read.
 
+### Live QuickBooks contract check
+
+The QuickBooks counterpart of § Live Xero contract check, and of the recorded
+replay (`quickbooks-online-adapter.md` § Recorded payment shapes, decisions
+§318). `pnpm test:erp:qbo-live` (`backend/tests/test_qbo_live_contract.py`)
+is opt-in (`FEOH_QBO_LIVE=1`; every other run skips it), local only, and
+read-only: every request to the company is a GET.
+
+It asserts that QuickBooks still:
+
+- links a bill's payments only with the `LinkedTxn` types the reader matches
+  (`_BILL_PAYMENT_TXN_TYPES`; decisions §317);
+- uses only the `PayType`s we map to a rail, and applies BillPayments only to
+  bills, vendor credits and journal entries;
+- serves each linked BillPayment, and its lines point back at the bill
+  (`bills_for_payment`);
+- reads a bill a person paid wholly in cash as paid outside FeohLedger, not by
+  credit, with a rail and a date (`bill_report`);
+- answers change-data-capture in the shape the sweep reads, and an unknown bill
+  with Fault 610.
+
+**To run it:** a real Intuit development app's keys in `backend/.env` with the
+`FEOH_ERP_QBO_*` fake-erp overrides blanked; the local `acme` tenant (or
+`FEOH_QBO_LIVE_TENANT`) connected to a sandbox company; a few bills paid there
+by hand with Pay Bills, from a bank account and from a credit card; the backend
+venv active. Opted in without a connection, the module fails rather than skips.
+It never runs in CI, for Xero's reasons. Run it before a release, and whenever
+the recorded fixtures or the fake's QuickBooks shapes change.
+
 ## Organization ERP Configuration
 
 The block's CONFIGURATION is stored in `Organization.settings` JSONB under
