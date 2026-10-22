@@ -11,21 +11,31 @@ import appCss from '../../app.css?raw';
  * (#635). The colours are now CSS keyed by `data-status` / `data-band`, from
  * palette tokens; this keeps a literal from coming back anywhere in the file.
  */
+/** Replace every `open … close` span (an unclosed one runs to the end) with a space. */
+function blankBetween(text: string, open: string, close: string): string {
+	let out = '';
+	let from = 0;
+	for (;;) {
+		const start = text.indexOf(open, from);
+		if (start < 0) return out + text.slice(from);
+		out += text.slice(from, start) + ' ';
+		const end = text.indexOf(close, start + open.length);
+		if (end < 0) return out;
+		from = end + close.length;
+	}
+}
+
 describe('dashboard palette', () => {
 	const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(/gi;
 
 	it('types no colour literal, in script, markup or style', () => {
-		// One pass is not enough: removing a comment can join the text around it
-		// into a new opener, so removal repeats until nothing changes.
-		let withoutComments = dashboard;
-		let previous: string;
-		do {
-			previous = withoutComments;
-			withoutComments = withoutComments
-				.replace(/<!--[\s\S]*?-->/g, '')
-				.replace(/\/\*[\s\S]*?\*\//g, '')
-				.replace(/^\s*\/\/.*$/gm, '');
-		} while (withoutComments !== previous);
+		// Each comment becomes one space, never nothing, so the text either side
+		// can't join into a new opener: one left-to-right scan is complete.
+		const withoutComments = blankBetween(
+			blankBetween(dashboard, '<!--', '-->'),
+			'/*',
+			'*/'
+		).replace(/^\s*\/\/.*$/gm, '');
 		expect([...withoutComments.matchAll(COLOUR_LITERAL)].map((m) => m[0])).toEqual([]);
 	});
 
