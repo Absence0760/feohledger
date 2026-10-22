@@ -51,6 +51,7 @@ const TRANSLATED = [
 	'/src/lib/components/marketing/HeroPipeline.svelte',
 	'/src/lib/components/marketing/Landing.svelte',
 	'/src/lib/components/marketing/Pricing.svelte',
+	'/src/lib/components/modals/BulkRecodeGLModal.svelte',
 	'/src/lib/components/modals/CreateVendorModal.svelte',
 	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
 	'/src/lib/components/modals/RunDetailModal.svelte',

@@ -77,12 +77,18 @@
 		const priorChanges = p.changes.length;
 		const aiCandidates = p.ai_candidates;
 		if (aiCandidates > 0 && priorChanges > 0) {
-			return `Apply ${priorChanges} + run AI on ${aiCandidates}`;
+			return m('invoices.bulkRecode.applyBoth', { changes: priorChanges, ai: aiCandidates });
 		}
 		if (aiCandidates > 0) {
-			return `Run AI on ${aiCandidates} invoice(s)`;
+			return m('invoices.bulkRecode.applyAi', { n: aiCandidates });
 		}
-		return `Apply ${priorChanges} change(s)`;
+		return m('invoices.bulkRecode.applyPriors', { n: priorChanges });
+	}
+
+	function sourceLabel(source: RecodeChange['source']): string {
+		return source === 'ai'
+			? m('invoices.bulkRecode.source.ai')
+			: m('invoices.bulkRecode.source.vendorPrior');
 	}
 
 	async function applyChanges() {
@@ -119,77 +125,74 @@
 	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label={m('invoices.bulkRecode.dialogLabel')} tabindex="-1">
 		<header class="modal-header">
 			<div class="help-row">
-				<h2>Bulk Re-code GL Codes</h2>
+				<h2>{m('invoices.bulkRecode.title')}</h2>
 				<HelpTip term="gl-coding" />
 			</div>
-			<button class="close-btn" onclick={onclose} aria-label="Close">&times;</button>
+			<button class="close-btn" onclick={onclose} aria-label={m('invoices.bulkRecode.close')}>&times;</button>
 		</header>
 
 		<div class="modal-body">
-			<p class="intro">
-				Re-applies cached vendor GL corrections to invoices in the selected scope.
-				Posted, paid, and in-flight invoices are skipped automatically.
-			</p>
+			<p class="intro">{m('invoices.bulkRecode.intro')}</p>
 
 			<div class="filters">
 				<label>
-					From
+					{m('invoices.bulkRecode.from')}
 					<input type="date" bind:value={from_date} disabled={busy} />
 				</label>
 				<label>
-					To
+					{m('invoices.bulkRecode.to')}
 					<input type="date" bind:value={to_date} disabled={busy} />
 				</label>
 			</div>
 
 			<label class="ai-toggle">
 				<input type="checkbox" bind:checked={include_ai_fallback} disabled={busy} />
-				Include AI fallback for invoices with no learned GL code
-				<span class="ai-warning">(billed per invoice)</span>
+				{m('invoices.bulkRecode.aiToggle')}
+				<span class="ai-warning">{m('invoices.bulkRecode.aiBilled')}</span>
 			</label>
 
 			{#if !preview}
 				<div class="actions">
-					<button class="btn-cancel" onclick={onclose} disabled={busy}>Cancel</button>
+					<button class="btn-cancel" onclick={onclose} disabled={busy}>{m('common.cancel')}</button>
 					<button class="btn-primary" onclick={runDryRun} disabled={busy}>
-						{busy ? 'Previewing…' : 'Preview Changes'}
+						{busy ? m('invoices.bulkRecode.previewing') : m('invoices.bulkRecode.preview')}
 					</button>
 				</div>
 			{:else}
 				<div class="report">
 					<dl class="summary">
-						<dt>Matched</dt>
+						<dt>{m('invoices.bulkRecode.summary.matched')}</dt>
 						<dd>{preview.matched}</dd>
-						<dt>Would change</dt>
+						<dt>{m('invoices.bulkRecode.summary.wouldChange')}</dt>
 						<dd class="emph">{preview.would_change ?? preview.applied ?? 0}</dd>
-						<dt>From cached priors</dt>
+						<dt>{m('invoices.bulkRecode.summary.fromPriors')}</dt>
 						<dd>{preview.by_source.vendor_prior}</dd>
 						{#if include_ai_fallback}
-							<dt>AI candidates</dt>
+							<dt>{m('invoices.bulkRecode.summary.aiCandidates')}</dt>
 							<dd>
 								{preview.ai_candidates}
-								<span class="hint">(would re-extract on apply)</span>
+								<span class="hint">{m('invoices.bulkRecode.summary.aiHint')}</span>
 							</dd>
 						{/if}
-						<dt>Skipped (already coded)</dt>
+						<dt>{m('invoices.bulkRecode.summary.skippedNoChange')}</dt>
 						<dd>{preview.skipped.no_change}</dd>
-						<dt>Skipped (immutable status)</dt>
+						<dt>{m('invoices.bulkRecode.summary.skippedImmutable')}</dt>
 						<dd>{preview.skipped.immutable_status}</dd>
-						<dt>Skipped (no learned code)</dt>
+						<dt>{m('invoices.bulkRecode.summary.skippedNoPrior')}</dt>
 						<dd>{preview.skipped.no_prior_no_ai}</dd>
 					</dl>
 
 					{#if preview.changes.length > 0}
-						<h3>Changes ({preview.changes.length})</h3>
+						<h3>{m('invoices.bulkRecode.changes', { n: preview.changes.length })}</h3>
 						<div class="changes">
 							<table>
 								<thead>
 									<tr>
-										<th>Invoice</th>
-										<th>Vendor</th>
-										<th>Old</th>
-										<th>New</th>
-										<th>Source</th>
+										<th>{m('invoices.bulkRecode.col.invoice')}</th>
+										<th>{m('invoices.bulkRecode.col.vendor')}</th>
+										<th>{m('invoices.bulkRecode.col.old')}</th>
+										<th>{m('invoices.bulkRecode.col.new')}</th>
+										<th>{m('invoices.bulkRecode.col.source')}</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -199,29 +202,29 @@
 											<td>{c.vendor_name}</td>
 											<td class="mono muted">{c.old_gl ?? '—'}</td>
 											<td class="mono">{c.new_gl}</td>
-											<td><span class="src src-{c.source}">{c.source}</span></td>
+											<td><span class="src src-{c.source}">{sourceLabel(c.source)}</span></td>
 										</tr>
 									{/each}
 								</tbody>
 							</table>
 							{#if preview.changes.length > 20}
-								<div class="more">…and {preview.changes.length - 20} more</div>
+								<div class="more">{m('invoices.bulkRecode.more', { n: preview.changes.length - 20 })}</div>
 							{/if}
 						</div>
 					{:else}
-						<div class="empty">No changes would land in this scope.</div>
+						<div class="empty">{m('invoices.bulkRecode.empty')}</div>
 					{/if}
 
 					<div class="actions">
 						<button class="btn-cancel" onclick={() => (preview = null)} disabled={busy}>
-							Edit filters
+							{m('invoices.bulkRecode.editFilters')}
 						</button>
 						<button
 							class="btn-primary"
 							onclick={applyChanges}
 							disabled={busy || (preview.changes.length === 0 && preview.ai_candidates === 0)}
 						>
-							{busy ? 'Applying…' : applyButtonLabel(preview)}
+							{busy ? m('invoices.bulkRecode.applying') : applyButtonLabel(preview)}
 						</button>
 					</div>
 				</div>
