@@ -1263,12 +1263,20 @@
 		padding: 14px 20px;
 		border-top: 1px solid var(--border);
 		display: flex;
+		/* Wraps, so the footer's minimum width is its widest button, not all
+		   three buttons on one line. Unwrapped, that line set the config
+		   panel's min-content — and through the editor's single `1fr` column
+		   at narrow widths, the whole editor's — so a slightly wider system
+		   font scrolled /workflows/[id] sideways at 320px (WCAG 1.4.10). */
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
+		gap: 8px;
 	}
 
 	.move-btns {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 6px;
 	}
 
