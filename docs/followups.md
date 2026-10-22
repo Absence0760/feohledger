@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, taking the file from 140 → 142. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**140 open: 121 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**142 open: 123 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2265,6 +2265,37 @@ providers still have the same gap.
       is cheaper and is blind exactly when the VM is. **Trigger:** before
       customer #1, with the status-page work, or at once if Caddy's logs show
       a renewal failure.
+
+### Surfaced by measuring the page-change glitch (2026-10-22, `tests-e2e/reactivity/layout-stability.spec.ts`)
+
+- [ ] **(c) A white-labelled tenant's accent flashes the platform default on
+      every cold load.** `stores/brand.svelte.ts` reads
+      `GET /api/organization/branding` only after `/auth/me` resolves, and
+      applies `--accent` / `--accent-strong` when it lands — so after a sign-in
+      or a reload the active sidebar row, the primary buttons and the pressed
+      chips paint in the default blue for a round trip and then turn the
+      tenant's colour (measured: blue → the acme seed's dark red on the first
+      page after login). Not per navigation — the store loads once a session —
+      but it is the first thing a branded tenant sees. **Durable fix:** cache
+      the two applied accent values per workspace (keyed by
+      `getTenantStorageKey()`, never the shared theme cookie) and apply them in `app.html`'s pre-paint script beside the theme, letting the
+      fetched branding correct a stale cache; clear the entry in
+      `brand.reset()`. **Trigger:** the first tenant that sets a brand accent,
+      or any white-label sale (the same trigger as the per-theme accent entry
+      above).
+- [ ] **(c) Tables without `fixed` re-flow their columns when their rows
+      land.** `DataTable` uses `table-layout: auto` unless the page passes
+      `fixed`, so the header cells are sized against the one "Loading…" row
+      and then re-sized against the real rows: every column slides sideways as
+      the data arrives (measured on /payments, /purchase-orders,
+      /gl-accounts — small layout-shift scores, but visible). /invoices passes
+      `fixed` with per-column widths and does not move. **Durable fix:** give
+      each list page's `DataTable` `fixed` plus `<th>` widths, as /invoices
+      does, page by page as each is next touched; extend
+      `tests-e2e/reactivity/layout-stability.spec.ts` with a header-cell
+      x-position check per converted page. **Trigger:** the next polish pass on
+      any of those pages, or a second report of pages "jumping" once the
+      vertical shifts fixed here have shipped.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
