@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**139 open: 120 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**138 open: 120 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2352,17 +2352,6 @@ as oversights.
       comes first.
 
 ## (b) Operator steps on merged code
-
-- [ ] **Move production onto the IAM-authenticated `feoh_app` role, then rotate
-      the master password.** The code, the cutover script and the
-      `rds-db:connect` grant are merged (decisions §310), and nothing changes
-      until the operator runs them. Production still signs in as the RDS master
-      with its password in the VM's env. Steps, verification and rollback:
-      `deploy/README.md` § Database role. In order: `terraform apply`, then
-      `./db-role-cutover.sh` and `--verify-login` on the VM, then switch
-      `FEOH_DATABASE_URL` / `FEOH_DATABASE_IAM_AUTH` in `prod.sops.yaml` and
-      redeploy, then rotate `db_master_password`. **Trigger:** before the first
-      customer's data lands on the instance.
 
 - [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
       Accounting and Blackbaud.** Until then those ERPs connect only when a

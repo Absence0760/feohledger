@@ -69,6 +69,11 @@ The whole flow is four commands on a fresh VM:
   `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml` (paste, fill, save;
   sops writes it encrypted) — and commit it there. Copy it onto the VM as
   `deploy/prod.sops.yaml`; `./decrypt-env.sh` checks it without deploying.
+  Session Manager has no file copy, so carry the (still encrypted) file through
+  the backups bucket, which the instance role can already read: `aws s3 cp` it
+  to `s3://<backups bucket>/transfer/prod.sops.yaml` from your laptop, `aws s3
+  cp` it down on the VM, then delete every version of that key (the bucket is
+  versioned, so a plain delete leaves a copy behind).
   Generate keys in your own terminal. Never commit either file here — this
   repo is public. Pattern: `~/github/project-mgmt/docs/secrets-management.md`.
 
