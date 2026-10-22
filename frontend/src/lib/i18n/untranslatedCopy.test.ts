@@ -53,6 +53,7 @@ const TRANSLATED = [
 	'/src/lib/components/marketing/Pricing.svelte',
 	'/src/lib/components/modals/CreateVendorModal.svelte',
 	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
+	'/src/lib/components/modals/RunDetailModal.svelte',
 	'/src/lib/components/modals/VendorConsolidationModal.svelte',
 	'/src/lib/components/modals/VendorModal.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
@@ -87,7 +88,14 @@ const TOASTS_TRANSLATED = [
 	// hand-built `s` suffixes (#635).
 	'/src/lib/components/modals/VendorConsolidationModal.svelte',
 	'/src/lib/components/modals/VendorModal.svelte',
+	// Was "Re-coded 3 invoice(s)", a hand-built plural, plus two English
+	// fallbacks (#635).
+	'/src/lib/components/modals/BulkRecodeGLModal.svelte',
+	'/src/lib/components/modals/RunDetailModal.svelte',
 	'/src/routes/invoices/+page.svelte',
+	// Was "Payment voided", "Draft payment run created…" and six English
+	// load-failure fallbacks (#635).
+	'/src/routes/payments/+page.svelte',
 	// Was "Selected all 3 matching vendor(s)" and every bulk-action failure in
 	// English (#635).
 	'/src/routes/vendors/+page.svelte'
@@ -225,6 +233,14 @@ function literalToastCopy(source: string): string[] {
 		}
 		const record = node as Record<string, unknown>;
 		if (isCall(record, 'm')) return;
+		// A ternary's TEST picks which message shows; it is never shown itself
+		// (`status === 'pending_compliance' ? m('a') : m('b')`). Only the two
+		// branches can reach the reader.
+		if (record.type === 'ConditionalExpression') {
+			collect(record.consequent);
+			collect(record.alternate);
+			return;
+		}
 		if (record.type === 'Literal' && typeof record.value === 'string' && IS_COPY.test(record.value)) {
 			out.push(record.value);
 		}
@@ -305,6 +321,7 @@ describe('translated surfaces carry no literal copy', () => {
 			"\ttoast(`Deleted ${n} invoice(s)`, 'success');",
 			"\ttoast(err instanceof Error ? err.message : 'Bulk delete failed', 'error');",
 			"\ttoast(m('invoices.toast.deleted', { n, label: 'not copy' }), 'success');",
+			"\ttoast(status === 'pending_compliance' ? m('a') : 'Still held', 'error');",
 			'</script>',
 			'<p>{m(\'x\')}</p>'
 		].join('\n');
@@ -312,7 +329,9 @@ describe('translated surfaces carry no literal copy', () => {
 			'Invoice deleted',
 			'Deleted ',
 			' invoice(s)',
-			'Bulk delete failed'
+			'Bulk delete failed',
+			// The ternary's branch is read; its test (`'pending_compliance'`) is not.
+			'Still held'
 		]);
 	});
 

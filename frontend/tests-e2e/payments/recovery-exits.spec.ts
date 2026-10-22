@@ -177,13 +177,79 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 		await expect(warning).toContainText('final');
 		await expect(warning).toContainText('cannot be undone');
 
-		// Reason is enforced in the FORM, not only server-side.
+		// Reason is enforced in the FORM, not only server-side — and the form
+		// SAYS so: Submit stays enabled, and a blank reason marks the field
+		// (§ Field validation). A disabled Submit gave no reason at all.
+		let acceptCalls = 0;
+		await page.route(`**/api/payments/${HELD_PAYMENT_ID}/settlement/accept`, (r) => {
+			acceptCalls += 1;
+			return r.fulfill({ status: 500, body: '' });
+		});
 		const confirm = page.getByTestId('settlement-confirm');
-		await expect(confirm).toBeDisabled();
-		await page.getByTestId('settlement-reason').fill('   ');
-		await expect(confirm).toBeDisabled();
-		await page.getByTestId('settlement-reason').fill('e2e: shortfall agreed with the vendor');
+		const reason = page.getByTestId('settlement-reason');
 		await expect(confirm).toBeEnabled();
+		await reason.fill('   ');
+		await confirm.click();
+		await expect(page.getByTestId('settlement-reason-error')).toHaveText(
+			'Reason is required to accept a settlement as final'
+		);
+		await expect(reason).toHaveAttribute('aria-invalid', 'true');
+		await expect(reason).toHaveAttribute('aria-describedby', 'settlement-reason-error');
+		await expect(reason).toBeFocused();
+		await expect(page.getByTestId('toast')).toHaveCount(0);
+		expect(acceptCalls).toBe(0);
+
+		await reason.fill('e2e: shortfall agreed with the vendor');
+		await expect(page.getByTestId('settlement-reason-error')).toBeEmpty();
+		await expect(reason).not.toHaveAttribute('aria-invalid', 'true');
+	});
+
+	test('an acceptance whose list refresh fails still reads as accepted', async ({ page }) => {
+		// `refreshAfterCompliance` used to run inside the acceptance's `try`, so
+		// a History reload that failed reached its `catch` and the dialog
+		// reported the acceptance as refused — about an invoice already released
+		// to paid. The same refresh follows a compliance release / dismiss.
+		const pageErrors: string[] = [];
+		page.on('pageerror', (e) => pageErrors.push(e.message));
+		let accepted = false;
+		// After `mockHistory`: the most recently registered route wins, so this
+		// list handler overrides its always-200 one.
+		await mockHistory(page, 'payment_scheduled');
+		await page.route(/\/api\/payments\?/, (r) =>
+			accepted
+				? r.fulfill({
+						status: 500,
+						contentType: 'application/json',
+						body: JSON.stringify({ detail: 'Internal Server Error' })
+					})
+				: r.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({ items: [heldPayment()], total: 1, page: 1, page_size: 20 })
+					})
+		);
+		await page.route(`**/api/payments/${HELD_PAYMENT_ID}/settlement/accept`, (r) => {
+			accepted = true;
+			return r.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ ...heldPayment(), status: 'completed' })
+			});
+		});
+
+		await openHistory(page);
+		await acceptAction(page).click();
+		await page.getByTestId('settlement-reason').fill('e2e: shortfall agreed with the vendor');
+		await page.getByTestId('settlement-confirm').click();
+
+		const toasts = page.getByTestId('toast');
+		await expect(toasts.filter({ hasText: 'Settlement accepted' })).toBeVisible();
+		await expect(toasts.filter({ hasText: 'could not be refreshed' })).toBeVisible();
+		// Positive first: the refresh ran and failed. Only then is the absence
+		// of a refusal meaningful.
+		await expect(page.getByTestId('settlement-error')).toHaveCount(0);
+		await expect(page.getByTestId('settlement-figures')).toHaveCount(0);
+		expect(pageErrors).toEqual([]);
 	});
 
 	test('both figures render under the currency the SERVER stated, not the org default', async ({
@@ -372,6 +438,93 @@ test.describe('/payments — run-level ERP sync retry (the stranded-invoice exit
 		// Wait for the mocked run row before asserting an absence.
 		await expect(page.getByText(RUN_ID.slice(0, 8)).first()).toBeVisible();
 		await expect(syncAction(page)).toHaveCount(0);
+	});
+});
+
+test.describe('/payments — dismissing a compliance hold', () => {
+	/** A payment the sanctions gate parked; this reader may dismiss it. */
+	function heldForCompliance() {
+		return {
+			...heldPayment(),
+			status: 'pending_compliance',
+			settled_amount: null,
+			settled_currency: null,
+			release_refusal: { code: 'e2e_not_offered' },
+			dismiss_refusal: null
+		};
+	}
+
+	async function mockComplianceHistory(page: import('@playwright/test').Page) {
+		let dismissed = false;
+		await page.route(/\/api\/payments\?/, (r) =>
+			dismissed
+				? r.fulfill({
+						status: 500,
+						contentType: 'application/json',
+						body: JSON.stringify({ detail: 'Internal Server Error' })
+					})
+				: r.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({
+							items: [heldForCompliance()],
+							total: 1,
+							page: 1,
+							page_size: 20
+						})
+					})
+		);
+		await page.route('**/api/payments/counts**', (r) =>
+			r.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ total: 1, by_status: { pending_compliance: 1 } })
+			})
+		);
+		let dismissCalls = 0;
+		await page.route(`**/api/payments/${HELD_PAYMENT_ID}/compliance/dismiss`, (r) => {
+			dismissCalls += 1;
+			dismissed = true;
+			return r.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ ...heldForCompliance(), status: 'failed' })
+			});
+		});
+		return { dismissCalls: () => dismissCalls };
+	}
+
+	test('a blank reason is a field error, and a dismiss whose refresh fails still reads as done', async ({
+		page
+	}) => {
+		const pageErrors: string[] = [];
+		page.on('pageerror', (e) => pageErrors.push(e.message));
+		const calls = await mockComplianceHistory(page);
+		await openHistory(page);
+		await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+
+		// Submit stays enabled; a blank reason marks the field and sends nothing.
+		const reason = page.getByTestId('compliance-reason');
+		await reason.fill('  ');
+		await page.getByRole('button', { name: 'Dismiss payment' }).click();
+		await expect(page.getByTestId('compliance-reason-error')).toHaveText(
+			'Reason is required to dismiss a held payment'
+		);
+		await expect(reason).toHaveAttribute('aria-invalid', 'true');
+		await expect(reason).toBeFocused();
+		await expect(page.getByTestId('toast')).toHaveCount(0);
+		expect(calls.dismissCalls()).toBe(0);
+
+		// The dismiss lands; the History reload after it fails. That is a stale
+		// list — never "Dismiss failed" about a payment already flipped.
+		await reason.fill('e2e: vendor confirmed sanctioned');
+		await page.getByRole('button', { name: 'Dismiss payment' }).click();
+		const toasts = page.getByTestId('toast');
+		await expect(toasts.filter({ hasText: 'Payment dismissed' })).toBeVisible();
+		await expect(toasts.filter({ hasText: 'could not be refreshed' })).toBeVisible();
+		await expect(toasts.filter({ hasText: 'Dismiss failed' })).toHaveCount(0);
+		expect(calls.dismissCalls()).toBe(1);
+		expect(pageErrors).toEqual([]);
 	});
 });
 

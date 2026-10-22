@@ -650,7 +650,7 @@
 				{ items }
 			);
 
-			toast('Draft payment run created — review and execute', 'success');
+			toast(m('payments.queue.draftCreated'), 'success');
 			selectedQueue = new Set();
 			showReview = false;
 			activeRunId = run.id;
@@ -677,8 +677,32 @@
 		await loadQueue();
 		await loadRuns();
 		if (activeTab === 'history') {
-			await paymentStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method; routes through api.get
+			await refreshPaymentList();
 			await fetchPaymentCounts();
+		}
+	}
+
+	/**
+	 * Re-read the History list after a mutation has landed. Never rejects.
+	 *
+	 * The store re-throws so an awaiting caller can handle a failure, and every
+	 * caller here awaits it right after a write that already succeeded — a void,
+	 * a card close, a compliance release, a run execute. Left to propagate, the
+	 * rejection reached that write's own `catch` and was reported as the WRITE
+	 * failing ("Payment voided", then "could not be voided"), or, from
+	 * `RunDetailModal`'s un-awaited `onchange`, as an unhandled rejection. A
+	 * failed refresh is a stale list, so it says exactly that, once. The
+	 * summary, queue and counts loaders already report their own failures.
+	 */
+	async function refreshPaymentList() {
+		try {
+			await paymentStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method; routes through api.get
+		} catch {
+			// The store rejects even when a newer load superseded this one;
+			// `errored` is set only when the NEWEST load failed, which is exactly
+			// when the list on screen is stale. A superseded failure under a list
+			// that has since loaded says nothing.
+			if (paymentStore.errored) toast(m('payments.history.refreshFailed'), 'error');
 		}
 	}
 
@@ -807,15 +831,21 @@
 	// one would be a control that cannot work.
 	const canRetryCardCancel = $derived(voidCardDisposition === 'not_closed_retryable');
 
+	// The reason field's own error — set on submit, cleared as it is edited.
+	let voidReasonError = $state('');
+	let voidReasonInput = $state<HTMLInputElement | null>(null);
+
 	function openVoid(p: Payment) {
 		voidTarget = p;
 		voidReason = '';
+		voidReasonError = '';
 		voidCardResult = null;
 		cardRetryError = '';
 	}
 
 	function closeVoid() {
 		voidTarget = null;
+		voidReasonError = '';
 		voidCardResult = null;
 		cardRetryError = '';
 	}
@@ -825,7 +855,7 @@
 		await Promise.all([
 			loadSummary(),
 			loadQueue(),
-			paymentStore.fetch(buildParams()), // noqa: raw-fetch-in-component — store method; routes through api.get
+			refreshPaymentList(),
 			fetchPaymentCounts(),
 		]);
 	}
@@ -834,29 +864,37 @@
 		if (!voidTarget) return;
 		const reason = voidReason.trim();
 		if (!reason) {
-			toast('Reason is required for a void', 'error');
+			// A field error, not a toast: beside the input, read with it through
+			// `aria-describedby` when focus lands there (`docs/ui-patterns.md`
+			// § Field validation).
+			voidReasonError = m('payments.void.reasonRequired');
+			voidReasonInput?.focus();
 			return;
 		}
 		voiding = true;
+		let voided: Payment;
 		try {
-			const voided = await voidPayment(voidTarget.id, reason);
-			toast('Payment voided', 'success');
-			// Branch on the SERVER's verdict, never on the raw outcome tag: a tag
-			// this build doesn't know must not read as "closed" (decisions §132).
-			const disposition = voided.void_card_disposition ?? null;
-			if (disposition === 'not_closed_retryable' || disposition === 'not_closed_final') {
-				voidCardResult = voided;
-				voidReason = '';
-			} else {
-				closeVoid();
-				voidReason = '';
-			}
-			await reloadAfterVoid();
+			voided = await voidPayment(voidTarget.id, reason);
 		} catch (err) {
 			toast(errorMessage(err, m('payments.void.failed')), 'error');
+			return;
 		} finally {
 			voiding = false;
 		}
+		// The void has landed. Nothing below may report it as failed: the
+		// refresh is outside the try, as in `commitCardCancelRetry`, and reports
+		// its own failure as a stale list (`refreshPaymentList`).
+		toast(m('payments.void.done'), 'success');
+		// Branch on the SERVER's verdict, never on the raw outcome tag: a tag
+		// this build doesn't know must not read as "closed" (decisions §132).
+		const disposition = voided.void_card_disposition ?? null;
+		if (disposition === 'not_closed_retryable' || disposition === 'not_closed_final') {
+			voidCardResult = voided;
+		} else {
+			closeVoid();
+		}
+		voidReason = '';
+		await reloadAfterVoid();
 	}
 
 	/**
@@ -884,7 +922,9 @@
 			retryingCardCancel = false;
 		}
 		// Outside the try: a list that fails to refresh reports itself, and is
-		// not a failed card close — the dialog must not say both.
+		// not a failed card close — the dialog must not say both. It never
+		// rejects (each loader handles its own failure), so nothing escapes
+		// this click handler as an unhandled rejection.
 		await reloadAfterVoid();
 	}
 
@@ -913,6 +953,9 @@
 	let complianceTarget = $state<Payment | null>(null);
 	let complianceMode = $state<ComplianceMode>('release');
 	let complianceReason = $state('');
+	// The dismiss reason's own error — set on submit, cleared as it is edited.
+	let complianceReasonError = $state('');
+	let complianceReasonInput = $state<HTMLInputElement | null>(null);
 	let complianceBusy = $state(false);
 
 	function canReleaseHold(p: Payment): boolean {
@@ -932,18 +975,20 @@
 		complianceTarget = p;
 		complianceMode = mode;
 		complianceReason = '';
+		complianceReasonError = '';
 	}
 
 	function closeCompliance() {
 		complianceTarget = null;
 		complianceReason = '';
+		complianceReasonError = '';
 	}
 
 	async function refreshAfterCompliance() {
 		await Promise.all([
 			loadSummary(),
 			loadQueue(),
-			paymentStore.fetch(buildParams()), // noqa: raw-fetch-in-component — store method; routes through api.get
+			refreshPaymentList(),
 			fetchPaymentCounts()
 		]);
 	}
@@ -954,7 +999,9 @@
 		const mode = complianceMode;
 		const reason = complianceReason.trim();
 		if (mode === 'dismiss' && !reason) {
-			toast(m('payments.compliance.reasonRequired'), 'error');
+			// A field error beside the input (§ Field validation), not a toast.
+			complianceReasonError = m('payments.compliance.reasonRequired');
+			complianceReasonInput?.focus();
 			return;
 		}
 		complianceBusy = true;
@@ -975,17 +1022,21 @@
 				await api.post<Payment>(`/api/payments/${id}/compliance/dismiss`, { reason });
 				toast(m('payments.compliance.dismiss.done'), 'success');
 			}
-			closeCompliance();
-			await refreshAfterCompliance();
 		} catch (err) {
 			const fallback =
 				mode === 'release'
 					? m('payments.compliance.release.failed')
 					: m('payments.compliance.dismiss.failed');
 			toast(err instanceof Error ? err.message : fallback, 'error');
+			return;
 		} finally {
 			complianceBusy = false;
 		}
+		// The release / dismiss landed. The refresh is outside the try, as in
+		// `commitVoid`, so a list that fails to reload never reads as a failed
+		// release — which would invite a second one.
+		closeCompliance();
+		await refreshAfterCompliance();
 	}
 
 	// --- Settlement acceptance (the under-settlement hold's other exit) -------
@@ -1008,6 +1059,9 @@
 	// becoming a button that can only 409.
 	let settlementTarget = $state<Payment | null>(null);
 	let settlementReason = $state('');
+	// The reason field's own error — set on submit, cleared as it is edited.
+	let settlementReasonError = $state('');
+	let settlementReasonInput = $state<HTMLInputElement | null>(null);
 	let settlementBusy = $state(false);
 	// Invoice status behind the target payment: `null` while in flight,
 	// `'?'` when we could not read it (fail OPEN — the backend re-checks).
@@ -1033,6 +1087,7 @@
 	async function openSettlement(p: Payment) {
 		settlementTarget = p;
 		settlementReason = '';
+		settlementReasonError = '';
 		settlementError = null;
 		settlementInvoiceStatus = null;
 		const invoiceId = p.invoice_id;
@@ -1051,6 +1106,7 @@
 	function closeSettlement() {
 		settlementTarget = null;
 		settlementReason = '';
+		settlementReasonError = '';
 		settlementError = null;
 		settlementInvoiceStatus = null;
 	}
@@ -1060,24 +1116,29 @@
 		const id = settlementTarget.id;
 		const reason = settlementReason.trim();
 		if (!reason) {
-			toast(m('payments.settlement.reasonRequired'), 'error');
+			// A field error beside the input (§ Field validation), not a toast.
+			settlementReasonError = m('payments.settlement.reasonRequired');
+			settlementReasonInput?.focus();
 			return;
 		}
 		settlementBusy = true;
 		settlementError = null;
 		try {
 			await acceptPaymentSettlement(id, reason);
-			toast(m('payments.settlement.done'), 'success');
-			closeSettlement();
-			await refreshAfterCompliance();
 		} catch (err) {
 			// Persistent, not a toast that fades: the backend's 409 detail
 			// ("already covers", "no held invoice") is the actionable half of
 			// the refusal and the operator needs it while the dialog is open.
 			settlementError = err instanceof Error ? err.message : m('payments.settlement.failed');
+			return;
 		} finally {
 			settlementBusy = false;
 		}
+		// The acceptance landed; the refresh is outside the try so a list that
+		// fails to reload can never read as a failed acceptance.
+		toast(m('payments.settlement.done'), 'success');
+		closeSettlement();
+		await refreshAfterCompliance();
 	}
 
 	// --- Run-level ERP sync-back retry ---------------------------------------
@@ -1129,12 +1190,15 @@
 			// anything" — `synced` counts legs that RAN and stays true on a
 			// repeat. Reporting `synced` as success would claim a recovery on
 			// every retry of an already-clean run.
-			await onRunChanged();
 		} catch (err) {
 			erpSyncError = err instanceof Error ? err.message : m('payments.erpSync.failed');
+			return;
 		} finally {
 			erpSyncBusy = false;
 		}
+		// Outside the try, as in `commitVoid`: the sync landed, and a refresh
+		// that fails is a stale list, never "ERP sync failed".
+		await onRunChanged();
 	}
 
 	async function downloadRemittance(p: Payment) {
@@ -1149,7 +1213,7 @@
 			a.remove();
 			URL.revokeObjectURL(url);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Could not download remittance', 'error');
+			toast(err instanceof Error ? err.message : m('payments.history.remittanceFailed'), 'error');
 		}
 	}
 
@@ -1276,7 +1340,7 @@
 			summary = data;
 		} catch (err) {
 			if (summarySequence.isCurrentRequest(token)) {
-				toast(err instanceof Error ? err.message : 'Failed to load summary', 'error');
+				toast(err instanceof Error ? err.message : m('payments.summary.loadFailed'), 'error');
 			}
 		}
 	}
@@ -1305,7 +1369,7 @@
 		} catch (err) {
 			if (queueSequence.isCurrentRequest(token)) {
 				queueErrored = true;
-				toast(err instanceof Error ? err.message : 'Failed to load payment queue', 'error');
+				toast(err instanceof Error ? err.message : m('payments.queue.loadFailed'), 'error');
 			}
 		} finally {
 			// `isCurrentRequest`, not `canCommit`: a local edit that supersedes
@@ -1343,7 +1407,7 @@
 			queueSelectableTotal = data.selectable_total ?? queueSelectableTotal;
 		} catch (err) {
 			if (queueSequence.isCurrentRequest(token)) {
-				toast(err instanceof Error ? err.message : 'Failed to load more of the payment queue', 'error');
+				toast(err instanceof Error ? err.message : m('payments.queue.loadMoreFailed'), 'error');
 			}
 		} finally {
 			if (queueSequence.isCurrentRequest(token)) {
@@ -1511,7 +1575,7 @@
 				expires: formatCardExpiry(resp.exp_month, resp.exp_year)
 			};
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Card not viewable', 'error');
+			toast(err instanceof Error ? err.message : m('payments.cards.revealFailed'), 'error');
 		}
 	}
 
@@ -1775,7 +1839,7 @@
 		} catch (err) {
 			if (runsSequence.isCurrentRequest(token)) {
 				runsErrored = true;
-				toast(err instanceof Error ? err.message : 'Failed to load payment runs', 'error');
+				toast(err instanceof Error ? err.message : m('payments.runs.loadFailed'), 'error');
 			}
 		} finally {
 			// `isCurrentRequest`, not `canCommit`: a request superseded by a local
@@ -2725,7 +2789,7 @@
 
 <Modal
 	open={revealedCard !== null}
-	ariaLabel="Card details"
+	ariaLabel={m('payments.cardDetails.dialogLabel')}
 	title={m('payments.cardDetails.title')}
 	onclose={() => (revealedCard = null)}
 >
@@ -2763,7 +2827,7 @@
      button that moves money. -->
 <Modal
 	open={rebateTarget !== null}
-	ariaLabel="Advance card rebate"
+	ariaLabel={m('payments.rebates.dialog.label')}
 	title={rebateMode === 'confirm'
 		? m('payments.rebates.dialog.confirmTitle')
 		: m('payments.rebates.dialog.markPaidTitle')}
@@ -2892,7 +2956,7 @@
 
 <Modal
 	open={voidTarget !== null}
-	ariaLabel="Void payment"
+	ariaLabel={m('payments.void.title')}
 	title={voidCardResult && voidCardDisposition !== 'closed'
 		? m('payments.void.card.title')
 		: m('payments.void.title')}
@@ -2968,12 +3032,20 @@
 					<input
 						type="text"
 						bind:value={voidReason}
+						bind:this={voidReasonInput}
+						oninput={() => (voidReasonError = '')}
 						placeholder={m('payments.void.reasonPlaceholder')}
 						maxlength="500"
 						data-testid="void-reason"
+						aria-invalid={voidReasonError ? 'true' : undefined}
+						aria-describedby="void-reason-error"
 						autofocus
 					/>
 				</label>
+				<!-- Always in the DOM, so `aria-describedby` always resolves; empty
+				     until a submit finds the reason missing. Focus moving to the
+				     input is what reads it — no live region (§ Field validation). -->
+				<p class="field-error" id="void-reason-error" data-testid="void-reason-error">{voidReasonError}</p>
 				<div class="modal-footer">
 					<button type="button" class="btn-cancel" onclick={closeVoid}>
 						{m('common.cancel')}
@@ -2982,7 +3054,7 @@
 						type="submit"
 						class="btn-danger"
 						data-testid="void-confirm"
-						disabled={voiding || !voidReason.trim()}
+						disabled={voiding}
 					>
 						{voiding ? m('payments.void.voiding') : m('payments.void.confirm')}
 					</button>
@@ -2997,7 +3069,7 @@
      payment — neither should be a single stray click on a table row. -->
 <Modal
 	open={complianceTarget !== null}
-	ariaLabel="Resolve compliance hold"
+	ariaLabel={m('payments.compliance.dialogLabel')}
 	title={complianceMode === 'release'
 		? m('payments.compliance.release.title')
 		: m('payments.compliance.dismiss.title')}
@@ -3022,11 +3094,17 @@
 					<input
 						type="text"
 						bind:value={complianceReason}
+						bind:this={complianceReasonInput}
+						oninput={() => (complianceReasonError = '')}
 						placeholder={m('payments.compliance.reasonPlaceholder')}
 						maxlength="1000"
+						data-testid="compliance-reason"
+						aria-invalid={complianceReasonError ? 'true' : undefined}
+						aria-describedby="compliance-reason-error"
 						autofocus
 					/>
 				</label>
+				<p class="field-error" id="compliance-reason-error" data-testid="compliance-reason-error">{complianceReasonError}</p>
 			{/if}
 			<div class="modal-footer">
 				<button type="button" class="btn-cancel" onclick={closeCompliance}>
@@ -3042,7 +3120,7 @@
 					<button
 						type="submit"
 						class="btn-danger"
-						disabled={complianceBusy || !complianceReason.trim()}
+						disabled={complianceBusy}
 					>
 						{complianceBusy
 							? m('payments.compliance.dismiss.busy')
@@ -3060,7 +3138,7 @@
      actually settled. Irreversible — it is not a void. -->
 <Modal
 	open={settlementTarget !== null}
-	ariaLabel="Accept settlement as final"
+	ariaLabel={m('payments.settlement.title')}
 	title={m('payments.settlement.title')}
 	onclose={closeSettlement}
 >
@@ -3123,12 +3201,17 @@
 					<input
 						type="text"
 						bind:value={settlementReason}
+						bind:this={settlementReasonInput}
+						oninput={() => (settlementReasonError = '')}
 						placeholder={m('payments.settlement.reasonPlaceholder')}
 						maxlength="1000"
 						data-testid="settlement-reason"
+						aria-invalid={settlementReasonError ? 'true' : undefined}
+						aria-describedby="settlement-reason-error"
 						autofocus
 					/>
 				</label>
+				<p class="field-error" id="settlement-reason-error" data-testid="settlement-reason-error">{settlementReasonError}</p>
 				<div class="modal-footer">
 					<button type="button" class="btn-cancel" onclick={closeSettlement}>
 						{m('common.cancel')}
@@ -3137,7 +3220,7 @@
 						type="submit"
 						class="btn-danger"
 						data-testid="settlement-confirm"
-						disabled={settlementBusy || !settlementReason.trim()}
+						disabled={settlementBusy}
 					>
 						{settlementBusy
 							? m('payments.settlement.busy')
@@ -3155,7 +3238,7 @@
      "did this recover anything"). A run with nothing to recover says so. -->
 <Modal
 	open={erpSyncTarget !== null}
-	ariaLabel="Retry ERP sync for payment run"
+	ariaLabel={m('payments.erpSync.dialogLabel')}
 	title={m('payments.erpSync.title')}
 	onclose={closeErpSync}
 >
@@ -3239,7 +3322,7 @@
      choice is worse than no comparison. -->
 <Modal
 	open={quoteTarget !== null}
-	ariaLabel="Compare payment routes"
+	ariaLabel={m('payments.quotes.title')}
 	title={m('payments.quotes.title')}
 	width="lg"
 	onclose={closeQuotes}
@@ -3945,6 +4028,21 @@
 	}
 
 	/* --- Void modal --- */
+
+	.field-error {
+		margin: -8px 0 0;
+		font-size: 0.82rem;
+		line-height: 1.4;
+		color: var(--danger);
+	}
+
+	.field-error:empty {
+		display: none;
+	}
+
+	input[aria-invalid='true'] {
+		border-color: var(--danger);
+	}
 
 	.modal-warn {
 		font-size: 0.82rem;

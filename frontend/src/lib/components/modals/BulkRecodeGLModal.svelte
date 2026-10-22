@@ -3,6 +3,7 @@
 	import { api } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface Props {
 		onclose: () => void;
@@ -66,7 +67,7 @@
 			if (to_date) body.to_date = to_date;
 			preview = await api.post<RecodeReport>('/api/invoices/bulk-recode-gl', body);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Preview failed', 'error');
+			toast(err instanceof Error ? err.message : m('invoices.bulkRecode.previewFailed'), 'error');
 		} finally {
 			busy = false;
 		}
@@ -95,11 +96,11 @@
 			if (from_date) body.from_date = from_date;
 			if (to_date) body.to_date = to_date;
 			const report = await api.post<RecodeReport>('/api/invoices/bulk-recode-gl', body);
-			toast(`Re-coded ${report.applied ?? 0} invoice(s)`, 'success');
+			toast(m('invoices.bulkRecode.applied', { n: report.applied ?? 0 }), 'success');
 			onapplied?.();
 			onclose();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Apply failed', 'error');
+			toast(err instanceof Error ? err.message : m('invoices.bulkRecode.applyFailed'), 'error');
 		} finally {
 			busy = false;
 		}
@@ -115,7 +116,7 @@
 		if (e.target === e.currentTarget) onclose();
 	}}
 >
-	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label="Bulk re-code GL" tabindex="-1">
+	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label={m('invoices.bulkRecode.dialogLabel')} tabindex="-1">
 		<header class="modal-header">
 			<div class="help-row">
 				<h2>Bulk Re-code GL Codes</h2>
