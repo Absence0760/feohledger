@@ -188,14 +188,37 @@ def _dec(value: Any) -> Decimal | None:
         return None
 
 
-#: ``LinkedTxn.TxnType`` values naming a bill payment QuickBooks recorded
-#: against the bill (a cheque or a credit-card bill payment).
+#: The ``LinkedTxn.TxnType`` values with which a Bill names a BillPayment
+#: applied to it. QuickBooks types the link by how the bill was paid (the
+#: BillPayment's ``PayType``: a cheque/bank payment or a credit-card payment),
+#: never by the entity name, so a person's "Pay Bills" from a bank account shows
+#: on the bill as ``BillPaymentCheck``. This is the ONE definition of "a
+#: bill-payment link"; every reader goes through :func:`_bill_payment_ids`.
+#:
+#: A bare ``"BillPayment"`` is deliberately NOT accepted. No Intuit source shows
+#: it on a Bill, and accepting it is how this drifted unseen: the test doubles
+#: and fake-erp emitted it, so they agreed with a reader real QuickBooks never
+#: matches, and every bill paid in cash read as settled by a vendor credit
+#: (docs/decisions.md §317).
 _BILL_PAYMENT_TXN_TYPES = frozenset({"BillPaymentCheck", "BillPaymentCreditCard"})
 
 
+def _bill_payment_ids(bill: dict) -> list[str]:
+    """The ids of the BillPayments the bill's ``LinkedTxn`` names, once each."""
+    links = bill.get("LinkedTxn") or []
+    return list(
+        dict.fromkeys(
+            str(link.get("TxnId"))
+            for link in links
+            if isinstance(link, dict)
+            and link.get("TxnType") in _BILL_PAYMENT_TXN_TYPES
+            and link.get("TxnId")
+        )
+    )
+
+
 def _has_bill_payment(bill: dict) -> bool:
-    linked = bill.get("LinkedTxn") or []
-    return any(isinstance(t, dict) and t.get("TxnType") in _BILL_PAYMENT_TXN_TYPES for t in linked)
+    return bool(_bill_payment_ids(bill))
 
 
 def map_bill_status(bill: dict) -> ErpInvoiceStatus:
@@ -806,7 +829,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
     async def _bill_payments(self, bill: dict) -> list[dict]:
         """Every live BillPayment the bill's ``LinkedTxn`` names."""
         out = []
-        for txn_id in _linked_ids(bill, "BillPayment"):
+        for txn_id in _bill_payment_ids(bill):
             record = await self._get_bill_payment(txn_id)
             if record is not None:
                 out.append(record)
@@ -852,7 +875,12 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         reduced_outside = (
             balance is not None and total is not None and (total - balance) > ours_applied
         )
-        cash = [p for p in external if not _uses_vendor_credit(p)]
+        # Cash is defined positively (money moved, applied only to bills), never
+        # as "not a vendor credit": a journal-entry credit cleared in Pay Bills
+        # is a $0 BillPayment too, and must not be booked as a cheque.
+        cash = [p for p in external if _is_cash_payment(p)]
+        outside = (total - balance - ours_applied) if reduced_outside else Decimal(0)
+        cash_applied = sum((_applied_to(p, str(bill.get("Id"))) for p in cash), Decimal(0))
         latest = max(cash, key=lambda p: str(p.get("TxnDate") or ""), default=None)
         return ErpBillReport(
             bill_id=str(bill.get("Id") or bill_id),
@@ -863,10 +891,11 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             external_payment_ids=tuple(str(p.get("Id")) for p in external if p.get("Id")),
             paid_only_by_us=bool(ours) and not reduced_outside,
             reduced_outside=reduced_outside,
-            # A credit took part, or nothing we can read paid it in cash: the
-            # bill was settled without (all) the money leaving.
+            # Anything but cash took part, or the cash we can read does not
+            # cover what left the bill outside us: settled without (all) the
+            # money leaving, so a person decides, and nothing is booked as cash.
             settled_by_credit=reduced_outside
-            and (any(_uses_vendor_credit(p) for p in external) or not cash),
+            and (len(cash) < len(external) or cash_applied < outside),
         )
 
     async def bills_for_payment(self, payment_id: str) -> list[str]:
@@ -1183,6 +1212,25 @@ def _uses_vendor_credit(record: dict) -> bool:
         for line in record.get("Line") or []
         if isinstance(line, dict)
     )
+
+
+def _is_cash_payment(record: dict) -> bool:
+    """Did this BillPayment move money, and only against bills? A positive
+    total, and every line linked to a ``Bill`` and nothing else. A line
+    applying a ``VendorCredit``, a ``JournalEntry`` or anything we do not
+    recognise, a line with no link, or a zero total makes it not cash
+    (docs/decisions.md §317)."""
+    total = _dec(record.get("TotalAmt"))
+    if total is None or total <= 0:
+        return False
+    lines = [line for line in record.get("Line") or [] if isinstance(line, dict)]
+    if not lines:
+        return False
+    for line in lines:
+        links = line.get("LinkedTxn") or []
+        if not links or not all(isinstance(t, dict) and t.get("TxnType") == "Bill" for t in links):
+            return False
+    return True
 
 
 def _is_voided_payment(record: dict) -> bool:

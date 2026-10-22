@@ -413,6 +413,67 @@ async def test_a_bill_settled_by_a_vendor_credit_blocks_and_books_no_cash(realdb
     assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.posted_in_erp
 
 
+@pytest.mark.parametrize(
+    ("pay_type", "link_type", "method"),
+    [("Check", "BillPaymentCheck", "check"), ("CreditCard", "BillPaymentCreditCard", "card")],
+)
+async def test_a_bill_paid_in_cash_in_real_quickbooks_shape_is_recorded_paid(
+    realdb, pay_type, link_type, method
+):
+    """Regression (production, 2026-10-22): the adapter's report, read from a
+    bill shaped as real QuickBooks returns it after Pay Bills, carried into
+    `apply_bill_report`. The bill links the payment as `BillPaymentCheck` /
+    `BillPaymentCreditCard`; read as anything else it found no cash and opened
+    a vendor-credit block instead of recording the payment (decisions §317)."""
+    import httpx
+
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+    from app.utils.json_money import dumps_exact_json
+
+    inv_id, corr = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    paid_on = utc_today() - timedelta(days=1)
+    bill = {
+        "Id": BILL,
+        "TotalAmt": Decimal("250.00"),
+        "Balance": Decimal("0"),
+        "PrivateNote": f"FeohLedger {corr}",
+        "LinkedTxn": [{"TxnId": "901", "TxnType": link_type}],
+    }
+    payment = {
+        "Id": "901",
+        "TotalAmt": Decimal("250.00"),
+        "PayType": pay_type,
+        "TxnDate": paid_on.isoformat(),
+        "Line": [{"Amount": Decimal("250.00"), "LinkedTxn": [{"TxnId": BILL, "TxnType": "Bill"}]}],
+    }
+
+    async def answer(method_, path, **kw):
+        body = {"bill/" + BILL: {"Bill": bill}, "billpayment/901": {"BillPayment": payment}}
+        return httpx.Response(200, content=dumps_exact_json(body[path]).encode())
+
+    adapter = QuickBooksOnlineAdapter(
+        {
+            "type": "quickbooks_online",
+            "integration_method": "direct",
+            "oauth": {"provider": "quickbooks_online", "external_tenant_id": "9130"},
+        }
+    )
+    with patch.object(QuickBooksOnlineAdapter, "_request", new=AsyncMock(side_effect=answer)):
+        report = await adapter.bill_report(BILL)
+    assert report.reduced_outside and not report.settled_by_credit
+
+    assert (await _apply(realdb, report)).action == "paid_recorded"
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.paid
+    assert await _exceptions(realdb, inv_id) == []
+    async with realdb.sessionmaker("a")() as s:
+        [booked] = (
+            (await s.execute(select(Payment).where(Payment.invoice_id == inv_id))).scalars().all()
+        )
+    assert booked.provider == EXTERNAL_PAYMENT_PROVIDER
+    assert booked.completed_at.date() == paid_on
+    assert booked.method == method
+
+
 async def test_a_bill_reduced_outside_with_no_payment_listed_still_blocks(realdb):
     """Judged from the balance: a reduction no readable payment explains (a
     journal entry, a credit) is still a reduction outside FeohLedger."""

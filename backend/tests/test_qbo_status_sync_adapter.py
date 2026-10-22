@@ -47,6 +47,13 @@ def _resp(status: int, body: dict | None = None) -> MagicMock:
     return r
 
 
+def _link_type(pay_type: str) -> str:
+    """How real QuickBooks names a BillPayment on the bill it pays: by its pay
+    type, never as "BillPayment" (decisions §317 — the double once used the
+    entity name, which hid a reader that matched nothing in a real company)."""
+    return "BillPaymentCreditCard" if pay_type == "CreditCard" else "BillPaymentCheck"
+
+
 def _gone() -> MagicMock:
     return _resp(400, {"Fault": {"Error": [{"Message": "Object Not Found", "code": "610"}]}})
 
@@ -90,7 +97,7 @@ class _Qbo:
         }
         bill = self.bills[bill_id]
         bill["Balance"] -= Decimal(amount)
-        bill["LinkedTxn"].append({"TxnId": pid, "TxnType": "BillPayment"})
+        bill["LinkedTxn"].append({"TxnId": pid, "TxnType": _link_type(pay_type)})
         return pid
 
     async def request(self, method, url, params=None, content=None, headers=None):
@@ -118,7 +125,12 @@ class _Qbo:
             if rid in self.replays:
                 return _resp(200, self.replays[rid])
             bill_id = body["Line"][0]["LinkedTxn"][0]["TxnId"]
-            pid = self.pay(bill_id, body["TotalAmt"], note=body["PrivateNote"])
+            pid = self.pay(
+                bill_id,
+                body["TotalAmt"],
+                note=body["PrivateNote"],
+                pay_type=body.get("PayType", "Check"),
+            )
             self.replays[rid] = {"BillPayment": self.payments[pid]}
             return _resp(200, {"BillPayment": self.payments[pid]})
         raise AssertionError(f"unexpected {method} {url}")
@@ -183,6 +195,138 @@ def test_bill_paid_by_a_person_in_quickbooks():
     assert report.external_payment_ids and not report.paid_only_by_us
 
 
+@pytest.mark.parametrize(
+    ("pay_type", "link_type", "method"),
+    [
+        ("Check", "BillPaymentCheck", "check"),
+        ("CreditCard", "BillPaymentCreditCard", "card"),
+    ],
+)
+def test_a_cash_payment_made_in_quickbooks_is_cash_not_a_vendor_credit(pay_type, link_type, method):
+    """Regression (production, 2026-10-22): a person paid a $150 bill in
+    QuickBooks with Pay Bills from Checking. The bill named the payment as
+    `BillPaymentCheck`, the reader looked for `BillPayment`, found no payment,
+    and reported the bill settled by a vendor credit — which opened a blocking
+    exception instead of recording the invoice paid outside FeohLedger."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    pid = qbo.pay("501", "150.00", pay_type=pay_type, txn_date="2026-10-21")
+    assert qbo.bills["501"]["LinkedTxn"] == [{"TxnId": pid, "TxnType": link_type}]
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid
+    assert report.reduced_outside is True
+    assert report.settled_by_credit is False
+    assert report.paid_on == date(2026, 10, 21)
+    assert report.payment_method == method
+    assert report.external_payment_ids == (pid,)
+    assert report.paid_only_by_us is False
+
+
+def _payment_record(qbo: _Qbo, bill_id: str, total: str, lines: list[dict], note="") -> str:
+    """A BillPayment a person made in QuickBooks, with the given lines, linked
+    from the bill as real QuickBooks does; the bill comes down by what the
+    lines applied to it."""
+    pid = str(qbo.next_id)
+    qbo.next_id += 1
+    qbo.payments[pid] = {
+        "Id": pid,
+        "TotalAmt": Decimal(total),
+        "PayType": "Check",
+        "TxnDate": "2026-10-21",
+        "PrivateNote": note,
+        "SyncToken": "0",
+        "Line": lines,
+    }
+    bill = qbo.bills[bill_id]
+    for line in lines:
+        if line["LinkedTxn"][0]["TxnType"] == "Bill":
+            bill["Balance"] -= line["Amount"]
+    bill["LinkedTxn"].append({"TxnId": pid, "TxnType": _link_type("Check")})
+    return pid
+
+
+def _line(txn_type: str, txn_id: str, amount: str) -> dict:
+    return {"Amount": Decimal(amount), "LinkedTxn": [{"TxnId": txn_id, "TxnType": txn_type}]}
+
+
+def test_a_journal_entry_credit_cleared_in_pay_bills_is_not_cash():
+    """Cash is defined positively. A $0 BillPayment applying a journal-entry
+    credit is not a vendor credit, and must still not be booked as a cheque
+    (money-path review of §317: reading payments correctly made it reachable)."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    _payment_record(
+        qbo, "501", "0", [_line("Bill", "501", "150.00"), _line("JournalEntry", "JE-1", "150.00")]
+    )
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid
+    assert report.reduced_outside and report.settled_by_credit
+    assert report.paid_on is None and report.payment_method is None
+
+
+def test_a_payment_part_cash_part_journal_entry_credit_still_blocks():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    _payment_record(
+        qbo,
+        "501",
+        "50.00",
+        [_line("Bill", "501", "150.00"), _line("JournalEntry", "JE-1", "100.00")],
+    )
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid
+    assert report.settled_by_credit is True
+
+
+def test_a_zero_total_payment_without_a_void_note_is_not_cash():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    _payment_record(qbo, "501", "0", [_line("Bill", "501", "150.00")], note="tidied up")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.settled_by_credit is True
+    assert report.paid_on is None and report.payment_method is None
+
+
+def test_cash_that_does_not_cover_the_reduction_still_blocks():
+    """$100 of cash read, $150 gone from the bill outside us (a journal entry
+    against the bill itself, say): the uncovered $50 left no money trail."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "100.00")
+    qbo.bills["501"]["Balance"] = Decimal("0")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid
+    assert report.settled_by_credit is True
+
+
+def test_a_bill_payment_linked_by_its_entity_name_is_not_read():
+    """`BillPayment` is the entity, not a `LinkedTxn.TxnType` a Bill carries.
+    It is deliberately not accepted (decisions §317): with no payment read, a
+    bill taken down outside us still blocks for a person, never books cash."""
+    qbo = _Qbo()
+    qbo.bill()
+    pid = qbo.pay("501", "100.00")
+    qbo.bills["501"]["LinkedTxn"] = [{"TxnId": pid, "TxnType": "BillPayment"}]
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.external_payment_ids == ()
+    assert report.reduced_outside and report.settled_by_credit
+    assert not any(c["url"].endswith(f"billpayment/{pid}") for c in qbo.calls)
+
+
+def test_our_write_back_is_found_through_the_bills_real_link_and_voided():
+    """The write-back's idempotency and void both find our BillPayment through
+    the bill. Read with the wrong link type, a void answered "nothing of ours
+    to void" and left our payment standing in QuickBooks."""
+    qbo = _Qbo()
+    qbo.bill()
+    posted = _run(qbo, lambda: _adapter().post_payment(_payload()))
+    assert posted.success
+    assert qbo.bills["501"]["LinkedTxn"][0]["TxnType"] == "BillPaymentCheck"
+    voided = _run(qbo, lambda: _adapter().void_payment(_payload()))
+    assert voided.success and voided.erp_document_id == posted.erp_document_id
+    assert qbo.payments[posted.erp_document_id]["TotalAmt"] == Decimal("0")
+
+
 def test_bill_paid_only_by_our_write_back_is_not_news():
     qbo = _Qbo()
     qbo.bill()
@@ -215,7 +359,7 @@ def _apply_credit(qbo: _Qbo, bill_id: str, amount: str) -> str:
     }
     bill = qbo.bills[bill_id]
     bill["Balance"] -= Decimal(amount)
-    bill["LinkedTxn"].append({"TxnId": pid, "TxnType": "BillPayment"})
+    bill["LinkedTxn"].append({"TxnId": pid, "TxnType": _link_type("Check")})
     return pid
 
 
@@ -380,6 +524,10 @@ def test_a_card_payment_books_from_the_card_account():
     body = json.loads(qbo.posts()[0]["content"])
     assert body["PayType"] == "CreditCard"
     assert body["CreditCardPayment"] == {"CCAccountRef": {"value": "35"}}
+    # Linked on the bill as a card payment, and still found as ours.
+    assert qbo.bills["501"]["LinkedTxn"][0]["TxnType"] == "BillPaymentCreditCard"
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.paid_only_by_us is True
 
 
 @pytest.mark.parametrize(

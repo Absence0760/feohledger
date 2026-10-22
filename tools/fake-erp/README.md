@@ -335,7 +335,10 @@ set `FAKE_ERP_OAUTH_REDIRECT_URIS` (comma-separated) to replace it. The same
 registered set guards the Xero authorize route.
 
 **Status sync-back and BillPayment write-back** (decisions §295): bills carry
-`LinkedTxn` and `MetaData.LastUpdatedTime` like QuickBooks'.
+`LinkedTxn` and `MetaData.LastUpdatedTime` like QuickBooks'. A payment is
+linked on its bill with the `TxnType` real QuickBooks uses — `BillPaymentCheck`
+for a `Check` (bank) payment, `BillPaymentCreditCard` for a `CreditCard` one —
+never `BillPayment` (decisions §317).
 `POST /qbo/v3/company/{realm}/billpayment?requestid=…` creates a BillPayment
 against the bill its `Line[0].LinkedTxn` names (a repeated `requestid` replays
 the first answer, as Intuit does; more than the bill's open balance is a 400

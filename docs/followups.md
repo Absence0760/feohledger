@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, taking the file from 140 → 142. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**142 open: 123 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**143 open: 123 (c) · 10 (a) · 10 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2434,6 +2434,32 @@ as oversights.
       migration 0117 has run (the deploy's own migration step). **Trigger:**
       before the first pilot customer on QuickBooks pays a bill through
       FeohLedger.
+
+- [ ] **Clear up what the wrong QuickBooks bill-payment reader left behind.**
+      Until decisions §317 the adapter saw no payments on any real QuickBooks
+      bill. On every tenant connected to QuickBooks Online, look for three
+      leftovers.
+      1. Open `payment_reconciliation` exceptions reading "settled, at least
+         in part by a vendor credit" on a bill that was really paid in cash.
+         Dismiss each one, then record the invoice paid outside FeohLedger
+         with QuickBooks' date and rail. The open exception refuses the
+         automatic record, and an unchanged bill is not re-read.
+      2. False "paid twice" `erp_reconciliation` and "FeohLedger is paying it
+         too" exceptions on bills that only our own write-back paid. Dismiss
+         them.
+      3. Payment voids audited `payment.erp_void_not_needed` for a payment
+         that has an earlier `payment.erp_posted` carrying an
+         `erp_document_id`. That BillPayment is still live in QuickBooks, and
+         voiding it there by hand is the only way to clear it. The payment is
+         already `voided` here, so `POST /api/payments/{id}/void` answers 409,
+         and nothing re-queues an ERP void. Until it is voided, the bill reads
+         as paid by us, and the invoice's next payment is held at dispatch.
+         Query each tenant's `audit_log` for `action =
+         'payment.erp_void_not_needed'` and compare `entity_id` against the
+         `payment.erp_posted` rows.
+      The known case is TEST-0002 on the production sandbox tenant (#598).
+      **Trigger:** the first
+      deploy carrying §317.
 
 - [ ] **Create the five published contact aliases.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) `/legal/*` tells readers to
       write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on
