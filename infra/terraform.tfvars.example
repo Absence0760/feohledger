@@ -65,6 +65,15 @@ alert_emails = ["alerts@example.com"]
 # db_multi_az              = false            # true when a customer needs an uptime commitment
 # db_master_password_version = 1              # bump with each password rotation
 
+# --- Uptime checks + paging (uptime.tf, README.md § Uptime checks and paging) --
+# One tenant host to check from outside, alongside the apex and the API. Use a
+# tenant you control (a test tenant). Unset skips the tenant check.
+# uptime_tenant_slug = "REPLACE"
+# The phone the pager topic texts, in E.164 form. Personal data: set it only in
+# the private copy. Verify it in the SNS SMS sandbox and get the toll-free
+# number registered first, or texts silently fail. Unset means no SMS.
+# alert_phone_number = "+1REPLACE"
+
 # --- Secrets ------------------------------------------------------------------
 # Never in a tfvars. The one secret, the RDS master password, is an ephemeral
 # variable passed as TF_VAR_db_master_password from

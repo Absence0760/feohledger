@@ -14139,6 +14139,115 @@ rollback, the master downgraded, migrated and provisioned a tenant, and the next
 cutover run handed that tenant over. The
 operator rollout is `deploy/README.md` § Database role.
 
+## 311. The site is checked from outside by Route 53, and only customer-facing failures text the phone (2026-10-21)
+
+**The gap.** Every alarm in `infra/` watched AWS's view of its own resources:
+the VM's status checks, RDS CPU, memory and storage, CloudFront error rates. A
+wrong DNS record, a Caddy that stopped proxying, an API container that exited
+on a healthy VM, or a distribution serving the wrong thing moved none of them,
+and all of them only sent email. Operator to-do #446 asked for uptime
+monitoring that reaches the phone before customer #1.
+
+**Route 53 health checks, not a monitoring vendor.** Route 53's checkers make
+real HTTPS requests from several AWS regions, live in the same Terraform and
+state as the stack they check, and need no account, API key or extra
+sub-processor. The public status page is still a vendor call
+(`founder-runbooks/support-and-status.md`). A vendor that runs its own monitors
+can sit beside these checks. It does not replace them.
+
+**Three hosts, one per way to be down.** The apex (the SPA), one tenant host
+(the wildcard record, the wildcard SAN and, before the CloudFront cutover, that
+tenant's Caddy block), and `api.<domain>/api/health`. The tenant slug is a
+variable with no default, so the public repo names no customer. Unset skips
+that check.
+
+**HTTPS everywhere, a body match only on the API.** An HTTP check would follow
+nothing and pass on the redirect. HTTPS, string matching and the fast interval
+each bill per check. The API's match on `"status":"ok"` earns its cost: the
+SPA router answers every path with `index.html`, so if `api.` ever resolved to
+CloudFront a status-only check would read healthy. The SPA hosts already fail
+on the status code or the handshake in every way a person would notice (an
+empty bucket, a missing object, a stopped Caddy, a host with no certificate).
+`backend/tests/test_sweep_health.py` reads the string out of `uptime.tf` and
+checks it against the bytes `/api/health` returns, so reformatting either side
+fails CI instead of paging for an API that is up.
+
+**30-second interval, 3 failures, 3 regions.** About 90 seconds of sustained
+failure before a check reads unhealthy, which a deploy's few-second container
+restart never reaches. The 10-second interval would cut that to about 30
+seconds, at $1–2 more per check, for a pilot with no uptime commitment.
+Three regions is Route 53's minimum. They don't lower the price, which is per
+check, but every checker is a request against CloudFront's free allowance and
+the API, and three regions on two continents still tell a regional network
+fault from an outage. All in, about $8–13 a month with the toll-free number.
+
+**us-east-1, by construction.** Route 53 publishes health-check metrics only
+in us-east-1, and an alarm can notify only a topic in its own region. The
+alarms and the pager topic are pinned to the existing `aws.us_east_1` alias.
+`frontend.tf` already refuses any other `aws_region`, which keeps the alerts
+topic and the database alarm that pages there too. No new provider, so the lock
+file is unchanged.
+
+**A separate pager topic, and only customer-facing alarms on it.** Putting an
+SMS subscription on `alerts` would text CPU-credit warnings at 3 a.m. Instead
+the uptime alarms and `db-storage-low` (past it writes fail, and no uptime
+check notices first) notify both `pager` (SMS) and `alerts` (email). Everything
+else stays email-only. CPU, memory and credits are sizing and cost signals. A
+failed VM status check, or a CloudFront 5xx surge customers can see, fails an
+uptime check anyway, so paging it too would send two or three texts per
+incident and teach the operator to ignore the phone.
+
+**Missing data is an outage for the uptime alarms, not for the certificate
+alarm.** Route 53 emits `HealthCheckStatus` every minute while a check exists,
+so silence means the check or the metric pipeline is broken. An uptime alarm
+that goes quiet when it cannot see is the failure this exists to remove. The
+cost is one page right after the first apply, which doubles as a delivery
+test. ACM's `DaysToExpiry` is daily with drifting timestamps, so an empty
+window there is normal and reads `notBreaching`.
+
+**Certificate expiry: ACM covered, Caddy tracked.** Route 53 does not validate
+certificates, so an expired one passes. ACM renews the platform certificate
+from 60 days out on its own. An alarm at under 30 days catches a renewal that
+failed (validation CNAME deleted, a CAA record) with a month left, by email.
+The Let's Encrypt certificates Caddy holds on the VM emit no AWS metric. That
+gap is a (c) follow-up (a Synthetics canary) rather than half-built here.
+
+**The phone number stays out of the repo, and its absence is safe.**
+`alert_phone_number` has no default, is `sensitive` so plans print
+`(sensitive value)`, and is validated as E.164. Unset creates no subscription,
+leaves the account's SMS settings alone and adds no delivery alarm, so
+plan, validate and the offline tests need no number. The `count` reads
+`nonsensitive(var.alert_phone_number != null)`, because whether a number is set
+reveals nothing and `count` refuses a sensitive value.
+
+**US SMS has prerequisites Terraform cannot do.** A new account is in the SNS
+SMS sandbox, which delivers only to numbers verified in the console. That is
+fine to stay in, since the operator is the only recipient. US carriers also
+refuse SMS without a registered origination identity. A toll-free number is
+the cheapest: $2 a month and about 15 days to register, as a sole proprietor
+with no EIN. Registrations since 2026-09-15 need privacy and terms URLs, which
+`/legal/` already publishes. SNS then needs a resource policy on the number.
+These are console steps (`infra/README.md` § Uptime checks and paging) and a
+(b) follow-up. Leasing the number through Terraform was rejected: the
+registration form carries the operator's address and contact phone, which
+belong in neither the public repo nor its state. A text SNS cannot deliver
+fails silently (unregistered number, unverified destination, the $1 default
+monthly spend limit), so with a number set an alarm on the pager topic's
+`NumberOfNotificationsFailed`, which counts an SMS once SNS stops trying to
+deliver it, emails the operator, and a second emails at 80% of the spend limit
+(`SMSMonthToDateSpentUSD`), since past it SNS stops texting for the rest of the
+month. A carrier dropping a text SNS handed over is invisible to both, which is
+why the README ends with a test-fire. `aws_sns_topic.pager` also carries its
+own `aws_region == "us-east-1"` precondition: `db_storage` sits on the default
+provider and publishes to it, which only works in the same region.
+
+**Tests.** `infra/tests/guardrails.tftest.hcl` pins the hosts, paths, body
+match, interval, threshold and regions, the tenant check appearing only with a
+slug, every uptime alarm paging and emailing on failure and recovery with
+missing data breaching, which alarms may page, the SMS subscription, SMS
+preferences and both SMS alarms existing only with a number, the E.164 and
+slug validations, the region precondition, and the certificate alarm.
+
 ## 312. The landing page follows the visitor's theme, with a light render of the tally (2026-10-21)
 
 **This supersedes §289's "the marketing landing page stays dark" and §294's

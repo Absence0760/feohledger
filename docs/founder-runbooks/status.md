@@ -80,7 +80,10 @@ each step.
         the same day; SES verified but still sandboxed. **Delivery not yet proven
         by a real inbound send** — see [#446](https://github.com/Absence0760/feohledger/issues/446) § 3
   - [ ] Status page live
-  - [ ] Uptime monitoring to phone
+  - [ ] Uptime monitoring to phone — built in Terraform (`infra/uptime.tf`,
+        decisions §311); open until the toll-free number is registered, the
+        phone verified and set in `prod.tfvars`, the stack applied, and a test
+        alarm has rung it (`infra/README.md` § Uptime checks and paging)
   - [ ] Incident runbook written
 - [ ] **Insurance** — **hard gate before customer #1** for a sole proprietor
       (decisions §252): with no entity, it is the only cover for personal assets
