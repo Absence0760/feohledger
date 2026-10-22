@@ -14682,3 +14682,102 @@ still drops; Business Central environment and `base_url` still drop; the
 opt-out list is pinned; the PATCH and test-erp round trips against the real
 backend); `frontend/src/lib/types/erpConnection.test.ts` (QuickBooks keeps the
 secret counted as saved and Save unblocked; Business Central asks again).
+
+## 317. A bill's payments are read by the LinkedTxn types QuickBooks really uses (2026-10-22)
+
+**What broke.** In production a person paid a QuickBooks Online bill with Pay
+Bills, $150 from a bank account: an ordinary cash payment, no vendor credit.
+The status sync opened a blocking `payment_reconciliation` saying the bill was
+"settled, at least in part by a vendor credit", instead of recording the
+invoice paid outside FeohLedger.
+
+**Root cause.** The adapter had two definitions of "a bill-payment link".
+`map_bill_status` (§303) matched `LinkedTxn.TxnType` against `BillPaymentCheck`
+/ `BillPaymentCreditCard`. `_bill_payments`, which every other reader goes
+through, matched the entity name `BillPayment`. A Bill types the link by how it
+was paid (the payment's `PayType`), so against a real company `_bill_payments`
+found nothing. In `bill_report` the cash list was then empty, so
+`settled_by_credit = reduced_outside and (... or not cash)` came out True and
+`apply_bill_report` took the vendor-credit branch. The same empty read reached
+further than the reported symptom:
+
+- our own write-back was invisible, so a bill FeohLedger paid read as paid
+  outside us (`paid_only_by_us` False). That flags `payment_scheduled` as a
+  double payment and a FeohLedger-paid invoice as "paid twice";
+- `post_payment`'s first idempotency layer (find ours by marker) never matched.
+  Intuit's `requestid` replay was the only thing preventing a duplicate;
+- `void_payment` answered "no bill payment of ours to void" and reported
+  success, while our BillPayment stayed live in QuickBooks.
+
+`tools/fake-erp` and the adapter test doubles both emitted `"TxnType":
+"BillPayment"`, so they agreed with the wrong reader and CI's erp-e2e stayed
+green.
+
+**Intuit's values.** Intuit's linked-transactions guide says a Bill's link to
+its payment is set by QuickBooks through the BillPayment and appears in the
+Bill's `LinkedTxn`. The documented `LinkedTxn` type enumeration lists
+`BillPaymentCheck` and `BillPaymentCreditCard` and no `BillPayment`. Client
+libraries built against the API (quickbooks-ruby's `LinkedTransaction`
+defaults to `BillPaymentCheck`) agree, and so does the production bill: its
+payment was not found under `BillPayment`.
+
+**The rule.** `_BILL_PAYMENT_TXN_TYPES` is the one definition, and
+`_bill_payment_ids(bill)` the one reader. `_has_bill_payment` (status mapping)
+and `_bill_payments` (bill report, write-back idempotency, void) both use it.
+The other `_linked_ids` calls are unaffected: a BillPayment's own lines link to
+a `Bill` or a `VendorCredit` by those names, and the webhook's `billpayment` is
+the CloudEvents entity name, not a link type. The fake ERP links a `Check`
+payment as `BillPaymentCheck` and a `CreditCard` one as
+`BillPaymentCreditCard`, so the erp-e2e exercises the real shape.
+
+**A bare `BillPayment` is deliberately not accepted.** No Intuit source shows
+it on a Bill. Accepting it "defensively" is how this hid: the doubles kept a
+reader passing that real QuickBooks never matched. It would also either split
+the definition again or widen what §303 counts as proof that money left. The
+cost of an unrecognised link type is bounded on the inbound side: no payment is
+read, so a bill taken down outside FeohLedger still blocks for a person and is
+never booked as cash. The void side is not bounded the same way. That is why
+`test_qbo_status_sync_adapter.py` now pins the real types in the double, and
+why the double and fake-erp derive the link type from the pay type, not a
+literal.
+
+**Cash is defined positively.** Fixing the reader made a second gap reachable,
+which the money-path review caught before merge. `bill_report` called a
+person's payment cash when it had no `VendorCredit` line. That was harmless
+while no payment was ever read; once payments are read, a journal-entry credit
+cleared through Pay Bills (a $0 BillPayment whose lines link the `Bill` and a
+`JournalEntry`) would have been booked as a $150 cheque. Cash is now
+`_is_cash_payment`: a positive `TotalAmt` and every line linked to a `Bill` and
+nothing else. `settled_by_credit` is True whenever any payment made outside us
+is not cash, or the cash read does not cover what left the bill outside us.
+Both cases block for a person and book nothing.
+
+**Rows already wrong.** Before this fix every QuickBooks bill read as having no
+payments, so production may hold any of these:
+
+- *A bill paid in cash, flagged as a vendor credit* (the reported case). The
+  open `payment_reconciliation` stays, and while it is open it also refuses
+  the ERP-paid record (`record_invoice_paid_outside` refuses on an open
+  payment-blocking exception). A person dismisses it (§169), then records the
+  invoice paid outside FeohLedger with QuickBooks' date and rail. Alternatively
+  they make any edit to the bill in QuickBooks, so the webhook or CDC re-reads
+  it. An unchanged bill is not re-read on its own.
+- *A FeohLedger write-back read as a payment made outside us.* This shows up as
+  a non-blocking "paid twice" `erp_reconciliation` on a FeohLedger-paid
+  invoice, or a blocking "FeohLedger is paying it too" on a `payment_scheduled`
+  one. Both were false and are dismissed.
+- *A void that left our BillPayment standing.* `void_payment` answered "nothing
+  of ours to void", so `payment.erp_void_not_needed` was audited and no pending
+  void was kept, and the payment can no longer be voided again here. Each one
+  is voided by hand in QuickBooks. They are tracked in `docs/followups.md` (b),
+  with the query that finds them.
+
+Tests: `backend/tests/test_qbo_status_sync_adapter.py` (a `BillPaymentCheck`
+and a `BillPaymentCreditCard` cash payment read as cash, not credit, with date
+and rail; a genuine vendor credit, a journal-entry credit, a part-credit
+payment, a $0 payment without a void note and cash short of the reduction all
+read as not cash; a bare `BillPayment` link is not read; the write-back, cheque
+or card, is found, read as ours and voided through the real link),
+`backend/tests/test_erp_status_sync.py` (the adapter's report from a real-shape
+bill, carried through `apply_bill_report`, records `paid_recorded` with no
+exception).

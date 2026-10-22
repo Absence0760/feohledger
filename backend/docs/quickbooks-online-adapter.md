@@ -108,7 +108,8 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   nothing. The mark moves only when the whole pass went through. The same pass
   finishes any ERP void a payment void recorded but did not complete.
 - `bill_report(bill_id)` reads the bill (and its BillPayments through
-  `LinkedTxn`): `paid` / `partially_paid` / `open` / `deleted` (Fault 610 or
+  `LinkedTxn`, where QuickBooks types each one `BillPaymentCheck` or
+  `BillPaymentCreditCard`, never `BillPayment` — decisions §317): `paid` / `partially_paid` / `open` / `deleted` (Fault 610 or
   `status: Deleted` only — an unreadable bill raises), the correlation id from
   our `PrivateNote` marker, and the latest cash payment a PERSON made: its date
   and rail (`PayType` `Check` → `check`, `CreditCard` → `card`). Whether the
@@ -116,8 +117,12 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   (`reduced_outside`: `TotalAmt − Balance` beyond what our own marked
   BillPayments applied), so a vendor credit — QuickBooks records one as a $0
   BillPayment linked to the `VendorCredit`, which is NOT a void — or a journal
-  entry counts too; `settled_by_credit` says when a credit took part or no
-  readable cash paid it.
+  entry counts too; `settled_by_credit` says when anything but cash took part,
+  or the cash read does not cover what left the bill outside us. Cash is
+  defined positively (`_is_cash_payment`): a positive `TotalAmt` and every line
+  linked to a `Bill` and nothing else, so a journal-entry credit cleared in Pay
+  Bills, or a $0 payment not noted as voided, is never booked as a cheque
+  (decisions §317).
 - `apply_bill_report` matches a bill to its invoice by the marker's correlation
   id AND the invoice's `erp_reference` (a deleted bill, which cannot be read, by
   `erp_reference` within the recorded realm only), row-locks it, and:

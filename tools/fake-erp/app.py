@@ -3124,7 +3124,11 @@ def _qbo_apply_payment(bill: dict, amount, *, note: str, pay_type: str, txn_date
     _qbo_touch(record)
     st["payments"][pid] = record
     bill["Balance"] = float(Decimal(str(bill["Balance"])) - amount)
-    bill.setdefault("LinkedTxn", []).append({"TxnId": pid, "TxnType": "BillPayment"})
+    # A Bill names its payment by how it was paid, never as "BillPayment": real
+    # QuickBooks links a cheque/bank payment as BillPaymentCheck and a card one
+    # as BillPaymentCreditCard (docs/decisions.md §317).
+    link_type = "BillPaymentCreditCard" if pay_type == "CreditCard" else "BillPaymentCheck"
+    bill.setdefault("LinkedTxn", []).append({"TxnId": pid, "TxnType": link_type})
     bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
     _qbo_touch(bill)
     return record

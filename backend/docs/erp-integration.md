@@ -325,6 +325,16 @@ Decisions §295; the phase-by-phase account is
   a bill QuickBooks paid, part-paid or deleted. The tenant is found through the
   control-plane realm index (`uq_organizations_erp_oauth_company`, migration
   0117), which also makes "one tenant per QuickBooks company" a database rule.
+- **How a bill's payments are found.** A Bill names each BillPayment applied
+  to it in its `LinkedTxn`, typed by how it was paid: `BillPaymentCheck` (a
+  bank/cheque payment, which is what Pay Bills from a bank account records) or
+  `BillPaymentCreditCard`, never the entity name `BillPayment`. One definition,
+  `quickbooks_online._BILL_PAYMENT_TXN_TYPES` read through `_bill_payment_ids`,
+  serves `bill_report` (cash vs vendor credit, and which payments are ours),
+  `get_invoice_status`, and the write-back's idempotency lookup and void.
+  Reading the wrong type finds no payment at all, so a bill paid in cash reads
+  as settled by a vendor credit and our own write-back reads as a payment made
+  outside FeohLedger (decisions §317).
 - **Outbound.** `payment_erp_sync` writes a settled payment back as a
   BillPayment (`services/erp_payment_writeback`), idempotent on the payment id,
   from the org's mapped pay-from account (`settings.erp.bill_payment_bank_account`
