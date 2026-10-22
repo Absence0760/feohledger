@@ -5,6 +5,7 @@ No DB / no network — just the pure-function surfaces.
 
 import pytest
 
+from app.utils.hcaptcha import CAPTCHA_FAILED, CAPTCHA_REQUIRED, CAPTCHA_UNAVAILABLE
 from app.utils.passwords import (
     MIN_LENGTH,
     PasswordError,
@@ -13,6 +14,11 @@ from app.utils.passwords import (
 )
 from app.utils.slug import (
     RESERVED_SLUGS,
+    SLUG_DOUBLE_HYPHEN,
+    SLUG_FORMAT,
+    SLUG_HYPHEN_EDGE,
+    SLUG_REQUIRED,
+    SLUG_RESERVED,
     SlugError,
     validate_slug_format,
 )
@@ -52,6 +58,62 @@ def test_validate_slug_format_rejects_reserved():
     for reserved in list(RESERVED_SLUGS)[:5]:
         with pytest.raises(SlugError):
             validate_slug_format(reserved)
+
+
+@pytest.mark.parametrize(
+    ("slug", "code"),
+    [
+        ("", SLUG_REQUIRED),
+        ("1acme", SLUG_FORMAT),
+        ("ACME", SLUG_FORMAT),
+        ("admin", SLUG_RESERVED),
+        ("acme-", SLUG_HYPHEN_EDGE),
+        ("ac--me", SLUG_DOUBLE_HYPHEN),
+    ],
+)
+def test_each_slug_rule_refuses_with_its_own_code(slug, code):
+    """The code is what a client localizes on (issue #635 finding 18); the
+    English names the field as the form does — a workspace address."""
+    with pytest.raises(SlugError) as info:
+        validate_slug_format(slug)
+    assert info.value.code == code
+    assert "slug" not in str(info.value).replace(f"'{slug}'", "").lower()
+
+
+@pytest.mark.parametrize(
+    ("setup", "code"),
+    [
+        ("no_token", CAPTCHA_REQUIRED),
+        ("network_error", CAPTCHA_UNAVAILABLE),
+        ("rejected", CAPTCHA_FAILED),
+    ],
+)
+async def test_each_captcha_refusal_carries_its_code(monkeypatch, setup, code):
+    import httpx
+
+    from app.utils import hcaptcha
+
+    monkeypatch.setattr(hcaptcha.settings, "hcaptcha_secret", "test-secret")
+
+    class _Client:
+        def __init__(self, *a, **kw) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc) -> None:
+            return None
+
+        async def post(self, url, data):  # noqa: ARG002
+            if setup == "network_error":
+                raise httpx.ConnectError("down")
+            return httpx.Response(200, json={"success": False}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(hcaptcha.httpx, "AsyncClient", _Client)
+    with pytest.raises(hcaptcha.CaptchaError) as info:
+        await hcaptcha.verify_captcha(None if setup == "no_token" else "tok")
+    assert info.value.code == code
 
 
 def test_reserved_slugs_include_common_infra_names():

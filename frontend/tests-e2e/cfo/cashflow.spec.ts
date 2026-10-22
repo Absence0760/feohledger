@@ -161,6 +161,8 @@ test.describe('/cfo RBAC', () => {
 		await page.locator('aside.sidebar a.nav-item', { hasText: 'Insights' }).click();
 		const tab = page.locator('a.section-tab[href="/cfo"]');
 		await expect(tab).toBeVisible();
+		// Named apart from the Cash-Flow Copilot tab beside it (decisions §314).
+		await expect(tab).toHaveText('Cash-flow analytics');
 		await tab.click();
 		await expect(page.getByRole('heading', { name: 'Cash Flow' })).toBeVisible();
 	});

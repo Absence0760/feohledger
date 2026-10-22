@@ -1,6 +1,9 @@
 import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 import { en } from './locales/en';
+import { CATALOGUE_LOADERS } from './catalogues';
+import { interpolate } from './interpolate';
+import { SUPPORTED_LOCALES } from './locale';
 
 /**
  * Source-scan guard: a surface declared translated must not carry English in
@@ -42,13 +45,61 @@ const RAW = import.meta.glob('/src/**/*.svelte', {
  */
 const TRANSLATED = [
 	'/src/lib/components/ConsentBanner.svelte',
+	'/src/lib/components/auth/NewPasswordFields.svelte',
+	'/src/lib/components/auth/PasswordInput.svelte',
+	'/src/lib/components/marketing/AdapterRail.svelte',
+	'/src/lib/components/marketing/HeroPipeline.svelte',
+	'/src/lib/components/marketing/Landing.svelte',
 	'/src/lib/components/marketing/Pricing.svelte',
+	'/src/lib/components/modals/BulkRecodeGLModal.svelte',
+	'/src/lib/components/modals/CreateVendorModal.svelte',
+	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
+	'/src/lib/components/modals/RunDetailModal.svelte',
+	'/src/lib/components/modals/VendorConsolidationModal.svelte',
+	'/src/lib/components/modals/VendorModal.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
 	'/src/lib/components/ui/InvoicePicker.svelte',
 	'/src/lib/components/ui/PlanUpgradeNotice.svelte',
 	'/src/lib/components/ui/VendorPicker.svelte',
 	'/src/routes/credit-memos/+page.svelte',
-	'/src/routes/exceptions/+page.svelte'
+	'/src/routes/exceptions/+page.svelte',
+	'/src/routes/find-workspace/+page.svelte',
+	'/src/routes/vendors/+page.svelte'
+];
+
+/**
+ * Surfaces whose `toast(…)` messages are fully extracted too.
+ *
+ * The template scan above never reaches a toast: its text is built in
+ * `<script>`, so a page could pass that check while every piece of feedback it
+ * gave was English. `/invoices` did — "Uploading 3 of 5...", "Uploaded 4 of 5
+ * invoices (1 failed)", "Deleted 2 invoice(s)" — with a hand-built `(s)` plural
+ * no translator could reach (#635). Listing a file here holds every word a
+ * `toast()` call can show to `m()`, including the fallback in
+ * `err instanceof Error ? err.message : 'Bulk delete failed'`.
+ *
+ * The two rosters are independent — a page can finish its toasts before its
+ * template (`/invoices` still renders the CSV / JSON / XML format names and the
+ * RAG·n priors chip as literals, so it is not on `TRANSLATED`).
+ */
+const TOASTS_TRANSLATED = [
+	'/src/lib/components/modals/CreateVendorModal.svelte',
+	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
+	// Was "Merged 2 duplicates (5 records re-homed)", spelled with two
+	// hand-built `s` suffixes (#635).
+	'/src/lib/components/modals/VendorConsolidationModal.svelte',
+	'/src/lib/components/modals/VendorModal.svelte',
+	// Was "Re-coded 3 invoice(s)", a hand-built plural, plus two English
+	// fallbacks (#635).
+	'/src/lib/components/modals/BulkRecodeGLModal.svelte',
+	'/src/lib/components/modals/RunDetailModal.svelte',
+	'/src/routes/invoices/+page.svelte',
+	// Was "Payment voided", "Draft payment run created…" and six English
+	// load-failure fallbacks (#635).
+	'/src/routes/payments/+page.svelte',
+	// Was "Selected all 3 matching vendor(s)" and every bulk-action failure in
+	// English (#635).
+	'/src/routes/vendors/+page.svelte'
 ];
 
 /** Attributes a human reads. `class` / `role` / `type` are not copy. */
@@ -154,6 +205,75 @@ function literalCopyAttrs(source: string): string[] {
 	return out;
 }
 
+/**
+ * Latin-letter string literals inside the first argument of every `toast(…)`
+ * call in the component's instance script — what a toast can show that did not
+ * come from `m()`.
+ *
+ * Walks the parsed ESTree rather than matching text, for the reason
+ * `walkFragment` gives. An `m('key', {…})` call is skipped whole, so its key
+ * and its params are not mistaken for copy; the second argument (the toast's
+ * tone, `'error'` / `'success'`) is never read. A message assembled in a local
+ * first (`const msg = …; toast(msg)`) is out of reach — key it at the point it
+ * is built, which is what `m()` at the toast call already makes the easy path.
+ */
+function literalToastCopy(source: string): string[] {
+	const ast = parse(source, { modern: true }) as unknown as { instance?: { content: unknown } };
+	const out: string[] = [];
+	const seen = new Set<unknown>();
+	function isCall(node: Record<string, unknown>, name: string): boolean {
+		const callee = node.callee as Record<string, unknown> | undefined;
+		return node.type === 'CallExpression' && callee?.type === 'Identifier' && callee.name === name;
+	}
+	function collect(node: unknown): void {
+		if (node === null || typeof node !== 'object' || seen.has(node)) return;
+		seen.add(node);
+		if (Array.isArray(node)) {
+			for (const child of node) collect(child);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		if (isCall(record, 'm')) return;
+		// A ternary's TEST picks which message shows; it is never shown itself
+		// (`status === 'pending_compliance' ? m('a') : m('b')`). Only the two
+		// branches can reach the reader.
+		if (record.type === 'ConditionalExpression') {
+			collect(record.consequent);
+			collect(record.alternate);
+			return;
+		}
+		if (record.type === 'Literal' && typeof record.value === 'string' && IS_COPY.test(record.value)) {
+			out.push(record.value);
+		}
+		if (record.type === 'TemplateElement') {
+			const cooked = (record.value as { cooked?: string } | undefined)?.cooked ?? '';
+			if (IS_COPY.test(cooked)) out.push(cooked);
+		}
+		for (const [key, value] of Object.entries(record)) {
+			if (key === 'loc' || key === 'start' || key === 'end') continue;
+			collect(value);
+		}
+	}
+	const visited = new Set<unknown>();
+	(function walk(node: unknown): void {
+		if (node === null || typeof node !== 'object' || visited.has(node)) return;
+		visited.add(node);
+		if (Array.isArray(node)) {
+			for (const child of node) walk(child);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		if (isCall(record, 'toast')) {
+			collect((record.arguments as unknown[] | undefined)?.[0]);
+		}
+		for (const [key, value] of Object.entries(record)) {
+			if (key === 'loc') continue;
+			walk(value);
+		}
+	})(ast.instance?.content);
+	return out;
+}
+
 describe('translated surfaces carry no literal copy', () => {
 	it('reads the component tree', () => {
 		expect(Object.keys(RAW).length).toBeGreaterThan(50);
@@ -190,6 +310,32 @@ describe('translated surfaces carry no literal copy', () => {
 		expect(literalCopyAttrs(sample)).toEqual(['aria-label="Cookie and privacy consent"']);
 	});
 
+	it('detects literal toast copy, and only toast copy', () => {
+		// The four shapes /invoices shipped: a bare literal, a template literal
+		// with a hand-built plural, and an English fallback behind
+		// `err.message` — beside a keyed toast, the tone argument, and an API
+		// path that is a string literal but not a toast message.
+		const sample = [
+			'<script lang="ts">',
+			"\tconst path = `/api/invoices/${id}`;",
+			"\ttoast('Invoice deleted', 'success');",
+			"\ttoast(`Deleted ${n} invoice(s)`, 'success');",
+			"\ttoast(err instanceof Error ? err.message : 'Bulk delete failed', 'error');",
+			"\ttoast(m('invoices.toast.deleted', { n, label: 'not copy' }), 'success');",
+			"\ttoast(status === 'pending_compliance' ? m('a') : 'Still held', 'error');",
+			'</script>',
+			'<p>{m(\'x\')}</p>'
+		].join('\n');
+		expect(literalToastCopy(sample)).toEqual([
+			'Invoice deleted',
+			'Deleted ',
+			' invoice(s)',
+			'Bulk delete failed',
+			// The ternary's branch is read; its test (`'pending_compliance'`) is not.
+			'Still held'
+		]);
+	});
+
 	for (const path of TRANSLATED) {
 		it(`${path} renders every word through m()`, () => {
 			const source = RAW[path];
@@ -203,6 +349,17 @@ describe('translated surfaces carry no literal copy', () => {
 				`${path} has a hardcoded human-readable attribute. An aria-label is read aloud; key it like any other string.`
 			).toEqual([]);
 			expect(source, `${path} should call m()`).toMatch(/\bm\(/);
+		});
+	}
+
+	for (const path of TOASTS_TRANSLATED) {
+		it(`${path} puts every toast through m()`, () => {
+			const source = RAW[path];
+			expect(source, `${path} not found through import.meta.glob`).toBeTypeOf('string');
+			expect(
+				literalToastCopy(source),
+				`${path} shows a literal in a toast. Key it (all six catalogues) and pass m(…) — use an ICU plural, never a hand-built "(s)".`
+			).toEqual([]);
 		});
 	}
 });
@@ -325,4 +482,62 @@ describe('the "Select all N matching" bulk affordance', () => {
 			);
 		}
 	});
+});
+
+describe('the /invoices toasts render with the params their call sites pass', () => {
+	/**
+	 * `satisfies Messages` checks keys, not placeholders, and the parity test
+	 * checks that each locale matches English — neither checks the CALL SITE.
+	 * A toast called with `{ shown }` against a message reading `{count}`
+	 * renders the literal `{count}` in every locale. So read each
+	 * `m('invoices.toast.*', { … })` call's property names off the AST and
+	 * render the message with them in all six locales, at a singular and a
+	 * plural count, with no `{` left over.
+	 */
+	const PAGE = '/src/routes/invoices/+page.svelte';
+
+	function toastCalls(source: string): { key: string; params: string[] }[] {
+		const ast = parse(source, { modern: true }) as unknown as { instance?: { content: unknown } };
+		const calls: { key: string; params: string[] }[] = [];
+		const seen = new Set<unknown>();
+		(function walk(node: unknown): void {
+			if (node === null || typeof node !== 'object' || seen.has(node)) return;
+			seen.add(node);
+			if (Array.isArray(node)) {
+				for (const child of node) walk(child);
+				return;
+			}
+			const r = node as Record<string, unknown>;
+			const callee = r.callee as Record<string, unknown> | undefined;
+			const args = r.arguments as Record<string, unknown>[] | undefined;
+			if (r.type === 'CallExpression' && callee?.type === 'Identifier' && callee.name === 'm' && args) {
+				const key = args[0]?.type === 'Literal' ? String(args[0].value) : '';
+				if (key.startsWith('invoices.toast.')) {
+					const props = (args[1]?.properties as Record<string, unknown>[] | undefined) ?? [];
+					const params = props.map((p) => String((p.key as Record<string, unknown>).name));
+					calls.push({ key, params });
+				}
+			}
+			for (const [k, v] of Object.entries(r)) if (k !== 'loc') walk(v);
+		})(ast.instance?.content);
+		return calls;
+	}
+
+	it('finds the keyed toasts', () => {
+		expect(toastCalls(RAW[PAGE]).length).toBeGreaterThan(15);
+	});
+
+	for (const loc of SUPPORTED_LOCALES) {
+		it(`${loc}: every call site fills every placeholder`, async () => {
+			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
+			for (const { key, params } of toastCalls(RAW[PAGE])) {
+				expect(dict, `${loc} lacks ${key}`).toHaveProperty(key);
+				for (const count of [1, 2]) {
+					const values = Object.fromEntries(params.map((p) => [p, count]));
+					const out = interpolate(dict[key], values, loc);
+					expect(out, `${loc} ${key} with {${params.join(', ')}} = ${count}`).not.toMatch(/[{}#]/);
+				}
+			}
+		});
+	}
 });

@@ -4263,13 +4263,13 @@ abstract class AppLocalizations {
   /// No description provided for @invoiceWarningAiAllowanceReached.
   ///
   /// In en, this message translates to:
-  /// **'AI reading is paused: this month\'s {included, plural, one {{included} AI-read invoice is} other {{included} AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.'**
+  /// **'AI reading is paused: this month\'s {included, plural, one {{included} AI-read invoice is} other {{included} AI-read invoices are}} used. Enter the details manually, or upgrade your plan under Settings → Subscription.'**
   String invoiceWarningAiAllowanceReached(int included);
 
   /// No description provided for @invoiceWarningAiSpendCapReached.
   ///
   /// In en, this message translates to:
-  /// **'AI reading is paused: this month\'s AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.'**
+  /// **'AI reading is paused: this month\'s AI spending cap is reached. Enter the details manually, or raise the cap under Settings → Subscription.'**
   String get invoiceWarningAiSpendCapReached;
 
   /// No description provided for @invoiceWarningUnverifiedVendor.

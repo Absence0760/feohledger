@@ -330,6 +330,9 @@ test.describe('/payments — paying outside FeohLedger', () => {
 			await modal.getByRole('button', { name: 'Download bank file (NACHA)' }).click();
 			expect((await nacha).status()).toBe(409);
 			await expect(modal.getByTestId('nacha-error')).toContainText('Company name');
+			// Stated once, in the panel: an error toast repeating it never times
+			// out and sat over the button below (one error, one signal).
+			await expect(page.getByTestId('toast').filter({ hasText: 'Company name' })).toHaveCount(0);
 
 			// Record the run as paid by the customer's bank.
 			await modal.getByRole('button', { name: 'Record run as paid…' }).click();

@@ -105,7 +105,7 @@
 		left: -18%;
 		width: 55%;
 		height: 60%;
-		background: radial-gradient(circle, rgba(140, 106, 255, 0.24), transparent 70%);
+		background: radial-gradient(circle, color-mix(in srgb, var(--brand-violet) 24%, transparent), transparent 70%);
 		animation: drift-b 4.6s ease-in-out 1 forwards;
 	}
 	/* The one warm note: the brand's gilt, kept faint and low so it reads as a
@@ -116,7 +116,7 @@
 		left: 34%;
 		width: 48%;
 		height: 46%;
-		background: radial-gradient(circle, rgba(231, 185, 94, 0.13), transparent 72%);
+		background: radial-gradient(circle, color-mix(in srgb, var(--gilt) 13%, transparent), transparent 72%);
 		animation: drift-c 5s ease-in-out 1 forwards;
 	}
 	.dense .aurora-a {

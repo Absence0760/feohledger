@@ -85,7 +85,11 @@ another key, even within the same org). The cap is
 `FEOH_PUBLIC_API_RATE_LIMIT_PER_MINUTE` (default **120 req/min**) over a fixed
 **60-second** window. A key over its cap gets an
 **HTTP `429 Too Many Requests`** with a **`Retry-After`** header (seconds until
-the oldest in-window request ages out).
+the oldest in-window request ages out). The body is the limiter's coded refusal,
+the same on every surface it guards:
+`{"detail": {"code": "rate_limited", "message": "Too many requests. Please wait N seconds before trying again.", "params": {"retry_after_seconds": N}}}`
+— `N` is the header's figure. Back off on the header; key on `detail.code`,
+never on the message text.
 
 Ordering matters for non-enumeration: the limit is checked **after** the key
 authenticates, inside `get_api_key_principal` (just before the principal is
@@ -277,6 +281,12 @@ build against it safely:
   enum, or make an optional param required — those are breaking changes and
   require a new version. The `V1Invoice` schema is decoupled from the internal
   ORM precisely so an internal column change never silently alters the contract.
+- **Error bodies are not part of the field contract.** An error is identified by
+  its HTTP status, its standard headers (`Retry-After`, `WWW-Authenticate`) and,
+  where present, `detail.code`; `detail`'s English text and shape may change
+  within `v1`. Key on those, never on the message. (The 429 `detail` became the
+  coded `rate_limited` object in issue #635; its status and `Retry-After` did
+  not change.)
 - **Deprecation window.** When a version is slated for sunset, it is announced in
   this doc and (where applicable) flagged via the standard `Deprecation` /
   `Sunset` response headers and `deprecated: true` in the OpenAPI operation. A

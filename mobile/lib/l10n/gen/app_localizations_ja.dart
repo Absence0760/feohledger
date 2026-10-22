@@ -2538,12 +2538,12 @@ class AppLocalizationsJa extends AppLocalizations {
       locale: localeName,
       other: '$included件',
     );
-    return 'AI読み取りを一時停止しました: 今月のAI読み取り枠（$_temp0）を使い切りました。手動で入力するか、請求ページでプランをアップグレードしてください。';
+    return 'AI読み取りを一時停止しました: 今月のAI読み取り枠（$_temp0）を使い切りました。手動で入力するか、「設定」→「サブスクリプション」でプランをアップグレードしてください。';
   }
 
   @override
   String get invoiceWarningAiSpendCapReached =>
-      'AI読み取りを一時停止しました: 今月のAI利用上限額に達しました。手動で入力するか、請求ページで上限額を引き上げてください。';
+      'AI読み取りを一時停止しました: 今月のAI利用上限額に達しました。手動で入力するか、「設定」→「サブスクリプション」で上限額を引き上げてください。';
 
   @override
   String get invoiceWarningUnverifiedVendor => '仕入先が未検証です';

@@ -2711,12 +2711,12 @@ class AppLocalizationsEs extends AppLocalizations {
       other: '$included facturas leídas por IA',
       one: '$included factura leída por IA',
     );
-    return 'Lectura con IA en pausa: se ha agotado el cupo mensual de $_temp0. Introduzca los datos manualmente o mejore su plan en la página Facturación.';
+    return 'Lectura con IA en pausa: se ha agotado el cupo mensual de $_temp0. Introduzca los datos manualmente o mejore su plan en Ajustes → Suscripción.';
   }
 
   @override
   String get invoiceWarningAiSpendCapReached =>
-      'Lectura con IA en pausa: se ha alcanzado el límite de gasto en IA de este mes. Introduzca los datos manualmente o aumente el límite en la página Facturación.';
+      'Lectura con IA en pausa: se ha alcanzado el límite de gasto en IA de este mes. Introduzca los datos manualmente o aumente el límite en Ajustes → Suscripción.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>

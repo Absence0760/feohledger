@@ -10,7 +10,7 @@ export const enSettings = {
 	// Organization settings (routes/organization/+page.svelte)
 	'org.title': 'Organization',
 	'org.loading': 'Loading...',
-	'org.toast.loadFailed': 'Failed to load organization',
+	'org.error.loadFailed': 'Failed to load organization',
 	'org.toast.sectionSaved': '{section} saved',
 	'org.toast.saveFailed': 'Save failed',
 	'org.toast.testFailed': 'Test failed',
@@ -23,7 +23,12 @@ export const enSettings = {
 	'org.gettingStarted.defaults': 'Invoice defaults',
 	'org.gettingStarted.users': 'Users & roles',
 	'org.gettingStarted.approvals': 'Approval thresholds',
+	'org.gettingStarted.paymentRunSignoff': 'CFO sign-off for payment runs',
 	'org.gettingStarted.branding': 'Branding',
+	'org.gettingStarted.erp': 'ERP integration',
+	'org.gettingStarted.vendors': 'Vendors',
+	'org.gettingStarted.security': 'Sign-in security',
+	'org.gettingStarted.emailIntake': 'Email intake',
 	// Rail labels for the settings section picker (`ui/SettingsRail.svelte`).
 	// `org.section.*` stays the PANEL heading; the rail needs short labels, so
 	// only the one heading too long to sit in a 200px column gets its own key.
@@ -1090,7 +1095,7 @@ export const enSettings = {
 	'billing.pm.loading': 'Loading payment methods…',
 	'billing.pm.starting': 'Starting…',
 	'billing.retry': 'Retry',
-	'billing.title': 'Billing',
+	'billing.title': 'Subscription',
 	'billing.usage.aria': 'Usage to date',
 	'billing.usage.billableExtractions': 'Billable extractions',
 	'billing.usage.cardRebates': 'Card rebates',

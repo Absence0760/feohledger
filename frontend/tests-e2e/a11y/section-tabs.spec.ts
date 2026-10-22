@@ -24,10 +24,11 @@ const pageOverflow = (page: import('@playwright/test').Page) =>
 test.describe('section tabs — overflow', () => {
 	test('a group with more tabs than fit never scrolls the document', async ({ page }) => {
 		await page.setViewportSize(NARROW);
-		// Billing (9 children) is the widest surviving group after the Settings
-		// split, so it is the one that still overflows an ordinary laptop.
+		// Treasury (formerly Billing, decisions §314) is the widest surviving
+		// group after the Settings split, so it is the one that still overflows
+		// an ordinary laptop.
 		await page.goto('/contracts');
-		await expect(page.getByRole('navigation', { name: /billing sections/i })).toBeVisible();
+		await expect(page.getByRole('navigation', { name: /treasury sections/i })).toBeVisible();
 
 		expect(await pageOverflow(page), 'the tab row widened the document').toBeLessThanOrEqual(1);
 

@@ -22,8 +22,12 @@
  *    recording a payment made outside FeohLedger, the NACHA bank file), and
  *    the plan-feature 402 every tier gate answers with, recording or
  *    cancelling a goods receipt, an ERP send refused for an open duplicate
- *    or fraud exception (stated by `api/erpRefusals.ts`), and an ERP sync
- *    refused because the connection is gone or the listing is incomplete;
+ *    or fraud exception (stated by `api/erpRefusals.ts`), an ERP sync
+ *    refused because the connection is gone or the listing is incomplete,
+ *    and every self-service signup refusal (the workspace address, the
+ *    email and name checks, the captcha, the verification link), the
+ *    shared rate limiter's 429 on every surface it guards, and every vendor
+ *    merge refusal (self-merge, cross-entity, a payments-blocked duplicate);
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -72,6 +76,17 @@ export const INVOICE_STALE_APPROVAL = 'invoice_stale_approval';
  *  (`backend/app/api/signup.py::SIGNUP_EMAIL_HAS_WORKSPACE`). `/verify`
  *  branches on it to link the existing workspace's sign-in page. */
 export const SIGNUP_EMAIL_HAS_WORKSPACE = 'signup_email_has_workspace';
+
+/**
+ * The `/api/signup/*` refusals that are about ONE form field carry
+ * `params.field`, the `SignupStartRequest` field name, so the signup page can
+ * put the (already localized) sentence under that field
+ * (`backend/app/api/signup.py`). `null` when the refusal names no field.
+ */
+export function refusalField(params: Record<string, unknown>): string | null {
+	const field = params.field;
+	return typeof field === 'string' && field ? field : null;
+}
 
 /** `POST /api/invoices/{id}/complete` refused for blank required fields
  *  (`backend/app/api/workflow.py::INVOICE_REQUIRED_FIELDS_MISSING`). */
@@ -249,6 +264,28 @@ function nachaNotConfigured(params: Params, t: Translate): string | null {
 	return t('refusal.nachaNotConfigured', { fields: formatList(labels) });
 }
 
+// --- the shared rate limiter ---------------------------------------------------
+
+/** Every 429 the shared limiter answers (`backend/app/services/rate_limit.py`):
+ *  sign-in, MFA, password reset, signup, the supplier portal, the public API. */
+export const RATE_LIMITED = 'rate_limited';
+
+/**
+ * The limiter's wait, said the way a person would: whole seconds under a
+ * minute, then whole minutes, then whole hours — each rounded UP, so the
+ * reader is never told to come back before the server will let them. The
+ * params carry only the `Retry-After` figure; the sentence adds nothing the
+ * server did not say (which limit tripped is deliberately not sent).
+ */
+function rateLimited(params: Params, t: Translate): string | null {
+	const seconds = params.retry_after_seconds;
+	if (typeof seconds !== 'number' || !Number.isInteger(seconds) || seconds < 1) return null;
+	if (seconds < 60) return t('refusal.rateLimitedSeconds', { n: seconds });
+	const minutes = Math.ceil(seconds / 60);
+	if (minutes < 60) return t('refusal.rateLimitedMinutes', { n: minutes });
+	return t('refusal.rateLimitedHours', { n: Math.ceil(seconds / 3600) });
+}
+
 // --- the table ---------------------------------------------------------------
 
 type Builder = (params: Params, t: Translate) => string | null;
@@ -258,6 +295,14 @@ const fixed =
 	(key: MessageKey): Builder =>
 	(_params, t) =>
 		t(key);
+
+/** A workspace-address refusal that names the address (`params.slug`). */
+const slugNamed =
+	(key: MessageKey): Builder =>
+	(params, t) => {
+		const slug = str(params, 'slug');
+		return slug === null ? null : t(key, { slug });
+	};
 
 const BUILDERS: Record<string, Builder> = {
 	// `services/approval_chain.py`
@@ -369,6 +414,29 @@ const BUILDERS: Record<string, Builder> = {
 			? t('refusal.signupEmailHasWorkspace', { url })
 			: t('refusal.signupEmailHasWorkspaceNoLink');
 	},
+	// `api/signup.py` — the self-service signup form and `/verify`. The
+	// workspace-address rules are `utils/slug.py`'s (the slug-check reports
+	// the same codes, with the address it checked as `slug`); the captcha's
+	// are `utils/hcaptcha.py`'s. User-facing text says "workspace address",
+	// never "slug".
+	slug_required: fixed('refusal.slugRequired'),
+	slug_format: fixed('refusal.slugFormat'),
+	slug_reserved: slugNamed('refusal.slugReserved'),
+	slug_hyphen_edge: fixed('refusal.slugHyphenEdge'),
+	slug_double_hyphen: fixed('refusal.slugDoubleHyphen'),
+	slug_taken: slugNamed('refusal.slugTaken'),
+	// Resting after its workspace was closed (`utils/slug.ensure_slug_not_held`,
+	// decisions §306): nobody owns it, so the sentence is not "taken".
+	signup_slug_held: fixed('refusal.signupSlugHeld'),
+	signup_email_invalid: fixed('refusal.signupEmailInvalid'),
+	signup_name_has_link: fixed('refusal.signupNameHasLink'),
+	captcha_required: fixed('refusal.captchaRequired'),
+	captcha_unavailable: fixed('refusal.captchaUnavailable'),
+	captcha_failed: fixed('refusal.captchaFailed'),
+	signup_email_send_failed: fixed('refusal.signupEmailSendFailed'),
+	signup_link_invalid: fixed('refusal.signupLinkInvalid'),
+	signup_unavailable: fixed('refusal.signupUnavailable'),
+	signup_provisioning_failed: fixed('refusal.signupProvisioningFailed'),
 	// `api/payments.py::_refuse_record_only` — every dispatching endpoint on a
 	// tenant whose payments are recorded, never sent. `params.reason` says why
 	// the mode resolved so; the sentence is the same for every reason.
@@ -479,6 +547,18 @@ const BUILDERS: Record<string, Builder> = {
 	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
 	// The admin path's other-workspace budget is spent (`api/admin.py`).
 	email_check_throttled: fixed('refusal.emailCheckThrottled'),
+	// Any 429 from the shared limiter (`services/rate_limit.py`).
+	[RATE_LIMITED]: rateLimited,
+	// A refused vendor merge (`services/vendor_merge.py`; the malformed-id 422
+	// is raised by its endpoint, `api/enrichment.py`). No params — the
+	// sentence never names a vendor, its tax id or its bank.
+	vendor_merge_self: fixed('refusal.vendorMergeSelf'),
+	vendor_merge_no_duplicates: fixed('refusal.vendorMergeNoDuplicates'),
+	vendor_merge_canonical_not_found: fixed('refusal.vendorMergeCanonicalNotFound'),
+	vendor_merge_duplicate_not_found: fixed('refusal.vendorMergeDuplicateNotFound'),
+	vendor_merge_invalid_id: fixed('refusal.vendorMergeInvalidId'),
+	vendor_merge_cross_entity: fixed('refusal.vendorMergeCrossEntity'),
+	vendor_merge_blocked_duplicate: fixed('refusal.vendorMergeBlockedDuplicate'),
 	// Closing a workspace (`api/organization_close.py`, decisions §306). The
 	// refusal's blockers are listed by the page itself; the toast is the
 	// fixed sentence, and a blocker list this build cannot read falls back.
@@ -487,8 +567,6 @@ const BUILDERS: Record<string, Builder> = {
 		refusalBlockers(p) === null ? null : t('refusal.workspaceCloseRefused'),
 	workspace_close_in_progress: fixed('refusal.workspaceCloseInProgress'),
 	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
-	// A slug resting after a workspace closure (`api/signup.py`, decisions §306).
-	signup_slug_held: fixed('refusal.signupSlugHeld'),
 	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
 	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete')
 };

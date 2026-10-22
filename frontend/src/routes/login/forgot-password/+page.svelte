@@ -3,6 +3,7 @@
 	import AuthCard from '#lib/components/auth/AuthCard.svelte';
 	import { api } from '#lib/api.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { brand } from '#lib/stores/brand.svelte.ts';
 
 	let email = $state('');
 	let error = $state('');
@@ -40,7 +41,7 @@
 </script>
 
 <svelte:head>
-	<title>{m('auth.forgotPassword.heading')} — FeohLedger</title>
+	<title>{m('auth.forgotPassword.pageTitle', { product: brand.productName })}</title>
 </svelte:head>
 
 <AuthCard

@@ -320,12 +320,12 @@ String? _localizeWarningCode(
     // Invoice is past due
     case 'past_due':
       return l.invoiceWarningPastDue;
-    // AI reading is paused: this month's {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.
+    // AI reading is paused: this month's {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan under Settings → Subscription.
     case 'ai_allowance_reached':
       final included = _count(p['included']);
       if (included == null) return null;
       return l.invoiceWarningAiAllowanceReached(included);
-    // AI reading is paused: this month's AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.
+    // AI reading is paused: this month's AI spending cap is reached. Enter the details manually, or raise the cap under Settings → Subscription.
     case 'ai_spend_cap_reached':
       return l.invoiceWarningAiSpendCapReached;
     // Vendor is unverified

@@ -49,6 +49,49 @@ export function formatViolations(violations: Result[]): string {
 }
 
 /**
+ * Resolve once nothing on the document is moving: every running CSS
+ * transition, CSS animation and Web Animation (Svelte 5's `in:`/`out:`
+ * transitions are Web Animations) has finished.
+ *
+ * Reduced-motion emulation alone does not cover this. A transition that was
+ * ALREADY running when the media changed keeps the duration it started with —
+ * CSS Transitions §3: changing `transition-*` does not touch a running
+ * transition — so a spec that flips the theme (`emulateMedia({ colorScheme })`,
+ * the theme picker) and scans straight away measured a background halfway
+ * between the two surfaces. `layout/EntitySwitcher.svelte`'s `transition: all`
+ * read #3a3c43 under its hint text and failed 4 runs in 10 (#635).
+ *
+ * The signal is the browser's own: `document.getAnimations()` and each
+ * animation's `finished` promise. Two animation frames go by first, so a
+ * style change made just before this call has been resolved and its
+ * transitions created (a transition starts at the style change, which is
+ * flushed no later than the next frame). Animations that would never finish
+ * — infinite iterations (banned in app code, decisions §279, but a third-party
+ * widget could carry one) or paused ones — are skipped rather than awaited.
+ * Finishing one animation can start another (a chained entrance), so it loops
+ * until a pass finds nothing running. Bounded by the test's own timeout; no
+ * sleep, no polling interval.
+ */
+export async function waitForMotionToSettle(page: Page): Promise<void> {
+	await page.evaluate(async () => {
+		const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		for (;;) {
+			await nextFrame();
+			await nextFrame();
+			const moving = document.getAnimations().filter((animation) => {
+				if (animation.playState !== 'running') return false;
+				const end = animation.effect?.getComputedTiming().endTime;
+				return typeof end === 'number' && Number.isFinite(end);
+			});
+			if (moving.length === 0) return;
+			// `finished` rejects when an animation is cancelled (its element
+			// removed, its transition replaced) — that is also "not moving".
+			await Promise.allSettled(moving.map((animation) => animation.finished));
+		}
+	});
+}
+
+/**
  * Run axe against the current page state at the WCAG 2.2 AA tag set and assert
  * zero violations. On failure the error message carries the full
  * `formatViolations` summary so the CI log is actionable.
@@ -75,6 +118,7 @@ export async function expectNoA11yViolations(
 	// motion. The moving states have their own guards
 	// (tests-e2e/a11y/reduced-motion.spec.ts, tests-e2e/marketing/).
 	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await waitForMotionToSettle(page);
 	let builder = new AxeBuilder({ page }).withTags([...WCAG_AA_TAGS]);
 	for (const selector of opts.exclude ?? []) {
 		builder = builder.exclude(selector);

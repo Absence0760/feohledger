@@ -1,3 +1,4 @@
+import type { Route } from '@playwright/test';
 import { expect, NO_TENANT_BASE, signIn, TENANT_ROOT_URL, test } from '../fixtures/helpers';
 
 // Start unauthenticated — this spec tests the login UI itself.
@@ -32,7 +33,7 @@ test.describe('/login', () => {
 	test('renders the sign-in form for an anon visitor', async ({ page }) => {
 		await page.goto('/login');
 
-		await expect(page.getByRole('heading', { name: 'FeohLedger' })).toBeVisible();
+		await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
 		await expect(page.locator('input[type="email"]')).toBeVisible();
 		await expect(page.locator('input[type="password"]')).toBeVisible();
 		await expect(page.getByRole('button', { name: /Sign in/ })).toBeVisible();
@@ -73,6 +74,108 @@ test.describe('/login', () => {
 		// is the dashboard for an authenticated tenant user — assert on
 		// the URL transition, not on dashboard internals (those evolve).
 		await page.waitForURL(TENANT_ROOT_URL, { timeout: 15_000 });
+	});
+});
+
+/**
+ * What the page says it is (issue #635 finding 34): the heading names the task
+ * (WCAG 2.4.6) rather than repeating the product, the tab title is in the
+ * reader's language, and the page says WHICH workspace it signs in to — by the
+ * host the visitor is on, which no public endpoint has to disclose.
+ */
+test.describe('/login — heading, title and workspace', () => {
+	test('says "Sign in", in the tab title too, and names the workspace host', async ({ page }) => {
+		await page.goto('/login');
+		await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+		await expect(page).toHaveTitle('Sign in — FeohLedger');
+		await expect(page.locator('form.login-form .subtitle')).toHaveText(
+			`Workspace: ${new URL(page.url()).host}`
+		);
+	});
+
+	test('the heading and tab title follow the reader\'s language', async ({ page }) => {
+		await page.addInitScript(() => localStorage.setItem('feoh_locale', 'de'));
+		await page.goto('/login');
+		await expect(page.getByRole('heading', { level: 1, name: 'Anmelden' })).toBeVisible();
+		await expect(page).toHaveTitle('Anmelden — FeohLedger');
+	});
+
+	test('the MFA step, which sets no title of its own, keeps the sign-in title', async ({ page }) => {
+		await page.goto('/login');
+		await page.evaluate(() =>
+			sessionStorage.setItem(
+				'mfa_challenge',
+				JSON.stringify({
+					mfa_required: true,
+					mfa_challenge_token: 'e2e-fake-challenge-token',
+					methods: ['totp'],
+					must_enroll: false
+				})
+			)
+		);
+		await page.goto('/login/mfa');
+		await expect(page.getByRole('heading', { name: 'Two-factor verification' })).toBeVisible();
+		await expect(page).toHaveTitle('Sign in — FeohLedger');
+	});
+});
+
+/**
+ * The two SSO config answers decide whether there is a password form at all,
+ * so the form waits for both (issue #635 finding 33). It used to render first
+ * and be pulled away when an SSO-only answer arrived — after the SECOND of two
+ * calls made one after the other.
+ */
+test.describe('/login — SSO config', () => {
+	test('an SSO-only workspace never shows the password form, and both configs are asked for at once', async ({
+		page
+	}) => {
+		const asked: string[] = [];
+		let release!: () => void;
+		const answered = new Promise<void>((resolve) => (release = resolve));
+		const hold = (name: string, json: unknown) => async (route: Route) => {
+			asked.push(name);
+			await answered;
+			await route.fulfill({ json });
+		};
+		await page.route(
+			(url) => url.pathname === '/api/auth/sso/config',
+			hold('oidc', { enabled: true, provider: 'okta', sso_only: true })
+		);
+		await page.route(
+			(url) => url.pathname === '/api/auth/saml/config',
+			hold('saml', { enabled: false, provider: null })
+		);
+		// Records a password field EVER being attached, however briefly.
+		await page.addInitScript(() => {
+			const w = window as unknown as { __sawPassword: boolean };
+			w.__sawPassword = false;
+			new MutationObserver(() => {
+				if (document.querySelector('input[type="password"]')) w.__sawPassword = true;
+			}).observe(document, { subtree: true, childList: true });
+		});
+
+		await page.goto('/login');
+		await expect(page.getByRole('status').filter({ hasText: 'Loading sign-in options' })).toBeVisible();
+		// Both requests are in flight before either is answered.
+		await expect.poll(() => [...asked].sort()).toEqual(['oidc', 'saml']);
+		release();
+
+		await expect(page.locator('.sso-only-note')).toBeVisible();
+		await expect(page.locator('button.sso-btn')).toBeVisible();
+		await expect(page.getByText('Loading sign-in options')).toHaveCount(0);
+		expect(await page.evaluate(() => (window as unknown as { __sawPassword: boolean }).__sawPassword)).toBe(
+			false
+		);
+	});
+
+	test('a config call that fails still leaves password sign-in', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/auth/sso/config' || url.pathname === '/api/auth/saml/config',
+			(route) => route.fulfill({ status: 500, json: { detail: 'boom' } })
+		);
+		await page.goto('/login');
+		await expect(page.locator('input[type="password"]')).toBeVisible();
+		await expect(page.locator('button.sso-btn')).toHaveCount(0);
 	});
 });
 

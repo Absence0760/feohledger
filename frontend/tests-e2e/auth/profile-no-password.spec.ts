@@ -94,12 +94,8 @@ test.describe('/profile — Password card, a password the org no longer uses for
 		await expect(card.locator('form')).toHaveCount(1);
 		await expect(card.locator('input[type="password"]')).toHaveCount(3);
 
-		const submit = card.getByRole('button', { name: 'Change password' });
-		await expect(submit).toBeDisabled();
-		await card.getByLabel('Current password', { exact: true }).fill('whatever-it-still-is');
-		await card.getByLabel('New password', { exact: true }).fill('a-new-password-1');
-		await card.getByLabel('Confirm new password', { exact: true }).fill('a-new-password-1');
-		await expect(submit).toBeEnabled();
+		// Submit is enabled whatever is typed: a submit says what is wrong.
+		await expect(card.getByRole('button', { name: 'Change password' })).toBeEnabled();
 	});
 });
 
@@ -112,5 +108,85 @@ test.describe('/profile — Password card, the ordinary case', () => {
 		await expect(card.locator('form')).toHaveCount(1);
 		await expect(card.locator('input[type="password"]')).toHaveCount(3);
 		await expect(card.getByText('single sign-on')).toHaveCount(0);
+	});
+});
+
+test.describe('/profile — Password card, field-level errors and the toggle', () => {
+	// #635: the card uses the change-password page's PasswordInput +
+	// NewPasswordFields — Submit stays enabled, each error is beside (and read
+	// with) its field, and the server's refusal lands on the field it is about.
+	test('a submit marks each bad field, and nothing is sent', async ({ page }) => {
+		await stubMe(page, { has_password: true, password_sign_in_closed: false });
+		const card = await openPasswordSection(page);
+
+		const current = card.getByLabel('Current password', { exact: true });
+		const newPw = card.getByLabel('New password', { exact: true });
+		const confirm = card.getByLabel('Confirm new password', { exact: true });
+		const submit = card.getByRole('button', { name: 'Change password' });
+
+		let patched = 0;
+		page.on('request', (r) => {
+			if (new URL(r.url()).pathname === '/api/auth/me' && r.method() === 'PATCH') patched += 1;
+		});
+
+		await submit.click();
+		await expect(current).toBeFocused();
+		await expect(current).toHaveAttribute('aria-invalid', 'true');
+		await expect(current).toHaveAccessibleDescription('Enter your current password.');
+		await expect(newPw).toHaveAttribute('aria-invalid', 'true');
+		await expect(confirm).toHaveAttribute('aria-invalid', 'true');
+
+		// The old form took six characters; the server has always wanted the
+		// complexity rules, which the checklist now states up front.
+		await current.fill('whatever-it-still-is');
+		await newPw.fill('a-new-password-1');
+		await submit.click();
+		await expect(newPw).toBeFocused();
+		await expect(card.getByText('Password does not meet the complexity requirements.')).toBeVisible();
+		await expect(card.locator('ul.strength li')).toHaveCount(4);
+
+		await newPw.fill('A-New-Password-1');
+		await confirm.fill('A-New-Password-2');
+		await submit.click();
+		await expect(confirm).toBeFocused();
+		await expect(confirm).toHaveAccessibleDescription('Passwords do not match.');
+		expect(patched).toBe(0);
+	});
+
+	test('a wrong current password is named beside its field', async ({ page }) => {
+		// A real 400 from `PATCH /api/auth/me`: it changes nothing and that
+		// route keeps no failure budget, so the worker's admin is unaffected.
+		await stubMe(page, { has_password: true, password_sign_in_closed: false });
+		const card = await openPasswordSection(page);
+
+		const current = card.getByLabel('Current password', { exact: true });
+		await current.fill('not-the-current-password');
+		await card.getByLabel('New password', { exact: true }).fill('A-New-Password-1');
+		await card.getByLabel('Confirm new password', { exact: true }).fill('A-New-Password-1');
+		const refused = page.waitForResponse(
+			(r) => new URL(r.url()).pathname === '/api/auth/me' && r.request().method() === 'PATCH'
+		);
+		await card.getByRole('button', { name: 'Change password' }).click();
+		expect((await refused).status()).toBe(400);
+
+		await expect(current).toBeFocused();
+		await expect(current).toHaveAttribute('aria-invalid', 'true');
+		await expect(current).toHaveAccessibleDescription("That isn't your current password.");
+		await current.fill('typing-again');
+		await expect(current).not.toHaveAttribute('aria-invalid', 'true');
+	});
+
+	test('each field has the show-password toggle', async ({ page }) => {
+		await stubMe(page, { has_password: true, password_sign_in_closed: false });
+		const card = await openPasswordSection(page);
+
+		const toggles = card.getByRole('button', { name: 'Show password', exact: true });
+		await expect(toggles).toHaveCount(3);
+		const current = card.getByLabel('Current password', { exact: true });
+		await current.fill('something');
+		await toggles.first().click();
+		await expect(toggles.first()).toHaveAttribute('aria-pressed', 'true');
+		await expect(current).toHaveAttribute('type', 'text');
+		await expect(current).toHaveAttribute('autocomplete', 'current-password');
 	});
 });

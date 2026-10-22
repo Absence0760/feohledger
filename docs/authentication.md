@@ -140,7 +140,13 @@ surfaces, through the HTTP login route).
 
 ## Auth Flow
 
-1. User visits a tenant subdomain (e.g., `acme.localhost:7777`)
+1. User visits a tenant subdomain (e.g., `acme.localhost:7777`). Someone who
+   starts at the apex instead (its **Sign in** links, or an apex `/login`)
+   lands on `/find-workspace`, which takes the **workspace address** and
+   redirects to that workspace's `/login`. It deliberately does no email
+   lookup: mapping an address to a workspace would tell anyone whether that
+   person is a customer, and where. Details: `docs/multi-tenancy.md` § Signing
+   in from the apex.
 2. Frontend extracts the tenant slug from the subdomain
 3. User submits email/password at `/login`
 4. Frontend POSTs `{ email, password }` to `/api/auth/login`
@@ -153,7 +159,8 @@ surfaces, through the HTTP login route).
 9. On a 401, or a 403 coded `token_tenant_mismatch` (a token for another
    workspace than the page's), the token is cleared and the user is redirected
    to `/login` — with `?reason=other_workspace` for the second, which the page
-   states (§ Signing in on another workspace's page is refused)
+   states (§ Signing in on another workspace's page is refused) — and with
+   `?next=` naming the page they were on (§ Sign-in returns to the page asked for)
 
 ## Backend Implementation
 
@@ -420,6 +427,15 @@ Four properties make this safe to put in front of a login form:
 - **Tenant-scoped on the portal.** A vendor address is unique only *within* a
   tenant DB; keying on the address alone would let one tenant's traffic throttle
   another tenant's supplier.
+- **One answer for both axes.** Every 429 either axis raises is the same
+  `RateLimitExceeded`: the `Retry-After` header plus the coded refusal
+  `{code: "rate_limited", message, params: {retry_after_seconds}}`, where the
+  param is the header's own figure. Nothing in it says which bucket tripped, its
+  limit or its count, so the body cannot tell an identity budget from an IP cap
+  (or a known account from an unknown one) any more than the old English
+  sentence could. The web client states the wait in the reader's language
+  (`frontend/src/lib/api/codedRefusals.ts`); a client that reads `detail` as
+  text keeps the English `message`.
 
 **Accepted trade-off:** because the bucket is keyed on the identity, someone who
 knows an address can burn that account's *password* budget and delay a
@@ -1022,7 +1038,57 @@ pins the page, beside `profile-sso-only-step-up.spec.ts` for the org-level case.
 - Auth state is managed in `src/lib/stores/auth.svelte.ts` (Svelte 5 runes)
 - Tenant slug is extracted by `src/lib/tenant.ts` from the subdomain
 - API client (`src/lib/api.ts`) automatically attaches both the Bearer token and the `X-Tenant-Slug` header to every request
-- The root `+layout.svelte` guards all routes — unauthenticated users are redirected to `/login`
+- The root `+layout.svelte` guards all routes — unauthenticated users are redirected to `/login?next=<the page>`
+
+### Sign-in returns to the page asked for
+
+A link into the app — a notification email's `/invoices/{id}`, a bookmarked
+filtered list — used to cost the reader their destination: the auth wall sent
+them to a bare `/login` and every sign-in path ended in `goto('/')`. Now the
+path and query they were opening travel as `?next=`:
+
+- **Set by** the root layout's auth wall, and by `api.ts::endSessionIfRejected`
+  (`sessionRejection.loginPathFor(rejection, next)`), beside `?reason=other_workspace`
+  when that applies (decisions §288 is unchanged — the reason and the notice it
+  drives are independent of `next`). A deliberate Log out does not carry one.
+- **Carried by** each step a sign-in can take: `/login` → `/login/mfa?next=` →
+  the forced `/change-password?next=` (the layout adds it when it redirects a
+  `must_change_password` account), whose submit then lands there. The OIDC /
+  SAML round trip cannot carry a parameter of ours, so `/login` stashes it in
+  `sessionStorage['auth_next']` before leaving for the IdP; the callback page
+  takes and clears it on arrival, success or failure, and a new SSO attempt
+  always overwrites or clears it, so an abandoned one cannot steer a later one.
+  An MFA enrolment the org forces (`must_enroll`) still goes to `/profile`.
+- **Honoured only as a same-origin relative path.** `next` comes from the URL,
+  so anyone can craft one; `frontend/src/lib/utils/postLoginRedirect.ts::safeNextPath`
+  is the one gate every reader and writer goes through. It accepts a string
+  starting with exactly one `/`, with no scheme, no backslash and no control
+  character, that resolves to the origin it was resolved against and whose
+  resolved path does not begin `//` (dot segments can collapse to one). It
+  refuses anything under `/login` (a loop) and `/` itself (the default). Refused
+  values are dropped, never rewritten — the user lands on the dashboard. The
+  value read back from `sessionStorage` is re-validated. Tests:
+  `postLoginRedirect.test.ts` (every refused shape), `sessionRejection.test.ts`,
+  and end to end `tests-e2e/auth/post-login-redirect.spec.ts`.
+
+### When the account cannot be loaded
+
+The app shell needs the signed-in account (`GET /api/auth/me` — its roles drive
+the nav), so it renders only once that has answered. `auth.userStatus`
+(`idle` → `loading` → `ready` | `error`) says where the load stands, and the
+layout draws `layout/AccountLoadState.svelte` in the shell's place until it is
+`ready`: a polite "Loading your workspace…" status while `/me` is in flight
+(faded in after a beat, so a fast answer never flashes it), and on a failure
+that is not the session ending — a 5xx, a timeout, the network — a panel with
+**Try again** and **Log out**, focus moved to its heading. Before this, such a
+failure left `loggedIn` true and `user` null and the page was blank with no way
+out. The layout starts one load from `idle` and never retries on its own; Retry
+is the user's. A refresh that fails while an account is already loaded (after a
+factor change, say) keeps that account rather than tearing the app down. A 401
+or a token for another workspace is still `api.ts`'s to handle — the store sees
+its token gone, stays on the loading state, and lets that navigation to
+`/login` happen. Only the most recent `/me` request's answer is applied. Test:
+`tests-e2e/auth/account-load-error.spec.ts`.
 - If no tenant subdomain is detected, a "no tenant" page is shown instead
 - The login page has its own layout without the sidebar
 
@@ -1790,7 +1856,7 @@ A single OIDC flow supports both Okta and Entra because they're both OIDC-compli
 
 ### Flow
 
-1. User clicks **Sign in with Okta/Microsoft** on `/login` (button renders only when `GET /api/auth/sso/config?slug=<tenant>` returns `enabled: true`). `slug` is optional — on a vanity host it is omitted and the tenant comes from the request `Host` (see *SSO on a white-label vanity host* below).
+1. User clicks **Sign in with Okta/Microsoft** on `/login` (button renders only when `GET /api/auth/sso/config?slug=<tenant>` returns `enabled: true`). `slug` is optional — on a vanity host it is omitted and the tenant comes from the request `Host` (see *SSO on a white-label vanity host* below). The page asks for the OIDC and SAML configs **in parallel** and shows a short loading state until both have answered (either way), so an SSO-only workspace never draws the password form and then pulls it away; a failed call still leaves password sign-in (issue #635 finding 33). Its heading is "Sign in", its tab title is localized (`login/+layout.svelte`, which `/login/mfa` inherits), and on a workspace host it names the workspace by that host — nothing a public endpoint would have to disclose.
 2. Browser navigates to `GET /api/auth/sso/authorize?slug=<tenant>` on the backend (same optional-`slug` rule).
 3. Backend fetches the discovery doc (cached in Redis for 24h), mints a one-shot `state` + `nonce` into Redis (keyed to the tenant slug), and **302-redirects** to the IdP's `authorization_endpoint` with `redirect_uri` pointing to the *tenant's own subdomain* (built from `FEOH_TENANT_URL_TEMPLATE`).
 4. User authenticates on the IdP.
@@ -1804,6 +1870,8 @@ A single OIDC flow supports both Okta and Entra because they're both OIDC-compli
    - JIT-provisions the user (match order: `(sso_provider, sso_provider_id)` → `(organization_id, email)` → new user with least-privilege `ap_clerk` role, or `admin` if it's the first user in the org).
    - Mints our own JWT and returns `{access_token, must_change_password, tenant_slug}`.
 8. Frontend stores the JWT, fetches `/api/auth/me`, and routes to `/change-password` if flagged or `/` otherwise.
+
+An IdP that refuses or abandons the sign-in redirects back with `?error=<code>` instead (RFC 6749 §4.1.2.1). The OIDC callback and the SAML bridge (`/login/saml-callback`) are one component, `components/auth/AuthCallback.svelte`, rendered inside `AuthShell` like every other sign-in screen; it states the refusal in words from `utils/idpCallbackError.ts` — `access_denied`, `login_required`, `consent_required`, `interaction_required`, `temporarily_unavailable` and `server_error` each have a sentence, anything else a generic one — and shows the raw code only as small support detail, and only when it is a short identifier: the value comes from the URL, so text someone wrote into a link is never echoed (issue #635 finding 36). The `?next=` destination stashed before the round trip is taken on arrival either way, and the "Back to sign in" link carries it.
 
 ### Why callback URLs are per-tenant
 

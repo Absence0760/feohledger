@@ -9,14 +9,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import Date, and_, case, cast, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import ROLE_ADMIN, get_current_user, holds_any_role, require_roles
+from app.database import get_control_db
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.models.user import User
 from app.models.virtual_card import CardRebate, VirtualCard
-from app.schemas.dashboard import DashboardResponse
+from app.schemas.dashboard import DashboardResponse, OnboardingResponse
 from app.services.analytics import (
     OPEN_AP_STATUSES,
     compute_touchless_rate,
@@ -29,6 +30,7 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
     rollup_from_grouped_rows,
 )
+from app.services.onboarding import compute_onboarding
 from app.services.touchless import touchless_counts_select
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.dates import utc_today
@@ -46,9 +48,47 @@ class SimpleNamespaceStep:
     assignee_name: str | None
 
 
+async def _organization_has_invoices(
+    db: AsyncSession, entity_id: uuid.UUID | None, scoped_count: int
+) -> bool:
+    """Does the WHOLE organization have an invoice, whichever entity is selected?
+
+    The figures on this page are entity-scoped, so `total_invoices == 0` on a
+    new subsidiary says nothing about whether the workspace is new — which is
+    how an established tenant came to be welcomed with "upload your first
+    invoice" the day it added an entity (#635). Unscoped, the consolidated
+    count already answers it and costs no query.
+    """
+    if entity_id is None or scoped_count > 0:
+        return scoped_count > 0
+    return (await db.execute(select(Invoice.id).limit(1))).first() is not None
+
+
+@router.get("/onboarding", response_model=OnboardingResponse)
+async def get_onboarding(
+    db: AsyncSession = Depends(get_tenant_db),
+    control_db: AsyncSession = Depends(get_control_db),
+    org: Organization = Depends(get_tenant),
+    _user: User = Depends(require_roles(ROLE_ADMIN)),
+):
+    """Setup progress for `/organization`'s Getting started panel.
+
+    The same derivation the dashboard's checklist reads (`services/onboarding`),
+    served alone so the settings page does not compute a whole dashboard for
+    seven booleans. Admin-only: it describes the tenant's configuration.
+    """
+    progress = await compute_onboarding(db=db, control_db=control_db, org=org)
+    return {
+        **progress.as_dict(),
+        "organization_has_invoices": (await db.execute(select(Invoice.id).limit(1))).first()
+        is not None,
+    }
+
+
 @router.get("", response_model=DashboardResponse)
 async def get_dashboard(
     db: AsyncSession = Depends(get_tenant_db),
+    control_db: AsyncSession = Depends(get_control_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -748,8 +788,19 @@ async def get_dashboard(
     ]
     discount = discount_capture_from_grouped_rows(discount_groups)
 
+    # First-run state. Emptiness is decided org-wide (see the helper), and the
+    # setup checklist is computed only for the one reader it is for: an admin
+    # on a workspace with no invoices yet. Everyone else gets `null` and pays
+    # for none of its queries (`docs/decisions.md` §315).
+    organization_has_invoices = await _organization_has_invoices(db, entity_id, total_invoices or 0)
+    onboarding = None
+    if not organization_has_invoices and holds_any_role(user, (ROLE_ADMIN,)):
+        onboarding = (await compute_onboarding(db=db, control_db=control_db, org=org)).as_dict()
+
     return {
         "total_invoices": total_invoices or 0,
+        "organization_has_invoices": organization_has_invoices,
+        "onboarding": onboarding,
         "total_amount": Decimal(str(total_amount)),
         # Currency-aware rollup of the whole invoice book into ONE reporting
         # currency, plus the per-currency split so the UI can show the mix.

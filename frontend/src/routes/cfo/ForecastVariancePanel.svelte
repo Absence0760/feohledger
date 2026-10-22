@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { tick } from 'svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
-	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatPeriod } from '#lib/utils/time.ts';
 	import { postForecastVariance } from '#lib/api/analytics.ts';
@@ -64,19 +64,21 @@
 	async function submit() {
 		// Validated ONCE, here, at submit — never on every keystroke, and never
 		// repaired. The typed text is the exact decimal string that goes on the
-		// wire; an amount we cannot read is refused with a toast rather than
-		// coerced to `0`, which would make the variance equal the whole actual
-		// outflow and report a fabricated 0%.
+		// wire; an amount we cannot read is refused — in the dialog's error
+		// region, beside the form — rather than coerced to `0`, which would make
+		// the variance equal the whole actual outflow and report a fabricated 0%.
 		const collected = collectForecastEntries(entries);
 		if (!collected.ok) {
-			toast(
+			// Cleared and re-inserted, so the same refusal on a second attempt is
+			// announced again (role="alert" announces on insertion).
+			loadError = null;
+			await tick();
+			loadError =
 				collected.reason === 'amount'
 					? m('common.amountInvalid')
 					: collected.reason === 'month'
 						? m('cfo.forecastVariance.errorMonth')
-						: m('cfo.forecastVariance.errorEmpty'),
-				'error'
-			);
+						: m('cfo.forecastVariance.errorEmpty');
 			return;
 		}
 		submitting = true;
@@ -86,9 +88,10 @@
 			open = false;
 		} catch (e) {
 			// The backend's own explanation (a 422 naming the bad month, a 403)
-			// is the actionable half of the refusal, so it is surfaced verbatim.
+			// is the actionable half of the refusal, so it is surfaced verbatim —
+			// in the dialog (role="alert") beside the form, and nowhere else: one
+			// error, one signal (`docs/ui-patterns.md` § Toast).
 			loadError = e instanceof Error ? e.message : m('cfo.forecastVariance.loadFailed');
-			toast(loadError, 'error');
 		} finally {
 			submitting = false;
 		}
@@ -99,7 +102,7 @@
 	<div class="chart-card" data-testid="forecast-variance">
 		<div class="fv-head">
 			<h2>{m('cfo.forecastVariance.title')}</h2>
-			<button class="btn-primary" onclick={() => (open = true)} data-testid="forecast-variance-open">
+			<button class="btn-primary" onclick={() => { loadError = null; open = true; }} data-testid="forecast-variance-open">
 				{result ? m('cfo.forecastVariance.edit') : m('cfo.forecastVariance.enter')}
 			</button>
 		</div>
@@ -217,14 +220,6 @@
 			}}
 		>
 			<p class="fv-hint">{m('cfo.forecastVariance.modalHint')}</p>
-			<!-- The backend fails closed with a specific, PII-free explanation (a
-			     422 naming the month it could not parse), and that explanation is
-			     the actionable half of the refusal — so it lands in a persistent
-			     region beside the form, not only in a toast that fades. Mirrors
-			     `VendorStatementReconModal`'s `statement-intake-error`. -->
-			{#if loadError}
-				<p class="cf-error" role="alert" data-testid="forecast-variance-error">{loadError}</p>
-			{/if}
 			<table class="fv-entry">
 				<thead>
 					<tr>
@@ -275,6 +270,16 @@
 			<button type="button" class="btn-cancel" onclick={addRow} data-testid="forecast-variance-add">
 				{m('cfo.forecastVariance.addRow')}
 			</button>
+			<!-- The backend fails closed with a specific, PII-free explanation (a
+			     422 naming the month it could not parse), and that explanation is
+			     the actionable half of the refusal — so it lands in a persistent
+			     region right above Submit, where the reader's eyes are after a
+			     long entry table, and only there (one error, one signal:
+			     `docs/ui-patterns.md` § Toast). A row the form itself refuses is
+			     stated here too. -->
+			{#if loadError}
+				<p class="cf-error" role="alert" data-testid="forecast-variance-error">{loadError}</p>
+			{/if}
 			<div class="modal-footer">
 				<button type="button" class="btn-cancel" onclick={() => (open = false)}>
 					{m('common.cancel')}

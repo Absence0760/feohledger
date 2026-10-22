@@ -43,6 +43,31 @@ test.describe('consent banner', () => {
 		await expect(banner(page).getByText('Analytics (optional)')).toBeVisible();
 	});
 
+	test('Manage says whether the details are open, and which element it opens', async ({
+		page
+	}) => {
+		// #635: the toggle carried no state, so a screen reader announced a
+		// plain button with nothing to say it had expanded anything.
+		const manage = page.getByRole('button', { name: 'Manage' });
+		await expect(manage).toHaveAttribute('aria-expanded', 'false');
+		const controls = await manage.getAttribute('aria-controls');
+		expect(controls).toBeTruthy();
+		const details = page.locator(`#${controls}`);
+		await expect(details).toBeHidden();
+
+		await manage.click();
+		// Its label flips to "Hide details"; the state rides along on the same button.
+		const hide = banner(page).getByRole('button', { name: 'Hide details' });
+		await expect(hide).toHaveAttribute('aria-expanded', 'true');
+		await expect(hide).toHaveAttribute('aria-controls', controls!);
+		await expect(details).toBeVisible();
+		await expect(details).toContainText('Strictly necessary (always on)');
+
+		await hide.click();
+		await expect(manage).toHaveAttribute('aria-expanded', 'false');
+		await expect(details).toBeHidden();
+	});
+
 	test('Accept persists the choice and hides the banner', async ({ page }) => {
 		await expect(banner(page)).toBeVisible();
 		await page.getByRole('button', { name: 'Accept all' }).click();
@@ -95,8 +120,12 @@ test.describe('consent banner', () => {
 		const passwords = page.locator('input[type="password"]');
 		await passwords.first().fill('BrandNewPassw0rd!42');
 		await passwords.nth(1).fill('BrandNewPassw0rd!42');
-		// The keyboard path: Tab from the last field lands on the enabled submit.
+		// The keyboard path: Tab from the last field reaches its show-password
+		// toggle (PasswordInput), then the enabled submit.
 		await passwords.nth(1).press('Tab');
+		const reveal = page.getByRole('button', { name: 'Show password' }).nth(1);
+		await expect(reveal).toBeFocused();
+		await reveal.press('Tab');
 		const submit = page.getByRole('button', { name: /Reset password/i });
 		await expect(submit).toBeFocused();
 

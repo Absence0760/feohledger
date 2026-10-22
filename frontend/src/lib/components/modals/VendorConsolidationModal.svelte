@@ -23,7 +23,10 @@
 		getVendorConsolidationSuggestions,
 		mergeVendorConsolidation
 	} from '#lib/api/vendors.ts';
-	import type { VendorCluster } from '#lib/types/vendor.ts';
+	import { vendorStatusLabelKey, type VendorCluster } from '#lib/types/vendor.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { consolidationReasonLabel } from '#lib/utils/vendorConsolidation.ts';
 
 	let {
 		onclose,
@@ -67,28 +70,33 @@
 			clusters = res.clusters;
 			truncated = res.truncated;
 		} catch {
+			// Stated in place below — a toast is never the only sign of a failed
+			// load, and a persistent error toast repeating it would be noise
+			// (decisions §313).
 			loadError = true;
-			toast('Failed to load consolidation suggestions', 'error');
 		} finally {
 			loading = false;
 		}
 	}
 
 	function canonicalOf(c: VendorCluster) {
-		return c.members.find((m) => m.is_canonical) ?? c.members[0];
+		return c.members.find((member) => member.is_canonical) ?? c.members[0];
 	}
 
 	function duplicatesOf(c: VendorCluster) {
-		return c.members.filter((m) => m.vendor_id !== c.canonical_vendor_id);
+		return c.members.filter((member) => member.vendor_id !== c.canonical_vendor_id);
 	}
 
+	// The thrown `ApiError`'s message is already the reader's-language sentence
+	// for a coded merge refusal (`api/codedRefusals.ts`), and the server's
+	// English for anything this build cannot state. Never `err.detail`: that is
+	// the raw body — a `{code, message, params}` object, not text.
 	function errMsg(err: unknown, fallback: string): string {
-		const e = err as { detail?: string; message?: string } | null;
-		return e?.detail ?? e?.message ?? fallback;
+		return err instanceof Error && err.message ? err.message : fallback;
 	}
 
 	async function doMerge(c: VendorCluster) {
-		const dupes = duplicatesOf(c).map((m) => m.vendor_id);
+		const dupes = duplicatesOf(c).map((member) => member.vendor_id);
 		if (dupes.length === 0) return;
 		mergingId = c.cluster_id;
 		confirmId = null;
@@ -97,10 +105,11 @@
 			const merged = res.deactivated_vendor_ids.length;
 			toast(
 				merged > 0
-					? `Merged ${merged} duplicate${merged === 1 ? '' : 's'} (${res.total_reassigned} record${
-							res.total_reassigned === 1 ? '' : 's'
-						} re-homed)`
-					: 'Already merged — nothing to do',
+					? m('vendors.consolidation.toast.merged', {
+							n: merged,
+							records: res.total_reassigned
+						})
+					: m('vendors.consolidation.toast.alreadyMerged'),
 				'success'
 			);
 			toastCardRevocations(res.card_revocations);
@@ -108,33 +117,33 @@
 			clusters = clusters.filter((x) => x.cluster_id !== c.cluster_id);
 			onmerged();
 		} catch (err) {
-			// Surface the backend's 4xx reason (self-merge / cross-entity / unknown).
-			toast(errMsg(err, 'Merge failed'), 'error');
+			// Surface the backend's 4xx reason (self-merge / cross-entity / blocked
+			// duplicate / unknown), in the reader's language.
+			toast(errMsg(err, m('vendors.consolidation.toast.mergeFailed')), 'error');
 		} finally {
 			mergingId = null;
 		}
 	}
 </script>
 
-<Modal open ariaLabel="Vendor consolidation" title="Merge duplicate vendors" width="lg" {onclose}>
-	<p class="hint muted">
-		These vendors look like duplicates (matched on tax ID, code, or similar names). Merging folds
-		each duplicate's invoices, payments, and other records into the <strong>canonical</strong>
-		vendor and retires the duplicates (sets them <em>inactive</em>) — it doesn't delete anything,
-		but it can't be undone from here.
-	</p>
+<Modal
+	open
+	ariaLabel={m('vendors.consolidation.dialogAria')}
+	title={m('vendors.consolidation.title')}
+	width="lg"
+	{onclose}
+>
+	<p class="hint muted">{m('vendors.consolidation.hint')}</p>
 
 	{#if loading}
-		<p class="muted state">Loading suggestions…</p>
+		<p class="muted state">{m('vendors.consolidation.loading')}</p>
 	{:else if loadError}
-		<p class="muted state">Couldn't load suggestions. Close and try again.</p>
+		<p class="muted state" role="alert">{m('vendors.consolidation.loadFailed')}</p>
 	{:else if clusters.length === 0}
-		<p class="muted state">No likely-duplicate vendors found. Your vendor list looks clean.</p>
+		<p class="muted state">{m('vendors.consolidation.empty')}</p>
 	{:else}
 		{#if truncated}
-			<p class="muted truncated-note">
-				Showing the strongest clusters — some were capped for performance.
-			</p>
+			<p class="muted truncated-note">{m('vendors.consolidation.truncated')}</p>
 		{/if}
 		<ul class="clusters">
 			{#each clusters as c (c.cluster_id)}
@@ -144,78 +153,102 @@
 					<div class="cluster-head">
 						<div class="reasons">
 							{#each c.reasons as r (r)}
-								<span class="reason-pill">{r}</span>
+								<span class="reason-pill"
+									>{consolidationReasonLabel(r, m, getActiveFormatLocale())}</span
+								>
 							{/each}
 						</div>
 						{#if canMerge}
 							{#if confirmId === c.cluster_id}
 								<div class="confirm-row">
-									<span class="confirm-q">Merge {dupes.length} into “{canon.name}”?</span>
+									<span class="confirm-q"
+										>{m('vendors.consolidation.confirmQuestion', {
+											n: dupes.length,
+											name: canon.name
+										})}</span
+									>
 									<RowAction
 										variant="danger"
 										armed
 										onclick={() => doMerge(c)}
 										disabled={mergingId !== null}
 									>
-										{mergingId === c.cluster_id ? 'Merging…' : 'Confirm merge'}
+										{mergingId === c.cluster_id
+											? m('vendors.consolidation.merging')
+											: m('vendors.consolidation.confirm')}
 									</RowAction>
 									<RowAction onclick={() => (confirmId = null)} disabled={mergingId !== null}>
-										Cancel
+										{m('common.cancel')}
 									</RowAction>
 								</div>
 							{:else}
 								<RowAction
 									onclick={() => (confirmId = c.cluster_id)}
 									disabled={mergingId !== null || dupes.length === 0}
-									ariaLabel={`Merge cluster into ${canon.name}`}
+									ariaLabel={m('vendors.consolidation.mergeAria', { name: canon.name })}
 								>
-									Merge into canonical
+									{m('vendors.consolidation.mergeIntoCanonical')}
 								</RowAction>
 							{/if}
 						{/if}
 					</div>
 
+					<!-- Six columns do not reflow at 320px: the table scrolls inside
+					     this named, focusable region instead of pushing the dialog
+					     sideways (WCAG 1.4.10, 2.1.1 — same rule as ui/DataTable). -->
+					<div
+						class="cluster-scroll"
+						role="region"
+						aria-label={m('vendors.consolidation.clusterRegion', { name: canon.name })}
+						tabindex="0"
+					>
 					<table class="cluster-table">
 						<thead>
 							<tr>
-								<th>Vendor</th>
-								<th>Code</th>
-								<th>Tax ID</th>
-								<th>Status</th>
-								<th class="num">Invoices</th>
-								<th>Role</th>
+								<th>{m('vendors.col.vendor')}</th>
+								<th>{m('vendors.col.code')}</th>
+								<th>{m('vendors.consolidation.col.taxId')}</th>
+								<th>{m('vendors.col.status')}</th>
+								<th class="num">{m('vendors.col.invoices')}</th>
+								<th>{m('vendors.consolidation.col.role')}</th>
 							</tr>
 						</thead>
 						<tbody>
-							{#each c.members as m (m.vendor_id)}
-								<tr class:canonical-row={m.is_canonical}>
-									<td class="m-name">{m.name}</td>
-									<td class="mono muted">{m.code ?? '—'}</td>
-									<td class="mono muted">{m.tax_id_masked ?? '—'}</td>
-									<td class="muted">{m.status ?? '—'}</td>
-									<td class="num mono">{m.invoice_count}</td>
+							{#each c.members as member (member.vendor_id)}
+								{@const statusKey = member.status ? vendorStatusLabelKey(member.status) : null}
+								<tr class:canonical-row={member.is_canonical}>
+									<td class="m-name">{member.name}</td>
+									<td class="mono muted">{member.code ?? '—'}</td>
+									<td class="mono muted">{member.tax_id_masked ?? '—'}</td>
+									<td class="muted">{statusKey ? m(statusKey) : (member.status ?? '—')}</td>
+									<td class="num mono">{member.invoice_count}</td>
 									<td>
-										{#if m.is_canonical}
-											<span class="role-badge canonical">Canonical</span>
+										{#if member.is_canonical}
+											<span class="role-badge canonical"
+												>{m('vendors.consolidation.role.canonical')}</span
+											>
 										{:else}
-											<span class="role-badge duplicate">Duplicate</span>
+											<span class="role-badge duplicate"
+												>{m('vendors.consolidation.role.duplicate')}</span
+											>
 										{/if}
 									</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
+					</div>
 				</li>
 			{/each}
 		</ul>
 
 		{#if !canMerge}
-			<p class="muted state">Merging needs the “Manage vendors” permission.</p>
+			<p class="muted state">{m('vendors.consolidation.needsPermission')}</p>
 		{/if}
 	{/if}
 
 	<div class="modal-footer">
-		<button type="button" class="btn-cancel" onclick={onclose}>Close</button>
+		<button type="button" class="btn-cancel" onclick={onclose}>{m('vendors.consolidation.close')}</button>
 	</div>
 </Modal>
 
@@ -280,6 +313,9 @@
 	.confirm-q {
 		font-size: 0.82rem;
 		font-weight: 500;
+	}
+	.cluster-scroll {
+		overflow-x: auto;
 	}
 	.cluster-table {
 		width: 100%;

@@ -14247,3 +14247,291 @@ slug, every uptime alarm paging and emailing on failure and recovery with
 missing data breaching, which alarms may page, the SMS subscription, SMS
 preferences and both SMS alarms existing only with a number, the E.164 and
 slug validations, the region precondition, and the certificate alarm.
+
+## 312. The landing page follows the visitor's theme, with a light render of the tally (2026-10-21)
+
+**This supersedes §289's "the marketing landing page stays dark" and §294's
+"not until evidence says otherwise".** §294 named what would reopen the
+question — drop-off or repeated feedback — and what doing it properly would
+mean: a light render of the tally, panel treatments composed for a light
+ground, contrast re-measured, the theme followed rather than toggled per page.
+What reopened it is the operator asking for it directly: a visitor who chose
+Light (or whose OS did) met a navy landing page between a light sign-in page
+and a light app, and on the apex domain that page is the product's first
+impression. The job was done the way §294 said it must be, not as a token
+swap that leaves a dark-composed render on white.
+
+**What changed.**
+
+- **No pin.** `data-theme-scope="dark"` is gone from `Landing` and from
+  `app.css`'s dark selector list; nothing else used the mechanism, so it was
+  removed rather than kept idle. The landing subtree (`Landing`, `Pricing`,
+  `HeroPipeline`, `AdapterRail`, `Atmosphere`) takes System / Light / Dark
+  from the same pre-paint script and store as everything else, so a stored
+  Light is on `<html>` at the first frame here too.
+- **Every colour is a token.** 85 literals — navy glass `rgba(24, 26, 35, …)`,
+  accent glows, the text-gradient stops, the stamp and ping greens — became
+  palette tokens or `color-mix(in srgb, var(--token) N%, transparent)`. Three
+  tokens are new, in both palettes: `--gilt` (the tally's gold), `--brand-violet`
+  (the gradient midpoint) and `--drop-shade` (a cast shadow: black on navy, a
+  soft ink on light, where black at the same strength reads as dirt). The dark
+  values are the old literals, so the dark page is unchanged to the eye.
+- **Light treatments, not an inversion.** Glass panels are translucent
+  `--surface` (white, in light) with `--shadow-card`, so they lift off the pale
+  ground by shadow rather than by being lighter than it; the hero card is
+  `--surface` with `--shadow-float`; the eyebrow pills moved onto the
+  calibrated `--accent-tint` / `--accent-on-tint` pair; the grid, grain and
+  vignette already followed `--text` / `--bg`. The brand mark is untouched.
+- **A second render of the tally.** On the light ground the dark render's
+  softbox reflections came out as near-white cream, the page's own value, and
+  the stick's near edges dissolved. `tally_scene.py` now takes
+  `TALLY_VARIANT=light`: dimmer softbox, ~0.45 stop less exposure, a warm weak
+  fill and a lower rim, everything else shared — so the two renders trim to the
+  same 1100 × 460 frame and swapping them never moves the layout.
+  `gen-marketing.sh` renders both (or one, by argument, so retuning one
+  lighting leaves the other's bytes alone) and refuses a pair that disagrees in
+  size. The page picks the file from `theme.resolved`
+  (`lib/marketing/ornament.ts`) rather than a `<picture>` media query, which
+  would follow the OS and ignore a stored choice; `AuthShell`'s panel, which
+  already followed the theme and was showing the dark render on white, uses the
+  same map. The grain overlay is shared — a grey tile under `overlay` blending
+  reads as grain on either ground — so it was not re-rendered.
+- **A theme switch in the header.** An anonymous visitor has no `/profile`.
+  `ThemePicker` and `SegmentedControl` gained `compact`: the same fieldset of
+  native radios drawn as three icons, legend and labels visually hidden but in
+  the accessibility tree, each segment titled, 30px targets, the radio clipped
+  (not faded) and the segment carrying the focus ring. With the dot hidden the
+  raised fill was no cue at all (1.04:1 against the track), so the chosen
+  segment takes an `--accent` ring on the accent tint pair — an edge the other
+  segments lack, ≥5.7:1 against the track in both palettes (1.4.11, 1.4.1). It sits beside the
+  `<nav>`, not in it — a setting, not a destination — and fits beside the mark
+  and the short CTA at 320px. No new strings: it reuses `profile.appearance.*`,
+  translated in all six locales.
+
+**Rejected.** *A page-local toggle* (a landing-only light/dark switch that
+does not touch the global choice) — §294 already ruled it out, and a choice
+that reverts on the next page is not a choice. *Keeping the scope mechanism for
+later* — an unused pin is an exemption from the light audit waiting to be
+reused. *CSS-swapping two `<img>` elements* — needs the light selectors written
+twice more (explicit and System) for one image, where the store already knows
+the answer.
+
+Guards: `src/lib/a11y/tokenPairing.test.ts` (both palettes over every
+marketing stylesheet with no exemption; no `data-theme-scope` anywhere; the
+marketing components type no colour literal — hex, any functional notation,
+`white` / `black`, in `<style>` or an inline `style=` — but `#fff` in a rule
+that also sets a `-strong` background, and a mask's `#000`; `--gilt`, `--brand-violet` and `--accent-on-tint` held to 4.5:1
+on `--bg` and `--surface` in each palette, since the scan cannot measure a
+`background-clip: text` gradient), `src/lib/marketing/ornament.test.ts` (both
+renders committed, same intrinsic size, not the same file), and
+`tests-e2e/a11y/light-theme.spec.ts` (the landing under a light OS: axe clean,
+light render; dark: axe clean, dark render; a stored Light under a dark OS:
+`data-theme` at the first frame, the ornament's first `src` the light file and
+the dark one never requested;
+the header switch reached by Tab, operated by arrow keys and by pointer,
+persisting across a reload, segments ≥ 24px, a drawn focus ring, a checked
+edge the others lack; at 320px the header holds mark, CTA and switch with no
+overflow; the auth shell's panel follows the theme).
+
+Numbered §312, with this branch's §313–§315 after it: they were drafted as §306–§309, main took §306–§308 and §310 first, and the open #631 and #634 claim §309 and §311.
+
+## 313. Error toasts stay until dismissed; other toasts pause while hovered or focused (issue #635, 2026-10-21)
+
+**This supersedes the fixed five-second timer `frontend/docs/ui-patterns.md`
+documented as deliberate** ("auto-dismiss timer kept"). Decided by the
+operator's delegate on #635 finding 24.
+
+**What was wrong.** Every toast vanished five seconds after it appeared,
+whatever it said and whatever the reader was doing. Several screens used a
+toast as their only error signal, some with an instruction in it (#6, #20,
+#21 on the issue); a screen-reader user hears it once, a slow reader may not
+finish it, and someone moving the pointer onto it to read it watched it go.
+That is WCAG 2.2.1 Timing Adjustable: content with a time limit needs a way
+to turn it off, adjust it or extend it.
+
+**The rule** (`frontend/src/lib/utils/toastQueue.ts`, rendered by
+`ui/Toast.svelte`):
+
+- An **error** toast has no timer. It stays until dismissed with its visible,
+  keyboard-reachable dismiss button. An explicit `duration` does not make an
+  error transient — no caller passed one, and an error that can be timed away
+  is the defect.
+- Any **other** toast keeps its timer (5 s, or the caller's explicit
+  `duration` — the sync report's 12 s warnings keep theirs), but the clock
+  **stops while the pointer is over a toast or focus is inside the region**
+  and resumes with the time it had left. A toast that arrives during a pause
+  starts its clock on resume.
+- **Persistent errors are bounded.** At most three stay on screen; a fourth
+  removes the oldest. The same error text arriving again replaces its earlier
+  copy instead of stacking — a page retrying a failing call cannot fill the
+  corner with identical cards.
+- **Live-region behaviour is unchanged where it matters.** Errors still go in
+  the assertive container and the rest in the polite one. Pausing changes no
+  DOM, so it announces nothing; a repeated error is a fresh insertion, so it is
+  announced again rather than silently deduplicated.
+- **Focus never falls to `<body>`.** Dismissing from the button moves focus to
+  the next toast's dismiss button, or to `<main>` when it was the last.
+- The region is named **"Status messages"**, not "Notifications": that is the
+  sidebar bell's name, and two landmarks sharing one name are
+  indistinguishable in a landmark list.
+
+**A toast is still not a load-error state.** A page whose data did not arrive
+says so in place with `ui/LoadError` and a Retry; the vendor list (#635
+finding 20) and the notification bell (finding 22) moved off toast-only
+failures in the same change. The persistent error toast is for an action's
+outcome.
+
+**Rejected: a longer fixed timer** (10 s, 15 s). It moves the line rather than
+removing it, and 2.2.1's "extend" option needs the reader to be able to ask
+for more time, which a fixed timer cannot give. **Rejected: making every toast
+persistent.** Success and info toasts confirm what the reader just did and
+the page already shows; requiring a dismissal for each would bury the errors
+that do need one.
+
+**Sign-off.** This changes a documented accessibility pattern
+(`docs/accessibility.md`, `frontend/docs/ui-patterns.md` § Toast); it should
+be confirmed by whoever owns `docs/accessibility.md`.
+
+## 314. The sidebar's groups say what is in them: Treasury, Subscription under Settings, Cash-flow analytics (issue #635, 2026-10-21)
+
+**Decided** by the operator's delegate on #635 finding 23 · `frontend/src/lib/nav.ts`
+
+A new admin met about thirteen sidebar rows and forty-odd destinations on day
+one, and three of the names misled:
+
+- **"Billing" held the customer's payables money tools** — Credit Memos,
+  Discounts, Positive Pay, Bank Reconciliation, vendor Statements — beside
+  *our* subscription page. Read cold, "Billing" is the vendor's bill or the
+  platform's invoice to you, not treasury work. The group is now
+  **Treasury** (`nav.group.treasury`; the old `nav.group.billing` key is gone,
+  so nothing can keep rendering the old name).
+- **Subscription moved to Settings, directly after Organization.** It is the
+  platform's plan and usage page (`/billing`, control plane), which describes
+  the workspace itself — the same kind of thing as Organization — and is
+  nothing to do with paying suppliers. It keeps its gate (admin | cfo, the
+  backend's `GET /api/billing/subscription`). A CFO, who can see no other
+  Settings child, now sees a Settings row that lands on Subscription; per-item
+  gating already handles a one-child view (the group row is the page).
+- **`/cfo` is "Cash-flow analytics"**, so it reads as distinct from
+  "Cash-Flow Copilot" beside it: one is the forecasting dashboard, the other a
+  conversation. Only the nav label changed (`nav.cashFlow`); the page keeps its
+  own heading key. In French the old label *was* "Trésorerie", which would have
+  collided with the new group name, so the guard below checks every locale.
+
+**What this does not change.** §174's row budget is untouched: no row was
+added, Treasury drops from nine tabs to eight, Settings grows from eight to
+nine, both under `nav.test.ts`'s ten-tab ceiling. The role matrix in
+`nav.test.ts` (`NAV_GATES`) moves `/billing` to the Settings block with the
+same roles.
+
+**Guard.** `nav.test.ts` pins the new placement, the CFO landing, and a
+locale-wide rule: no two sidebar rows share a name, and within a group no two
+tabs (nor a tab and its group) read the same, in any of the six catalogues.
+`tests-e2e/smoke/section-nav.spec.ts` checks the rendered sidebar.
+
+**The page and every pointer to it say "Subscription".** The rename left the
+`/billing` heading (`billing.title`) on "Billing" while the nav said
+"Subscription", and the messages that send a user there — the public pricing
+page's "starts on Free" line, the plan-feature refusal
+(`refusal.planFeatureRequired`), both AI-reading-paused invoice warnings and
+the three AI-usage notices (80%, 100%, spending cap) — named a "Billing" page no row is
+called. The name a user hunts for is the one in the sidebar, so the heading
+now matches the nav label in every locale, and each pointer names the path,
+**Settings → Subscription** (translated with each locale's own nav labels), since
+the row sits inside the Settings group. The backend's English for the same
+warnings (`invoice_warning_catalog.py`, regenerated into the web and mobile
+code maps) and the notices (`notification_templates.py`) changed with them, as
+did the mobile ARB copies of the two warnings. The route stays `/billing`;
+only words changed.
+
+**Partner Admin is NOT hidden yet — it needs a product call.** The finding
+asked to hide it unless the workspace is a partner. There is no partner flag:
+`GET /api/partner`'s `is_partner` is *derived* — true once the org parents at
+least one child — and the page that row opens is also where a standalone org
+(a) provisions or attaches its **first** child, which is how it becomes a
+partner at all, and (b) mints the link code that consents to being adopted
+*by* a partner. Gating the row on `is_partner` would make both unreachable
+from the UI for exactly the orgs that need them, and the row's gate would no
+longer agree with the page's (admin-only, the backend's
+`require_roles(ROLE_ADMIN)` on every `/api/partner` route) — the mismatch
+`frontend/CLAUDE.md` calls a defect. Doing it properly means either an
+operator-set partner capability (a plan entitlement or an
+`organizations.is_partner` column, exposed on `/auth/me`) with the link-code
+minting moved to Organization settings, or accepting the row as is. Tracked in
+`docs/followups.md`.
+
+## 315. An admin's first run is a setup checklist ticked from facts the app already holds; emptiness is the workspace's (issue #635, 2026-10-21)
+
+Decided by the operator's delegate on #635 findings 9 and 38.
+
+**What was wrong.** A new workspace's dashboard offered one button, "Go to
+invoices". The `start-admin` guide says to configure first — company, users,
+sign-in security, ERP, vendors, the approval workflow — so a new admin's first
+invoice landed in an untuned default workflow with no vendors to match and no
+one else to approve it. The `/organization` "Getting started" panel had six
+static links with no progress and left out the ERP, vendors, security and email
+intake. Separately, the dashboard decided "brand-new workspace" from
+`total_invoices`, which is scoped to the selected entity, so an established
+customer that added a subsidiary was welcomed with "upload your first invoice"
+the moment they switched to it.
+
+**The rule.**
+
+- **An admin on a workspace with no invoices gets a setup checklist** in place
+  of the empty state: company details, invite the team, require two-factor
+  sign-in, connect the accounting system, add vendors, set up the approval
+  workflow, and uploading the first invoice last. Each step links to the panel
+  that owns it, and the list links the `start-admin` guide.
+- **A step is ticked only from a fact some other feature already owns,
+  derived on read** (`backend/app/services/onboarding.py`). There is no
+  tracking table and no "mark as done" write, so a step cannot be ticked by
+  visiting a page and cannot drift from the setting it names. Each fact is
+  narrow and named for what it reads: a Company Profile field beyond the name
+  signup sets; more than one active user; `mfa.required` or SSO switched on;
+  a non-`mock` ERP selected (the plan gate's own predicate); a vendor row; the
+  workflow saved since it was provisioned (a version, an edit, or a second
+  definition, because every tenant is provisioned with one); a live intake
+  address. "Reviewed the security panel" and "looked at the workflow" are not
+  knowable, so they are not claimed — the steps are worded as the change whose
+  saved result is the fact.
+- **A step with no fact behind it carries no done state at all.** The settings
+  panel's Invoice defaults, payment-run sign-off and Branding links are drawn
+  with their number only, never as unfinished: a blank defaults form is a valid
+  choice. A non-admin, or a progress read that fails, gets the same links with
+  no states rather than a row of empty boxes.
+- **One server field, one derivation, two readers.** `GET /api/dashboard`
+  carries `onboarding` (computed in the same request, only for an admin on an
+  empty workspace — everyone else gets `null` and pays for none of its
+  queries), and `GET /api/dashboard/onboarding` (admin-only) serves the same
+  `compute_onboarding` to `/organization` without computing a dashboard.
+  `frontend/src/lib/utils/onboarding.ts` is the one map from step to panel, so
+  the two surfaces cannot send a step to two places.
+- **The checklist retires itself** when the workspace has its first invoice:
+  the server stops sending `onboarding`. No dismiss control — it would need a
+  stored preference, and the condition that ends it is one every workspace
+  reaches on its first real day.
+- **Emptiness is decided org-wide** (`organization_has_invoices`, unscoped by
+  `X-Entity-ID`). An entity with nothing in it yet keeps its true zero KPI row
+  and says "No invoices for <entity> yet" in place of the charts; the
+  new-workspace welcome and the checklist never appear for it.
+- **Every other role on an empty workspace** keeps the empty state, fitted to
+  what it can do: a role that may add invoices is sent to `/invoices`; one that
+  may not (no system role today — a custom role can) is told what will appear,
+  with no button into a page whose upload would refuse it.
+
+**Not regressed.** The checklist, like the empty state before it, replaces the
+KPI row only once the response has landed (`isEmptyTenant` keys on `data`), so
+the loading → empty hand-off of §125 / §154 is unchanged.
+
+**Considered and rejected.** A per-step "mark done" store: it reintroduces the
+drift this avoids and makes the tick a claim about intent. Ticking security on
+the admin's *own* MFA enrolment: it says nothing about everyone else signing
+in. Counting "a workflow definition exists": always true since provisioning
+seeds one.
+
+Tests: `backend/tests/test_dashboard_onboarding.py` (each flag follows its
+owning data; admin-only; retires with the first invoice; an empty entity on an
+established workspace); `frontend/src/lib/utils/onboarding.test.ts`;
+`frontend/tests-e2e/dashboard/first-run.spec.ts` (checklist, done states,
+non-admin views, retirement and the entity case against the real backend, axe
+in both themes); `frontend/tests-e2e/organization/getting-started.spec.ts`.

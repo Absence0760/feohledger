@@ -60,7 +60,6 @@ export const messages = {
 	'portal.changePassword.confirm': '新しいパスワードの確認',
 	'portal.changePassword.save': 'パスワードを保存',
 	'portal.changePassword.saving': '保存しています...',
-	'portal.changePassword.mismatch': 'パスワードが一致しません。',
 	'portal.changePassword.failed': '変更に失敗しました',
 
 	// ポータルの請求書 (routes/portal/invoices/+page.svelte)

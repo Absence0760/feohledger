@@ -99,7 +99,12 @@ on the user being fully signed into a tenant, since the read needs auth) that
 calls `brand.ensureLoadedAndApply()`. `applyTheme()` writes the configured
 accent tokens onto `document.documentElement.style` (or removes them when
 unset). The document `<title>` and the sidebar logo + product name read the
-store reactively. `reset()` clears both the cache and the inline `<html>`
+store reactively. So do the auth pages' own tab titles (sign-in, SSO callback,
+verify, forgot / reset password, change password): each is a catalogue entry
+taking the name as a `{product}` param, never a hardcoded "FeohLedger". Before
+sign-in the branding read cannot run, so they show the platform fallback, the
+same as the shell's mark; once loaded (change password, or a sign-in page
+reached after one) they carry the tenant's name. `reset()` clears both the cache and the inline `<html>`
 overrides (logout / tenant switch).
 
 **The fallback mark** — `brand.mark` (`brandTheme.ts::brandMark`,

@@ -22,6 +22,30 @@ techflow.localhost:7777┘   (shared)             └── feohledger DB (contr
 - `techflow.app.com` → slug `techflow`
 - `localhost:7777` (no subdomain) → shows "no tenant" page
 
+#### Signing in from the apex (`/find-workspace`)
+
+The apex (`feohledger.com`, `localhost:7777`) has no sign-in form: a user
+belongs to one workspace and signs in at its host. The landing page's **Sign
+in** links, and an apex `/login`, go to `/find-workspace`, which asks for the
+workspace address, checks its format (the client half of `utils/slug.py`, in
+`frontend/src/lib/utils/workspaceAddress.ts`) and sends the browser to that
+workspace's `/login`, built from `tenant_url_template` in `GET
+/api/public-config`. A full domain that is not the platform's — a workspace on its own custom
+domain — is offered back as a link to that host's `/login` rather than refused
+as a malformed name. If the config cannot be loaded it says so and offers Retry;
+it never guesses a host from the current URL.
+
+**There is deliberately no "enter your email, we'll find your workspace"
+lookup.** An unauthenticated endpoint that maps an email address to a workspace
+tells anyone who asks whether that person is a customer, and at which company —
+an account-enumeration oracle, the same disclosure the forgot-password flow is
+written to avoid. The address is in the welcome email and every notification a
+workspace sends, so the visitor already has it; a slug that names no workspace
+simply lands on a sign-in page that fails like any other. Adding such a lookup
+would need the same answer-for-everyone design as forgot-password (email the
+links, say the same thing whether or not anything matched) and a security
+review first.
+
 ### 2. Frontend sends tenant header
 
 Every API request includes an `X-Tenant-Slug` header (added automatically by `src/lib/api.ts`).

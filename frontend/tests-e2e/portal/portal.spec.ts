@@ -469,24 +469,121 @@ test.describe("/portal/change-password", () => {
     await expect(page.locator('input[type="password"]')).toHaveCount(3);
   });
 
-  test("mismatched new/confirm passwords show an inline error and do not submit", async ({
+  test("Submit stays enabled and a submit says what is wrong beside each field", async ({
     page,
   }) => {
+    // #635: the portal form uses the employee forms' PasswordInput +
+    // NewPasswordFields, so it gets the same contract — no disabled Submit,
+    // no banner for a field's problem, each error read with its field.
     await portalSignIn(page);
-    await expect(page).toHaveURL(/\/portal\/invoices/, { timeout: 15_000 });
-
     await page.goto("/portal/change-password");
 
-    const fields = page.locator('input[type="password"]');
-    await fields.nth(0).fill(PORTAL_PASSWORD);
-    await fields.nth(1).fill("A-Strong-New-Pass-1");
-    await fields.nth(2).fill("does-not-match-Pass-1");
-    await page.locator('button[type="submit"]').click();
+    const current = page.getByLabel("Current (temporary) password", { exact: true });
+    const newPw = page.getByLabel("New password", { exact: true });
+    const confirm = page.getByLabel("Confirm new password", { exact: true });
+    const submit = page.getByRole("button", { name: "Save password" });
+    await expect(submit).toBeEnabled();
 
-    // Client-side guard catches the mismatch before any API call —
-    // the `.error` banner shows and we stay on the page.
-    await expect(page.locator(".error")).toBeVisible({ timeout: 5_000 });
+    // Any request the form sends is a failure of the client-side checks.
+    let posted = 0;
+    page.on("request", (r) => {
+      if (r.url().includes("/api/portal/auth/change-password")) posted += 1;
+    });
+
+    // Nothing typed: every field is marked, the first one gets focus.
+    await submit.click();
+    await expect(current).toBeFocused();
+    await expect(current).toHaveAttribute("aria-invalid", "true");
+    await expect(current).toHaveAccessibleDescription("Enter your current password.");
+    await expect(newPw).toHaveAttribute("aria-invalid", "true");
+    await expect(confirm).toHaveAttribute("aria-invalid", "true");
+
+    // The portal enforces the employee rules (`validate_password_complexity`),
+    // so the same checklist describes the field.
+    const rulesId = await page.locator("ul.strength").getAttribute("id");
+    expect(rulesId).toBeTruthy();
+    await expect(newPw).toHaveAttribute("aria-describedby", new RegExp(`\\b${rulesId}\\b`));
+    await current.fill(PORTAL_PASSWORD);
+    await newPw.fill("weakpw");
+    await submit.click();
+    await expect(newPw).toBeFocused();
+    await expect(current).not.toHaveAttribute("aria-invalid", "true");
+    await expect(
+      page.getByText("Password does not meet the complexity requirements."),
+    ).toBeVisible();
+
+    // A mismatch is named on the confirmation, not in a banner.
+    await newPw.fill("A-Strong-New-Pass-1");
+    await confirm.fill("does-not-match-Pass-1");
+    await submit.click();
+    await expect(confirm).toBeFocused();
+    await expect(confirm).toHaveAttribute("aria-invalid", "true");
+    await expect(confirm).toHaveAccessibleDescription("Passwords do not match.");
+    await expect(page.locator(".error")).toHaveCount(0);
     await expect(page).toHaveURL(/\/portal\/change-password/);
+    expect(posted).toBe(0);
+  });
+
+  test("a wrong current password is named beside its field", async ({ page }) => {
+    // The 400 changes nothing server-side (no failure budget on this route),
+    // so it runs against the real backend and the seeded supplier.
+    await portalSignIn(page);
+    await page.goto("/portal/change-password");
+
+    const current = page.getByLabel("Current (temporary) password", { exact: true });
+    await current.fill("not-the-current-password");
+    await page.getByLabel("New password", { exact: true }).fill("A-Strong-New-Pass-1");
+    await page.getByLabel("Confirm new password", { exact: true }).fill("A-Strong-New-Pass-1");
+    const refused = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/portal/auth/change-password") &&
+        r.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Save password" }).click();
+    expect((await refused).status()).toBe(400);
+
+    await expect(current).toBeFocused();
+    await expect(current).toHaveAttribute("aria-invalid", "true");
+    await expect(current).toHaveAccessibleDescription("That isn't your current password.");
+    await expect(page.locator(".error")).toHaveCount(0);
+
+    // Editing the field clears the server's refusal.
+    await current.fill(PORTAL_PASSWORD);
+    await expect(current).not.toHaveAttribute("aria-invalid", "true");
+  });
+
+  test("each field has the show-password toggle", async ({ page }) => {
+    await portalSignIn(page);
+    await page.goto("/portal/change-password");
+
+    const toggles = page.getByRole("button", { name: "Show password", exact: true });
+    await expect(toggles).toHaveCount(3);
+    const current = page.getByLabel("Current (temporary) password", { exact: true });
+    await current.fill(PORTAL_PASSWORD);
+    await toggles.first().click();
+    await expect(toggles.first()).toHaveAttribute("aria-pressed", "true");
+    await expect(current).toHaveAttribute("type", "text");
+    await expect(current).toHaveAttribute("autocomplete", "current-password");
+  });
+});
+
+test.describe("/portal/login show-password", () => {
+  test("the sign-in field has the toggle, and signing in still works with it on", async ({
+    page,
+  }) => {
+    await acceptConsent(page);
+    await page.goto("/portal/login");
+    const password = page.getByLabel("Password", { exact: true });
+    const toggle = page.getByRole("button", { name: "Show password", exact: true });
+    await page.locator('input[type="email"]').fill(PORTAL_EMAIL);
+    await password.fill(PORTAL_PASSWORD);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(password).toHaveAttribute("type", "text");
+    await expect(password).toHaveAttribute("autocomplete", "current-password");
+
+    await page.getByRole("button", { name: /Sign in/ }).click();
+    await expect(page).toHaveURL(/\/portal\/?$/, { timeout: 15_000 });
   });
 });
 

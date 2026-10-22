@@ -1,9 +1,11 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { auth } from '#lib/stores/auth.svelte.ts';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
+	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
+	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -159,6 +161,20 @@
 	let newPassword = $state('');
 	let confirmPassword = $state('');
 	let savingPassword = $state(false);
+	let passwordSubmitted = $state(false);
+	let currentPasswordInput = $state<HTMLInputElement | null>(null);
+	let newPasswordFields = $state<ReturnType<typeof NewPasswordFields> | null>(null);
+	// The server's refusals of one field, shown beside it until it is edited:
+	// a wrong current password (400), a new password it would not take (422,
+	// `validate_password_complexity`). Anything else is not about a field and
+	// is a toast, as before.
+	let currentPasswordServerError = $state('');
+	let newPasswordServerError = $state('');
+	const currentPasswordError = $derived(
+		passwordSubmitted && currentPassword === ''
+			? m('auth.changePassword.currentRequired')
+			: currentPasswordServerError,
+	);
 
 	$effect(() => {
 		// Seed the local edit field once the user record lands (and again if the
@@ -189,11 +205,14 @@
 	}
 
 	async function changePassword() {
-		if (!currentPassword || !newPassword) return;
-		if (newPassword !== confirmPassword) {
-			toast(m('profile.password.mismatch'), 'error');
-			return;
-		}
+		// Submit stays enabled: every field is marked at once, each error beside
+		// its field, and focus goes to the first bad one (the same contract as
+		// `/change-password`, issue #635).
+		passwordSubmitted = true;
+		const currentOk = currentPassword !== '';
+		const newOk = newPasswordFields?.validate(currentOk) ?? false;
+		if (!currentOk) currentPasswordInput?.focus();
+		if (!currentOk || !newOk) return;
 		savingPassword = true;
 		try {
 			await api.patch('/api/auth/me', {
@@ -203,9 +222,23 @@
 			currentPassword = '';
 			newPassword = '';
 			confirmPassword = '';
+			passwordSubmitted = false;
+			newPasswordFields?.reset();
 			toast(m('profile.password.updated'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('profile.password.updateFailed'), 'error');
+			// `PATCH /api/auth/me` raises 400 only for the current password
+			// (missing or wrong) and 422 for a new password it would not take.
+			if (err instanceof ApiError && err.status === 400) {
+				currentPasswordServerError = m('auth.changePassword.currentIncorrect');
+				await tick();
+				currentPasswordInput?.focus();
+			} else if (err instanceof ApiError && err.status === 422) {
+				newPasswordServerError = err.message;
+				await tick();
+				newPasswordFields?.focusNew();
+			} else {
+				toast(err instanceof Error ? err.message : m('profile.password.updateFailed'), 'error');
+			}
 		} finally {
 			savingPassword = false;
 		}
@@ -684,6 +717,8 @@
 							<p class="hint">{m('profile.password.notUsedForSignIn')}</p>
 						{/if}
 						<form
+							class="password-form"
+							novalidate
 							onsubmit={(e) => {
 								e.preventDefault();
 								changePassword();
@@ -702,40 +737,29 @@
 								tabindex="-1"
 								aria-hidden="true"
 							/>
-							<label>
-								<span>{m('profile.password.current')}</span>
-								<input
-									type="password"
-									bind:value={currentPassword}
-									required
-									autocomplete="current-password"
-								/>
-							</label>
-							<label>
-								<span>{m('profile.password.new')}</span>
-								<input
-									type="password"
-									bind:value={newPassword}
-									required
-									minlength="6"
-									autocomplete="new-password"
-								/>
-							</label>
-							<label>
-								<span>{m('profile.password.confirm')}</span>
-								<input
-									type="password"
-									bind:value={confirmPassword}
-									required
-									minlength="6"
-									autocomplete="new-password"
-								/>
-							</label>
+							<PasswordInput
+								id="profile-password-current"
+								label={m('profile.password.current')}
+								bind:value={currentPassword}
+								bind:input={currentPasswordInput}
+								autocomplete="current-password"
+								required
+								error={currentPasswordError}
+								oninput={() => (currentPasswordServerError = '')}
+							/>
+							<NewPasswordFields
+								bind:this={newPasswordFields}
+								idPrefix="profile-password"
+								newLabel={m('profile.password.new')}
+								confirmLabel={m('profile.password.confirm')}
+								bind:newPassword
+								bind:confirmPassword
+								bind:serverError={newPasswordServerError}
+							/>
 							<div class="actions">
-								<button
-									type="submit"
-									disabled={savingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
-								>
+								<!-- Enabled whatever is typed: a submit says what is wrong,
+								     beside the field (issue #635 #14). -->
+								<button type="submit" disabled={savingPassword}>
 									{savingPassword ? m('common.saving') : m('profile.password.submit')}
 								</button>
 							</div>
@@ -1292,6 +1316,33 @@
 	input:not([type='checkbox']):not([type='radio']):focus {
 		outline: none;
 		border-color: var(--accent);
+	}
+
+	/* The Password card's fields are PasswordInput / NewPasswordFields, so
+	   their label and input are those components' elements, which the scoped
+	   rules above cannot reach. The same recipe through `:global()`, wrapped
+	   in `:where()` so the components' own rules (the room the show-password
+	   toggle needs) still win on specificity. */
+	.password-form :global(:where(.password-field label)) {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+	}
+	.password-form :global(:where(.password-field input:not([type='checkbox']):not([type='radio']))) {
+		width: 100%;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		padding: 10px 12px;
+		font-size: 0.9rem;
+		color: var(--text);
+		font-family: inherit;
+	}
+	.password-form :global(:where(.password-field input:not([type='checkbox']):not([type='radio']):focus)) {
+		outline: none;
+		border-color: var(--accent);
+	}
+	.password-form :global(:where(.password-field input[aria-invalid='true'])) {
+		border-color: var(--danger);
 	}
 
 	.actions {

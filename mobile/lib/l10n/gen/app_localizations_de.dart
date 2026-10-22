@@ -2712,12 +2712,12 @@ class AppLocalizationsDe extends AppLocalizations {
       other: '$included KI-gelesenen Rechnungen',
       one: '$included KI-gelesenen Rechnung',
     );
-    return 'KI-Erfassung pausiert: Das Monatskontingent von $_temp0 ist aufgebraucht. Erfassen Sie die Angaben manuell oder wechseln Sie auf der Seite „Abrechnung“ in einen höheren Tarif.';
+    return 'KI-Erfassung pausiert: Das Monatskontingent von $_temp0 ist aufgebraucht. Erfassen Sie die Angaben manuell oder wechseln Sie unter Einstellungen → Abonnement in einen höheren Tarif.';
   }
 
   @override
   String get invoiceWarningAiSpendCapReached =>
-      'KI-Erfassung pausiert: Das KI-Ausgabenlimit für diesen Monat ist erreicht. Erfassen Sie die Angaben manuell oder erhöhen Sie das Limit auf der Seite „Abrechnung“.';
+      'KI-Erfassung pausiert: Das KI-Ausgabenlimit für diesen Monat ist erreicht. Erfassen Sie die Angaben manuell oder erhöhen Sie das Limit unter Einstellungen → Abonnement.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>

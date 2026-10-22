@@ -144,8 +144,36 @@ class DiscountCapture(BaseModel):
     insufficient_data: bool
 
 
+class OnboardingProgress(BaseModel):
+    """First-run setup facts, each derived on read from data another feature
+    owns — never a stored tick. Field meanings: `app/services/onboarding.py`
+    (`docs/decisions.md` §315)."""
+
+    company: bool
+    users: bool
+    security: bool
+    erp: bool
+    vendors: bool
+    workflow: bool
+    email_intake: bool
+
+
+class OnboardingResponse(OnboardingProgress):
+    """`GET /api/dashboard/onboarding` — the progress plus the one fact that
+    retires the dashboard checklist."""
+
+    organization_has_invoices: bool
+
+
 class DashboardResponse(BaseModel):
     total_invoices: int
+    #: Whether the ORGANIZATION has any invoice, ignoring the selected entity.
+    #: `total_invoices` is entity-scoped, so it cannot tell a brand-new
+    #: workspace from a brand-new subsidiary of an established one.
+    organization_has_invoices: bool
+    #: Setup progress — present only for an admin on a workspace with no
+    #: invoices, `null` otherwise.
+    onboarding: OnboardingProgress | None = None
     total_amount: MoneyAmount
     reporting: ReportingRollup
     total_paid: MoneyAmount

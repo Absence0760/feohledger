@@ -6,6 +6,7 @@
 	import Toast from '#lib/components/ui/Toast.svelte';
 	import UnsavedChangesDialog from '#lib/components/ui/UnsavedChangesDialog.svelte';
 	import ConsentBanner from '#lib/components/ConsentBanner.svelte';
+	import AccountLoadState from '#lib/components/layout/AccountLoadState.svelte';
 	import { sidebar } from '#lib/stores/sidebar.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { brand } from '#lib/stores/brand.svelte.ts';
@@ -16,6 +17,7 @@
 	import { browser } from '$app/env';
 	import { initLocale, m } from '#lib/i18n/store.svelte.ts';
 	import { theme } from '#lib/stores/theme.svelte.ts';
+	import { withNext } from '#lib/utils/postLoginRedirect.ts';
 
 	// Tri-state: `undefined` until the browser resolves it (render nothing, no
 	// flash), then true/false. This asks "does this host carry a tenant at all",
@@ -63,6 +65,19 @@
 		}
 	});
 
+	// The apex has no sign-in form: each company signs in at its own workspace
+	// host. `/find-workspace` asks which one (#635 finding 4), and an apex
+	// `/login` — a bookmark, a typed URL, a legal page's "Sign in" — goes
+	// there instead of quietly showing the marketing page.
+	const FIND_WORKSPACE = '/find-workspace';
+	const isLoginPath = (path: string) => path === '/login' || path.startsWith('/login/');
+
+	$effect(() => {
+		if (hasTenant === false && isLoginPath(page.url.pathname)) {
+			goto(FIND_WORKSPACE, { replace: true });
+		}
+	});
+
 	$effect(() => {
 		if (!hasTenant) return;
 
@@ -77,13 +92,22 @@
 		// data subject with no account is a dead end, not a detour.
 		if (path.startsWith(LEGAL_PREFIX)) return;
 
+		// The page asked for, carried through sign-in as `?next=` so the user
+		// lands back on it (a notification email's /invoices/{id} link) rather
+		// than on the dashboard. `withNext` drops anything that is not a safe
+		// same-origin path, and `/` itself.
+		const here = path + page.url.search;
+
 		if (!auth.loggedIn && !path.startsWith('/login')) {
-			goto('/login');
+			goto(withNext('/login', here), { replace: true });
 			return;
 		}
 
+		// Start loading the account once; the shell's AccountLoadState shows
+		// the load in flight, and a failure waits for the user's Retry rather
+		// than looping here.
 		if (auth.loggedIn && !auth.user) {
-			auth.fetchUser();
+			if (auth.userStatus === 'idle') auth.fetchUser();
 			return;
 		}
 
@@ -92,23 +116,37 @@
 			auth.user?.must_change_password &&
 			path !== '/change-password'
 		) {
-			goto('/change-password');
+			goto(withNext('/change-password', here), { replace: true });
 		}
 	});
 
 	// WCAG 1.4.10 Reflow: on narrow viewports collapse the sidebar to its icon
 	// rail so the 220px panel doesn't force the page wider than the screen. Nav
-	// stays reachable (icon rail), the user can still expand it. Desktop is
-	// unaffected — the breakpoint only fires below 700px.
+	// stays reachable (icon rail), and expanding it there opens the panel as an
+	// OVERLAY over the page (`sidebar.overlay`) rather than pushing the content
+	// into the ~100px a 320px screen has left beside it (#635 finding 39).
+	// Desktop is unaffected — the breakpoint only fires at 700px and below.
 	$effect(() => {
 		if (!browser) return;
 		const mq = window.matchMedia('(max-width: 700px)');
 		const apply = () => {
-			if (mq.matches && !sidebar.collapsed) sidebar.toggle();
+			sidebar.setNarrow(mq.matches);
+			if (mq.matches) sidebar.collapse();
 		};
 		apply();
 		mq.addEventListener('change', apply);
 		return () => mq.removeEventListener('change', apply);
+	});
+
+	// While the overlay is open the page behind it is inert (below) and must not
+	// scroll under the backdrop either — the same lock `ui/Modal` takes.
+	$effect(() => {
+		if (!sidebar.overlay) return;
+		const prev = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.body.style.overflow = prev;
+		};
 	});
 
 	// White-label theming: once the user is fully signed into a tenant, load the
@@ -165,6 +203,10 @@
 	<slot />
 {:else if PUBLIC_PATHS.includes(page.url.pathname)}
 	<slot />
+{:else if hasTenant === false && page.url.pathname === FIND_WORKSPACE}
+	<slot />
+{:else if hasTenant === false && isLoginPath(page.url.pathname)}
+	<!-- Apex /login: on its way to /find-workspace (above); nothing to flash. -->
 {:else if hasTenant === false}
 	<Landing />
 {:else if page.url.pathname.startsWith('/login') || page.url.pathname === '/change-password'}
@@ -173,18 +215,30 @@
 	<div class="app-shell">
 		<!-- WCAG 2.4.1 Bypass Blocks: first focusable element jumps past the
 		     sidebar nav straight to the page content. -->
-		<a href="#main-content" class="skip-link">{m('shell.skipToMain')}</a>
+		<a href="#main-content" class="skip-link" inert={sidebar.overlay}>{m('shell.skipToMain')}</a>
 		<Sidebar />
+		<!-- On a narrow viewport the expanded sidebar floats OVER the page, so
+		     the page keeps the rail's 60px offset and is inert behind the
+		     overlay: no focus, no clicks, hidden from assistive tech until the
+		     panel closes (`sidebar.overlay`). -->
 		<main
 			id="main-content"
 			tabindex="-1"
 			class="main-content"
-			style="margin-left: {sidebar.collapsed ? 60 : 220}px"
+			inert={sidebar.overlay}
+			style="margin-left: {sidebar.collapsed || sidebar.narrow ? 60 : 220}px"
 		>
 			<SectionTabs />
 			<slot />
 		</main>
 	</div>
+{:else if auth.loggedIn && !auth.user}
+	<!-- Signed in, account not loaded yet (or it failed): never a blank page. -->
+	<AccountLoadState
+		status={auth.userStatus}
+		onretry={() => auth.fetchUser()}
+		onlogout={() => auth.logout()}
+	/>
 {/if}
 
 <Toast />

@@ -460,7 +460,17 @@ What the merge does, in one tenant transaction (`app/services/vendor_merge.py`):
 - **Refusals** — self-merge (canonical in the duplicate set) and an empty
   duplicate set → 422; an unknown vendor → 404; a **cross-entity** merge
   (canonical and a duplicate in different entities) → 422 (folding across
-  entities would silently re-home another subsidiary's spend).
+  entities would silently re-home another subsidiary's spend); a
+  **payments-blocked duplicate into an unblocked canonical** → 422 (it would
+  make the held invoices payable — a sanctions-block bypass; the reverse
+  direction is allowed). Each is a coded refusal (`{code, message, params}`,
+  `api/refusals.py::coded_refusal`) so the web app states it in the reader's
+  language: `vendor_merge_self`, `vendor_merge_no_duplicates`,
+  `vendor_merge_canonical_not_found`, `vendor_merge_duplicate_not_found`,
+  `vendor_merge_cross_entity`, `vendor_merge_blocked_duplicate`, plus the
+  endpoint's own `vendor_merge_invalid_id` for an id that is not a UUID.
+  Status codes and the English `message` are unchanged, and `params` is
+  always empty — no vendor name, tax id or bank detail rides on a refusal.
 
 ### Frontend UI
 
@@ -473,12 +483,14 @@ diff table (name / code / masked tax ID / status / invoice count / role, with th
 clustering `reasons` as pills). A per-cluster **Merge into canonical** button uses
 a two-step arm → **Confirm merge** (the fold is soft-retire-irreversible), calls
 `/consolidation/merge` for that cluster's duplicate ids, drops the merged cluster
-from the list, surfaces the backend's 4xx detail (self-merge / cross-entity /
-unknown) in the failure toast, and refreshes the vendor list. API client +
+from the list, surfaces the backend's 4xx refusal (self-merge / cross-entity /
+blocked duplicate / unknown) in the failure toast — in the reader's language,
+through `#lib/api/codedRefusals.ts` — and refreshes the vendor list. API client +
 types: `#lib/api/vendors.ts` (`getVendorConsolidationSuggestions` /
 `mergeVendorConsolidation`) + `#lib/types/vendor.ts`. e2e:
 `frontend/tests-e2e/vendors/consolidation-merge.spec.ts` (seeds a duplicate pair
-sharing a tax id, merges, asserts the duplicate goes `inactive`; plus a clerk who
+sharing a tax id, merges, asserts the duplicate goes `inactive`; a stubbed
+`vendor_merge_blocked_duplicate` refusal stated in German; plus a clerk who
 never sees the action).
 
 ## External enrichment (D&B / Clearbit)

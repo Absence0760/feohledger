@@ -429,7 +429,7 @@
 		font-family: inherit;
 		font-size: 0.9rem;
 		cursor: pointer;
-		transition: all 0.12s;
+		transition: border-color 0.12s;
 	}
 
 	.prompt-btn:hover {

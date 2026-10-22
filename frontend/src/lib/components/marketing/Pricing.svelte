@@ -177,8 +177,8 @@
 		padding: 5px 13px 5px 11px;
 		margin-bottom: 20px;
 		border-radius: 999px;
-		border: 1px solid rgba(99, 140, 255, 0.28);
-		background: rgba(99, 140, 255, 0.10);
+		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+		background: var(--accent-tint);
 		font-size: 0.75rem;
 		font-weight: 600;
 		letter-spacing: 0.08em;
@@ -224,24 +224,22 @@
 		padding: 28px 22px;
 		display: flex;
 		flex-direction: column;
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
-		transition: border-color 0.2s, transform 0.2s, background 0.2s;
 	}
-	.plan:hover {
-		border-color: rgba(99, 140, 255, 0.35);
-		background: rgba(30, 33, 45, 0.75);
-		transform: translateY(-3px);
-	}
+	/* The card does not react to the pointer: only its button does. A card
+	   that lifts under the cursor reads as one big link, and clicking it did
+	   nothing (#635 finding 30). */
 	/* The featured plan gets a gradient BORDER rather than a flat accent one: a
 	   masked pseudo-element painting only the 1px ring, so the card's own
 	   translucent fill still shows the page behind it. */
 	.plan.featured {
 		border-color: transparent;
 		background:
-			radial-gradient(420px 220px at 50% 0%, rgba(99, 140, 255, 0.16), transparent 70%),
-			rgba(28, 31, 44, 0.8);
-		box-shadow: 0 28px 70px -28px rgba(99, 140, 255, 0.45);
+			radial-gradient(420px 220px at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+			color-mix(in srgb, var(--surface) 85%, transparent);
+		box-shadow: 0 28px 70px -28px color-mix(in srgb, var(--accent) 45%, transparent);
 	}
 	.plan.featured::before {
 		content: '';
@@ -249,7 +247,7 @@
 		inset: -1px;
 		border-radius: inherit;
 		padding: 1px;
-		background: linear-gradient(160deg, #7d9bff, #a37dff 50%, rgba(231, 185, 94, 0.7));
+		background: linear-gradient(160deg, var(--accent-on-tint), var(--brand-violet) 50%, color-mix(in srgb, var(--gilt) 70%, transparent));
 		mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
 		mask-composite: exclude;
 		pointer-events: none;
@@ -285,7 +283,7 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.plan.featured .amount {
-		background: linear-gradient(135deg, #7d9bff, #a37dff);
+		background: linear-gradient(135deg, var(--accent-on-tint), var(--brand-violet));
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
@@ -305,7 +303,7 @@
 		text-decoration: none;
 		font-weight: 600;
 		font-size: 0.9rem;
-		background: rgba(15, 17, 23, 0.5);
+		background: color-mix(in srgb, var(--bg) 50%, transparent);
 		color: var(--text);
 		border: 1px solid var(--border);
 		margin-bottom: 24px;
@@ -318,11 +316,11 @@
 		background: var(--accent-strong);
 		color: #fff;
 		border-color: var(--accent-strong);
-		box-shadow: 0 12px 30px -12px rgba(99, 140, 255, 0.9);
+		box-shadow: 0 12px 30px -12px var(--accent-glow);
 	}
 	.plan-cta.primary:hover {
 		transform: translateY(-1px);
-		box-shadow: 0 16px 34px -12px rgba(99, 140, 255, 1);
+		box-shadow: 0 16px 34px -12px color-mix(in srgb, var(--accent) 70%, transparent);
 	}
 
 	.plan-features {
@@ -412,7 +410,8 @@
 		padding: 20px 24px;
 		border-radius: 14px;
 		border: 1px solid var(--border);
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 	}
 	.ai-read h3 {
 		font-size: 1rem;

@@ -33,6 +33,17 @@ export default defineConfig(({ mode }) => {
 	// `BASE_PATH` (unprefixed, so `loadEnv` needs the empty prefix to see it) is
 	// the sub-path escape hatch — unset everywhere today.
 	const { BASE_PATH } = loadEnv(mode, ".", "BASE_PATH");
+	// Where SvelteKit writes its generated modules — `.svelte-kit` unless a
+	// caller names another. It has to be nameable because the dev server writes
+	// the resolved `PUBLIC_*` values into `<outDir>/generated/dev/env/*` when it
+	// starts, and each running server's watcher reloads from those files: two
+	// `vite dev` processes in ONE checkout (an e2e run on its own port beside a
+	// `pnpm dev`, or two e2e runs) therefore shared one `PUBLIC_API_URL`, the
+	// last one started, and the other server's pages called the wrong backend.
+	// `tests-e2e/playwright.config.ts` gives each e2e dev server its own
+	// directory, keyed by port. A build or `vite preview` must keep the default
+	// (preview serves `<outDir>/output`, which `pnpm build` wrote there).
+	const { SVELTEKIT_OUT_DIR } = loadEnv(mode, ".", "SVELTEKIT_OUT_DIR");
 	const apiProxy = {
 		"/api": {
 			target: env.PUBLIC_API_URL || "http://localhost:8000",
@@ -61,6 +72,7 @@ export default defineConfig(({ mode }) => {
 					base: (BASE_PATH || "") as "" | `/${string}`,
 				},
 				inlineStyleThreshold: 0,
+				outDir: SVELTEKIT_OUT_DIR || ".svelte-kit",
 			}),
 			Icons({
 				autoInstall: true,

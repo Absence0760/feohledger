@@ -39,14 +39,19 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (the `feoh_app` cutover prune, #638, and the bundle-metric change, #640) into the uptime-checks branch; both sides kept, taking the file to 134. Before that, 2026-10-21 — merging main (§307, §308, §310 and the #575
-round-1 entries) into the uptime-checks branch; both sides' entries kept, taking
-the file to 136. Before that, 2026-10-21 — merging main (§305, §306) into the
-uptime-checks branch; both sides' entries kept, taking the file to 133.
-Before that, 2026-10-21 — the external uptime checks (decisions §311)
-opened one (c) entry, the VM's Let's Encrypt certificates going unwatched,
-and one (b) entry, turning on SMS paging, taking the file from 126 → 128.
-Before that, 2026-10-21 — merging main (§305, §306) into the #575 round-1 branch, both sides' entries kept, taking the file to 134. Before that, 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
+**Last reconciled:** 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+(c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
+that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
+entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
+2026-10-21 — merging main (§306 workspace closure, #624, #632) into the
+first-client UX branch (issue #635); both sides' entries kept, this branch's decisions renumbered
+§312–§315, taking the file to 137. Before that, 2026-10-21 — coding the shared rate limiter's 429 (issue
+#635) opened one (c) entry, the assistant stream reading every 429 as a budget
+error, taking the file from 131 → 132. Before that, 2026-10-21 — the sidebar renames (issue #635 #23,
+decisions §314) opened one (c) entry, hiding Partner Admin from non-partners,
+taking the file from 130 → 131. Before that, 2026-10-21 — extracting `ui/LoadError` (issue #635) opened
+one (c) entry, the pages still hand-rolling a load-error + Retry block, taking
+the file from 129 → 130. Before that, 2026-10-21 — merging main (§305, §306) into the #575 round-1 branch, both sides' entries kept, taking the file to 134. Before that, 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
 decisions §305) opened three (c) entries — the modal's assignee clause, bulk
 status approving a draft past review, and the pages still restating server
 predicates — taking the file from 126 → 129. Before that, 2026-10-21 — storing the ERP document id on the invoice
@@ -221,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**134 open: 115 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**139 open: 120 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2142,6 +2147,90 @@ providers still have the same gap.
       ones (settlement, ERP sync, run record / NACHA, expense approval) first.
       **Trigger:** the next change to any of those controls, or a report of a
       button that 403s / 409s.
+
+### Surfaced by extracting `ui/LoadError` (2026-10-21, issue #635)
+
+- [ ] **(c) About a dozen pages still hand-roll the load-error + Retry block.**
+      `ui/LoadError.svelte` (`frontend/docs/component-library.md`) now owns "a
+      failed load, stated in place, with Retry" — including moving focus to
+      `<main>` on Retry, so a keyboard user is not dropped onto `<body>` when
+      the block unmounts. The dashboard and `/organization` use it; `/catalogs`,
+      `/admin/entities`, `/admin/api-keys`, `/admin/webhooks`,
+      `/bank-reconciliation` (page + `StatementDetailModal`),
+      `ScheduledReportsPanel` and the other `role="alert"` + Retry copies
+      (`grep -rln 'role="alert"' frontend/src/routes | xargs grep -l -i retry`)
+      still carry their own markup and their own retry key, and lose focus the
+      same way. **Durable fix:** render `<LoadError message onretry testId />`
+      in each, drop the private `*.retry` keys for `common.retry`, and move
+      each page's spec selector to its `testId`. **Trigger:** the next change to
+      any of those pages, or a focus-order (WCAG 2.4.3) report on a retry.
+
+### Surfaced by the sidebar renames (2026-10-21, issue #635 #23, decisions §314)
+
+- [ ] **(c) Partner Admin shows to every admin, partner or not — needs a product
+      call.** #635 asked to hide the row unless the workspace is a partner, but
+      nothing says so: `GET /api/partner`'s `is_partner` is derived from having
+      at least one child, and `/admin/partner` is also where a standalone org
+      provisions or attaches its first child (how it becomes a partner) and
+      mints the link code that consents to being adopted. Gating the row on
+      `is_partner` would strand both and break "the sidebar gate and the page's
+      gate agree" (`frontend/CLAUDE.md`). **Durable fix:** an operator-granted
+      partner capability (plan entitlement, or `organizations.is_partner`) on
+      `/auth/me`, the `/api/partner` routes gated on it, the link-code minting
+      moved to Organization settings (any admin may consent to adoption), and
+      the nav row gated on the capability. **Trigger:** the product decision on
+      who may act as a partner, or the next partner/reseller onboarding.
+
+### Surfaced by fixing the payments-spec data leak (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) Some e2e spec leaks draft payment runs, and `queue.spec` leaks a vendor.**
+      After `delete-gate.spec` stopped leaking blocked invoices (16d74798), a
+      check of the local e2e tenants found 20 draft payment runs on e2e2 dated
+      2026-09-05..07 that no spec removes. A draft run holding live payments
+      keeps those invoices out of the payment queue, which is the same
+      cross-spec interference that broke `execute.spec`.
+      `payments/queue.spec.ts`'s `createApprovedInvoice` also leaves its
+      auto-created `E2E Pluralization Vendor` behind. It has no invoices, so it
+      is inert today. **Durable fix:** find the spec that creates draft runs
+      (grep `payment-runs` POSTs without a matching `deletePaymentRun` in an
+      `afterEach`) and give it prefix-scoped cleanup. Remove the pluralization
+      vendor in `queue.spec`'s teardown, and extend `meta/teardown-guard` to
+      catch a spec that creates a payment run or vendor without removing it.
+      **Trigger:** the next payments e2e flake, or the next pass over
+      `meta/teardown-guard`.
+
+### Surfaced by removing `transition: all` (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) Three pages hand-roll a button the shared library already owns.**
+      `routes/invoices/+page.svelte` (`.bulk-delete-btn`) and
+      `InvoiceModal.svelte` (`.btn-delete-outline`) restyle the destructive
+      bulk/delete button instead of rendering `ui/BulkDeleteButton.svelte`.
+      `routes/cash-flow/+page.svelte` (`.prompt-btn`) restyles the example-prompt
+      chips instead of rendering `assistant/ExamplePrompts.svelte`. The copies
+      drift: narrowing `transition: all` (commits f5efe887, 2f25ef56)
+      had to find and fix each one by hand, and one copy was missed in the first
+      sweep. **Durable fix:** render the shared components at those three sites,
+      extending their props if a site needs a variant (guard rail 9), and delete
+      the copied CSS. Cover each with the existing page specs (bulk delete on
+      `/invoices`, the invoice modal's delete, the cash-flow prompt chips).
+      **Trigger:** the next change to any of those buttons, or the next
+      component-library pass.
+
+### Surfaced by coding the shared rate limiter's 429 (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) The assistant stream reads any 429 as "AI budget reached".**
+      `streamAssistantChat` (`frontend/src/lib/api.ts`, the `res.status === 429`
+      branch) builds an `AssistantBudgetError` from every 429, reading
+      `detail as string` plus `used` / `budget` / `period`. Today only the
+      assistant's own budget mapping (`backend/app/api/assistant.py`) answers 429
+      on `/chat/stream`, so it is correct. But the shared limiter's 429 is now the
+      coded `rate_limited` refusal, so if that limiter is ever put in front of the
+      assistant, a rate-limit refusal would show as "budget reached 0 / 0".
+      **Durable fix:** treat a 429 as a budget error only when the body carries
+      `budget`, and send any other 429 through `apiErrorFromBody` so the coded
+      refusal is localized like everywhere else. Cover both with a stubbed
+      stream e2e. **Trigger:** any change that rate-limits `/api/assistant/*`, or
+      the next edit to `streamAssistantChat`.
 
 ### Surfaced by adding external uptime checks (2026-10-21, decisions §311)
 

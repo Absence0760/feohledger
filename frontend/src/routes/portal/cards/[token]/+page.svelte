@@ -3,6 +3,7 @@
 	import { api } from '#lib/api.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	interface RevealResponse {
 		last_four: string | null;
@@ -32,10 +33,10 @@
 		try {
 			card = await api.get<RevealResponse>(`/api/portal/cards/${token}`);
 		} catch (err) {
-			const e = err as { status?: number; message?: string; detail?: string } | null;
+			const e = err as { status?: number } | null;
 			error = {
 				status: e?.status ?? 0,
-				message: e?.detail ?? e?.message ?? m('portal.cards.loadFailed')
+				message: errorMessage(err, m('portal.cards.loadFailed'))
 			};
 		} finally {
 			loading = false;

@@ -33,7 +33,11 @@ test.describe('auth wall (acme tenant, anon visitor)', () => {
 			// `goto('/login')` runs in onMount once auth state resolves.
 			// Wait for the redirect rather than asserting on the initial
 			// URL — Svelte navigation isn't instant.
-			await page.waitForURL(/\/login$/, { timeout: 5_000 });
+			await page.waitForURL((url) => url.pathname === '/login', { timeout: 5_000 });
+			// The page asked for rides along as ?next= so sign-in returns
+			// there (post-login-redirect.spec.ts); the dashboard is the
+			// default and is not carried.
+			expect(new URL(page.url()).searchParams.get('next')).toBe(path === '/' ? null : path);
 			await expect(page.locator('input[type="password"]')).toBeVisible();
 		});
 	}

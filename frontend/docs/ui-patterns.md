@@ -941,6 +941,8 @@ the `ui/` primitive in the Source column.
 | Money / currency | `<Money>` / `formatMoney` | `ui/Money.svelte` / `utils/money.ts` |
 | Field-level advisory | `.field-warning` (`role="status"`) | `ui/FieldWarning.svelte` |
 | Zero-data onboarding block | `.empty-state` (+ `data-testid`) | `ui/EmptyState.svelte` |
+| Setup steps with done states | `.setup-checklist` (`li[data-done]`) | `ui/SetupChecklist.svelte` |
+| Failed load + Retry (page, or whole screen) | `.load-error` (`role="alert"` in a page) | `ui/LoadError.svelte` |
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
 
@@ -1043,7 +1045,16 @@ inherit it for free. Reuse these; don't re-solve them per page.
   motion test reads computed opacity up the ancestor chain
   (`tests-e2e/marketing/landing.spec.ts`), and the axe scans of these pages run
   under `emulateMedia({ reducedMotion: 'reduce' })` so contrast is measured at
-  rest rather than mid-fade.
+  rest rather than mid-fade. That emulation does not shorten a transition
+  already running, so `expectNoA11yViolations` also waits for
+  `document.getAnimations()` to finish first (`tests-e2e/README.md`
+  § Accessibility guard).
+
+  **Name the properties a hover transition animates; never `transition: all`.**
+  `all` also animates the colour tokens on a theme change, so text fades
+  through sub-4.5:1 values for the length of the transition (#635). Transition
+  `border-color`, or `background-color` where the resting background is
+  `none` or transparent, and let colours swap at once.
 - **Modal / focus trap** (`ui/Modal.svelte` + `#lib/actions/focusTrap.ts`;
   WCAG 2.1.2 / 2.4.3) — `use:focusTrap={{ onEscape }}` on a dialog box
   (with `tabindex="-1"`) moves focus in on open, traps Tab / Shift+Tab
@@ -1064,10 +1075,82 @@ inherit it for free. Reuse these; don't re-solve them per page.
   `StepNode` pairs its drag handle with per-node Move ↑ / Move ↓ buttons
   (`onmoveup`/`onmovedown` over the canvas `onreorder`). Mirror this for any
   new drag interaction; don't ship drag as the only path.
-- **Toast** (`ui/Toast.svelte`; WCAG 4.1.3) — `role="region"` +
-  two persistent live containers (`aria-live="assertive"` for errors,
-  `"polite"` for the rest). Each toast has a real `<button>` dismiss
-  (`aria-label="Dismiss notification"`); auto-dismiss timer kept.
+- **Toast** (`ui/Toast.svelte`; WCAG 4.1.3, 2.2.1) — `role="region"` named
+  "Status messages" (`toast.region`; not "Notifications", which is the sidebar
+  bell's name) + two persistent live containers (`aria-live="assertive"` for
+  errors, `"polite"` for the rest). Each toast has a real 24px `<button>`
+  dismiss (`toast.dismiss`). **Timing (decisions §313, superseding the fixed
+  5-second timer this entry used to call deliberate):** an **error stays until
+  dismissed** — an explicit `duration` does not change that; every other toast
+  times out (5 s, or the caller's explicit `duration`), but its clock **stops
+  while the pointer is over a toast or focus is inside the region**, and runs
+  on with the time it had left. At most three errors stay on screen (the
+  oldest goes), and the same error text arriving again replaces its old copy —
+  a fresh insertion, so it is announced again. When a focused toast leaves
+  (dismissed, evicted by the cap, replaced), focus moves to the next toast's
+  dismiss, or back to where it came from when it was the last (`<main>` if that
+  element is gone). The region rises above a showing bulk-action bar
+  (`.bulk-bar`) and the consent banner, and a toast is never wider than
+  `100vw − 32px` (2.4.11, 1.4.10). **A toast never covers any part of an open
+  modal dialog** (a `role="dialog"` with `aria-modal="true"` — every dialog here
+  carries both): when the corner stack would touch the dialog's box, the dialog
+  **yields a band** at the bottom of the viewport and the stack sits in it,
+  beside the dialog (`utils/toastPlacement.ts`, #635, #636). The backdrop's
+  bottom padding grows to the band and the dialog's height is capped to what is
+  left; its own scrolling takes the rest, each scroller keeping its distance from
+  its bottom (so the footer the reader retries from stays in view) and the
+  focused control scrolled into view. The stack takes at most 40% of the
+  viewport's height and scrolls past that. Once yielded the band is kept, and
+  only grows, until the dialog closes: a dialog moving back as a toast left
+  would slide its footer under the pointer that just dismissed it (on a phone,
+  an armed "Confirm cancel"). A click in the band does not close the dialog
+  (it is backdrop, which every shell reads as "close"), a new viewport
+  (rotation, zoom) recomputes the cap, and the band is only taken from a dialog
+  whose parent is a full-viewport fixed backdrop. A dialog the corner does not
+  touch never moves.
+  Steering the stack around the dialog's contents was tried first (around the
+  footer, then the focused control) and cannot work: a dialog is controls top to
+  bottom, so on a phone there is no gap — the payment run's error sat over
+  "Record run as paid…" in its body. A new dialog needs nothing for this beyond
+  being centred in a full-viewport backdrop (its parent), the rule below.
+  **The region is hosted inside the topmost modal dialog** while one is open
+  (appended last, still
+  `position: fixed`), and goes back to its place in the layout when the dialog
+  closes: `aria-modal` hides everything outside the dialog from assistive tech
+  (WebKit and Chromium prune it), so a region left outside was not announced
+  and its dismiss buttons could not be reached. `actions/focusTrap` puts the
+  region's dismiss buttons (`data-dialog-satellite`) after the dialog's own
+  controls in its Tab cycle — last control → toasts → first control,
+  Shift+Tab the reverse — and never gives one the dialog's initial focus;
+  dismissing the last toast hands focus back to the dialog control it came
+  from (2.1.1, 2.4.3). Escape on a focused toast dismisses that toast, not the
+  dialog. The trap is told which dialogs are modal by the `aria-modal`
+  attribute, so a new dialog without it neither hosts the region nor is
+  avoided by it. **A modal's backdrop must be `position: fixed; inset: 0`**:
+  every backdrop has `backdrop-filter`, which makes it the containing block of
+  the hosted (fixed) region, and only a full-viewport backdrop keeps the stack
+  in the viewport corner. A toast inserted while the region was detached or
+  outside the open modal is re-inserted once the region has moved, so it is
+  still announced. Browser guard:
+  `tests-e2e/a11y/toast-timing.spec.ts` (Playwright clock, no sleeps). The
+  rules are the pure `utils/toastQueue.ts` (unit-tested with fake timers).
+  **A toast is never the only sign of a failed LOAD**: a page whose data did not
+  arrive says so in place with `ui/LoadError` and a Retry (the vendors list and
+  the notification bell are the worked examples); a toast reports an action's
+  outcome. **One error, one signal:** an error a dialog or panel already states
+  in place — a `role="alert"` element beside the control that failed — is not
+  also toasted. `role="alert"` is announced the moment it appears, so the copy
+  added nothing for a screen-reader user, and since an error toast no longer
+  times out it sat over the dialog until dismissed (the payment run's NACHA
+  refusal, stated in its panel AND toasted, covered "Record run as paid…"). A
+  form that has an error slot puts its own client-side refusals there too
+  (`cfo/ForecastVariancePanel`). A failed LOAD's generic in-place block may
+  still be paired with a toast carrying the server's own detail — the two say
+  different things. Guard: `src/lib/a11y/errorDoubleReport.test.ts` (Svelte AST:
+  no `toast(…, 'error')` passes a variable rendered inside `role="alert"`, or
+  sits on the same code path as an assignment to one — or, for an `{#if flag}`
+  alert with fixed words, raises fixed words too). It reads one file at a time,
+  so an error state passed down to a child component is outside it.
 - **Inline form feedback** (WCAG 4.1.3) — a message that appears in response
   to an action (`{#if saved}<div class="message">…`) must be announced, not
   just shown. A polite status sits inside a live region that already exists
@@ -1079,6 +1162,19 @@ inherit it for free. Reuse these; don't re-solve them per page.
   forgot/reset-password pages do. Guard: `src/lib/a11y/liveRegionAudit.test.ts`
   (Svelte-AST scan of every `{#if}`-rendered `error` / `message` / `msg` /
   `success` element; the two non-feedback matches are an explained allowlist).
+- **Field validation** (WCAG 3.3.1, 3.3.3) — keep Submit **enabled** and
+  validate on submit: a Submit disabled until the form is valid gives no reason,
+  and any message it guards can never appear (issue #635 #14). On submit, mark
+  every bad field (`aria-invalid`, its message beside it and first in its
+  `aria-describedby`) and move focus to the first one — focus is what reads the
+  message, so don't also put it in a live region. A server refusal that is
+  about one field (a wrong current password, a refused new one) goes beside
+  that field the same way and clears when it is edited; only what belongs to
+  no field stays in the banner. A message that appears while focus is elsewhere
+  (a confirmation mismatch shown on blur) is the one case for a polite live
+  region, rendered empty up front. Reference: `auth/PasswordInput.svelte`,
+  `auth/NewPasswordFields.svelte`, `/change-password`. Help text such as a
+  rules checklist is linked by `aria-describedby` too, after the error.
 - **Tabs** (`ui/Tabs.svelte`; WAI-ARIA tabs) — roving `tabindex`
   (active=0, others=-1) + Arrow/Home/End key navigation, plus the
   existing `role=tablist/tab` + `aria-selected` + `aria-controls`. The
@@ -1128,6 +1224,26 @@ inherit it for free. Reuse these; don't re-solve them per page.
   `<Badge tone="danger">Below minimum</Badge>` in the Closing cell, the
   `/payments` queue's overdue rows an "Overdue" badge. The banner above a table
   can give the count; only the row can say which.
+- **Sidebar on a phone** (WCAG 1.4.10, 2.1.2, 2.4.3; #635) — at 700px and
+  below the sidebar starts as its 60px icon rail, and expanding it opens the
+  panel as an **overlay**, never a push: `<main>` keeps the rail's 60px offset
+  and its full width, a `--overlay` backdrop covers it, and `<main>` plus the
+  skip link carry `inert` while it is open (with the body scroll lock `ui/Modal`
+  takes). Focus moves to the first nav row on open and back to the toggle when
+  Escape or the backdrop closes it; following a link closes it too. A popup
+  inside the panel (bell, entity menu, profile) takes Escape first — the panel
+  reads `[aria-expanded="true"]` inside itself, so the order the window
+  listeners run in does not matter. The open panel stacks at z-index 55
+  (backdrop 54): above a page's own fixed bars (`BulkBar` is 50), below
+  modals (100). It stays the primary-nav landmark rather than becoming a
+  `role="dialog"` — the inert page already confines the screen reader to it,
+  and the toggle's name ("Collapse sidebar") states that it is open. The
+  rail's buttons transition `background-color` only, never `all`: a colour
+  transition fades the muted labels through sub-4.5:1 values on every theme
+  change. Desktop keeps the push layout. State lives
+  in `stores/sidebar.svelte.ts` (`narrow`, `overlay`). Guard:
+  `tests-e2e/a11y/sidebar-overlay.spec.ts` (375 and 320px, both themes under
+  axe, desktop unchanged).
 - **Icon-only controls** — every icon-only `<button>` needs an
   `aria-label` (NotificationBell reflects the unread count; the sidebar
   collapse toggle + profile button carry `aria-label` + `aria-expanded`).
@@ -1212,16 +1328,26 @@ script only decides which one the page asks for.
   `AuthShell` page. It is listed on the Cookie Notice (`feoh_theme`), which
   with the Privacy Policy says it is the only cookie the app sets —
   `storageInventory.test.ts` fails if a second `document.cookie =` appears.
-- **What follows the theme:** the signed-in app, the auth shell (`AuthShell`,
-  signup, MFA, reset), the supplier portal, the help centre and the legal
-  pages. **What does not:** the marketing landing page (`Landing` and the
-  components only it renders — `Pricing`, `HeroPipeline`, `AdapterRail`). Its
-  rendered ornament, grain and glass panels were designed on navy, so its root
-  carries `data-theme-scope="dark"`, which `app.css` includes in the dark
-  palette's selector list: custom properties inherit, so redeclaring the dark
-  tokens on that element pins the whole subtree. The light audit skips those
-  four files; `tokenPairing.test.ts` proves each is rendered only inside the
-  pinned root, so a component cannot be pinned and then reused elsewhere.
+- **Everything follows the theme:** the signed-in app, the auth shell
+  (`AuthShell`, signup, MFA, reset), the supplier portal, the help centre, the
+  legal pages and the marketing landing page (decisions §312, which ended
+  §289's dark pin). There is no per-subtree palette pin, and
+  `tokenPairing.test.ts` fails if a `data-theme-scope` reappears. The landing
+  page's header carries a compact `ThemePicker` (an anonymous visitor has no
+  `/profile`).
+- **The public pages' brand colours are tokens too.** `--gilt` (the tally's
+  gold) and `--brand-violet` are the gradient stops beside the accent blue
+  (headline, stat figures, pipeline rail, featured-plan ring); `--drop-shade`
+  is the cast shadow under a lit object. Each has a light value, and the stops
+  are held to 4.5:1 on `--bg` / `--surface` in both palettes, because a
+  `background-clip: text` gradient is something the rule scan cannot measure.
+  The marketing components may type no colour literal at all except `#fff` on
+  a `-strong` fill and a mask's `#000` (the same test).
+- **A raster picks its file from `theme.resolved`.** The rendered tally
+  ornament has a lighting per palette (`#lib/marketing/ornament.ts`, generated
+  by `pnpm gen:marketing`); a `<picture>` with a `prefers-color-scheme` source
+  would follow the OS and ignore a stored choice. Both renders share one
+  intrinsic size so a theme switch never moves the layout.
 - **A new colour token goes in both palettes**, measured in both. The light
   base tokens are deliberately darker than the bare-surface bar needs: ~40
   rules set a base token as text on a 10–20% tint of its own hue, and each base

@@ -24,6 +24,23 @@ from app.models.procurement import PurchaseOrder
 from app.models.vendor import Vendor
 from app.models.vendor_priors import VendorExtractionPrior
 from app.models.workflow import AuditLog
+from app.services.vendor_merge import (
+    VENDOR_MERGE_BLOCKED_DUPLICATE,
+    VENDOR_MERGE_CANONICAL_NOT_FOUND,
+    VENDOR_MERGE_CROSS_ENTITY,
+    VENDOR_MERGE_DUPLICATE_NOT_FOUND,
+    VENDOR_MERGE_INVALID_ID,
+    VENDOR_MERGE_NO_DUPLICATES,
+    VENDOR_MERGE_SELF,
+)
+
+_MERGE_URL = "/api/enrichment/vendors/consolidation/merge"
+
+
+def _assert_coded_refusal(r, status: int, code: str, message: str) -> None:
+    # Empty params: no vendor name, tax id or bank detail rides on a refusal.
+    assert r.status_code == status, r.text
+    assert r.json()["detail"] == {"code": code, "message": message, "params": {}}
 
 
 async def _seed_vendor(
@@ -236,8 +253,14 @@ async def test_merge_refuses_self_merge(realdb):
     body = {"canonical_vendor_id": str(v), "duplicate_vendor_ids": [str(v)]}
     async with realdb.client(key="a", role="ap_manager") as client:
         r = await client.post("/api/enrichment/vendors/consolidation/merge", json=body)
-    assert r.status_code == 422
-    assert "self-merge" in r.json()["detail"].lower()
+    _assert_coded_refusal(
+        r,
+        422,
+        VENDOR_MERGE_SELF,
+        "The canonical vendor cannot also be a duplicate (self-merge).",
+    )
+    async with mk() as s:
+        assert (await s.get(Vendor, v)).status == "active"
 
 
 async def test_merge_refuses_empty_duplicates(realdb):
@@ -247,7 +270,11 @@ async def test_merge_refuses_empty_duplicates(realdb):
     body = {"canonical_vendor_id": str(v), "duplicate_vendor_ids": []}
     async with realdb.client(key="a", role="ap_manager") as client:
         r = await client.post("/api/enrichment/vendors/consolidation/merge", json=body)
-    assert r.status_code == 422
+    _assert_coded_refusal(
+        r, 422, VENDOR_MERGE_NO_DUPLICATES, "At least one duplicate vendor is required."
+    )
+    async with mk() as s:
+        assert (await s.get(Vendor, v)).status == "active"
 
 
 async def test_merge_refuses_cross_entity(realdb):
@@ -273,8 +300,12 @@ async def test_merge_refuses_cross_entity(realdb):
     body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(dup)]}
     async with realdb.client(key="a", role="ap_manager") as client:
         r = await client.post("/api/enrichment/vendors/consolidation/merge", json=body)
-    assert r.status_code == 422
-    assert "entit" in r.json()["detail"].lower()
+    _assert_coded_refusal(
+        r,
+        422,
+        VENDOR_MERGE_CROSS_ENTITY,
+        "Cannot merge vendors that belong to different entities.",
+    )
 
     # Nothing changed — the duplicate stays active.
     async with mk() as s:
@@ -296,8 +327,15 @@ async def test_merge_refuses_blocked_duplicate_into_unblocked_canonical(realdb):
     body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(dup)]}
     async with realdb.client(key="a", role="ap_manager") as client:
         r = await client.post("/api/enrichment/vendors/consolidation/merge", json=body)
-    assert r.status_code == 422
-    assert "block" in r.json()["detail"].lower()
+    _assert_coded_refusal(
+        r,
+        422,
+        VENDOR_MERGE_BLOCKED_DUPLICATE,
+        "Cannot merge a payments-blocked vendor into an unblocked canonical — resolve the "
+        "block first (see the vendor's screening review) or exclude it from this merge.",
+    )
+    # The sanctions reason seeded on the duplicate never reaches the refusal.
+    assert "sanctions hit" not in r.text
 
     # Nothing changed: the duplicate is still blocked/active, the canonical
     # is still unblocked, and the held invoice was NOT reassigned to the
@@ -338,7 +376,30 @@ async def test_merge_unknown_vendor_404(realdb):
     body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(uuid.uuid4())]}
     async with realdb.client(key="a", role="ap_manager") as client:
         r = await client.post("/api/enrichment/vendors/consolidation/merge", json=body)
-    assert r.status_code == 404
+    _assert_coded_refusal(
+        r, 404, VENDOR_MERGE_DUPLICATE_NOT_FOUND, "A duplicate vendor was not found."
+    )
+    async with mk() as s:
+        assert (await s.get(Vendor, canonical)).status == "active"
+
+
+async def test_merge_unknown_canonical_404(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    dup = await _seed_vendor(mk, org_id, name="OrphanDupCo")
+    body = {"canonical_vendor_id": str(uuid.uuid4()), "duplicate_vendor_ids": [str(dup)]}
+    async with realdb.client(key="a", role="ap_manager") as client:
+        r = await client.post(_MERGE_URL, json=body)
+    _assert_coded_refusal(r, 404, VENDOR_MERGE_CANONICAL_NOT_FOUND, "Canonical vendor not found.")
+    async with mk() as s:
+        assert (await s.get(Vendor, dup)).status == "active"
+
+
+async def test_merge_malformed_vendor_id_422(realdb):
+    body = {"canonical_vendor_id": "not-a-uuid", "duplicate_vendor_ids": [str(uuid.uuid4())]}
+    async with realdb.client(key="a", role="ap_manager") as client:
+        r = await client.post(_MERGE_URL, json=body)
+    _assert_coded_refusal(r, 422, VENDOR_MERGE_INVALID_ID, "Invalid vendor id.")
 
 
 async def test_merge_clerk_forbidden(realdb):

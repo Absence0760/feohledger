@@ -17,8 +17,16 @@ their spacing, so the render can be re-derived from this file alone. Everything
 is authored in metres at roughly the scale the object had in life (a ~24 cm
 stick), which is what keeps the bevel widths and the depth-of-field plausible.
 
-Output: assets/marketing/render/tally-split.png (RGBA, transparent film), which
-gen-marketing.sh downsamples into frontend/static/marketing/.
+Output: assets/marketing/render/tally-split[-light].png (RGBA, transparent
+film), which gen-marketing.sh downsamples into frontend/static/marketing/.
+
+Two lightings of the same object, picked by TALLY_VARIANT (docs/decisions.md
+§312). `dark` (the default) is the original, composed for the navy page: a cool
+blue fill and rim keep the shadow side off black. `light` is for the light
+page: the same geometry, camera and depth of field — so the trimmed frame and
+the alpha are identical and the page can swap one file for the other with no
+layout change — but lit for a pale ground, where the dark lighting's
+cream-white highlights dissolved into the page and the object lost its edges.
 """
 import math
 import os
@@ -33,7 +41,34 @@ HERE = os.path.dirname(os.path.abspath(bpy.data.filepath or __file__))
 # want; the filepath fallback above only matters if this is ever run from a
 # saved .blend.
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "render", "tally-split.png")
+VARIANT = os.environ.get("TALLY_VARIANT", "dark")
+if VARIANT not in {"dark", "light"}:
+    sys.exit(f"TALLY_VARIANT must be 'dark' or 'light', not {VARIANT!r}")
+OUT = os.path.join(HERE, "render", "tally-split.png" if VARIANT == "dark" else "tally-split-light.png")
+
+# What differs between the two lightings. Everything else in the scene is
+# shared, on purpose: the variants must trim to the same frame.
+LIGHTING = {
+    "dark": {
+        "fill": dict(energy=2.4, color=(0.52, 0.63, 1.0)),
+        "rim": dict(energy=7, color=(0.70, 0.80, 1.0)),
+        "softbox": 4.0,
+        "exposure": 0.0,
+    },
+    # On a pale page the problem inverts: nothing needs rescuing from black, and
+    # the faces that reflect the softbox render as near-white cream — the same
+    # value as the page, so the near edges vanish. A dimmer softbox and a
+    # stop-and-a-bit less exposure keep every face in the gold range; the fill
+    # goes warm and weak (a blue cast reads as dirt on white rather than as
+    # depth), and the rim drops so the underside reads as shadow, which is what
+    # separates a light object from a light ground.
+    "light": {
+        "fill": dict(energy=1.2, color=(1.0, 0.90, 0.78)),
+        "rim": dict(energy=3.0, color=(0.92, 0.90, 0.95)),
+        "softbox": 2.4,
+        "exposure": -0.45,
+    },
+}[VARIANT]
 
 # ── the stick ────────────────────────────────────────────────────────────────
 LENGTH = 0.24          # 24 cm, a working Exchequer tally's order of magnitude
@@ -209,6 +244,16 @@ def aim(ob, target):
     return empty
 
 
+def gpu_backend_available(prefs, backend):
+    """Whether this Blender build and machine offer `backend` with a device."""
+    try:
+        prefs.compute_device_type = backend
+    except TypeError:  # the enum has no such member on this platform
+        return False
+    prefs.get_devices()
+    return any(d.type == backend for d in prefs.devices)
+
+
 def camera_distance(frame_width, lens, sensor=36.0):
     """How far back an unrotated `lens` mm camera must sit to frame that width.
 
@@ -271,12 +316,11 @@ def main():
     # stripe, which is the whole subject gone.
     area_light("key", (0.34, -0.30, 0.40), size=0.26, energy=11,
                color=(1.0, 0.95, 0.86))
-    # The fill is the product's own blue: it keeps the shadow side from going to
-    # black on --bg without adding a second warm source.
-    area_light("fill", (-0.42, 0.22, 0.10), size=0.60, energy=2.4,
-               color=(0.52, 0.63, 1.0))
-    area_light("rim", (-0.16, -0.40, -0.26), size=0.35, energy=7,
-               color=(0.70, 0.80, 1.0))
+    # Dark variant: the fill is the product's own blue, which keeps the shadow
+    # side from going to black on --bg without adding a second warm source. The
+    # light variant's values and their reasoning are in LIGHTING above.
+    area_light("fill", (-0.42, 0.22, 0.10), size=0.60, **LIGHTING["fill"])
+    area_light("rim", (-0.16, -0.40, -0.26), size=0.35, **LIGHTING["rim"])
 
     studio_world(scene)
 
@@ -294,7 +338,7 @@ def main():
     tree.nodes.remove(tree.nodes["Principled BSDF"])
     emission = tree.nodes.new("ShaderNodeEmission")
     emission.inputs["Color"].default_value = (1.0, 0.97, 0.92, 1.0)
-    emission.inputs["Strength"].default_value = 4.0
+    emission.inputs["Strength"].default_value = LIGHTING["softbox"]
     tree.links.new(emission.outputs["Emission"], tree.nodes["Material Output"].inputs["Surface"])
     panel.data.materials.append(emitter)
     panel.visible_camera = False
@@ -327,11 +371,19 @@ def main():
     # ── render ───────────────────────────────────────────────────────────────
     scene.render.engine = "CYCLES"
     prefs = bpy.context.preferences.addons["cycles"].preferences
-    prefs.compute_device_type = "OPTIX"
-    prefs.get_devices()
-    for device in prefs.devices:
-        device.use = device.type in {"OPTIX", "CPU"}
-    scene.cycles.device = "GPU"
+    # OptiX on the NVIDIA workstation the ornament was first rendered on, Metal
+    # on Apple silicon; CPU only when neither backend exists. The device changes
+    # noise, not the image — the denoiser and 256 samples converge either way —
+    # but a re-render on a different backend is not byte-identical to the last.
+    backend = next((b for b in ("OPTIX", "METAL") if gpu_backend_available(prefs, b)), None)
+    if backend:
+        prefs.compute_device_type = backend
+        prefs.get_devices()
+        for device in prefs.devices:
+            device.use = device.type in {backend, "CPU"}
+        scene.cycles.device = "GPU"
+    else:
+        scene.cycles.device = "CPU"
     scene.cycles.samples = int(os.environ.get("TALLY_SAMPLES", SAMPLES))
     scene.cycles.use_denoising = True
     scene.cycles.max_bounces = 8
@@ -343,7 +395,7 @@ def main():
     # transform, which is exactly how the first render came out as a white bar.
     scene.view_settings.view_transform = "AgX"
     scene.view_settings.look = "AgX - Punchy"
-    scene.view_settings.exposure = 0.0
+    scene.view_settings.exposure = LIGHTING["exposure"]
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     scene.render.filepath = OUT

@@ -5,7 +5,7 @@
 Virtual cards are single-use credit card numbers generated per invoice payment. Instead of sending ACH or wire, the system creates a virtual card with a spending limit matching the invoice amount, sends the card details to the vendor, and the vendor charges the card. The card expires after use.
 
 **Why this matters:**
-- **Revenue**: 1-2% cashback rebate on every payment — this is the primary monetization channel for AP platforms
+- **Revenue**: a typical 1–2% rebate on payments to vendors that accept card (only card-paid spend earns one; the buyer funds every card) — this is the primary monetization channel for AP platforms. Public wording and its basis: `docs/marketing-substantiation.md`
 - **Security**: Single-use cards can't be reused or overcharged
 - **Speed**: Instant payment — no waiting for ACH settlement
 - **Control**: Per-card spending limits, merchant restrictions, auto-expiry

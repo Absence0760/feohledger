@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 #
-# Regenerate the marketing page's two generated assets. Deterministic and
-# idempotent: re-running with no source change rewrites byte-identical files.
+# Regenerate the marketing page's generated assets. Deterministic and
+# idempotent on one machine: re-running with no source change rewrites
+# byte-identical files (a different GPU backend changes the noise, not the
+# image — see tally_scene.py).
 #
 #   1. Blender renders the split tally ornament (tally_scene.py) with Cycles on
-#      the GPU, then ImageMagick trims the transparent margin, downsamples it to
-#      the width the page serves, and encodes it as WebP.
+#      the GPU, once per page theme — `dark` for the navy palette, `light` for
+#      the light one (docs/decisions.md §312) — then ImageMagick trims the
+#      transparent margin, downsamples it to the width the page serves, and
+#      encodes it as WebP. The two lightings share geometry, camera and depth
+#      of field, so both trim to the same frame and the page swaps them with
+#      no layout change.
 #   2. The grain overlay is written as an SVG feTurbulence filter — a few hundred
 #      bytes that tile without a seam at any size.
 #
@@ -13,24 +19,49 @@
 # results are what ship, exactly like assets/gen-icons.sh. Rationale and the
 # reason the ornament is a render rather than a drawing: docs/decisions.md §180.
 #
+# Usage: gen-marketing.sh [all|dark|light]   (default: all)
+#   Naming one variant re-renders only that ornament (and rewrites the grain),
+#   so retuning one lighting leaves the other's committed bytes untouched.
+#
 set -euo pipefail
+
+VARIANTS="${1:-all}"
+case "$VARIANTS" in
+  all) VARIANTS="dark light" ;;
+  dark|light) ;;
+  *) echo "usage: $0 [all|dark|light]" >&2; exit 2 ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUT_DIR="$REPO_ROOT/frontend/static/marketing"
-RENDER="$SCRIPT_DIR/render/tally-split.png"
+RENDER_DIR="$SCRIPT_DIR/render"
 
-BLENDER="${BLENDER:-$HOME/.local/bin/blender}"
+# $BLENDER, else the workstation's ~/.local/bin build, else whatever is on PATH
+# (Homebrew's cask on a Mac).
+if [ -z "${BLENDER:-}" ]; then
+  if [ -x "$HOME/.local/bin/blender" ]; then BLENDER="$HOME/.local/bin/blender"
+  else BLENDER="$(command -v blender || true)"; fi
+fi
 
 command -v magick >/dev/null 2>&1 || { echo "error: 'magick' not on PATH" >&2; exit 1; }
-[ -x "$BLENDER" ] || { echo "error: blender not found at $BLENDER (set \$BLENDER)" >&2; exit 1; }
+if [ -z "$BLENDER" ] || [ ! -x "$BLENDER" ]; then
+  echo "error: blender not found (set \$BLENDER)" >&2
+  exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 
-echo "[render] split tally ornament (Cycles / OPTIX)"
-"$BLENDER" -b --python "$SCRIPT_DIR/tally_scene.py" >/dev/null
+# variant -> output basename. Dark keeps the original name so nothing that
+# already references it moves.
+out_name() { if [ "$1" = dark ]; then echo tally-split; else echo "tally-split-$1"; fi; }
 
-echo "[web] downsampling"
+for variant in $VARIANTS; do
+name="$(out_name "$variant")"
+echo "[render] split tally ornament, $variant lighting (Cycles)"
+TALLY_VARIANT="$variant" "$BLENDER" -b --python "$SCRIPT_DIR/tally_scene.py" >/dev/null
+
+echo "[web] downsampling $name"
 # -trim removes the transparent margin the render frames with, so the page
 # controls the object's size rather than inheriting Blender's framing; the 2%
 # border puts a little back so the drop-off at the edges isn't a hard cut.
@@ -40,13 +71,14 @@ echo "[web] downsampling"
 # which is the case PNG is worst at — the same pixels are 243 KB as PNG and
 # 32 KB here, on a page every cold visitor loads. Nothing needs a fallback;
 # WebP has been in every shipping browser since 2020.
-magick "$RENDER" \
+magick "$RENDER_DIR/$name.png" \
   -trim +repage \
   -bordercolor none -border 2% \
   -resize 1100x \
   -strip \
   -quality 86 -define webp:method=6 \
-  "$OUT_DIR/tally-split.webp"
+  "$OUT_DIR/$name.webp"
+done
 
 echo "[web] grain overlay"
 # An SVG filter rather than a noise bitmap. A raster tile that is fine enough not
@@ -72,7 +104,17 @@ SVG
 
 echo
 echo "wrote:"
-printf '  %-44s %s\n' "frontend/static/marketing/tally-split.webp" \
-  "$(magick identify -format '%wx%h, %b' "$OUT_DIR/tally-split.webp")"
+for variant in $VARIANTS; do
+  name="$(out_name "$variant")"
+  printf '  %-44s %s\n' "frontend/static/marketing/$name.webp" \
+    "$(magick identify -format '%wx%h, %b' "$OUT_DIR/$name.webp")"
+done
+# The page gives both <source>s one width/height; a variant that trimmed to a
+# different frame would shift the layout on a theme switch.
+if [ -f "$OUT_DIR/tally-split.webp" ] && [ -f "$OUT_DIR/tally-split-light.webp" ]; then
+  a="$(magick identify -format '%wx%h' "$OUT_DIR/tally-split.webp")"
+  b="$(magick identify -format '%wx%h' "$OUT_DIR/tally-split-light.webp")"
+  [ "$a" = "$b" ] || { echo "error: ornament variants differ in size ($a vs $b)" >&2; exit 1; }
+fi
 printf '  %-44s %s\n' "frontend/static/marketing/grain.svg" \
   "$(wc -c < "$OUT_DIR/grain.svg" | tr -d ' ') bytes"

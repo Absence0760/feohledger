@@ -60,6 +60,20 @@ function hardDeleteInvoice(id: string): void {
  * by the runs detail tests via the API.
  */
 
+/**
+ * The first queue row whose checkbox is ENABLED. The queue lists blocked rows
+ * (an unverified vendor, an open payment-blocking exception) with a disabled
+ * checkbox, and with no due dates their order is the random invoice id — so
+ * "the first row" was a blocked one whenever the tenant held any, and
+ * `.check()` waited out the timeout on a control that can never be checked.
+ */
+function firstSelectableRow(page: import('@playwright/test').Page) {
+	return page
+		.locator('table tbody tr')
+		.filter({ has: page.locator('input[type="checkbox"]:not([disabled])') })
+		.first();
+}
+
 test.describe('/payments queue selection', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/payments');
@@ -80,7 +94,7 @@ test.describe('/payments queue selection', () => {
 	});
 
 	test('selecting a row reveals the pay-bar with count + total', async ({ page }) => {
-		const firstRow = page.locator('table tbody tr').first();
+		const firstRow = firstSelectableRow(page);
 		await firstRow.locator('input[type="checkbox"]').check();
 
 		const payBar = page.locator('.pay-bar');
@@ -137,19 +151,19 @@ test.describe('/payments queue selection', () => {
 	});
 
 	test('Clear button drops selection and hides pay-bar', async ({ page }) => {
-		await page.locator('table tbody tr').first().locator('input[type="checkbox"]').check();
+		const row = firstSelectableRow(page);
+		const checkbox = row.locator('input[type="checkbox"]');
+		await checkbox.check();
 		const payBar = page.locator('.pay-bar');
 		await expect(payBar).toBeVisible();
 
 		await payBar.getByRole('button', { name: 'Clear' }).click();
 		await expect(payBar).toBeHidden();
-		await expect(
-			page.locator('table tbody tr').first().locator('input[type="checkbox"]')
-		).not.toBeChecked();
+		await expect(checkbox).not.toBeChecked();
 	});
 
 	test('Review & Pay opens the panel; method selects default to ACH', async ({ page }) => {
-		await page.locator('table tbody tr').first().locator('input[type="checkbox"]').check();
+		await firstSelectableRow(page).locator('input[type="checkbox"]').check();
 		await page.locator('.pay-bar').getByRole('button', { name: 'Review & Pay' }).click();
 
 		const reviewPanel = page.locator('.review-panel');
@@ -169,7 +183,7 @@ test.describe('/payments queue selection', () => {
 	});
 
 	test('changing the payment-method select sticks while panel is open', async ({ page }) => {
-		await page.locator('table tbody tr').first().locator('input[type="checkbox"]').check();
+		await firstSelectableRow(page).locator('input[type="checkbox"]').check();
 		await page.locator('.pay-bar').getByRole('button', { name: 'Review & Pay' }).click();
 
 		const select = page.locator('.review-panel select.method-select').first();

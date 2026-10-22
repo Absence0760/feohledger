@@ -55,9 +55,9 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'rush_payment': 'invoices.warning.rushPayment',
 	// Invoice is past due
 	'past_due': 'invoices.warning.pastDue',
-	// AI reading is paused: this month's {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.
+	// AI reading is paused: this month's {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan under Settings → Subscription.
 	'ai_allowance_reached': 'invoices.warning.aiAllowanceReached',
-	// AI reading is paused: this month's AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.
+	// AI reading is paused: this month's AI spending cap is reached. Enter the details manually, or raise the cap under Settings → Subscription.
 	'ai_spend_cap_reached': 'invoices.warning.aiSpendCapReached',
 	// Vendor is unverified
 	'unverified_vendor': 'invoices.warning.unverifiedVendor',

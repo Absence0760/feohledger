@@ -199,6 +199,13 @@ async def test_throttles_once_the_limit_is_reached(fake_redis):
         await check_auth_failures("auth_login", "ident", limit=3, window_seconds=900)
     assert exc.value.status_code == 429
     assert "Retry-After" in exc.value.headers
+    # The SAME coded refusal the per-IP cap answers with — an identity budget
+    # must not be told apart from a request cap (nor a known account from an
+    # unknown one) by its body. Only the wait varies, and it is the header's.
+    assert exc.value.detail["code"] == "rate_limited"
+    assert exc.value.detail["params"] == {
+        "retry_after_seconds": int(exc.value.headers["Retry-After"])
+    }
 
 
 @pytest.mark.asyncio

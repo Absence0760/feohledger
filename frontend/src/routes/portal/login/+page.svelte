@@ -2,6 +2,7 @@
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { portalBrand } from '#lib/stores/portalBrand.svelte.ts';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import { goto } from '$app/navigation';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
@@ -201,10 +202,13 @@
 				<span>{m('portal.login.email')}</span>
 				<input type="email" bind:value={email} required autocomplete="username" />
 			</label>
-			<label>
-				<span>{m('portal.login.password')}</span>
-				<input type="password" bind:value={password} required autocomplete="current-password" />
-			</label>
+			<PasswordInput
+				id="portal-login-password"
+				label={m('portal.login.password')}
+				bind:value={password}
+				required
+				autocomplete="current-password"
+			/>
 
 			<button type="submit" disabled={loading}>
 				{loading ? m('portal.login.signingIn') : m('portal.login.signIn')}
@@ -318,7 +322,7 @@
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
 	}
-	input {
+	input:not([type='checkbox']):not([type='radio']) {
 		background: var(--bg);
 		border: 1px solid var(--border);
 		border-radius: 4px;
@@ -327,7 +331,33 @@
 		color: var(--text);
 		font-family: inherit;
 	}
-	input:focus {
+	input:not([type='checkbox']):not([type='radio']):focus {
+		outline: none;
+		border-color: var(--accent);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
+	}
+	/* The password field is PasswordInput (the show-password toggle the
+	   employee sign-in has), so its label and input are that component's
+	   elements: the same recipe, reached through `:global()` and wrapped in
+	   `:where()` so the component's own rules (the toggle's room) still win. */
+	.login-card :global(:where(.password-field label > span)) {
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.login-card :global(:where(.password-field input:not([type='checkbox']):not([type='radio']))) {
+		width: 100%;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		padding: 10px 12px;
+		font-size: 0.9rem;
+		color: var(--text);
+		font-family: inherit;
+	}
+	.login-card :global(:where(.password-field input:not([type='checkbox']):not([type='radio']):focus)) {
 		outline: none;
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);

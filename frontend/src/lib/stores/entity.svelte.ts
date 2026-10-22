@@ -42,6 +42,14 @@ class EntityStore {
 	selectedId = $state<string>(getStoredEntitySelection());
 	loading = $state(false);
 	/**
+	 * True once a load of the list has FINISHED — succeeded or failed. Until
+	 * then a selected entity's name is not known yet, as opposed to not
+	 * knowable; a surface that names the entity (the dashboard's empty-entity
+	 * heading) waits on this rather than rendering a placeholder that is then
+	 * replaced (#635).
+	 */
+	settled = $state(false);
+	/**
 	 * The entity that WAS selected until this load found it deactivated.
 	 *
 	 * Set by {@link ensureLoaded} at the moment it drops the selection back to
@@ -53,6 +61,15 @@ class EntityStore {
 	deactivatedSelection = $state<Entity | null>(null);
 	#loaded = false;
 	#inflight: Promise<void> | null = null;
+	/**
+	 * Bumped by {@link reset}. A load applies its answer only while the
+	 * generation it started under is still current: `/admin/entities` resets and
+	 * reloads after a create while the sidebar's first load may still be in
+	 * flight, and that older list, landing last, used to overwrite the newer one
+	 * — dropping a just-created entity, and with it a selection of that entity
+	 * back to the consolidated view.
+	 */
+	#generation = 0;
 
 	/**
 	 * The entities a user may actually select — the ACTIVE ones.
@@ -102,6 +119,15 @@ class EntityStore {
 		return this.selected?.id ?? this.entities.find((e) => e.is_default)?.id ?? null;
 	}
 
+	/**
+	 * A specific entity is selected but its name has not arrived yet — the
+	 * list is still loading. False for the consolidated view (it has no name to
+	 * wait for) and after a failed load (the name will not come).
+	 */
+	get namePending(): boolean {
+		return this.selectedId !== ALL_ENTITIES && !this.selected && !this.settled;
+	}
+
 	/** Label for the current selection (switcher button text). */
 	get selectedLabel(): string {
 		return this.selected?.name ?? 'All entities';
@@ -111,20 +137,27 @@ class EntityStore {
 		if (this.#loaded) return;
 		if (this.#inflight) return this.#inflight;
 		this.loading = true;
-		this.#inflight = (async () => {
+		const generation = this.#generation;
+		const load = (async () => {
 			try {
 				const rows = await api.get<Entity[]>('/api/entities');
+				if (generation !== this.#generation) return;
 				this.entities = rows;
 				this.#reconcileSelection(rows);
 				this.#loaded = true;
 			} catch {
 				// Non-fatal: without the list the switcher just doesn't render.
 			} finally {
-				this.loading = false;
-				this.#inflight = null;
+				// A superseded load touches nothing: the current one owns these.
+				if (generation === this.#generation) {
+					this.loading = false;
+					this.settled = true;
+					this.#inflight = null;
+				}
 			}
 		})();
-		return this.#inflight;
+		this.#inflight = load;
+		return load;
 	}
 
 	/**
@@ -180,9 +213,12 @@ class EntityStore {
 	}
 
 	reset(): void {
+		this.#generation++;
 		this.entities = [];
 		this.deactivatedSelection = null;
 		this.selectedId = getStoredEntitySelection();
+		this.settled = false;
+		this.loading = false;
 		this.#loaded = false;
 		this.#inflight = null;
 	}

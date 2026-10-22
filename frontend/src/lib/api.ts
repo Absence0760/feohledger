@@ -113,7 +113,12 @@ export function endSessionIfRejected(status: number, detail: unknown): boolean {
 	// server too, best-effort, before forgetting it here.
 	revokeRejectedSession(rejection, getToken(), getApiBase(), (url, init) => fetch(url, init));
 	clearToken();
-	window.location.href = loginPathFor(rejection);
+	// `next` brings the user back to the page they were on once they sign in
+	// again (`#lib/utils/postLoginRedirect.ts` validates it on both ends).
+	window.location.href = loginPathFor(
+		rejection,
+		window.location.pathname + window.location.search
+	);
 	return true;
 }
 

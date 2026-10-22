@@ -1,4 +1,12 @@
-import { API_BASE, authedTenantHeaders, expect, tenantPsql, test } from '../fixtures/helpers';
+import {
+	API_BASE,
+	authedTenantHeaders,
+	deleteInvoicesWhere,
+	deleteVendorsWhere,
+	expect,
+	tenantPsql,
+	test
+} from '../fixtures/helpers';
 
 /**
  * `/invoices` row Delete must be offered only where the server will honour it.
@@ -11,7 +19,19 @@ import { API_BASE, authedTenantHeaders, expect, tenantPsql, test } from '../fixt
  * row rendered a Delete the user could arm and confirm — and every confirm
  * bought a "Cannot delete invoice in this status" error toast. The gate now
  * reads the shared `IMMUTABLE_STATUSES` in `#lib/types/invoice`.
+ *
+ * Teardown matters here more than in most specs: three of the four rows are
+ * placed in PAYABLE statuses (`posted_in_erp`, `payment_scheduled`) against a
+ * vendor the create path auto-mints `unverified`, so a leaked row lands in the
+ * tenant's payment queue as a BLOCKED row. The queue orders null due dates by
+ * id, so such a row could sort first and break every payments spec that picks
+ * a queue row to pay. Every row this file creates carries `MARKER`, and its
+ * vendor exists only for it, so both are swept after each test — which also
+ * clears rows an interrupted earlier run left behind.
  */
+
+const MARKER = 'E2E-DELGATE-';
+const VENDOR = 'E2E Delete Gate Vendor';
 
 async function createInvoice(
 	page: import('@playwright/test').Page,
@@ -20,7 +40,7 @@ async function createInvoice(
 	const res = await page.request.post(`${API_BASE}/api/invoices`, {
 		headers: await authedTenantHeaders(page),
 		data: {
-			vendor: 'E2E Delete Gate Vendor',
+			vendor: VENDOR,
 			invoice_number: invoiceNumber,
 			amount: '12.34',
 			currency: 'USD'
@@ -46,8 +66,13 @@ async function rowFor(page: import('@playwright/test').Page, invoiceNumber: stri
 }
 
 test.describe('/invoices — row Delete gate matches the server', () => {
+	test.afterEach(() => {
+		deleteInvoicesWhere(`invoice_number LIKE '${MARKER}%'`);
+		deleteVendorsWhere(`name = '${VENDOR}'`);
+	});
+
 	test('Delete is offered while the invoice is still mutable', async ({ page }) => {
-		const number = `E2E-DELGATE-OK-${Date.now()}`;
+		const number = `${MARKER}OK-${Date.now()}`;
 		await createInvoice(page, number);
 
 		await page.goto('/invoices');
@@ -59,7 +84,7 @@ test.describe('/invoices — row Delete gate matches the server', () => {
 	// `DELETE /api/invoices/{id}`, so the control must not be rendered.
 	for (const status of ['posted_in_erp', 'payment_scheduled', 'paid'] as const) {
 		test(`Delete is withheld once the invoice is ${status}`, async ({ page }) => {
-			const number = `E2E-DELGATE-${status.toUpperCase()}-${Date.now()}`;
+			const number = `${MARKER}${status.toUpperCase()}-${Date.now()}`;
 			const id = await createInvoice(page, number);
 			// The API deliberately refuses caller-supplied statuses, so place the
 			// row directly — the same setup the transitions spec uses.
