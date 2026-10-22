@@ -185,14 +185,14 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         "ai_reading_paused",
         "AI reading is paused: this month's "
         "{included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} "
-        "used. Enter the details manually, or upgrade your plan on the Billing page.",
+        "used. Enter the details manually, or upgrade your plan under Settings → Subscription.",
         {"included": "count"},
     ),
     WarningSpec(
         "ai_spend_cap_reached",
         "ai_reading_paused",
         "AI reading is paused: this month's AI spending cap is reached. Enter the "
-        "details manually, or raise the cap on the Billing page.",
+        "details manually, or raise the cap under Settings → Subscription.",
         {},
     ),
     WarningSpec("unverified_vendor", "unverified_vendor", "Vendor is unverified", {}),

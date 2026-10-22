@@ -28,6 +28,8 @@
 	import ImportCsvModal from '#lib/components/modals/ImportCsvModal.svelte';
 	import CreateVendorModal from '#lib/components/modals/CreateVendorModal.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import InviteVendorPortalUserModal from '#lib/components/modals/InviteVendorPortalUserModal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
@@ -52,6 +54,8 @@
 	} from '#lib/api/vendors.ts';
 	import { vendorSyncReportLines, type VendorSyncReport } from '#lib/utils/erpSyncReport.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
+	import { vendorErpSyncOffer, type VendorErpSyncOffer } from '#lib/utils/vendorErpSync.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	type BankDetails = VendorBankDetails;
 
@@ -62,10 +66,9 @@
 	// granular permission, not a role check (mirrors the backend gate).
 	let showConsolidation = $state(false);
 	// Day-0 CSV import — `POST /api/vendors/import-csv` is
-	// `require_roles(ADMIN, AP_MANAGER)`, the same plain-role gate as the ERP
-	// sync button above, so this reuses `auth.isManager` rather than the
-	// granular `vendor.manage` permission (which could diverge under a
-	// custom role split).
+	// `require_permission(vendor.manage)`, like the ERP sync, so both are gated
+	// on `canManageVendors`, not the role list (which diverges under a custom
+	// role split).
 	let showImportCsv = $state(false);
 	const canManageVendors = $derived(auth.can(PERM_VENDOR_MANAGE));
 	// "+ New Vendor" — `POST /api/vendors` is `require_permission(vendor.manage)`,
@@ -134,8 +137,7 @@
 			toast(m('vendors.bank.toast.submitted'), 'success');
 			bankEditing = null;
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
-			toast(e?.detail ?? e?.message ?? m('vendors.bank.toast.submitFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bank.toast.submitFailed')), 'error');
 		} finally {
 			savingBank = false;
 		}
@@ -189,6 +191,11 @@
 	// First fetch landed (success or error) — gates the onboarding empty state
 	// so "Add your first vendor" doesn't flash during the initial load.
 	let loaded = $state(false);
+	// A list (not load-more) fetch is in flight. Starts true: the first fetch
+	// fires from the status effect on mount.
+	let loading = $state(true);
+	// The latest list fetch failed. The table is replaced by `LoadError` with a
+	// Retry rather than reading "No vendors yet" over a failure (#635).
 	let loadErrored = $state(false);
 	let hasMore = $derived(vendors.length < total);
 
@@ -299,6 +306,10 @@
 
 	async function fetchVendors(opts: { append?: boolean; nextPage?: number } = {}) {
 		const token = fetchSequence.start();
+		if (!opts.append) {
+			loading = true;
+			loadErrored = false;
+		}
 		try {
 			const nextPage = opts.nextPage ?? 1;
 			const params = new URLSearchParams({
@@ -339,11 +350,17 @@
 			// local edit still failed, and no newer request is coming to report
 			// it — only a newer *fetch* makes this one's outcome irrelevant.
 			if (fetchSequence.isCurrentRequest(token)) {
-				toast('Failed to load vendors', 'error');
-				loadErrored = true;
+				// A failed Load-more keeps the rows already shown, so a toast
+				// is enough; a failed list load has nothing true to show, so
+				// the page states it in place (`LoadError` below).
+				if (opts.append) toast(m('vendors.toast.loadMoreFailed'), 'error');
+				else loadErrored = true;
 			}
 		} finally {
-			if (fetchSequence.isCurrentRequest(token)) loaded = true;
+			if (fetchSequence.isCurrentRequest(token)) {
+				loaded = true;
+				if (!opts.append) loading = false;
+			}
 		}
 	}
 
@@ -414,14 +431,14 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('vendors.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching vendor(s)`, 'success');
+				toast(m('vendors.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Failed to select all matching', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -443,7 +460,7 @@
 				: m('vendors.bulk.verified', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk verify failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.verifyFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -461,7 +478,7 @@
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk reject failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.rejectFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -479,7 +496,7 @@
 			toast(msg, res.screened > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk screen failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.screenFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -492,7 +509,7 @@
 			await exportVendorsCsv(ids);
 			toast(m('vendors.bulk.exported', { n: ids.length }), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk export failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.bulk.exportFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -526,9 +543,9 @@
 		try {
 			await api.post(`/api/vendors/${id}/verify`, {});
 			await fetchVendors();
-			toast('Vendor verified', 'success');
+			toast(m('vendors.toast.verified'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Verify failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.toast.verifyFailed'), 'error');
 		}
 	}
 
@@ -539,10 +556,10 @@
 		try {
 			const rejected = await rejectVendorRequest(id);
 			await fetchVendors();
-			toast('Vendor rejected', 'success');
+			toast(m('vendors.toast.rejected'), 'success');
 			toastCardRevocations([rejected.card_revocation]);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Reject failed', 'error');
+			toast(err instanceof Error ? err.message : m('vendors.toast.rejectFailed'), 'error');
 		}
 	}
 
@@ -581,26 +598,47 @@
 		{ key: 'active', label: m('vendors.filter.active') },
 		{ key: 'rejected', label: m('vendors.filter.rejected') }
 	]);
-	// Only the true "this tenant has zero vendors" state points at the CSV
-	// import CTA — a search/status filter that matches nothing gets the plain
-	// message, since "import a CSV" would be a non-sequitur when the tenant
-	// already has vendors and the filter is just narrow.
+	// The table's empty line, chosen by state — the invoices page's shape. A
+	// failed load never reaches it (`LoadError` replaces the table), and the
+	// genuinely fresh, unfiltered tenant gets the onboarding `EmptyState`
+	// instead; this covers the moment between (loading) and a filter that
+	// matched nothing. Only the unfiltered case points at the CSV import — "import
+	// a CSV" is a non-sequitur when the filter is just narrow.
+	let noActiveFilters = $derived(!search.trim() && statusFilter === 'all');
 	let emptyMessage = $derived(
-		vendors.length === 0 && !search.trim() && statusFilter === 'all'
-			? m('vendors.empty.fresh')
-			: m('vendors.empty')
+		loading ? m('common.loading') : noActiveFilters ? m('vendors.empty.fresh') : m('vendors.empty')
 	);
 	// A brand-new tenant with zero vendors and no active filter gets the rich
 	// onboarding CTA (mirrors the dashboard / `/invoices` EmptyState) instead of
 	// the bare "no vendors" cell — gated on `loaded` (not mid-load) and no error.
 	let showOnboarding = $derived(
-		loaded &&
-			!loadErrored &&
-			vendors.length === 0 &&
-			total === 0 &&
-			!search.trim() &&
-			statusFilter === 'all'
+		loaded && !loading && !loadErrored && vendors.length === 0 && total === 0 && noActiveFilters
 	);
+
+	// "Sync from ERP" is offered only where it can work: an ERP is configured
+	// and its route is on the plan (`utils/vendorErpSync.ts`). Read from
+	// `settings.erp` on `GET /api/organization` — the field the Organization →
+	// ERP panel reads. Only a `vendor.manage` holder (the sync endpoint's gate)
+	// sees any of it, so only they fetch. `null` while unknown: nothing renders
+	// rather than a button that may vanish. A failed read offers the button —
+	// the endpoint is the authority, and hiding a working sync over a transient
+	// read error would be the worse failure.
+	let erpOffer = $state<VendorErpSyncOffer | null>(null);
+	$effect(() => {
+		if (!canManageVendors || erpOffer) return;
+		let cancelled = false;
+		api
+			.get<{ settings?: { erp?: Record<string, unknown> | null } }>('/api/organization')
+			.then((org) => {
+				if (!cancelled) erpOffer = vendorErpSyncOffer(org.settings?.erp, (f) => auth.hasFeature(f));
+			})
+			.catch(() => {
+				if (!cancelled) erpOffer = { kind: 'sync' };
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 </script>
 
 <svelte:window
@@ -628,18 +666,23 @@
 		{/if}
 		{#if canManageVendors}
 			<button class="btn-outline" onclick={() => (showConsolidation = true)}>
-				Merge duplicates
+				{m('vendors.mergeDuplicates')}
 			</button>
 		{/if}
-		{#if auth.isManager}
-			<!-- `POST /api/vendors/sync-erp` is require_roles(ADMIN, AP_MANAGER).
+		{#if canManageVendors && erpOffer?.kind === 'sync'}
+			<!-- `POST /api/vendors/sync-erp` is require_permission(vendor.manage).
 			     A CFO reaches this page (nav.ts admits them for the read) but
-			     holds neither role, so the button only ever 403'd. -->
+			     doesn't hold it, so the button only ever 403'd. -->
 			<button class="btn-outline" disabled={syncing} onclick={syncFromErp}>
 				{syncing ? m('vendors.action.syncing') : m('vendors.action.syncErp')}
 			</button>
+		{:else if auth.isAdmin && erpOffer?.kind === 'connect'}
+			<!-- No ERP yet: the way to one, for the role that can set it up. -->
+			<a class="btn-outline" href="/organization?section=erp" data-testid="vendors-connect-erp">
+				{m('vendors.action.connectErp')}
+			</a>
 		{/if}
-		{#if auth.isManager}
+		{#if canManageVendors}
 			<!-- Day-0 bulk load — `POST /api/vendors/import-csv`, same gate as
 			     the sync button above. See backend/docs/csv-import.md. -->
 			<button class="btn-outline" onclick={() => (showImportCsv = true)}>
@@ -653,14 +696,28 @@
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 	</div>
 
+	{#if canManageVendors && erpOffer?.kind === 'upgrade'}
+		<!-- An ERP is configured but its route isn't on the plan (Merge.dev
+		     needs Scale): say so instead of a Sync that answers 402. -->
+		<PlanUpgradeNotice feature={erpOffer.feature} testId="vendors-erp-upgrade" />
+	{/if}
+
 	{#if showOnboarding}
 		<EmptyState
 			icon="🏢"
 			testId="vendors-empty-state"
 			heading={m('vendors.onboarding.heading')}
-			description={m('vendors.onboarding.description')}
+			description={erpOffer?.kind === 'sync'
+				? m('vendors.onboarding.descriptionErp')
+				: m('vendors.onboarding.description')}
 			actionLabel={canManageVendors ? m('vendors.action.newVendor') : undefined}
 			onaction={canManageVendors ? () => (showCreateVendor = true) : undefined}
+		/>
+	{:else if loadErrored}
+		<LoadError
+			message={m('vendors.empty.errored')}
+			onretry={() => fetchVendors()}
+			testId="vendors-load-error"
 		/>
 	{:else}
 	<div class="vendor-table">
@@ -734,8 +791,8 @@
 							<span
 								class="erp-linked"
 								role="img"
-								aria-label={`Linked to ERP: ${v.erp_vendor_id}`}
-								title="Linked to ERP: {v.erp_vendor_id}"
+								aria-label={m('vendors.erpLinked', { id: v.erp_vendor_id })}
+								title={m('vendors.erpLinked', { id: v.erp_vendor_id })}
 							>
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
 							</span>
@@ -910,7 +967,7 @@
 
 <Modal
 	open={bankEditing !== null}
-	ariaLabel="Vendor bank counterparty"
+	ariaLabel={m('vendors.bank.dialogAria')}
 	onclose={() => (bankEditing = null)}
 >
 	{#if bankEditing}
@@ -918,11 +975,7 @@
 			<h2>{m('vendors.bank.title', { vendor: bankEditing.name })}</h2>
 			<HelpTip term="bank-change-request" />
 		</div>
-		<p class="modal-hint">
-			These values bridge to your payment processor (e.g. Modern Treasury). The
-			<code>counterparty_id</code> is the processor's identifier; the last4s are stored
-			here for display only — full account / routing numbers belong with the processor.
-		</p>
+		<p class="modal-hint">{m('vendors.bank.processorHint')}</p>
 		<p class="dual-control-hint">
 			{m('vendors.bank.dualControlHint')}
 			{#if auth.isManager}
@@ -1131,19 +1184,17 @@
 	}
 
 	/* Bank-counterparty modal extras */
-	.modal-hint code {
-		font-family: 'SF Mono', 'Cascadia Code', monospace;
-		font-size: 0.78rem;
-		color: var(--text);
-	}
 	.modal input:focus {
 		outline: none;
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
+	/* `minmax(0, 1fr)`, not `1fr`: a bare `1fr` track never shrinks below its
+	   input's intrinsic width, so at 320px the bank dialog's paired fields
+	   overflowed it and the form scrolled sideways (WCAG 1.4.10). */
 	.form-row {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
 	}
 

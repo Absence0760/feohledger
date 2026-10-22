@@ -182,6 +182,34 @@
 						> also clears itself the moment the browser tab closes, whether or not that happens.
 					</td>
 				</tr>
+				<tr>
+					<td><code>auth_next</code></td>
+					<td>sessionStorage</td>
+					<td>
+						Remembers the page inside the app you were opening (a path such as an invoice link)
+						while you sign in through your organization's single sign-on provider, so you land
+						back on it afterwards.
+					</td>
+					<td>Strictly necessary</td>
+					<td>
+						Removed as soon as you return from the sign-on provider, whether or not sign-in
+						succeeded; <code>sessionStorage</code> also clears itself when the browser tab closes.
+					</td>
+				</tr>
+				<tr>
+					<td><code>verifyToken</code></td>
+					<td>sessionStorage (page history state)</td>
+					<td>
+						Holds the one-time verification token from your sign-up email for that browser tab,
+						after it is removed from the address bar, so reloading the verification page still
+						works.
+					</td>
+					<td>Strictly necessary</td>
+					<td>
+						Kept with that tab's history entry for the verification page only;
+						<code>sessionStorage</code> clears itself when the browser tab closes.
+					</td>
+				</tr>
 			</tbody>
 		</table>
 	</div>

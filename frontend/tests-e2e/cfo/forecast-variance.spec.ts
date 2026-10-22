@@ -112,12 +112,31 @@ test('refuses unreadable money instead of sending a repaired figure', async ({ p
 	await modal.getByLabel('Forecast outflow for row 1').fill('$1,200.50');
 	await page.getByTestId('forecast-variance-submit').click();
 
-	await expect(page.locator('.toast, [role="alert"]').filter({ hasText: /plain number/i })).toBeVisible();
+	// Stated once, in the dialog's error slot beside Submit — not also toasted
+	// (one error, one signal: `docs/ui-patterns.md` § Toast).
+	const error = modal.getByTestId('forecast-variance-error');
+	await expect(error).toContainText(/plain number/i);
+	await expect(page.getByTestId('toast').filter({ hasText: /plain number/i })).toHaveCount(0);
 	// The refusal is the point: no request went out at all.
 	expect(sent).toHaveLength(0);
 	// The dialog stays open on the typed value rather than closing on a lie.
 	await expect(modal).toBeVisible();
 	await expect(modal.getByLabel('Forecast outflow for row 1')).toHaveValue('$1,200.50');
+
+	// The same refusal a second time is a NEW alert (re-inserted, so it is
+	// announced again), not the old node left as it was.
+	await error.evaluate((el) => el.setAttribute('data-first-attempt', ''));
+	await page.getByTestId('forecast-variance-submit').click();
+	await expect(error).toContainText(/plain number/i);
+	await expect(error).not.toHaveAttribute('data-first-attempt');
+
+	// Closing and reopening starts clean.
+	await modal.getByRole('button', { name: 'Cancel' }).click();
+	await expect(modal).toBeHidden();
+	await page.getByTestId('forecast-variance-open').click();
+	await expect(modal).toBeVisible();
+	await expect(modal.getByTestId('forecast-variance-submit')).toBeVisible();
+	await expect(error).toHaveCount(0);
 });
 
 test('sends the typed decimal string verbatim, never a JSON number', async ({ page }) => {

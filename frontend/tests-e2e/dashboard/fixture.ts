@@ -4,7 +4,11 @@
 // load under Playwright, which knows nothing of those. A `import type` is
 // erased before the runtime ever sees it, so this costs nothing at test time. Keep app *values* out of the e2e tree; app *types* are what make
 // these fixtures honest.
-import type { DashboardData, DashboardDiscountCapture } from '#lib/types/analytics.ts';
+import type {
+	DashboardData,
+	DashboardDiscountCapture,
+	OnboardingProgress
+} from '#lib/types/analytics.ts';
 
 /**
  * The one `GET /api/dashboard` stub the dashboard specs build on.
@@ -125,6 +129,10 @@ function base(patch: DashboardPatch): DashboardData {
 	const reportingCurrency = patch.reportingCurrency ?? REPORTING_CURRENCY;
 	return {
 		total_invoices: 6,
+		// An established workspace: the checklist is retired, and the server
+		// sends `onboarding` to nobody (`docs/decisions.md` §315).
+		organization_has_invoices: true,
+		onboarding: null,
 		total_amount: 6000,
 		reporting: {
 			reporting_currency: reportingCurrency,
@@ -190,13 +198,22 @@ function base(patch: DashboardPatch): DashboardData {
  * to stop. The state it represents is the only one the dashboard's onboarding
  * EmptyState answers (`docs/decisions.md` §154), so it ships whole.
  */
-export function emptyTenantDashboardResponse() {
+export function emptyTenantDashboardResponse(
+	/**
+	 * The setup facts the server sends ONLY to an admin on an empty workspace.
+	 * Omitted, this is what every other role reads (`null`); a spec signed in
+	 * as an admin that wants the checklist passes them.
+	 */
+	onboarding: OnboardingProgress | null = null
+) {
 	const payload = base({});
 	const zeroBands = { current: 0, days_30: 0, days_60: 0, days_90: 0, days_90_plus: 0 };
 	return {
 		...payload,
 		...NON_RENDERED_FIELDS,
 		total_invoices: 0,
+		organization_has_invoices: false,
+		onboarding,
 		total_amount: 0,
 		reporting: { ...payload.reporting, total_amount: 0, total_count: 0 },
 		total_paid: 0,
@@ -206,6 +223,20 @@ export function emptyTenantDashboardResponse() {
 		pipeline: {},
 		aging: zeroBands,
 		aging_reporting: { ...zeroBands, unconverted_count: 0 }
+	};
+}
+
+/** Setup progress with nothing done but the facts named in `done`. */
+export function onboardingProgress(done: Partial<OnboardingProgress> = {}): OnboardingProgress {
+	return {
+		company: false,
+		users: false,
+		security: false,
+		erp: false,
+		vendors: false,
+		workflow: false,
+		email_intake: false,
+		...done
 	};
 }
 

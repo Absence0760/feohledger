@@ -76,6 +76,11 @@ test.describe('/login/reset-password', () => {
 			'href',
 			'/login/forgot-password'
 		);
+		// Found on load, with nothing pressed and nothing focused: the alert is
+		// what announces it (the pressed paths focus it instead).
+		await expect(
+			page.getByRole('alert').filter({ hasText: /invalid or has expired/i })
+		).toHaveCount(1);
 	});
 
 	test('a used set-password link names Forgot password as the way back in', async ({ page }) => {
@@ -114,6 +119,39 @@ test.describe('/login/reset-password', () => {
 		const success = page.getByText(/your password has been reset/i);
 		await expect(success).toBeVisible();
 		await expect(success).toBeFocused();
+	});
+
+	test('a mismatched confirmation is named beside the field on submit, and nothing is sent', async ({
+		page
+	}) => {
+		// #635 #14: Submit used to stay disabled until the two matched, so this
+		// message could never appear. Now Submit is enabled and says why.
+		await stubCheck(page, 'someone@acme.example');
+		let posted = false;
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) => {
+				posted = true;
+				return route.fulfill({ json: { message: 'ok' } });
+			}
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+
+		const newPw = page.getByLabel('New password', { exact: true });
+		const confirm = page.getByLabel('Confirm new password', { exact: true });
+		await newPw.fill('BrandNewPassw0rd!42');
+		await confirm.fill('BrandNewPassw0rd!43');
+		const submit = page.getByRole('button', { name: /Reset password/i });
+		await expect(submit).toBeEnabled();
+		await submit.click();
+
+		await expect(confirm).toBeFocused();
+		await expect(confirm).toHaveAttribute('aria-invalid', 'true');
+		await expect(confirm).toHaveAccessibleDescription('Passwords do not match.');
+		await expect(newPw).not.toHaveAttribute('aria-invalid', 'true');
+		// Still the form: the refusal was the page's own, not the server's.
+		await expect(page.locator('input[autocomplete="new-password"]')).toHaveCount(2);
+		expect(posted).toBe(false);
 	});
 
 	test('opening the link (again and again) never redeems it — only the submit does', async ({
@@ -167,6 +205,139 @@ test.describe('/login/reset-password', () => {
 		await expect(page.locator('form input[autocomplete="username"]')).toHaveValue(
 			'retry@acme.example'
 		);
+		// The Try again button went with the failed state; focus lands on the
+		// first field of the form that replaced it, not on <body>.
+		await expect(page.locator('input[type="password"]').first()).toBeFocused();
+	});
+
+	test('a retried check that finds the link dead switches to the request-a-new-link screen, focused', async ({
+		page
+	}) => {
+		// The first check failed for a reason that says nothing about the link (a
+		// rate limit); the retry then answers 400, the link is dead. Try again
+		// went with the failed state, so the explanation takes focus — that is
+		// what announces it (WCAG 2.4.3, 4.1.3).
+		let status = 429;
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) =>
+				status === 429
+					? route.fulfill({ status: 429, json: { detail: 'Too many requests. Slow down.' } })
+					: route.fulfill({ status: 400, json: { detail: 'Invalid or expired reset link.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token&mode=set');
+		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
+
+		status = 400;
+		await page.getByRole('button', { name: 'Try again' }).click();
+
+		const focused = page.locator(':focus');
+		await expect(focused).toContainText(
+			'This reset link is invalid or has expired. Please request a new one.'
+		);
+		await expect(focused).toContainText(/set-password links work once and expire/i);
+		// Focus announces it; an alert as well would read it twice.
+		await expect(focused).not.toHaveAttribute('role', 'alert');
+		await expect(page.getByRole('link', { name: /Reset your password/i })).toHaveAttribute(
+			'href',
+			'/login/forgot-password'
+		);
+		await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+		await expect(page.getByText('Too many requests. Slow down.')).toHaveCount(0);
+	});
+
+	test('a retried check that fails again keeps focus on Try again', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) =>
+				route.fulfill({ status: 429, json: { detail: 'Too many requests. Slow down.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+		await page.getByRole('button', { name: 'Try again' }).click();
+		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Try again' })).toBeFocused();
+	});
+
+	test('a link that dies between loading and submitting switches to the request-a-new-link screen', async ({
+		page
+	}) => {
+		// The load-time check passed, then the token was spent (another tab, the
+		// welcome-email copy of a set-password link) or expired before submit.
+		// The redemption answers the same opaque 400 the check would have; the
+		// page used to banner it over a form that could never succeed.
+		await stubCheck(page, 'late@acme.example');
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) =>
+				route.fulfill({ status: 400, json: { detail: 'Invalid or expired reset link.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token&mode=set');
+
+		await page.locator('input[type="password"]').first().fill('BrandNewPassw0rd!42');
+		await page.locator('input[type="password"]').nth(1).fill('BrandNewPassw0rd!42');
+		await page.getByRole('button', { name: 'Set password' }).click();
+
+		// The dead-link screen, focused so it is announced (the focused submit
+		// button went with the form) — with the set-mode hint and the way on.
+		// One focus target holds both the reason and the set-mode next step, and
+		// it is not also an alert (that would be read twice).
+		const focused = page.locator(':focus');
+		await expect(focused).toContainText(
+			'This reset link is invalid or has expired. Please request a new one.'
+		);
+		await expect(focused).toContainText(/set-password links work once and expire/i);
+		await expect(focused).not.toHaveAttribute('role', 'alert');
+		await expect(page.getByRole('link', { name: /Reset your password/i })).toHaveAttribute(
+			'href',
+			'/login/forgot-password'
+		);
+		await expect(page.locator('input[type="password"]')).toHaveCount(0);
+		// Not ALSO the server's English in the banner over it.
+		await expect(page.getByText('Invalid or expired reset link.', { exact: true })).toHaveCount(0);
+	});
+
+	test('a refusal that is not about the link keeps the form, with the reason', async ({
+		page
+	}) => {
+		await stubCheck(page, 'weak@acme.example');
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) =>
+				route.fulfill({ status: 429, json: { detail: 'Too many requests. Slow down.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+
+		await page.locator('input[type="password"]').first().fill('BrandNewPassw0rd!42');
+		await page.locator('input[type="password"]').nth(1).fill('BrandNewPassw0rd!42');
+		await page.getByRole('button', { name: /Reset password/i }).click();
+
+		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
+		await expect(page.locator('input[type="password"]')).toHaveCount(2);
+		await expect(page.getByText(/invalid or has expired/i)).toHaveCount(0);
+	});
+
+	test('a new password the server refuses is named beside the field, not in the banner', async ({
+		page
+	}) => {
+		await stubCheck(page, 'weak@acme.example');
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) =>
+				route.fulfill({ status: 422, json: { detail: 'Password must contain a digit.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+
+		const newPw = page.getByLabel('New password', { exact: true });
+		await newPw.fill('BrandNewPassw0rd!42');
+		await page.getByLabel('Confirm new password', { exact: true }).fill('BrandNewPassw0rd!42');
+		await page.getByRole('button', { name: /Reset password/i }).click();
+
+		await expect(newPw).toBeFocused();
+		await expect(newPw).toHaveAttribute('aria-invalid', 'true');
+		await expect(newPw).toHaveAccessibleDescription(/^Password must contain a digit\./);
+		// Editing the field clears the server's verdict on the old value.
+		await newPw.fill('BrandNewPassw0rd!43');
+		await expect(newPw).not.toHaveAttribute('aria-invalid', 'true');
 	});
 
 	test('set mode: a password manager can save the new password under the account', async ({

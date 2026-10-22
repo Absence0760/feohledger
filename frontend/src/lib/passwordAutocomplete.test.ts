@@ -32,6 +32,15 @@ import { describe, expect, it } from 'vitest';
  * identifier `autocomplete="username"` — `email` is not the token a password
  * manager pairs a saved password with, even when the identifier is an address.
  *
+ * The employee auth forms render their password fields through
+ * `components/auth/PasswordInput.svelte` (one `<input>` whose `type` flips for
+ * the show-password toggle, and whose `autocomplete` is a typed prop) and the
+ * new + confirm pair through `components/auth/NewPasswordFields.svelte` (two
+ * `new-password` PasswordInputs). So a `<PasswordInput>` call site must pass a
+ * literal allowed `autocomplete`, and the form-level rules count both
+ * components as the inputs they render — otherwise moving a field into the
+ * component would quietly take its form out of this guard.
+ *
  * Like `a11y/imageDragging.test.ts`, the template is parsed with the Svelte
  * compiler and only `ast.fragment` is walked, so a `<script>` comment that
  * mentions `type="password"` is structurally out of reach.
@@ -64,20 +73,28 @@ interface Attr {
 	value?: unknown;
 }
 
-function collect(node: unknown, name: string, out: Node[] = []): Node[] {
+function collect(
+	node: unknown,
+	name: string,
+	out: Node[] = [],
+	kind: 'RegularElement' | 'Component' = 'RegularElement'
+): Node[] {
 	if (node === null || typeof node !== 'object') return out;
 	if (Array.isArray(node)) {
-		for (const child of node) collect(child, name, out);
+		for (const child of node) collect(child, name, out, kind);
 		return out;
 	}
 	const record = node as Record<string, unknown>;
-	if (record.type === 'RegularElement' && record.name === name) out.push(record as Node);
+	if (record.type === kind && record.name === name) out.push(record as Node);
 	for (const [key, value] of Object.entries(record)) {
 		if (key === 'parent') continue;
-		collect(value, name, out);
+		collect(value, name, out, kind);
 	}
 	return out;
 }
+
+/** The one file whose password `<input>` takes its token from a typed prop. */
+const PASSWORD_INPUT_PATH = 'lib/components/auth/PasswordInput.svelte';
 
 function attr(element: Node, name: string): Attr | undefined {
 	return element.attributes?.find((a) => a.type === 'Attribute' && a.name === name);
@@ -120,14 +137,34 @@ function findings(source: string, path = 'inline.svelte'): string[] {
 	const out: string[] = [];
 	for (const input of collect(ast.fragment, 'input')) {
 		if (!canBePassword(input, source)) continue;
+		// PasswordInput's `{autocomplete}` is typed `'current-password' |
+		// 'new-password'`, and every call site is checked for a literal below.
+		if (
+			path === PASSWORD_INPUT_PATH &&
+			/^\{?\s*autocomplete\s*\}?$/.test(valueSource(attr(input, 'autocomplete'), source))
+		) {
+			continue;
+		}
 		const value = autocompleteOf(input);
 		if (value === null || !ALLOWED.has(value)) {
 			out.push(`${path}: autocomplete=${value ?? '(missing)'} on ${excerpt(input, source)}`);
 		}
 	}
+	for (const field of collect(ast.fragment, 'PasswordInput', [], 'Component')) {
+		const value = autocompleteOf(field);
+		if (value === null || !ALLOWED.has(value)) {
+			out.push(`${path}: autocomplete=${value ?? '(missing)'} on ${excerpt(field, source)}`);
+		}
+	}
 	for (const form of collect(ast.fragment, 'form')) {
 		const inputs = collect(form.fragment, 'input');
 		const values = new Set(inputs.map(autocompleteOf));
+		for (const field of collect(form.fragment, 'PasswordInput', [], 'Component')) {
+			values.add(autocompleteOf(field));
+		}
+		if (collect(form.fragment, 'NewPasswordFields', [], 'Component').length > 0) {
+			values.add('new-password');
+		}
 		// A SIGN-IN form (current password, nothing new): password managers pair
 		// the saved password with the `username` field, and `email` is not that
 		// token — the form's identifier must say `username` even when it is an
@@ -186,6 +223,23 @@ describe('every password input declares its autocomplete purpose (#575)', () => 
 		expect(found[1]).toContain('shown ?');
 		expect(found[2]).toContain('autocomplete=nope');
 		expect(found[3]).toContain('password-change <form>');
+	});
+
+	it('sees through PasswordInput and NewPasswordFields', () => {
+		// A call site without a literal token is flagged like a bare input…
+		expect(findings('<PasswordInput id="a" label="A" bind:value={v} />')[0]).toContain(
+			'(missing)'
+		);
+		// …and a change form built from the components still needs its username.
+		const change =
+			'<form><PasswordInput id="c" autocomplete="current-password" />' +
+			'<NewPasswordFields idPrefix="n" /></form>';
+		expect(findings(change)[0]).toContain('password-change <form>');
+		expect(findings(change.replace('<form>', '<form><input hidden autocomplete="username" />'))).toEqual([]);
+		// A sign-in form built from it still needs a username identifier.
+		expect(
+			findings('<form><input type="email" /><PasswordInput id="p" autocomplete="current-password" /></form>')[0]
+		).toContain('found (missing)');
 	});
 
 	it('a sign-in form needs a username identifier; a step-up form does not', () => {

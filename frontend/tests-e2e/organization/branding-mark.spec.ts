@@ -128,7 +128,7 @@ test.describe('sidebar brand mark', () => {
 test.describe('sign-in brand mark', () => {
 	test.use({ storageState: { cookies: [], origins: [] } });
 
-	test('the sign-in card pairs the mark with the product name', async ({ page }) => {
+	test('the sign-in card carries the mark beside its heading', async ({ page }) => {
 		await page.goto('/login');
 
 		// Scoped to the FORM, not the page: the split-screen shell draws a second
@@ -137,7 +137,9 @@ test.describe('sign-in brand mark', () => {
 		// hidden.
 		const mark = page.locator('form.login-form img.brand-mark');
 		await expect(mark).toBeVisible();
-		await expect(page.getByRole('heading', { level: 1, name: 'FeohLedger' })).toBeVisible();
+		// The heading names the task (WCAG 2.4.6); the product is named by the
+		// tab title and the brand panel (issue #635 finding 34).
+		await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
 		await expect.poll(() => naturalWidth(page, 'form.login-form img.brand-mark')).toBeGreaterThan(0);
 	});
 

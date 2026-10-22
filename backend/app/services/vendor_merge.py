@@ -57,6 +57,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.refusals import coded_refusal
 from app.models.adaptive_suggestion import WorkflowSuggestion
 from app.models.contract import Contract
 from app.models.credit_memo import CreditMemo
@@ -81,6 +82,13 @@ from app.models.virtual_card import VirtualCard
 
 __all__ = [
     "VENDOR_FK_CHILDREN",
+    "VENDOR_MERGE_BLOCKED_DUPLICATE",
+    "VENDOR_MERGE_CANONICAL_NOT_FOUND",
+    "VENDOR_MERGE_CROSS_ENTITY",
+    "VENDOR_MERGE_DUPLICATE_NOT_FOUND",
+    "VENDOR_MERGE_INVALID_ID",
+    "VENDOR_MERGE_NO_DUPLICATES",
+    "VENDOR_MERGE_SELF",
     "VendorMergeError",
     "VendorMergeResult",
     "merge_vendors",
@@ -115,15 +123,35 @@ VENDOR_FK_CHILDREN: tuple[type, ...] = (
 )
 
 
+#: The stable code of each refusal, so a client states it in the reader's
+#: language (``frontend/src/lib/api/codedRefusals.ts``). None carries params:
+#: each code is exactly as specific as the English it replaces, and none names a
+#: vendor — which duplicate tripped the rule is already on the steward's screen.
+VENDOR_MERGE_SELF = "vendor_merge_self"
+VENDOR_MERGE_NO_DUPLICATES = "vendor_merge_no_duplicates"
+VENDOR_MERGE_CANONICAL_NOT_FOUND = "vendor_merge_canonical_not_found"
+VENDOR_MERGE_DUPLICATE_NOT_FOUND = "vendor_merge_duplicate_not_found"
+VENDOR_MERGE_CROSS_ENTITY = "vendor_merge_cross_entity"
+VENDOR_MERGE_BLOCKED_DUPLICATE = "vendor_merge_blocked_duplicate"
+#: Raised by the endpoint, not here: a request id that is not a UUID at all.
+VENDOR_MERGE_INVALID_ID = "vendor_merge_invalid_id"
+
+
 class VendorMergeError(Exception):
     """A merge precondition failed (self-merge, empty set, cross-entity, unknown
-    vendor). The API layer maps it to the appropriate 4xx with a PII-free
-    message."""
+    vendor, blocked duplicate). ``code`` names the rule; the API layer answers
+    with ``status_code`` and :attr:`detail`, the coded refusal carrying the
+    PII-free English ``message``."""
 
-    def __init__(self, message: str, *, status_code: int = 422):
+    def __init__(self, code: str, message: str, *, status_code: int = 422):
         super().__init__(message)
+        self.code = code
         self.message = message
         self.status_code = status_code
+
+    @property
+    def detail(self) -> dict:
+        return coded_refusal(self.code, self.message)
 
 
 @dataclass
@@ -188,6 +216,7 @@ async def merge_vendors(
     for d in duplicate_vendor_ids:
         if d == canonical_vendor_id:
             raise VendorMergeError(
+                VENDOR_MERGE_SELF,
                 "The canonical vendor cannot also be a duplicate (self-merge).",
                 status_code=422,
             )
@@ -195,7 +224,11 @@ async def merge_vendors(
             seen.add(d)
             duplicates.append(d)
     if not duplicates:
-        raise VendorMergeError("At least one duplicate vendor is required.", status_code=422)
+        raise VendorMergeError(
+            VENDOR_MERGE_NO_DUPLICATES,
+            "At least one duplicate vendor is required.",
+            status_code=422,
+        )
 
     # Row-lock the canonical + every duplicate together (deterministic id order
     # avoids a lock-ordering deadlock between two concurrent merges). A vendor id
@@ -215,10 +248,16 @@ async def merge_vendors(
 
     canonical = by_id.get(canonical_vendor_id)
     if canonical is None:
-        raise VendorMergeError("Canonical vendor not found.", status_code=404)
+        raise VendorMergeError(
+            VENDOR_MERGE_CANONICAL_NOT_FOUND, "Canonical vendor not found.", status_code=404
+        )
     for d in duplicates:
         if d not in by_id:
-            raise VendorMergeError("A duplicate vendor was not found.", status_code=404)
+            raise VendorMergeError(
+                VENDOR_MERGE_DUPLICATE_NOT_FOUND,
+                "A duplicate vendor was not found.",
+                status_code=404,
+            )
 
     # Cross-entity guard: a merge stays inside one entity. The canonical and
     # every duplicate must share the same entity_id (NULL == NULL counts as
@@ -227,6 +266,7 @@ async def merge_vendors(
     for d in duplicates:
         if by_id[d].entity_id != canonical.entity_id:
             raise VendorMergeError(
+                VENDOR_MERGE_CROSS_ENTITY,
                 "Cannot merge vendors that belong to different entities.",
                 status_code=422,
             )
@@ -247,6 +287,7 @@ async def merge_vendors(
         for d in duplicates:
             if by_id[d].payments_blocked:
                 raise VendorMergeError(
+                    VENDOR_MERGE_BLOCKED_DUPLICATE,
                     "Cannot merge a payments-blocked vendor into an unblocked "
                     "canonical — resolve the block first (see the vendor's "
                     "screening review) or exclude it from this merge.",

@@ -21,6 +21,21 @@ const PORT_ARG = WEB_PORT ? ` --port ${WEB_PORT}` : '';
 // this is NARROWER than the default — no LAN interface is exposed.
 const HOST_ARG = ' --host 127.0.0.1';
 
+const USE_PREVIEW = process.env.FEOH_E2E_USE_PREVIEW === 'true';
+
+// A `vite dev` server of its own for SvelteKit's generated modules, keyed by
+// the port it serves. SvelteKit writes the resolved `PUBLIC_API_URL` into
+// `<outDir>/generated/dev/env/*` at startup and every dev server watching that
+// file reloads from it, so two dev servers in one checkout sharing the default
+// `.svelte-kit` meant the LAST one started decided which backend BOTH called —
+// a spec on :7823 would sign in against :8011's API and bounce to /login.
+// Under `.svelte-kit/`, so it is already gitignored and outside any other
+// server's watch set (SvelteKit ignores every sibling of `<outDir>/generated`).
+// Not for preview: `vite preview` serves `<outDir>/output`, which CI's
+// `pnpm build` wrote under the default directory. See vite.config.ts and
+// tests-e2e/README.md § Running from a worktree.
+const DEV_OUT_DIR = `.svelte-kit/e2e-${WEB_PORT || 'default'}`;
+
 /**
  * Playwright e2e config for the frontend.
  *
@@ -134,10 +149,9 @@ export default defineConfig({
 		// package.json, so invoking the script directly would ignore
 		// `E2E_WEB_ORIGIN` and hand back the primary checkout's port. Empty when
 		// the origin uses the scheme's default port — then vite picks its own.
-		command:
-			process.env.FEOH_E2E_USE_PREVIEW === 'true'
-				? `pnpm exec vite preview${PORT_ARG}${HOST_ARG}`
-				: `pnpm exec vite dev${PORT_ARG}${HOST_ARG}`,
+		command: USE_PREVIEW
+			? `pnpm exec vite preview${PORT_ARG}${HOST_ARG}`
+			: `pnpm exec vite dev${PORT_ARG}${HOST_ARG}`,
 		url: WEB_ORIGIN,
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
@@ -152,7 +166,8 @@ export default defineConfig({
 			// Both come from `fixtures/env.ts::PLATFORM_DOMAINS`, because the two
 			// run modes disagreeing is what kept `tenant/vanity-host.spec.ts`
 			// from covering the vanity half at all.
-			PUBLIC_PLATFORM_DOMAINS: PLATFORM_DOMAINS
+			PUBLIC_PLATFORM_DOMAINS: PLATFORM_DOMAINS,
+			...(USE_PREVIEW ? {} : { SVELTEKIT_OUT_DIR: DEV_OUT_DIR })
 		}
 	},
 

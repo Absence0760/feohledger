@@ -10,6 +10,7 @@ import {
 	test
 } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
+import { captchaEvent, stubCaptcha } from './captchaStub';
 
 /**
  * The palette the page is actually showing, read the way the app resolves it
@@ -114,72 +115,8 @@ async function waitForEmailMentioning(
 	return text!;
 }
 
-/**
- * Turn the captcha on and stub everything external about it. Local dev and CI
- * run with no hCaptcha sitekey (the local-first default), so this path is
- * otherwise never exercised. Stubbed: the sitekey, the submit endpoint (so a
- * test can read what each attempt sent), and hCaptcha's script — faked with
- * the explicit-render API the page uses: it renders nothing by itself, calls
- * the `onload` named in its URL, and `render` / `remove` record what they were
- * asked. Each widget's container carries its id and the theme it was drawn in.
- */
-async function stubCaptcha(page: Page): Promise<Array<{ captcha_token: string | null }>> {
-	const submissions: Array<{ captcha_token: string | null }> = [];
-	await page.route('**/api/public-config', (route) =>
-		route.fulfill({
-			json: { hcaptcha_sitekey: 'e2e-sitekey', tenant_url_template: tenantBase('{slug}') }
-		})
-	);
-	await page.route('**/api/signup/slug-check**', (route) =>
-		route.fulfill({ json: { slug: 'x', available: true, reason: null } })
-	);
-	await page.route('**/api/signup/start', async (route) => {
-		submissions.push(route.request().postDataJSON());
-		await route.fulfill({ json: { status: 'pending', message: 'We sent a verification link.' } });
-	});
-	await page.route(
-		(url) => url.hostname === 'hcaptcha.com' && url.pathname === '/1/api.js',
-		(route) =>
-			route.fulfill({
-				contentType: 'application/javascript',
-				body: `(() => {
-					let widgets = 0;
-					window.__removedWidgets = [];
-					window.hcaptcha = {
-						render(el, opts) {
-							const id = 'w' + String(++widgets);
-							el.dataset.widget = String(widgets);
-							el.dataset.renderedTheme = opts.theme || 'light';
-							window.__solveCaptcha = opts.callback;
-							window.__expireCaptcha = opts['expired-callback'];
-							return id;
-						},
-						remove(id) {
-							window.__removedWidgets.push(id);
-						}
-					};
-					const onload = new URL(document.currentScript.src).searchParams.get('onload');
-					if (onload) window[onload]();
-				})();`
-			})
-	);
-	return submissions;
-}
-
-/** Call one of the fake hCaptcha's recorded callbacks, as a solve / expiry would. */
-async function captchaEvent(page: Page, event: 'solve' | 'expire', token = ''): Promise<void> {
-	await page.evaluate(
-		([e, t]) => {
-			const w = window as unknown as {
-				__solveCaptcha: (t: string) => void;
-				__expireCaptcha: () => void;
-			};
-			if (e === 'solve') w.__solveCaptcha(t);
-			else w.__expireCaptcha();
-		},
-		[event, token] as const
-	);
-}
+// The captcha stub (sitekey, endpoints, a fake explicit-render hCaptcha) is
+// shared with captcha.spec.ts and form-rules.spec.ts: ./captchaStub.ts.
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -285,7 +222,7 @@ test.describe('/signup — form', () => {
 		page
 	}) => {
 		await page.emulateMedia({ colorScheme: scheme });
-		const submissions = await stubCaptcha(page);
+		const { submissions } = await stubCaptcha(page);
 
 		await page.goto('/signup');
 		const widget = page.locator('.h-captcha');
@@ -339,7 +276,7 @@ test.describe('/signup — form', () => {
 		page
 	}) => {
 		await page.emulateMedia({ colorScheme: 'dark' });
-		const submissions = await stubCaptcha(page);
+		const { submissions } = await stubCaptcha(page);
 		await page.goto('/signup');
 		const widget = page.locator('.h-captcha');
 		await expect(widget).toHaveAttribute('data-widget', '1');
@@ -540,13 +477,109 @@ test.describe('/verify — outcomes', () => {
 		await expect(page.getByText(/something went wrong/i)).toHaveCount(0);
 	});
 
-	test('an invalid/expired token surfaces the uniform error', async ({ page }) => {
+	test('an invalid/expired token says the link expired, in the reader\'s language', async ({
+		page
+	}) => {
+		// The real backend: the uniform 410 for a token that never existed.
 		await page.goto('/verify?token=' + 'x'.repeat(40));
-		await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible({
+		await expect(page.getByRole('heading', { name: 'This link has expired' })).toBeVisible({
 			timeout: 10_000
 		});
-		// Backend returns the uniform 410 message (no 404-vs-410 enumeration).
-		await expect(page.getByText(/invalid or has expired/i)).toBeVisible();
+		await expect(page.getByText(/verification links work once and last 24 hours/i)).toBeVisible();
+		// Both ways on: a fresh link, or the workspace someone already made.
+		await expect(page.getByRole('link', { name: 'Start over' })).toHaveAttribute(
+			'href',
+			'/signup'
+		);
+		await expect(page.getByText(/already set up your workspace\?/i)).toBeVisible();
+		// Neither the generic failure nor the server's English sentence.
+		await expect(page.getByText(/something went wrong/i)).toHaveCount(0);
+		await expect(page.getByText(/please sign up again/i)).toHaveCount(0);
+	});
+
+	test('the 410 is read by its status, never by the server\'s wording', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) => route.fulfill({ status: 410, json: { detail: 'any wording at all' } })
+		);
+		await page.goto('/verify?token=' + 'x'.repeat(40));
+		await expect(page.getByRole('heading', { name: 'This link has expired' })).toBeVisible();
+		await expect(page.getByText('any wording at all')).toHaveCount(0);
+	});
+
+	test('the token leaves the address bar once the link has been answered', async ({ page }) => {
+		// Left in place it stays in history, a copied URL and a screenshot.
+		const requested: string[] = [];
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) => {
+				requested.push(route.request().postDataJSON().token);
+				return route.fulfill({
+					json: {
+						status: 'provisioned',
+						slug: 'stubco',
+						tenant_url: tenantBase('stubco'),
+						admin_email: 'admin@stubco.example',
+						set_password_url: null
+					}
+				});
+			}
+		);
+		const token = 'y'.repeat(40);
+		await page.goto(`/verify?token=${token}&utm_source=email`);
+		await expect(page.getByRole('heading', { name: 'Your workspace is ready' })).toBeVisible();
+		await expect(page).toHaveURL(/\/verify\?utm_source=email$/);
+		expect(page.url()).not.toContain(token);
+		// The request itself still carried it.
+		expect(requested).toEqual([token]);
+	});
+
+	test('a reload after the strip still re-sends the token, from the tab\'s own history entry', async ({
+		page
+	}) => {
+		// The token left the address bar, but a reload must still reach the
+		// backend's re-answer for a spent link (decisions §292), not "no token".
+		const signInUrl = `${tenantBase('stubco')}/login?email=admin%40stubco.example`;
+		const sent: string[] = [];
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) => {
+				sent.push(route.request().postDataJSON().token);
+				return route.fulfill({
+					json: {
+						status: 'provisioned',
+						slug: 'stubco',
+						tenant_url: tenantBase('stubco'),
+						admin_email: 'admin@stubco.example',
+						set_password_url: null,
+						sign_in_url: signInUrl,
+						already_verified: sent.length > 1
+					}
+				});
+			}
+		);
+		const token = 'r'.repeat(40);
+		await page.goto(`/verify?token=${token}`);
+		await expect(page.getByRole('heading', { name: 'Your workspace is ready' })).toBeVisible();
+		await expect(page).toHaveURL(/\/verify$/);
+
+		await page.reload();
+		await expect(page.getByText(/you already confirmed this email/i)).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute(
+			'href',
+			signInUrl
+		);
+		await expect(page).toHaveURL(/\/verify$/);
+		expect(sent).toEqual([token, token]);
+	});
+
+	test('the token is stripped from a refused link too', async ({ page }) => {
+		const token = 'z'.repeat(40);
+		await page.goto(`/verify?token=${token}`);
+		await expect(page.getByRole('heading', { name: 'This link has expired' })).toBeVisible({
+			timeout: 10_000
+		});
+		await expect(page).toHaveURL(/\/verify$/);
 	});
 });
 

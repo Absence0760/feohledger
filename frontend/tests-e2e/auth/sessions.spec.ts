@@ -82,9 +82,13 @@ test.describe('signed-in devices', () => {
 
 			// --- The point of the whole feature: A's token is now dead. ---
 			// Its next authenticated request 401s, which clears the token and
-			// bounces it to /login.
+			// bounces it to /login, carrying the page it was on as `next` so a
+			// fresh sign-in returns there (`api.ts::endSessionIfRejected`).
 			await page.goto('/invoices');
-			await page.waitForURL(/\/login$/, { timeout: 15_000 });
+			await page.waitForURL(
+				(url) => url.pathname === '/login' && url.searchParams.get('next') === '/invoices',
+				{ timeout: 15_000 }
+			);
 			const token = await page.evaluate(() => localStorage.getItem('auth_token'));
 			expect(token).toBeNull();
 		} finally {

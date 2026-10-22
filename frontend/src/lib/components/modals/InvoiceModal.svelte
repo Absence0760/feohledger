@@ -1788,6 +1788,7 @@
 		class="modal"
 		class:fullscreen
 		role="dialog"
+		aria-modal="true"
 		aria-label="Edit invoice {invoice.invoice_number}"
 		tabindex="-1"
 	>
@@ -3225,7 +3226,7 @@
 		background: var(--surface);
 		color: var(--text-muted);
 		border: 1px solid var(--border);
-		transition: all 0.15s;
+		transition: border-color 0.15s;
 	}
 
 	.btn-delete-outline:hover {

@@ -20,7 +20,8 @@ infra/
 ├── network.tf                   # workload VPC: 2 public subnets (VM), 2 private (RDS), no NAT, REJECT flow logs
 ├── compute.tf                   # app VM (EC2 Graviton, Session Manager, IMDSv2) + instance role + Elastic IP + apex/api/* DNS
 ├── database.tf                  # RDS Postgres 16: private, encrypted, TLS-only, point-in-time restore, write-only password
-├── monitoring.tf                # SNS alerts topic + VM recovery/reboot and DB CPU/memory/storage alarms
+├── monitoring.tf                # SNS alerts (email) + pager (SMS) topics + VM recovery/reboot and DB CPU/memory/storage alarms
+├── uptime.tf                    # Route 53 HTTPS checks on the apex, a tenant host and api./api/health, their paging alarms, ACM expiry alarm
 ├── deploy.tf                    # release deploys: the SSM command document that runs deploy.sh --ref, + the deploy role's grant to run it
 ├── frontend.tf                  # the SPA: private S3 bucket + CloudFront (OAC, SPA router, headers, logs, alarms) + the deploy role's publish grant
 ├── cloudfront/spa-router.js     # the CloudFront Function: built files pass through, routes become /index.html
@@ -204,7 +205,7 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 - **The VM holds no AWS keys.** Its instance role can decrypt the sops secrets, read and write the three data buckets under the app key, and send mail as the platform domain — nothing else.
 - **The database is private.** Private subnets with no internet route, reachable only from the VM's security group, encrypted with the app key, TLS forced (`rds.force_ssl`), deletion-protected, IAM database authentication enabled — the app signs in as the `feoh_app` role with a per-connection token, and the VM role's `rds-db:connect` names that one user on this one instance (`compute.tf`, `../docs/decisions.md` §310); the master keeps password login for break-glass only — and restorable to any point in the last `db_backup_retention_days` (default 7). The nightly logical dumps (`../deploy/backup.sh`) keep 90 days beyond that.
 - **DNS.** `api.` points at the VM's Elastic IP. The apex and `*.` (every tenant) do too until `frontend_on_cloudfront` moves them to the SPA's CloudFront distribution (§ Frontend on CloudFront).
-- **Alarms** go to `alert_emails` through SNS — each address must click AWS's confirmation link once. The VM recovers itself onto new hardware on a host failure and reboots on a guest failure.
+- **Alarms** go to `alert_emails` through SNS — each address must click AWS's confirmation link once. The VM recovers itself onto new hardware on a host failure and reboots on a guest failure. Database storage running out also texts `alert_phone_number`, as do the external uptime checks (§ Uptime checks and paging).
 
 **The database password never enters Terraform state.** `db_master_password` is an *ephemeral* variable feeding RDS's *write-only* `password_wo`, so it is sent to AWS and stored nowhere else — not in state, not in a plan file. That is why this module does not read it through a `sops_file` data source (§ Secrets): a data source's value is written to state in plaintext. The operator supplies it at apply time from the private `infra-secrets` repo, as an environment variable on the one command.
 
@@ -213,9 +214,10 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 1. Add `alert_emails = ["…"]` to `prod.tfvars` (it has no default — the repo is public).
 2. Create the master password once in `infra-secrets` (a 48-hex-character value is URL-safe, which it must be because the break-glass `FEOH_DATABASE_URL` embeds it): `cd ~/github/infra-secrets && AWS_PROFILE=feohledger sops feohledger/terraform.sops.yaml`, and add a `db_master_password:` key set to the output of `openssl rand -hex 24`.
 3. Plan and apply with the password passed in from sops (one line each):
-   `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan`
-   then `AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform apply tfplan`.
-   An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice.
+   `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(AWS_PROFILE=feohledger sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan`
+   then `AWS_PROFILE=feohledger TF_VAR_db_master_password="$(AWS_PROFILE=feohledger sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform apply tfplan`.
+   An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice. `AWS_PROFILE` is set inside the `$( … )` too: a prefix assignment reaches only the command it precedes, so without it the substitution decrypts with no profile.
+   If `plan` reports the cached provider "does not match any of the checksums recorded in the dependency lock file", re-run `terraform init -backend-config=backend.config` and keep the `h1:` line it adds until the apply is done — restoring the lock first brings the error straight back. Then `git restore .terraform.lock.hcl`, so one workstation's hash never lands in a commit.
 4. Confirm the SNS subscription email AWS sends to each alert address.
 5. Then the VM side: `../deploy/README.md` (bootstrap, the sops env with `FEOH_DATABASE_URL` pointing at the `db_address` output, first deploy, then § Database role to move the app onto `feoh_app`).
 
@@ -354,6 +356,113 @@ are in the repo root with `AWS_PROFILE=feohledger`.
 back to the VM, whose Caddy still serves the SPA until step 8. For a bad
 *build*, rather than bad infrastructure, see `../deploy/README.md` § Frontend
 rollback.
+
+## Uptime checks and paging
+
+`uptime.tf` checks the product from outside, and the pager topic in
+`monitoring.tf` texts the operator's phone when it fails (`../docs/decisions.md`
+§311). The alarms above all watch AWS's view from inside the account. None of
+them notices a wrong DNS record, a Caddy that stopped proxying, or an API
+container that exited on a healthy VM.
+
+**What it creates**
+
+- **Route 53 HTTPS health checks** (with SNI) from three regions (`us-east-1`,
+  `us-west-2`, `eu-west-1`) every 30 seconds. An endpoint reads unhealthy after 3
+  failures in a row, about 90 seconds:
+  - `https://<domain>/`, the apex SPA;
+  - `https://api.<domain>/api/health`, matched on the body `"status":"ok"`, so a
+    200 from anything else (the SPA router answering that path with
+    `index.html`, a parked domain) fails. `backend/tests/test_sweep_health.py`
+    pins the string against what the endpoint really sends;
+  - `https://<uptime_tenant_slug>.<domain>/`, one tenant host: the wildcard
+    record, the wildcard SAN and, before the CloudFront cutover, that tenant's
+    Caddy block. Skipped while `uptime_tenant_slug` is unset.
+- **One alarm per check** (`<project>-<env>-uptime-<apex|api|tenant>`), in
+  us-east-1 because Route 53 publishes health-check metrics only there. It goes
+  to the pager topic (text) **and** the alerts topic (email), on failure and on
+  recovery. Missing data counts as a failure, so expect one page right after the
+  first apply, before Route 53's first datapoint.
+- **The pager topic** (`<project>-<env>-pager`, us-east-1) and, when
+  `alert_phone_number` is set, its SMS subscription, the account's SMS type set
+  to Transactional, and two email alarms: a text SNS failed to deliver
+  (`pager-sms-failed`), and this month's SMS spend reaching 80% of the
+  account's SMS spend limit (`pager-sms-spend`), past which SNS stops texting.
+- **Which alarms page:** the uptime checks and `db-storage-low` (past it writes
+  fail, and no uptime check notices first). Everything else stays email-only:
+  CPU, memory and CPU credits are sizing and cost signals, and a failed VM status
+  check or a CloudFront error surge that customers can see already fails an
+  uptime check, so paging those too would send two or three texts per incident.
+- **Certificate expiry** (`<project>-<env>-certificate-expiry`, email): the ACM
+  certificate's `DaysToExpiry` under 30. Route 53 checks complete the TLS
+  handshake but don't validate the certificate, so an expired one would pass
+  them. ACM renews from 60 days out on its own, so this only fires when that
+  renewal has failed. The VM's own Let's Encrypt certificates (Caddy, on `api.`)
+  are not covered yet: `../docs/followups.md`.
+
+**Cost**: about **$8–13 a month**. Each HTTPS check is $0.50–0.75 a month plus
+$1–2 for HTTPS and, on the API, $1–2 for the string match. The lower figures are
+AWS's rates for an AWS endpoint, and these checks may bill at the non-AWS rate
+since they target hostnames. That comes to $5.50–10.25 for three checks. The
+toll-free number is $2 a month, each text about a cent (base fee plus carrier
+fee, `aws.amazon.com/end-user-messaging/pricing`), and up to six new alarms
+about $0.60. The 10-second fast interval and latency graphs are off: each adds $1–2
+per check. Fewer regions don't lower the price, which is per check, but they
+cut the requests the checkers make against CloudFront and the API. The $75
+budget still covers the stack plus this.
+
+**Phone delivery, before you set `alert_phone_number`** (US numbers; these are
+console steps, not Terraform). New accounts are in the SNS **SMS sandbox**,
+which texts only verified numbers (up to 10). The operator is the only
+recipient, so the sandbox is fine to stay in. US carriers also refuse SMS
+without a registered **origination identity**. A toll-free number is the
+cheapest: $2 a month, registration in about 15 days.
+
+1. **Request a toll-free number** in the AWS End User Messaging SMS console, in
+   **us-east-1** (a number belongs to one region, and the pager topic is
+   there): SMS capability, message type Transactional. Requesting it opens its
+   registration form.
+2. **Complete the registration.** Business type *Sole proprietor* (no EIN
+   needed), website `https://feohledger.com`, privacy and terms URLs
+   `https://feohledger.com/legal/privacy` and `https://feohledger.com/legal/terms`
+   (required on registrations since 2026-09-15), use case *Account
+   notifications*, with details along the lines of "infrastructure alerts sent
+   only to the business owner's own phone". Message sample:
+   `ALARM: "feohledger-prod-uptime-api" in US East (N. Virginia)`. The form also
+   asks for a street address and contact phone. Those go to AWS and the
+   carriers, not to any published page. The number sends nothing until the
+   registration reads **Complete**.
+3. **Let SNS use the number.** AWS's registration docs require a resource
+   policy on it for SNS: on the number's *Resource policy* tab, allow
+   `sns.amazonaws.com` `sms-voice:SendTextMessage` on that number, conditioned
+   on `aws:SourceAccount` = this account
+   (`docs.aws.amazon.com/sms-voice/latest/userguide/shared-resources.html`).
+4. **Verify the destination number** in the SNS console, us-east-1 → Text
+   messaging (SMS) → Sandbox destination phone numbers → Add phone number, then
+   enter the code it texts.
+5. The SMS spend limit for a new account is $1 a month, about a hundred texts.
+   That covers paging; `pager-sms-spend` emails at 80% of it, in time to raise
+   it in the SNS console's text messaging preferences.
+
+**Operator steps**
+
+1. **Apply the checks** (they need no phone): add `uptime_tenant_slug` (a
+   tenant you control, such as the test tenant) to `prod.tfvars`, then plan and
+   apply as in § Workload stack step 3. The plan should add the health checks
+   (two, or three with the slug), one `uptime` alarm per check,
+   `platform_certificate_expiry` and `aws_sns_topic.pager`. It should change
+   only `db_storage` (its actions gain the pager topic) and destroy nothing.
+   Each alarm emails ALARM, then OK, within a few minutes of the apply.
+2. **Add the phone** once the toll-free registration is Complete and the
+   number is verified: `alert_phone_number = "+1…"` in `prod.tfvars`, then plan
+   and apply again. The plan should add `pager_sms`, the `pager` SMS
+   preferences, `pager_delivery_failed` and `pager_sms_spend`, and the number shows as
+   `(sensitive value)`.
+3. **Ring the phone**:
+   `aws cloudwatch set-alarm-state --alarm-name feohledger-prod-uptime-api --state-value ALARM --state-reason "Paging test" --region us-east-1 --profile feohledger`.
+   A text and an email arrive within a minute. The next evaluation sets the
+   alarm back to OK, which sends a second text. If no text comes, check
+   `feohledger-prod-pager-sms-failed` and the registration status.
 
 ## Secrets
 

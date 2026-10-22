@@ -56,7 +56,8 @@ test.describe('sidebar notification bell', () => {
 		await page.locator('.bell-btn').click();
 		await expect(page.locator('.bell-popover')).toBeVisible();
 
-		await page.getByRole('button', { name: 'View all →' }).click();
+		// A link, not a button: it navigates. The arrow is decorative (aria-hidden).
+		await page.getByRole('link', { name: 'View all', exact: true }).click();
 		await expect(page).toHaveURL(/\/notifications$/);
 	});
 

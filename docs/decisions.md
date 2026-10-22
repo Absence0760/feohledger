@@ -13985,6 +13985,89 @@ Guards: `tests/test_budget_rollup.py::test_actual_counts_an_invoice_mid_erp_push
 field removed and contradicted), `tests/test_extraction_self_correction.py`,
 `tests/test_extraction_confidence_contract.py::test_no_amount_never_auto_approves_on_either_trigger`.
 
+## 309. The ERP push refuses an invoice FeohLedger is already paying (2026-10-21)
+
+**The gap.** The run builder and the card mint each refuse an invoice the
+other rail already holds (`uq_payments_one_live_per_invoice`,
+`live_payment_invoices`, `live_card_invoice_ids`). The ERP push asked neither.
+Staging a run books a live `pending` payment and leaves the invoice `approved`;
+an `exported` NACHA run is the same; a minted card leaves it `approved` too.
+"Send to ERP" then posted the bill, and a bill in the ERP can be paid there
+("Mark as paid", Bill Pay). One invoice, two outflows: our rail and the ERP.
+The ERP is a third rail, and it was the only one not checking the other two.
+
+**The rule.** The push refuses while the invoice holds a live payment (any
+status outside `api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`) or a live virtual
+card (any card not `cancelled`), with the coded refusal
+`payment_blocks_erp_export`, `params = {claim: "payment" | "virtual_card"}`,
+and `possibly_posted: true` on §286's terms. It is in
+`services/erp_export_gate.py` beside §286's exception check, through one
+function, `erp_export_refusal`, which every push asks: the three HTTP doors
+(409 before their transition) and `services/erp._call_erp` (before any
+adapter is built). An open duplicate / fraud exception is named first, so
+§286's refusals read as before.
+
+- **"Live" is not restated.** `erp_export_live_claim` calls
+  `payment_runs.live_payment_invoices` and `card_issuance.live_card_invoice_ids`,
+  the predicates the two rails refuse each other with, which mirror the two
+  partial unique indexes. A second spelling is how the gates would come to
+  disagree about a `pending_compliance` or `charged` row.
+- **A settled card or a completed payment still refuses.** The money has
+  already moved on our rail; a bill posted now is payable a second time. The
+  remedy the refusal names is the rail's own exit (cancel the run, void the
+  payment, cancel the card), the same one the other rail would need.
+- **Why `_call_erp` asks too, not only the doors.** `sending_to_erp` and
+  `failed` are outside `PAYABLE_INVOICE_STATUSES`, so once the door's
+  transition commits no run can be staged on the invoice. But the run builder
+  reads its invoices without a lock (the door and the card mint do lock), so
+  a run staged concurrently with a send can still read the invoice as
+  `approved` and book a payment after the door's gate saw none. Re-reading at
+  `_call_erp`, immediately before the adapter, stops a push whose claim landed
+  in that window, and it covers pushes that never pass a door: a dispatcher,
+  a Lambda redelivery, a row written before this gate (a `failed` invoice
+  with a live payment beside it, which `/retry-erp` would otherwise post), or
+  a future entry point (the auto-send on approval in flight as PR #625 routes
+  through the same gate). §286 put its check at the chokepoint for the same
+  reason. The cost is two indexed reads per attempt. It narrows the race but
+  does not close it; locking the run builder's invoices is the durable fix,
+  tracked in `docs/followups.md`. A claim that slips through is not a double
+  payment today: with status sync off the invoice closes at `done` and
+  dispatch refuses the payment (`invoice_not_payable`); with it on, the
+  invoice lands at `posted_in_erp` and is paid once, with a BillPayment
+  written back.
+- **Interaction with QuickBooks status sync (§295, §296).** Status sync covers
+  the other order. With it on, a confirmed push lands the invoice at
+  `posted_in_erp`, still payable here; a payment staged then is written back
+  to QuickBooks as a BillPayment, and a bill paid in QuickBooks while
+  FeohLedger also holds a payment opens the blocking `payment_reconciliation`
+  exception. None of that passes this gate: an invoice at `posted_in_erp` (or
+  `payment_scheduled` / `paid`) is never pushed again, so a payment against it
+  is never refused here. With sync off, a confirmed push closes the invoice at
+  `done`, so nothing is paid here after it either. With an ERP, the supported
+  order is therefore *push, then pay*; *pay, then push* is what this refuses.
+  That tightens a flow that used to work with sync on: staging a run and then
+  pushing ended at `posted_in_erp`, where the write-back and the
+  `payment_reconciliation` exception caught a QuickBooks payment after the
+  fact. The refusal is still right with sync on. Between the push and our
+  run's execution the bill sits open in QuickBooks and anyone can pay it
+  there, and the exception only reports that payment once it has been made.
+  Do not exempt sync-on orgs from this gate.
+
+**Rejected: transition the invoice off `approved` when a run is staged or a
+card minted.** That would change the payment queue, the run builder's own
+payable-status check and every screen that reads `approved`, to fix a gap in
+one consumer. The claim already exists as a row; the push only had to read it.
+
+**Rejected: refuse silently (a 202 that fails a second later).** Same reason as
+§286: the user would have to read the audit trail to learn why.
+
+Tests: `backend/tests/test_erp_export_blocking_exceptions.py` (draft run,
+exported run, live card, voided / failed / cancelled payment, cancelled card,
+no claim, the real run builder then cancel, `/retry-erp` with
+`possibly_posted`, and `_call_erp` stopping a push queued before the claim);
+`frontend/src/lib/api/erpRefusals.test.ts` and `codedRefusals.test.ts` (all
+six locales).
+
 ## 310. The app signs in to RDS as a least-privilege role with an IAM token, and the master password leaves the VM (2026-10-21)
 
 **The problem.** Production connected as the RDS master user `postgres`, whose
@@ -14139,85 +14222,399 @@ rollback, the master downgraded, migrated and provisioned a tenant, and the next
 cutover run handed that tenant over. The
 operator rollout is `deploy/README.md` § Database role.
 
-## 309. The ERP push refuses an invoice FeohLedger is already paying (2026-10-21)
+## 311. The site is checked from outside by Route 53, and only customer-facing failures text the phone (2026-10-21)
 
-**The gap.** The run builder and the card mint each refuse an invoice the
-other rail already holds (`uq_payments_one_live_per_invoice`,
-`live_payment_invoices`, `live_card_invoice_ids`). The ERP push asked neither.
-Staging a run books a live `pending` payment and leaves the invoice `approved`;
-an `exported` NACHA run is the same; a minted card leaves it `approved` too.
-"Send to ERP" then posted the bill, and a bill in the ERP can be paid there
-("Mark as paid", Bill Pay). One invoice, two outflows: our rail and the ERP.
-The ERP is a third rail, and it was the only one not checking the other two.
+**The gap.** Every alarm in `infra/` watched AWS's view of its own resources:
+the VM's status checks, RDS CPU, memory and storage, CloudFront error rates. A
+wrong DNS record, a Caddy that stopped proxying, an API container that exited
+on a healthy VM, or a distribution serving the wrong thing moved none of them,
+and all of them only sent email. Operator to-do #446 asked for uptime
+monitoring that reaches the phone before customer #1.
 
-**The rule.** The push refuses while the invoice holds a live payment (any
-status outside `api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`) or a live virtual
-card (any card not `cancelled`), with the coded refusal
-`payment_blocks_erp_export`, `params = {claim: "payment" | "virtual_card"}`,
-and `possibly_posted: true` on §286's terms. It is in
-`services/erp_export_gate.py` beside §286's exception check, through one
-function, `erp_export_refusal`, which every push asks: the three HTTP doors
-(409 before their transition) and `services/erp._call_erp` (before any
-adapter is built). An open duplicate / fraud exception is named first, so
-§286's refusals read as before.
+**Route 53 health checks, not a monitoring vendor.** Route 53's checkers make
+real HTTPS requests from several AWS regions, live in the same Terraform and
+state as the stack they check, and need no account, API key or extra
+sub-processor. The public status page is still a vendor call
+(`founder-runbooks/support-and-status.md`). A vendor that runs its own monitors
+can sit beside these checks. It does not replace them.
 
-- **"Live" is not restated.** `erp_export_live_claim` calls
-  `payment_runs.live_payment_invoices` and `card_issuance.live_card_invoice_ids`,
-  the predicates the two rails refuse each other with, which mirror the two
-  partial unique indexes. A second spelling is how the gates would come to
-  disagree about a `pending_compliance` or `charged` row.
-- **A settled card or a completed payment still refuses.** The money has
-  already moved on our rail; a bill posted now is payable a second time. The
-  remedy the refusal names is the rail's own exit (cancel the run, void the
-  payment, cancel the card), the same one the other rail would need.
-- **Why `_call_erp` asks too, not only the doors.** `sending_to_erp` and
-  `failed` are outside `PAYABLE_INVOICE_STATUSES`, so once the door's
-  transition commits no run can be staged on the invoice. But the run builder
-  reads its invoices without a lock (the door and the card mint do lock), so
-  a run staged concurrently with a send can still read the invoice as
-  `approved` and book a payment after the door's gate saw none. Re-reading at
-  `_call_erp`, immediately before the adapter, stops a push whose claim landed
-  in that window, and it covers pushes that never pass a door: a dispatcher,
-  a Lambda redelivery, a row written before this gate (a `failed` invoice
-  with a live payment beside it, which `/retry-erp` would otherwise post), or
-  a future entry point (the auto-send on approval in flight as PR #625 routes
-  through the same gate). §286 put its check at the chokepoint for the same
-  reason. The cost is two indexed reads per attempt. It narrows the race but
-  does not close it; locking the run builder's invoices is the durable fix,
-  tracked in `docs/followups.md`. A claim that slips through is not a double
-  payment today: with status sync off the invoice closes at `done` and
-  dispatch refuses the payment (`invoice_not_payable`); with it on, the
-  invoice lands at `posted_in_erp` and is paid once, with a BillPayment
-  written back.
-- **Interaction with QuickBooks status sync (§295, §296).** Status sync covers
-  the other order. With it on, a confirmed push lands the invoice at
-  `posted_in_erp`, still payable here; a payment staged then is written back
-  to QuickBooks as a BillPayment, and a bill paid in QuickBooks while
-  FeohLedger also holds a payment opens the blocking `payment_reconciliation`
-  exception. None of that passes this gate: an invoice at `posted_in_erp` (or
-  `payment_scheduled` / `paid`) is never pushed again, so a payment against it
-  is never refused here. With sync off, a confirmed push closes the invoice at
-  `done`, so nothing is paid here after it either. With an ERP, the supported
-  order is therefore *push, then pay*; *pay, then push* is what this refuses.
-  That tightens a flow that used to work with sync on: staging a run and then
-  pushing ended at `posted_in_erp`, where the write-back and the
-  `payment_reconciliation` exception caught a QuickBooks payment after the
-  fact. The refusal is still right with sync on. Between the push and our
-  run's execution the bill sits open in QuickBooks and anyone can pay it
-  there, and the exception only reports that payment once it has been made.
-  Do not exempt sync-on orgs from this gate.
+**Three hosts, one per way to be down.** The apex (the SPA), one tenant host
+(the wildcard record, the wildcard SAN and, before the CloudFront cutover, that
+tenant's Caddy block), and `api.<domain>/api/health`. The tenant slug is a
+variable with no default, so the public repo names no customer. Unset skips
+that check.
 
-**Rejected: transition the invoice off `approved` when a run is staged or a
-card minted.** That would change the payment queue, the run builder's own
-payable-status check and every screen that reads `approved`, to fix a gap in
-one consumer. The claim already exists as a row; the push only had to read it.
+**HTTPS everywhere, a body match only on the API.** An HTTP check would follow
+nothing and pass on the redirect. HTTPS, string matching and the fast interval
+each bill per check. The API's match on `"status":"ok"` earns its cost: the
+SPA router answers every path with `index.html`, so if `api.` ever resolved to
+CloudFront a status-only check would read healthy. The SPA hosts already fail
+on the status code or the handshake in every way a person would notice (an
+empty bucket, a missing object, a stopped Caddy, a host with no certificate).
+`backend/tests/test_sweep_health.py` reads the string out of `uptime.tf` and
+checks it against the bytes `/api/health` returns, so reformatting either side
+fails CI instead of paging for an API that is up.
 
-**Rejected: refuse silently (a 202 that fails a second later).** Same reason as
-§286: the user would have to read the audit trail to learn why.
+**30-second interval, 3 failures, 3 regions.** About 90 seconds of sustained
+failure before a check reads unhealthy, which a deploy's few-second container
+restart never reaches. The 10-second interval would cut that to about 30
+seconds, at $1–2 more per check, for a pilot with no uptime commitment.
+Three regions is Route 53's minimum. They don't lower the price, which is per
+check, but every checker is a request against CloudFront's free allowance and
+the API, and three regions on two continents still tell a regional network
+fault from an outage. All in, about $8–13 a month with the toll-free number.
 
-Tests: `backend/tests/test_erp_export_blocking_exceptions.py` (draft run,
-exported run, live card, voided / failed / cancelled payment, cancelled card,
-no claim, the real run builder then cancel, `/retry-erp` with
-`possibly_posted`, and `_call_erp` stopping a push queued before the claim);
-`frontend/src/lib/api/erpRefusals.test.ts` and `codedRefusals.test.ts` (all
-six locales).
+**us-east-1, by construction.** Route 53 publishes health-check metrics only
+in us-east-1, and an alarm can notify only a topic in its own region. The
+alarms and the pager topic are pinned to the existing `aws.us_east_1` alias.
+`frontend.tf` already refuses any other `aws_region`, which keeps the alerts
+topic and the database alarm that pages there too. No new provider, so the lock
+file is unchanged.
+
+**A separate pager topic, and only customer-facing alarms on it.** Putting an
+SMS subscription on `alerts` would text CPU-credit warnings at 3 a.m. Instead
+the uptime alarms and `db-storage-low` (past it writes fail, and no uptime
+check notices first) notify both `pager` (SMS) and `alerts` (email). Everything
+else stays email-only. CPU, memory and credits are sizing and cost signals. A
+failed VM status check, or a CloudFront 5xx surge customers can see, fails an
+uptime check anyway, so paging it too would send two or three texts per
+incident and teach the operator to ignore the phone.
+
+**Missing data is an outage for the uptime alarms, not for the certificate
+alarm.** Route 53 emits `HealthCheckStatus` every minute while a check exists,
+so silence means the check or the metric pipeline is broken. An uptime alarm
+that goes quiet when it cannot see is the failure this exists to remove. The
+cost is one page right after the first apply, which doubles as a delivery
+test. ACM's `DaysToExpiry` is daily with drifting timestamps, so an empty
+window there is normal and reads `notBreaching`.
+
+**Certificate expiry: ACM covered, Caddy tracked.** Route 53 does not validate
+certificates, so an expired one passes. ACM renews the platform certificate
+from 60 days out on its own. An alarm at under 30 days catches a renewal that
+failed (validation CNAME deleted, a CAA record) with a month left, by email.
+The Let's Encrypt certificates Caddy holds on the VM emit no AWS metric. That
+gap is a (c) follow-up (a Synthetics canary) rather than half-built here.
+
+**The phone number stays out of the repo, and its absence is safe.**
+`alert_phone_number` has no default, is `sensitive` so plans print
+`(sensitive value)`, and is validated as E.164. Unset creates no subscription,
+leaves the account's SMS settings alone and adds no delivery alarm, so
+plan, validate and the offline tests need no number. The `count` reads
+`nonsensitive(var.alert_phone_number != null)`, because whether a number is set
+reveals nothing and `count` refuses a sensitive value.
+
+**US SMS has prerequisites Terraform cannot do.** A new account is in the SNS
+SMS sandbox, which delivers only to numbers verified in the console. That is
+fine to stay in, since the operator is the only recipient. US carriers also
+refuse SMS without a registered origination identity. A toll-free number is
+the cheapest: $2 a month and about 15 days to register, as a sole proprietor
+with no EIN. Registrations since 2026-09-15 need privacy and terms URLs, which
+`/legal/` already publishes. SNS then needs a resource policy on the number.
+These are console steps (`infra/README.md` § Uptime checks and paging) and a
+(b) follow-up. Leasing the number through Terraform was rejected: the
+registration form carries the operator's address and contact phone, which
+belong in neither the public repo nor its state. A text SNS cannot deliver
+fails silently (unregistered number, unverified destination, the $1 default
+monthly spend limit), so with a number set an alarm on the pager topic's
+`NumberOfNotificationsFailed`, which counts an SMS once SNS stops trying to
+deliver it, emails the operator, and a second emails at 80% of the spend limit
+(`SMSMonthToDateSpentUSD`), since past it SNS stops texting for the rest of the
+month. A carrier dropping a text SNS handed over is invisible to both, which is
+why the README ends with a test-fire. `aws_sns_topic.pager` also carries its
+own `aws_region == "us-east-1"` precondition: `db_storage` sits on the default
+provider and publishes to it, which only works in the same region.
+
+**Tests.** `infra/tests/guardrails.tftest.hcl` pins the hosts, paths, body
+match, interval, threshold and regions, the tenant check appearing only with a
+slug, every uptime alarm paging and emailing on failure and recovery with
+missing data breaching, which alarms may page, the SMS subscription, SMS
+preferences and both SMS alarms existing only with a number, the E.164 and
+slug validations, the region precondition, and the certificate alarm.
+
+## 312. The landing page follows the visitor's theme, with a light render of the tally (2026-10-21)
+
+**This supersedes §289's "the marketing landing page stays dark" and §294's
+"not until evidence says otherwise".** §294 named what would reopen the
+question — drop-off or repeated feedback — and what doing it properly would
+mean: a light render of the tally, panel treatments composed for a light
+ground, contrast re-measured, the theme followed rather than toggled per page.
+What reopened it is the operator asking for it directly: a visitor who chose
+Light (or whose OS did) met a navy landing page between a light sign-in page
+and a light app, and on the apex domain that page is the product's first
+impression. The job was done the way §294 said it must be, not as a token
+swap that leaves a dark-composed render on white.
+
+**What changed.**
+
+- **No pin.** `data-theme-scope="dark"` is gone from `Landing` and from
+  `app.css`'s dark selector list; nothing else used the mechanism, so it was
+  removed rather than kept idle. The landing subtree (`Landing`, `Pricing`,
+  `HeroPipeline`, `AdapterRail`, `Atmosphere`) takes System / Light / Dark
+  from the same pre-paint script and store as everything else, so a stored
+  Light is on `<html>` at the first frame here too.
+- **Every colour is a token.** 85 literals — navy glass `rgba(24, 26, 35, …)`,
+  accent glows, the text-gradient stops, the stamp and ping greens — became
+  palette tokens or `color-mix(in srgb, var(--token) N%, transparent)`. Three
+  tokens are new, in both palettes: `--gilt` (the tally's gold), `--brand-violet`
+  (the gradient midpoint) and `--drop-shade` (a cast shadow: black on navy, a
+  soft ink on light, where black at the same strength reads as dirt). The dark
+  values are the old literals, so the dark page is unchanged to the eye.
+- **Light treatments, not an inversion.** Glass panels are translucent
+  `--surface` (white, in light) with `--shadow-card`, so they lift off the pale
+  ground by shadow rather than by being lighter than it; the hero card is
+  `--surface` with `--shadow-float`; the eyebrow pills moved onto the
+  calibrated `--accent-tint` / `--accent-on-tint` pair; the grid, grain and
+  vignette already followed `--text` / `--bg`. The brand mark is untouched.
+- **A second render of the tally.** On the light ground the dark render's
+  softbox reflections came out as near-white cream, the page's own value, and
+  the stick's near edges dissolved. `tally_scene.py` now takes
+  `TALLY_VARIANT=light`: dimmer softbox, ~0.45 stop less exposure, a warm weak
+  fill and a lower rim, everything else shared — so the two renders trim to the
+  same 1100 × 460 frame and swapping them never moves the layout.
+  `gen-marketing.sh` renders both (or one, by argument, so retuning one
+  lighting leaves the other's bytes alone) and refuses a pair that disagrees in
+  size. The page picks the file from `theme.resolved`
+  (`lib/marketing/ornament.ts`) rather than a `<picture>` media query, which
+  would follow the OS and ignore a stored choice; `AuthShell`'s panel, which
+  already followed the theme and was showing the dark render on white, uses the
+  same map. The grain overlay is shared — a grey tile under `overlay` blending
+  reads as grain on either ground — so it was not re-rendered.
+- **A theme switch in the header.** An anonymous visitor has no `/profile`.
+  `ThemePicker` and `SegmentedControl` gained `compact`: the same fieldset of
+  native radios drawn as three icons, legend and labels visually hidden but in
+  the accessibility tree, each segment titled, 30px targets, the radio clipped
+  (not faded) and the segment carrying the focus ring. With the dot hidden the
+  raised fill was no cue at all (1.04:1 against the track), so the chosen
+  segment takes an `--accent` ring on the accent tint pair — an edge the other
+  segments lack, ≥5.7:1 against the track in both palettes (1.4.11, 1.4.1). It sits beside the
+  `<nav>`, not in it — a setting, not a destination — and fits beside the mark
+  and the short CTA at 320px. No new strings: it reuses `profile.appearance.*`,
+  translated in all six locales.
+
+**Rejected.** *A page-local toggle* (a landing-only light/dark switch that
+does not touch the global choice) — §294 already ruled it out, and a choice
+that reverts on the next page is not a choice. *Keeping the scope mechanism for
+later* — an unused pin is an exemption from the light audit waiting to be
+reused. *CSS-swapping two `<img>` elements* — needs the light selectors written
+twice more (explicit and System) for one image, where the store already knows
+the answer.
+
+Guards: `src/lib/a11y/tokenPairing.test.ts` (both palettes over every
+marketing stylesheet with no exemption; no `data-theme-scope` anywhere; the
+marketing components type no colour literal — hex, any functional notation,
+`white` / `black`, in `<style>` or an inline `style=` — but `#fff` in a rule
+that also sets a `-strong` background, and a mask's `#000`; `--gilt`, `--brand-violet` and `--accent-on-tint` held to 4.5:1
+on `--bg` and `--surface` in each palette, since the scan cannot measure a
+`background-clip: text` gradient), `src/lib/marketing/ornament.test.ts` (both
+renders committed, same intrinsic size, not the same file), and
+`tests-e2e/a11y/light-theme.spec.ts` (the landing under a light OS: axe clean,
+light render; dark: axe clean, dark render; a stored Light under a dark OS:
+`data-theme` at the first frame, the ornament's first `src` the light file and
+the dark one never requested;
+the header switch reached by Tab, operated by arrow keys and by pointer,
+persisting across a reload, segments ≥ 24px, a drawn focus ring, a checked
+edge the others lack; at 320px the header holds mark, CTA and switch with no
+overflow; the auth shell's panel follows the theme).
+
+Numbered §312, with this branch's §313–§315 after it: they were drafted as §306–§309, main took §306–§308 and §310 first, and the open #631 and #634 claim §309 and §311.
+
+## 313. Error toasts stay until dismissed; other toasts pause while hovered or focused (issue #635, 2026-10-21)
+
+**This supersedes the fixed five-second timer `frontend/docs/ui-patterns.md`
+documented as deliberate** ("auto-dismiss timer kept"). Decided by the
+operator's delegate on #635 finding 24.
+
+**What was wrong.** Every toast vanished five seconds after it appeared,
+whatever it said and whatever the reader was doing. Several screens used a
+toast as their only error signal, some with an instruction in it (#6, #20,
+#21 on the issue); a screen-reader user hears it once, a slow reader may not
+finish it, and someone moving the pointer onto it to read it watched it go.
+That is WCAG 2.2.1 Timing Adjustable: content with a time limit needs a way
+to turn it off, adjust it or extend it.
+
+**The rule** (`frontend/src/lib/utils/toastQueue.ts`, rendered by
+`ui/Toast.svelte`):
+
+- An **error** toast has no timer. It stays until dismissed with its visible,
+  keyboard-reachable dismiss button. An explicit `duration` does not make an
+  error transient — no caller passed one, and an error that can be timed away
+  is the defect.
+- Any **other** toast keeps its timer (5 s, or the caller's explicit
+  `duration` — the sync report's 12 s warnings keep theirs), but the clock
+  **stops while the pointer is over a toast or focus is inside the region**
+  and resumes with the time it had left. A toast that arrives during a pause
+  starts its clock on resume.
+- **Persistent errors are bounded.** At most three stay on screen; a fourth
+  removes the oldest. The same error text arriving again replaces its earlier
+  copy instead of stacking — a page retrying a failing call cannot fill the
+  corner with identical cards.
+- **Live-region behaviour is unchanged where it matters.** Errors still go in
+  the assertive container and the rest in the polite one. Pausing changes no
+  DOM, so it announces nothing; a repeated error is a fresh insertion, so it is
+  announced again rather than silently deduplicated.
+- **Focus never falls to `<body>`.** Dismissing from the button moves focus to
+  the next toast's dismiss button, or to `<main>` when it was the last.
+- The region is named **"Status messages"**, not "Notifications": that is the
+  sidebar bell's name, and two landmarks sharing one name are
+  indistinguishable in a landmark list.
+
+**A toast is still not a load-error state.** A page whose data did not arrive
+says so in place with `ui/LoadError` and a Retry; the vendor list (#635
+finding 20) and the notification bell (finding 22) moved off toast-only
+failures in the same change. The persistent error toast is for an action's
+outcome.
+
+**Rejected: a longer fixed timer** (10 s, 15 s). It moves the line rather than
+removing it, and 2.2.1's "extend" option needs the reader to be able to ask
+for more time, which a fixed timer cannot give. **Rejected: making every toast
+persistent.** Success and info toasts confirm what the reader just did and
+the page already shows; requiring a dismissal for each would bury the errors
+that do need one.
+
+**Sign-off.** This changes a documented accessibility pattern
+(`docs/accessibility.md`, `frontend/docs/ui-patterns.md` § Toast); it should
+be confirmed by whoever owns `docs/accessibility.md`.
+
+## 314. The sidebar's groups say what is in them: Treasury, Subscription under Settings, Cash-flow analytics (issue #635, 2026-10-21)
+
+**Decided** by the operator's delegate on #635 finding 23 · `frontend/src/lib/nav.ts`
+
+A new admin met about thirteen sidebar rows and forty-odd destinations on day
+one, and three of the names misled:
+
+- **"Billing" held the customer's payables money tools** — Credit Memos,
+  Discounts, Positive Pay, Bank Reconciliation, vendor Statements — beside
+  *our* subscription page. Read cold, "Billing" is the vendor's bill or the
+  platform's invoice to you, not treasury work. The group is now
+  **Treasury** (`nav.group.treasury`; the old `nav.group.billing` key is gone,
+  so nothing can keep rendering the old name).
+- **Subscription moved to Settings, directly after Organization.** It is the
+  platform's plan and usage page (`/billing`, control plane), which describes
+  the workspace itself — the same kind of thing as Organization — and is
+  nothing to do with paying suppliers. It keeps its gate (admin | cfo, the
+  backend's `GET /api/billing/subscription`). A CFO, who can see no other
+  Settings child, now sees a Settings row that lands on Subscription; per-item
+  gating already handles a one-child view (the group row is the page).
+- **`/cfo` is "Cash-flow analytics"**, so it reads as distinct from
+  "Cash-Flow Copilot" beside it: one is the forecasting dashboard, the other a
+  conversation. Only the nav label changed (`nav.cashFlow`); the page keeps its
+  own heading key. In French the old label *was* "Trésorerie", which would have
+  collided with the new group name, so the guard below checks every locale.
+
+**What this does not change.** §174's row budget is untouched: no row was
+added, Treasury drops from nine tabs to eight, Settings grows from eight to
+nine, both under `nav.test.ts`'s ten-tab ceiling. The role matrix in
+`nav.test.ts` (`NAV_GATES`) moves `/billing` to the Settings block with the
+same roles.
+
+**Guard.** `nav.test.ts` pins the new placement, the CFO landing, and a
+locale-wide rule: no two sidebar rows share a name, and within a group no two
+tabs (nor a tab and its group) read the same, in any of the six catalogues.
+`tests-e2e/smoke/section-nav.spec.ts` checks the rendered sidebar.
+
+**The page and every pointer to it say "Subscription".** The rename left the
+`/billing` heading (`billing.title`) on "Billing" while the nav said
+"Subscription", and the messages that send a user there — the public pricing
+page's "starts on Free" line, the plan-feature refusal
+(`refusal.planFeatureRequired`), both AI-reading-paused invoice warnings and
+the three AI-usage notices (80%, 100%, spending cap) — named a "Billing" page no row is
+called. The name a user hunts for is the one in the sidebar, so the heading
+now matches the nav label in every locale, and each pointer names the path,
+**Settings → Subscription** (translated with each locale's own nav labels), since
+the row sits inside the Settings group. The backend's English for the same
+warnings (`invoice_warning_catalog.py`, regenerated into the web and mobile
+code maps) and the notices (`notification_templates.py`) changed with them, as
+did the mobile ARB copies of the two warnings. The route stays `/billing`;
+only words changed.
+
+**Partner Admin is NOT hidden yet — it needs a product call.** The finding
+asked to hide it unless the workspace is a partner. There is no partner flag:
+`GET /api/partner`'s `is_partner` is *derived* — true once the org parents at
+least one child — and the page that row opens is also where a standalone org
+(a) provisions or attaches its **first** child, which is how it becomes a
+partner at all, and (b) mints the link code that consents to being adopted
+*by* a partner. Gating the row on `is_partner` would make both unreachable
+from the UI for exactly the orgs that need them, and the row's gate would no
+longer agree with the page's (admin-only, the backend's
+`require_roles(ROLE_ADMIN)` on every `/api/partner` route) — the mismatch
+`frontend/CLAUDE.md` calls a defect. Doing it properly means either an
+operator-set partner capability (a plan entitlement or an
+`organizations.is_partner` column, exposed on `/auth/me`) with the link-code
+minting moved to Organization settings, or accepting the row as is. Tracked in
+`docs/followups.md`.
+
+## 315. An admin's first run is a setup checklist ticked from facts the app already holds; emptiness is the workspace's (issue #635, 2026-10-21)
+
+Decided by the operator's delegate on #635 findings 9 and 38.
+
+**What was wrong.** A new workspace's dashboard offered one button, "Go to
+invoices". The `start-admin` guide says to configure first — company, users,
+sign-in security, ERP, vendors, the approval workflow — so a new admin's first
+invoice landed in an untuned default workflow with no vendors to match and no
+one else to approve it. The `/organization` "Getting started" panel had six
+static links with no progress and left out the ERP, vendors, security and email
+intake. Separately, the dashboard decided "brand-new workspace" from
+`total_invoices`, which is scoped to the selected entity, so an established
+customer that added a subsidiary was welcomed with "upload your first invoice"
+the moment they switched to it.
+
+**The rule.**
+
+- **An admin on a workspace with no invoices gets a setup checklist** in place
+  of the empty state: company details, invite the team, require two-factor
+  sign-in, connect the accounting system, add vendors, set up the approval
+  workflow, and uploading the first invoice last. Each step links to the panel
+  that owns it, and the list links the `start-admin` guide.
+- **A step is ticked only from a fact some other feature already owns,
+  derived on read** (`backend/app/services/onboarding.py`). There is no
+  tracking table and no "mark as done" write, so a step cannot be ticked by
+  visiting a page and cannot drift from the setting it names. Each fact is
+  narrow and named for what it reads: a Company Profile field beyond the name
+  signup sets; more than one active user; `mfa.required` or SSO switched on;
+  a non-`mock` ERP selected (the plan gate's own predicate); a vendor row; the
+  workflow saved since it was provisioned (a version, an edit, or a second
+  definition, because every tenant is provisioned with one); a live intake
+  address. "Reviewed the security panel" and "looked at the workflow" are not
+  knowable, so they are not claimed — the steps are worded as the change whose
+  saved result is the fact.
+- **A step with no fact behind it carries no done state at all.** The settings
+  panel's Invoice defaults, payment-run sign-off and Branding links are drawn
+  with their number only, never as unfinished: a blank defaults form is a valid
+  choice. A non-admin, or a progress read that fails, gets the same links with
+  no states rather than a row of empty boxes.
+- **One server field, one derivation, two readers.** `GET /api/dashboard`
+  carries `onboarding` (computed in the same request, only for an admin on an
+  empty workspace — everyone else gets `null` and pays for none of its
+  queries), and `GET /api/dashboard/onboarding` (admin-only) serves the same
+  `compute_onboarding` to `/organization` without computing a dashboard.
+  `frontend/src/lib/utils/onboarding.ts` is the one map from step to panel, so
+  the two surfaces cannot send a step to two places.
+- **The checklist retires itself** when the workspace has its first invoice:
+  the server stops sending `onboarding`. No dismiss control — it would need a
+  stored preference, and the condition that ends it is one every workspace
+  reaches on its first real day.
+- **Emptiness is decided org-wide** (`organization_has_invoices`, unscoped by
+  `X-Entity-ID`). An entity with nothing in it yet keeps its true zero KPI row
+  and says "No invoices for <entity> yet" in place of the charts; the
+  new-workspace welcome and the checklist never appear for it.
+- **Every other role on an empty workspace** keeps the empty state, fitted to
+  what it can do: a role that may add invoices is sent to `/invoices`; one that
+  may not (no system role today — a custom role can) is told what will appear,
+  with no button into a page whose upload would refuse it.
+
+**Not regressed.** The checklist, like the empty state before it, replaces the
+KPI row only once the response has landed (`isEmptyTenant` keys on `data`), so
+the loading → empty hand-off of §125 / §154 is unchanged.
+
+**Considered and rejected.** A per-step "mark done" store: it reintroduces the
+drift this avoids and makes the tick a claim about intent. Ticking security on
+the admin's *own* MFA enrolment: it says nothing about everyone else signing
+in. Counting "a workflow definition exists": always true since provisioning
+seeds one.
+
+Tests: `backend/tests/test_dashboard_onboarding.py` (each flag follows its
+owning data; admin-only; retires with the first invoice; an empty entity on an
+established workspace); `frontend/src/lib/utils/onboarding.test.ts`;
+`frontend/tests-e2e/dashboard/first-run.spec.ts` (checklist, done states,
+non-admin views, retirement and the entity case against the real backend, axe
+in both themes); `frontend/tests-e2e/organization/getting-started.spec.ts`.

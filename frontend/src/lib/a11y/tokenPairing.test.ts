@@ -71,24 +71,6 @@ for (const file of files) for (const t of collectAssignedTokens(file.source)) as
 
 const sources: StyleSource[] = files.flatMap((f) => extractStyleBlocks(f.path, f.source));
 
-/**
- * Files that only ever render inside the marketing landing page's
- * `data-theme-scope="dark"` subtree, so the light palette never reaches them
- * (docs/decisions.md §289). They are held to the DARK audit like everything
- * else and skipped by the light one — and the `dark-pinned subtree` block
- * below proves the premise, so a component cannot be added here and then
- * rendered somewhere the light theme applies.
- */
-const DARK_PINNED_ROOT = 'lib/components/marketing/Landing.svelte';
-const DARK_PINNED = new Set([
-	DARK_PINNED_ROOT,
-	'lib/components/marketing/Pricing.svelte',
-	'lib/components/marketing/HeroPipeline.svelte',
-	'lib/components/marketing/AdapterRail.svelte'
-]);
-const sourcesFor = (theme: PaletteTheme) =>
-	theme === 'dark' ? sources : sources.filter((s) => !DARK_PINNED.has(s.path));
-
 describe('style token pairing', () => {
 	it('scans a realistic number of stylesheets — the walk itself must not silently break', () => {
 		expect(appCss, 'src/app.css must be discoverable by the walk').toBeDefined();
@@ -98,7 +80,7 @@ describe('style token pairing', () => {
 
 	for (const theme of PALETTE_THEMES) {
 		it(`[${theme}] has no colour pair below the WCAG AA bar, no stale fallback, and no dead token`, () => {
-			const findings = auditStyles(sourcesFor(theme), {
+			const findings = auditStyles(sources, {
 				palette: palettes[theme],
 				assignedTokens,
 				// The surfaces body text actually renders on. See `AuditOptions`
@@ -111,32 +93,104 @@ describe('style token pairing', () => {
 	}
 });
 
-describe('dark-pinned subtree', () => {
-	it('the landing page root carries data-theme-scope="dark"', () => {
-		const landing = files.find((f) => f.path === DARK_PINNED_ROOT);
-		expect(landing, `${DARK_PINNED_ROOT} must exist`).toBeDefined();
-		expect(landing!.source).toMatch(/<div class="landing" data-theme-scope="dark">/);
+/**
+ * The marketing landing page follows the theme like every other surface
+ * (docs/decisions.md §312, superseding §289's dark pin). It is held to both
+ * audits above with no exemption; these checks keep it there.
+ *
+ * The audit only measures pairs it can resolve, and a colour typed as a
+ * literal is a pair it measures in one palette at best: `rgba(24, 26, 35, …)`
+ * was a navy glass panel in both themes. So the marketing components may name
+ * no colour literal at all except `#fff` — the text on a `-strong` fill, which
+ * is white in both palettes by contract — and the `#000` of a mask, which is
+ * alpha, not colour.
+ */
+describe('marketing landing page follows the theme', () => {
+	const MARKETING = files.filter((f) => f.path.startsWith('lib/components/marketing/'));
+
+	it('finds the marketing components', () => {
+		expect(MARKETING.map((f) => f.path)).toEqual(
+			expect.arrayContaining([
+				'lib/components/marketing/Landing.svelte',
+				'lib/components/marketing/Pricing.svelte',
+				'lib/components/marketing/HeroPipeline.svelte',
+				'lib/components/marketing/AdapterRail.svelte',
+				'lib/components/marketing/Atmosphere.svelte'
+			])
+		);
 	});
 
-	it('app.css redeclares the dark palette on [data-theme-scope=\'dark\']', () => {
-		expect(appCss!.source).toMatch(/^:root,\s*(?:\/\*[\s\S]*?\*\/\s*)?\[data-theme-scope='dark'\] \{/m);
+	it('nothing pins a subtree to one palette', () => {
+		const pinned = files.filter((f) => /data-theme-scope/.test(f.source)).map((f) => f.path);
+		expect(pinned, 'a palette pin exempts its subtree from the visitor\'s theme').toEqual([]);
 	});
 
-	it('every other pinned component is imported only from inside the pinned set', () => {
-		for (const pinned of DARK_PINNED) {
-			if (pinned === DARK_PINNED_ROOT) continue;
-			const name = pinned.split('/').pop()!;
-			const importers = files
-				.filter((f) => f.path !== pinned && f.source.includes(`/${name}'`))
-				.map((f) => f.path);
-			expect(importers.length, `${name} must be imported somewhere`).toBeGreaterThan(0);
-			const outside = importers.filter((p) => !DARK_PINNED.has(p));
-			expect(
-				outside,
-				`${name} renders outside the dark-pinned landing page, so the light theme reaches ` +
-					'it — take it out of DARK_PINNED and fix its light-theme findings'
-			).toEqual([]);
+	/**
+	 * Any way of typing a colour that is not a token: hex, the functional
+	 * notations old and new, and the two named colours that mean "a literal
+	 * tuned for one ground" in practice. `transparent` and `currentColor` are
+	 * not colours of a palette and stay legal.
+	 */
+	const COLOUR_LITERAL =
+		/#[0-9a-f]{3,8}\b|(?<![-\w])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(|(?<![-\w])(?:white|black)(?![-\w])/gi;
+
+	/** `{ … }` around `index`: the declarations of the rule it sits in. */
+	const ruleAround = (css: string, index: number) =>
+		css.slice(css.lastIndexOf('{', index) + 1, css.indexOf('}', index));
+	/** The one declaration `index` sits in, however many lines it spans. */
+	const declarationAround = (css: string, index: number) =>
+		css.slice(Math.max(css.lastIndexOf(';', index), css.lastIndexOf('{', index)) + 1, css.indexOf(';', index));
+
+	it('the marketing components type no colour literal', () => {
+		const MARKETING_PATH = 'lib/components/marketing/';
+		const found: string[] = [];
+		const scan = (path: string, css: string) => {
+			const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');
+			for (const match of clean.matchAll(COLOUR_LITERAL)) {
+				const at = match[0].toLowerCase();
+				const decl = declarationAround(clean, match.index!);
+				// White text on a `-strong` fill: white in both palettes by the
+				// palette's own contract (`palette contract` below). Only there.
+				if (
+					(at === '#fff' || at === '#ffffff') &&
+					/^\s*color\s*:/.test(decl) &&
+					/background(?:-color)?\s*:\s*var\(--[a-z-]+-strong\)/.test(ruleAround(clean, match.index!))
+				) {
+					continue;
+				}
+				// A mask's black is alpha, not colour.
+				if (at === '#000' && /^\s*mask(?:-image)?\s*:/.test(decl)) continue;
+				found.push(`${path}: ${decl.trim().replace(/\s+/g, ' ')}`);
+			}
+		};
+		for (const { path, css } of sources.filter((s) => s.path.startsWith(MARKETING_PATH))) scan(path, css);
+		// Inline `style="…"` in the markup is a stylesheet the block scan never sees.
+		for (const { path, source } of MARKETING) {
+			// Repeat until stable: removing one block can join its neighbours into
+			// a new `<style…>…</style>` that a single pass would leave behind.
+			let markup = source;
+			let previous: string;
+			do {
+				previous = markup;
+				markup = markup.replace(/<style[^>]*>[\s\S]*?<\/style[^>]*>/gi, '');
+			} while (markup !== previous);
+			for (const attr of markup.matchAll(/\sstyle="([^"]*)"/g)) scan(`${path} (style=)`, `{${attr[1]};}`);
 		}
+		expect(found, `\n${found.join('\n')}\n`).toEqual([]);
+	});
+
+	it('the literal scan catches what it claims to', () => {
+		// A guard that can't fail proves nothing; feed it each shape it names.
+		const probe = (css: string) =>
+			[...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(COLOUR_LITERAL)].map((m) => m[0]);
+		for (const bad of ['#7d9bff', 'rgba(1,2,3,.5)', 'oklch(70% .1 250)', 'color(srgb 1 0 0)', 'white', 'hsl(0 0% 0%)']) {
+			expect(probe(`.x { background: ${bad}; }`), bad).not.toEqual([]);
+		}
+		expect(
+			probe(
+				'.x { color: var(--text); white-space: nowrap; background: color-mix(in srgb, var(--accent) 20%, transparent); }'
+			)
+		).toEqual([]);
 	});
 });
 
@@ -201,7 +255,21 @@ for (const theme of PALETTE_THEMES) describe(`palette contract [${theme}]`, () =
 		});
 	}
 
-	for (const token of ['--text', '--text-muted', '--accent', '--success', '--danger', '--warning']) {
+	// --gilt and --brand-violet are gradient stops on the landing page's
+	// headline and figures (background-clip: text), which the rule scan cannot
+	// measure — so the stops themselves are held to the body-text bar, which
+	// makes any gradient through them legible end to end (decisions §312).
+	for (const token of [
+		'--text',
+		'--text-muted',
+		'--accent',
+		'--success',
+		'--danger',
+		'--warning',
+		'--accent-on-tint',
+		'--gilt',
+		'--brand-violet'
+	]) {
 		it(`${token} is legible on --bg and --surface`, () => {
 			const value = palette[token];
 			expect(value, `${token} must be declared in :root`).toBeDefined();

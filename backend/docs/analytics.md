@@ -615,6 +615,27 @@ every one of those rows carries the approval stamp.
 If a dashboard delta needs explaining, the honest sentence is: *the metric
 stopped counting invoices that never went through approval.*
 
+### First-run fields — `organization_has_invoices` and `onboarding`
+
+Two fields describe the WORKSPACE rather than the figures (`docs/decisions.md`
+§315):
+
+- `organization_has_invoices` — whether the organization has any invoice,
+  **ignoring `X-Entity-ID`**. Every other figure here is entity-scoped, so
+  `total_invoices == 0` on a new subsidiary says nothing about whether the
+  workspace is new. Consolidated, the scoped count already answers it; with an
+  entity selected and nothing in it, one `LIMIT 1` probe does.
+- `onboarding` — the setup checklist's facts (`company`, `users`, `security`,
+  `erp`, `vendors`, `workflow`, `email_intake`), sent **only to an admin on a
+  workspace with no invoices** and `null` to everyone else, who pay for none of
+  its queries. Each flag is derived on read from data another feature owns —
+  no tracking table, no write — by `services/onboarding.compute_onboarding`; the
+  module docstring says exactly which fact each flag reads.
+
+`GET /api/dashboard/onboarding` (admin-only) serves the same derivation, plus
+`organization_has_invoices`, to `/organization`'s Getting started panel without
+computing a dashboard. Tests: `tests/test_dashboard_onboarding.py`.
+
 ## CFO metrics (`GET /api/analytics/cfo`)
 
 Query params: `period_days` (default 365, range 30–730).

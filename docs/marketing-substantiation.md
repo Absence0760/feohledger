@@ -6,13 +6,18 @@ number is an objectively verifiable factual claim, not puffery, and the page has
 published invented ones before (below, § Withdrawn).
 
 **Scope:** the no-tenant landing page — `frontend/src/lib/components/marketing/`
-(`Landing.svelte`, `Pricing.svelte`, `HeroPipeline.svelte`, `AdapterRail.svelte`).
+(`Landing.svelte`, `Pricing.svelte`, `HeroPipeline.svelte`, `AdapterRail.svelte`)
+and its words, which live in the `marketing` catalogue slice
+(`frontend/src/lib/i18n/locales/marketing/<locale>.ts`, all six locales) and
+the pricing keys in the main catalogues — plus the meta and Open Graph
+descriptions in `frontend/src/app.html`, which repeat the English hero. A claim
+is the same claim in every translation: re-check all six when one changes.
 The published legal pages are governed separately (`docs/decisions.md` §175).
 
 **The rule:** a number on the page either comes from a generated module, or has
 a row here naming its source. Change a figure and its row in the same commit; if
 the source count moves, change the figure. A figure with no derivation is
-removed, not kept "until someone checks". Last re-derived: 2026-10-07.
+removed, not kept "until someone checks". Last re-derived: 2026-10-21.
 
 ## Pricing — generated, not substantiated by hand
 
@@ -52,9 +57,9 @@ are qualitative (negotiated terms; help with a security review — answered from
 |---|---|---|---|
 | "payment rails, ACH to CHAPS" | **12** | `payment_methods.KNOWN_PAYMENT_METHODS` in `backend/app/services/payment_methods.py`: `ach`, `wire`, `check`, `virtual_card`, `card`, `bacs`, `faster_payments`, `chaps`, `rtp`, `sepa`, `international_ach`, `international_wire` — every rail the platform models and records payments on. | Raised from 7 on 2026-10-07 at the operator's call, and to 12 on 2026-10-20 when `card` (a bill the ERP reports paid by credit card; record-only, never dispatched — decisions §295) joined the set. Seven are user-selectable on a payment (`PAYMENT_METHODS` in `frontend/src/lib/types/payment.ts`); `rtp`, `sepa`, `international_ach` and `international_wire` are reached through the international corridor selector. If a rail is removed from `KNOWN_PAYMENT_METHODS`, lower this figure in the same change. |
 | "workflow step types" | **9** | `backend/app/services/workflow_step_types.py`: `CANONICAL_STEP_TYPES` (4: extraction, approval, erp_export, done) + `BUILDER_STEP_TYPES` (5: condition, parallel, webhook, email, delay). | The three backwards-compatible aliases are not counted. |
-| "languages, fully localized" | **6** | `SUPPORTED_LOCALES` in `frontend/src/lib/i18n/locale.ts` (en, de, fr, es, pt-BR, ja); `messages_parity.test.ts` fails a locale missing any key. | "Fully" excludes the two documented English-only surfaces: the legal text (§174) and the help-centre guide prose (§244). |
-| "typical rebate on card payments" | **1–2%** | Lower bound: `_DEFAULT_REBATE_RATE = 0.0100` in `backend/app/api/cards.py`, the rate applied with no negotiated rate on file. Upper bound: an org-negotiated `settings.cards.rebate_rate`, which the same function accepts up to 10%. | The 2% is a typical negotiated rate, not a platform default; the qualifier "typical" and the "Illustrative" note beside the worked example carry that. Rebates depend on the issuer program, so this is the figure most worth re-checking when a card issuer is actually contracted. |
-| "$500k/month → $60–120k/yr" | worked example | $500,000 × 12 months × 1% = $60,000; × 2% = $120,000. Pure arithmetic on the rebate row above, assuming all spend moves to card. | Labelled "Illustrative" in the markup beside it, with the three variables that move it. |
+| "interface languages" | **6** | `SUPPORTED_LOCALES` in `frontend/src/lib/i18n/locale.ts` (en, de, fr, es, pt-BR, ja); `messages_parity.test.ts` fails a locale missing any key. | Was "languages, fully localized" until 2026-10-21 — withdrawn below. |
+| "typical rebate where vendors accept card" (stat); "a typical 1–2% rebate on payments to vendors that accept card" (hero, card feature, meta description) | **1–2%** | Lower bound: `_DEFAULT_REBATE_RATE = 0.0100` in `backend/app/api/cards.py`, the rate applied with no negotiated rate on file. Upper bound: an org-negotiated `settings.cards.rebate_rate`, which the same function accepts up to 10%. | The 2% is a typical negotiated rate, not a platform default; the qualifier "typical" and the "Illustrative" note beside the worked example carry that. "Where vendors accept card" carries the other condition: a rebate exists only on spend paid by card, to a vendor that takes card. Rebates depend on the issuer program, so this is the figure most worth re-checking when a card issuer is actually contracted. |
+| "$500,000 a month moved to card → $60,000–$120,000 a year" | worked example | $500,000 × 12 months × 1% = $60,000; × 2% = $120,000. Pure arithmetic on the rebate row above; the sentence states its own premise (the spend *moved to card*) rather than assuming it. | Labelled "Illustrative" beside it, with the three variables that move it. The three amounts are params rendered through `formatMoney` in the visitor's number format — the figures are not typed into any translation. |
 | "Free to start · No credit card" | — | Signup (`/api/signup/start`, `/complete`) asks for no payment method, and every new workspace is bound to the first catalogue plan, priced at zero (`tenant_provisioning` → `ensure_subscription`). | Re-check if signup ever gains plan selection or a card step. |
 | Hero card (vendor, invoice number, amount, due date, confidence bars) | — | A drawing of an invented invoice (`HeroPipeline.svelte`), `aria-hidden`; confidences render only as bar widths, never as numbers. | Not a performance claim. Never add a numeric confidence or timing to it. |
 | Adapter rail | — | Provider names only, each a registered adapter in this repo (`AdapterRail.svelte`'s own comment). | Names, not customers. |
@@ -73,4 +78,7 @@ Kept so the same figure is not reintroduced without a source.
 | "12 workflow step types" | Reached 12 only by counting three aliases; 9 is the honest count. |
 | "Provision in 30 seconds" / "Spin up your workspace in 30 seconds" | Never measured, and the flow includes the visitor verifying their email, which no timing of ours can promise. Replaced with "Self-service signup" / "in minutes". |
 | "SOC 2 attestation", "99.9% uptime SLA" | Neither exists (removed with the legal-pages change). |
+| "Earn 1–2% rebate on every payment. Cards fund themselves." / "with rebates on every card payment" | Contradicted the page's own footnote (#635 finding 11). A rebate accrues only on spend paid by card to a vendor that accepts it, not on every payment; and the buyer funds every card, so "cards fund themselves" was false. Replaced by the "vendors that accept card" wording above, in the page, the meta description and the Open Graph description. |
+| "6 languages, fully localized" | The landing page itself was English-only while claiming it (#635 finding 10), and several in-app surfaces are still English by the documented incremental path (`untranslatedCopy.test.ts`), besides the legal text and help guides. The landing page is now translated; the figure stays, as "interface languages", without "fully". |
+| "Ship a new ERP integration in a day, not a quarter" | An engineering-effort claim with no measurement behind it, and written for the wrong reader (#635 finding 27). The card now says what a finance buyer gets: the ERP, bank, card issuer and email stay, and rules and history survive a provider change. |
 | Per-seat pricing ($29/$24 per seat, 5-seat minimum), annual toggle, "50 invoices / month, 2 seats" free caps, "Start 14-day trial", "Most popular" | The billing code modelled none of it (issue #426). Replaced by the generated grid above; nothing grants `trial_days` yet, and there is no customer data behind a popularity badge. |

@@ -10,63 +10,52 @@
 	import IconBolt from '~icons/material-symbols/bolt';
 	import IconCheck from '~icons/material-symbols/check-circle-outline';
 	import IconArrow from '~icons/material-symbols/arrow-forward';
+	import IconMenu from '~icons/material-symbols/menu';
+	import IconClose from '~icons/material-symbols/close';
 	import Pricing from '#lib/components/marketing/Pricing.svelte';
 	import AdapterRail from '#lib/components/marketing/AdapterRail.svelte';
 	import Atmosphere from '#lib/components/marketing/Atmosphere.svelte';
 	import HeroPipeline from '#lib/components/marketing/HeroPipeline.svelte';
 	import { LEGAL_PAGES } from '#lib/legal/pages.ts';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import ThemePicker from '#lib/components/ui/ThemePicker.svelte';
 	import { countUp, reveal } from '#lib/actions/reveal.ts';
+	import { ensureSlices, m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { TALLY_ORNAMENT, TALLY_ORNAMENT_SIZE } from '#lib/marketing/ornament.ts';
+	import { DEFAULT_PRODUCT_NAME } from '#lib/stores/brandTheme.ts';
+	import { theme } from '#lib/stores/theme.svelte.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
 
-	const features = [
-		{
-			icon: IconExtract,
-			title: 'AI extraction',
-			body: 'Drop in a PDF or photo. Claude, GPT-4V, or Textract pulls every field and line item with per-field confidence scores. Platform keys or bring your own.',
-		},
-		{
-			icon: IconApprove,
-			title: 'Approval workflows',
-			body: 'Drag-and-drop step builder. Route by amount, vendor, or GL code. RBAC, audit trail, and Slack-style mobile approvals out of the box.',
-		},
-		{
-			icon: IconMatch,
-			title: '2-way + 3-way PO matching',
-			body: 'Automatic match against POs and goods receipts with configurable tolerance. Mismatches land in the exception queue, not your inbox.',
-		},
-		{
-			icon: IconErp,
-			title: 'Real ERP sync',
-			body: 'Push approved invoices to NetSuite, Dynamics 365, or anything Merge.dev supports. Status syncs back — ERP stays the source of truth.',
-		},
-		{
-			icon: IconCard,
-			title: 'Virtual card payments',
-			body: 'Issue single-use cards per invoice via Lithic or Nium. Earn 1–2% rebate on every payment. Cards fund themselves.',
-		},
-		{
-			icon: IconAlert,
-			title: 'Exception queue',
-			body: 'Duplicates, fraud flags, amount breaches, unverified vendors — all surfaced, assigned, and resolvable without digging through email.',
-		},
+	// The page's copy is the `marketing` catalogue slice, in the visitor's
+	// language (decisions §261, §300). The root layout renders this component
+	// in place of a route on the apex, so no `+layout.ts` load can fetch the
+	// slice first; the page waits for it instead of drawing its keys raw or in
+	// English under a `<html lang>` that says otherwise (#635 finding 10).
+	// The layout already renders nothing until the host is classified, so the
+	// wait is one small chunk added to a blank frame the visitor was already
+	// looking at.
+	let copyReady = $state(false);
+	void ensureSlices('marketing').then(() => (copyReady = true));
+
+	// The platform's own name: the apex has no tenant, so no brand to apply.
+	const product = DEFAULT_PRODUCT_NAME;
+
+	type Card = { icon: typeof IconExtract; title: MessageKey; body: MessageKey };
+
+	const features: Card[] = [
+		{ icon: IconExtract, title: 'marketing.features.extract.title', body: 'marketing.features.extract.body' },
+		{ icon: IconApprove, title: 'marketing.features.approve.title', body: 'marketing.features.approve.body' },
+		{ icon: IconMatch, title: 'marketing.features.match.title', body: 'marketing.features.match.body' },
+		{ icon: IconErp, title: 'marketing.features.erp.title', body: 'marketing.features.erp.body' },
+		{ icon: IconCard, title: 'marketing.features.card.title', body: 'marketing.features.card.body' },
+		{ icon: IconAlert, title: 'marketing.features.exceptions.title', body: 'marketing.features.exceptions.body' }
 	];
 
-	const steps = [
-		{
-			icon: IconUpload,
-			title: 'Capture',
-			body: 'Email, upload, drag-drop, or snap a photo on mobile. Works with PDF, PNG, JPG, and scanned receipts.',
-		},
-		{
-			icon: IconBolt,
-			title: 'Extract + route',
-			body: 'AI pulls vendor, amount, GL code, and line items. Your workflow routes it to the right approver automatically.',
-		},
-		{
-			icon: IconCheck,
-			title: 'Pay + sync',
-			body: 'Approved invoices go to ERP, schedule for payment, and pay via ACH, wire, check, or rebate-earning virtual card.',
-		},
+	const steps: Card[] = [
+		{ icon: IconUpload, title: 'marketing.how.capture.title', body: 'marketing.how.capture.body' },
+		{ icon: IconBolt, title: 'marketing.how.route.title', body: 'marketing.how.route.body' },
+		{ icon: IconCheck, title: 'marketing.how.pay.title', body: 'marketing.how.pay.body' }
 	];
 
 	// Every figure on this page must be checkable against the product by anyone
@@ -74,77 +63,163 @@
 	// not puffery. How each one is derived — and what has been withdrawn for
 	// want of a derivation (the "3.2s" / "97%" statistics, "12 workflow step
 	// types", "Provision in 30 seconds") — is recorded per figure in
-	// docs/marketing-substantiation.md. Change a number here and that file in
-	// the same commit; if the source count moves, change the number. Prices
-	// and allowances are not typed here or in Pricing.svelte at all: they are
-	// generated from the plan catalogue (`pnpm gen:pricing`).
+	// docs/marketing-substantiation.md. Change a number here or in the
+	// `marketing` catalogue slice and that file in the same commit; if the
+	// source count moves, change the number. Prices and allowances are not
+	// typed here or in Pricing.svelte at all: they are generated from the plan
+	// catalogue (`pnpm gen:pricing`).
 	//
 	// `countUp` animates the leading integer and leaves anything else alone, so
 	// `1–2%` is rendered, not counted to. The final value is what is written in
 	// the markup — the animation replaces it and puts it back — so a visitor with
 	// reduced motion, a crawler and a failed bundle all read the real figure.
-	const stats = [
-		{ value: '12', label: 'payment rails, ACH to CHAPS' },
-		{ value: '9', label: 'workflow step types' },
-		{ value: '6', label: 'languages, fully localized' },
-		{ value: '1–2%', label: 'typical rebate on card payments' },
-	];
+	const stats = $derived([
+		{ value: '12', label: m('marketing.stats.rails') },
+		{ value: '9', label: m('marketing.stats.stepTypes') },
+		{ value: '6', label: m('marketing.stats.languages') },
+		{ value: m('marketing.stats.rebateValue'), label: m('marketing.stats.rebate') }
+	]);
+
+	// The rebate worked example (substantiation: $500,000 × 12 × 1–2%), in the
+	// visitor's number format. Whole dollars: cents on an illustration would
+	// claim a precision it does not have.
+	const usd = (amount: string) => formatMoney(amount, { currency: 'USD', whole: true });
+	const cardsBody = $derived(
+		m('marketing.diff.cards.body', { monthly: usd('500000'), low: usd('60000'), high: usd('120000') })
+	);
 
 	// Whether the page has scrolled past the hero's top edge, which is the only
 	// thing the sticky header changes about itself. Kept as a boolean rather
 	// than a scroll offset so the class flips once instead of on every frame.
 	let scrolled = $state(false);
+
+	// The narrow header's disclosure menu (#635 finding 25). Below 1024px the
+	// in-page links and the theme switch move into it; the signup call to
+	// action stays in the bar, and so does Sign in down to 360px.
+	let menuOpen = $state(false);
+	let menuToggle = $state<HTMLButtonElement | null>(null);
+
+	let header = $state<HTMLElement | null>(null);
+
+	function closeMenu(returnFocus = false) {
+		if (!menuOpen) return;
+		menuOpen = false;
+		if (returnFocus) menuToggle?.focus();
+	}
+
+	// The open panel is part of the sticky header, so it would cover whatever
+	// focus or a tap moves to below it (WCAG 2.4.11). It closes as soon as
+	// either leaves the header — without taking focus back.
+	function onHeaderFocusOut(event: FocusEvent) {
+		const next = event.relatedTarget as Node | null;
+		if (next && !header?.contains(next)) closeMenu();
+	}
+	function onPointerDown(event: PointerEvent) {
+		if (menuOpen && !header?.contains(event.target as Node)) closeMenu();
+	}
+	// Escape closes it from anywhere, and returns focus to the toggle only
+	// when focus was in the menu — never pulling it up from the page.
+	function onKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Escape' || !menuOpen) return;
+		const active = document.activeElement;
+		const inMenu = !!active && (active === menuToggle || !!document.getElementById('landing-menu')?.contains(active));
+		closeMenu(inMenu);
+	}
 </script>
 
-<svelte:window onscroll={() => (scrolled = window.scrollY > 12)} />
+<svelte:window
+	onscroll={() => (scrolled = window.scrollY > 12)}
+	onkeydown={onKeydown}
+	onpointerdown={onPointerDown}
+/>
 
-<!-- Pinned to the dark palette whatever the visitor's theme: the rendered
-     tally ornament, the grain and the glass panels were designed on navy, and a
-     light rendition is a design job, not a token swap (docs/decisions.md §289).
-     `data-theme-scope="dark"` redeclares the dark tokens on this subtree. -->
-<div class="landing" data-theme-scope="dark">
+<!-- Follows the visitor's theme like every other surface (docs/decisions.md
+     §312): every colour below is a palette token, and the one raster — the
+     tally ornament — has a render lit for each ground. -->
+{#if copyReady}
+<div class="landing">
 	<Atmosphere fixed />
 
-	<header class="nav" class:scrolled>
+	<header class="nav" class:scrolled bind:this={header} onfocusout={onHeaderFocusOut}>
 		<a href="/" class="brand">
 			<BrandMark size={28} />
-			<span class="brand-name">FeohLedger</span>
+			<span class="brand-name">{product}</span>
 		</a>
-		<nav class="nav-links">
-			<a href="#features">Features</a>
-			<a href="#how">How it works</a>
-			<a href="#pricing">Pricing</a>
+		<div class="nav-end">
+			<!-- The wide header's site links. Below 1024px this is `display: none`,
+			     which takes it out of the accessibility tree too, and the same
+			     links are in the menu panel below instead — so there is only ever
+			     one "Main" navigation landmark to land on. -->
+			<nav class="nav-links nav-wide" aria-label={m('marketing.nav.label')}>
+				<a href="#features">{m('marketing.nav.features')}</a>
+				<a href="#how">{m('marketing.nav.how')}</a>
+				<a href="#pricing">{m('marketing.nav.pricing')}</a>
+			</nav>
+			<!-- The apex has no sign-in form of its own: each company signs in at
+			     its own workspace host, so this asks which one (#635 finding 4). -->
+			<a href="/find-workspace" class="nav-signin">{m('marketing.nav.signIn')}</a>
 			<a href="/signup" class="nav-cta">
 				<!-- Two labels, one shown per breakpoint. `display: none` on the
 				     hidden one takes it out of the accessibility tree too, so the
 				     link's name is always exactly the label in view. -->
-				<span class="cta-long">Create workspace</span><span class="cta-short">Start free</span>
+				<span class="cta-long">{m('marketing.cta.create')}</span><span class="cta-short"
+					>{m('marketing.cta.short')}</span
+				>
 				<IconArrow aria-hidden="true" />
 			</a>
-		</nav>
+			<!-- An anonymous visitor has no /profile, so the theme is chosen here:
+			     the auth pages' picker, drawn as three icons. Beside the <nav>, not
+			     in it — it is a setting, not a destination. -->
+			<div class="theme-wide">
+				<ThemePicker name="landing-theme" compact />
+			</div>
+			<!-- A disclosure, not a menu widget: a button that shows and hides a
+			     panel of ordinary links (WAI-ARIA APG "Disclosure Navigation
+			     Menu"), so Tab walks it and no arrow-key model is owed. The panel
+			     follows the button in the DOM, so opening it puts its links next
+			     in the focus order. -->
+			<button
+				type="button"
+				class="menu-toggle"
+				bind:this={menuToggle}
+				aria-expanded={menuOpen}
+				aria-controls="landing-menu"
+				onclick={() => (menuOpen = !menuOpen)}
+			>
+				{#if menuOpen}<IconClose aria-hidden="true" />{:else}<IconMenu aria-hidden="true" />{/if}
+				<span class="visually-hidden">{m('marketing.nav.menu')}</span>
+			</button>
+		</div>
+		<div id="landing-menu" class="menu-panel" hidden={!menuOpen}>
+			<nav aria-label={m('marketing.nav.label')}>
+				<a href="#features" onclick={() => closeMenu()}>{m('marketing.nav.features')}</a>
+				<a href="#how" onclick={() => closeMenu()}>{m('marketing.nav.how')}</a>
+				<a href="#pricing" onclick={() => closeMenu()}>{m('marketing.nav.pricing')}</a>
+				<!-- Shown only below 360px, where the bar's own Sign in is hidden:
+				     one of the two is ever on screen (or in the accessibility tree). -->
+				<a href="/find-workspace" class="menu-signin">{m('marketing.nav.signIn')}</a>
+			</nav>
+			<ThemePicker name="landing-theme-menu" compact />
+		</div>
 	</header>
 
 	<main class="content">
 		<section class="hero">
 			<div class="hero-text">
-				<span class="eyebrow">Accounts payable, automated</span>
+				<span class="eyebrow">{m('marketing.hero.eyebrow')}</span>
+				<!-- No forced line breaks: where a headline may break is a property
+				     of the language, so each locale wraps its own (`text-wrap:
+				     pretty`, and hyphenation for long compounds). -->
 				<h1>
-					AP automation<br />
-					your finance team<br />
-					<span class="accent">will actually use.</span>
+					<span class="title-main">{m('marketing.hero.title')}</span>
+					<span class="accent">{m('marketing.hero.titleAccent')}</span>
 				</h1>
-				<p class="lede">
-					From invoice to payment in minutes, not days. AI-powered extraction,
-					configurable approval workflows, and real ERP sync — in one place,
-					with rebates on every card payment.
-				</p>
+				<p class="lede">{m('marketing.hero.lede')}</p>
 				<div class="cta-row">
-					<a href="/signup" class="primary">Start free workspace<IconArrow /></a>
-					<a href="#how" class="secondary">See how it works</a>
+					<a href="/signup" class="primary">{m('marketing.cta.create')}<IconArrow aria-hidden="true" /></a>
+					<a href="#how" class="secondary">{m('marketing.hero.secondary')}</a>
 				</div>
-				<p class="sub-note">
-					Free to start · No credit card · Self-service signup
-				</p>
+				<p class="sub-note">{m('marketing.hero.subNote')}</p>
 			</div>
 
 			<div class="hero-visual">
@@ -167,13 +242,9 @@
 
 		<section id="features" class="features">
 			<div class="section-head" use:reveal>
-				<span class="eyebrow">Everything you need</span>
-				<h2>One platform, from capture to payment.</h2>
-				<p>
-					Most teams stitch together extraction, approvals, matching, and ERP
-					sync across four tools. FeohLedger is one tool that does all of it —
-					with the pluggable pieces you'd expect.
-				</p>
+				<span class="eyebrow">{m('marketing.features.eyebrow')}</span>
+				<h2>{m('marketing.features.heading')}</h2>
+				<p>{m('marketing.features.lede')}</p>
 			</div>
 
 			<div class="feature-grid">
@@ -182,8 +253,8 @@
 						<div class="feature-icon">
 							<feature.icon />
 						</div>
-						<h3>{feature.title}</h3>
-						<p>{feature.body}</p>
+						<h3>{m(feature.title)}</h3>
+						<p>{m(feature.body)}</p>
 					</div>
 				{/each}
 			</div>
@@ -191,8 +262,8 @@
 
 		<section id="how" class="how">
 			<div class="section-head" use:reveal>
-				<span class="eyebrow">How it works</span>
-				<h2>Invoice to ledger, in three steps.</h2>
+				<span class="eyebrow">{m('marketing.how.eyebrow')}</span>
+				<h2>{m('marketing.how.heading')}</h2>
 			</div>
 
 			<div class="steps">
@@ -202,14 +273,14 @@
 						     that is only defensible if this really is decoration: the
 						     ordinal is already carried by the cards' reading order, so
 						     nothing is lost by hiding it. The fade is in the COLOUR
-						     (an rgba), not an `opacity` on the element — group opacity
+						     (a `color-mix`), not an `opacity` on the element — group opacity
 						     would composite the card's real text down with it, which
 						     is the idiom src/lib/a11y/opacityAudit.test.ts exists to
 						     keep out of this tree. -->
 						<div class="step-num" aria-hidden="true">{i + 1}</div>
 						<div class="step-icon"><step.icon /></div>
-						<h3>{step.title}</h3>
-						<p>{step.body}</p>
+						<h3>{m(step.title)}</h3>
+						<p>{m(step.body)}</p>
 					</div>
 				{/each}
 			</div>
@@ -226,68 +297,44 @@
 		<section class="tally">
 			<div class="tally-intro">
 				<div class="tally-copy" use:reveal>
-					<span class="eyebrow">Why teams switch</span>
-					<h2>Built for finance, not marketed at them.</h2>
-					<p class="tally-lede">
-						The Exchequer settled a debt by notching a stick, splitting it, and
-						giving each party half — the debt was paid when the halves matched.
-						That is still the job: an invoice against a purchase order, a payment
-						against a statement. Everything here exists to make the halves meet.
-					</p>
+					<span class="eyebrow">{m('marketing.tally.eyebrow')}</span>
+					<h2>{m('marketing.tally.heading')}</h2>
+					<p class="tally-lede">{m('marketing.tally.lede')}</p>
 				</div>
 
 				<div class="tally-art" use:reveal={{ delay: 120 }}>
 					<img
-						src={asset('marketing/tally-split.webp')}
-						width="1100"
-						height="460"
+						src={asset(TALLY_ORNAMENT[theme.resolved])}
+						width={TALLY_ORNAMENT_SIZE.width}
+						height={TALLY_ORNAMENT_SIZE.height}
 						loading="lazy"
 						decoding="async"
 						draggable="false"
-						alt="A notched gold tally stick split lengthwise into two halves, the notches on each half lining up with the other."
+						alt={m('marketing.tally.alt')}
 					/>
 				</div>
 			</div>
 
 			<div class="diff-grid">
 				<div class="diff" use:reveal={{ delay: 60 }}>
-					<h3>AI you control</h3>
-					<p>
-						Use our platform key or bring your own — Claude, OpenAI, or Textract.
-						Your prompt, your model, your data-retention policy. Self-host with
-						Ollama if you need to.
-					</p>
+					<h3>{m('marketing.diff.ai.title')}</h3>
+					<p>{m('marketing.diff.ai.body')}</p>
 				</div>
 				<div class="diff" use:reveal={{ delay: 120 }}>
-					<h3>Pluggable everything</h3>
-					<p>
-						Adapter pattern for extraction, ERP, cards, and email. Swap providers
-						without touching business logic. Ship a new ERP integration in a
-						day, not a quarter.
-					</p>
+					<h3>{m('marketing.diff.connect.title')}</h3>
+					<p>{m('marketing.diff.connect.body')}</p>
 				</div>
 				<div class="diff" use:reveal={{ delay: 180 }}>
-					<h3>Cards that pay you back</h3>
-					<p>
-						Virtual card payments via Lithic or Nium earn 1–2% rebate. On a
-						shop doing $500k/month in invoices, that's $60–120k/yr straight
-						back to your budget.
-					</p>
+					<h3>{m('marketing.diff.cards.title')}</h3>
+					<p>{cardsBody}</p>
 					<!-- A large, vivid dollar figure reads as a projection unless the
 					     variability sits next to it. Derivation:
 					     docs/marketing-substantiation.md. -->
-					<p class="diff-note">
-						Illustrative. Rebates depend on your negotiated rate, how much spend
-						moves to card, and which vendors accept it.
-					</p>
+					<p class="diff-note">{m('marketing.diff.cards.note')}</p>
 				</div>
 				<div class="diff" use:reveal={{ delay: 240 }}>
-					<h3>Mobile without compromise</h3>
-					<p>
-						Native iOS and Android with camera OCR, biometric login,
-						swipe-to-approve, and offline mode. Approvers unblock AP from
-						an airport Wi-Fi.
-					</p>
+					<h3>{m('marketing.diff.mobile.title')}</h3>
+					<p>{m('marketing.diff.mobile.body')}</p>
 				</div>
 			</div>
 		</section>
@@ -296,12 +343,11 @@
 
 		<section class="cta-section" use:reveal>
 			<div class="cta-inner">
-				<h2>Spin up your workspace in minutes.</h2>
-				<p>
-					Pick a slug, verify your email, and you're in. Free plan — no card,
-					no contract, no sales call.
-				</p>
-				<a href="/signup" class="primary large">Create your workspace<IconArrow /></a>
+				<h2>{m('marketing.final.heading')}</h2>
+				<!-- The steps signup really takes: the address, the confirmation
+				     email, then the set-password link (decisions §283). -->
+				<p>{m('marketing.final.body')}</p>
+				<a href="/signup" class="primary large">{m('marketing.cta.create')}<IconArrow aria-hidden="true" /></a>
 			</div>
 		</section>
 	</main>
@@ -310,30 +356,33 @@
 		<div class="footer-inner">
 			<div class="footer-brand">
 				<BrandMark size={22} />
-				<span class="brand-name">FeohLedger</span>
+				<span class="brand-name">{product}</span>
 			</div>
-			<div class="footer-links">
-				<a href="/signup">Sign up</a>
-				<a href="#features">Features</a>
-				<a href="#how">How it works</a>
+			<nav class="footer-links" aria-label={m('marketing.footer.label')}>
+				<a href="/find-workspace">{m('marketing.nav.signIn')}</a>
+				<a href="/signup">{m('marketing.cta.create')}</a>
+				<a href="#features">{m('marketing.nav.features')}</a>
+				<a href="#how">{m('marketing.nav.how')}</a>
 				<!--
 					The legal set, reached from the marketing page because that is
 					where an evaluating buyer, a supplier chasing their own data and a
 					procurement reviewer all land first — and on the apex domain this
 					footer is the only navigation that exists. Rendered from
 					`LEGAL_PAGES` rather than hand-listed so a new document appears
-					here without anyone remembering to add it.
+					here without anyone remembering to add it. The titles stay
+					English in every locale, as the documents do (decisions §174).
 				-->
 				{#each LEGAL_PAGES as page (page.path)}
 					<a href={page.path}>{page.title}</a>
 				{/each}
-			</div>
+			</nav>
 			<div class="footer-copy">
-				© {new Date().getFullYear()} FeohLedger.
+				{m('marketing.footer.copyright', { year: String(new Date().getFullYear()), product })}
 			</div>
 		</div>
 	</footer>
 </div>
+{/if}
 
 <style>
 	/* Smooth anchor scrolling for the nav's in-page links — scoped to while this
@@ -351,10 +400,6 @@
 		   2.4.11 Focus Not Obscured. Per-section `scroll-margin-top` fixed only
 		   the two anchors it was written on. */
 		scroll-padding-top: 88px;
-		/* The page is pinned to the dark palette (`data-theme-scope="dark"` on
-		   `.landing`), but the document scroller belongs to <html>, which a
-		   light theme would otherwise give a light scrollbar. */
-		color-scheme: dark;
 	}
 
 	.landing {
@@ -379,6 +424,7 @@
 		top: 0;
 		z-index: 40;
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
@@ -391,7 +437,7 @@
 		transition: background 0.25s, border-color 0.25s, backdrop-filter 0.25s;
 	}
 	.nav.scrolled {
-		background: rgba(15, 17, 23, 0.72);
+		background: color-mix(in srgb, var(--bg) 72%, transparent);
 		backdrop-filter: blur(14px) saturate(140%);
 		border-bottom-color: var(--border);
 	}
@@ -407,72 +453,185 @@
 		font-size: 1rem;
 		letter-spacing: -0.01em;
 	}
+	.nav-end,
 	.nav-links {
 		display: flex;
 		align-items: center;
 		gap: 22px;
 	}
-	.nav-links a {
+	.nav-end {
+		gap: 16px;
+	}
+	/* Sign in is the returning customer's one control on this page: padded to
+	   a 36px target rather than leaning on 2.5.8's spacing exception. */
+	.nav-end .nav-signin {
+		display: inline-flex;
+		align-items: center;
+		min-height: 36px;
+		padding: 0 4px;
+	}
+	.nav-links a,
+	.nav-end .nav-signin {
 		color: var(--text-muted);
 		text-decoration: none;
 		font-size: 0.9rem;
+		white-space: nowrap;
 		transition: color 0.15s;
 	}
-	.nav-links a:hover {
+	.nav-links a:hover,
+	.nav-end .nav-signin:hover {
 		color: var(--text);
 	}
-	/* Scoped under `.nav-links` on purpose. As a bare `.nav-cta` (0,1,0) this lost
-	   to `.nav-links a` (0,1,1) above and rendered --text-muted on --accent-strong
-	   — about 1.5:1. The previous version papered over the same tie with
-	   `color: #fff !important`; matching the specificity is the fix, and it keeps
-	   `!important` free for the reduced-motion overrides that genuinely need
-	   it. */
-	.nav-links .nav-cta {
+	/* The CTA is no longer inside `.nav-links` (it is an action, not one of the
+	   page's sections), so nothing out-specifies it any more. It once lost to
+	   `.nav-links a` (0,1,1) and rendered --text-muted on --accent-strong —
+	   about 1.5:1; the two-class selector keeps it ahead of any future link
+	   rule in this header without reaching for `!important`. */
+	.nav-end .nav-cta {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
+		text-decoration: none;
+		white-space: nowrap;
+		font-size: 0.9rem;
 		background: var(--accent-strong);
 		color: #fff;
 		padding: 9px 17px;
 		border-radius: 8px;
 		font-weight: 500;
-		box-shadow: 0 8px 22px -12px rgba(99, 140, 255, 0.9);
+		box-shadow: 0 8px 22px -12px var(--accent-glow);
 		transition: transform 0.15s, box-shadow 0.15s;
 	}
-	.nav-links .nav-cta:hover {
+	/* Restates the fill beside the white, so the pair is decided in one rule
+	   the token audit can read. */
+	.nav-end .nav-cta:hover {
+		background: var(--accent-strong);
 		color: #fff;
 		transform: translateY(-1px);
-		box-shadow: 0 12px 26px -12px rgba(99, 140, 255, 1);
+		box-shadow: 0 12px 26px -12px color-mix(in srgb, var(--accent) 70%, transparent);
 	}
 	.cta-short {
 		display: none;
+	}
+
+	/* The phone menu: a toggle in the bar and a panel under it. Neither exists
+	   above 1024px, where the same links sit in the bar. */
+	.menu-toggle {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		flex: none;
+		padding: 0;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: color-mix(in srgb, var(--surface) 60%, transparent);
+		color: var(--text);
+		font-size: 22px;
+		cursor: pointer;
+	}
+	.menu-toggle:hover {
+		border-color: var(--border-strong);
+	}
+	.menu-toggle:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.menu-panel {
+		display: none;
+	}
+
+	/* The menu takes over at 1024px, not at the phone breakpoint: with Sign
+	   in beside them, the section links, the CTA and the theme switch need
+	   about 970px in French with Noto Sans as `system-ui`, and about 1030px
+	   with DejaVu Sans (CI's Ubuntu runner; it sets wider). A bar that wraps
+	   onto a second row is a taller sticky header than `scroll-padding-top`
+	   allows for (WCAG 2.4.11). landing.spec.ts measures the bar from 320px to
+	   1025px in every locale.
+
+	   So just above the breakpoint the bar's gaps close up a little, which
+	   gives the widest locale (French) about 25px to spare at 1025px in
+	   DejaVu Sans; from 1201px there is room for the full spacing. */
+	@media (max-width: 1200px) {
+		.nav-links {
+			gap: 16px;
+		}
+		.nav-end {
+			gap: 12px;
+		}
+	}
+	@media (max-width: 1024px) {
+		.nav {
+			row-gap: 0;
+		}
+		/* The panel is open: the bar takes the solid ground the scrolled header
+		   has, so the links are not read over the hero. */
+		.nav:has(.menu-panel:not([hidden])) {
+			background: var(--bg);
+			border-bottom-color: var(--border);
+		}
+		.nav-end {
+			gap: 12px;
+		}
+		.nav-wide,
+		.theme-wide {
+			display: none;
+		}
+		.menu-toggle {
+			display: inline-flex;
+		}
+		.menu-panel:not([hidden]) {
+			display: flex;
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 14px;
+			flex-basis: 100%;
+			padding: 14px 0 6px;
+		}
+		.menu-panel nav {
+			display: flex;
+			flex-direction: column;
+			align-self: stretch;
+		}
+		/* Each row a full-width, 44px target (WCAG 2.5.8 asks 24px; a thumb
+		   asks more). */
+		.menu-panel nav a {
+			display: flex;
+			align-items: center;
+			min-height: 44px;
+			color: var(--text);
+			text-decoration: none;
+			font-size: 1rem;
+			border-bottom: 1px solid var(--hairline);
+		}
 	}
 	@media (max-width: 760px) {
 		.nav {
 			padding: 14px 20px;
 		}
-		.nav-links {
-			gap: 12px;
-		}
-		.nav-links a:not(.nav-cta) { display: none; }
-		.nav-links .nav-cta {
+		.nav-end .nav-cta {
 			padding: 8px 14px;
 			white-space: nowrap;
 		}
 		.cta-long { display: none; }
 		.cta-short { display: inline; }
 	}
+	.menu-panel nav a.menu-signin {
+		display: none;
+	}
 	/* WCAG 1.4.10 Reflow, at the criterion's own 320px. With the wordmark
-	   beside them, the mark and the short CTA (measured when a motion toggle
-	   also sat in this row) ran past that viewport, and `.landing` clips
-	   horizontal overflow — so the button's edge was cut off rather than
-	   scrollable. The wordmark goes, and
+	   beside them, the mark, Sign in, the short CTA and the menu toggle run
+	   past that viewport in the longer locales, and `.landing` clips
+	   horizontal overflow — so the last control's edge would be cut off rather
+	   than scrollable (landing.spec.ts measures every locale). The wordmark goes, and
 	   the mark alone carries the brand; its TEXT stays in the accessibility tree
 	   (clipped, not `display: none`), because the mark image is decorative and
 	   that text is the home link's only accessible name. */
 	@media (max-width: 400px) {
 		.nav {
 			padding: 12px 14px;
+			column-gap: 8px;
 		}
 		.nav .brand-name {
 			position: absolute;
@@ -482,6 +641,33 @@
 			overflow: hidden;
 			clip-path: inset(50%);
 			white-space: nowrap;
+		}
+		.nav-end {
+			gap: 8px;
+		}
+		.nav-end .nav-cta {
+			padding: 8px 12px;
+		}
+		/* The arrow is decoration; at this width its 22px are worth more to a
+		   long translated label. */
+		.nav-end .nav-cta :global(svg) {
+			display: none;
+		}
+		.menu-toggle {
+			width: 36px;
+			height: 36px;
+		}
+	}
+	/* Below 360px the bar holds the mark, the signup call to action and the
+	   menu toggle; Sign in moves into the menu. "Iniciar sesión" beside
+	   "Empezar gratis" does not fit 320px, and a label that did would be a
+	   worse label. Measured in every locale by landing.spec.ts. */
+	@media (max-width: 359px) {
+		.nav-end .nav-signin {
+			display: none;
+		}
+		.menu-panel nav a.menu-signin {
+			display: flex;
 		}
 	}
 
@@ -508,8 +694,8 @@
 		padding: 5px 13px 5px 11px;
 		margin-bottom: 20px;
 		border-radius: 999px;
-		border: 1px solid rgba(99, 140, 255, 0.28);
-		background: rgba(99, 140, 255, 0.10);
+		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+		background: var(--accent-tint);
 		font-size: 0.75rem;
 		font-weight: 600;
 		letter-spacing: 0.08em;
@@ -523,6 +709,15 @@
 		border-radius: 50%;
 		background: var(--accent);
 	}
+	/* A German compound ("AP-Automatisierung") at the headline's size is wider
+	   than a phone; hyphenate in the page's language, and break a word only
+	   when even that is not enough. */
+	h1,
+	h2,
+	h3 {
+		hyphens: auto;
+		overflow-wrap: break-word;
+	}
 	h1 {
 		margin: 0 0 24px;
 		font-size: clamp(2.5rem, 5.4vw, 3.9rem);
@@ -530,8 +725,15 @@
 		letter-spacing: -0.03em;
 		font-weight: 800;
 	}
+	h1 .title-main,
 	h1 .accent {
-		background: linear-gradient(100deg, #7d9bff 0%, #a37dff 42%, #e7b95e 100%);
+		display: block;
+		/* `pretty`, not `balance`: balancing a three-line phone headline left
+		   one short word alone on the middle line. */
+		text-wrap: pretty;
+	}
+	h1 .accent {
+		background: linear-gradient(100deg, var(--accent-on-tint) 0%, var(--brand-violet) 42%, var(--gilt) 100%);
 		background-size: 220% 100%;
 		-webkit-background-clip: text;
 		background-clip: text;
@@ -573,15 +775,15 @@
 	.primary {
 		background: var(--accent-strong);
 		color: #fff;
-		box-shadow: 0 14px 34px -14px rgba(99, 140, 255, 0.95);
+		box-shadow: 0 14px 34px -14px var(--accent-glow);
 	}
 	.primary:hover {
 		transform: translateY(-2px);
-		box-shadow: 0 20px 42px -16px rgba(99, 140, 255, 1);
+		box-shadow: 0 20px 42px -16px color-mix(in srgb, var(--accent) 70%, transparent);
 	}
 	.primary.large { padding: 15px 30px; font-size: 1rem; }
 	.secondary {
-		background: rgba(24, 26, 35, 0.6);
+		background: color-mix(in srgb, var(--surface) 60%, transparent);
 		color: var(--text);
 		border: 1px solid var(--border);
 	}
@@ -592,8 +794,16 @@
 		font-size: 0.82rem;
 	}
 
+	/* `min-width: 0` on both grid items: a grid item will not shrink below its
+	   longest unbreakable word, and at the headline's size a French or German
+	   word ("L’automatisation") is wider than a phone, which pushed the whole
+	   column past the viewport instead of letting the headline hyphenate. */
+	.hero-text {
+		min-width: 0;
+	}
 	.hero-visual {
 		position: relative;
+		min-width: 0;
 	}
 
 	/* ------------------------------ sections ----------------------------- */
@@ -614,7 +824,8 @@
 		gap: 20px;
 		border-radius: 18px;
 		border: 1px solid var(--border);
-		background: rgba(24, 26, 35, 0.4);
+		background: color-mix(in srgb, var(--surface) 40%, transparent);
+		box-shadow: var(--shadow-card);
 	}
 	@media (max-width: 760px) {
 		.stats { grid-template-columns: repeat(2, 1fr); margin-bottom: 80px; }
@@ -628,7 +839,7 @@
 		font-weight: 800;
 		letter-spacing: -0.03em;
 		font-variant-numeric: tabular-nums;
-		background: linear-gradient(135deg, #7d9bff, #a37dff);
+		background: linear-gradient(135deg, var(--accent-on-tint), var(--brand-violet));
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
@@ -678,13 +889,15 @@
 		position: relative;
 		border-radius: 14px;
 		padding: 24px;
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
-		transition: border-color 0.2s, transform 0.2s, background 0.2s;
 	}
-	/* A hairline of accent along the top edge, brightening on hover. A
-	   pseudo-element rather than a border so it can be inset from the corners
-	   and not fight the card's own radius. */
+	/* A hairline of accent along the top edge. A pseudo-element rather than a
+	   border so it can be inset from the corners and not fight the card's own
+	   radius. It does not react to the pointer: nothing here is clickable, and
+	   a card that lifts or lights up under the cursor promises a link it does
+	   not have (#635 finding 30). */
 	.feature::before {
 		content: '';
 		position: absolute;
@@ -692,17 +905,7 @@
 		left: 18%;
 		right: 18%;
 		height: 1px;
-		background: linear-gradient(90deg, transparent, rgba(99, 140, 255, 0.55), transparent);
-		transition: left 0.3s, right 0.3s;
-	}
-	.feature:hover {
-		border-color: rgba(99, 140, 255, 0.4);
-		background: rgba(30, 33, 45, 0.75);
-		transform: translateY(-3px);
-	}
-	.feature:hover::before {
-		left: 4%;
-		right: 4%;
+		background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent);
 	}
 	.feature-icon {
 		display: inline-flex;
@@ -711,8 +914,8 @@
 		width: 44px;
 		height: 44px;
 		border-radius: 12px;
-		background: linear-gradient(140deg, rgba(99, 140, 255, 0.22), rgba(163, 125, 255, 0.14));
-		border: 1px solid rgba(99, 140, 255, 0.22);
+		background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--brand-violet) 14%, transparent));
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 		color: var(--accent-on-tint);
 		font-size: 22px;
 		margin-bottom: 16px;
@@ -748,7 +951,8 @@
 		overflow: hidden;
 		border-radius: 14px;
 		padding: 28px 24px;
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
 	}
 	.step-num {
@@ -759,7 +963,7 @@
 		font-weight: 800;
 		line-height: 1;
 		/* The fade lives in the colour, not in `opacity` — see the markup. */
-		color: rgba(226, 228, 234, 0.07);
+		color: color-mix(in srgb, var(--text) 7%, transparent);
 	}
 	.step-icon {
 		display: inline-flex;
@@ -768,8 +972,8 @@
 		width: 46px;
 		height: 46px;
 		border-radius: 12px;
-		background: linear-gradient(135deg, rgba(99, 140, 255, 0.22), rgba(163, 125, 255, 0.18));
-		border: 1px solid rgba(99, 140, 255, 0.22);
+		background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--brand-violet) 18%, transparent));
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 		color: var(--accent-on-tint);
 		font-size: 24px;
 		margin-bottom: 16px;
@@ -829,8 +1033,8 @@
 		/* The render is lit from above-left on a transparent film, so a warm
 		   bloom under it reads as the object's own light on the page rather
 		   than as a box around a picture. */
-		filter: drop-shadow(0 26px 46px rgba(231, 185, 94, 0.14))
-			drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+		filter: drop-shadow(0 26px 46px color-mix(in srgb, var(--gilt) 14%, transparent))
+			drop-shadow(0 8px 18px var(--drop-shade));
 	}
 	.diff-grid {
 		display: grid;
@@ -843,12 +1047,9 @@
 	.diff {
 		border-radius: 14px;
 		padding: 26px;
-		background: rgba(24, 26, 35, 0.62);
+		background: color-mix(in srgb, var(--surface) 62%, transparent);
+		box-shadow: var(--shadow-card);
 		border: 1px solid var(--border);
-		transition: border-color 0.2s;
-	}
-	.diff:hover {
-		border-color: rgba(99, 140, 255, 0.32);
 	}
 	.diff h3 {
 		margin: 0 0 10px;
@@ -879,9 +1080,9 @@
 		padding: 64px 40px;
 		text-align: center;
 		background:
-			radial-gradient(640px 320px at 50% 0%, rgba(99, 140, 255, 0.26), transparent 70%),
-			linear-gradient(180deg, rgba(31, 35, 48, 0.9), rgba(20, 22, 31, 0.9));
-		border: 1px solid rgba(99, 140, 255, 0.22);
+			radial-gradient(640px 320px at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+			linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 60%, var(--surface)), var(--surface));
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 	}
 	.cta-inner h2 {
 		font-size: clamp(1.7rem, 3.6vw, 2.4rem);
@@ -899,7 +1100,7 @@
 	/* ------------------------------ footer ------------------------------- */
 	.footer {
 		border-top: 1px solid var(--border);
-		background: rgba(15, 17, 23, 0.6);
+		background: color-mix(in srgb, var(--bg) 60%, transparent);
 	}
 	.footer-inner {
 		max-width: 1180px;

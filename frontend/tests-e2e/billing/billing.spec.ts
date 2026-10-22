@@ -121,7 +121,7 @@ test.describe('/billing (admin)', () => {
 	});
 
 	test('renders the billing surface header', async ({ page }) => {
-		await expect(page.getByRole('heading', { name: 'Billing' })).toBeVisible();
+		await expect(page.getByRole('heading', { level: 1, name: 'Subscription', exact: true })).toBeVisible();
 	});
 
 	test('with no subscription, shows the friendly empty state + usage meters', async ({ page }) => {
@@ -400,9 +400,10 @@ test.describe('/billing (admin)', () => {
 	});
 
 	test('the Subscription section tab is visible + active for the admin', async ({ page }) => {
-		// /billing is a child of the Billing nav group, so it surfaces as a
-		// section sub-tab (not a top-level sidebar row). On /billing the Billing
-		// group's sub-tab bar is shown with Subscription as the active tab.
+		// /billing is a child of the Settings nav group (beside Organization —
+		// decisions §314), so it surfaces as a section sub-tab, not a top-level
+		// sidebar row. On /billing the Settings sub-tab bar is shown with
+		// Subscription as the active tab.
 		const tab = page.locator('nav.section-tabs a[href="/billing"]');
 		await expect(tab).toBeVisible();
 		await expect(tab).toHaveText('Subscription');
@@ -562,7 +563,7 @@ test.describe('/billing (clerk — not authorized)', () => {
 		await page.goto('/billing');
 		// admin/cfo only — the page waits for /me then bounces the clerk to root.
 		await page.waitForURL(TENANT_ROOT_URL, { timeout: 15_000 });
-		await expect(page.getByRole('heading', { name: 'Billing' })).toHaveCount(0);
+		await expect(page.getByRole('heading', { level: 1, name: 'Subscription', exact: true })).toHaveCount(0);
 
 		// The clerk also can't reach the Subscription tab (it's admin/cfo-only,
 		// and they were bounced to the dashboard, which has no section tabs).

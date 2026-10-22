@@ -39,11 +39,19 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (§307, §308, §310 and the #575 round-1
-entries) into the live-claim ERP refusal branch; both sides' entries kept, taking
-the file to 135, one of them the (c) entry refusing the ERP push for an invoice
-already being paid (decisions §309) opened (the run builder's unlocked invoice
-read). Before that, 2026-10-21 — merging main (§305, §306) into the #575 round-1 branch, both sides' entries kept, taking the file to 134. Before that, 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
+**Last reconciled:** 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+(c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
+that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
+entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
+2026-10-21 — merging main (§306 workspace closure, #624, #632) into the
+first-client UX branch (issue #635); both sides' entries kept, this branch's decisions renumbered
+§312–§315, taking the file to 137. Before that, 2026-10-21 — coding the shared rate limiter's 429 (issue
+#635) opened one (c) entry, the assistant stream reading every 429 as a budget
+error, taking the file from 131 → 132. Before that, 2026-10-21 — the sidebar renames (issue #635 #23,
+decisions §314) opened one (c) entry, hiding Partner Admin from non-partners,
+taking the file from 130 → 131. Before that, 2026-10-21 — extracting `ui/LoadError` (issue #635) opened
+one (c) entry, the pages still hand-rolling a load-error + Retry block, taking
+the file from 129 → 130. Before that, 2026-10-21 — merging main (§305, §306) into the #575 round-1 branch, both sides' entries kept, taking the file to 134. Before that, 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
 decisions §305) opened three (c) entries — the modal's assignee clause, bulk
 status approving a draft past review, and the pages still restating server
 predicates — taking the file from 126 → 129. Before that, 2026-10-21 — storing the ERP document id on the invoice
@@ -218,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**135 open: 116 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
+**140 open: 121 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1250,27 +1258,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       only logs. **Durable fix:** when `post_payment` is implemented, send
       `discount_amount` beside `amount` so the ERP books the discount taken.
       **Trigger:** the first real ERP payment-posting adapter.
-- [ ] **(c) The web bundle total counts route-split content nobody loads
-      together.** `MAX_TOTAL_KB` sums every chunk (one locale catalogue), so
-      the help centre's lazy guide prose and diagrams (~81 KB, `/help` only)
-      raised it as if every visitor downloaded them; the 2026-09-16 ceiling
-      entry's trigger for this fired on PR #516 and the ceiling went to 1075.
-      **Durable fix:** measure the app shell plus the heaviest single route
-      (from the Vite manifest's import graph) as the gated total, and keep the
-      every-chunk sum as a reported, ungated figure. **Trigger:** the next
-      time `MAX_TOTAL_KB` binds, or the next change to the budget workflow.
-      **Fired 2026-10-08, deliberately not taken:** the help-catalogue split
-      (decisions §261) changed the workflow only to count one help slice like
-      one catalogue; the total measured 1005 of 1075, so the every-chunk sum is
-      not binding and this stays the next budget change's job. **Fired again
-      2026-10-20, again not taken:** the settings and portal slices (§300)
-      generalised that to one file per catalogue kind; the total measured 1034
-      of 1075 (down from 1050), still not binding, and the change was scoped to
-      the per-chunk ceiling that was. **Fired a third time 2026-10-20, not
-      taken:** the workflow became a reusable workflow called from `ci.yml` so
-      the budget gates merges through `CI gate` (decisions §301). That change
-      was deliberately limited to the trigger, with the measurement and the
-      numbers left exactly as they were, and the total is still not binding.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
@@ -2181,6 +2168,111 @@ providers still have the same gap.
       **Trigger:** the next change to any of those controls, or a report of a
       button that 403s / 409s.
 
+### Surfaced by extracting `ui/LoadError` (2026-10-21, issue #635)
+
+- [ ] **(c) About a dozen pages still hand-roll the load-error + Retry block.**
+      `ui/LoadError.svelte` (`frontend/docs/component-library.md`) now owns "a
+      failed load, stated in place, with Retry" — including moving focus to
+      `<main>` on Retry, so a keyboard user is not dropped onto `<body>` when
+      the block unmounts. The dashboard and `/organization` use it; `/catalogs`,
+      `/admin/entities`, `/admin/api-keys`, `/admin/webhooks`,
+      `/bank-reconciliation` (page + `StatementDetailModal`),
+      `ScheduledReportsPanel` and the other `role="alert"` + Retry copies
+      (`grep -rln 'role="alert"' frontend/src/routes | xargs grep -l -i retry`)
+      still carry their own markup and their own retry key, and lose focus the
+      same way. **Durable fix:** render `<LoadError message onretry testId />`
+      in each, drop the private `*.retry` keys for `common.retry`, and move
+      each page's spec selector to its `testId`. **Trigger:** the next change to
+      any of those pages, or a focus-order (WCAG 2.4.3) report on a retry.
+
+### Surfaced by the sidebar renames (2026-10-21, issue #635 #23, decisions §314)
+
+- [ ] **(c) Partner Admin shows to every admin, partner or not — needs a product
+      call.** #635 asked to hide the row unless the workspace is a partner, but
+      nothing says so: `GET /api/partner`'s `is_partner` is derived from having
+      at least one child, and `/admin/partner` is also where a standalone org
+      provisions or attaches its first child (how it becomes a partner) and
+      mints the link code that consents to being adopted. Gating the row on
+      `is_partner` would strand both and break "the sidebar gate and the page's
+      gate agree" (`frontend/CLAUDE.md`). **Durable fix:** an operator-granted
+      partner capability (plan entitlement, or `organizations.is_partner`) on
+      `/auth/me`, the `/api/partner` routes gated on it, the link-code minting
+      moved to Organization settings (any admin may consent to adoption), and
+      the nav row gated on the capability. **Trigger:** the product decision on
+      who may act as a partner, or the next partner/reseller onboarding.
+
+### Surfaced by fixing the payments-spec data leak (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) Some e2e spec leaks draft payment runs, and `queue.spec` leaks a vendor.**
+      After `delete-gate.spec` stopped leaking blocked invoices (16d74798), a
+      check of the local e2e tenants found 20 draft payment runs on e2e2 dated
+      2026-09-05..07 that no spec removes. A draft run holding live payments
+      keeps those invoices out of the payment queue, which is the same
+      cross-spec interference that broke `execute.spec`.
+      `payments/queue.spec.ts`'s `createApprovedInvoice` also leaves its
+      auto-created `E2E Pluralization Vendor` behind. It has no invoices, so it
+      is inert today. **Durable fix:** find the spec that creates draft runs
+      (grep `payment-runs` POSTs without a matching `deletePaymentRun` in an
+      `afterEach`) and give it prefix-scoped cleanup. Remove the pluralization
+      vendor in `queue.spec`'s teardown, and extend `meta/teardown-guard` to
+      catch a spec that creates a payment run or vendor without removing it.
+      **Trigger:** the next payments e2e flake, or the next pass over
+      `meta/teardown-guard`.
+
+### Surfaced by removing `transition: all` (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) Three pages hand-roll a button the shared library already owns.**
+      `routes/invoices/+page.svelte` (`.bulk-delete-btn`) and
+      `InvoiceModal.svelte` (`.btn-delete-outline`) restyle the destructive
+      bulk/delete button instead of rendering `ui/BulkDeleteButton.svelte`.
+      `routes/cash-flow/+page.svelte` (`.prompt-btn`) restyles the example-prompt
+      chips instead of rendering `assistant/ExamplePrompts.svelte`. The copies
+      drift: narrowing `transition: all` (commits f5efe887, 2f25ef56)
+      had to find and fix each one by hand, and one copy was missed in the first
+      sweep. **Durable fix:** render the shared components at those three sites,
+      extending their props if a site needs a variant (guard rail 9), and delete
+      the copied CSS. Cover each with the existing page specs (bulk delete on
+      `/invoices`, the invoice modal's delete, the cash-flow prompt chips).
+      **Trigger:** the next change to any of those buttons, or the next
+      component-library pass.
+
+### Surfaced by coding the shared rate limiter's 429 (2026-10-21, issue #635, PR #636)
+
+- [ ] **(c) The assistant stream reads any 429 as "AI budget reached".**
+      `streamAssistantChat` (`frontend/src/lib/api.ts`, the `res.status === 429`
+      branch) builds an `AssistantBudgetError` from every 429, reading
+      `detail as string` plus `used` / `budget` / `period`. Today only the
+      assistant's own budget mapping (`backend/app/api/assistant.py`) answers 429
+      on `/chat/stream`, so it is correct. But the shared limiter's 429 is now the
+      coded `rate_limited` refusal, so if that limiter is ever put in front of the
+      assistant, a rate-limit refusal would show as "budget reached 0 / 0".
+      **Durable fix:** treat a 429 as a budget error only when the body carries
+      `budget`, and send any other 429 through `apiErrorFromBody` so the coded
+      refusal is localized like everywhere else. Cover both with a stubbed
+      stream e2e. **Trigger:** any change that rate-limits `/api/assistant/*`, or
+      the next edit to `streamAssistantChat`.
+
+### Surfaced by adding external uptime checks (2026-10-21, decisions §311)
+
+- [ ] **(c) Nothing watches the Let's Encrypt certificates Caddy holds on the
+      VM.** `infra/uptime.tf` alarms on the ACM certificate's `DaysToExpiry`,
+      but `api.feohledger.com` (and, until the CloudFront cutover, the apex and
+      every tenant host) is served on a certificate Caddy obtains and renews
+      itself, which no AWS metric sees. The Route 53 health checks do not help:
+      they complete the TLS handshake without validating the certificate, so an
+      expired one still reads healthy while every browser refuses the API.
+      Caddy renews 30 days ahead and retries, so this needs a renewal failing
+      for a month unnoticed (an ACME rate limit, DNS moved away, port 80 closed
+      by a security-group change). **Durable fix:** a CloudWatch Synthetics
+      canary (an API canary, hourly: ~$0.86 a month at $0.0012 a run) that
+      fetches `https://api.<domain>/api/health` with certificate validation on
+      and fails under 14 days to expiry, alarming to the pager topic; it needs
+      an artifacts bucket and an execution role in `infra/`. The alternative,
+      a cron on the VM reporting Caddy's certificate expiry as a custom metric,
+      is cheaper and is blind exactly when the VM is. **Trigger:** before
+      customer #1, with the status-page work, or at once if Caddy's logs show
+      a renewal failure.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
@@ -2231,7 +2323,9 @@ as oversights.
       decision and a vendor contract, but **not all engineering prereqs are
       complete** (*corrected 2026-10-07*): `soc2-readiness.md` still lists
       moving the existing S3 buckets onto Object Lock as pending code work,
-      and 5xx/RBAC-denial alerting and uptime monitoring as pending.
+      and 5xx/RBAC-denial alerting as pending. (Uptime monitoring is built,
+      `infra/uptime.tf`, decisions §311, and waits on the SMS-paging (b)
+      entry below.)
       Ref: [soc2-readiness.md](soc2-readiness.md).
 - [ ] **Live government e-invoice clearance** — SdI (IT), SAT-PAC (MX), SEFAZ
       (BR), DIAN (CO). The generators and national validation ship as pure
@@ -2281,16 +2375,16 @@ as oversights.
 
 ## (b) Operator steps on merged code
 
-- [ ] **Move production onto the IAM-authenticated `feoh_app` role, then rotate
-      the master password.** The code, the cutover script and the
-      `rds-db:connect` grant are merged (decisions §310), and nothing changes
-      until the operator runs them. Production still signs in as the RDS master
-      with its password in the VM's env. Steps, verification and rollback:
-      `deploy/README.md` § Database role. In order: `terraform apply`, then
-      `./db-role-cutover.sh` and `--verify-login` on the VM, then switch
-      `FEOH_DATABASE_URL` / `FEOH_DATABASE_IAM_AUTH` in `prod.sops.yaml` and
-      redeploy, then rotate `db_master_password`. **Trigger:** before the first
-      customer's data lands on the instance.
+- [ ] **Turn on SMS paging for the uptime checks.** Built (decisions §311,
+      `infra/uptime.tf`): with no phone number set the checks only email. In
+      us-east-1, lease a toll-free number in AWS End User Messaging SMS and
+      complete its registration (sole proprietor, ~15 days), give SNS the
+      resource policy on the number, verify the operator's phone in the SNS
+      SMS sandbox, then set `alert_phone_number` and `uptime_tenant_slug` in
+      `infra-secrets/feohledger/prod.tfvars` (never in this repo), apply, and
+      ring the phone with `aws cloudwatch set-alarm-state`. Every step is
+      `infra/README.md` § Uptime checks and paging. **Trigger:** before
+      customer #1 (#446 § Support + status).
 
 - [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
       Accounting and Blackbaud.** Until then those ERPs connect only when a

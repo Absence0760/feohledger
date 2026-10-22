@@ -10,6 +10,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { en } from '../i18n/locales/en';
 import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import { messages as de } from '../i18n/locales/de';
+import { messages as fr } from '../i18n/locales/fr';
+import { messages as es } from '../i18n/locales/es';
+import { messages as ptBR } from '../i18n/locales/pt-BR';
+import { messages as ja } from '../i18n/locales/ja';
 import { interpolate } from '../i18n/interpolate';
 import { setActiveFormatLocale } from '../i18n/formatLocale';
 import type { MainMessageKey, MessageKey } from '../i18n/messages';
@@ -19,9 +23,11 @@ import {
 	INVOICE_STALE_APPROVAL,
 	INVOICE_STALE_EDIT,
 	PLAN_FEATURE_REQUIRED,
+	RATE_LIMITED,
 	SIGNUP_EMAIL_HAS_WORKSPACE,
 	codedRefusalText,
-	localizeApiDetail
+	localizeApiDetail,
+	refusalField
 } from './codedRefusals';
 
 const translator =
@@ -502,7 +508,7 @@ describe('the plan-feature refusal', () => {
 	it('names the feature and the tier that grants it, in the reader’s language', () => {
 		expect(codedRefusalText(PLAN_FEATURE_REQUIRED, { feature: 'scim' }, enT)).toBe(
 			'SCIM user provisioning is not included in your plan. It is available on the Scale ' +
-				'plan — upgrade in Billing to use it.'
+				'plan — upgrade under Settings → Subscription to use it.'
 		);
 		const out = codedRefusalText(PLAN_FEATURE_REQUIRED, { feature: 'sso' }, deT) ?? '';
 		expect(out).toContain(de['planFeature.sso']);
@@ -618,5 +624,150 @@ describe('the ERP send refused for an open duplicate or fraud exception (§286)'
 				enT
 			)
 		).toContain('an earlier attempt may already have created the bill in the ERP');
+	});
+});
+
+describe('the self-service signup refusals (issue #635 finding 18)', () => {
+	const FIXED: [string, MainMessageKey][] = [
+		['slug_required', 'refusal.slugRequired'],
+		['slug_format', 'refusal.slugFormat'],
+		['slug_hyphen_edge', 'refusal.slugHyphenEdge'],
+		['slug_double_hyphen', 'refusal.slugDoubleHyphen'],
+		['signup_email_invalid', 'refusal.signupEmailInvalid'],
+		['signup_name_has_link', 'refusal.signupNameHasLink'],
+		['captcha_required', 'refusal.captchaRequired'],
+		['captcha_unavailable', 'refusal.captchaUnavailable'],
+		['captcha_failed', 'refusal.captchaFailed'],
+		['signup_email_send_failed', 'refusal.signupEmailSendFailed'],
+		['signup_link_invalid', 'refusal.signupLinkInvalid'],
+		['signup_unavailable', 'refusal.signupUnavailable'],
+		['signup_provisioning_failed', 'refusal.signupProvisioningFailed']
+	];
+
+	it.each(FIXED)('%s is stated in the reader\'s language', (code, key) => {
+		expect(codedRefusalText(code, { field: 'slug' }, deT)).toBe(de[key]);
+		expect(codedRefusalText(code, {}, enT)).toBe(en[key]);
+	});
+
+	it('names the workspace address in the reserved / taken refusals', () => {
+		expect(codedRefusalText('slug_taken', { field: 'slug', slug: 'acme' }, enT)).toBe(
+			'“acme” is already taken. Choose another workspace address.'
+		);
+		expect(codedRefusalText('slug_reserved', { slug: 'admin' }, deT)).toBe(
+			de['refusal.slugReserved'].replace('{slug}', 'admin')
+		);
+		// No address to name: the server's sentence, never a blank.
+		expect(codedRefusalText('slug_taken', {}, enT)).toBeNull();
+	});
+
+	it('never calls the workspace address a "slug" in any locale', () => {
+		for (const [, key] of FIXED) expect(en[key].toLowerCase()).not.toContain('slug');
+		expect(interpolate(en['refusal.slugTaken'], { slug: 'x' }, 'en')).not.toMatch(/slug/i);
+		expect(interpolate(en['refusal.slugReserved'], { slug: 'x' }, 'en')).not.toMatch(/slug/i);
+	});
+
+	it('reads the form field a refusal is about', () => {
+		expect(refusalField({ field: 'admin_email' })).toBe('admin_email');
+		expect(refusalField({})).toBeNull();
+		expect(refusalField({ field: 3 })).toBeNull();
+	});
+});
+
+describe('the shared rate limiter’s 429 (`rate_limited`)', () => {
+	it('states the wait in seconds, pluralised, in the reader’s language', () => {
+		expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: 1 }, enT)).toBe(
+			'Too many attempts. Wait 1 second and try again.'
+		);
+		expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: 42 }, enT)).toBe(
+			'Too many attempts. Wait 42 seconds and try again.'
+		);
+		expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: 42 }, deT)).toBe(
+			'Zu viele Versuche. Warten Sie 42 Sekunden und versuchen Sie es dann erneut.'
+		);
+	});
+
+	it('rounds a longer wait UP to whole minutes, then whole hours', () => {
+		const say = (s: number) => codedRefusalText(RATE_LIMITED, { retry_after_seconds: s }, enT);
+		expect(say(60)).toBe('Too many attempts. Wait 1 minute and try again.');
+		// 61 s is not "1 minute": the reader would come back too early.
+		expect(say(61)).toBe('Too many attempts. Wait 2 minutes and try again.');
+		expect(say(3540)).toBe('Too many attempts. Wait 59 minutes and try again.');
+		// Rounds to 60 minutes → said as the hour it is.
+		expect(say(3541)).toBe('Too many attempts. Wait 1 hour and try again.');
+		expect(say(3600)).toBe('Too many attempts. Wait 1 hour and try again.');
+		expect(say(3601)).toBe('Too many attempts. Wait 2 hours and try again.');
+	});
+
+	it('states it in every shipped locale', () => {
+		for (const [locale, messages] of [
+			['fr', fr],
+			['es', es],
+			['pt-BR', ptBR],
+			['ja', ja]
+		] as const) {
+			const t = translator(messages, locale);
+			for (const s of [5, 300, 7200]) {
+				const text = codedRefusalText(RATE_LIMITED, { retry_after_seconds: s }, t);
+				expect(text, `${locale} ${s}s`).toBeTruthy();
+				expect(text).not.toContain('{');
+				expect(text).not.toContain('Too many');
+			}
+		}
+	});
+
+	it('falls back to the server sentence for a missing or malformed wait', () => {
+		for (const bad of [undefined, null, 0, -5, 1.5, '30']) {
+			expect(codedRefusalText(RATE_LIMITED, { retry_after_seconds: bad }, enT)).toBeNull();
+		}
+	});
+
+	it('reaches the transport from a raw limiter detail', () => {
+		const raw = {
+			code: 'rate_limited',
+			message: 'Too many requests. Please wait 90 seconds before trying again.',
+			params: { retry_after_seconds: 90 }
+		};
+		expect(localizeApiDetail(raw, deT)).toBe(
+			'Zu viele Versuche. Warten Sie 2 Minuten und versuchen Sie es dann erneut.'
+		);
+	});
+});
+
+describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
+	const MERGE: [string, MainMessageKey][] = [
+		['vendor_merge_self', 'refusal.vendorMergeSelf'],
+		['vendor_merge_no_duplicates', 'refusal.vendorMergeNoDuplicates'],
+		['vendor_merge_canonical_not_found', 'refusal.vendorMergeCanonicalNotFound'],
+		['vendor_merge_duplicate_not_found', 'refusal.vendorMergeDuplicateNotFound'],
+		['vendor_merge_invalid_id', 'refusal.vendorMergeInvalidId'],
+		['vendor_merge_cross_entity', 'refusal.vendorMergeCrossEntity'],
+		['vendor_merge_blocked_duplicate', 'refusal.vendorMergeBlockedDuplicate']
+	];
+
+	it.each(MERGE)('%s is the fixed sentence %s in every shipped locale', (code, key) => {
+		expect(CODED_REFUSAL_CODES).toContain(code);
+		for (const [locale, messages] of [
+			['en', en],
+			['de', de],
+			['fr', fr],
+			['es', es],
+			['pt-BR', ptBR],
+			['ja', ja]
+		] as const) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
+			expect(text, `${locale} ${code}`).toBeTruthy();
+		}
+	});
+
+	it('reaches the transport from the raw merge detail, in the reader’s language', () => {
+		const raw = detail(
+			'vendor_merge_blocked_duplicate',
+			{},
+			'Cannot merge a payments-blocked vendor into an unblocked canonical — resolve the ' +
+				"block first (see the vendor's screening review) or exclude it from this merge."
+		);
+		expect(localizeApiDetail(raw, deT)).toBe(de['refusal.vendorMergeBlockedDuplicate']);
+		expect(localizeApiDetail(raw, deT)).not.toContain('payments-blocked');
 	});
 });

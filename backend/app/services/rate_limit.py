@@ -23,18 +23,30 @@ import uuid
 
 from fastapi import HTTPException, Request, status
 
+from app.api.refusals import coded_refusal
 from app.config import settings
 from app.redis import get_redis
 
 KEY_PREFIX = "ratelimit:"
 
+#: The one code both axes answer with. No more specific than the English it
+#: replaces: which bucket tripped, its limit and count stay server-side
+#: (`docs/authentication.md` § Brute-force protection).
+RATE_LIMITED = "rate_limited"
+
 
 class RateLimitExceeded(HTTPException):
+    """The limiter's 429: ``Retry-After`` plus the coded ``rate_limited`` refusal,
+    whose only param is the header's own figure."""
+
     def __init__(self, retry_after_seconds: int):
         super().__init__(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Too many requests. Please wait {retry_after_seconds} seconds before trying again."
+            detail=coded_refusal(
+                RATE_LIMITED,
+                f"Too many requests. Please wait {retry_after_seconds} seconds "
+                "before trying again.",
+                retry_after_seconds=retry_after_seconds,
             ),
             headers={"Retry-After": str(retry_after_seconds)},
         )

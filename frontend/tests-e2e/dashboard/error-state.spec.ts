@@ -33,7 +33,7 @@ test.describe('dashboard error state', () => {
 
 		// Error branch is visible (not a blank page). Scope to the dashboard's
 		// own error block — the global Toast live-regions also carry role="alert".
-		const errorBox = page.locator('.dashboard-error');
+		const errorBox = page.getByTestId('dashboard-error');
 		await expect(errorBox).toBeVisible();
 		const retry = errorBox.getByRole('button');
 		await expect(retry).toBeVisible();
@@ -55,6 +55,6 @@ test.describe('dashboard error state', () => {
 		// have passed before the click and proved nothing about the recovery.
 		await retry.click();
 		await expect(row.locator('.kpi[data-kpi-state="value"]').first()).toBeVisible();
-		await expect(page.locator('.dashboard-error')).toHaveCount(0);
+		await expect(page.getByTestId('dashboard-error')).toHaveCount(0);
 	});
 });

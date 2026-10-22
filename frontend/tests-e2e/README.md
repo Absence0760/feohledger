@@ -133,7 +133,28 @@ pnpm test:e2e:a11y      # frontend/package.json — targets just tests-e2e/a11y
 It uses the same per-worker `e2e<N>` tenant + admin storage-state fixtures as
 every other spec (the two login surfaces opt out of the storage state). The
 shared `a11y/axe-helper.ts` owns the tag set + the `expectNoA11yViolations`
-assertion; reuse it when adding a route to the guard. Automated tooling only
+assertion; reuse it when adding a route to the guard. Call it rather than
+`new AxeBuilder(...)` directly, because it measures the page **at rest**:
+
+- It emulates `prefers-reduced-motion: reduce`, which collapses every new
+  animation and transition to its final frame (`app.css` § Reduced motion).
+- It then waits until nothing on the document is moving
+  (`waitForMotionToSettle`, exported for a spec that needs the same wait for
+  its own reads). Reduced motion does not cover this case: a transition that
+  was already running when the media changed keeps the duration it started
+  with. So a spec that flips the theme (`emulateMedia({ colorScheme })` or the
+  theme picker) and scans at once measured backgrounds part-way between the
+  two surfaces. One example: `EntitySwitcher`'s old `transition: all` read
+  #3a3c43 under its hint text, a false 3.41:1, and failed 4 of 10 runs of
+  `dashboard/first-run.spec.ts` (#635). The wait lets two animation frames
+  pass, so a style change made just before the call has started its
+  transitions. Then it awaits the `finished` promise of every running
+  `document.getAnimations()` entry, looping until a pass finds none.
+  Infinite and paused animations are skipped, not awaited. The wait is
+  bounded by the test timeout and uses no sleep. With it, the same spec passed
+  20 of 20 runs with the `transition: all` put back.
+
+Automated tooling only
 covers the machine-detectable criteria — the manual screen-reader passes and
 the conformance docs (`docs/accessibility.md`, `docs/accessibility-vpat.md`)
 cover the rest.
@@ -331,6 +352,34 @@ also pins the behaviour the derivation depends on: that `TENANT_ROOT_URL` is
 anchored to the tenant root rather than matching any page below it, and that
 `escapeRegExp` escapes backslashes, so one tenant's pattern can never be
 satisfied by another tenant's origin.
+
+Two more things are per-origin, and both used to be shared by every run in one
+checkout — each made a run on its own port sign in against the wrong state and
+bounce every signed-in spec to `/login`:
+
+- **SvelteKit's generated env modules.** `vite dev` writes the resolved
+  `PUBLIC_API_URL` into `<outDir>/generated/dev/env/*` when it starts, and every
+  dev server watching that file reloads from it. With one `.svelte-kit` per
+  checkout, a second dev server (another session's e2e run, or a `pnpm dev`)
+  overwrote the first one's value, and the first server's pages then called the
+  second's backend. `playwright.config.ts` now passes `SVELTEKIT_OUT_DIR=
+  .svelte-kit/e2e-<port>` to the dev server it starts, and `vite.config.ts` hands
+  that to SvelteKit as `outDir` — so each e2e dev server owns its generated
+  files. It is under `.svelte-kit/`, so already gitignored, and SvelteKit's
+  watcher ignores every sibling of `<outDir>/generated`, so the default server
+  does not react to it either. Preview runs (CI) keep the default, because
+  `vite preview` serves the `<outDir>/output` that `pnpm build` wrote. If you
+  hand-start a second `vite dev` in one checkout, give it its own
+  `SVELTEKIT_OUT_DIR` the same way (`docs/environment.md`).
+- **The saved admin login** (`.auth/`). A storageState file holds localStorage
+  per origin, port included, and its JWT is only valid against the backend
+  that issued it. The file was keyed by tenant alone (`e2e1-admin.json`), so two
+  runs on different ports overwrote each other's, the token probe still passed,
+  and the reading run booted with no token for its own origin. It is now
+  `<slug>-admin@<web origin>_<api base>.json`
+  (`fixtures/helpers.ts::_authStateFile`), and the token is read only from the
+  entry for the run's own tenant origin. Old `<slug>-admin.json` files are
+  simply never read again; delete them whenever you like.
 
 Three things stay shared and are NOT covered by these variables:
 
@@ -746,6 +795,16 @@ Reach for these instead of duplicating boilerplate per spec:
   delete rows in those three tables. See "Row teardown" above; a source guard
   fails the suite if a spec issues its own `DELETE FROM`. Note the third takes a
   name prefix, not a predicate.
+- `firstPayableQueueInvoice(page)` — the first invoice a payment run will
+  accept, from `GET /api/payments/queue/ids` (the server's selectable set).
+  Never take `queue.items[0]`: the queue lists BLOCKED rows too, and with no
+  due dates its order is the random invoice id, so one blocked row anywhere in
+  the tenant makes that pick fail some of the time with a 409. In the UI, pick
+  a row whose checkbox is enabled, not `tbody tr` `.first()`.
+- A spec that places a row in a payable status (`approved`, `posted_in_erp`,
+  `payment_scheduled`) must remove it in `afterEach`. A leaked one stays in that
+  tenant's payment queue for every later spec on the worker
+  (`invoices/delete-gate.spec.ts` leaked BLOCKED rows that way for weeks).
 - `API_BASE`, `ACME_BASE`, `TECHFLOW_BASE`, `NO_TENANT_BASE`,
   `tenantBase(slug)` — the same origins everyone was redeclaring inline, all
   derived from `E2E_WEB_ORIGIN` / `PUBLIC_API_URL` (see "Running from a
@@ -788,7 +847,7 @@ same origin so the vanity `Host` reaches the backend. See
 ## Storage-state (future)
 
 The auth-storage-state pattern (sign each user in once, persist to
-`.auth/<user>.json`, then `test.use({ storageState })` per spec) is
+`.auth/<user>@<origin>.json`, then `test.use({ storageState })` per spec) is
 already the default (`fixtures/helpers.ts::_ensureAdminStorageState`),
 just lazy per-worker rather than precomputed for every seeded user
 up front — login is fast enough that this is fine. A `globalSetup`

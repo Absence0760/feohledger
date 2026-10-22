@@ -1335,9 +1335,10 @@ async def test_signup_states_a_resting_slug_in_its_own_words(realdb, trial):
         check = await c.get("/api/signup/slug-check", params={"slug": trial["slug"]})
         done = await c.post("/api/signup/complete", json={"token": token})
     assert check.json()["available"] is False
-    assert check.json()["reason_code"] == "signup_slug_held"
+    assert check.json()["code"] == "signup_slug_held"
     assert done.status_code == 409
     assert done.json()["detail"]["code"] == "signup_slug_held"
+    assert done.json()["detail"]["params"] == {"field": "slug", "slug": trial["slug"]}
     assert not await _database_exists(trial["result"].db_name)
 
 

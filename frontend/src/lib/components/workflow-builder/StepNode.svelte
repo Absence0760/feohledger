@@ -160,6 +160,13 @@
 		position: relative;
 		display: flex;
 		align-items: center;
+		/* Wraps, so the row has no fixed minimum width. Unwrapped, handle +
+		   icon + name + the action cluster + the number made one unbreakable
+		   ~360px line, which set the editor's min-content and scrolled
+		   /workflows/[id] sideways at phone width (WCAG 1.4.10). When the name
+		   would get less than its flex-basis, the actions + number drop to a
+		   second line instead. */
+		flex-wrap: wrap;
 		gap: 10px;
 		width: 100%;
 		padding: 10px 12px;
@@ -208,7 +215,8 @@
 	}
 
 	.node-info {
-		flex: 1;
+		/* The basis is the narrowest the name gets before the actions wrap. */
+		flex: 1 1 6rem;
 		min-width: 0;
 	}
 
@@ -231,6 +239,8 @@
 		align-items: center;
 		gap: 6px;
 		flex-shrink: 0;
+		/* Right-aligned whether it shares the name's line or wrapped below it. */
+		margin-left: auto;
 	}
 
 	.enabled-toggle {

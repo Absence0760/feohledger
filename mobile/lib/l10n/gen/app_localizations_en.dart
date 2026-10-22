@@ -2692,12 +2692,12 @@ class AppLocalizationsEn extends AppLocalizations {
       other: '$included AI-read invoices are',
       one: '$included AI-read invoice is',
     );
-    return 'AI reading is paused: this month\'s $_temp0 used. Enter the details manually, or upgrade your plan on the Billing page.';
+    return 'AI reading is paused: this month\'s $_temp0 used. Enter the details manually, or upgrade your plan under Settings → Subscription.';
   }
 
   @override
   String get invoiceWarningAiSpendCapReached =>
-      'AI reading is paused: this month\'s AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.';
+      'AI reading is paused: this month\'s AI spending cap is reached. Enter the details manually, or raise the cap under Settings → Subscription.';
 
   @override
   String get invoiceWarningUnverifiedVendor => 'Vendor is unverified';

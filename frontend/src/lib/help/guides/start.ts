@@ -26,7 +26,7 @@ export const START_GUIDES: Guide[] = [
 						type: 'list',
 						items: [
 							'The busiest pages have their own row: [[page:/]], [[page:/invoices]], [[page:/payments]], [[page:/vendors]], [[page:/vendors/screening]], [[page:/vendors/change-requests]] and [[page:/exceptions]].',
-							'Everything else is folded into a group row: {ui:nav.group.procurement}, {ui:nav.group.billing}, {ui:nav.group.insights}, {ui:nav.group.automation}, {ui:nav.group.governance} and {ui:nav.group.settings}. Clicking a group opens its first page you can see.',
+							'Everything else is folded into a group row: {ui:nav.group.procurement}, {ui:nav.group.treasury}, {ui:nav.group.insights}, {ui:nav.group.automation}, {ui:nav.group.governance} and {ui:nav.group.settings}. Clicking a group opens its first page you can see.',
 							'Inside a group, the pages appear as section tabs across the top of the page. When the tabs do not fit, the rest sit behind {ui:shell.sectionMore}.',
 							'Click {ui:shell.collapse} at the bottom of the sidebar to shrink it to icons and give the page more room. Hover an icon to see its name; click the arrow again to expand it.'
 						]
@@ -316,6 +316,10 @@ export const START_GUIDES: Guide[] = [
 					{
 						type: 'p',
 						text: 'Most settings live under {ui:nav.group.settings} in the sidebar. [[page:/organization]] opens on {ui:org.gettingStarted.title}, which links to the panels most organizations fill in first.'
+					},
+					{
+						type: 'p',
+						text: 'Until your organization has its first invoice, the [[page:/]] shows {ui:dashboard.setup.heading}: the steps below, in this order, ending with {ui:dashboard.setup.step.firstInvoice}. A step is ticked only once the setting it names is saved, for example when a second person has an account or a real ERP is selected, and the list goes away when the first invoice arrives. {ui:org.gettingStarted.title} ticks the same steps.'
 					}
 				]
 			},

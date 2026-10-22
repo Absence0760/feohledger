@@ -273,7 +273,153 @@ test.describe('/payments — the retry finishes the void', () => {
 		await openVoidDialog(page);
 		await page.getByTestId('void-card-retry').click();
 
-		await expect(page.getByTestId('void-card-retry-failed')).toBeVisible();
+		// The server's own reason, stated in the dialog — and only there (one
+		// error, one signal: a toast repeating it would sit over the dialog).
+		await expect(page.getByTestId('void-card-retry-failed')).toHaveText(
+			"Only a voided payment's card close can be retried"
+		);
+		await expect(
+			page.getByTestId('toast').filter({ hasText: 'card close can be retried' })
+		).toHaveCount(0);
+	});
+});
+
+/**
+ * History answers until the void has been sent, then fails every read — the
+ * refresh a void (or a later card-close retry) runs after it has landed. Keyed
+ * on the void request, not on a read count, so however many reads the page
+ * makes before it, the row is there to void.
+ */
+async function mockHistoryThatFailsAfterVoid(page: import('@playwright/test').Page) {
+	let voidSent = false;
+	page.on('request', (req) => {
+		if (req.method() === 'POST' && req.url().includes(`/api/payments/${PAYMENT_ID}/void`)) {
+			voidSent = true;
+		}
+	});
+	await page.route(/\/api\/payments\?/, (r) => {
+		if (voidSent) {
+			return r.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ detail: 'Internal Server Error' })
+			});
+		}
+		return r.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				items: [cardPayment({ void_refusal: null })],
+				total: 1,
+				page: 1,
+				page_size: 20
+			})
+		});
+	});
+	await page.route('**/api/payments/counts**', (r) =>
+		r.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ total: 1, by_status: { completed: 1 } })
+		})
+	);
+}
+
+test.describe('/payments — a void that landed never reads as a failed void', () => {
+	// The refresh after a void used to run inside the void's own `try`, so a
+	// list that failed to reload reached the void's `catch`: "Payment voided",
+	// then "The payment could not be voided." — about money that HAD been
+	// reversed, inviting the operator to void it again or chase a phantom.
+	test('a failed list refresh says the list is stale, not that the void failed', async ({
+		page
+	}) => {
+		const pageErrors: string[] = [];
+		page.on('pageerror', (e) => pageErrors.push(e.message));
+		await mockHistoryThatFailsAfterVoid(page);
+		await mockVoid(page, { void_card_outcome: null, void_card_disposition: null });
+
+		await openVoidDialog(page);
+
+		const toasts = page.getByTestId('toast');
+		await expect(toasts.filter({ hasText: 'Payment voided' })).toBeVisible();
+		await expect(toasts.filter({ hasText: 'could not be refreshed' })).toBeVisible();
+		// The positive assertions above prove the refresh ran and failed; only
+		// then does this absence mean something.
+		await expect(toasts.filter({ hasText: 'could not be voided' })).toHaveCount(0);
+		await expect(page.getByRole('dialog', { name: 'Void payment' })).toHaveCount(0);
+		expect(pageErrors).toEqual([]);
+	});
+
+	test('a card close whose refresh fails confirms the close and leaks no rejection', async ({
+		page
+	}) => {
+		const pageErrors: string[] = [];
+		page.on('pageerror', (e) => pageErrors.push(e.message));
+		await mockHistoryThatFailsAfterVoid(page);
+		await mockVoid(page, {
+			void_card_outcome: 'card_cancel_rejected',
+			void_card_disposition: 'not_closed_retryable'
+		});
+		await page.route(`**/api/payments/${PAYMENT_ID}/void/retry-card-cancel`, (r) =>
+			r.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(
+					cardPayment({
+						status: 'voided',
+						void_card_outcome: 'card_cancelled',
+						void_card_disposition: 'closed'
+					})
+				)
+			})
+		);
+
+		await openVoidDialog(page);
+		await page.getByTestId('void-card-retry').click();
+
+		await expect(page.getByTestId('void-card-closed')).toBeVisible();
+		await expect(
+			page.getByTestId('toast').filter({ hasText: 'could not be refreshed' }).first()
+		).toBeVisible();
+		await expect(page.getByTestId('void-card-retry-failed')).toHaveCount(0);
+		// An unhandled rejection from the click handler surfaces as a page error.
+		expect(pageErrors).toEqual([]);
+	});
+});
+
+test.describe('/payments — a missing void reason is a field error', () => {
+	test('submitting without a reason marks the field, focuses it, and sends nothing', async ({
+		page
+	}) => {
+		await mockHistory(page);
+		let voidCalls = 0;
+		await page.route(`**/api/payments/${PAYMENT_ID}/void`, (r) => {
+			voidCalls += 1;
+			return r.fulfill({ status: 500, body: '' });
+		});
+
+		await page.goto('/payments');
+		await page.getByRole('tab', { name: 'History', exact: true }).click();
+		await page.getByRole('button', { name: 'Void', exact: true }).first().click();
+		// Whitespace is not a reason.
+		await page.getByTestId('void-reason').fill('   ');
+		// Submit stays enabled so the reason can be said (§ Field validation).
+		await page.getByTestId('void-confirm').click();
+
+		const input = page.getByTestId('void-reason');
+		const error = page.getByTestId('void-reason-error');
+		await expect(error).toHaveText('Enter a reason for the void.');
+		await expect(input).toHaveAttribute('aria-invalid', 'true');
+		await expect(input).toHaveAttribute('aria-describedby', 'void-reason-error');
+		await expect(input).toBeFocused();
+		// One error, one signal: the field says it, no toast repeats it.
+		await expect(page.getByTestId('toast')).toHaveCount(0);
+		expect(voidCalls).toBe(0);
+
+		// Editing the field clears its error.
+		await input.fill('e2e: duplicate run');
+		await expect(error).toBeEmpty();
+		await expect(input).not.toHaveAttribute('aria-invalid', 'true');
 	});
 });
 

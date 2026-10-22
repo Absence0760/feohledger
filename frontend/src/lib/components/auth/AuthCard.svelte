@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
-	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
 
 	/**
 	 * Heading + subtitle + error chrome for the secondary auth pages
@@ -32,7 +32,7 @@
 <AuthShell>
 	<div class="auth-card auth-stack">
 		<div class="head">
-			<BrandMark size={40} />
+			<AuthBrandMark />
 			<h1>{heading}</h1>
 			{#if subtitle}
 				<p class="subtitle">{subtitle}</p>

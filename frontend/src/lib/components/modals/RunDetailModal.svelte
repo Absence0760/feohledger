@@ -41,6 +41,7 @@
 	// rounding or locale can't land in one and not the others.
 	import { formatAmountWithoutCurrency } from '#lib/utils/discountRecommendation.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	let {
 		runId,
@@ -224,8 +225,9 @@
 			await load();
 			onchange?.();
 		} catch (err) {
+			// Stated in the panel (role="alert"), beside the button that failed —
+			// and only there: one error, one signal (`docs/ui-patterns.md` § Toast).
 			nachaError = err instanceof Error ? err.message : m('paymentRuns.runDetail.nachaFailed');
-			toast(nachaError, 'error');
 		} finally {
 			downloadingNacha = false;
 			confirmRegenerate = false;
@@ -260,8 +262,8 @@
 			await load();
 			onchange?.();
 		} catch (err) {
+			// In the form (role="alert"), not also a toast: one error, one signal.
 			rejectError = err instanceof Error ? err.message : m('paymentRuns.runDetail.nachaRejectFailed');
-			toast(rejectError, 'error');
 		} finally {
 			rejecting = false;
 		}
@@ -301,9 +303,9 @@
 			onchange?.();
 		} catch (err) {
 			// A coded refusal names the invoice that stopped the WHOLE run
-			// (nothing was recorded), so it stays on screen beside the form.
+			// (nothing was recorded), so it stays on screen beside the form — and
+			// only there: one error, one signal.
 			recordError = err instanceof Error ? err.message : m('paymentRuns.runDetail.recordFailed');
-			toast(recordError, 'error');
 		} finally {
 			recordingRun = false;
 		}
@@ -358,8 +360,7 @@
 			await load();
 			onchange?.();
 		} catch (err) {
-			const e = err as { detail?: string; message?: string } | null;
-			toast(e?.detail ?? e?.message ?? m('paymentRuns.runDetail.approveFailed'), 'error');
+			toast(errorMessage(err, m('paymentRuns.runDetail.approveFailed')), 'error');
 		} finally {
 			approving = false;
 		}
@@ -380,6 +381,9 @@
 			toast(err instanceof Error ? err.message : m('paymentRuns.runDetail.cancelFailed'), 'error');
 		} finally {
 			cancelling = false;
+			// Disarm whichever way it went, as Execute does: a failed cancel must
+			// not leave a destructive control one click from firing.
+			confirmCancel = false;
 		}
 	}
 
@@ -459,7 +463,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
 <div class="backdrop" onclick={handleBackdrop} role="presentation">
-	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-label="Payment run" tabindex="-1">
+	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label={m('paymentRuns.runDetail.dialogLabel')} tabindex="-1">
 		<header>
 			<div class="title-block">
 				<h2>{m('paymentRuns.runDetail.title')}</h2>

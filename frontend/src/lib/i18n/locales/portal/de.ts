@@ -53,7 +53,6 @@ export const messages = {
 	'portal.changePassword.confirm': 'Neues Passwort bestätigen',
 	'portal.changePassword.save': 'Passwort speichern',
 	'portal.changePassword.saving': 'Wird gespeichert...',
-	'portal.changePassword.mismatch': 'Die Passwörter stimmen nicht überein.',
 	'portal.changePassword.failed': 'Änderung fehlgeschlagen',
 	'portal.invoices.title': 'Meine Rechnungen',
 	'portal.invoices.submit': 'Rechnung einreichen',

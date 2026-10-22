@@ -20,7 +20,7 @@ Roles are enforced in the frontend UI. The `/api/auth/me` endpoint returns the u
 ### Role-Based UI Restrictions
 
 The sidebar (driven by `frontend/src/lib/nav.ts`) keeps high-traffic routes as
-direct rows and folds the rest into groups (Procurement / Billing / Insights /
+direct rows and folds the rest into groups (Procurement / Treasury / Insights /
 Automation / Governance / Settings) that open a sub-tabbed page. A group row
 appears when the role can see ≥1 of its children and lands on the first of
 them; the per-page section tabs are filtered by the same per-route `roles` gate

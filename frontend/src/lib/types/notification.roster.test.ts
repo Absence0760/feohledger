@@ -111,9 +111,10 @@ describe('notification event roster', () => {
 	});
 
 	it('the English catalogue value equals the English EVENT_LABELS spelling', () => {
-		// Two English sources exist on purpose: the notification centre and bell
-		// are not in the i18n extraction slice yet. Pinning them together is what
-		// stops that from becoming two different names for one event.
+		// Two English sources exist on purpose: the notification centre is not in
+		// the i18n extraction slice yet (the bell is, and reads the keys). Pinning
+		// them together is what stops that from becoming two different names for
+		// one event.
 		for (const event of EVENT_ORDER) {
 			expect(EN_ALL[EVENT_LABEL_KEYS[event]], `${event} label differs between EVENT_LABELS and en`).toBe(
 				EVENT_LABELS[event]

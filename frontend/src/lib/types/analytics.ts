@@ -427,8 +427,38 @@ export interface ReportingAgingBuckets extends AgingBuckets {
 	unconverted_count: number;
 }
 
+/**
+ * First-run setup facts (`GET /api/dashboard`'s `onboarding`, and
+ * `GET /api/dashboard/onboarding`). Each is derived on read from data another
+ * feature owns — never a stored tick — so a step is done only when the setting
+ * it names is. Field meanings: `backend/app/services/onboarding.py`
+ * (`docs/decisions.md` §315).
+ */
+export interface OnboardingProgress {
+	company: boolean;
+	users: boolean;
+	security: boolean;
+	erp: boolean;
+	vendors: boolean;
+	workflow: boolean;
+	email_intake: boolean;
+}
+
+/** `GET /api/dashboard/onboarding` — admin-only. */
+export interface OnboardingResponse extends OnboardingProgress {
+	organization_has_invoices: boolean;
+}
+
 export interface DashboardData {
 	total_invoices: number;
+	/**
+	 * Whether the ORGANIZATION has any invoice, ignoring the selected entity.
+	 * `total_invoices` is entity-scoped, so it cannot tell a brand-new workspace
+	 * from a brand-new subsidiary of an established one (#635).
+	 */
+	organization_has_invoices: boolean;
+	/** Setup progress — only for an admin on a workspace with no invoices; `null` otherwise. */
+	onboarding: OnboardingProgress | null;
 	total_amount: MoneyAmount;
 	/**
 	 * Currency-aware rollup of the whole invoice book into ONE reporting

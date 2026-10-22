@@ -43,6 +43,10 @@
 	} from '#lib/types/ssoSettings.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import SetupChecklist from '#lib/components/ui/SetupChecklist.svelte';
+	import { setupStepDone, setupStepHref, type SetupStepId } from '#lib/utils/onboarding.ts';
+	import type { OnboardingResponse } from '#lib/types/analytics.ts';
 	import ErpConnectionPanel from '#lib/components/organization/ErpConnectionPanel.svelte';
 	import CommerceConnectionPanel from '#lib/components/organization/CommerceConnectionPanel.svelte';
 	import CloseWorkspacePanel from '#lib/components/organization/CloseWorkspacePanel.svelte';
@@ -119,6 +123,10 @@
 	}
 
 	let org = $state<OrgResponse | null>(null);
+	// Set when `GET /api/organization` fails, so the page says so and offers a
+	// retry. `org` is only ever set on success, so without this the template's
+	// fallback branch read "Loading…" forever after a failed load (#635).
+	let orgLoadFailed = $state(false);
 	// Editable fields
 	let name = $state('');
 	let address = $state('');
@@ -414,6 +422,48 @@
 	 */
 	const requestedPanels = new Set<string>();
 
+	/**
+	 * Getting started — the settings a new workspace configures first, each
+	 * ticked from the same server-side facts as the dashboard's setup checklist
+	 * (`GET /api/dashboard/onboarding`, `docs/decisions.md` §315). Read again
+	 * each time the panel is shown, so a step saved on another panel is ticked
+	 * on the way back. Admin-only: a non-admin, or a read that fails, gets the
+	 * same links with no done state at all — an unknown is never drawn as
+	 * unfinished.
+	 */
+	let onboarding = $state<OnboardingResponse | null>(null);
+	const GETTING_STARTED: { id: SetupStepId; labelKey: MessageKey }[] = [
+		{ id: 'company', labelKey: 'org.gettingStarted.company' },
+		{ id: 'defaults', labelKey: 'org.gettingStarted.defaults' },
+		{ id: 'users', labelKey: 'org.gettingStarted.users' },
+		{ id: 'security', labelKey: 'org.gettingStarted.security' },
+		{ id: 'erp', labelKey: 'org.gettingStarted.erp' },
+		{ id: 'vendors', labelKey: 'org.gettingStarted.vendors' },
+		// Invoice approval thresholds (auto-approve, CFO above, maximum) live on
+		// the workflow's approval step, not on this page; the Payments panel's
+		// only threshold is the CFO sign-off for a payment RUN, which is its own
+		// step (#635).
+		{ id: 'workflow', labelKey: 'org.gettingStarted.approvals' },
+		{ id: 'payments', labelKey: 'org.gettingStarted.paymentRunSignoff' },
+		{ id: 'email_intake', labelKey: 'org.gettingStarted.emailIntake' },
+		{ id: 'branding', labelKey: 'org.gettingStarted.branding' }
+	];
+	const gettingStartedSteps = $derived(
+		GETTING_STARTED.map(({ id, labelKey }) => ({
+			id,
+			label: m(labelKey),
+			href: setupStepHref(id, '/organization'),
+			done: setupStepDone(id, onboarding)
+		}))
+	);
+	$effect(() => {
+		if (section !== 'getting-started' || !userLoaded || !auth.isAdmin) return;
+		api.get<OnboardingResponse>('/api/dashboard/onboarding').then(
+			(res) => (onboarding = res),
+			() => (onboarding = null)
+		);
+	});
+
 	function once(slug: string, load: () => void) {
 		if (section !== slug || requestedPanels.has(slug)) return;
 		requestedPanels.add(slug);
@@ -431,6 +481,7 @@
 	});
 
 	async function loadOrg() {
+		orgLoadFailed = false;
 		try {
 			const data = await api.get<OrgResponse>('/api/organization');
 			org = data;
@@ -514,7 +565,8 @@
 				brandSsoCallbackBaseUrl = (brandCfg.sso_callback_base_url as string) || '';
 			}
 		} catch {
-			toast(m('org.toast.loadFailed'), 'error');
+			// In place, not a toast: the toast faded and left the loading line.
+			orgLoadFailed = true;
 		}
 	}
 
@@ -1464,12 +1516,12 @@
 			);
 			toast(m('orgSso.toast.saved'), 'success');
 		} catch (err) {
-			const text =
+			// Stated beside Save (role="alert"), and only there: one error, one
+			// signal (`docs/ui-patterns.md` § Toast).
+			ssoSaveError =
 				err instanceof ApiError
 					? (ssoRefusalText(err, m) ?? err.message)
 					: m('orgSso.toast.saveFailed');
-			ssoSaveError = text;
-			toast(text, 'error');
 		} finally {
 			savingSso = false;
 		}
@@ -1658,19 +1710,17 @@
 			<fieldset class="sections" disabled={readOnly}>
 				{#if section === 'getting-started'}
 					<section class="getting-started card">
-						<h2>{m('org.gettingStarted.title')}</h2>
+						<h2 id="org-getting-started-heading">{m('org.gettingStarted.title')}</h2>
 						<p class="card-hint">{m('org.gettingStarted.intro')}</p>
 						<!-- These were `#org-*` anchors into one long scroll. They now name
 						     the panel that owns each step directly; the old anchors still
 						     resolve, via `LEGACY_HASH_SECTIONS`, for the copies of them
 						     that exist outside this repo. -->
-						<nav class="gs-links" aria-label={m('org.gettingStarted.title')}>
-							<a href="?section=company">{m('org.gettingStarted.company')}</a>
-							<a href="?section=defaults">{m('org.gettingStarted.defaults')}</a>
-							<a href="/admin">{m('org.gettingStarted.users')}</a>
-							<a href="?section=payments">{m('org.gettingStarted.approvals')}</a>
-							<a href="?section=branding">{m('org.gettingStarted.branding')}</a>
-						</nav>
+						<SetupChecklist
+							steps={gettingStartedSteps}
+							labelledby="org-getting-started-heading"
+							testId="org-getting-started-steps"
+						/>
 					</section>
 				{/if}
 
@@ -3211,6 +3261,8 @@
 				{/if}
 			</fieldset>
 		</div>
+	{:else if orgLoadFailed}
+		<LoadError message={m('org.error.loadFailed')} onretry={loadOrg} testId="org-load-error" />
 	{:else}
 		<div class="loading">{m('org.loading')}</div>
 	{/if}
@@ -3368,23 +3420,6 @@
 	   configures first. Purely a shortcut; nothing is hidden. */
 	.getting-started {
 		border-color: var(--accent);
-	}
-
-	.gs-links {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px 18px;
-		margin-top: 4px;
-	}
-
-	.gs-links a {
-		font-size: 0.85rem;
-		color: var(--accent);
-		text-decoration: none;
-	}
-
-	.gs-links a:hover {
-		text-decoration: underline;
 	}
 
 	.form-grid {

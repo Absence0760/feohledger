@@ -32,6 +32,13 @@ export const CATALOGUE_LOADERS: Record<Locale, () => Promise<Messages>> = {
 //   settings — org / SSO / admin / billing / sweep-health screens. Loaded by
 //              /organization, /admin, /billing and /help (§300).
 //   portal   — the supplier portal. Loaded by /portal (§300).
+//   marketing — the apex landing page's copy and /find-workspace. Loaded by
+//              `Landing.svelte` (which the root layout renders on the apex, so
+//              no route load reaches it — it awaits the slice before it draws)
+//              and by /find-workspace's `+layout.ts`. The pricing grid's
+//              `marketing.pricing.*` keys stay in the main catalogue, which
+//              `m()` reads first: `pricing.test.ts` holds them to the main
+//              catalogues by import.
 //
 // A route-scoped slice (settings, portal) is lazy in EVERY locale, English
 // included: the route's `+layout.ts` awaits it before rendering, so nothing
@@ -68,6 +75,14 @@ export const SLICE_LOADERS: { [S in SliceName]: Record<Locale, () => Promise<Sli
 		'pt-BR': () => import('./locales/portal/pt-BR').then((m) => m.messages),
 		ja: () => import('./locales/portal/ja').then((m) => m.messages),
 	},
+	marketing: {
+		en: () => import('./locales/marketing/en').then((m) => m.enMarketing),
+		de: () => import('./locales/marketing/de').then((m) => m.messages),
+		fr: () => import('./locales/marketing/fr').then((m) => m.messages),
+		es: () => import('./locales/marketing/es').then((m) => m.messages),
+		'pt-BR': () => import('./locales/marketing/pt-BR').then((m) => m.messages),
+		ja: () => import('./locales/marketing/ja').then((m) => m.messages),
+	},
 };
 
 /**
@@ -82,6 +97,7 @@ export const SLICE_PREFIXES: Record<SliceName, readonly string[]> = {
 	help: ['help.'],
 	settings: ['org.', 'orgSso.', 'admin.', 'billing.', 'sweepHealth.'],
 	portal: ['portal.'],
+	marketing: ['marketing.'],
 };
 
 /** The static English copy a slice shows until its chunk lands — help only (see above). */
