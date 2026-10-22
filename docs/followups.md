@@ -214,7 +214,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**133 open: 115 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**132 open: 114 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1246,27 +1246,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       only logs. **Durable fix:** when `post_payment` is implemented, send
       `discount_amount` beside `amount` so the ERP books the discount taken.
       **Trigger:** the first real ERP payment-posting adapter.
-- [ ] **(c) The web bundle total counts route-split content nobody loads
-      together.** `MAX_TOTAL_KB` sums every chunk (one locale catalogue), so
-      the help centre's lazy guide prose and diagrams (~81 KB, `/help` only)
-      raised it as if every visitor downloaded them; the 2026-09-16 ceiling
-      entry's trigger for this fired on PR #516 and the ceiling went to 1075.
-      **Durable fix:** measure the app shell plus the heaviest single route
-      (from the Vite manifest's import graph) as the gated total, and keep the
-      every-chunk sum as a reported, ungated figure. **Trigger:** the next
-      time `MAX_TOTAL_KB` binds, or the next change to the budget workflow.
-      **Fired 2026-10-08, deliberately not taken:** the help-catalogue split
-      (decisions §261) changed the workflow only to count one help slice like
-      one catalogue; the total measured 1005 of 1075, so the every-chunk sum is
-      not binding and this stays the next budget change's job. **Fired again
-      2026-10-20, again not taken:** the settings and portal slices (§300)
-      generalised that to one file per catalogue kind; the total measured 1034
-      of 1075 (down from 1050), still not binding, and the change was scoped to
-      the per-chunk ceiling that was. **Fired a third time 2026-10-20, not
-      taken:** the workflow became a reusable workflow called from `ci.yml` so
-      the budget gates merges through `CI gate` (decisions §301). That change
-      was deliberately limited to the trigger, with the measurement and the
-      numbers left exactly as they were, and the total is still not binding.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
