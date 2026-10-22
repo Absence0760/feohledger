@@ -4365,6 +4365,7 @@ export const messages = {
 	'invoices.modal.activity.title': 'アクティビティ',
 	'invoices.modal.approverNone': 'レビュー担当者に割り当てられる他のユーザーがいません。送信すると、この請求書は未割り当てのままレビュー待ちに入り、どの承認者でも対応できます。',
 	'invoices.modal.approverPlaceholder': '承認者...',
+	'invoices.modal.approverRequiredHint': '提出するには承認者を選択してください',
 	'invoices.modal.approverUnavailable': 'レビュー担当者の一覧を読み込めませんでした。送信すると、この請求書は未割り当てのままレビュー待ちに入り、どの承認者でも対応できます。',
 	'invoices.modal.assignApprover': '承認者を割り当て',
 	'invoices.modal.chain.anyApprover': '承認可能な担当者なら誰でも',

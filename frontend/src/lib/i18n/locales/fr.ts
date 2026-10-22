@@ -4431,6 +4431,7 @@ export const messages = {
 	'invoices.modal.activity.title': 'Activité',
 	'invoices.modal.approverNone': 'Aucune autre personne ne peut être assignée comme réviseur. En soumettant, cette facture rejoint la file de révision sans affectation — n’importe quel approbateur peut la prendre en charge.',
 	'invoices.modal.approverPlaceholder': 'Approbateur...',
+	'invoices.modal.approverRequiredHint': 'Choisissez un approbateur pour soumettre',
 	'invoices.modal.approverUnavailable': 'La liste des réviseurs n’a pas pu être chargée. En soumettant, cette facture rejoint la file de révision sans affectation — n’importe quel approbateur peut la prendre en charge.',
 	'invoices.modal.assignApprover': 'Assigner un approbateur',
 	'invoices.modal.chain.anyApprover': 'Tout approbateur éligible',

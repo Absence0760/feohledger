@@ -4424,6 +4424,7 @@ export const messages = {
 	'invoices.modal.activity.title': 'Actividad',
 	'invoices.modal.approverNone': 'No hay nadie más a quien asignar como revisor. Al enviarla, esta factura pasa a la cola de revisión sin asignar: cualquier aprobador puede tomarla.',
 	'invoices.modal.approverPlaceholder': 'Aprobador...',
+	'invoices.modal.approverRequiredHint': 'Elija un aprobador para enviar',
 	'invoices.modal.approverUnavailable': 'No se pudo cargar la lista de revisores. Al enviarla, esta factura pasa a la cola de revisión sin asignar: cualquier aprobador puede tomarla.',
 	'invoices.modal.assignApprover': 'Asignar aprobador',
 	'invoices.modal.chain.anyApprover': 'Cualquier aprobador elegible',

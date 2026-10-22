@@ -637,6 +637,24 @@ centred dialog with backdrop-click + Esc to close:
   children in `{#if x}…{/if}`.
 - Cancel sits left of the primary action. Required-field markers use
   `<em class="required">*</em>`.
+- **A long dialog keeps its decisions out of the scroll.** When a dialog's body
+  runs past one screen (the invoice dialog's right pane: summary, fields, line
+  items, activity, chat, e-invoice), split the `<form>` into a scrolling region
+  and an action footer **beside it in the flex column** — `form { display: flex;
+  flex-direction: column; min-height: 0 }`, the body `flex: 1; min-height: 0;
+  overflow-y: auto`, the footer `flex-shrink: 0`. Never `position: sticky` the
+  footer over the content: a pinned strip hides the focused field under it
+  (2.4.11) and intercepts Playwright's scroll-then-click (`docs/decisions.md`
+  §181, § Shared visual layer below). The footer stays inside the `<form>` so
+  Save still submits, holds every forward action (Cancel, Save, Submit, and
+  Approve / Reject with the reject-reason flow), and caps itself at
+  `max-height: 50%` with its own `overflow-y: auto` so a 320px dialog never
+  squeezes the fields to nothing. A primary action disabled for a reason the
+  reader can fix says so beside it, wired with `aria-describedby` (the invoice
+  dialog's "Pick an approver to submit"). Reference:
+  `components/modals/InvoiceModal.svelte` (`.form-scroll` / `.form-actions`);
+  guards: `tests-e2e/invoices/review-verdict.spec.ts` (in view at 1280×720, no
+  spill at 320px) and `approver-picker.spec.ts` (the hint).
 - **Never hand-roll a modal shell.** Every dialog — including the feature
   dialogs in `#lib/components/modals/` — wraps its body in `<Modal>`. Do
   not write your own `.backdrop` / `div.modal[role="dialog"]`, your own

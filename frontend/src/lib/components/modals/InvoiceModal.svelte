@@ -598,6 +598,9 @@
 	 *  moves the invoice to `ready_for_review` with no assignee, and an
 	 *  unassigned invoice is reviewable by any approver. */
 	let approverRequired = $derived(needsApproverSelect && reviewerOptions.length > 0);
+	// Submit is held back ONLY because no approver is picked yet — the case the
+	// footer explains in words next to the disabled button.
+	let awaitingApprover = $derived(approverRequired && !selectedApproverId);
 
 	/** Explain the missing picker — but only once the lookup has settled, so a
 	 *  slow response doesn't flash a "no reviewers" note that is then wrong. */
@@ -1880,7 +1883,13 @@
 			<div class="form-pane" style="width:{formPaneWidth}px">
 				<!-- Enter in a field submits too, so the form honours the Save button's
 				     own gate rather than firing a PATCH the server refuses. -->
-				<form onsubmit={(e) => { e.preventDefault(); if (canWrite && !isDone) save(); }}>
+				<!-- The pane is two regions: everything below scrolls in .form-scroll,
+				     and .form-actions sits UNDER it in the flex column — never over it —
+				     so Save / Submit / Approve / Reject are on screen the moment the
+				     dialog opens without overlaying a focused field (decisions §181,
+				     WCAG 2.4.11). The footer stays inside the <form> so Save submits. -->
+				<form class="invoice-form" onsubmit={(e) => { e.preventDefault(); if (canWrite && !isDone) save(); }}>
+					<div class="form-scroll" data-testid="invoice-form-scroll">
 					{#if summaryLoading && !summary}
 						<div class="audit-summary" data-testid="audit-summary">
 							<div class="audit-summary-skeleton"></div>
@@ -2813,7 +2822,9 @@
 							</div>
 						{/if}
 					</div>
+					</div>
 
+					<footer class="form-actions" data-testid="invoice-modal-actions">
 					{#if canReview}
 						<div class="review-section">
 							<div class="help-row review-title-row">
@@ -2878,7 +2889,6 @@
 						</div>
 					{/if}
 
-					<footer>
 						<div class="footer-right">
 							<button type="button" class="btn-cancel" onclick={onclose}>{m('common.cancel')}</button>
 							{#if canExtract || extracting}
@@ -2915,9 +2925,22 @@
 									     leaving a disabled button with no explanation. -->
 									<p class="approver-note">{approverNote}</p>
 								{/if}
-								<button type="button" class="btn-submit" disabled={submitting || (approverRequired && !selectedApproverId)} onclick={submitDone}>
+								<button
+									type="button"
+									class="btn-submit"
+									disabled={submitting || awaitingApprover}
+									aria-describedby={awaitingApprover ? 'approver-required-hint' : undefined}
+									onclick={submitDone}
+								>
 									{submitting ? m('invoices.modal.submitting') : submitLabel}
 								</button>
+								{#if awaitingApprover}
+									<!-- The one reason Submit is disabled that the reader can fix
+									     here: say so beside the button rather than leaving it greyed. -->
+									<p class="approver-hint" id="approver-required-hint" data-testid="approver-required-hint">
+										{m('invoices.modal.approverRequiredHint')}
+									</p>
+								{/if}
 							{/if}
 						</div>
 					</footer>
@@ -3091,12 +3114,15 @@
 
 	/* --- Form pane --- */
 
+	/* The pane itself never scrolls: .form-scroll does, and .form-actions sits
+	   below it in normal flow, so the dialog's decisions are always on screen
+	   without anything pinned over content (decisions §181). */
 	.form-pane {
 		flex-shrink: 0;
-		overflow-y: auto;
-		overflow-x: hidden;
+		overflow: hidden;
 		display: flex;
 		flex-direction: column;
+		min-height: 0;
 		contain: paint;
 	}
 
@@ -3115,12 +3141,26 @@
 		opacity: 0.3;
 	}
 
-	form {
-		padding: 20px;
+	.invoice-form {
 		display: flex;
 		flex-direction: column;
 		flex: 1;
 		min-width: 0;
+		min-height: 0;
+		/* app.css's `.modal form` gap belongs between the fields, which now
+		   live in .form-scroll — not between the scroll region and footer. */
+		gap: 0;
+	}
+
+	.form-scroll {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		overflow-x: hidden;
+		padding: 20px;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
 	}
 
 	.form-grid {
@@ -3166,15 +3206,23 @@
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
-	footer {
+	/* Never shrinks below its content, but is capped at half the pane: on a very
+	   short dialog the footer scrolls on its own rather than squeezing the
+	   fields to nothing. */
+	.form-actions {
+		flex-shrink: 0;
+		max-height: 50%;
+		overflow-y: auto;
 		display: flex;
-		flex-wrap: wrap;
-		justify-content: space-between;
-		align-items: center;
+		flex-direction: column;
 		gap: 10px;
-		padding-top: 18px;
+		padding: 12px 20px 14px;
 		border-top: 1px solid var(--border);
-		margin-top: auto;
+		background: var(--surface);
+	}
+
+	.form-actions .footer-right {
+		justify-content: flex-end;
 	}
 
 	.footer-left {
@@ -3737,12 +3785,20 @@
 
 	/* Shown in place of the picker when there is no reviewer to offer —
 	   explains what Submit will do rather than leaving a bare disabled button. */
-	.approver-note {
+	.approver-note,
+	.approver-hint {
 		margin: 0;
 		max-width: 320px;
 		font-size: 0.78rem;
 		line-height: 1.35;
 		color: var(--text-muted);
+	}
+
+	/* Its own line under the buttons, right-aligned beside Submit. */
+	.approver-hint {
+		flex-basis: 100%;
+		max-width: none;
+		text-align: right;
 	}
 
 	/* E-invoice section + its format dropdown */
@@ -4522,6 +4578,17 @@
 		border-radius: 6px;
 	}
 
+	/* In the action footer the review card is the first row, not a section
+	   after the content, so it drops the spacing that separated it. */
+	.form-actions .review-section {
+		margin-top: 0;
+		padding: 10px 12px;
+	}
+
+	.form-actions .review-title {
+		margin-bottom: 8px;
+	}
+
 	.chat-section {
 		margin-top: 14px;
 		padding: 12px;
@@ -4541,6 +4608,9 @@
 
 	.review-actions {
 		display: flex;
+		/* Approve + Reject do not fit side by side in a 320px dialog; wrap
+		   rather than overflow the card. */
+		flex-wrap: wrap;
 		gap: 8px;
 	}
 
@@ -4695,12 +4765,23 @@
 		.pdf-pane {
 			border-right: none;
 			border-bottom: 1px solid var(--border);
-			height: 45%;
+			/* The action footer now takes its own share of the stacked column,
+			   so the document preview gives up some height to the fields. */
+			height: 30%;
 			flex: none;
 		}
 
+		.form-actions {
+			padding: 10px 12px 12px;
+		}
+
+		/* Stacked, the pane must take the REMAINING height rather than its
+		   content height (flex-shrink: 0 above), or it runs past the dialog's
+		   clipped bottom edge and neither the fields' scroll nor the action
+		   footer is reachable. */
 		.form-pane {
 			width: 100% !important;
+			flex: 1 1 0;
 		}
 
 		.resize-handle {

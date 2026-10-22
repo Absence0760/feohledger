@@ -90,4 +90,104 @@ test.describe('invoice modal — review decisions follow the server verdict', ()
 		await approve.click();
 		expect((await approved).status()).toBe(200);
 	});
+
+	test('Approve, Reject and Save are on screen when the dialog opens on a short viewport', async ({
+		page
+	}) => {
+		// Production report: Approve / Reject sat at the foot of the right
+		// panel's scroll, below the summary, fields, line items, activity, chat
+		// and e-invoice sections — an approver had to scroll past all of it to
+		// decide. The actions now live in a footer UNDER the scroll region (not
+		// pinned over it — decisions §181), so they are in view on open.
+		await page.setViewportSize({ width: 1280, height: 720 });
+		const number = `${PREFIX}-VIEW-${Date.now()}`;
+		const id = await createInReview(page, number);
+		tenantPsql(`UPDATE invoices SET uploaded_by_id = NULL WHERE id='${id}'`);
+
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`) && r.status() === 200
+		);
+		await page.goto(`/invoices?id=${id}`);
+		await verdict;
+		const modal = page.locator('div.modal[role="dialog"]');
+		await expect(modal.locator('header h2')).toContainText(number);
+
+		const approve = modal.getByRole('button', { name: 'Approve', exact: true });
+		const reject = modal.getByRole('button', { name: 'Reject', exact: true });
+		const save = modal.getByRole('button', { name: 'Save', exact: true });
+		await expect(approve).toBeEnabled();
+
+		// The premise: the content really is taller than the pane, so "in view"
+		// is a statement about placement, not about a short invoice.
+		const scroll = modal.getByTestId('invoice-form-scroll');
+		await expect
+			.poll(() => scroll.evaluate((el) => el.scrollHeight > el.clientHeight))
+			.toBe(true);
+		expect(await scroll.evaluate((el) => el.scrollTop)).toBe(0);
+
+		await expect(approve).toBeInViewport({ ratio: 1 });
+		await expect(reject).toBeInViewport({ ratio: 1 });
+		await expect(save).toBeInViewport({ ratio: 1 });
+		// …and they are not overlaying the content: the footer sits wholly
+		// below the scroll region.
+		const footer = modal.getByTestId('invoice-modal-actions');
+		const [scrollBox, footerBox] = await Promise.all([scroll.boundingBox(), footer.boundingBox()]);
+		expect(scrollBox && footerBox).toBeTruthy();
+		expect(footerBox!.y).toBeGreaterThanOrEqual(scrollBox!.y + scrollBox!.height - 1);
+
+		// The reject-reason flow opens in the footer too, still in view.
+		await reject.click();
+		const reason = modal.getByRole('textbox', { name: 'Reason for rejection' });
+		await expect(reason).toBeInViewport();
+		await expect(modal.getByRole('button', { name: 'Confirm Reject' })).toBeInViewport();
+	});
+
+	test('at 320px the action footer neither scrolls sideways nor crowds out the fields', async ({
+		page
+	}) => {
+		// 1.4.10 at the width it names. The footer is outside the scroll region,
+		// so it must wrap rather than overflow, and must leave the fields room —
+		// it is capped at half the pane and scrolls on its own past that.
+		await page.setViewportSize({ width: 320, height: 720 });
+		const number = `${PREFIX}-320-${Date.now()}`;
+		const id = await createInReview(page, number);
+		tenantPsql(`UPDATE invoices SET uploaded_by_id = NULL WHERE id='${id}'`);
+
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`) && r.status() === 200
+		);
+		await page.goto(`/invoices?id=${id}`);
+		await verdict;
+		const modal = page.locator('div.modal[role="dialog"]');
+		const approve = modal.getByRole('button', { name: 'Approve', exact: true });
+		await expect(approve).toBeEnabled();
+		await expect(approve).toBeInViewport({ ratio: 1 });
+
+		const footer = modal.getByTestId('invoice-modal-actions');
+		const scroll = modal.getByTestId('invoice-form-scroll');
+		for (const region of [footer, scroll]) {
+			expect(await region.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+		}
+		// Approve + Reject wrap inside their card rather than spilling past it
+		// (which the footer's own scrollWidth cannot see while the spill stays
+		// inside its padding).
+		const spill = await footer.evaluate((el) => {
+			const card = el.querySelector('.review-section')!.getBoundingClientRect();
+			return [...el.querySelectorAll('.review-section button')]
+				.map((b) => b.getBoundingClientRect())
+				.filter((r) => r.left < card.left - 0.5 || r.right > card.right + 0.5).length;
+		});
+		expect(spill).toBe(0);
+		await expect(modal.getByRole('button', { name: 'Reject', exact: true })).toBeInViewport({
+			ratio: 1
+		});
+		const [footerH, scrollH] = await Promise.all([
+			footer.evaluate((el) => el.getBoundingClientRect().height),
+			scroll.evaluate((el) => el.getBoundingClientRect().height)
+		]);
+		// The footer's cap is max-height: 50% of the pane, so at worst the two
+		// split it evenly; the 1px absorbs sub-pixel layout rounding only.
+		expect(scrollH).toBeGreaterThanOrEqual(footerH - 1);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+	});
 });
