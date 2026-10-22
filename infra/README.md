@@ -213,9 +213,10 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 1. Add `alert_emails = ["…"]` to `prod.tfvars` (it has no default — the repo is public).
 2. Create the master password once in `infra-secrets` (a 48-hex-character value is URL-safe, which it must be because the break-glass `FEOH_DATABASE_URL` embeds it): `cd ~/github/infra-secrets && AWS_PROFILE=feohledger sops feohledger/terraform.sops.yaml`, and add a `db_master_password:` key set to the output of `openssl rand -hex 24`.
 3. Plan and apply with the password passed in from sops (one line each):
-   `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan`
-   then `AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform apply tfplan`.
-   An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice.
+   `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(AWS_PROFILE=feohledger sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan`
+   then `AWS_PROFILE=feohledger TF_VAR_db_master_password="$(AWS_PROFILE=feohledger sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform apply tfplan`.
+   An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice. `AWS_PROFILE` is set inside the `$( … )` too: a prefix assignment reaches only the command it precedes, so without it the substitution decrypts with no profile.
+   If `plan` reports the cached provider "does not match any of the checksums recorded in the dependency lock file", re-run `terraform init -backend-config=backend.config` and keep the `h1:` line it adds until the apply is done — restoring the lock first brings the error straight back. Then `git restore .terraform.lock.hcl`, so one workstation's hash never lands in a commit.
 4. Confirm the SNS subscription email AWS sends to each alert address.
 5. Then the VM side: `../deploy/README.md` (bootstrap, the sops env with `FEOH_DATABASE_URL` pointing at the `db_address` output, first deploy, then § Database role to move the app onto `feoh_app`).
 
