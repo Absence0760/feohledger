@@ -37,7 +37,10 @@ It must match the scenario's meaning (the replay asserts it).
 
 **Scrubbing.** The repository is public. No token is ever read into this
 script's output: the access token stays inside ``erp_oauth`` and the adapter's
-``_request``. The company's realm id becomes ``recorded-sandbox-realm``.
+``_request``. The company's realm id becomes ``recorded-sandbox-realm``, and
+so does every ``intuitaccountid`` / ``realmId`` whatever it holds; a webhook
+delivery's events about any other company connected to the same Intuit app are
+dropped before scrubbing.
 Strings are kept verbatim only under the keys the status sync reads (ids,
 ``SyncToken``, ``TxnType``, ``PayType``, dates, reference ``value``\\ s,
 ``status``, Fault ``code``); a ``PrivateNote`` keeps only a leading "Voided"
@@ -130,17 +133,18 @@ VERBATIM_KEYS = frozenset(
         "PrintStatus",
         # Fault envelope
         "code",
-        "Message",
         "type",
         "time",
         # CloudEvents
         "specversion",
         "id",
         "intuitentityid",
-        "intuitaccountid",
         "datacontenttype",
     }
 )
+#: Keys naming a QuickBooks company, written as the placeholder whatever they
+#: hold: a delivery can name ANOTHER company connected to the same Intuit app.
+COMPANY_KEYS = frozenset({"intuitaccountid", "realmId"})
 _MARKER = re.compile(r"FeohLedger(?: payment| recorder)?(?: [0-9a-fA-F-]{36})?")
 _VOIDED = re.compile(r"^\s*voided\b[\s:\-]*", re.IGNORECASE)
 _FAKE_ADDRESS = {
@@ -183,7 +187,7 @@ def scrub(value: Any, realm: str, key: str = "") -> Any:
         return value
     if value == "":
         return value
-    if value == REALM_PLACEHOLDER or (realm and value == realm):
+    if key in COMPANY_KEYS or value == REALM_PLACEHOLDER or (realm and value == realm):
         return REALM_PLACEHOLDER
     if key == "PrivateNote":
         return scrub_note(value)
@@ -210,6 +214,14 @@ def to_json(value: Any, indent: int = 0) -> str:
         items = [f"{inner}{to_json(v, indent + 1)}" for v in value]
         return "[\n" + ",\n".join(items) + f"\n{pad}]"
     return json.dumps(value)
+
+
+def own_company_events(body: Any, realm: str) -> list[dict]:
+    """The events in a delivery that are about THIS company. Intuit delivers
+    for every company connected to the app's keys — production ones included —
+    so anything else is dropped before it is scrubbed, not merely renamed."""
+    events = body if isinstance(body, list) else [body]
+    return [e for e in events if isinstance(e, dict) and str(e.get("intuitaccountid")) == realm]
 
 
 def ngrok_webhook_body(captured: dict) -> Any:
@@ -402,7 +414,6 @@ class Recorder:
         ]
         for pid in dict.fromkeys([*linked, *payment_ids]):
             responses[f"billpayment/{pid}"] = await self.capture(f"billpayment/{pid}")
-        self.bills[scenario] = bill_id
         return {
             "bill_id": bill_id,
             "correlation_id": correlation,
@@ -411,6 +422,10 @@ class Recorder:
         }
 
     async def record_cdc(self) -> dict:
+        if not self.bills:
+            raise RecordingFailed(
+                "cdc needs the bill scenarios created in the same run (no --only cdc alone)"
+            )
         since = self.started.isoformat(timespec="seconds")
         status, body = await self.call(
             "GET", "cdc", params={"entities": "Bill,BillPayment", "changedSince": since}
@@ -555,6 +570,9 @@ async def run(args: argparse.Namespace) -> int:
                             how = "a bill made by hand in QuickBooks"
                         else:
                             bill_id, correlation, payments = await recorder.make(scenario)
+                            # Only a bill this run changed is owed by the CDC
+                            # answer; a hand-made one was merely read.
+                            recorder.bills[scenario] = bill_id
                             how = "created through the API by the recorder"
                         payload = await recorder.record_bill(
                             scenario, bill_id, correlation, payments
@@ -569,7 +587,10 @@ async def run(args: argparse.Namespace) -> int:
                                 "--webhook-from-ngrok)"
                             )
                             continue
-                        payload = {"body": scrub(body, recorder.realm)}
+                        events = own_company_events(body, recorder.realm)
+                        if not events:
+                            raise RecordingFailed("the delivery holds no event for this company")
+                        payload = {"body": scrub(events, recorder.realm)}
                         how = "a delivered CloudEvents webhook body"
                     path = recorder.write(scenario, payload, how)
                     print(f"  {scenario}: wrote {path.relative_to(BACKEND.parent)}")

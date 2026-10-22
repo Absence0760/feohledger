@@ -32,6 +32,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import re
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -253,6 +254,23 @@ def test_a_webhook_body_keeps_its_event_fields_and_loses_the_company():
     assert event["data"] == {"note": "[scrubbed]"}
 
 
+def test_a_delivery_keeps_only_this_companys_events():
+    """Intuit delivers for every company connected to the app's keys; another
+    company's events (a production one, say) never reach a fixture, and any
+    company id that does is written as the placeholder."""
+    other = "123145700000000"
+    body = [
+        {"id": "e1", "type": "qbo.bill.updated.v1", "intuitaccountid": _REAL_REALM},
+        {"id": "e2", "type": "qbo.bill.updated.v1", "intuitaccountid": other},
+    ]
+    assert [e["id"] for e in RECORDER.own_company_events(body, _REAL_REALM)] == ["e1"]
+    assert RECORDER.own_company_events(body[1], _REAL_REALM) == []
+    assert RECORDER.scrub({"intuitaccountid": other, "realmId": other}, _REAL_REALM) == {
+        "intuitaccountid": REALM,
+        "realmId": REALM,
+    }
+
+
 def test_ngrok_capture_yields_the_body_and_never_the_headers():
     body = b'[{"id": "e1", "type": "qbo.bill.updated.v1"}]'
     raw = b"POST /api/erp/webhook/quickbooks HTTP/1.1\r\nintuit-signature: c2ln\r\n\r\n" + body
@@ -294,6 +312,37 @@ def test_every_committed_recording_is_already_scrubbed(name):
     assert bodies, f"{name} holds no recorded body"
     for body in bodies:
         assert RECORDER.scrub(body, "") == body
+    assert not list(_long_numbers(fixture)), f"{name} carries a company-sized number"
+
+
+#: Keys whose values are a QuickBooks record id (short, company-local).
+_ID_KEYS = frozenset({"Id", "TxnId", "value", "intuitentityid", "SyncToken"})
+_LONG_NUMBER = re.compile(r"\d{9,}")
+
+
+def _long_numbers(value, key: str = ""):
+    """Strings holding a run of 9+ digits outside a record-id key — the shape
+    of a realm (company) id, an account number or a phone number."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            yield from _long_numbers(v, k)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _long_numbers(v, key)
+    elif isinstance(value, str) and key not in _ID_KEYS and _LONG_NUMBER.search(value):
+        yield key, value
+
+
+def test_a_recording_is_whole_or_absent():
+    """Skips are the state before the FIRST recording. Once any file is
+    committed, every scenario must be there: a partial recording would leave
+    the missing scenarios skipped forever, which is the masked failure the
+    skip is not allowed to become."""
+    expected = {*EXPECTED, "bill_deleted", "cdc", "webhook"}
+    present = {p.stem for p in FIXTURES.glob("*.json")} if FIXTURES.is_dir() else set()
+    if not present:
+        pytest.skip(AWAITING.format(name="any"))
+    assert expected <= present, f"missing recordings: {sorted(expected - present)}"
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +376,18 @@ async def test_bill_report_reads_the_recorded_bill_as_it_was_paid(scenario):
     if method is None:
         assert report.paid_on is None
     else:
-        dates = [p["TxnDate"] for p in _payments(fixture)]
+        # The date is the CASH payment's: never a credit application's, never
+        # a voided one's.
+        dates = [
+            p["TxnDate"]
+            for p in _payments(fixture)
+            if Decimal(str(p.get("TotalAmt") or 0)) > 0
+            and not any(
+                t.get("TxnType") == "VendorCredit"
+                for line in p.get("Line") or []
+                for t in line.get("LinkedTxn") or []
+            )
+        ]
         assert str(report.paid_on) == max(dates)
     # A person's payment (or credit application) is named; ours and a voided
     # one never are.
@@ -386,6 +446,7 @@ async def test_changed_bills_names_every_bill_the_recording_run_changed():
     from datetime import datetime
 
     fixture = recorded("cdc")
+    assert fixture["bills_changed"], "the cdc recording names no bill the run changed"
     since = datetime.fromisoformat(fixture["changed_since"])
     changed = await _run(fixture, lambda a: a.changed_bills(since))
     assert set(fixture["bills_changed"]) <= set(changed)
