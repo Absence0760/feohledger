@@ -54,7 +54,8 @@ describe('the registry pins the backend', () => {
 					provider: 'QuickBooks Online',
 					accounts: ['6100'],
 					intuit_code: '6000',
-					exception_type: 'duplicate'
+					exception_type: 'duplicate',
+					claim: 'payment'
 				};
 				const text = erpRefusalText({ code, params }, t);
 				expect(text, `${locale} ${code}`).toBeTruthy();
@@ -171,8 +172,45 @@ describe('erpRefusalText', () => {
 		}
 	});
 
+	it('says FeohLedger is already paying the invoice, per rail, in every locale', () => {
+		const code = 'payment_blocks_erp_export';
+		expect(erpRefusalText({ code, params: { claim: 'payment' } }, enT)).toBe(
+			en['erpRefusal.paymentBlocksExport']
+		);
+		expect(erpRefusalText({ code, params: { claim: 'virtual_card' } }, enT)).toBe(
+			en['erpRefusal.cardBlocksExport']
+		);
+		const locales = { en, de, es, fr, ja, 'pt-BR': ptBR } as Record<
+			string,
+			Record<string, string>
+		>;
+		const cases: [string, boolean, string][] = [
+			['payment', false, 'erpRefusal.paymentBlocksExport'],
+			['payment', true, 'erpRefusal.paymentBlocksExportPossiblyPosted'],
+			['virtual_card', false, 'erpRefusal.cardBlocksExport'],
+			['virtual_card', true, 'erpRefusal.cardBlocksExportPossiblyPosted']
+		];
+		for (const [locale, messages] of Object.entries(locales)) {
+			for (const [claim, posted, key] of cases) {
+				const params = posted ? { claim, possibly_posted: true } : { claim };
+				const text = erpRefusalText({ code, params }, translator(messages, locale));
+				expect(messages[key], `${locale} ${key}`).toBeTruthy();
+				expect(text, `${locale} ${key}`).toBe(messages[key]);
+			}
+		}
+		// Only a literal `true` switches to the possibly-posted sentence.
+		expect(
+			erpRefusalText({ code, params: { claim: 'payment', possibly_posted: 'true' } }, enT)
+		).toBe(en['erpRefusal.paymentBlocksExport']);
+	});
+
 	it.each([
 		['no refusal recorded (a row from before coded refusals)', undefined],
+		['a paid refusal with no claim', { code: 'payment_blocks_erp_export', params: {} }],
+		[
+			'a paid refusal with an unknown claim',
+			{ code: 'payment_blocks_erp_export', params: { claim: 'cheque' } }
+		],
 		['an exception refusal with no type', { code: 'exception_blocks_erp_export', params: {} }],
 		['an unknown code (a newer backend)', { code: 'brand_new', params: { provider: 'X' } }],
 		['a missing provider', { code: 'vendor_not_linked', params: {} }],

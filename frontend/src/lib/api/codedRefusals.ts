@@ -22,7 +22,8 @@
  *    recording a payment made outside FeohLedger, the NACHA bank file), and
  *    the plan-feature 402 every tier gate answers with, recording or
  *    cancelling a goods receipt, an ERP send refused for an open duplicate
- *    or fraud exception (stated by `api/erpRefusals.ts`), an ERP sync
+ *    or fraud exception or because FeohLedger is already paying the invoice
+ *    (both stated by `api/erpRefusals.ts`), an ERP sync
  *    refused because the connection is gone or the listing is incomplete,
  *    and every self-service signup refusal (the workspace address, the
  *    email and name checks, the captcha, the verification link), the
@@ -51,7 +52,11 @@ import { nachaFieldLabelKey } from '#lib/types/paymentExecution.ts';
 import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRefusal.ts';
 import { authRefusalText } from '#lib/api/authRefusals.ts';
 import { ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
-import { EXCEPTION_BLOCKS_ERP_EXPORT, erpRefusalText } from '#lib/api/erpRefusals.ts';
+import {
+	EXCEPTION_BLOCKS_ERP_EXPORT,
+	PAYMENT_BLOCKS_ERP_EXPORT,
+	erpRefusalText
+} from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
@@ -378,6 +383,10 @@ const BUILDERS: Record<string, Builder> = {
 	// modal's ERP panel, which states the same code off the audit row.
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: (p, t) =>
 		erpRefusalText({ code: EXCEPTION_BLOCKS_ERP_EXPORT, params: p }, t),
+	// ...and for an invoice FeohLedger is already paying (a live payment or
+	// virtual card), the same way.
+	[PAYMENT_BLOCKS_ERP_EXPORT]: (p, t) =>
+		erpRefusalText({ code: PAYMENT_BLOCKS_ERP_EXPORT, params: p }, t),
 	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
 	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
 	// or whose listing could not be read whole, so nothing synced.

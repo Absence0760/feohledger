@@ -575,6 +575,28 @@ describe('the commerce refusals', () => {
 	});
 });
 
+describe('the ERP send refused because FeohLedger is already paying the invoice', () => {
+	it('states the 409 the send doors answer with, per rail', () => {
+		expect(
+			localizeApiDetail(detail('payment_blocks_erp_export', { claim: 'payment' }), enT)
+		).toBe(EN_ALL['erpRefusal.paymentBlocksExport']);
+		expect(codedRefusalText('payment_blocks_erp_export', { claim: 'virtual_card' }, deT)).toBe(
+			de['erpRefusal.cardBlocksExport']
+		);
+		expect(
+			codedRefusalText(
+				'payment_blocks_erp_export',
+				{ claim: 'payment', possibly_posted: true },
+				enT
+			)
+		).toContain('an earlier attempt may already have created the bill in the ERP');
+	});
+
+	it('falls back to the server sentence when the claim is missing', () => {
+		expect(codedRefusalText('payment_blocks_erp_export', {}, enT)).toBeNull();
+	});
+});
+
 describe('the ERP send refused for an open duplicate or fraud exception (§286)', () => {
 	it('states the 409 the send doors answer with, in the reader’s language', () => {
 		expect(

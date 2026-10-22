@@ -1149,3 +1149,274 @@ async def test_voiding_a_payment_made_after_the_bank_change_raises_nothing(reald
     await _void_payment(realdb, pay_id, info.org_id, info.users["admin"])
 
     assert await _rows(mk, inv_id, "fraud_flag") == []
+
+
+# ---------------------------------------------------------------------------
+# FeohLedger already paying the invoice refuses the push (decisions §309)
+# ---------------------------------------------------------------------------
+#
+# Staging a run books a live `pending` payment and leaves the invoice
+# `approved`; so does an `exported` NACHA run; a minted card leaves it
+# `approved` too. Pushed then, the bill is payable from the ERP as well. The
+# gate asks the rails' own "live" predicates, so a voided / failed / cancelled
+# payment or a cancelled card no longer holds the invoice.
+
+PAID_CODE = "payment_blocks_erp_export"
+
+
+async def _stage_payment(
+    mk, org_id, inv_id, *, run_status: str = "draft", payment_status: str = "pending"
+) -> uuid.UUID:
+    """A run holding one payment for the invoice, the invoice left as it was."""
+    from app.models.payment import Payment, PaymentRun
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        run = PaymentRun(
+            organization_id=org_id,
+            status=run_status,
+            total_amount=inv.amount,
+            requires_cfo_approval=False,
+        )
+        s.add(run)
+        await s.flush()
+        payment = Payment(
+            invoice_id=inv_id,
+            payment_run_id=run.id,
+            amount=inv.amount,
+            method="ach",
+            status=payment_status,
+            correlation_id=inv.correlation_id,
+        )
+        s.add(payment)
+        await s.commit()
+        return payment.id
+
+
+async def _mint_card(mk, org_id, inv_id, *, status: str = "active") -> uuid.UUID:
+    from app.models.virtual_card import VirtualCard
+
+    async with mk() as s:
+        card = VirtualCard(
+            organization_id=org_id,
+            invoice_id=inv_id,
+            card_provider="mock",
+            provider_card_id=f"mock-{uuid.uuid4().hex[:8]}",
+            amount_limit=Decimal("1234.56"),
+            currency="USD",
+            status=status,
+            last_four="4242",
+        )
+        s.add(card)
+        await s.commit()
+        return card.id
+
+
+def _assert_paid_refusal(res, claim: str) -> None:
+    assert res.status_code == 409, res.text
+    detail = res.json()["detail"]
+    assert detail["code"] == PAID_CODE
+    assert detail["params"] == {"claim": claim}
+    assert "before sending the invoice to the ERP" in detail["message"]
+    assert "Northwind" not in res.text
+
+
+def test_the_paid_refusal_code_is_registered_for_the_browser():
+    from app.services.erp_adapters.base import ERP_REFUSAL_CODES
+    from app.services.erp_export_gate import PAYMENT_BLOCKS_ERP_EXPORT
+
+    assert PAYMENT_BLOCKS_ERP_EXPORT == PAID_CODE
+    assert PAID_CODE in ERP_REFUSAL_CODES
+
+
+@pytest.mark.parametrize("door", ["send-to-erp", "complete"])
+async def test_a_pending_payment_in_a_draft_run_refuses_the_push(realdb, dispatched, door):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number=f"PAYX-DRAFT-{door}")
+    await _stage_payment(mk, info.org_id, inv_id)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/{door}")
+
+    _assert_paid_refusal(res, "payment")
+    assert await _status(mk, inv_id) == InvoiceStatus.approved
+    assert dispatched == []
+    assert await _audit(mk, inv_id, "invoice.erp_submitted") == []
+
+
+async def test_an_exported_nacha_run_refuses_the_push(realdb, dispatched):
+    """The bank holds the file: the payment is still `pending`, and live."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="PAYX-EXPORTED")
+    await _stage_payment(mk, info.org_id, inv_id, run_status="exported")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+
+    _assert_paid_refusal(res, "payment")
+    assert dispatched == []
+
+
+async def test_a_live_virtual_card_refuses_the_push(realdb, dispatched):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="PAYX-CARD")
+    await _mint_card(mk, info.org_id, inv_id)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+
+    _assert_paid_refusal(res, "virtual_card")
+    assert await _status(mk, inv_id) == InvoiceStatus.approved
+    assert dispatched == []
+
+
+@pytest.mark.parametrize("dead", ["voided", "failed", "cancelled"])
+async def test_a_payment_no_longer_live_does_not_refuse_the_push(realdb, dispatched, dead):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number=f"PAYX-DEAD-{dead}")
+    await _stage_payment(mk, info.org_id, inv_id, payment_status=dead)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert res.status_code == 202, res.text
+    assert dispatched == [inv_id]
+
+
+async def test_a_cancelled_card_does_not_refuse_the_push(realdb, dispatched):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="PAYX-CARD-CANCELLED")
+    await _mint_card(mk, info.org_id, inv_id, status="cancelled")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert res.status_code == 202, res.text
+
+
+async def test_no_payment_and_no_card_does_not_refuse_the_push(realdb, dispatched):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="PAYX-NONE")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert res.status_code == 202, res.text
+    assert dispatched == [inv_id]
+
+
+async def test_an_open_duplicate_is_named_before_a_live_payment(realdb, dispatched):
+    """Both hold the invoice; the §286 refusal comes first, as it always did."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="PAYX-BOTH")
+    await _stage_payment(mk, info.org_id, inv_id)
+    await _open(mk, info.org_id, inv_id, "duplicate")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    _assert_refusal(res, "duplicate")
+
+
+async def test_staging_a_run_then_cancelling_it_refuses_then_allows_the_push(realdb, dispatched):
+    """End to end through the real run builder: `POST /api/payments/runs`
+    leaves the invoice `approved` with a live payment, so the push is refused;
+    cancelling the run releases it, and the push goes through."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="PAYX-E2E")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        staged = await c.post(
+            "/api/payments/runs",
+            json={"items": [{"invoice_id": str(inv_id), "method": "ach"}]},
+        )
+        assert staged.status_code == 201, staged.text
+        assert await _status(mk, inv_id) == InvoiceStatus.approved
+
+        _assert_paid_refusal(await c.post(f"/api/invoices/{inv_id}/send-to-erp"), "payment")
+        assert dispatched == []
+
+        run_id = staged.json()["id"]
+        cancelled = await c.post(f"/api/payments/runs/{run_id}/cancel")
+        assert cancelled.status_code == 200, cancelled.text
+
+        sent = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert sent.status_code == 202, sent.text
+    assert dispatched == [inv_id]
+
+
+async def test_retry_erp_with_a_live_payment_says_the_bill_may_be_posted(realdb, dispatched):
+    """A timed-out push left the invoice `failed` with a live payment beside
+    it (rows from before this gate): the retry is refused and says the ERP may
+    already hold a bill FeohLedger is also paying."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="PAYX-RETRY", status=InvoiceStatus.failed)
+    await _set_state(
+        mk, inv_id, {"erp_retries": 3, "last_error": "HTTP 503", "erp_outcome_unknown": True}
+    )
+    await _stage_payment(mk, info.org_id, inv_id)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/retry-erp")
+
+    assert res.status_code == 409, res.text
+    detail = res.json()["detail"]
+    assert detail["code"] == PAID_CODE
+    assert detail["params"] == {"claim": "payment", "possibly_posted": True}
+    assert "may already have created the bill in the ERP" in detail["message"]
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    assert dispatched == []
+
+
+@pytest.mark.parametrize("claim", ["payment", "virtual_card"])
+async def test_a_claim_made_after_the_push_was_queued_stops_it_at_call_erp(realdb, claim):
+    """The door passed; a payment or card is live by the time the dispatcher
+    runs. `_call_erp` refuses before building an adapter, at `failed`, on the
+    first attempt, with the code on the `invoice.erp_failed` row."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(
+        mk, info.org_id, number=f"PAYX-QUEUED-{claim}", status=InvoiceStatus.sending_to_erp
+    )
+    if claim == "payment":
+        await _stage_payment(mk, info.org_id, inv_id)
+    else:
+        await _mint_card(mk, info.org_id, inv_id)
+
+    spy = _SpyAdapter()
+    await _push(mk, inv_id, adapter=spy)
+
+    assert spy.posted == 0
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    (failed,) = await _audit(mk, inv_id, "invoice.erp_failed")
+    assert failed.details["refusal"] == {"code": PAID_CODE, "params": {"claim": claim}}
+    assert failed.details["error"] == f"ERP post refused: {PAID_CODE} ({claim})"
+    assert failed.details["retries"] == 1, "a refusal must not spend the backoff budget"
+
+
+async def test_call_erp_refuses_a_live_payment_before_any_adapter_is_built():
+    """Unit level: no open exception, a live payment; no adapter is built."""
+    from types import SimpleNamespace
+
+    from app.services.erp import ErpPostRefusedError, _call_erp
+
+    inv_id = uuid.uuid4()
+
+    class _Db:
+        async def execute(self, stmt, *_a, **_kw):
+            sql = str(stmt)
+            if "FROM exceptions" in sql:
+                return SimpleNamespace(all=lambda: [])
+            assert "JOIN payments" in sql, f"unexpected query: {sql}"
+            return SimpleNamespace(all=lambda: [(inv_id, "INV-1")])
+
+    with patch("app.services.erp.get_erp_adapter") as factory:
+        with pytest.raises(ErpPostRefusedError) as exc:
+            await _call_erp(_Db(), SimpleNamespace(id=inv_id), {"type": "quickbooks_online"})
+    factory.assert_not_called()
+    assert exc.value.refusal == {"code": PAID_CODE, "params": {"claim": "payment"}}

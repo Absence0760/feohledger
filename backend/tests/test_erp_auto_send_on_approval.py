@@ -492,6 +492,43 @@ async def test_an_open_duplicate_refuses_the_auto_send_and_the_invoice_stays_app
     assert "Northwind" not in str(refused.details)
 
 
+@pytest.mark.plan("growth")
+async def test_a_live_card_refuses_the_auto_send_and_the_invoice_stays_approved(realdb, dispatched):
+    """Decisions §309 reaches the auto path through the same gate: an invoice
+    FeohLedger is already paying (here a live virtual card, written directly
+    since no rail mints before approval) is not pushed on approval."""
+    from app.models.virtual_card import VirtualCard
+
+    await _write_erp(realdb, LIVE_ERP)
+    inv_id = await _seed(realdb, snapshot=_snapshot())
+    async with realdb.sessionmaker(TENANT)() as s:
+        s.add(
+            VirtualCard(
+                organization_id=realdb.info(TENANT).org_id,
+                invoice_id=inv_id,
+                card_provider="mock",
+                provider_card_id=f"mock-{inv_id.hex[:8]}",
+                amount_limit=Decimal("1234.56"),
+                currency="USD",
+                status="active",
+            )
+        )
+        await s.commit()
+
+    res = await _approve(realdb, inv_id)
+
+    assert res.status_code == 200, res.text
+    assert dispatched == []
+    assert await _status(realdb, inv_id) == InvoiceStatus.approved
+    assert await _audit(realdb, inv_id, "invoice.erp_submitted") == []
+    [refused] = await _audit(realdb, inv_id, AUTO_SEND_REFUSED_ACTION)
+    assert refused.details["refusal"] == {
+        "code": "payment_blocks_erp_export",
+        "params": {"claim": "virtual_card"},
+    }
+    assert refused.details["status_code"] == 409
+
+
 async def test_a_plan_without_the_erp_feature_refuses_the_auto_send(realdb, dispatched):
     """A Merge.dev ERP on Free (§256/§258): the manual send would 402, so the
     auto-send records that refusal and leaves the invoice approved."""

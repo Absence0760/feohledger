@@ -17,11 +17,7 @@ from app.services.erp_adapters import (
 )
 from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, NOT_CONNECTED
 from app.services.erp_adapters.deep_links import erp_document_url
-from app.services.erp_export_gate import (
-    blocked_export_message,
-    blocked_export_refusal,
-    erp_export_blocking_exception,
-)
+from app.services.erp_export_gate import erp_export_refusal
 from app.services.erp_link_realm import (
     connection_realm,
     legacy_links_trusted,
@@ -668,13 +664,13 @@ async def _call_erp(
     # was posted". Nothing is looked up in the ERP from here: the gate refuses
     # before any adapter is built, and once a person clears the flag the next
     # push's own idempotency lookup finds that bill instead of posting another.
-    blocking = await erp_export_blocking_exception(db, invoice.id)
-    if blocking is not None:
-        posted = possibly_posted(state)
-        raise ErpPostRefusedError(
-            blocked_export_message(blocking, possibly_posted=posted),
-            refusal=blocked_export_refusal(blocking, possibly_posted=posted),
-        )
+    # The same gate refuses an invoice FeohLedger is already paying (a live
+    # payment or virtual card, decisions §309): posted now, the bill would be
+    # payable from the ERP as well. Asked here as well as at the HTTP doors, so
+    # a push queued before the run was staged is stopped at the last moment.
+    refused = await erp_export_refusal(db, invoice.id, possibly_posted=possibly_posted(state))
+    if refused is not None:
+        raise ErpPostRefusedError(refused.error, refusal=refused.refusal)
     # A bill due before it is dated is invalid in the ERP, whichever path made
     # the invoice; entry refuses the pair too (`api/refusals`). No adapter has
     # been built, so this attempt sent nothing.

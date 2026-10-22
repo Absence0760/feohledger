@@ -871,6 +871,24 @@ the money already moved on that rail, and an ACH run would move it again.
 The exit is cancelling the card, which vacates the slot the index and this gate
 share.
 
+#### The ERP is a third rail: a live payment or card refuses the push
+
+A bill in the ERP can be paid there, so pushing an invoice FeohLedger is
+already paying would let it be paid twice. Staging a run (a `pending` payment,
+the invoice still `approved`), an `exported` NACHA run and a minted card all
+leave the invoice sendable, so the ERP push asks the same two predicates the
+rails refuse each other with — `live_payment_invoices` and
+`live_card_invoice_ids` — and refuses with `payment_blocks_erp_export`
+(`params.claim` = `payment` / `virtual_card`): 409 at `/complete`,
+`/send-to-erp` and `/retry-erp`, and again at `services/erp._call_erp` before
+any adapter, so a push queued before the run was staged is stopped too. A
+voided, failed or cancelled payment and a cancelled card release it. With an
+ERP the supported order is push first, then pay: a payment against a
+`posted_in_erp` invoice never meets this gate. See `erp-integration.md`
+§ An invoice FeohLedger is already paying refuses the push, and decisions §309.
+
+**Tests:** `tests/test_erp_export_blocking_exceptions.py`.
+
 ### Voiding a settled payment reverses the discount it captured
 
 When the voided payment was `completed` and had captured an early-pay

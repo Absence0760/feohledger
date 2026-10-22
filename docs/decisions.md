@@ -13985,6 +13985,89 @@ Guards: `tests/test_budget_rollup.py::test_actual_counts_an_invoice_mid_erp_push
 field removed and contradicted), `tests/test_extraction_self_correction.py`,
 `tests/test_extraction_confidence_contract.py::test_no_amount_never_auto_approves_on_either_trigger`.
 
+## 309. The ERP push refuses an invoice FeohLedger is already paying (2026-10-21)
+
+**The gap.** The run builder and the card mint each refuse an invoice the
+other rail already holds (`uq_payments_one_live_per_invoice`,
+`live_payment_invoices`, `live_card_invoice_ids`). The ERP push asked neither.
+Staging a run books a live `pending` payment and leaves the invoice `approved`;
+an `exported` NACHA run is the same; a minted card leaves it `approved` too.
+"Send to ERP" then posted the bill, and a bill in the ERP can be paid there
+("Mark as paid", Bill Pay). One invoice, two outflows: our rail and the ERP.
+The ERP is a third rail, and it was the only one not checking the other two.
+
+**The rule.** The push refuses while the invoice holds a live payment (any
+status outside `api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`) or a live virtual
+card (any card not `cancelled`), with the coded refusal
+`payment_blocks_erp_export`, `params = {claim: "payment" | "virtual_card"}`,
+and `possibly_posted: true` on §286's terms. It is in
+`services/erp_export_gate.py` beside §286's exception check, through one
+function, `erp_export_refusal`, which every push asks: the three HTTP doors
+(409 before their transition) and `services/erp._call_erp` (before any
+adapter is built). An open duplicate / fraud exception is named first, so
+§286's refusals read as before.
+
+- **"Live" is not restated.** `erp_export_live_claim` calls
+  `payment_runs.live_payment_invoices` and `card_issuance.live_card_invoice_ids`,
+  the predicates the two rails refuse each other with, which mirror the two
+  partial unique indexes. A second spelling is how the gates would come to
+  disagree about a `pending_compliance` or `charged` row.
+- **A settled card or a completed payment still refuses.** The money has
+  already moved on our rail; a bill posted now is payable a second time. The
+  remedy the refusal names is the rail's own exit (cancel the run, void the
+  payment, cancel the card), the same one the other rail would need.
+- **Why `_call_erp` asks too, not only the doors.** `sending_to_erp` and
+  `failed` are outside `PAYABLE_INVOICE_STATUSES`, so once the door's
+  transition commits no run can be staged on the invoice. But the run builder
+  reads its invoices without a lock (the door and the card mint do lock), so
+  a run staged concurrently with a send can still read the invoice as
+  `approved` and book a payment after the door's gate saw none. Re-reading at
+  `_call_erp`, immediately before the adapter, stops a push whose claim landed
+  in that window, and it covers pushes that never pass a door: a dispatcher,
+  a Lambda redelivery, a row written before this gate (a `failed` invoice
+  with a live payment beside it, which `/retry-erp` would otherwise post), or
+  a future entry point (the auto-send on approval in flight as PR #625 routes
+  through the same gate). §286 put its check at the chokepoint for the same
+  reason. The cost is two indexed reads per attempt. It narrows the race but
+  does not close it; locking the run builder's invoices is the durable fix,
+  tracked in `docs/followups.md`. A claim that slips through is not a double
+  payment today: with status sync off the invoice closes at `done` and
+  dispatch refuses the payment (`invoice_not_payable`); with it on, the
+  invoice lands at `posted_in_erp` and is paid once, with a BillPayment
+  written back.
+- **Interaction with QuickBooks status sync (§295, §296).** Status sync covers
+  the other order. With it on, a confirmed push lands the invoice at
+  `posted_in_erp`, still payable here; a payment staged then is written back
+  to QuickBooks as a BillPayment, and a bill paid in QuickBooks while
+  FeohLedger also holds a payment opens the blocking `payment_reconciliation`
+  exception. None of that passes this gate: an invoice at `posted_in_erp` (or
+  `payment_scheduled` / `paid`) is never pushed again, so a payment against it
+  is never refused here. With sync off, a confirmed push closes the invoice at
+  `done`, so nothing is paid here after it either. With an ERP, the supported
+  order is therefore *push, then pay*; *pay, then push* is what this refuses.
+  That tightens a flow that used to work with sync on: staging a run and then
+  pushing ended at `posted_in_erp`, where the write-back and the
+  `payment_reconciliation` exception caught a QuickBooks payment after the
+  fact. The refusal is still right with sync on. Between the push and our
+  run's execution the bill sits open in QuickBooks and anyone can pay it
+  there, and the exception only reports that payment once it has been made.
+  Do not exempt sync-on orgs from this gate.
+
+**Rejected: transition the invoice off `approved` when a run is staged or a
+card minted.** That would change the payment queue, the run builder's own
+payable-status check and every screen that reads `approved`, to fix a gap in
+one consumer. The claim already exists as a row; the push only had to read it.
+
+**Rejected: refuse silently (a 202 that fails a second later).** Same reason as
+§286: the user would have to read the audit trail to learn why.
+
+Tests: `backend/tests/test_erp_export_blocking_exceptions.py` (draft run,
+exported run, live card, voided / failed / cancelled payment, cancelled card,
+no claim, the real run builder then cancel, `/retry-erp` with
+`possibly_posted`, and `_call_erp` stopping a push queued before the claim);
+`frontend/src/lib/api/erpRefusals.test.ts` and `codedRefusals.test.ts` (all
+six locales).
+
 ## 310. The app signs in to RDS as a least-privilege role with an IAM token, and the master password leaves the VM (2026-10-21)
 
 **The problem.** Production connected as the RDS master user `postgres`, whose
