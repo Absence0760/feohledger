@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (§307, §308, §310 and the #575
+**Last reconciled:** 2026-10-21 — merging main (the `feoh_app` cutover prune, #638, and the bundle-metric change, #640) into the uptime-checks branch; both sides kept, taking the file to 134. Before that, 2026-10-21 — merging main (§307, §308, §310 and the #575
 round-1 entries) into the uptime-checks branch; both sides' entries kept, taking
 the file to 136. Before that, 2026-10-21 — merging main (§305, §306) into the
 uptime-checks branch; both sides' entries kept, taking the file to 133.
@@ -221,7 +221,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**136 open: 116 (c) · 10 (a) · 10 (b)** — re-derived from the file, never carried
+**134 open: 115 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1253,27 +1253,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       only logs. **Durable fix:** when `post_payment` is implemented, send
       `discount_amount` beside `amount` so the ERP books the discount taken.
       **Trigger:** the first real ERP payment-posting adapter.
-- [ ] **(c) The web bundle total counts route-split content nobody loads
-      together.** `MAX_TOTAL_KB` sums every chunk (one locale catalogue), so
-      the help centre's lazy guide prose and diagrams (~81 KB, `/help` only)
-      raised it as if every visitor downloaded them; the 2026-09-16 ceiling
-      entry's trigger for this fired on PR #516 and the ceiling went to 1075.
-      **Durable fix:** measure the app shell plus the heaviest single route
-      (from the Vite manifest's import graph) as the gated total, and keep the
-      every-chunk sum as a reported, ungated figure. **Trigger:** the next
-      time `MAX_TOTAL_KB` binds, or the next change to the budget workflow.
-      **Fired 2026-10-08, deliberately not taken:** the help-catalogue split
-      (decisions §261) changed the workflow only to count one help slice like
-      one catalogue; the total measured 1005 of 1075, so the every-chunk sum is
-      not binding and this stays the next budget change's job. **Fired again
-      2026-10-20, again not taken:** the settings and portal slices (§300)
-      generalised that to one file per catalogue kind; the total measured 1034
-      of 1075 (down from 1050), still not binding, and the change was scoped to
-      the per-chunk ceiling that was. **Fired a third time 2026-10-20, not
-      taken:** the workflow became a reusable workflow called from `ci.yml` so
-      the budget gates merges through `CI gate` (decisions §301). That change
-      was deliberately limited to the trigger, with the measurement and the
-      numbers left exactly as they were, and the total is still not binding.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
@@ -2286,17 +2265,6 @@ as oversights.
       comes first.
 
 ## (b) Operator steps on merged code
-
-- [ ] **Move production onto the IAM-authenticated `feoh_app` role, then rotate
-      the master password.** The code, the cutover script and the
-      `rds-db:connect` grant are merged (decisions §310), and nothing changes
-      until the operator runs them. Production still signs in as the RDS master
-      with its password in the VM's env. Steps, verification and rollback:
-      `deploy/README.md` § Database role. In order: `terraform apply`, then
-      `./db-role-cutover.sh` and `--verify-login` on the VM, then switch
-      `FEOH_DATABASE_URL` / `FEOH_DATABASE_IAM_AUTH` in `prod.sops.yaml` and
-      redeploy, then rotate `db_master_password`. **Trigger:** before the first
-      customer's data lands on the instance.
 
 - [ ] **Turn on SMS paging for the uptime checks.** Built (decisions §311,
       `infra/uptime.tf`): with no phone number set the checks only email. In

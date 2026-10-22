@@ -42,15 +42,23 @@ env:
   # avoid that, so the current 43 KB max has room to grow naturally before the
   # gate has anything to say.
   #
-  # IMPORTANT: the total counts lazily-imported chunks too. Code-splitting a
-  # dependency therefore does NOT lower this number — only removing weight
-  # does. The one exception is the lazy locale catalogues: a visitor fetches at
-  # most one of each KIND — the main catalogue and each slice (help since
-  # 2026-10-08, settings and portal since 2026-10-20) — so only the largest
-  # file of each kind is counted (see the 2026-09-15 entry). The kinds are read
-  # off the locales/ subdirectories, so a new slice is counted without editing
-  # this step. The total is summed in bytes and rounded once, so the number of
-  # chunks has no effect on it.
+  # WHAT THE TOTAL MEASURES (since 2026-10-21): what one visitor downloads to
+  # open the app's most expensive page — the app shell (SvelteKit's boot
+  # entries, its client runtime and the root layout, statically closed), plus
+  # the heaviest single route's own static imports beyond the shell, plus the
+  # largest file of each lazy locale catalogue kind (the main catalogue and
+  # each slice — help, settings, portal, … — read off the locales/
+  # subdirectories; a visitor fetches at most one of each). It is computed from
+  # the Vite manifest's import graph and SvelteKit's route dictionary by
+  # scripts/measure_web_bundle.mjs, whose header states the rule for lazy
+  # imports. Code-splitting a dependency off the shell or the heaviest route
+  # therefore DOES lower this number now; a lazy chunk counts on the route that
+  # imports it statically. The every-chunk sum (the gated metric until this
+  # date) and the shipped sum are still reported in the job summary, ungated.
+  # Every figure is summed in bytes and rounded once.
+  #
+  # Entries before 2026-10-21 describe the every-chunk metric; their numbers
+  # are not comparable with the ceiling below.
   #
   # ── Ceiling change log — append a dated entry with the measurement + reason ──
   # 2026-08-06 — initial: total 850, largest 100. Baseline 747 / 43.
@@ -173,7 +181,28 @@ env:
   # (was 1050). With #611 merged on top: largest catalogue 77, largest chunk
   # 78, total 1034. The measurement now counts one file per catalogue kind,
   # derived from the locales/ subdirectories, rather than naming help.
-  MAX_TOTAL_KB: 1075
+  # 2026-10-21 — the metric changed, so the ceiling was re-derived: total
+  # 1075 → 430. The 2026-09-16 entry's trigger ("if this binds again from
+  # route chunks rather than shared weight") fired on PR #516, and had been
+  # deferred three times since (docs/followups.md). It fired again: PR #636
+  # measured 1076 on CI against main's 1035, over the ceiling by ~41 KB of
+  # genuine route content. Ratcheting the every-chunk sum again would have
+  # charged every visitor for every page, so the gated total is now the app
+  # shell plus the heaviest route plus one catalogue of each kind (see above).
+  # Measured locally (gzip level 6, no file name in the header, which is why
+  # the every-chunk figure reads ~2 KB under the old step's):
+  #   main:  gated 391 KB = shell 179 + heaviest route 97 (/help/guides/[id],
+  #          the guide prose and diagrams) + catalogues 118 (main 79, help 10,
+  #          portal 6, settings 23). Every chunk 1042 (the old step said 1044
+  #          locally), shipped 1504, largest chunk 79 (the ja catalogue).
+  #   #636:  gated 413 KB = shell 193 + heaviest route 97 (same) + catalogues
+  #          123 (it adds a 4 KB marketing slice). Every chunk 1074 (old step:
+  #          1076), shipped 1570, largest chunk 83.
+  # The help routes are the five heaviest (81-97 KB beyond the shell); the
+  # first page of daily work, /invoices, is next at 68, then /organization 51.
+  # ~10% headroom on main's 391, the same margin as the earlier entries.
+  # MAX_LARGEST_CHUNK_KB is unchanged at 100.
+  MAX_TOTAL_KB: 430
   MAX_LARGEST_CHUNK_KB: 100
 
 jobs:
@@ -206,132 +235,13 @@ jobs:
           PUBLIC_API_URL: http://localhost:8000
         run: pnpm build
 
+      # The measurement's own tests: a sub-second `node --test`, run here so a
+      # broken metric cannot pass the budget it computes.
+      - name: Test the measurement
+        run: node --test scripts/measure_web_bundle.test.mjs
+
+      # Reads frontend/build, the Vite manifest and SvelteKit's generated route
+      # dictionary; MAX_TOTAL_KB and MAX_LARGEST_CHUNK_KB come from `env` above.
+      # Locally: `pnpm check:build:bundle` after a production build.
       - name: Measure + assert budget
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUILD_DIR=frontend/build
-          LOCALES_SRC=frontend/src/lib/i18n/locales
-          # Vite's client manifest maps each hashed chunk back to its source. It
-          # is the only reliable way to tell a locale catalogue from any other
-          # chunk.
-          MANIFEST=frontend/.svelte-kit/output/client/.vite/manifest.json
-          if [ ! -d "$BUILD_DIR" ]; then
-            echo "::error::No build output at $BUILD_DIR"
-            exit 1
-          fi
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::error::No Vite manifest at $MANIFEST. The total needs it to find the lazy locale catalogues; if SvelteKit moved it, update MANIFEST in this step."
-            exit 1
-          fi
-
-          # The lazily imported locale catalogues (src/lib/i18n/catalogues.ts),
-          # grouped by KIND: the main catalogue (locales/<l>.ts) and each slice
-          # (locales/<slice>/<l>.ts — help, settings, portal; decisions §261,
-          # §300). A visitor downloads at most one file of each kind, their own
-          # locale's, so each kind adds only its largest file to the total.
-          # English main is a static import, so it sits in the entry chunks and
-          # is counted like any other code; so is the help slice's English (its
-          # static fallback), while the route-scoped slices are lazy in English
-          # too and are measured here with the rest of their kind.
-          declare -A kind_of=()
-          while IFS=$'\t' read -r src file; do
-            if [ ! -f "$BUILD_DIR/$file" ]; then
-              echo "::error::$MANIFEST names $file, which is not in $BUILD_DIR: the manifest and the build disagree."
-              exit 1
-            fi
-            rel=${src#src/lib/i18n/locales/}
-            if [[ "$rel" == */* ]]; then kind=${rel%%/*}; else kind=main; fi
-            kind_of["$BUILD_DIR/$file"]=$kind
-          done < <(jq -r 'to_entries[]
-            | select(.value.isDynamicEntry == true)
-            | (.value.src // .key) as $src
-            | select($src | test("^src/lib/i18n/locales/([^/]+/)?[^/]+\\.ts$"))
-            | [$src, .value.file] | @tsv' "$MANIFEST")
-
-          # Every kind the source tree has must show up as lazy chunks; if one
-          # stopped being lazy (or moved), the one-per-kind rule no longer
-          # describes a visitor.
-          expected=(main)
-          while IFS= read -r d; do expected+=("$(basename "$d")"); done < <(find "$LOCALES_SRC" -mindepth 1 -maxdepth 1 -type d | sort)
-          for k in "${expected[@]}"; do
-            found=0
-            for f in "${!kind_of[@]}"; do [ "${kind_of[$f]}" = "$k" ] && found=1 && break; done
-            if [ "$found" -eq 0 ]; then
-              echo "::error::No lazy '$k' locale catalogue found in $MANIFEST. If it moved or stopped being lazy, the one-per-kind rule below no longer describes a visitor; update this step."
-              exit 1
-            fi
-          done
-
-          shipped_bytes=0    # every JS + CSS file the build emits
-          counted_bytes=0    # every file except the lazy catalogues...
-          declare -A kind_bytes=()  # ...plus the largest file of each kind
-          declare -A kind_path=()
-          largest_bytes=0
-          largest_path=""
-          file_count=0
-          catalogue_count=0
-
-          while IFS= read -r -d '' f; do
-            gz_bytes=$(gzip -c "$f" | wc -c)
-            shipped_bytes=$(( shipped_bytes + gz_bytes ))
-            file_count=$(( file_count + 1 ))
-            if [ "$gz_bytes" -gt "$largest_bytes" ]; then
-              largest_bytes="$gz_bytes"
-              largest_path="$f"
-            fi
-            k="${kind_of[$f]:-}"
-            if [ -n "$k" ]; then
-              catalogue_count=$(( catalogue_count + 1 ))
-              if [ "$gz_bytes" -gt "${kind_bytes[$k]:-0}" ]; then
-                kind_bytes["$k"]="$gz_bytes"
-                kind_path["$k"]="$f"
-              fi
-            else
-              counted_bytes=$(( counted_bytes + gz_bytes ))
-            fi
-          done < <(find "$BUILD_DIR" \( -name '*.js' -o -name '*.css' \) -print0)
-          for k in "${!kind_bytes[@]}"; do counted_bytes=$(( counted_bytes + kind_bytes[$k] )); done
-
-          # Summed in bytes, rounded up once. Rounding each file up first added
-          # up to 1 KB per file, so splitting code into more chunks raised the
-          # total without adding any weight.
-          kb() { echo $(( ($1 + 1023) / 1024 )); }
-          total_kb=$(kb "$counted_bytes")
-          shipped_kb=$(kb "$shipped_bytes")
-          largest_kb=$(kb "$largest_bytes")
-
-          echo "Files measured:       ${file_count}, ${catalogue_count} of them lazy locale catalogues"
-          echo "Total gzipped JS+CSS: ${total_kb} KB (budget ${MAX_TOTAL_KB} KB): every chunk, one catalogue of each kind"
-          echo "Shipped, not gated:   ${shipped_kb} KB: every chunk, every catalogue"
-          for k in "${expected[@]}"; do
-            printf 'Largest %-13s %s KB — %s\n' "${k}:" "$(kb "${kind_bytes[$k]}")" "${kind_path[$k]}"
-          done
-          echo "Largest chunk:        ${largest_kb} KB — ${largest_path} (budget ${MAX_LARGEST_CHUNK_KB} KB)"
-
-          {
-            echo "## Web bundle budget"
-            echo ""
-            echo "| Metric | Size | Budget |"
-            echo "|---|---|---|"
-            echo "| Total gzipped JS+CSS (every chunk, one locale catalogue of each kind) | ${total_kb} KB | ${MAX_TOTAL_KB} KB |"
-            echo "| Largest single chunk | ${largest_kb} KB | ${MAX_LARGEST_CHUNK_KB} KB |"
-            for k in "${expected[@]}"; do
-              echo "| Largest \`${k}\` catalogue | $(kb "${kind_bytes[$k]}") KB | — |"
-            done
-            echo "| Shipped (every catalogue) | ${shipped_kb} KB | not gated |"
-            echo "| Files measured | ${file_count} (${catalogue_count} lazy catalogues) | — |"
-            echo ""
-            echo "Largest chunk: \`${largest_path#"$BUILD_DIR"/}\`"
-          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-
-          failed=0
-          if [ "$total_kb" -gt "$MAX_TOTAL_KB" ]; then
-            echo "::error::Total gzipped bundle ${total_kb} KB exceeds the ${MAX_TOTAL_KB} KB budget. Either trim weight, or raise MAX_TOTAL_KB in .github/workflows/web-bundle-budget.yml and append a dated entry to the ceiling change log explaining the measurement and why the growth is warranted."
-            failed=1
-          fi
-          if [ "$largest_kb" -gt "$MAX_LARGEST_CHUNK_KB" ]; then
-            echo "::error::Largest chunk ${largest_path#"$BUILD_DIR"/} is ${largest_kb} KB, over the ${MAX_LARGEST_CHUNK_KB} KB per-chunk budget. This usually means a single heavyweight dependency landed in one chunk — check whether it is really needed before raising the ceiling. If it is a locale catalogue, move route-scoped keys into a lazy slice (decisions §261, §300) rather than raising it."
-            failed=1
-          fi
-          exit "$failed"
+        run: node scripts/measure_web_bundle.mjs

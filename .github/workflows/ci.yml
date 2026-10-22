@@ -86,11 +86,13 @@ jobs:
               - 'pnpm-lock.yaml'
               - '.github/workflows/ci.yml'
             # The web bundle budget (web-bundle-budget.yml) builds frontend/
-            # alone, from frontend/pnpm-lock.yaml, so only frontend/ and the
-            # two workflow files that define the check can move its numbers.
-            # These are the paths its standalone `pull_request` trigger used.
+            # alone, from frontend/pnpm-lock.yaml, so only frontend/, the two
+            # workflow files that define the check, and the measurement script
+            # (and its tests) the workflow runs can move its numbers.
             bundle:
               - 'frontend/**'
+              - 'scripts/measure_web_bundle.mjs'
+              - 'scripts/measure_web_bundle.test.mjs'
               - '.github/workflows/web-bundle-budget.yml'
               - '.github/workflows/ci.yml'
 
