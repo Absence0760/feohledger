@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -1649,28 +1649,21 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the first production deploy (2026-10-18, #566, decisions §274)
 
-- [ ] **(c) Nothing tests the day-one path: an empty install to a first paid
-      invoice.** The first production deploy found nine defects on that path
-      (empty control plane never built, roles unseeded, a migration script that
-      exited 0 on failure, an action hidden for unverified vendors, a
-      tax-exclusive false positive, table overflow, an admin-typed password
-      reset, an inaccurate audit diff, a VM-only compose warning). Every test
-      database is built by `create_all` from tidy seed data, so the path a real
-      first customer takes never ran. **Durable fix:** the checklist in
-      [#575](https://github.com/Absence0760/feohledger/issues/575) — a no-seed
-      day-one CI job driving the real deploy commands plus a browser
-      walkthrough, production-shaped fixtures, single-owner rules with
-      shown-equals-allowed parity tests, Compose version parity, a scripted
-      deploy + restore rehearsal, and the further tests listed there. One
-      piece has landed: every deploy now ends with a smoke check of the site
-      and the API through the VM's own Caddy (#579, decisions §277) — it
-      would have caught the v0.1.0 empty-404 outage. Since extended
-      (`deploy/smoke.sh`) to a tenant host's TLS and `public-config` against
-      the env, and run by `aws-deploy.yml` too; Compose version parity has
-      landed as well (CI's `deploy-compose` job, the VM's version read from
-      `bootstrap-vm.sh`).
-      **Trigger:** the next change to `deploy/`, Alembic bootstrap or
-      `tenant_provisioning`, and in any case before customer #2.
+- [ ] **(c) The VM release workflow never smoke-checks the API through public
+      DNS.** The day-one gaps the first production deploy found are closed
+      ([#575](https://github.com/Absence0760/feohledger/issues/575): the no-seed
+      day-one CI job, production-shaped fixtures, single-owner rules with
+      shown-equals-allowed parity tests, Compose parity, script exit-code tests).
+      One piece is still open. `vm-deploy.yml` runs `deploy/smoke.sh --vm` on the
+      box, which goes through the VM's own Caddy, and checks the SPA hosts from the
+      runner with `smoke-frontend.sh`. Nothing outside the VM asks
+      `https://api.feohledger.com/api/health` or `public-config`. A DNS, Elastic IP
+      or security-group fault on `api.` would therefore pass the release and show
+      up only as a broken site. **Durable fix:** after the publish step, run
+      `deploy/smoke.sh --app … --api … --tenant … --signup …` from the runner,
+      the same way `aws-deploy.yml`'s `smoke` job does, with the values taken
+      from the workflow's existing repository variables.
+      **Trigger:** the next change to `vm-deploy.yml`.
 
 ### Surfaced by giving backend rules a single owner (2026-10-20, issue #575 §3)
 
