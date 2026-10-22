@@ -172,7 +172,11 @@ CI plus two kinds of human review:
    cannot reflow scrolls **inside its own container**, which does not count
    toward that measurement; the page does not.
    **It enumerates `frontend/src/routes` off disk rather than naming paths**,
-   so a route is covered the day it lands. That is the whole point of the file:
+   so a route is covered the day it lands. Routes with a path parameter
+   (`/workflows/[id]`, `/help/guides/[id]`) are walked too: each needs an
+   entry in the spec's `DYNAMIC_ROUTE_SAMPLES` naming a real record to open,
+   and the walk fails on a dynamic app route with no sample. That is how the
+   workflow editor's 142px overflow at 320px was found. That is the whole point of the file:
    the guard previously named five paths by hand (`/`, `/invoices`, `/vendors`,
    `/payments`, `/contracts`) and was green while seven other routes failed the
    same criterion — `/organization` (137px, a diagnosed entry in

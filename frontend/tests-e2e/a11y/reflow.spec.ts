@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import AxeBuilder from '@axe-core/playwright';
 
-import { expect, test } from '../fixtures/helpers';
+import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers';
 import { formatViolations } from './axe-helper';
 
 /**
@@ -65,31 +65,85 @@ const NOT_THE_APP_SHELL: { prefix: string; why: string }[] = [
 	}
 ];
 
-/** Every `+page.svelte` directory under `src/routes`, as a URL path. */
-function discoverRoutes(): string[] {
-	const found: string[] = [];
+/**
+ * Every `+page.svelte` directory under `src/routes`, as a URL path — split
+ * into the static routes and the route PATTERNS with a dynamic segment
+ * (`/workflows/[id]`), which have no URL until a record is named.
+ */
+function discoverRoutes(): { fixed: string[]; dynamic: string[] } {
+	const fixed: string[] = [];
+	const dynamic: string[] = [];
 	const walk = (dir: string, urlPath: string) => {
 		const entries = readdirSync(dir, { withFileTypes: true });
 		if (entries.some((e) => e.isFile() && e.name === '+page.svelte')) {
-			found.push(urlPath === '' ? '/' : urlPath);
+			(urlPath.includes('[') ? dynamic : fixed).push(urlPath === '' ? '/' : urlPath);
 		}
 		for (const entry of entries) {
 			if (!entry.isDirectory()) continue;
-			// A dynamic segment has no id to visit without inventing data; the
-			// specs that own those records cover them.
-			if (entry.name.includes('[')) continue;
 			walk(join(dir, entry.name), `${urlPath}/${entry.name}`);
 		}
 	};
 	walk(ROUTES_DIR, '');
-	return found.sort();
+	return { fixed: fixed.sort(), dynamic: dynamic.sort() };
 }
 
-const ALL_ROUTES = discoverRoutes();
-const APP_ROUTES = ALL_ROUTES.filter(
-	(path) =>
-		!NOT_THE_APP_SHELL.some(({ prefix }) => path === prefix || path.startsWith(`${prefix}/`))
-);
+const isAppShell = (path: string) =>
+	!NOT_THE_APP_SHELL.some(({ prefix }) => path === prefix || path.startsWith(`${prefix}/`));
+
+const DISCOVERED = discoverRoutes();
+const ALL_ROUTES = DISCOVERED.fixed;
+const APP_ROUTES = ALL_ROUTES.filter(isAppShell);
+const DYNAMIC_APP_ROUTES = DISCOVERED.dynamic.filter(isAppShell);
+
+/**
+ * ## And the routes with an id in the path
+ *
+ * The walk above cannot visit `/workflows/[id]` without naming a record, and
+ * it used to skip every dynamic segment outright — so the workflow editor
+ * scrolled the document 142px sideways at 320px (one unwrappable step row in
+ * the canvas set the editor's minimum width) with nothing here to say so.
+ *
+ * Each dynamic route in the app shell now needs an entry: how to find a real
+ * record to open, and the element that proves the page drew it. The walk
+ * test below fails when a new dynamic route lands without one, the same way
+ * a new static route is measured the day it exists.
+ */
+const DYNAMIC_ROUTE_SAMPLES: Record<
+	string,
+	{
+		resolve: (page: import('@playwright/test').Page) => Promise<string>;
+		ready: (page: import('@playwright/test').Page) => import('@playwright/test').Locator;
+	}
+> = {
+	'/workflows/[id]': {
+		// Workflow ids are generated, not seeded constants: ask the API for the
+		// worker tenant's default (it has steps, so the canvas has rows to lay
+		// out). The token lives in the app origin's localStorage, so the list
+		// page is opened first.
+		resolve: async (page) => {
+			await page.goto('/workflows');
+			await expect(page.locator('aside.sidebar').first()).toBeVisible();
+			const resp = await page.request.get(`${API_BASE}/api/workflows`, {
+				headers: await authedTenantHeaders(page)
+			});
+			expect(resp.status()).toBe(200);
+			const { items } = (await resp.json()) as {
+				items: { id: string; is_default: boolean }[];
+			};
+			const wf = items.find((w) => w.is_default) ?? items[0];
+			expect(wf, 'the worker tenant has no workflow to open').toBeTruthy();
+			return `/workflows/${wf.id}`;
+		},
+		// The step rows are what overflowed; measure once they are drawn.
+		ready: (page) => page.locator('.canvas .node').first()
+	},
+	'/help/guides/[id]': {
+		// A guide id is content, not data; this one carries a diagram, the
+		// widest thing a guide renders.
+		resolve: async () => '/help/guides/run-payments',
+		ready: (page) => page.getByRole('heading', { level: 1, name: 'Run a payment run' })
+	}
+};
 
 /**
  * ## And why `/organization`'s panels are read off disk too
@@ -132,6 +186,10 @@ test.describe('reflow at 320px (WCAG 1.4.10)', () => {
 		expect(APP_ROUTES).toContain('/');
 		expect(APP_ROUTES).toContain('/organization');
 		expect(APP_ROUTES).not.toContain('/login');
+		// Every dynamic route the app shell serves names a sample to open, and
+		// every sample still names a route that exists.
+		expect(DYNAMIC_APP_ROUTES).toContain('/workflows/[id]');
+		expect(Object.keys(DYNAMIC_ROUTE_SAMPLES).sort()).toEqual(DYNAMIC_APP_ROUTES);
 		// An exclusion for a route that no longer exists is dead weight that
 		// hides the next person's mistake — each prefix must still name a real
 		// page.
@@ -164,6 +222,34 @@ test.describe('reflow at 320px (WCAG 1.4.10)', () => {
 			// …and whatever scrolls instead of the document must be reachable by
 			// keyboard. One rule, not the full tag set — the full scan is
 			// `axe.spec.ts`'s job; this visit exists for the width.
+			const { violations } = await new AxeBuilder({ page })
+				.withRules(['scrollable-region-focusable'])
+				.analyze();
+			expect(
+				violations,
+				`keyboard-unreachable scroll region on ${path} at 320px:\n${formatViolations(violations)}`
+			).toEqual([]);
+		});
+	}
+});
+
+test.describe('reflow at 320px — routes with an id in the path (WCAG 1.4.10)', () => {
+	for (const [pattern, sample] of Object.entries(DYNAMIC_ROUTE_SAMPLES)) {
+		test(`${pattern} does not scroll the document sideways`, async ({ page }) => {
+			await page.setViewportSize({ width: 320, height: 720 });
+			const path = await sample.resolve(page);
+			await page.goto(path);
+
+			await expect(page.locator('aside.sidebar').first()).toBeVisible();
+			await expect(page).not.toHaveURL(/\/login/);
+			await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+			await expect(sample.ready(page)).toBeVisible();
+
+			const overflow = await page.evaluate(
+				() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+			);
+			expect(overflow, `horizontal page overflow on ${path} at 320px`).toBeLessThanOrEqual(1);
+
 			const { violations } = await new AxeBuilder({ page })
 				.withRules(['scrollable-region-focusable'])
 				.analyze();
