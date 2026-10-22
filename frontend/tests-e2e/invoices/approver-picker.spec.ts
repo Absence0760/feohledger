@@ -290,6 +290,79 @@ test.describe('/invoices approver picker — admin', () => {
 		invoiceId = null;
 	});
 
+	test('a disabled Submit says it is waiting for an approver, in view on open', async ({
+		page
+	}) => {
+		// Production report: an admin could not see WHY Submit for Review was
+		// disabled — and, on a short screen, could not see Submit at all
+		// without scrolling past the whole form. The footer now sits under the
+		// scroll region and names the one fixable reason beside the button.
+		await page.setViewportSize({ width: 1280, height: 720 });
+		const number = `E2E-APPROVER-HINT-${Date.now()}`;
+		invoiceId = await createNewInvoice(page, number);
+
+		// The hint belongs to the picker world: a manual approval step with
+		// someone to pick. The step is the seeded default — assert it rather than
+		// assume it — and pin the reviewer list so the world cannot drift with
+		// whichever users the tenant happens to hold.
+		const steps = await page.request.get(`${API_BASE}/api/workflows/active/steps`, {
+			headers: await authedTenantHeaders(page)
+		});
+		expect(steps.ok()).toBeTruthy();
+		const stepsBody = (await steps.json()) as {
+			approval?: boolean;
+			approval_config?: { approver_strategy?: string } | null;
+		};
+		expect(
+			stepsBody.approval && stepsBody.approval_config?.approver_strategy,
+			'the seeded workflow approval step is manual'
+		).toBe('manual');
+		await page.route(
+			(url) => url.pathname === '/api/invoices/assignable-reviewers',
+			(route) =>
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							id: '00000000-0000-4000-8000-00000000e2e1',
+							full_name: 'E2E Hint Reviewer',
+							is_active: true
+						}
+					])
+				})
+		);
+
+		await page.goto('/invoices');
+		await openInvoice(page, number);
+
+		const modal = page.locator('div.modal[role="dialog"]');
+		const submit = modal.getByRole('button', { name: SUBMIT });
+		const picker = modal.getByLabel('Assign approver');
+		const hint = modal.getByTestId('approver-required-hint');
+
+		await expect(picker).toBeVisible();
+		await expect(submit).toBeDisabled();
+		await expect(hint).toHaveText('Pick an approver to submit');
+		await expect(submit).toHaveAttribute('aria-describedby', 'approver-required-hint');
+		await expect(submit).toHaveAccessibleDescription('Pick an approver to submit');
+
+		// All of it on screen without scrolling.
+		await expect(submit).toBeInViewport({ ratio: 1 });
+		await expect(picker).toBeInViewport({ ratio: 1 });
+		await expect(hint).toBeInViewport();
+		await expect(modal.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({
+			ratio: 1
+		});
+		expect(await modal.getByTestId('invoice-form-scroll').evaluate((el) => el.scrollTop)).toBe(0);
+
+		// Picking someone answers the hint: it goes, and so does the description.
+		await picker.selectOption({ label: 'E2E Hint Reviewer' });
+		await expect(submit).toBeEnabled();
+		await expect(hint).toHaveCount(0);
+		await expect(submit).not.toHaveAttribute('aria-describedby');
+	});
+
 	test('an admin degrades to submit-unassigned too — no admin-users fallback', async ({
 		page
 	}) => {

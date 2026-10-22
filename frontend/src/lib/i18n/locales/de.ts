@@ -4431,6 +4431,7 @@ export const messages = {
 	'invoices.modal.activity.title': 'Aktivität',
 	'invoices.modal.approverNone': 'Es kann niemand sonst als Prüfer zugewiesen werden. Beim Einreichen gelangt diese Rechnung ohne Zuweisung in die Prüfliste — jeder Genehmiger kann sie übernehmen.',
 	'invoices.modal.approverPlaceholder': 'Genehmiger...',
+	'invoices.modal.approverRequiredHint': 'Genehmiger auswählen, um einzureichen',
 	'invoices.modal.approverUnavailable': 'Die Prüferliste konnte nicht geladen werden. Beim Einreichen gelangt diese Rechnung ohne Zuweisung in die Prüfliste — jeder Genehmiger kann sie übernehmen.',
 	'invoices.modal.assignApprover': 'Genehmiger zuweisen',
 	'invoices.modal.chain.anyApprover': 'Jeder berechtigte Genehmiger',
