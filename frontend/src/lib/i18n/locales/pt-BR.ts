@@ -4426,6 +4426,7 @@ export const messages = {
 	'invoices.modal.activity.title': 'Atividade',
 	'invoices.modal.approverNone': 'Não há mais ninguém para atribuir como revisor. Ao enviar, esta fatura entra na fila de revisão sem atribuição — qualquer aprovador pode assumi-la.',
 	'invoices.modal.approverPlaceholder': 'Aprovador...',
+	'invoices.modal.approverRequiredHint': 'Escolha um aprovador para enviar',
 	'invoices.modal.approverUnavailable': 'Não foi possível carregar a lista de revisores. Ao enviar, esta fatura entra na fila de revisão sem atribuição — qualquer aprovador pode assumi-la.',
 	'invoices.modal.assignApprover': 'Atribuir aprovador',
 	'invoices.modal.chain.anyApprover': 'Qualquer aprovador elegível',

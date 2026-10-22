@@ -45,6 +45,32 @@ is wide enough for grid pages on 1920–2560px monitors without leaving
 half the viewport empty; on a 13″ laptop the natural body width
 constrains it before the cap kicks in.
 
+**Data that lands after first paint must not move what is already drawn.**
+A page mounts, draws its shell, and fills in from responses that arrive a
+round trip later. Anything those responses *add above the table* drops the
+table under the reader on every visit — on a deployed backend the round trip
+is long enough to see, and it reads as "a glitch whenever I change pages".
+So:
+
+- **Draw the slot from first paint.** A KPI / summary strip renders its cards
+  with the shared no-figure dash (`kpiDisplayValue`, or `<KpiCard>` with a
+  nullish `value`) and `aria-busy` while pending, never `{#if summary}` around
+  the whole strip (`/payments`).
+- **A chip row whose roster comes from a response holds its place while that
+  response is pending** — render it with just its "All" chip until the roster
+  lands (`/exceptions`' type row).
+- **Don't put data-sized controls inline beside fixed ones on a wrapping row.**
+  `/invoices`' status chips depend on the active workflow and their width on
+  the tallies; inline beside the search box the row fitted on one line at
+  mount and wrapped once they landed. They take a line of their own
+  (`flex-basis: 100%`). Likewise a `<select>` filled from a response gets a
+  fixed `width`, since a select sizes itself to its widest option.
+
+`tests-e2e/reactivity/layout-stability.spec.ts` holds the late responses
+behind a gate and asserts the table (or tab bar) sits at the same `y` before
+and after — add the page there when you put something above a table that
+loads.
+
 ### Navigating a long page
 
 Three primitives, and which one a page gets depends on **why its sections share
@@ -549,6 +575,31 @@ fails any `$effect` body containing `setTimeout(` / `setInterval(` without a
 matching `return () => clear…` — a deliberate static guard, because the
 symptom only shows inside a sub-second window that no non-flaky e2e can pin.
 
+**A debounce `$effect` must also skip its own mount-time run.** A `$effect`
+runs once at mount whether or not `search` changed, and the page's load effect
+has already fetched the list by then — so an unguarded `search;
+debouncedFetch()` loads it a second time 300ms later on every visit (it did on
+`/invoices`, `/vendors`, `/payments` and `/bank-reconciliation`), flipping the
+page's loading state while the reader is looking at the finished table. Open
+the body with the first-run skip:
+
+```ts
+let searchEffectRan = false;
+$effect(() => {
+    search;
+    if (!searchEffectRan) {
+        searchEffectRan = true;
+        return;
+    }
+    debouncedFetch();
+    return () => clearTimeout(searchTimer);
+});
+```
+
+The same source scan enforces it: an `$effect` whose first statement is
+`search;` and which arms a timer (or calls a `debounced…()` helper) must
+`return;` before it does.
+
 **Reading the URL once at mount is only half of the round trip.** SvelteKit
 reuses the mounted component for a navigation within the same route — the
 sidebar row clicked while on a filtered view, a `goto('/invoices?…')`, or
@@ -637,6 +688,24 @@ centred dialog with backdrop-click + Esc to close:
   children in `{#if x}…{/if}`.
 - Cancel sits left of the primary action. Required-field markers use
   `<em class="required">*</em>`.
+- **A long dialog keeps its decisions out of the scroll.** When a dialog's body
+  runs past one screen (the invoice dialog's right pane: summary, fields, line
+  items, activity, chat, e-invoice), split the `<form>` into a scrolling region
+  and an action footer **beside it in the flex column** — `form { display: flex;
+  flex-direction: column; min-height: 0 }`, the body `flex: 1; min-height: 0;
+  overflow-y: auto`, the footer `flex-shrink: 0`. Never `position: sticky` the
+  footer over the content: a pinned strip hides the focused field under it
+  (2.4.11) and intercepts Playwright's scroll-then-click (`docs/decisions.md`
+  §181, § Shared visual layer below). The footer stays inside the `<form>` so
+  Save still submits, holds every forward action (Cancel, Save, Submit, and
+  Approve / Reject with the reject-reason flow), and caps itself at
+  `max-height: 50%` with its own `overflow-y: auto` so a 320px dialog never
+  squeezes the fields to nothing. A primary action disabled for a reason the
+  reader can fix says so beside it, wired with `aria-describedby` (the invoice
+  dialog's "Pick an approver to submit"). Reference:
+  `components/modals/InvoiceModal.svelte` (`.form-scroll` / `.form-actions`);
+  guards: `tests-e2e/invoices/review-verdict.spec.ts` (in view at 1280×720, no
+  spill at 320px) and `approver-picker.spec.ts` (the hint).
 - **Never hand-roll a modal shell.** Every dialog — including the feature
   dialogs in `#lib/components/modals/` — wraps its body in `<Modal>`. Do
   not write your own `.backdrop` / `div.modal[role="dialog"]`, your own

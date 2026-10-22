@@ -285,9 +285,16 @@
 		fetchVendors();
 	});
 
-	// Re-fetch on search input (debounced).
+	// Re-fetch on search input (debounced). `searchEffectRan` skips the mount
+	// run: the effect above has already loaded the list, and the unguarded run
+	// fetched it a second time 300ms later on every visit.
+	let searchEffectRan = false;
 	$effect(() => {
 		search;
+		if (!searchEffectRan) {
+			searchEffectRan = true;
+			return;
+		}
 		debouncedFetch();
 		// Cancel a pending debounce on teardown: without it the timer fires
 		// after the page is gone and lands a stale list into the shared store.

@@ -74,4 +74,36 @@ describe('$effect timer cleanup', () => {
 		}
 		expect(offenders, 'these $effect blocks arm a timer they never disarm').toEqual([]);
 	});
+
+	/**
+	 * A debounced search effect must skip its own mount-time run.
+	 *
+	 * A `$effect` runs once at mount whether or not its tracked value changed.
+	 * A list page's search effect (`search; debouncedFetch()`) sits beside the
+	 * effect that does the initial load, so without a guard every visit loaded
+	 * the list a second time 300ms later — /invoices, /vendors, /payments and
+	 * /bank-reconciliation all did, and on /invoices the repeat flipped the
+	 * loading state the page draws while the reader was already looking at the
+	 * finished table. The usual guard is the `if (!searchEffectRan) { … return; }`
+	 * first-run skip /contracts introduced; this pins an early bail-out on every
+	 * such effect.
+	 */
+	it('every debounced search $effect skips its mount-time run', () => {
+		const offenders: string[] = [];
+		for (const [path, source] of Object.entries(RAW)) {
+			for (const body of effectBodies(source)) {
+				// The effect's first statement tracks the search term …
+				if (!/^\{\s*search\s*;/.test(body)) continue;
+				// … and it debounces, directly or through a helper.
+				const arms = body.search(/\bsetTimeout\s*\(|\bdebounced\w*\s*\(/);
+				if (arms === -1) continue;
+				// An early `return;` must come before the timer is armed — the
+				// first-run skip, whatever its flag is called (`PortalListFilters`
+				// names it `effectRan`).
+				const bails = body.search(/\breturn\s*;/);
+				if (bails === -1 || bails > arms) offenders.push(path);
+			}
+		}
+		expect(offenders, 'these debounced search effects re-fetch on mount').toEqual([]);
+	});
 });

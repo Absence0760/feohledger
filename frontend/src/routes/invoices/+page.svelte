@@ -428,9 +428,22 @@
 		invoiceStore.fetchCounts(buildParams()).catch(() => {});
 	});
 
-	// Re-fetch on search input (debounced)
+	// Re-fetch on search input (debounced).
+	//
+	// `searchEffectRan` skips this effect's own mount-time run, the guard
+	// /contracts, /budgets and /gl-accounts already carry: a `$effect` always
+	// runs once at mount, and the filter effect above has already loaded the
+	// list and the chip counts by then, so the unguarded run issued the same
+	// two requests again 300ms later on every visit, flipping
+	// `invoiceStore.loading` (the "Load more" button read "Loading…") a second
+	// time while the page sat still. `effectTimerCleanup.test.ts` guards it.
+	let searchEffectRan = false;
 	$effect(() => {
 		search;
+		if (!searchEffectRan) {
+			searchEffectRan = true;
+			return;
+		}
 		// Same reasoning as the status/advanced-filter effect above — a
 		// changed search term invalidates whatever "select all matching" had
 		// resolved against the OLD term.
@@ -1318,9 +1331,24 @@
 		white-space: nowrap;
 	}
 
+	/* A fixed width, not a min/max range: a <select> sizes itself to its widest
+	   option, and the reviewer options arrive after first paint, so a range let
+	   the control grow once they landed and push the row onto another line. */
 	.assignee-select {
-		min-width: 160px;
-		max-width: 220px;
+		width: 200px;
+		max-width: 100%;
+	}
+
+	/* The status chips take a line of their own. Their number depends on the
+	   active workflow (the approval stages only exist with an approval step) and
+	   their width on the tallies, and both arrive after first paint — inline
+	   beside the search box, the row fitted on one line with the three chips
+	   drawn at mount and wrapped onto a second once the rest landed, dropping
+	   the whole table ~44px under the reader on every fresh visit. A row of its
+	   own holds the same height either way. Guarded by
+	   tests-e2e/reactivity/layout-stability.spec.ts. */
+	.filter-row > .filters {
+		flex-basis: 100%;
 	}
 
 	/* Fixed column widths pair with DataTable's `fixed`/`stickyHeader` props.

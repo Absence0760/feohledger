@@ -4612,6 +4612,7 @@ export const en = {
 	'invoices.modal.activity.title': 'Activity',
 	'invoices.modal.approverNone': 'No one else can be assigned as reviewer. Submitting sends this invoice to the review queue unassigned — any approver can pick it up.',
 	'invoices.modal.approverPlaceholder': 'Approver...',
+	'invoices.modal.approverRequiredHint': 'Pick an approver to submit',
 	'invoices.modal.approverUnavailable': 'The reviewer list could not be loaded. Submitting sends this invoice to the review queue unassigned — any approver can pick it up.',
 	'invoices.modal.assignApprover': 'Assign approver',
 	'invoices.modal.chain.anyApprover': 'Any eligible approver',
