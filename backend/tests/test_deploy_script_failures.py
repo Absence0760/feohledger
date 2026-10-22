@@ -560,3 +560,23 @@ def test_bootstrap_converges_compose_on_the_pin(tmp_path: Path, running: str | N
     assert result.returncode != 0
     assert f"installed docker compose v{COMPOSE_PIN}" in result.stderr
     assert "bootstrap complete" not in result.stdout
+
+
+def test_every_runnable_deploy_script_is_committed_executable() -> None:
+    """The operator runs these as `./<script>.sh` on the VM, whose checkout takes
+    its file modes from git. `db-role-cutover.sh` shipped as 100644 and answered
+    "Permission denied" at the cutover's first step. The index mode is what the VM
+    gets, so that is what is checked; `lib.sh` is sourced, never run."""
+    listing = subprocess.run(
+        ["git", "ls-files", "-s", "--", "deploy/*.sh"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    modes = {line.split("\t", 1)[1]: line.split()[0] for line in listing}
+    assert "deploy/db-role-cutover.sh" in modes, "the listing found no deploy scripts"
+    not_executable = sorted(
+        path for path, mode in modes.items() if mode != "100755" and path != "deploy/lib.sh"
+    )
+    assert not_executable == []
