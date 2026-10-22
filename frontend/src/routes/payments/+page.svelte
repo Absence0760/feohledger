@@ -89,6 +89,7 @@
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
+	import { kpiDisplayValue } from '#lib/utils/kpiValue.ts';
 
 	let RUNS_COLUMNS = $derived([
 		{ label: m('payments.col.run') },
@@ -219,6 +220,10 @@
 		excluded_rebate_count?: number;
 	}
 	let summary = $state<Summary | null>(null);
+	// The summary request failed and nothing has replaced it: the strip's cards
+	// stay drawn (with the no-figure dash) but stop announcing "Loading…".
+	let summaryFailed = $state(false);
+	let summaryPending = $derived(summary === null && !summaryFailed);
 
 	// The shared `<Tabs>` (WAI-ARIA tablist: role=tab + aria-selected + roving
 	// tabindex). The tab bar used to be four plain buttons whose selected state
@@ -1289,10 +1294,13 @@
 		}, 300);
 	}
 
+	// The queue is NOT loaded here: only the Queue tab shows it, and the tab
+	// effect below loads it whenever that tab is (or becomes) the open one —
+	// including at mount, where loading it here too sent the same request twice
+	// on every visit.
 	$effect(() => {
 		orgCurrency.ensureLoaded();
 		loadSummary();
-		loadQueue();
 		loadExecutionMode();
 	});
 
@@ -1314,8 +1322,16 @@
 		}
 	});
 
+	// `searchEffectRan` skips the mount run: the tab effect above has already
+	// loaded the history list (when that tab is open), and the unguarded run
+	// fetched it again 300ms later.
+	let searchEffectRan = false;
 	$effect(() => {
 		search;
+		if (!searchEffectRan) {
+			searchEffectRan = true;
+			return;
+		}
 		debouncedFetch();
 		// Cancel a pending debounce on teardown: without it the timer fires
 		// after the page is gone and lands a stale list into the shared store.
@@ -1340,8 +1356,10 @@
 			const data = await api.get<Summary>('/api/payments/summary');
 			if (!summarySequence.canCommit(token)) return; // superseded by a newer load
 			summary = data;
+			summaryFailed = false;
 		} catch (err) {
 			if (summarySequence.isCurrentRequest(token)) {
+				summaryFailed = true;
 				toast(err instanceof Error ? err.message : m('payments.summary.loadFailed'), 'error');
 			}
 		}
@@ -1949,39 +1967,44 @@
 </script>
 
 <PageHeader title={m('payments.title')}>
-	{#if summary}
-		<div class="summary-cards">
-			<div class="scard">
-				<span class="scard-value">
-					{formatCurrency(summary.total_paid, summary.currency)}
-				</span>
-				<span class="scard-label">{m('payments.summary.totalPaid')}</span>
-			</div>
-			<div class="scard">
-				<span class="scard-value">
-					{formatCurrency(summary.total_pending, summary.currency)}
-				</span>
-				<span class="scard-label">{m('payments.summary.pending')}</span>
-			</div>
-			<div class="scard">
-				<span class="scard-value">{summary.queue_count}</span>
-				<span class="scard-label">{m('payments.summary.readyToPay')}</span>
-			</div>
-			<div class="scard">
-				<span class="scard-value">{summary.payment_count}</span>
-				<span class="scard-label">{m('payments.summary.payments')}</span>
-			</div>
-			{#if Number(summary.total_rebates) > 0}
-				<div class="scard rebate">
-					<!-- `summary.currency` is what the API says EVERY money figure in
-					     this block is denominated in, `total_rebates` included — the
-					     three cards above pass it and this one didn't, falling through
-					     to the store instead of the response's own declaration. -->
-					<span class="scard-value">{formatCurrency(summary.total_rebates, summary.currency)}</span>
-					<span class="scard-label">{m('payments.summary.rebatesEarned')}</span>
-				</div>
-			{/if}
+	<!-- The four headline cards are drawn from first paint, holding the shared
+	     no-figure dash until /api/payments/summary lands. They used to appear
+	     only once it had, inserting a ~94px strip ABOVE the tabs and the table
+	     on every visit and dropping both under the reader
+	     (tests-e2e/reactivity/layout-stability.spec.ts). -->
+	<div class="summary-cards" aria-busy={summaryPending ? 'true' : undefined}>
+		<div class="scard">
+			<span class="scard-value">
+				{kpiDisplayValue(summary ? formatCurrency(summary.total_paid, summary.currency) : null, summaryPending)}
+			</span>
+			<span class="scard-label">{m('payments.summary.totalPaid')}</span>
 		</div>
+		<div class="scard">
+			<span class="scard-value">
+				{kpiDisplayValue(summary ? formatCurrency(summary.total_pending, summary.currency) : null, summaryPending)}
+			</span>
+			<span class="scard-label">{m('payments.summary.pending')}</span>
+		</div>
+		<div class="scard">
+			<span class="scard-value">{kpiDisplayValue(summary?.queue_count, summaryPending)}</span>
+			<span class="scard-label">{m('payments.summary.readyToPay')}</span>
+		</div>
+		<div class="scard">
+			<span class="scard-value">{kpiDisplayValue(summary?.payment_count, summaryPending)}</span>
+			<span class="scard-label">{m('payments.summary.payments')}</span>
+		</div>
+		{#if summary && Number(summary.total_rebates) > 0}
+			<div class="scard rebate">
+				<!-- `summary.currency` is what the API says EVERY money figure in
+				     this block is denominated in, `total_rebates` included — the
+				     three cards above pass it and this one didn't, falling through
+				     to the store instead of the response's own declaration. -->
+				<span class="scard-value">{formatCurrency(summary.total_rebates, summary.currency)}</span>
+				<span class="scard-label">{m('payments.summary.rebatesEarned')}</span>
+			</div>
+		{/if}
+	</div>
+	{#if summary}
 		<!-- A payment with no rate into the reporting currency is left out of the
 		     totals above, so the headline understates what actually moved. Same
 		     notice pattern as /discounts' excluded foreign offers and the /cfo
