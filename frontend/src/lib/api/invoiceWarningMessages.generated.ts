@@ -127,6 +127,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'self_correction_date_ordering': 'invoices.warning.selfCorrectionDateOrdering',
 	// Line items total ({lineItemsTotal}) doesn't match invoice amount ({amount}).
 	'self_correction_line_items_sum': 'invoices.warning.selfCorrectionLineItemsSum',
+	// Amounts are printed in {printedCurrency}, but the invoice currency reads {fieldCurrency}. The amounts were left blank — enter them from the document.
+	'self_correction_currency_conflict': 'invoices.warning.selfCorrectionCurrencyConflict',
+	// Amounts are printed in more than one currency ({printedCurrencies}). The amounts were left blank — enter them from the document.
+	'self_correction_currency_mixed': 'invoices.warning.selfCorrectionCurrencyMixed',
 	// Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.
 	'self_correction_line_item_math': 'invoices.warning.selfCorrectionLineItemMath',
 	// AI suggested GL code(s) not in active chart: {codes}
@@ -223,6 +227,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'self_correction_total_reconciliation': { subtotal: 'number', tax: 'number', shipping: 'number', discount: 'number', expected: 'number', amount: 'number' },
 	'self_correction_date_ordering': { dueDate: 'date', invoiceDate: 'date' },
 	'self_correction_line_items_sum': { lineItemsTotal: 'number', amount: 'number' },
+	'self_correction_currency_conflict': { printedCurrency: 'text', fieldCurrency: 'text' },
+	'self_correction_currency_mixed': { printedCurrencies: 'text' },
 	'self_correction_line_item_math': { lineNumber: 'count', quantity: 'number', unitPrice: 'number', expected: 'number', total: 'number' },
 	'gl_codes_not_in_chart': { codes: 'text' },
 	'gl_code_stale_prior': { code: 'text' },

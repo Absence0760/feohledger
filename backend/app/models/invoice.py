@@ -1,4 +1,3 @@
-import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -19,21 +18,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, EntityMixin, TimestampMixin
-
-
-class InvoiceStatus(enum.StrEnum):
-    new = "new"
-    pending = "pending"
-    ready_for_review = "ready_for_review"
-    approved = "approved"
-    rejected = "rejected"
-    sending_to_erp = "sending_to_erp"
-    sent_to_erp = "sent_to_erp"
-    posted_in_erp = "posted_in_erp"
-    payment_scheduled = "payment_scheduled"
-    paid = "paid"
-    done = "done"
-    failed = "failed"
+from app.models.invoice_status import InvoiceStatus  # the one enum; re-exported
 
 
 class Invoice(Base, EntityMixin, TimestampMixin):

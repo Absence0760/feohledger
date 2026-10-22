@@ -311,6 +311,8 @@ def _platform_mark_header(brand: BrandContext, *, max_height_pt: float, name_sty
         from reportlab.pdfbase.pdfmetrics import stringWidth
         from reportlab.platypus import Paragraph, Table, TableStyle
 
+        from app.services.pdf_text import pdf_markup
+
         # Two text lines tall reads as a mark beside its name rather than a
         # banner over it, and the header box still caps it.
         side = min(max_height_pt, name_style.leading * 2)
@@ -323,7 +325,7 @@ def _platform_mark_header(brand: BrandContext, *, max_height_pt: float, name_sty
         style = ParagraphStyle("brand-mark-caption", parent=name_style, spaceBefore=0, spaceAfter=0)
         caption_w = stringWidth(caption, style.fontName, style.fontSize) + 2
         row = Table(
-            [[mark, Paragraph(_escape_html(caption), style)]],
+            [[mark, Paragraph(pdf_markup(caption), style)]],
             colWidths=[side + side / 4, caption_w],
             hAlign="LEFT",
         )

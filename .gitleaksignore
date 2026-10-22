@@ -85,3 +85,10 @@ d9dc86a970108d5a9ad1238e542c0e36438f9465:backend/tests/test_email_intake_process
 # value from the test's own password instead, so only the introducing commit
 # still carries the literal.
 58aceec2f46c494c89894ea080176d8ed9b6ac1e:backend/tests/test_email_identity_case.py:generic-api-key:224
+
+# A stub IAM token in backend/tests/test_db_engine.py (PR #632): the test's fake
+# token generator returns a string built from host, port and user, and the
+# assertion on that synthetic value trips generic-api-key on the keyword plus
+# entropy. It is no credential; RDS IAM tokens are presigned URLs minted per
+# connection and never written down.
+76e9ba0fecfa2e1bb9b31cbf78159dff9e7c15a7:backend/tests/test_db_engine.py:generic-api-key:163

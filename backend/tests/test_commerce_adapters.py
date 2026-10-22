@@ -319,6 +319,7 @@ def test_a_deployed_environment_refuses_the_override():
             commerce_api_base_override="http://localhost:12113",
             secret_key="x" * 40,
             hcaptcha_secret="h",
+            hcaptcha_sitekey="site-key",
             credential_kms_key_id="arn:aws:kms:us-east-1:111122223333:key/test",
         )
 

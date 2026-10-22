@@ -46,7 +46,12 @@ from app.models.credit_memo import CreditMemo
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
-from app.models.payment import Payment, PaymentRun, PaymentSchedule
+from app.models.payment import (
+    LIVE_PAYMENT_TERMINAL_STATUSES,
+    Payment,
+    PaymentRun,
+    PaymentSchedule,
+)
 from app.models.user import User
 from app.models.vendor import Vendor
 from app.models.virtual_card import CardRebate, VirtualCard
@@ -281,12 +286,10 @@ PAYMENT_BLOCKING_EXCEPTION_TYPES = (
 ERP_EXPORT_BLOCKING_EXCEPTION_TYPES = ("duplicate", "fraud_flag")
 assert set(ERP_EXPORT_BLOCKING_EXCEPTION_TYPES) <= set(PAYMENT_BLOCKING_EXCEPTION_TYPES)
 
-# Terminal payment states — a payment in one of these no longer represents a
-# LIVE claim on its invoice, so the "one live payment per invoice" idempotency
-# invariant (both the app-level guard and the `uq_payments_one_live_per_invoice`
-# partial index) excludes them. A void hands the invoice back to `approved` to
-# be re-paid; a failed / cancelled attempt must not block a fresh one.
-LIVE_PAYMENT_TERMINAL_STATUSES = ("voided", "failed", "cancelled")
+# Terminal payment states (no longer a LIVE claim on the invoice) are defined
+# once, beside the partial index that enforces them:
+# `models/payment.LIVE_PAYMENT_TERMINAL_STATUSES`, imported above and
+# re-exported for the callers that already read it from this module.
 
 
 #: `detail.code` of the refusal a record-only tenant gets from every

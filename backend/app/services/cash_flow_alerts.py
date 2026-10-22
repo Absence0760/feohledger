@@ -67,11 +67,12 @@ from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.analytics import _commitment_rows
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
+from app.db_engine import create_async_engine
 from app.models.notification import EVENT_CASH_SHORTFALL_PROJECTED
 from app.models.organization import Organization
 from app.services.analytics import (

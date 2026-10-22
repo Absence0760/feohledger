@@ -539,6 +539,8 @@ export const messages = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Los importes no cuadran: subtotal ({subtotal}) + impuestos ({tax}) + envío ({shipping}) − descuento ({discount}) = {expected}, pero el total es {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'La fecha de vencimiento ({dueDate}) es anterior a la fecha de la factura ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'El total de las líneas ({lineItemsTotal}) no coincide con el importe de la factura ({amount}).',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Los importes figuran en {printedCurrency}, pero la moneda de la factura indica {fieldCurrency}. Los importes se dejaron en blanco: introdúzcalos desde el documento.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Los importes figuran en más de una moneda ({printedCurrencies}). Los importes se dejaron en blanco: introdúzcalos desde el documento.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Línea {lineNumber}: {quantity} × {unitPrice} = {expected}, pero el total es {total}.',
 	'invoices.warning.glCodesNotInChart': 'Cuentas contables sugeridas por la IA que no están en el plan activo: {codes}',
 	'invoices.warning.glCodeStalePrior': 'La cuenta contable «{code}» guardada para el proveedor ya no está en el plan de cuentas activo.',

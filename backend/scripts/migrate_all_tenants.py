@@ -26,8 +26,8 @@ import asyncpg
 from sqlalchemy import select
 
 from app.database import _make_tenant_url, control_engine, control_session_factory
+from app.db_engine import connect_raw
 from app.models.organization import Organization
-from app.services.tenant_provisioning import asyncpg_connect_kwargs
 
 UNTRACKED_NOTE = (
     "  NOTE: {db} has tables but no Alembic version (provisioned by create_all before "
@@ -47,7 +47,7 @@ async def _is_untracked(db_name: str) -> bool:
     — the ``alembic`` run that follows fails on it, and that failure fails the
     deploy."""
     try:
-        conn = await asyncpg.connect(**asyncpg_connect_kwargs(_make_tenant_url(db_name)))
+        conn = await connect_raw(_make_tenant_url(db_name))
     except (OSError, asyncpg.PostgresError):
         return False
     try:

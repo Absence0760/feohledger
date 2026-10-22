@@ -238,6 +238,32 @@ statement cell can't drift apart:
   cleaners and into `run_self_correction`, so the header, the lines and the
   checker can't be read under different rules.
 
+### A currency code printed beside the figure
+
+A model transcribing the printed total often keeps the code the page prints:
+`GBP 9,500.00`, `1,234.56 USD`. `_amount_core_and_codes` strips the code so the
+magnitude parses, and **returns it** — it is the document stating that figure's
+currency, not decoration (`docs/decisions.md` §308). `extraction_currency_evidence`
+collects the codes from every money token that parses (the same header + line
+set the convention vote reads) and weighs them against the model's `currency`
+field (`CurrencyEvidence`):
+
+| `currency` field | Codes printed on the amounts | Result |
+|---|---|---|
+| `GBP` | none, or `GBP` | currency `GBP`, money read |
+| empty / not a code | `GBP` | currency `GBP` from the code — never the upload's `USD` placeholder |
+| `EUR` | `USD` | **conflict** — no header money is written, currency left as it was |
+| any | `GBP` and `USD` | **conflict** — same |
+| empty | none | row keeps its currency (see `docs/followups.md` on the `USD` default) |
+
+On a conflict the amount stays at the upload's `0`, so `missing_amount` fires
+and `decide_auto_approve` refuses it — a zero or negative amount never
+auto-approves on either trigger. `tax_rate` (a percentage) is still read. The
+self-correction pass names the conflict to the reviewer
+(`self_correction_currency_conflict` / `self_correction_currency_mixed`) and
+docks `amount` / `currency`. A symbol (`€`, `$`) is not evidence — `$` alone
+names a dozen currencies.
+
 ### Date disambiguation (DD/MM vs MM/DD)
 
 A numeric date like `03/04/2026` is the same class of problem as the amount
@@ -276,10 +302,14 @@ CSV and PDF-statement intake paths, via `parse_date`).
 
 Runs after `_apply_extraction()`, before line items are saved. Implemented in `services/extraction_self_correction.py`.
 
-**Invariant checks (4):**
+**Invariant checks (5):**
 
 1. **Total reconciliation** — `|subtotal + tax_amount + shipping_amount - discount_amount - amount| / amount <= 2%` (skipped when no subtotal was extracted)
-2. **Date ordering** — `due_date >= invoice_date`
+2. **Date ordering** — `due_date >= invoice_date`, with both dates read by
+   `extraction._clean_date` under the org's day-first preference — the same
+   reading `_apply_extraction` stored them under. It used to accept ISO only, so
+   a swapped `28/10/2026` / `28/09/2026` pair (or `March 15, 2026`) went
+   unchecked.
 3. **Line items sum** — `sum(line_item.total)` must reconcile with the header by
    `invoice_warnings.line_total_reconciles`, the **same definition the
    payment-blocking `line_total_mismatch` check uses**: within one cent of
@@ -291,7 +321,16 @@ Runs after `_apply_extraction()`, before line items are saved. Implemented in `s
    the payment gate itself accepted (issue #566). The gate's absolute cent
    replaced the 2 % slop so the two checks cannot disagree in either direction.
    See `line-total-reconciliation.md`.
-4. **Line item math** — per line: `|quantity * unit_price - total| / total <= 1%`
+4. **Line item math** — per line: `|quantity * unit_price - total| / total <= 1%`,
+   or, when the line states its own `tax`, the same test against
+   `quantity * unit_price + tax` — a Net / VAT / Gross invoice whose model read
+   reports the net unit price and the gross line total is consistent, and was
+   flagged on every line until #575.
+5. **Currency evidence** — the ISO codes printed on the amounts agree with each
+   other and with the `currency` field (see *A currency code printed beside the
+   figure* above). The writer already refused the money on a conflict, whether
+   or not this pass runs; this check is what tells the reviewer why, and it
+   docks `amount` and `currency`.
 
 **On violation:**
 
@@ -300,6 +339,46 @@ Runs after `_apply_extraction()`, before line items are saved. Implemented in `s
 - Results stored in `InvoiceExtractionResult.priors_metadata.self_correction`
 
 Controlled by `org_settings.extraction.self_correction_enabled` (default: true).
+
+### Golden extraction cases
+
+`tests/test_extraction_golden.py` replays real-shaped Claude answers through the
+real pipeline, so the mock adapter's conventions (tax-inclusive lines, bare
+`"1234.56"` strings, USD) are not the only ones tested (issue #575). Each case
+is a PDF plus the recorded Messages API response for it, in
+`tests/fixtures/extraction_golden/`:
+
+| Case | What it covers |
+|---|---|
+| `us_tax_exclusive` | USD, net lines, header subtotal + sales tax + shipping, `$1,156.00` strings |
+| `gb_vat_inclusive` | GBP Net / VAT / Gross columns: net unit price, line VAT, gross line total |
+| `eur_multipage` | EUR decimal commas (`1.180,00`, qty `12,5`), `EUR 8.739,84`, 16 lines over two pages with a carry-forward row |
+| `jpy_zero_decimal` | JPY `¥176,440` (every token the ambiguous shape), `null` due date / PO |
+| `us_scanned` | Image-only PDF; a `thinking` block, a ```` ```json ```` fence, JSON numbers, a numeric SKU, `N/A` and `string or null` sentinels |
+| `inconsistent_gb` | A wrong read: transposed total, dropped line, misread unit price, swapped day-first dates. All four self-checks must fire, and the payment gate must refuse the lines too |
+
+The replay swaps only httpx's transport (`httpx.MockTransport`). The adapter's
+request build, the response-block walk, the fence strip, `_apply_extraction`,
+`extracted_line_values`, the decimal-convention vote, `run_self_correction` and
+`reconcile_line_totals` all run for real. A correct case must extract exactly
+the stated `Decimal`s and raise **no** self-check flag or confidence penalty.
+
+**To add a case:**
+
+1. Add a builder to `tests/fixtures/extraction_golden/generate.py` that returns
+   the page layout and the recorded answer, and register it in `CASES`. Use
+   invented vendors, addresses and tax ids only. Never record a response from
+   the real API against a customer document. Write the answer the way a current
+   model writes it, quirks included, not the way the mock does.
+2. Run `.venv/bin/python tests/fixtures/extraction_golden/generate.py` from
+   `backend/`. ReportLab runs with `invariant=1`, so unchanged cases regenerate
+   byte-identical files.
+3. Add a `Golden(...)` entry to `test_extraction_golden.py` with the expected
+   values **written out literally**. Do not derive them from the generator,
+   because then a fixture change would rewrite its own expectations.
+4. If the case fails, the fix goes in the parser, the cleaners or the
+   self-check, with the case as its regression test. Do not change the
+   recorded answer or loosen the expectation to make it pass.
 
 ### Auto-Approve on Confidence
 

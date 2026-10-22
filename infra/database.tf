@@ -11,7 +11,10 @@
 # The master password is a write-only attribute fed from an ephemeral variable,
 # so it is never stored in Terraform state or plan files. The operator supplies
 # it from the private infra-secrets repo at apply time (README.md § Workload
-# stack); the same value goes into FEOH_DATABASE_URL in the sops env.
+# stack). It is the break-glass credential only: the app signs in as its own
+# least-privilege role, `feoh_app`, with an IAM auth token (compute.tf's
+# ConnectAsAppRole, docs/decisions.md §310), so the master password is not in
+# the VM's sops env at all.
 
 # RDS creates this group itself on first export — unencrypted by a CMK and kept
 # forever. Declaring it first gives connection logs (client addresses, user
@@ -99,18 +102,20 @@ resource "aws_db_instance" "main" {
   kms_key_id            = aws_kms_key.app.arn
 
   # The app's control-plane database; tenant databases are created beside it
-  # by tenant provisioning (CREATE DATABASE as the master user).
+  # by tenant provisioning (CREATE DATABASE as the app role, which holds
+  # CREATEDB and owns every app database — deploy/db-role-cutover.sh).
   db_name  = "feohledger"
   username = "postgres"
 
   password_wo         = var.db_master_password
   password_wo_version = var.db_master_password_version
 
-  # IAM database authentication (Trivy AWS-0176). Additive: it lets a role
-  # granted `rds-db:connect` sign in with a 15-minute token instead of the
-  # master password, and password login keeps working alongside it. The app
-  # still connects with the password in FEOH_DATABASE_URL; moving it onto
-  # tokens is tracked in docs/followups.md. Toggling it is an in-place modify.
+  # IAM database authentication (Trivy AWS-0176). The app role `feoh_app`
+  # (granted rds_iam; it acts as the NOLOGIN owner role `feoh_owner`) signs in
+  # with a 15-minute token minted per connection from the VM's instance
+  # profile, which holds `rds-db:connect` on exactly that user (compute.tf).
+  # Password login keeps working for the master, which is what break-glass and
+  # the rollback rely on. Toggling it is an in-place modify.
   iam_database_authentication_enabled = true
 
   db_subnet_group_name   = aws_db_subnet_group.main.name

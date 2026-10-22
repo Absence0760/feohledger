@@ -40,8 +40,8 @@ from app.models.discount import (
     DiscountOffer,
 )
 from app.models.invoice import Invoice
+from app.models.invoice_status import OPEN_AP_STATUSES
 from app.models.organization import Organization
-from app.models.payment import PaymentSchedule
 from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.discount import (
@@ -65,6 +65,7 @@ from app.services.discount_auto_trigger import (
 )
 from app.services.discount_optimizer import OfferOpportunity, optimize
 from app.services.discount_roi import compute_roi, days_between
+from app.services.payment_schedules import latest_schedule
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -84,14 +85,9 @@ _WRITE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
 _ACCEPT_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 
 # Invoice statuses where payment is still pending — the set a vendor-wide bulk
-# discount can still be captured against.
-_OPEN_FOR_DISCOUNT = (
-    "approved",
-    "sending_to_erp",
-    "sent_to_erp",
-    "posted_in_erp",
-    "payment_scheduled",
-)
+# discount can still be captured against. That is the open-AP set, named rather
+# than re-listed (`models/invoice_status`, issue #575).
+_OPEN_FOR_DISCOUNT = OPEN_AP_STATUSES
 
 
 # --------------------------------------------------------------------------- #
@@ -539,14 +535,7 @@ async def invoice_roi(
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     # Net due date: payment schedule wins, else the invoice's own due_date.
-    sched = (
-        await db.execute(
-            select(PaymentSchedule)
-            .where(PaymentSchedule.invoice_id == invoice_id)
-            .order_by(PaymentSchedule.created_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    sched = await latest_schedule(db, invoice_id)
     due_date = (sched.due_date if sched else None) or invoice.due_date
     if due_date is None:
         raise HTTPException(

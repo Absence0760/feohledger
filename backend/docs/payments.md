@@ -2559,7 +2559,9 @@ SELECTION rather than of any one invoice.
 
 **A live payment is excluded, not marked.** `_queue_base_where()` drops any
 invoice with a **live** payment — `Payment.status NOT IN
-LIVE_PAYMENT_TERMINAL_STATUSES`, the SAME definition the builder's
+LIVE_PAYMENT_TERMINAL_STATUSES` (defined once in `models/payment`, where it
+also builds the `uq_payments_one_live_per_invoice` predicate), the SAME
+definition the builder's
 `live_payment_invoices` guard uses. It used to exclude only
 `Payment.status == "completed"`, so an invoice with a `submitted` /
 `processing` / `pending` payment — every real rail, ACH settles in 1-3 days —

@@ -3,10 +3,10 @@ import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.config import settings
+from app.db_engine import create_async_engine
 from app.models import Base
 from app.tenant_url import make_tenant_url
 
@@ -27,8 +27,12 @@ else:
 # syntax" before any migration ran. Doubling it is configparser's escape.
 config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
 
+# disable_existing_loggers=False: fileConfig's default disables every logger
+# that already exists, so an in-process run (a test driving alembic.command, or
+# any caller importing the app first) silenced the app's loggers for the rest of
+# the process, which the log-redaction tests then read as empty output.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
@@ -52,11 +56,11 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Through the app's one engine factory, so a migration authenticates the
+    # way the app does (FEOH_DATABASE_IAM_AUTH: a fresh IAM token per connection)
+    # — `async_engine_from_config` would bypass it. `url` is the unescaped value
+    # set above; the ini copy exists for offline mode and `alembic` itself.
+    connectable = create_async_engine(url, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

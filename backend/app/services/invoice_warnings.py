@@ -13,7 +13,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.exception import Exception as APException
-from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice import Invoice
+from app.models.invoice_status import (
+    APPROVED_OR_BEYOND_STATUSES,
+    IN_REVIEW_STATUSES,
+    PRE_APPROVAL_STATUSES,
+)
 from app.models.procurement import po_currency_code
 from app.services.invoice_warning_catalog import (
     exception_finding,
@@ -326,7 +331,7 @@ async def refresh_warnings(
     if (
         invoice.due_date
         and invoice.due_date < utc_today()
-        and _status_str(invoice.status) in ("new", "pending", "ready_for_review")
+        and _status_str(invoice.status) in IN_REVIEW_STATUSES
     ):
         warnings.append(warning("past_due", "warning"))
 
@@ -392,14 +397,7 @@ async def refresh_warnings(
                     .where(
                         Invoice.vendor_id == invoice.vendor_id,
                         Invoice.id != invoice.id,
-                        Invoice.status.in_(
-                            [
-                                InvoiceStatus.approved.value,
-                                InvoiceStatus.posted_in_erp.value,
-                                InvoiceStatus.payment_scheduled.value,
-                                InvoiceStatus.paid.value,
-                            ]
-                        ),
+                        Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
                         Invoice.remit_to_address.isnot(None),
                     )
                     .order_by(Invoice.created_at.desc())
@@ -427,14 +425,7 @@ async def refresh_warnings(
                     .where(
                         Invoice.vendor_id == invoice.vendor_id,
                         Invoice.id != invoice.id,
-                        Invoice.status.in_(
-                            [
-                                InvoiceStatus.approved.value,
-                                InvoiceStatus.posted_in_erp.value,
-                                InvoiceStatus.payment_scheduled.value,
-                                InvoiceStatus.paid.value,
-                            ]
-                        ),
+                        Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
                         Invoice.amount.isnot(None),
                         Invoice.currency == (invoice.currency or "USD"),
                     )
@@ -820,17 +811,7 @@ async def _refresh_price_variance(
             .where(
                 Invoice.vendor_id == invoice.vendor_id,
                 Invoice.id != invoice.id,
-                Invoice.status.in_(
-                    [
-                        InvoiceStatus.approved.value,
-                        InvoiceStatus.sending_to_erp.value,
-                        InvoiceStatus.sent_to_erp.value,
-                        InvoiceStatus.posted_in_erp.value,
-                        InvoiceStatus.payment_scheduled.value,
-                        InvoiceStatus.paid.value,
-                        InvoiceStatus.done.value,
-                    ]
-                ),
+                Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
                 InvoiceLineItem.unit_price.isnot(None),
             )
             .order_by(Invoice.created_at.desc())
@@ -988,7 +969,7 @@ PO_MATCH_EXCEPTION_TYPES: tuple[str, ...] = ("po_mismatch", "quality_hold")
 #: invoice at another PO is no longer re-reviewed by anyone, so letting it
 #: clear the hold would let the person who changed the reference also release
 #: the payment — the open row stays for a human (`segregation_refusal`).
-_PRE_APPROVAL_STATUSES = frozenset({"new", "pending", "ready_for_review", "rejected"})
+_PRE_APPROVAL_STATUSES = PRE_APPROVAL_STATUSES
 
 #: The resolution text and actor an auto-close writes. Not a person — a
 #: detector observing that its own finding is gone — so the audit row carries
@@ -1869,20 +1850,14 @@ async def _llm_anomaly_check(
     if not api_key:
         return
 
-    # Pull approved history (same set the stat-anomaly rule uses).
+    # Pull approved history (same set the stat-anomaly rule uses:
+    # `APPROVED_OR_BEYOND_STATUSES`, the one "human-accepted" population).
     hist_q = await db.execute(
         select(Invoice)
         .where(
             Invoice.vendor_id == vendor.id,
             Invoice.id != invoice.id,
-            Invoice.status.in_(
-                [
-                    InvoiceStatus.approved.value,
-                    InvoiceStatus.posted_in_erp.value,
-                    InvoiceStatus.payment_scheduled.value,
-                    InvoiceStatus.paid.value,
-                ]
-            ),
+            Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
         )
         .order_by(Invoice.created_at.desc())
         .limit(HISTORY_SIZE)

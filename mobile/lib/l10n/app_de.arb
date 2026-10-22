@@ -752,6 +752,8 @@
   "invoiceWarningSelfCorrectionTotalReconciliation": "Die Beträge stimmen nicht: Zwischensumme ({subtotal}) + Steuer ({tax}) + Versand ({shipping}) − Rabatt ({discount}) = {expected}, die Gesamtsumme lautet jedoch {amount}.",
   "invoiceWarningSelfCorrectionDateOrdering": "Das Fälligkeitsdatum ({dueDate}) liegt vor dem Rechnungsdatum ({invoiceDate}).",
   "invoiceWarningSelfCorrectionLineItemsSum": "Die Positionssumme ({lineItemsTotal}) stimmt nicht mit dem Rechnungsbetrag ({amount}) überein.",
+  "invoiceWarningSelfCorrectionCurrencyConflict": "Die Beträge sind in {printedCurrency} angegeben, die Rechnungswährung lautet jedoch {fieldCurrency}. Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.",
+  "invoiceWarningSelfCorrectionCurrencyMixed": "Die Beträge sind in mehr als einer Währung angegeben ({printedCurrencies}). Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.",
   "invoiceWarningSelfCorrectionLineItemMath": "Position {lineNumber}: {quantity} × {unitPrice} = {expected}, die Summe lautet jedoch {total}.",
   "invoiceWarningGlCodesNotInChart": "Von der KI vorgeschlagene Sachkonten fehlen im aktiven Kontenplan: {codes}",
   "invoiceWarningGlCodeStalePrior": "Das zwischengespeicherte Sachkonto „{code}“ des Lieferanten ist nicht mehr im aktiven Kontenplan.",

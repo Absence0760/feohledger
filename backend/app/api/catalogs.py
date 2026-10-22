@@ -972,9 +972,10 @@ async def punchout_cart_return(
 
     # 5. Short-lived tenant session (same shape as peppol_receive) — match the
     #    session by BuyerCookie, store the cart, audit. All on the tenant DB.
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url
+    from app.db_engine import create_async_engine
 
     tenant_engine = create_async_engine(_make_tenant_url(org.db_name), pool_size=1, max_overflow=0)
     tenant_factory = async_sessionmaker(tenant_engine, expire_on_commit=False)

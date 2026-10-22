@@ -31,6 +31,7 @@ from app.database import get_control_db
 from app.models.expense import Expense, ExpenseReport
 from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import IN_REVIEW_STATUSES
 from app.models.organization import Organization
 from app.models.payment import Payment, PaymentSchedule
 from app.models.procurement import po_currency_code
@@ -75,6 +76,7 @@ from app.services.currency_conversion import (
     vendor_spend_grouped_select,
 )
 from app.services.fx_adapters import get_fx_adapter
+from app.services.payment_schedules import LATEST_SCHEDULE_ORDER
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -112,18 +114,10 @@ CASH_FORECAST_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 # still-in-flight pipeline (new / pending / ready_for_review) — projected,
 # lower-certainty outflow. Everything else (rejected / paid / done /
 # failed) is excluded: terminal, already-paid, or never going to pay.
-_COMMITTED_STATUSES = (
-    InvoiceStatus.approved.value,
-    InvoiceStatus.sending_to_erp.value,
-    InvoiceStatus.sent_to_erp.value,
-    InvoiceStatus.posted_in_erp.value,
-    InvoiceStatus.payment_scheduled.value,
-)
-_PENDING_STATUSES = (
-    InvoiceStatus.new.value,
-    InvoiceStatus.pending.value,
-    InvoiceStatus.ready_for_review.value,
-)
+# Both are the shared sets (`models/invoice_status`), named here rather than
+# re-listed: committed IS the open-AP population the aging and AP balance read.
+_COMMITTED_STATUSES = OPEN_AP_STATUSES
+_PENDING_STATUSES = tuple(s.value for s in IN_REVIEW_STATUSES)
 
 
 async def _commitment_rows(
@@ -174,12 +168,11 @@ async def _commitment_rows(
     # `PaymentSchedule` — an accident of the current feature set, not a
     # guarantee, and this query is the single source every cash projection reads.
     #
-    # `DISTINCT ON` mirrors `discount_auto_trigger._resolve_due_date`, which
-    # already takes the same precaution (`ORDER BY created_at DESC LIMIT 1`) on
-    # the same table — so the discount engine's idea of an invoice's due date
-    # and the cash forecast's cannot diverge. `id` is the tiebreak, so two rows
-    # written in one transaction (identical `created_at`) still resolve
-    # deterministically rather than letting the plan hash flap between reads.
+    # `DISTINCT ON` with `services/payment_schedules.LATEST_SCHEDULE_ORDER`, the
+    # same rule the discount engine's `latest_schedule` reads — so its idea of an
+    # invoice's due date and the cash forecast's cannot diverge. `id` is the
+    # tiebreak, so two rows written in one transaction (identical `created_at`)
+    # still resolve deterministically rather than letting the plan hash flap.
     latest_schedule = (
         select(
             PaymentSchedule.invoice_id.label("invoice_id"),
@@ -188,11 +181,7 @@ async def _commitment_rows(
             PaymentSchedule.discount_percent.label("discount_percent"),
         )
         .distinct(PaymentSchedule.invoice_id)
-        .order_by(
-            PaymentSchedule.invoice_id,
-            PaymentSchedule.created_at.desc(),
-            PaymentSchedule.id.desc(),
-        )
+        .order_by(PaymentSchedule.invoice_id, *LATEST_SCHEDULE_ORDER)
         .subquery()
     )
 

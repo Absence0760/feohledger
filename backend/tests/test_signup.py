@@ -390,6 +390,7 @@ def test_config_requires_captcha_in_deployed_env():
             email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="0xabc",
+            hcaptcha_sitekey="site-key",
             secret_key=strong_key,
         ).is_deployed
         is True

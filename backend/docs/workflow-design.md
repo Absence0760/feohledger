@@ -513,7 +513,33 @@ again. Detail: `erp-integration.md` § Retry Logic.
 4. Set `WorkflowInstance.state = "completed"`.
 5. Write audit log (`invoice.erp_confirmed`).
 
-The invoice is **immutable** in the later half of the lifecycle. PATCH and DELETE reject requests when the invoice is in `sending_to_erp`, `sent_to_erp`, `posted_in_erp`, `payment_scheduled`, `paid`, or `done` (the `IMMUTABLE_STATUSES` set in `app/api/invoices.py`).
+The invoice is **immutable** in the later half of the lifecycle. PATCH and DELETE reject requests when the invoice is in `sending_to_erp`, `sent_to_erp`, `posted_in_erp`, `payment_scheduled`, `paid`, or `done` (`IMMUTABLE_STATUSES` in `app/api/invoices.py`, which is
+`models/invoice_status.POST_APPROVAL_LOCKED_STATUSES`).
+
+### Status groupings have one owner
+
+`app/models/invoice_status.py` holds the `InvoiceStatus` enum (re-exported by
+`models.invoice` and `schemas.invoice`) and every named grouping of it:
+`IN_REVIEW_STATUSES` (new / pending / ready_for_review), `PRE_APPROVAL_STATUSES`
+(+ rejected), `OPEN_AP_STATUSES` (approved → payment_scheduled),
+`APPROVED_OR_BEYOND_STATUSES` (+ paid, done) and `POST_APPROVAL_LOCKED_STATUSES`
+(approved-or-beyond minus approved). `failed` is in none of the approval
+groups, since it is reachable both before and after approval. Import the set;
+never list its members again. The copies this replaced had drifted — the
+budget's realised spend dropped `sending_to_erp`, and the remit-to-change,
+statistical-anomaly and LLM-anomaly fraud baselines dropped `sending_to_erp`,
+`sent_to_erp` and `done`, so a vendor whose history had finished had no
+baseline at all (issue #575). `tests/test_invoice_status_groups.py` derives
+each group from `VALID_TRANSITIONS` and fails on a literal restatement anywhere
+under `app/`.
+
+Two readings of these sets are deliberate and are recorded in
+`docs/decisions.md` §308. The budget's realised spend adds `failed` back, but
+only with `Invoice.approval_date` set (an approved invoice whose ERP push
+failed). And the fraud baselines read `done`, which is the CSV importer's
+default status, so imported history seeds them. That is safe because the checks
+then fire more often, never less. It is also why the touchless rate (§73), which
+asks a different question, still requires the approval stamp.
 
 ## Workflow Models
 
