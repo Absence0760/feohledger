@@ -173,9 +173,17 @@
 	// counts stay whole-set, so a client-side filter would hide matches past the
 	// cap and report "nothing matched" under a whole-set header. Debounced, and
 	// the fetch goes through the same sequencer as every other load.
+	// `searchEffectRan` skips the mount run: the age-filter effect above has
+	// already loaded `/outstanding`, and the unguarded run loaded it again 300ms
+	// later on every visit.
 	let searchTimer: ReturnType<typeof setTimeout>;
+	let searchEffectRan = false;
 	$effect(() => {
 		search;
+		if (!searchEffectRan) {
+			searchEffectRan = true;
+			return;
+		}
 		clearTimeout(searchTimer);
 		searchTimer = setTimeout(() => {
 			syncUrl();

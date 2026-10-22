@@ -873,8 +873,9 @@
 	// The type row's "All types" key. `typeFilter` is `null` for "no type", and a
 	// chip key is a string; the empty string cannot collide with a wire type.
 	const ALL_TYPES = '';
-	// "All types" is label-only (no tally), as it always was. Rendered only when
-	// there is at least one type to choose between — `typeChips.length > 1`.
+	// "All types" is label-only (no tally), as it always was. Once the summary
+	// has landed the row renders only when there is at least one type to choose
+	// between — `typeChips.length > 1`; before then it holds its place (template).
 	let typeChips = $derived([
 		{ key: ALL_TYPES, label: m('exceptions.filter.allTypes') },
 		...typeChipEntries.map(([type, count]) => ({ key: type, label: typeLabel(type), count }))
@@ -964,7 +965,12 @@
 				<HelpTip term="exception" />
 			</div>
 
-			{#if typeChips.length > 1}
+			<!-- Drawn from first paint, holding only "All types" until the summary
+			     says which types exist: gating it on the roster alone inserted the
+			     row ~40px above the search box and the table once the summary
+			     landed, on every visit (tests-e2e/reactivity/layout-stability.spec.ts).
+			     It still goes when a LOADED summary leaves nothing to choose between. -->
+			{#if summary === null || typeChips.length > 1}
 				<!-- `data-testid`: the e2e suite's handle on THIS row, since every
 				     row now renders the same `.filter-chip`. -->
 				<div class="help-row" data-testid="exception-type-filters">

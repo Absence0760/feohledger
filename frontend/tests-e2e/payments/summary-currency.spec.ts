@@ -183,7 +183,10 @@ test.describe('/payments — reporting currency and FX exclusions', () => {
 		await page.goto('/payments');
 
 		const paid = page.locator('.scard').filter({ hasText: 'Total Paid' }).locator('.scard-value');
-		await expect(paid).toBeVisible();
+		// The card is drawn (with a dash) before the summary lands, so wait for
+		// the figure itself — otherwise the absence check below passes against
+		// the placeholder and proves nothing.
+		await expect(paid).toContainText(/10[.,]00/);
 		await expect(paid).not.toContainText('undefined');
 		await expect(page.getByTestId('unconverted-payments')).toHaveCount(0);
 		await expect(page.getByTestId('unconverted-queue')).toHaveCount(0);
