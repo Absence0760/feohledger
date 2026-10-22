@@ -61,6 +61,15 @@ class EntityStore {
 	deactivatedSelection = $state<Entity | null>(null);
 	#loaded = false;
 	#inflight: Promise<void> | null = null;
+	/**
+	 * Bumped by {@link reset}. A load applies its answer only while the
+	 * generation it started under is still current: `/admin/entities` resets and
+	 * reloads after a create while the sidebar's first load may still be in
+	 * flight, and that older list, landing last, used to overwrite the newer one
+	 * — dropping a just-created entity, and with it a selection of that entity
+	 * back to the consolidated view.
+	 */
+	#generation = 0;
 
 	/**
 	 * The entities a user may actually select — the ACTIVE ones.
@@ -128,21 +137,27 @@ class EntityStore {
 		if (this.#loaded) return;
 		if (this.#inflight) return this.#inflight;
 		this.loading = true;
-		this.#inflight = (async () => {
+		const generation = this.#generation;
+		const load = (async () => {
 			try {
 				const rows = await api.get<Entity[]>('/api/entities');
+				if (generation !== this.#generation) return;
 				this.entities = rows;
 				this.#reconcileSelection(rows);
 				this.#loaded = true;
 			} catch {
 				// Non-fatal: without the list the switcher just doesn't render.
 			} finally {
-				this.loading = false;
-				this.settled = true;
-				this.#inflight = null;
+				// A superseded load touches nothing: the current one owns these.
+				if (generation === this.#generation) {
+					this.loading = false;
+					this.settled = true;
+					this.#inflight = null;
+				}
 			}
 		})();
-		return this.#inflight;
+		this.#inflight = load;
+		return load;
 	}
 
 	/**
@@ -198,10 +213,12 @@ class EntityStore {
 	}
 
 	reset(): void {
+		this.#generation++;
 		this.entities = [];
 		this.deactivatedSelection = null;
 		this.selectedId = getStoredEntitySelection();
 		this.settled = false;
+		this.loading = false;
 		this.#loaded = false;
 		this.#inflight = null;
 	}

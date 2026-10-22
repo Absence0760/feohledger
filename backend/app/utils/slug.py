@@ -110,8 +110,9 @@ SLUG_HYPHEN_EDGE = "slug_hyphen_edge"
 SLUG_DOUBLE_HYPHEN = "slug_double_hyphen"
 SLUG_TAKEN = "slug_taken"
 #: Resting after its workspace was closed (`ensure_slug_not_held`, decisions
-#: §306). Named for the signup surface that introduced it; kept on the wire
-#: as-is so a client that already reads it keeps working.
+#: §306). Named for the signup surface that introduced it, and the value is
+#: unchanged from then. The slug-check now carries it in ``code`` like every
+#: other rule's code; the ``reason_code`` field that used to carry it is gone.
 SLUG_HELD = "signup_slug_held"
 
 

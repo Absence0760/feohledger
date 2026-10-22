@@ -120,6 +120,42 @@ for (const width of [375, 320]) {
 			await expectClosed(page);
 		});
 
+		test('a modal dialog over the panel takes Escape, and the panel stays open', async ({
+			page
+		}) => {
+			// The one modal a reader can raise FROM the open panel: following a
+			// nav link away from unsaved edits. Its Escape used to reach the
+			// panel's window listener too, closing both at once.
+			// A reflow-clean page (`/admin/retention` is in `reflow.spec.ts`), so
+			// the overlay opens exactly as on the dashboard. Nothing is saved:
+			// the dirty form is discarded with the page.
+			await page.setViewportSize({ width, height: 720 });
+			await page.goto('/admin/retention');
+			const input = page.getByTestId('retention-input-invoices');
+			await input.fill(String(Number(await input.inputValue()) + 1));
+			await expect(page.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+			const here = page.url();
+
+			await toggle(page).click();
+			await expectOpen(page, width);
+
+			const unsaved = page.getByRole('dialog', { name: 'Unsaved changes' });
+			await primaryNav(page).getByRole('link', { name: 'Invoices' }).click();
+			await expect(unsaved).toBeVisible();
+			await expect(unsaved.getByRole('button', { name: 'Stay on page' })).toBeFocused();
+
+			await page.keyboard.press('Escape');
+			await expect(unsaved).toHaveCount(0);
+			expect(page.url()).toBe(here);
+			await expect(page.locator('aside.sidebar')).toHaveClass(/\boverlay\b/);
+			await expect(backdrop(page)).toBeVisible();
+			await expect(main(page)).toHaveAttribute('inert', '');
+
+			// With the dialog gone, the next Escape is the panel's again.
+			await page.keyboard.press('Escape');
+			await expectClosed(page);
+		});
+
 		test('the panel stays above a bulk-action bar', async ({ page }) => {
 			await page.setViewportSize({ width, height: 720 });
 			// Status "new": selectable rows (the seed always has some), where an

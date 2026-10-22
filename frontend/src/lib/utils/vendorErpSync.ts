@@ -23,14 +23,35 @@ import {
  * see — for them a direct route counts as live and gated on
  * `erp_integrations`, which every plan holds. An ERP block written without
  * `integration_method` (by hand or an older client) is invisible to a
- * non-admin, who then sees no sync offer at all. The route rule mirrors the backend's `dispatcher.resolve_adapter_key`:
- * `integration_method` defaults to `merge_dev`, and `merge_dev` wins whatever
- * the type; a direct `mock` is never plan-gated.
+ * non-admin, who then sees no sync offer at all.
+ *
+ * The route rule is the backend's `dispatcher.resolve_adapter_key`, keyed on
+ * the same thing it keys on — whether a KEY is present, not whether its value
+ * is truthy:
+ *
+ * - `integration_method` ABSENT defaults to `merge_dev`, and `merge_dev` wins
+ *   whatever the type. PRESENT with any other value — `"direct"`, but also
+ *   `""` or `null` — is a direct route (`dict.get(k, default)` only defaults a
+ *   missing key).
+ * - On a direct route a PRESENT `type` names the adapter, a Python-falsy one
+ *   (`""`, `null`) meaning `mock`, which is never plan-gated. An ABSENT `type`
+ *   is the non-admin projection above, not a mock — the projection always
+ *   strips it, so it says nothing about what is configured.
  */
 export type VendorErpSyncOffer =
 	| { kind: 'sync' }
 	| { kind: 'connect' }
 	| { kind: 'upgrade'; feature: PlanFeature };
+
+/** Python truthiness, for the values a JSON settings block can hold. */
+function pyTruthy(value: unknown): boolean {
+	if (value === null || value === undefined || value === false || value === 0 || value === '') {
+		return false;
+	}
+	if (Array.isArray(value)) return value.length > 0;
+	if (typeof value === 'object') return Object.keys(value).length > 0;
+	return true;
+}
 
 export function vendorErpSyncOffer(
 	stored: Record<string, unknown> | null | undefined,
@@ -39,14 +60,13 @@ export function vendorErpSyncOffer(
 	if (!stored || typeof stored !== 'object' || Object.keys(stored).length === 0) {
 		return { kind: 'connect' };
 	}
-	const method = typeof stored.integration_method === 'string' ? stored.integration_method : '';
-	const type = typeof stored.type === 'string' ? stored.type : '';
-	if ((method || 'merge_dev') === 'merge_dev') {
+	const route = 'integration_method' in stored ? stored.integration_method : 'merge_dev';
+	if (route === 'merge_dev') {
 		if (!hasFeature(FEATURE_ERP_INTEGRATIONS)) return { kind: 'upgrade', feature: FEATURE_ERP_INTEGRATIONS };
 		if (!hasFeature(FEATURE_ERP_MERGE)) return { kind: 'upgrade', feature: FEATURE_ERP_MERGE };
 		return { kind: 'sync' };
 	}
-	if (type === 'mock') return { kind: 'sync' };
+	if ('type' in stored && (!pyTruthy(stored.type) || stored.type === 'mock')) return { kind: 'sync' };
 	if (!hasFeature(FEATURE_ERP_INTEGRATIONS)) return { kind: 'upgrade', feature: FEATURE_ERP_INTEGRATIONS };
 	return { kind: 'sync' };
 }

@@ -11,6 +11,7 @@
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import { NAV, entryHref, isEntryActive, isEntryVisible, type NavEntry } from '#lib/nav.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { topModalDialog } from '#lib/actions/focusTrap.ts';
 
 	let collapsed = $derived(sidebar.collapsed);
 	let mark = $derived(brand.mark);
@@ -53,6 +54,17 @@
 
 	function onWindowKeydown(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
+		// An open modal dialog owns Escape: its own `focusTrap` handler closes
+		// it, and this window listener sees the same press after it. Without
+		// this check one press closed both — "Unsaved changes" opened over the
+		// phone overlay took the overlay down with it. The registry `focusTrap`
+		// keeps of open `aria-modal` dialogs is the signal: the dialog leaves it
+		// only when it unmounts, on the flush AFTER this event, so it still
+		// reads as open here. The target check covers a press from inside a
+		// dialog that is no longer registered.
+		if (topModalDialog() || (e.target as Element | null)?.closest?.('[aria-modal="true"]')) {
+			return;
+		}
 		// Esc closes the profile popover and returns focus to its trigger,
 		// matching the backdrop-click dismissal. Without this the only way out
 		// is a click — a keyboard user who opened the menu was stranded in it.

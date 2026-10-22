@@ -887,7 +887,9 @@
 
 	/* One hue per stage family, from the palette so both themes are tuned:
 	   intake blue, review violet, approval green, held amber, refused red,
-	   finished neutral. Within a family the bars may look alike (the light
+	   finished neutral. Violet is the app palette's `--violet-on-tint` (a
+	   solid hue tuned per theme), never the marketing pages' `--brand-violet`.
+	   Within a family the bars may look alike (the light
 	   theme's base and -strong tokens are close); every row carries its
 	   status label and count in text, which is what is read. */
 	.pipeline-bar[data-status='new'],
@@ -901,7 +903,7 @@
 		background: var(--warning);
 	}
 	.pipeline-bar[data-status='ready_for_review'] {
-		background: var(--brand-violet);
+		background: var(--violet-on-tint);
 	}
 	.pipeline-bar[data-status='approved'],
 	.pipeline-bar[data-status='posted_in_erp'] {

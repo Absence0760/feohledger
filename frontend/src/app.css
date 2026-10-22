@@ -133,7 +133,10 @@
 	--danger-on-tint: #f87171;
 	/* Violet — the "with the ERP" status pill (an invoice sent to the ERP,
 	   an ERP-sourced badge). Text-on-tint 5.06 / 5.59. Two pills spelled it
-	   as literals before the light theme needed a second value. */
+	   as literals before the light theme needed a second value.
+	   --violet-on-tint is also the app's one solid violet: the dashboard's
+	   ready-for-review pipeline bar fills with it. --brand-violet (below) is
+	   the public pages' gradient stop, not an app colour. */
 	--violet-tint: rgba(140, 100, 240, 0.15);
 	--violet-on-tint: #a585f5;
 
