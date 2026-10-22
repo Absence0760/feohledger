@@ -618,6 +618,8 @@ export const en = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Amounts don\'t add up: subtotal ({subtotal}) + tax ({tax}) + shipping ({shipping}) − discount ({discount}) = {expected}, but total is {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'Due date ({dueDate}) is before invoice date ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'Line items total ({lineItemsTotal}) doesn\'t match invoice amount ({amount}).',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Amounts are printed in {printedCurrency}, but the invoice currency reads {fieldCurrency}. The amounts were left blank — enter them from the document.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Amounts are printed in more than one currency ({printedCurrencies}). The amounts were left blank — enter them from the document.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.',
 	'invoices.warning.glCodesNotInChart': 'AI suggested GL code(s) not in active chart: {codes}',
 	'invoices.warning.glCodeStalePrior': 'Cached vendor GL code “{code}” is no longer in the active chart of accounts.',

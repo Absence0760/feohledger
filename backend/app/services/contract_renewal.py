@@ -52,10 +52,11 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from sqlalchemy import Date, cast, func, literal, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
+from app.db_engine import create_async_engine
 from app.models.contract import Contract, ContractStatus
 from app.models.notification import EVENT_CONTRACT_RENEWAL_DUE
 from app.models.organization import Organization

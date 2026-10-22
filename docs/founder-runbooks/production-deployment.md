@@ -82,7 +82,7 @@ AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml
 
 Required values for prod:
 - `FEOH_SECRET_KEY` — generate with `openssl rand -hex 32`
-- `FEOH_DATABASE_URL` — RDS endpoint from Terraform outputs
+- `FEOH_DATABASE_URL` — RDS endpoint from Terraform outputs, as the `feoh_app` role with no password, plus `FEOH_DATABASE_IAM_AUTH: "true"` (the master password stays in `infra-secrets` only — `deploy/README.md` § Database role)
 - `FEOH_REDIS_URL` — ElastiCache endpoint
 - `FEOH_S3_BUCKET` — Terraform-provisioned invoice bucket
 - `FEOH_ANTHROPIC_API_KEY` — your Claude Vision key

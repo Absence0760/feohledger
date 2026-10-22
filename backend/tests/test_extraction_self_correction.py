@@ -365,6 +365,63 @@ async def test_line_item_unit_math_fails():
     assert result.line_items[0].total.confidence < original_li_confidence
 
 
+@pytest.mark.asyncio
+async def test_gross_line_total_with_its_own_vat_is_not_a_violation():
+    """Net / VAT / Gross columns: 2 × 95.00 net + 38.00 VAT = 228.00 gross.
+
+    Flagging this is the #572 defect class on a correct UK/EU tax invoice
+    (issue #575).
+    """
+    line = _line_item(qty="2", price="95.00", total="228.00")
+    line.tax = _field("38.00")
+    result = _result(amount=_field("228.00"), line_items=[line])
+
+    report = await run_self_correction(result)
+
+    assert [v["check"] for v in report.violations] == []
+
+
+@pytest.mark.asyncio
+async def test_gross_line_total_that_does_not_add_up_is_still_flagged():
+    """The gross reading is net + the line's OWN tax — not any tax at all."""
+    line = _line_item(qty="2", price="95.00", total="228.00")
+    line.tax = _field("19.00")
+    result = _result(amount=_field("228.00"), line_items=[line])
+
+    report = await run_self_correction(result)
+
+    assert [v["check"] for v in report.violations] == ["line_item_math"]
+
+
+# ---------------------------------------------------------------------------
+# date_ordering — reads dates the way the invoice row did
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_date_ordering_reads_day_first_dates_for_a_uk_org():
+    """28/10/2026 → 28/09/2026 is a due date a month BEFORE the invoice.
+
+    The check used to accept ISO only, so it skipped exactly the dates
+    `_apply_extraction` stored from the day-first strings (issue #575).
+    """
+    result = _result(invoice_date=_field("28/10/2026"), due_date=_field("28/09/2026"))
+
+    report = await run_self_correction(result, {"company": {"companies_house_number": "09999999"}})
+
+    assert [v["check"] for v in report.violations] == ["date_ordering"]
+    assert "due_date" in report.confidence_penalties
+
+
+@pytest.mark.asyncio
+async def test_date_ordering_reads_written_out_dates():
+    result = _result(invoice_date=_field("March 15, 2026"), due_date=_field("March 1, 2026"))
+
+    report = await run_self_correction(result)
+
+    assert [v["check"] for v in report.violations] == ["date_ordering"]
+
+
 # ---------------------------------------------------------------------------
 # 10. confidence floor at zero
 # ---------------------------------------------------------------------------
@@ -514,3 +571,51 @@ async def test_every_violation_is_json_safe():
         assert violation["type"] == "extraction_self_correction"
         for value in violation["params"].values():
             assert isinstance(value, (str, int)), (violation["code"], value)
+
+
+# ---------------------------------------------------------------------------
+# currency_evidence — the document contradicts itself about its currency
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_printed_code_contradicting_the_currency_field_is_flagged():
+    """`_apply_extraction` leaves the money unread (decisions §308); this pass
+    tells the reviewer why and docks the confidence the auto-approve gate reads."""
+    result = _result(amount=_field("USD 1,000.00"), currency=_field("EUR"))
+    report = await run_self_correction(result)
+
+    [v] = [v for v in report.violations if v["check"] == "currency_evidence"]
+    assert v["code"] == "self_correction_currency_conflict"
+    assert v["params"] == {"printedCurrency": "USD", "fieldCurrency": "EUR"}
+    assert v["type"] == "extraction_self_correction"
+    assert "amount" in report.confidence_penalties
+    assert "currency" in report.confidence_penalties
+
+
+@pytest.mark.asyncio
+async def test_amounts_printing_different_codes_are_flagged():
+    result = _result(
+        amount=_field("GBP 9,500.00"),
+        line_items=[_line_item("1", "9,500.00", "USD 9,500.00")],
+    )
+    report = await run_self_correction(result)
+
+    [v] = [v for v in report.violations if v["check"] == "currency_evidence"]
+    assert v["code"] == "self_correction_currency_mixed"
+    assert v["params"] == {"printedCurrencies": "GBP, USD"}
+
+
+@pytest.mark.parametrize(
+    "amount, currency",
+    [
+        ("GBP 9,500.00", None),  # the code is the currency — no contradiction
+        ("GBP 9,500.00", "GBP"),  # agreement
+        ("9,500.00", "EUR"),  # nothing printed
+    ],
+)
+@pytest.mark.asyncio
+async def test_consistent_currency_evidence_is_not_flagged(amount, currency):
+    result = _result(amount=_field(amount), currency=_field(currency))
+    report = await run_self_correction(result)
+    assert not any(v["check"] == "currency_evidence" for v in report.violations)

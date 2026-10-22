@@ -541,6 +541,8 @@ export const messages = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Os valores não fecham: subtotal ({subtotal}) + imposto ({tax}) + frete ({shipping}) − desconto ({discount}) = {expected}, mas o total é {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'A data de vencimento ({dueDate}) é anterior à data da nota ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'O total dos itens ({lineItemsTotal}) não corresponde ao valor da nota ({amount}).',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Os valores estão impressos em {printedCurrency}, mas a moeda da nota indica {fieldCurrency}. Os valores ficaram em branco — preencha-os a partir do documento.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Os valores estão impressos em mais de uma moeda ({printedCurrencies}). Os valores ficaram em branco — preencha-os a partir do documento.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Item {lineNumber}: {quantity} × {unitPrice} = {expected}, mas o total é {total}.',
 	'invoices.warning.glCodesNotInChart': 'Contas contábeis sugeridas pela IA que não estão no plano ativo: {codes}',
 	'invoices.warning.glCodeStalePrior': 'A conta contábil “{code}” em cache para o fornecedor não está mais no plano de contas ativo.',

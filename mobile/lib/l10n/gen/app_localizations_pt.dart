@@ -2977,6 +2977,19 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  ) {
+    return 'Os valores estão impressos em $printedCurrency, mas a moeda da nota indica $fieldCurrency. Os valores ficaram em branco — preencha-os a partir do documento.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies) {
+    return 'Os valores estão impressos em mais de uma moeda ($printedCurrencies). Os valores ficaram em branco — preencha-os a partir do documento.';
+  }
+
+  @override
   String invoiceWarningSelfCorrectionLineItemMath(
     String lineNumber,
     String quantity,
@@ -6087,6 +6100,19 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
     String amount,
   ) {
     return 'O total dos itens ($lineItemsTotal) não corresponde ao valor da nota ($amount).';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  ) {
+    return 'Os valores estão impressos em $printedCurrency, mas a moeda da nota indica $fieldCurrency. Os valores ficaram em branco — preencha-os a partir do documento.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies) {
+    return 'Os valores estão impressos em mais de uma moeda ($printedCurrencies). Os valores ficaram em branco — preencha-os a partir do documento.';
   }
 
   @override

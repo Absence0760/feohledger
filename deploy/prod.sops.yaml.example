@@ -30,19 +30,26 @@
 # Setting FEOH_DATABASE_URL is what selects the RDS path; deploy/lib.sh reads it
 # for every script, and decrypt-env.sh checks whichever block you chose.
 #
-# (a) RDS — the documented path. The URL: the master user, its password
-#     (URL-safe: openssl rand -hex 24, or percent-encode anything else), the
-#     endpoint host name EXACTLY as RDS reports it (verify-full checks the
-#     certificate against it — no IP, no CNAME of your own), the initial
-#     database `feohledger`, and NO query string (TLS is PGSSLMODE's job, which
-#     the app and the backup tools both read). PGSSLMODE must be verify-full
-#     (require / verify-ca warn; anything weaker is refused).
-FEOH_DATABASE_URL: "postgresql+asyncpg://postgres:<password>@<instance>.<id>.<region>.rds.amazonaws.com:5432/feohledger"
+# (a) RDS — the documented path. The app signs in as the least-privilege role
+#     `feoh_app` with a 15-minute IAM token it mints per connection from the
+#     instance profile, so the URL carries NO password: the user, the endpoint
+#     host name EXACTLY as RDS reports it (verify-full checks the certificate
+#     against it, and the token is signed for it — no IP, no CNAME of your
+#     own), the initial database `feohledger`, and NO query string (TLS is
+#     PGSSLMODE's job, which the app and the backup tools both read).
+#     FEOH_DATABASE_IAM_AUTH must be "true" and PGSSLMODE "verify-full" — both
+#     refused otherwise. Before deploy/db-role-cutover.sh has run (or on the
+#     break-glass path) the URL is the master's, WITH its password, and
+#     FEOH_DATABASE_IAM_AUTH "false"; never both (deploy/README.md § Database
+#     role). The master password itself lives in infra-secrets'
+#     terraform.sops.yaml, not here.
+FEOH_DATABASE_URL: "postgresql+asyncpg://feoh_app@<instance>.<id>.<region>.rds.amazonaws.com:5432/feohledger"
+FEOH_DATABASE_IAM_AUTH: "true"
 PGSSLMODE: "verify-full"
 POSTGRES_PASSWORD: ""
 #
 # (b) Postgres in a container on the VM — the cheaper alternative. Delete the
-#     two keys above and set this one instead (URL-safe by construction —
+#     three keys above and set this one instead (URL-safe by construction —
 #     compose embeds it in the URL it derives):
 # POSTGRES_PASSWORD: ""
 
@@ -142,10 +149,13 @@ FEOH_APPROVAL_SIGNING_KEY: ""
 # FEOH_SIGNUP_ENABLED is the switch. "false" closes signup: every /api/signup/*
 # route answers 404, /signup says signup is closed, and neither hCaptcha key is
 # needed — the right setting for a pilot whose tenants come from add-tenant.sh.
-# Delete the line (or set "true") to open public signup; then the hCaptcha
-# SECRET is REQUIRED — FEOH_ENVIRONMENT=production refuses to boot without it
-# (config.py _require_captcha_in_deployed_envs), and decrypt-env.sh refuses
-# before it gets that far — and the SITEKEY must be set for the widget to render.
+# Delete the line (or set "true") to open public signup; then BOTH hCaptcha
+# keys are REQUIRED — FEOH_ENVIRONMENT=production refuses to boot without
+# either (config.py _require_captcha_in_deployed_envs), and decrypt-env.sh
+# refuses before it gets that far. The secret verifies each signup; the site
+# key is what /api/public-config hands the browser so the widget renders, and
+# without it every signup fails the captcha. The post-deploy smoke check
+# (deploy/smoke.sh) confirms public-config reports this switch and the key.
 # docs/self-service-signup.md § Turning signup off.
 FEOH_SIGNUP_ENABLED: "false"
 # FEOH_HCAPTCHA_SECRET: ""

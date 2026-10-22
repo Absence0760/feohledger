@@ -7,10 +7,10 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 from app.config import settings
+from app.db_engine import create_async_engine
 from app.tenant_url import make_tenant_url
 
 # ---------------------------------------------------------------------------

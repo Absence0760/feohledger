@@ -637,13 +637,18 @@ def test_deploy_publishes_after_the_roll_and_ends_with_the_smoke_check() -> None
     roll = code.index("up -d --wait --wait-timeout 300")
     publish = code.rindex("\tpublish_frontend\n")
     reload_ = code.index("feoh_caddy_reload ||")
-    smoke = code.index('feoh_smoke_check "$APP_DOMAIN" /')
+    smoke = code.index("./smoke.sh --vm ||")
+    done = code.index('echo "deploy complete')
     assert roll < publish < reload_ < smoke, (
         "a release goes live only after the API rolled healthy, and the deploy ends "
         "by proving the site serves"
     )
-    assert 'feoh_smoke_check "$API_DOMAIN" /api/health' in code
-    assert "curl" in code.split("for cmd in", 1)[1].split(";", 1)[0].split()
+    # The smoke check is the LAST step (#575): nothing that could still change
+    # what is served runs after it.
+    assert code[smoke:done].count("\n") <= 3, code[smoke:done]
+    assert "feoh_smoke_check" not in code, "deploy.sh restates a check smoke.sh owns"
+    preflight = code.split("for cmd in", 1)[1].split(";", 1)[0].split()
+    assert {"curl", "python3"} <= set(preflight)
 
 
 def test_deploy_publishes_only_through_the_atomic_swap() -> None:
@@ -777,11 +782,15 @@ exit 0
 
 DEPLOY_CURL_STUB = """#!/bin/sh
 printf '%s\\n' "$*" >> "$STUB_DIR/curl_calls"
+for arg; do url=$arg; done
 while [ $# -gt 0 ]; do
   [ "$1" = "-o" ] && out=$2
   shift
 done
-echo "<!doctype html>" > "$out"
+case "$url" in
+  */api/public-config) echo '{"signup_enabled": false, "hcaptcha_sitekey": ""}' > "$out" ;;
+  *) echo "<!doctype html>" > "$out" ;;
+esac
 printf 200
 """
 
@@ -792,13 +801,20 @@ class Stack:
         self.repo = root / "repo"
         self.deploy = self.repo / "deploy"
         self.deploy.mkdir(parents=True)
-        for name in ("deploy.sh", "lib.sh", "Caddyfile", "tenants.caddy.example"):
+        for name in (
+            "deploy.sh",
+            "lib.sh",
+            "smoke.sh",
+            "bootstrap-vm.sh",
+            "Caddyfile",
+            "tenants.caddy.example",
+        ):
             shutil.copy2(DEPLOY / name, self.deploy / name)
         (self.deploy / "prod.sops.yaml").write_text("{}\n")
         decrypt = self.deploy / "decrypt-env.sh"
         decrypt.write_text(
             "#!/bin/sh\nprintf 'APP_DOMAIN=app.example.com\\nAPI_DOMAIN=api.example.com\\n"
-            "POSTGRES_PASSWORD=x\\n' > .env\n"
+            "POSTGRES_PASSWORD=x\\nFEOH_SIGNUP_ENABLED=false\\n' > .env\n"
         )
         decrypt.chmod(0o755)
         (self.repo / "frontend").mkdir()
@@ -943,7 +959,7 @@ def test_a_failed_build_or_migration_fails_the_deploy_before_the_roll(
 
 def test_a_failed_post_deploy_prune_warns_but_the_deploy_stands(stack: Stack) -> None:
     """The deliberate non-failure: disk hygiene after a deploy that is already
-    live and smoke-checked."""
+    live; the smoke check after it still decides the outcome."""
     stack.live_release("old")
 
     result = stack.run(fail="image prune")

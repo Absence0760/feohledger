@@ -241,9 +241,10 @@ async def _run_local(
     without knowing they exist. See `database.dispatch_engine_scope`.
     """
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url, dispatch_engine_scope
+    from app.db_engine import create_async_engine
     from app.models.invoice import Invoice
     from app.models.organization import Organization
     from app.services.extraction import run_extraction
@@ -385,9 +386,10 @@ async def _mark_failed(invoice_id: uuid.UUID, org_id: uuid.UUID, reason: str) ->
     fires the same hooks that reach for the app-loop engines.
     """
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.database import _make_tenant_url, dispatch_engine_scope
+    from app.db_engine import create_async_engine
     from app.models.invoice import Invoice, InvoiceStatus
     from app.models.organization import Organization
 

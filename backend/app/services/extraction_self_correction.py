@@ -53,13 +53,18 @@ def _to_decimal(val: str | None, convention: AmountConvention | None = None) -> 
     return _clean_decimal(val, convention)
 
 
-def _parse_date(val: str | None) -> date | None:
-    if val is None:
-        return None
-    try:
-        return date.fromisoformat(str(val).strip())
-    except (ValueError, TypeError):
-        return None
+def _parse_date(val: str | None, *, day_first: bool = False) -> date | None:
+    """Read one of the model's dates the SAME way the invoice row did.
+
+    Delegates to ``extraction._clean_date``, for the reason ``_to_decimal``
+    delegates to ``_clean_decimal``. This used to accept ISO only, so a date the
+    writer stored from ``28/10/2026`` (or ``March 15, 2026``) was invisible to the
+    ordering check — a due date before the invoice date went unflagged on
+    exactly the documents most likely to have the dates swapped (issue #575).
+    """
+    from app.services.extraction import _clean_date
+
+    return _clean_date(val, day_first=day_first)
 
 
 def _penalize(
@@ -146,10 +151,16 @@ def _check_date_ordering(
     result: ExtractionResult,
     report: SelfCorrectionReport,
     convention: AmountConvention | None = None,
+    *,
+    day_first: bool = False,
 ) -> None:
-    """due_date should be >= invoice_date."""
-    inv_date = _parse_date(result.invoice_date.value)
-    due = _parse_date(result.due_date.value)
+    """due_date should be >= invoice_date.
+
+    ``day_first`` is the org's preference (``resolve_day_first_preference``),
+    the one ``_apply_extraction`` read the dates under.
+    """
+    inv_date = _parse_date(result.invoice_date.value, day_first=day_first)
+    due = _parse_date(result.due_date.value, day_first=day_first)
     if inv_date is None or due is None:
         return
 
@@ -235,33 +246,88 @@ def _check_line_item_math(
     report: SelfCorrectionReport,
     convention: AmountConvention | None = None,
 ) -> None:
-    """quantity × unit_price ≈ total for each line item."""
+    """quantity × unit_price ≈ total for each line item.
+
+    A line that states its own tax may carry a GROSS total — the Net / VAT /
+    Gross column layout of a UK or EU tax invoice, where the model reports the
+    net unit price, the line's VAT and the gross amount. That line is consistent
+    when ``total ≈ quantity × unit_price + tax``, and flagging it (as this did,
+    on every such line — issue #575) is the #572 defect class again: a correct
+    invoice reported as suspect. Without a line tax only the net reading
+    applies, so a misread unit price is still caught.
+    """
     for i, li in enumerate(result.line_items):
         qty = _to_decimal(li.quantity.value, convention)
         price = _to_decimal(li.unit_price.value, convention)
         total = _to_decimal(li.total.value, convention)
+        line_tax = _to_decimal(li.tax.value, convention)
         if qty is None or price is None or total is None or total == 0:
             continue
 
         expected = qty * price
-        if not _approx_eq(expected, total, LINE_ITEM_TOLERANCE):
-            report.violations.append(
-                {
-                    **warning(
-                        "self_correction_line_item_math",
-                        "info",
-                        lineNumber=i + 1,
-                        quantity=qty,
-                        unitPrice=price,
-                        expected=expected,
-                        total=total,
-                    ),
-                    "check": "line_item_math",
-                    "fields_affected": [f"line_items[{i}].total"],
-                }
-            )
-            li.total.confidence = max(0.0, li.total.confidence - CONFIDENCE_PENALTY)
-            report.confidence_penalties[f"line_items[{i}].total"] = round(-CONFIDENCE_PENALTY, 2)
+        if _approx_eq(expected, total, LINE_ITEM_TOLERANCE):
+            continue
+        if line_tax and _approx_eq(expected + line_tax, total, LINE_ITEM_TOLERANCE):
+            continue
+        report.violations.append(
+            {
+                **warning(
+                    "self_correction_line_item_math",
+                    "info",
+                    lineNumber=i + 1,
+                    quantity=qty,
+                    unitPrice=price,
+                    expected=expected,
+                    total=total,
+                ),
+                "check": "line_item_math",
+                "fields_affected": [f"line_items[{i}].total"],
+            }
+        )
+        li.total.confidence = max(0.0, li.total.confidence - CONFIDENCE_PENALTY)
+        report.confidence_penalties[f"line_items[{i}].total"] = round(-CONFIDENCE_PENALTY, 2)
+
+
+def _check_currency_evidence(
+    result: ExtractionResult,
+    report: SelfCorrectionReport,
+    convention: AmountConvention | None = None,
+) -> None:
+    """The currency codes printed on the amounts agree with each other and with
+    the ``currency`` field.
+
+    ``_apply_extraction`` already refuses to write header money from a document
+    that contradicts itself about its currency (``CurrencyEvidence``,
+    `decisions.md` §308) — that half is not optional and does not depend on
+    this pass. This check is the half that tells the reviewer WHY the amount is
+    blank, and docks ``amount`` / ``currency`` so the score the auto-approve
+    gate reads says the read is suspect.
+    """
+    from app.services.extraction import extraction_currency_evidence
+
+    evidence = extraction_currency_evidence(result, convention)
+    if not evidence.conflict:
+        return
+    printed = sorted(evidence.printed_codes)
+    if len(printed) > 1:
+        finding = warning(
+            "self_correction_currency_mixed",
+            "warning",
+            # Codes are identifiers, joined with the ASCII separator (§148).
+            printedCurrencies=", ".join(printed),
+        )
+    else:
+        finding = warning(
+            "self_correction_currency_conflict",
+            "warning",
+            printedCurrency=printed[0],
+            fieldCurrency=evidence.field_currency,
+        )
+    report.violations.append(
+        {**finding, "check": "currency_evidence", "fields_affected": ["amount", "currency"]}
+    )
+    for f in ("amount", "currency"):
+        _penalize(result, report, f)
 
 
 # ------------------------------------------------------------------
@@ -284,14 +350,18 @@ async def run_self_correction(
         return SelfCorrectionReport()
 
     from app.services.extraction import extraction_amount_convention
+    from app.utils.dates import resolve_day_first_preference
 
     report = SelfCorrectionReport()
     # One document, one decimal convention — resolved from the same money
     # tokens `_apply_extraction` read, so the checker and the writer agree.
     convention = extraction_amount_convention(result)
 
+    _check_currency_evidence(result, report, convention)
     _check_total_reconciliation(result, report, convention)
-    _check_date_ordering(result, report, convention)
+    _check_date_ordering(
+        result, report, convention, day_first=resolve_day_first_preference(org_settings)
+    )
     _check_line_items_sum(result, report, convention)
     _check_line_item_math(result, report, convention)
 

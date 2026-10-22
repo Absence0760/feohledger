@@ -72,13 +72,15 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, exists, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import NullPool
 
 from app.api.deps import ROLE_ADMIN
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory, forget_tenant_engine
+from app.db_engine import create_async_engine
+from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.workspace_closure import (
@@ -136,19 +138,12 @@ BLOCKER_SUPPLIER_PORTAL_USERS = "supplier_portal_users"
 #: timeout, a dropped connection). Not knowing is not a pass.
 BLOCKER_RECORDS_UNVERIFIABLE = "records_unverifiable"
 
-#: Invoice statuses that only exist once someone approved the invoice. Paired
+#: Invoice statuses that only exist once someone approved the invoice — the
+#: named group from `app/models/invoice_status.py`, never restated here. Paired
 #: with `approved_by IS NOT NULL` in the check, which also catches an approved
 #: invoice whose ERP send failed (`failed` is shared with extraction failures,
 #: so the status alone cannot say).
-_POST_APPROVAL_STATUSES = (
-    "approved",
-    "sending_to_erp",
-    "sent_to_erp",
-    "posted_in_erp",
-    "payment_scheduled",
-    "paid",
-    "done",
-)
+_POST_APPROVAL_STATUSES: tuple[str, ...] = tuple(str(s) for s in APPROVED_OR_BEYOND_STATUSES)
 
 #: Purchase-order statuses that say nothing has happened to the order yet.
 #: `PurchaseOrder.status` is free-form (the ERP feed writes it), so this is the

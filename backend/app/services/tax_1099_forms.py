@@ -52,6 +52,7 @@ from app.services.branding import (
     build_logo_flowable,
     get_brand_context,
 )
+from app.services.pdf_text import pdf_markup
 from app.services.tax_1099 import (
     BOX_CATALOG,
     FORM_MISC,
@@ -226,10 +227,6 @@ def _money(amount: Decimal) -> str:
     return f"{sign}${abs(amount):,.2f}"
 
 
-def _escape(s: str) -> str:
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
 def render_1099_pdf(ctx: Form1099Context) -> bytes:
     """Render a single 1099-NEC / 1099-MISC working copy to PDF bytes."""
     buf = BytesIO()
@@ -280,7 +277,7 @@ def render_1099_pdf(ctx: Form1099Context) -> bytes:
         story.append(logo)
         story.append(Spacer(1, 0.08 * inch))
     else:
-        story.append(Paragraph(_escape(brand.product_name), h_brand))
+        story.append(Paragraph(pdf_markup(brand.product_name), h_brand))
     story.append(Paragraph(f"Form {ctx.form_type}", h_title))
     story.append(
         Paragraph(
@@ -291,20 +288,20 @@ def render_1099_pdf(ctx: Form1099Context) -> bytes:
     )
     story.append(Spacer(1, 0.2 * inch))
 
-    payer_block = [Paragraph("PAYER", label), Paragraph(_escape(ctx.payer_name), body)]
+    payer_block = [Paragraph("PAYER", label), Paragraph(pdf_markup(ctx.payer_name), body)]
     if ctx.payer_address:
-        payer_block.append(Paragraph(_escape(ctx.payer_address), body))
+        payer_block.append(Paragraph(pdf_markup(ctx.payer_address), body))
     if ctx.payer_tin_masked:
-        payer_block.append(Paragraph(f"TIN: {_escape(ctx.payer_tin_masked)}", body))
+        payer_block.append(Paragraph(f"TIN: {pdf_markup(ctx.payer_tin_masked)}", body))
 
     recipient_block = [
         Paragraph("RECIPIENT", label),
-        Paragraph(_escape(ctx.recipient_name), body),
+        Paragraph(pdf_markup(ctx.recipient_name), body),
     ]
     if ctx.recipient_address:
-        recipient_block.append(Paragraph(_escape(ctx.recipient_address), body))
+        recipient_block.append(Paragraph(pdf_markup(ctx.recipient_address), body))
     recipient_block.append(
-        Paragraph(f"TIN: {_escape(ctx.recipient_tin_masked or 'NOT ON FILE')}", body)
+        Paragraph(f"TIN: {pdf_markup(ctx.recipient_tin_masked or 'NOT ON FILE')}", body)
     )
 
     parties = Table([[payer_block, recipient_block]], colWidths=[3.4 * inch, 3.4 * inch])
@@ -328,16 +325,16 @@ def render_1099_pdf(ctx: Form1099Context) -> bytes:
     # single-line rendering.
     if ctx.boxes:
         data = [
-            [Paragraph(f"<b>{_escape(b.label)}</b>", body), _money(b.amount)] for b in ctx.boxes
+            [Paragraph(f"<b>{pdf_markup(b.label)}</b>", body), _money(b.amount)] for b in ctx.boxes
         ]
     else:
-        data = [[Paragraph(f"<b>{_escape(ctx.box_label)}</b>", body), _money(ctx.box_amount)]]
+        data = [[Paragraph(f"<b>{pdf_markup(ctx.box_label)}</b>", body), _money(ctx.box_amount)]]
     total_row_index = None
     if len(data) > 1:
         total_row_index = len(data)
         data.append(
             [
-                Paragraph(f"<b>Total — Form {_escape(ctx.form_type)}</b>", body),
+                Paragraph(f"<b>Total — Form {pdf_markup(ctx.form_type)}</b>", body),
                 _money(ctx.box_amount),
             ]
         )

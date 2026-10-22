@@ -42,10 +42,11 @@ async def main(args: argparse.Namespace) -> None:
         from datetime import UTC, datetime, timedelta
 
         from sqlalchemy import func, select
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from app.config import settings as app_settings
         from app.database import _make_tenant_url, control_session_factory
+        from app.db_engine import create_async_engine
         from app.models.invoice import Invoice, InvoiceStatus
         from app.models.organization import Organization
 

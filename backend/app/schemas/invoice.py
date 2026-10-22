@@ -1,9 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
-from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.models.invoice_status import InvoiceStatus  # the one enum; see that module
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
@@ -44,21 +44,6 @@ def _is_masked_tax_id(value) -> bool:
     """True when a caller echoed back the ``***<last4>`` masked value we return
     in responses. Real tax ids are digits/separators and never start ``***``."""
     return isinstance(value, str) and value.startswith("***")
-
-
-class InvoiceStatus(StrEnum):
-    new = "new"
-    pending = "pending"
-    ready_for_review = "ready_for_review"
-    approved = "approved"
-    rejected = "rejected"
-    sending_to_erp = "sending_to_erp"
-    sent_to_erp = "sent_to_erp"
-    posted_in_erp = "posted_in_erp"
-    payment_scheduled = "payment_scheduled"
-    paid = "paid"
-    done = "done"
-    failed = "failed"
 
 
 class InvoiceBase(BaseModel):

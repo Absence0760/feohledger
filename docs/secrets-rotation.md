@@ -12,7 +12,8 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Secrets management).
 |---|---|---|---|
 | `FEOH_SECRET_KEY` (JWT signing) | sops — `infra-secrets` (`feohledger/`) | **90 days** | Forge any user's JWT; full impersonation |
 | AWS KMS key for SOPS | AWS KMS | **365 days (auto)** | Decrypt every secret under `infra-secrets/feohledger/` |
-| RDS master password | AWS Secrets Manager | **90 days** | Full DB read/write |
+| RDS master password | sops — `infra-secrets` (`feohledger/terraform.sops.yaml`); **not** on the VM | **90 days**, and once right after the IAM cutover | Full DB read/write — but only from inside the VPC (the instance is private), and break-glass only: the app signs in as `feoh_app` with IAM tokens (`docs/decisions.md` §310) |
+| `feoh_app` IAM auth tokens | minted per connection, never stored | **15 minutes (automatic)** | One new connection as the app role while it lasts; nothing to rotate — revoke `rds-db:connect` on the VM role to stop all of them |
 | `FEOH_ANTHROPIC_API_KEY` (platform Claude Vision) | sops — `infra-secrets` (`feohledger/`) | **180 days** | Anthropic billing fraud, prompt extraction abuse |
 | `FEOH_LITHIC_API_KEY` (virtual cards — platform) | sops — `infra-secrets` (`feohledger/`) | **180 days** | Issue cards on our account |
 | `FEOH_NIUM_CLIENT_*` (virtual cards — platform) | sops — `infra-secrets` (`feohledger/`) | **180 days** | Issue cards on our account |
@@ -86,18 +87,8 @@ aws kms get-key-rotation-status --key-id alias/feohledger-sops
 
 ### RDS master password
 
-1. Pick a new password (≥ 32 chars, generated):
-   ```bash
-   openssl rand -base64 32 | tr -d '/+=' | head -c 40
-   ```
-2. Update via the AWS Console or CLI:
-   ```bash
-   aws rds modify-db-instance --db-instance-identifier feoh-prod \
-     --master-user-password '<new>' --apply-immediately
-   ```
-3. Update `FEOH_DATABASE_URL` in the encrypted deployed env (`infra-secrets`).
-4. Deploy. Application reconnects with the new password.
-5. Rotate any other consumers (read replicas, BI tools).
+See [§ RDS master password (break-glass)](#rds-master-password-break-glass) below — the
+procedure is the Terraform one, and since the IAM cutover it no longer touches the VM.
 
 ### Third-party API keys (Anthropic, Lithic, Nium, hCaptcha, SES)
 
@@ -186,24 +177,41 @@ This section is the container-mode database (`docs/minimal-deployment.md`
 `backup.sh` and `restore.sh` connect over the container's local socket and are
 unaffected.
 
-### RDS master password (the password in `FEOH_DATABASE_URL`)
+### RDS master password (break-glass)
 
-The RDS path's only database credential: the app, the migrations and
-`backup.sh` / `restore.sh` (through `pgtools`) all connect as the master user.
-Generate the new value URL-safe in your own terminal (`openssl rand -hex 24` —
-it is embedded in the URL, and `decrypt-env.sh` refuses characters it would
-have to decode). Changing it on the instance immediately breaks every new
-connection made with the old one, so keep the window short:
+Since the IAM cutover (`deploy/README.md` § Database role, `docs/decisions.md`
+§310) the app, its migrations and `backup.sh` / `psql.sh` sign in as `feoh_app`
+with IAM tokens, so **the master password is not on the VM** and rotating it
+does not interrupt the app. It is the break-glass credential: a logical
+restore, a pgvector upgrade, a cutover re-run.
 
-1. Set it on the instance — through the Terraform in `infra/` if that owns the
-   password, otherwise
-   `aws rds modify-db-instance --profile feohledger --db-instance-identifier <instance> --master-user-password <new> --apply-immediately`
-   (run it from your own terminal: the value is on that command line).
-2. In `infra-secrets`: `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml`, replace the
-   password inside `FEOH_DATABASE_URL`, save and commit; copy the file onto the VM as
-   `deploy/prod.sops.yaml`.
-3. `./deploy.sh --no-pull --backend-only` — recreates the api with the new URL. The
-   nightly backup reads the URL from `deploy/.env` per run, so it needs nothing else.
+1. In your own terminal, `openssl rand -hex 24` (URL-safe — the break-glass URL
+   embeds it), and put it in `infra-secrets/feohledger/terraform.sops.yaml` as
+   `db_master_password`.
+2. Bump `db_master_password_version` in `prod.tfvars` and apply as in
+   `infra/README.md` § Workload stack step 3 (the password is a write-only,
+   ephemeral input: it never lands in state or a plan file).
+3. Nothing on the VM changes. Confirm the app is still on the app role:
+   `./psql.sh -d feohledger -Atc "SELECT session_user"` prints `feoh_app`.
+
+**The one-time rotation after the cutover is not optional.** Until the cutover
+the master password was inside `FEOH_DATABASE_URL` in the VM's deploy env, so
+treat it as exposed and rotate it as soon as the app is on `feoh_app`. Likewise
+after any break-glass session that typed it on the VM.
+
+**Before the cutover** (or if the app is ever put back on the master), the
+password is also inside `FEOH_DATABASE_URL` in `prod.sops.yaml`: change it there
+in the same sitting, copy the file onto the VM and run
+`./deploy.sh --no-pull --backend-only`. Every new connection made with the old
+password fails between the apply and that redeploy.
+
+**There is no app-role password to rotate.** `feoh_app` has none (the cutover
+sets `PASSWORD NULL`, and RDS refuses password sign-in for an `rds_iam` member
+anyway), and `feoh_owner`, which owns the data, cannot sign in at all. To cut off the app role in an incident, remove the `ConnectAsAppRole`
+statement from the VM role (`infra/compute.tf`) or `REVOKE rds_iam FROM
+feoh_app` as the master. Tokens already minted are only good for opening a
+connection in their 15 minutes; connections already open must be terminated
+(`pg_terminate_backend`) as the master.
 
 ### HMAC signing keys (`FEOH_APPROVAL_SIGNING_KEY`, `FEOH_EMAIL_ACTION_SIGNING_KEY`, `FEOH_PARTNER_LINK_SIGNING_KEY`, `FEOH_EMAIL_INTAKE_SIGNING_SECRET`)
 

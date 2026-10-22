@@ -25,6 +25,7 @@ def test_deployed_env_refuses_default_secret_key():
             email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
+            hcaptcha_sitekey="site-key",
             secret_key="change-me-in-production",
         )
 
@@ -36,6 +37,7 @@ def test_deployed_env_refuses_too_short_secret_key():
             email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
+            hcaptcha_sitekey="site-key",
             secret_key="short",
         )
 
@@ -46,6 +48,7 @@ def test_deployed_env_accepts_a_strong_secret_key():
         email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="hc",
+        hcaptcha_sitekey="site-key",
         secret_key=_GOOD_KEY,
     )
     assert s.secret_key == _GOOD_KEY
@@ -70,6 +73,7 @@ def test_deployed_env_refuses_lithic_live_key_with_sandbox_on():
             email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
+            hcaptcha_sitekey="site-key",
             secret_key=_GOOD_KEY,
             lithic_api_key="sk_live_abc",
             lithic_sandbox=True,
@@ -82,6 +86,7 @@ def test_deployed_env_accepts_lithic_live_key_with_sandbox_off():
         email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="hc",
+        hcaptcha_sitekey="site-key",
         secret_key=_GOOD_KEY,
         lithic_api_key="sk_live_abc",
         lithic_sandbox=False,
@@ -96,6 +101,7 @@ def test_deployed_env_refuses_nium_creds_with_sandbox_on():
             email_provider="ses",
             credential_kms_key_id="alias/test-app",
             hcaptcha_secret="hc",
+            hcaptcha_sitekey="site-key",
             secret_key=_GOOD_KEY,
             nium_client_id="nium_live",
             nium_sandbox=True,
@@ -110,6 +116,7 @@ def test_deployed_env_without_card_keys_ignores_sandbox_flag():
         email_provider="ses",
         credential_kms_key_id="alias/test-app",
         hcaptcha_secret="hc",
+        hcaptcha_sitekey="site-key",
         secret_key=_GOOD_KEY,
     )
     assert s.lithic_sandbox is True  # default unchanged, but boot succeeds
@@ -133,6 +140,7 @@ def test_deployed_env_refuses_missing_credential_kms_key():
             environment="production",
             email_provider="ses",
             hcaptcha_secret="hc",
+            hcaptcha_sitekey="site-key",
             secret_key=_GOOD_KEY,
         )
 
@@ -143,6 +151,7 @@ def test_deployed_env_refuses_blank_credential_kms_key():
             environment="production",
             email_provider="ses",
             hcaptcha_secret="hc",
+            hcaptcha_sitekey="site-key",
             secret_key=_GOOD_KEY,
             credential_kms_key_id="   ",
         )
@@ -159,6 +168,7 @@ _DEPLOYED = {
     "environment": "production",
     "credential_kms_key_id": "alias/test-app",
     "hcaptcha_secret": "hc",
+    "hcaptcha_sitekey": "site-key",
     "secret_key": _GOOD_KEY,
 }
 
@@ -185,3 +195,29 @@ def test_local_dev_keeps_the_console_email_adapter():
     # The local signup flow reads the welcome email's temporary password from
     # this log (docs/self-service-signup.md § Testing the flow locally).
     assert Settings(environment="development").email_provider == "console"
+
+
+# ── hCaptcha site key (deployed-env boot guard, #575) ─────────────────
+
+
+@pytest.mark.parametrize("sitekey", ["", "   "])
+def test_deployed_env_with_signup_open_refuses_a_missing_captcha_sitekey(sitekey):
+    # The secret alone verifies every signup server-side, but the widget only
+    # renders when /api/public-config hands the browser a site key: without
+    # one, every signup on a deployed stack fails the captcha. The post-deploy
+    # smoke check (deploy/smoke.sh) asserts the same thing from outside.
+    with pytest.raises(ValidationError, match="FEOH_HCAPTCHA_SITEKEY"):
+        Settings(**{**_DEPLOYED, "hcaptcha_sitekey": sitekey}, email_provider="ses")
+
+
+def test_deployed_env_with_signup_closed_needs_no_captcha_sitekey():
+    s = Settings(
+        **{**_DEPLOYED, "hcaptcha_secret": "", "hcaptcha_sitekey": ""},
+        email_provider="ses",
+        signup_enabled=False,
+    )
+    assert s.signup_enabled is False
+
+
+def test_local_dev_needs_no_captcha_sitekey():
+    assert Settings(environment="development").hcaptcha_sitekey == ""

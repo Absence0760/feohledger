@@ -217,8 +217,10 @@ is [§ Database](#database). In short: `db.t4g.micro`, single-AZ, encrypted
 gp3 storage, automated backups on (that retention window *is* the
 point-in-time-restore window), `rds.force_ssl = 1`, an initial database named
 `feohledger`, not publicly accessible, and a security group admitting 5432
-from the VM's security group only. The instance profile needs nothing for it —
-the app authenticates with the master password, not IAM.
+from the VM's security group only. The app signs in as the least-privilege
+role `feoh_app` with an IAM auth token minted per connection, so the instance
+profile holds `rds-db:connect` on that one user (`infra/compute.tf`) and the
+master password is not on the VM ([§ The app's database role](#the-apps-database-role)).
 
 ### 2. Production compose stack (`deploy/compose.prod.yml` — built)
 
@@ -296,9 +298,10 @@ Beyond the committed defaults, the deployed env sets at minimum:
 | `FEOH_SECRET_KEY` | `openssl rand -hex 32` |
 | `FEOH_CREDENTIAL_KMS_KEY_ID` | `terraform output app_kms_key_alias` (e.g. `alias/feohledger-app-prod`) — the key that seals tenant ERP / payment / card credentials. **Required**: the API (and `alembic`) refuse to boot in production without it, and `deploy.sh` refuses first. Set it before the first deploy carrying migration 0110, which seals the existing credentials with it. The VM role already holds `kms:GenerateDataKey` + `kms:Decrypt` on that key (`infra/compute.tf`) |
 | `FEOH_SIGNUP_ENABLED` | `false` to keep self-service signup closed (every `/api/signup/*` route 404s and `/signup` says signup is closed) — the usual choice here, with tenants provisioned by `deploy/add-tenant.sh`. Leave it unset (on) only when you want public signup, and then set both hCaptcha keys |
-| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **Required while signup is on** — the API refuses to boot in production with the secret empty, and `deploy.sh` refuses first. With `FEOH_SIGNUP_ENABLED=false` neither is needed. |
-| `FEOH_DATABASE_URL` | **RDS path:** `postgresql+asyncpg://<master user>:<master password>@<RDS endpoint>:5432/feohledger` — the endpoint host name exactly as RDS reports it (verify-full checks the certificate against it), no query string, and a URL-safe password (`openssl rand -hex 24`; anything else percent-encoded). Setting it is what selects the RDS path. **Container path:** leave unset — compose derives it from `POSTGRES_PASSWORD` |
-| `PGSSLMODE` | **RDS path:** `verify-full` (required; `require` / `verify-ca` warn, anything weaker is refused). **Container path:** leave unset — the container serves no TLS |
+| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **Both required while signup is on** — the API refuses to boot in production with either empty (no site key means no widget, so every signup fails the captcha), and `deploy.sh` refuses first. With `FEOH_SIGNUP_ENABLED=false` neither is needed. |
+| `FEOH_DATABASE_URL` | **RDS path:** `postgresql+asyncpg://feoh_app@<RDS endpoint>:5432/feohledger` — no password (IAM auth), the endpoint host name exactly as RDS reports it (verify-full checks the certificate against it, and the token is signed for it), no query string. Before `deploy/db-role-cutover.sh` (and on the break-glass path) it is the master's URL with its URL-safe password instead. Setting it is what selects the RDS path. **Container path:** leave unset — compose derives it from `POSTGRES_PASSWORD` |
+| `FEOH_DATABASE_IAM_AUTH` | **RDS path:** `"true"` with the password-less app-role URL above; `"false"` (or unset) only with a password URL. `decrypt-env.sh` refuses both together and neither. **Container path:** leave unset |
+| `PGSSLMODE` | **RDS path:** `verify-full` (required; with a password URL `require` / `verify-ca` warn, and with IAM auth anything but `verify-full` is refused). **Container path:** leave unset — the container serves no TLS |
 | `POSTGRES_PASSWORD` | **Container path:** `openssl rand -hex 24` (compose derives `FEOH_DATABASE_URL` from it). **RDS path:** leave empty — nothing reads it |
 | `FEOH_S3_BUCKET` | invoice-files bucket; set `FEOH_S3_ENDPOINT_URL` / `FEOH_S3_ACCESS_KEY` / `FEOH_S3_SECRET_KEY` **empty** → real S3 via the instance-profile credential chain |
 | `FEOH_MFA_ENABLED` / `FEOH_HSTS_ENABLED` | `true` / `true` |
@@ -339,10 +342,13 @@ pipeline), then rolls the containers with `up -d --wait` — the deploy fails
 loudly if the API healthcheck never passes, and a failed build or migration
 leaves the previous containers serving. Only then does the new SPA go live — a
 copy of the build under `deploy/www/releases/`, switched in by one symlink
-rename — followed by a Caddy reload and a **smoke check**: `curl` from the VM,
-through its own Caddy, must get a 200 with a non-empty body from
-`https://<APP_DOMAIN>/` and `https://<API_DOMAIN>/api/health`, or the deploy
-fails (`deploy/README.md` § Deploys, § How the SPA is served). Flags: `--no-pull`, `--ref <sha>`,
+rename — followed by a Caddy reload and, last, a **smoke check**
+(`deploy/smoke.sh --vm`): `curl` from the VM, through its own Caddy, must get a
+200 with a non-empty body from `https://<APP_DOMAIN>/`,
+`https://<API_DOMAIN>/api/health` and the first tenant host (over a valid
+certificate), and `/api/public-config` must report signup as `.env` configures
+it, with a captcha site key while it is on — or the deploy fails
+(`deploy/README.md` § Deploys, § How the SPA is served). Flags: `--no-pull`, `--ref <sha>`,
 `--backend-only`, `--frontend-only`. Only one deploy runs at a time (a `flock`
 on `deploy/.deploy.lock`), and after the checkout the script re-runs the
 `deploy.sh` it just checked out, so a release that changes the deploy steps is
@@ -411,14 +417,19 @@ Two layers on the RDS path, one in container mode:
   [--force] [db …]`, streamed straight from S3; existing DBs are skipped
   unless `--force`. Container mode replays the role globals and then each DB
   via `pg_restore --create`. **On the RDS path it does not replay globals and
-  restores each DB with `--no-owner --no-acl`:** the app needs exactly one
-  role — the master user it connects as, which RDS already has — and the
+  restores each DB with `--no-owner --no-acl`, as the master:** the roles the
+  app needs already exist on the instance — the master, `feoh_owner` and
+  `feoh_app` — and the
   dumped roles cannot be recreated as dumped (a container dump's `postgres`
   is a SUPERUSER, which RDS refuses; an RDS dump's `rds*` roles belong to
   AWS). Without `--no-owner`, a container dump restored into RDS would try to
-  hand every object to a `postgres` role the app does not connect as. The
-  master user is `rds_superuser`, which is enough for `pg_restore --create`
-  (`CREATEDB`) and for the `CREATE EXTENSION vector` inside each tenant dump.
+  hand every object to a `postgres` role the app does not connect as. It runs
+  as the master (break-glass, `deploy/README.md` § Database role), because
+  `pg_restore --create` builds each database from `template0` and only
+  `rds_superuser` may `CREATE EXTENSION vector` (not a trusted extension on
+  RDS); the app role is refused. Re-run `deploy/db-role-cutover.sh` afterwards
+  to hand the restored objects to `feoh_owner`, then bring the api up from a
+  clean shell (`deploy/README.md` § Database role).
   **Test a restore once** before calling this done: scratch stack,
   `restore.sh <yesterday>`, log in.
 - RPO / RTO: on the RDS path the database's RPO is about five minutes (the
@@ -442,9 +453,10 @@ you switch.
    as possible").
 3. Wait, then read its endpoint: `aws rds wait db-instance-available --profile feohledger --db-instance-identifier <instance>-pitr-<yyyymmddhhmm>` and `aws rds describe-db-instances --profile feohledger --db-instance-identifier <instance>-pitr-<yyyymmddhhmm> --query 'DBInstances[0].Endpoint.Address' --output text`
 4. Switch the app to it. Either change the host in `FEOH_DATABASE_URL` in
-   `infra-secrets/feohledger/prod.sops.yaml` (same master user and password —
-   they are restored with the data), copy the file onto the VM and run
-   `./deploy.sh`; or keep the endpoint by renaming — `aws rds modify-db-instance --profile feohledger --db-instance-identifier <instance> --new-db-instance-identifier <instance>-old --apply-immediately`,
+   `infra-secrets/feohledger/prod.sops.yaml` (same users — roles are restored
+   with the data — but `rds-db:connect` names the instance's resource id, so
+   re-apply `infra/` against the new instance first or the app role's tokens
+   are refused), copy the file onto the VM and run `./deploy.sh`; or keep the endpoint by renaming — `aws rds modify-db-instance --profile feohledger --db-instance-identifier <instance> --new-db-instance-identifier <instance>-old --apply-immediately`,
    wait, then the same with `--db-instance-identifier <instance>-pitr-<yyyymmddhhmm> --new-db-instance-identifier <instance>`
    — the endpoint host name follows the identifier, so the secrets file does
    not change; restart the api (`./compose.sh restart api`). Either way,
@@ -493,15 +505,25 @@ explicitly so it survives a parameter-group swap), **an initial database named
 not publicly accessible, and a security group admitting TCP 5432 from the VM's
 security group and nothing else. The master password must be URL-safe
 (`openssl rand -hex 24`, or Terraform's `random_password` with
-`special = false`): it is embedded in `FEOH_DATABASE_URL`, and `decrypt-env.sh`
-refuses a URL `lib.sh` cannot hand to libpq.
+`special = false`): the break-glass `FEOH_DATABASE_URL` embeds it, and
+`decrypt-env.sh` refuses a URL `lib.sh` cannot hand to libpq.
 
-The app connects as the master user. That user is a member of
-`rds_superuser`, **not** a superuser, and nothing in the app needs more:
-tenant provisioning's `CREATE DATABASE` / `DROP DATABASE … WITH (FORCE)` need
-`CREATEDB` and ownership, which it has; the audit-log immutability triggers
-are ordinary `CREATE FUNCTION` / `CREATE TRIGGER`; no code path uses an event
-trigger, `ALTER SYSTEM`, or a role change.
+### The app's database role
+
+The app does **not** connect as the master (a member of `rds_superuser`). It
+connects as `feoh_app` (`LOGIN`, `rds_iam`, no password), and every session
+acts as `feoh_owner` (`NOLOGIN`, `CREATEDB`), the owner of the control plane and
+every tenant database. Neither role has `CREATEROLE` or is in `rds_superuser`,
+and the master joins only `feoh_owner`, so it keeps its password login. That is all the app needs: tenant provisioning's
+`CREATE DATABASE` / `DROP DATABASE … WITH (FORCE)` need `CREATEDB` and
+ownership; the audit-log immutability triggers are ordinary
+`CREATE FUNCTION` / `CREATE TRIGGER` on tables it owns; no code path uses an
+event trigger, `ALTER SYSTEM`, or a role change. It signs in with a 15-minute
+IAM token minted per connection from the instance profile
+(`backend/app/db_engine.py`), so there is no long-lived database credential on
+the VM. pgvector is created once in `template1` by the master, because the app
+role may not create it. The cutover, rollback and break-glass procedure is
+`deploy/README.md` § Database role; the reasoning is `docs/decisions.md` §310.
 
 ### Database TLS
 
@@ -515,7 +537,7 @@ the stack sets it in one place:
   `require` and above it loads `PGSSLROOTCERT`, and `verify-full` also checks
   the host name. Nothing in the app passes `ssl`: SQLAlchemy's asyncpg
   dialect forwards only the URL's query string, and the raw
-  `asyncpg.connect` calls (`tenant_provisioning.asyncpg_connect_kwargs`, used
+  connections (`db_engine.connect_raw` over `db_engine.asyncpg_connect_kwargs`, used
   by provisioning, deletion, `seed.py` and the rename script) parse the URL
   with the same `make_url` the engines use. So the control-plane engine, every
   tenant engine, Alembic (control and per-tenant), the raw CREATE/DROP
@@ -552,10 +574,13 @@ the stack sets it in one place:
 
 RDS for PostgreSQL 16 ships pgvector as the `vector` extension (every 16.x
 minor; the pgvector version follows the minor — 0.8.x on current 16.x). No
-`shared_preload_libraries` change is needed, and the master user
-(`rds_superuser`) may `CREATE EXTENSION vector`, which is what tenant
-provisioning (`CREATE EXTENSION IF NOT EXISTS vector`), migration
-`0003_rag_embeddings` and every tenant dump's restore run. The container image
+`shared_preload_libraries` change is needed. It is **not** a trusted extension
+on RDS: only the master (`rds_superuser`) may `CREATE EXTENSION vector`, so
+`deploy/db-role-cutover.sh` creates it once in `template1`. Every tenant
+database is copied from `template1`, so tenant provisioning's and migration
+`0003_rag_embeddings`'s `CREATE EXTENSION IF NOT EXISTS vector` find it
+present, which is a no-op the app role may run. A logical restore recreates it,
+which is why that restore runs as the master. The container image
 pins pgvector 0.8.7; a dump moves between the two either way, because
 `pg_dump` records `CREATE EXTENSION vector` without a version. To confirm on
 the live instance, from `deploy/` on the VM:
@@ -581,7 +606,9 @@ and losing the VM without a dump means losing the data.
 3. Copy the file onto the VM and run `./decrypt-env.sh` — the VM is now in RDS
    mode for every script.
 4. `./restore.sh <today> --force` — into RDS, without globals, with
-   `--no-owner --no-acl`, so every object belongs to the master user.
+   `--no-owner --no-acl`, so every object belongs to the master user (the
+   URL is still the master's at this point); then `./db-role-cutover.sh` and
+   the rest of `deploy/README.md` § Database role move the app onto `feoh_app`.
    `--force` because `feohledger` already exists on the new instance (created
    empty with it) and would otherwise be skipped; nothing else is there yet to
    overwrite.

@@ -2801,6 +2801,19 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningSelfCorrectionCurrencyConflict(
+    String printedCurrency,
+    String fieldCurrency,
+  ) {
+    return '金額は $printedCurrency で記載されていますが、請求書の通貨は $fieldCurrency です。金額は空欄のままです。書類から入力してください。';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionCurrencyMixed(String printedCurrencies) {
+    return '金額が複数の通貨（$printedCurrencies）で記載されています。金額は空欄のままです。書類から入力してください。';
+  }
+
+  @override
   String invoiceWarningSelfCorrectionLineItemMath(
     String lineNumber,
     String quantity,

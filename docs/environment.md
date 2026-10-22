@@ -191,7 +191,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_PUBLIC_URL`       | `http://localhost:7777`                                                  | Where the frontend is served — used in outbound email links, and as the origin of the email header's brand mark (`/email-mark.png`), so a deployed env left on loopback shows recipients a broken image |
 | `FEOH_TENANT_URL_TEMPLATE` | `http://{slug}.localhost:7777`                                        | Platform-wide tenant URL shape; `{slug}` is substituted. **Now a fallback** — a tenant that sets `settings.brand.tenant_url_template` (via `PUT /api/organization/branding`) overrides it for every outbound link: invites, password resets, portal and approval deep links. Also the source the **platform domain** is derived from, which `PUT /api/organization/branding/custom-domains` refuses vanity hosts under. Deliberately NOT read per-tenant by `services/sso.py` (the OIDC `redirect_uri` / SAML bridge URL are registered at the customer's IdP) or the public signup-config endpoint. See [../backend/docs/notifications.md](../backend/docs/notifications.md) § Where a tenant's links point and [decisions.md](decisions.md) §91 |
 | `FEOH_SIGNUP_ENABLED` | `true`                                                               | Master switch for self-service tenant signup. **Production:** keep `true` (and set both hCaptcha keys) on a deployment that takes self-service customers; set `false` on one whose tenants are provisioned by an operator (`deploy/add-tenant.sh`). Off → every `/api/signup/*` route answers 404, `/api/public-config` reports `signup_enabled: false` so `/signup` renders "signup is closed", and the deployed-env hCaptcha boot check stops applying. Default on so local dev is unchanged. See [self-service-signup.md](self-service-signup.md) § Turning signup off |
-| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | (empty)                                                   | hCaptcha keys for self-service signup. The secret is **required** in a deployed env while `FEOH_SIGNUP_ENABLED` is on (boot refuses otherwise), and not needed when it is off |
+| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | (empty)                                                   | hCaptcha keys for self-service signup. Both are **required** in a deployed env while `FEOH_SIGNUP_ENABLED` is on (boot refuses otherwise — without the site key `/signup` renders no widget and every signup fails the captcha), and neither is needed when it is off |
 | `FEOH_SIGNUP_RATE_LIMIT_PER_HOUR` | `5`                                                            | Max `/signup/start` + `/complete` per IP per hour (Redis sliding window) |
 | `FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR` | `3`                                                      | Max verification emails per target address per hour (anti email-bombing) |
 | `FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS` | `72`                                                        | Lifetime of the single-use set-password link a signup admin gets instead of a temporary password (a reset token, redeemed at `/login/reset-password`). Minimum 1. See [self-service-signup.md](self-service-signup.md), `decisions.md` §283 |
@@ -227,6 +227,19 @@ All backend variables are prefixed with `FEOH_` and loaded via `pydantic-setting
 ### Database URLs
 
 The `FEOH_DATABASE_URL` points to the **control-plane database** (`feohledger`). Tenant database URLs are derived automatically by replacing the database name with `<FEOH_TENANT_DB_PREFIX><slug>` (e.g., `feoh_acme`) — and only the name: the driver, credentials, host, port and any query string carry over (`app/tenant_url.make_tenant_url`, which Alembic's per-tenant run uses too).
+
+**`FEOH_DATABASE_IAM_AUTH`** (default `false`). On, every connection signs in
+with an RDS IAM auth token minted per new connection, off the event loop, from
+the process's AWS credentials (the VM's instance profile), instead of a
+password in the URL. Every engine, raw connection, Alembic run and Lambda
+handler goes through `app/db_engine.py`, so it applies to all of them. With it
+on, `FEOH_DATABASE_URL` must name the user and host with **no password**
+(`postgresql+asyncpg://feoh_app@<endpoint>:5432/feohledger`) and `PGSSLMODE`
+must be `verify-full`. The API refuses to boot otherwise, every engine refuses
+to build, and `deploy/decrypt-env.sh` refuses first. An AWS region must resolve
+(`AWS_REGION` / `AWS_DEFAULT_REGION`). Off is local dev and CI: password auth
+against the local container, unchanged. The production role, cutover and
+rollback: `deploy/README.md` § Database role, `docs/decisions.md` §310.
 
 **Database TLS is not a `FEOH_` variable.** asyncpg (every engine, and the raw connections tenant provisioning opens) and libpq (`pg_dump` and friends) both read the standard `PGSSLMODE` / `PGSSLROOTCERT` when the URL names no TLS option, so that is how a deployment sets it: the backend image sets `PGSSLROOTCERT` to the RDS CA bundle it carries, and the deployment sets `PGSSLMODE=verify-full` for RDS. Unset, asyncpg's default is `prefer` — what local dev uses. `docs/minimal-deployment.md` § Database TLS.
 

@@ -61,6 +61,8 @@ import asyncpg
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(1, str(Path(__file__).resolve().parent.parent))
 
+from app.config import settings
+from app.db_engine import connect_raw
 from app.services.tenant_provisioning import (
     _assert_safe_db_name,
     _parse_maintenance_dsn,
@@ -121,7 +123,7 @@ async def _rename_database(
 
 
 async def _rewrite_org_db_names(
-    dsn: dict, control_db: str, old_prefix: str, new_prefix: str, *, apply: bool
+    control_db: str, old_prefix: str, new_prefix: str, *, apply: bool
 ) -> str:
     """Repoint ``organizations.db_name`` at the renamed tenant databases.
 
@@ -131,7 +133,7 @@ async def _rewrite_org_db_names(
     then turn that into ``feoh_server``, silently corrupting an unrelated row.
     ``left()`` is a plain string comparison with no pattern semantics.
     """
-    conn = await asyncpg.connect(**{**dsn, "database": control_db})
+    conn = await connect_raw(settings.database_url, database=control_db)
     n = len(old_prefix)
     try:
         stale = await conn.fetchval(
@@ -181,7 +183,7 @@ async def main() -> int:
 
     dsn = _parse_maintenance_dsn()
     try:
-        conn = await asyncpg.connect(**dsn)
+        conn = await connect_raw(settings.database_url, database="postgres")
     except (OSError, asyncpg.PostgresError) as exc:
         # Operator-facing script: a stack trace here is noise. The actionable
         # information is the endpoint we tried and that it didn't answer.
@@ -249,7 +251,6 @@ async def main() -> int:
     print("\nControl-plane organizations.db_name:")
     try:
         status = await _rewrite_org_db_names(
-            dsn,
             control_db,
             args.old_tenant_prefix,
             args.new_tenant_prefix,

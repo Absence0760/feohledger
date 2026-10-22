@@ -537,6 +537,8 @@ export const messages = {
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Die Beträge stimmen nicht: Zwischensumme ({subtotal}) + Steuer ({tax}) + Versand ({shipping}) − Rabatt ({discount}) = {expected}, die Gesamtsumme lautet jedoch {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'Das Fälligkeitsdatum ({dueDate}) liegt vor dem Rechnungsdatum ({invoiceDate}).',
 	'invoices.warning.selfCorrectionLineItemsSum': 'Die Positionssumme ({lineItemsTotal}) stimmt nicht mit dem Rechnungsbetrag ({amount}) überein.',
+	'invoices.warning.selfCorrectionCurrencyConflict': 'Die Beträge sind in {printedCurrency} angegeben, die Rechnungswährung lautet jedoch {fieldCurrency}. Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.',
+	'invoices.warning.selfCorrectionCurrencyMixed': 'Die Beträge sind in mehr als einer Währung angegeben ({printedCurrencies}). Die Beträge wurden leer gelassen – bitte aus dem Dokument übernehmen.',
 	'invoices.warning.selfCorrectionLineItemMath': 'Position {lineNumber}: {quantity} × {unitPrice} = {expected}, die Summe lautet jedoch {total}.',
 	'invoices.warning.glCodesNotInChart': 'Von der KI vorgeschlagene Sachkonten fehlen im aktiven Kontenplan: {codes}',
 	'invoices.warning.glCodeStalePrior': 'Das zwischengespeicherte Sachkonto „{code}“ des Lieferanten ist nicht mehr im aktiven Kontenplan.',
