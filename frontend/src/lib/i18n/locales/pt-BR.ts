@@ -148,7 +148,7 @@ export const messages = {
 	'marketing.pricing.cta.free': 'Criar espaço de trabalho',
 	'marketing.pricing.cta.upgrade': 'Criar espaço de trabalho e depois mudar para {plan}',
 	'marketing.pricing.cta.enterprise': 'Falar com vendas',
-	'marketing.pricing.startsOnFree': 'Todo espaço de trabalho começa no {plan}. Mude de plano em Faturamento quando quiser.',
+	'marketing.pricing.startsOnFree': 'Todo espaço de trabalho começa no {plan}. Mude de plano em Configurações → Assinatura quando quiser.',
 	'marketing.pricing.aiRead.heading': 'O que conta como fatura lida por IA?',
 	'marketing.pricing.aiRead.body': 'Uma fatura que nossa IA lê com sucesso para você a partir de um PDF ou foto, contada uma vez por mês civil, não importa quantas vezes seja lida de novo. Faturas eletrônicas estruturadas (PEPPOL, UBL, Factur-X), importações CSV e faturas lidas com sua própria chave de provedor de IA nunca contam.',
 	'marketing.pricing.more': 'Precisa de mais do que o {plan} inclui, ou de um contrato? {sales}.',
@@ -217,7 +217,6 @@ export const messages = {
 	'profile.password.new': 'Nova senha',
 	'profile.password.confirm': 'Confirmar a nova senha',
 	'profile.password.submit': 'Alterar a senha',
-	'profile.password.mismatch': 'As senhas não coincidem',
 	'profile.password.updated': 'Senha atualizada',
 	'profile.password.updateFailed': 'Não foi possível atualizar a senha',
 	'profile.password.noPassword':
@@ -464,6 +463,10 @@ export const messages = {
 	// Invoices list
 	'invoices.title': 'Faturas',
 	'invoices.action.bulkRecode': 'Recodificar contas',
+	'invoices.bulkRecode.dialogLabel': "Recodificar contas",
+	'invoices.bulkRecode.applied': "{n, plural, one {# fatura recodificada} other {# faturas recodificadas}}",
+	'invoices.bulkRecode.previewFailed': "Falha na pré-visualização",
+	'invoices.bulkRecode.applyFailed': "Falha ao aplicar",
 	'invoices.action.create': '+ Criar fatura',
 	'invoices.action.upload': '+ Enviar faturas',
 	'invoices.action.uploading': 'Enviando…',
@@ -551,9 +554,9 @@ export const messages = {
 	'invoices.warning.rushPayment': 'Pagamento urgente: vence em {days, plural, one {# dia} other {# dias}} a partir da data da nota',
 	'invoices.warning.pastDue': 'A nota está vencida',
 	'invoices.warning.aiAllowanceReached':
-		'Leitura por IA pausada: a cota mensal de {included, plural, one {# nota lida por IA} other {# notas lidas por IA}} foi usada. Insira os dados manualmente ou faça upgrade do plano na página Faturamento.',
+		'Leitura por IA pausada: a cota mensal de {included, plural, one {# nota lida por IA} other {# notas lidas por IA}} foi usada. Insira os dados manualmente ou faça upgrade do plano em Configurações → Assinatura.',
 	'invoices.warning.aiSpendCapReached':
-		'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite na página Faturamento.',
+		'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite em Configurações → Assinatura.',
 	'invoices.warning.unverifiedVendor': 'O fornecedor não está verificado',
 	'invoices.warning.personalEmailDomain': 'O e-mail do fornecedor usa um domínio pessoal: {domain}',
 	'invoices.warning.newVendorLargeAmount': 'Fornecedor novo (criado há {days, plural, one {# dia} other {# dias}}) apresentando uma nota alta de {amount}',
@@ -628,6 +631,7 @@ export const messages = {
 	'payments.queue.unconvertedRows':
 		'{n, plural, one {# fatura não tem} other {# faturas não têm}} taxa de câmbio para a moeda de relatório, então os totais da fila as deixam de fora. As linhas continuam listadas e pagáveis, cada uma na sua própria moeda.',
 	'payments.summary.pending': 'Pendente',
+	'payments.summary.loadFailed': "Não foi possível carregar o resumo de pagamentos.",
 	'payments.summary.readyToPay': 'Pronto para pagar',
 	'payments.summary.payments': 'Pagamentos',
 	'payments.summary.rebatesEarned': 'Reembolsos obtidos',
@@ -648,6 +652,9 @@ export const messages = {
 	'payments.queue.empty': 'Nenhuma fatura pronta para pagamento.',
 	'payments.queue.empty.errored': 'Não foi possível carregar a fila de pagamentos. Tente novamente.',
 	'payments.queue.createFailed': 'Falha ao criar a remessa de pagamentos',
+	'payments.queue.draftCreated': "Lote de pagamento criado como rascunho — revise e execute",
+	'payments.queue.loadFailed': "Não foi possível carregar a fila de pagamentos.",
+	'payments.queue.loadMoreFailed': "Não foi possível carregar mais itens da fila de pagamentos.",
 	'payments.queue.mixedCurrency':
 		'Esta seleção abrange {n} moedas, portanto os subtotais são exibidos separadamente e NÃO são somados. Uma remessa de pagamentos precisa ter uma única moeda — reduza a seleção a uma moeda para continuar.',
 	'payments.queue.mixedCurrencyBlocked': 'Uma remessa de pagamentos precisa ter uma única moeda.',
@@ -757,6 +764,8 @@ export const messages = {
 	'payments.overdue': 'Vencida',
 	'payments.history.empty': 'Nenhum pagamento corresponde aos seus filtros.',
 	'payments.history.empty.errored': 'Não foi possível carregar os pagamentos. Tente novamente.',
+	'payments.history.refreshFailed': "Não foi possível atualizar a lista de pagamentos. Recarregue a página para ver o status mais recente.",
+	'payments.history.remittanceFailed': "Não foi possível baixar o comprovante de pagamento.",
 	'payments.history.remittance': 'Comprovante de pagamento',
 	'payments.history.void': 'Anular',
 	'payments.history.complianceRelease': 'Liberar',
@@ -768,6 +777,7 @@ export const messages = {
 	'payments.history.showingAll': '{total, plural, one {Exibindo # pagamento} other {Exibindo todos os # pagamentos}}',
 	'payments.runs.empty': 'Ainda não há lotes de pagamento.',
 	'payments.runs.empty.errored': 'Não foi possível carregar os lotes de pagamento.',
+	'payments.runs.loadFailed': "Não foi possível carregar os lotes de pagamento.",
 	'payments.runs.retry': 'Tentar novamente',
 	'payments.runs.erpSync': 'Repetir sincronização com o ERP',
 	'payments.runs.erpSyncAria': 'Repetir sincronização com o ERP — execução de pagamentos {run}',
@@ -781,6 +791,7 @@ export const messages = {
 	'payments.cards.loading': 'Carregando cartões…',
 	'payments.cards.empty': 'Ainda não há cartões virtuais emitidos.',
 	'payments.cards.errored': 'Não foi possível carregar os cartões virtuais.',
+	'payments.cards.revealFailed': "Não foi possível exibir os dados do cartão.",
 	'payments.cards.reveal': 'Revelar',
 	'payments.cards.loadMore': 'Carregar mais ({shown} de {total})',
 	'payments.cards.showingAll': '{total, plural, one {Exibindo # cartão} other {Exibindo todos os # cartões}}',
@@ -816,6 +827,7 @@ export const messages = {
 	'payments.rebates.dialog.markPaidWarning':
 		'Registra que o pagamento do processador referente a este reembolso já entrou — por exemplo, como uma linha no seu próprio extrato bancário. Isso não movimenta dinheiro: é o registro contábil de um pagamento que ocorreu fora deste aplicativo. Registrado na auditoria.',
 	'payments.rebates.dialog.busy': 'Registrando…',
+	'payments.rebates.dialog.label': "Atualizar o reembolso do cartão",
 	'payments.rebates.dialog.confirmCta': 'Registrar como confirmado',
 	'payments.rebates.dialog.markPaidCta': 'Registrar como pago',
 	'payments.rebates.confirmed': 'Reembolso registrado como confirmado.',
@@ -828,6 +840,8 @@ export const messages = {
 	'payments.void.voiding': 'Anulando…',
 	'payments.void.confirm': 'Anular pagamento',
 	'payments.void.failed': 'Não foi possível anular o pagamento.',
+	'payments.void.done': "Pagamento anulado",
+	'payments.void.reasonRequired': "Informe um motivo para a anulação.",
 	'payments.void.card.title': 'Cartão virtual não encerrado',
 	'payments.void.card.retryable':
 		'O pagamento foi anulado, mas o cartão virtual não foi encerrado no provedor. O cartão continua ativo e pode ser gasto até ser encerrado.',
@@ -859,6 +873,7 @@ export const messages = {
 	'payments.compliance.dismiss.failed': 'Falha ao descartar',
 	'payments.compliance.reason': 'Motivo',
 	'payments.compliance.reasonPlaceholder': 'Por que este pagamento está sendo descartado?',
+	'payments.compliance.dialogLabel': "Resolver a retenção de compliance",
 	'payments.compliance.reasonRequired': 'É necessário um motivo para descartar um pagamento retido',
 	'payments.close': 'Fechar',
 	'payments.settlement.title': 'Aceitar a liquidação como definitiva',
@@ -879,6 +894,7 @@ export const messages = {
 	'payments.erpSync.confirm': 'Executar sincronização com o ERP',
 	'payments.erpSync.busy': 'Sincronizando…',
 	'payments.erpSync.failed': 'Falha ao repetir a sincronização com o ERP',
+	'payments.erpSync.dialogLabel': "Repetir a sincronização com o ERP do lote de pagamento",
 	'payments.erpSync.recovered': '{count, plural, one {# fatura liberada como paga} other {# faturas liberadas como pagas}}',
 	'payments.erpSync.nothing': 'Nada a recuperar — nenhuma fatura foi movida.',
 	'payments.erpSync.counts.transitioned': 'Faturas liberadas',
@@ -888,6 +904,7 @@ export const messages = {
 	'payments.erpSync.counts.failed': 'Com falha',
 	'payments.erpSync.countsHint': 'Faturas liberadas é a contagem de recuperação. Operações sincronizadas conta o trabalho de ERP executado e permanece igual quando você executa de novo.',
 	'payments.cardDetails.title': 'Detalhes do cartão virtual',
+	'payments.cardDetails.dialogLabel': "Dados do cartão",
 	'payments.cardDetails.hint': 'Esses valores são obtidos sob demanda e o acesso é registrado em auditoria. Trate-os como um número de cartão de crédito — cole no portal do fornecedor e feche esta caixa de diálogo quando terminar.',
 	'payments.cardDetails.cardNumber': 'Número do cartão',
 	'payments.cardDetails.cvv': 'CVV',
@@ -3074,7 +3091,7 @@ export const messages = {
 	// Auth — login (routes/login/+page.svelte)
 	'auth.login.heading': "Entrar",
 	'auth.login.subtitle': 'Entre para continuar',
-	'auth.login.pageTitle': "Entrar — FeohLedger",
+	'auth.login.pageTitle': "Entrar — {product}",
 	'auth.login.workspace': "Espaço de trabalho: {workspace}",
 	'auth.login.loadingOptions': "Carregando as opções de login…",
 	'auth.login.email': 'E-mail',
@@ -3095,6 +3112,7 @@ export const messages = {
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Redefinir sua senha',
+	'auth.forgotPassword.pageTitle': 'Redefinir sua senha — {product}',
 	'auth.forgotPassword.subtitle':
 		'Digite seu e-mail e enviaremos um link para redefinir sua senha.',
 	'auth.forgotPassword.email': 'E-mail',
@@ -3106,6 +3124,7 @@ export const messages = {
 
 	// Auth — reset password (routes/login/reset-password/+page.svelte)
 	'auth.resetPassword.heading': 'Defina uma nova senha',
+	'auth.resetPassword.pageTitle': 'Defina uma nova senha — {product}',
 	'auth.resetPassword.subtitle': 'Escolha uma nova senha para sua conta.',
 	'auth.resetPassword.newPassword': 'Nova senha',
 	'auth.resetPassword.confirmPassword': 'Confirmar nova senha',
@@ -3127,6 +3146,7 @@ export const messages = {
 	'auth.resetPassword.setSubmit': 'Definir senha',
 	'auth.resetPassword.setSubtitle': 'Escolha uma senha para sua nova conta.',
 	'auth.resetPassword.setHeading': 'Defina sua senha',
+	'auth.resetPassword.setPageTitle': 'Defina sua senha — {product}',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Verificação em duas etapas',
@@ -3153,7 +3173,7 @@ export const messages = {
 	'auth.mfa.error.verify': 'Falha na verificação',
 
 	// Auth — SSO / SAML callback (routes/login/{sso,saml}-callback/+page.svelte)
-	'auth.callback.pageTitle': 'Entrando… — FeohLedger',
+	'auth.callback.pageTitle': 'Entrando… — {product}',
 	'auth.callback.signingIn': 'Conectando você…',
 	'auth.callback.idpAccessDenied': "O login foi cancelado, ou seu provedor de identidade não permitiu seu acesso a este aplicativo.",
 	'auth.callback.idpLoginRequired': "Seu provedor de identidade precisa que você entre nele novamente. Tente outra vez.",
@@ -3220,7 +3240,7 @@ export const messages = {
 		'Escolha-a direto na página de confirmação ou pelo link do seu e-mail de boas-vindas.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
-	'auth.changePassword.pageTitle': 'Alterar senha — FeohLedger',
+	'auth.changePassword.pageTitle': 'Alterar senha — {product}',
 	'auth.changePassword.heading': 'Defina uma nova senha',
 	'auth.changePassword.subForced': 'Você entrou com uma senha temporária. Escolha uma nova para continuar.',
 	'auth.changePassword.subVoluntary': 'Atualize sua senha.',
@@ -3249,7 +3269,7 @@ export const messages = {
 	'auth.changePassword.signOut': 'Sair',
 
 	// Auth — verify / provisioning (routes/verify/+page.svelte)
-	'auth.verify.pageTitle': 'Verificando — FeohLedger',
+	'auth.verify.pageTitle': 'Verificando — {product}',
 	'auth.verify.noToken': 'Nenhum token de verificação na URL.',
 	'auth.verify.failed': 'Falha na verificação.',
 	'auth.verify.pendingHeading': 'Criando seu espaço de trabalho…',
@@ -4685,6 +4705,7 @@ export const messages = {
 	'paymentRuns.runDetail.cancelling': 'Cancelando…',
 	'paymentRuns.runDetail.cfoApprovedNote': '✓ Aprovado pelo diretor financeiro em {date} · pronto para executar.',
 	'paymentRuns.runDetail.close': 'Fechar',
+	'paymentRuns.runDetail.dialogLabel': "Lote de pagamento",
 	'paymentRuns.runDetail.colAmount': 'Valor',
 	'paymentRuns.runDetail.colInvoice': 'Fatura',
 	'paymentRuns.runDetail.colMethod': 'Método',
@@ -4796,7 +4817,7 @@ export const messages = {
 
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "O FeohLedger não envia pagamentos para esta organização. Pague o fornecedor pelo seu banco ou ERP e depois registre o pagamento como pago fora do FeohLedger.",
-	'refusal.planFeatureRequired': "{feature} não está incluído no seu plano. Está disponível no plano {plan} — faça o upgrade em Faturamento para usar.",
+	'refusal.planFeatureRequired': "{feature} não está incluído no seu plano. Está disponível no plano {plan} — faça o upgrade em Configurações → Assinatura para usar.",
 	'refusal.externalPaymentForInvoice': "Fatura {invoice}: {reason}",
 	'refusal.externalPaymentNotPayable': "Somente uma fatura aprovada e ainda não paga pode ser registrada como paga (esta está com status {status}).",
 	'refusal.externalPaymentSegregation': "Segregação de funções: você criou ou alterou esta fatura, então outro usuário deve registrar o pagamento.",

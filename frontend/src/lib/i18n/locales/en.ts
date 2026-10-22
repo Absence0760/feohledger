@@ -170,7 +170,7 @@ export const en = {
 	'marketing.pricing.cta.free': 'Create workspace',
 	'marketing.pricing.cta.upgrade': 'Create workspace, then upgrade to {plan}',
 	'marketing.pricing.cta.enterprise': 'Contact sales',
-	'marketing.pricing.startsOnFree': 'Every workspace starts on {plan}. Upgrade from Billing whenever you are ready.',
+	'marketing.pricing.startsOnFree': 'Every workspace starts on {plan}. Upgrade under Settings → Subscription whenever you are ready.',
 	'marketing.pricing.aiRead.heading': 'What counts as an AI-read invoice?',
 	'marketing.pricing.aiRead.body': 'An invoice our AI successfully reads for you from a PDF or a photo, counted once per calendar month however often it is read again. Structured e-invoices (PEPPOL, UBL, Factur-X), CSV imports and invoices read with your own AI provider key never count.',
 	'marketing.pricing.more': 'Need more than {plan} includes, or a contract? {sales}.',
@@ -245,7 +245,6 @@ export const en = {
 	'profile.password.new': 'New password',
 	'profile.password.confirm': 'Confirm new password',
 	'profile.password.submit': 'Change password',
-	'profile.password.mismatch': 'Passwords do not match',
 	'profile.password.updated': 'Password updated',
 	'profile.password.updateFailed': 'Failed to update password',
 	// Shown instead of the form for an account with no password at all
@@ -529,6 +528,10 @@ export const en = {
 	// Invoices list (routes/invoices/+page.svelte)
 	'invoices.title': 'Invoices',
 	'invoices.action.bulkRecode': 'Bulk Re-code GL',
+	'invoices.bulkRecode.dialogLabel': "Bulk re-code GL",
+	'invoices.bulkRecode.applied': "{n, plural, one {Re-coded # invoice} other {Re-coded # invoices}}",
+	'invoices.bulkRecode.previewFailed': "Preview failed",
+	'invoices.bulkRecode.applyFailed': "Apply failed",
 	'invoices.action.create': '+ Create Invoice',
 	'invoices.action.upload': '+ Upload Invoices',
 	'invoices.action.uploading': 'Uploading...',
@@ -628,9 +631,9 @@ export const en = {
 	'invoices.warning.rushPayment': 'Rush payment: due within {days, plural, one {# day} other {# days}} of the invoice date',
 	'invoices.warning.pastDue': 'Invoice is past due',
 	'invoices.warning.aiAllowanceReached':
-		'AI reading is paused: this month\'s {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.',
+		'AI reading is paused: this month\'s {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan under Settings → Subscription.',
 	'invoices.warning.aiSpendCapReached':
-		'AI reading is paused: this month\'s AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.',
+		'AI reading is paused: this month\'s AI spending cap is reached. Enter the details manually, or raise the cap under Settings → Subscription.',
 	'invoices.warning.unverifiedVendor': 'Vendor is unverified',
 	'invoices.warning.personalEmailDomain': 'Vendor email uses personal domain: {domain}',
 	'invoices.warning.newVendorLargeAmount': 'New vendor (created {days, plural, one {# day} other {# days}} ago) submitting large invoice {amount}',
@@ -705,6 +708,7 @@ export const en = {
 	'payments.queue.unconvertedRows':
 		'{n, plural, one {# invoice has} other {# invoices have}} no exchange rate into the reporting currency, so the queue totals leave them out. The rows themselves are listed and payable, each in its own currency.',
 	'payments.summary.pending': 'Pending',
+	'payments.summary.loadFailed': "Could not load the payment summary.",
 	'payments.summary.readyToPay': 'Ready to Pay',
 	'payments.summary.payments': 'Payments',
 	'payments.summary.rebatesEarned': 'Rebates Earned',
@@ -725,6 +729,9 @@ export const en = {
 	'payments.queue.empty': 'No invoices ready for payment.',
 	'payments.queue.empty.errored': 'Could not load the payment queue. Try again.',
 	'payments.queue.createFailed': 'Payment run failed',
+	'payments.queue.draftCreated': "Draft payment run created — review and execute",
+	'payments.queue.loadFailed': "Could not load the payment queue.",
+	'payments.queue.loadMoreFailed': "Could not load more of the payment queue.",
 	'payments.queue.mixedCurrency':
 		'This selection spans {n} currencies, so the subtotals are shown separately and are NOT added together. A payment run must be a single currency — clear the selection down to one currency to continue.',
 	'payments.queue.mixedCurrencyBlocked': 'A payment run must be a single currency.',
@@ -838,6 +845,8 @@ export const en = {
 	'payments.overdue': 'Overdue',
 	'payments.history.empty': 'No payments match your filters.',
 	'payments.history.empty.errored': 'Could not load payments. Try again.',
+	'payments.history.refreshFailed': "The payment list could not be refreshed. Reload the page to see the latest status.",
+	'payments.history.remittanceFailed': "Could not download the remittance advice.",
 	'payments.history.remittance': 'Remittance',
 	'payments.history.void': 'Void',
 	'payments.history.complianceRelease': 'Release',
@@ -849,6 +858,7 @@ export const en = {
 	'payments.history.showingAll': '{total, plural, one {Showing all # payment} other {Showing all # payments}}',
 	'payments.runs.empty': 'No payment runs yet.',
 	'payments.runs.empty.errored': 'Could not load payment runs.',
+	'payments.runs.loadFailed': "Could not load payment runs.",
 	'payments.runs.retry': 'Retry',
 	'payments.runs.erpSync': 'Retry ERP sync',
 	'payments.runs.erpSyncAria': 'Retry ERP sync — payment run {run}',
@@ -862,6 +872,7 @@ export const en = {
 	'payments.cards.loading': 'Loading cards…',
 	'payments.cards.empty': 'No virtual cards issued yet.',
 	'payments.cards.errored': 'Could not load virtual cards.',
+	'payments.cards.revealFailed': "The card details could not be shown.",
 	'payments.cards.reveal': 'Reveal',
 	'payments.cards.loadMore': 'Load more ({shown} of {total})',
 	'payments.cards.showingAll': '{total, plural, one {Showing all # card} other {Showing all # cards}}',
@@ -897,6 +908,7 @@ export const en = {
 	'payments.rebates.dialog.markPaidWarning':
 		"Records that the processor's payout for this rebate has already landed — for example as a line on your own bank statement. This moves no money: it is a bookkeeping record of a payout that happened outside this app. Audit-logged.",
 	'payments.rebates.dialog.busy': 'Recording…',
+	'payments.rebates.dialog.label': "Advance card rebate",
 	'payments.rebates.dialog.confirmCta': 'Record as confirmed',
 	'payments.rebates.dialog.markPaidCta': 'Record as paid out',
 	'payments.rebates.confirmed': 'Rebate recorded as confirmed.',
@@ -909,6 +921,8 @@ export const en = {
 	'payments.void.voiding': 'Voiding…',
 	'payments.void.confirm': 'Void payment',
 	'payments.void.failed': 'The payment could not be voided.',
+	'payments.void.done': "Payment voided",
+	'payments.void.reasonRequired': "Enter a reason for the void.",
 	'payments.void.card.title': 'Virtual card not closed',
 	'payments.void.card.retryable':
 		'The payment was voided, but its virtual card was not closed at the provider. The card is still live and can be spent until it is closed.',
@@ -940,6 +954,7 @@ export const en = {
 	'payments.compliance.dismiss.failed': 'Dismiss failed',
 	'payments.compliance.reason': 'Reason',
 	'payments.compliance.reasonPlaceholder': 'Why is this payment being dismissed?',
+	'payments.compliance.dialogLabel': "Resolve compliance hold",
 	'payments.compliance.reasonRequired': 'Reason is required to dismiss a held payment',
 	'payments.close': 'Close',
 	'payments.settlement.title': 'Accept settlement as final',
@@ -960,6 +975,7 @@ export const en = {
 	'payments.erpSync.confirm': 'Run ERP sync',
 	'payments.erpSync.busy': 'Syncing…',
 	'payments.erpSync.failed': 'ERP sync retry failed',
+	'payments.erpSync.dialogLabel': "Retry ERP sync for payment run",
 	'payments.erpSync.recovered': '{count, plural, one {# invoice released to paid} other {# invoices released to paid}}',
 	'payments.erpSync.nothing': 'Nothing to recover — no invoice moved.',
 	'payments.erpSync.counts.transitioned': 'Invoices released',
@@ -969,6 +985,7 @@ export const en = {
 	'payments.erpSync.counts.failed': 'Failed',
 	'payments.erpSync.countsHint': 'Invoices released is the recovery count. Legs synced counts the ERP work that ran, and stays the same when you run this again.',
 	'payments.cardDetails.title': 'Virtual card details',
+	'payments.cardDetails.dialogLabel': "Card details",
 	'payments.cardDetails.hint': "These values are fetched on demand and the access is audit-logged. Treat them like a credit card number — paste into the vendor's portal and close this dialog when you're done.",
 	'payments.cardDetails.cardNumber': 'Card number',
 	'payments.cardDetails.cvv': 'CVV',
@@ -3253,7 +3270,7 @@ export const en = {
 	// Auth — login (routes/login/+page.svelte)
 	'auth.login.heading': "Sign in",
 	'auth.login.subtitle': 'Sign in to continue',
-	'auth.login.pageTitle': "Sign in — FeohLedger",
+	'auth.login.pageTitle': "Sign in — {product}",
 	'auth.login.workspace': "Workspace: {workspace}",
 	'auth.login.loadingOptions': "Loading sign-in options…",
 	'auth.login.email': 'Email',
@@ -3274,6 +3291,7 @@ export const en = {
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Reset your password',
+	'auth.forgotPassword.pageTitle': 'Reset your password — {product}',
 	'auth.forgotPassword.subtitle':
 		"Enter your email and we'll send you a link to reset your password.",
 	'auth.forgotPassword.email': 'Email',
@@ -3285,6 +3303,7 @@ export const en = {
 
 	// Auth — reset password (routes/login/reset-password/+page.svelte)
 	'auth.resetPassword.heading': 'Set a new password',
+	'auth.resetPassword.pageTitle': 'Set a new password — {product}',
 	'auth.resetPassword.subtitle': 'Choose a new password for your account.',
 	'auth.resetPassword.newPassword': 'New password',
 	'auth.resetPassword.confirmPassword': 'Confirm new password',
@@ -3306,6 +3325,7 @@ export const en = {
 	'auth.resetPassword.setSubmit': 'Set password',
 	'auth.resetPassword.setSubtitle': 'Choose a password for your new account.',
 	'auth.resetPassword.setHeading': 'Set your password',
+	'auth.resetPassword.setPageTitle': 'Set your password — {product}',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Two-factor verification',
@@ -3332,7 +3352,7 @@ export const en = {
 	'auth.mfa.error.verify': 'Verification failed',
 
 	// Auth — SSO / SAML callback (routes/login/{sso,saml}-callback/+page.svelte)
-	'auth.callback.pageTitle': 'Signing in… — FeohLedger',
+	'auth.callback.pageTitle': 'Signing in… — {product}',
 	'auth.callback.signingIn': 'Signing you in…',
 	'auth.callback.idpAccessDenied': "Sign-in was cancelled, or your identity provider didn't allow you into this app.",
 	'auth.callback.idpLoginRequired': "Your identity provider needs you to sign in to it again. Try once more.",
@@ -3399,7 +3419,7 @@ export const en = {
 		'Choose it straight from the confirmation page, or from the link in your welcome email.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
-	'auth.changePassword.pageTitle': 'Change password — FeohLedger',
+	'auth.changePassword.pageTitle': 'Change password — {product}',
 	'auth.changePassword.heading': 'Set a new password',
 	'auth.changePassword.subForced': 'You signed in with a temporary password. Choose a new one to continue.',
 	'auth.changePassword.subVoluntary': 'Update your password.',
@@ -3428,7 +3448,7 @@ export const en = {
 	'auth.changePassword.signOut': 'Sign out',
 
 	// Auth — verify / provisioning (routes/verify/+page.svelte)
-	'auth.verify.pageTitle': 'Verifying — FeohLedger',
+	'auth.verify.pageTitle': 'Verifying — {product}',
 	'auth.verify.noToken': 'No verification token in the URL.',
 	'auth.verify.failed': 'Verification failed.',
 	'auth.verify.pendingHeading': 'Creating your workspace…',
@@ -4869,6 +4889,7 @@ export const en = {
 	'paymentRuns.runDetail.cancelling': 'Cancelling…',
 	'paymentRuns.runDetail.cfoApprovedNote': '✓ CFO-approved {date} · ready to execute.',
 	'paymentRuns.runDetail.close': 'Close',
+	'paymentRuns.runDetail.dialogLabel': "Payment run",
 	'paymentRuns.runDetail.colAmount': 'Amount',
 	'paymentRuns.runDetail.colInvoice': 'Invoice',
 	'paymentRuns.runDetail.colMethod': 'Method',
@@ -4982,7 +5003,7 @@ export const en = {
 
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "FeohLedger does not send payments for this organization. Pay the supplier from your bank or ERP, then record the payment as paid outside FeohLedger.",
-	'refusal.planFeatureRequired': "{feature} is not included in your plan. It is available on the {plan} plan — upgrade in Billing to use it.",
+	'refusal.planFeatureRequired': "{feature} is not included in your plan. It is available on the {plan} plan — upgrade under Settings → Subscription to use it.",
 	'refusal.externalPaymentForInvoice': "Invoice {invoice}: {reason}",
 	'refusal.externalPaymentNotPayable': "Only an approved invoice that has not been paid can be recorded as paid (this one is {status}).",
 	'refusal.externalPaymentSegregation': "Segregation of duties: you created or shaped this invoice, so a different user must record its payment.",

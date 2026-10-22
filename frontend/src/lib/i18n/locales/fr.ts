@@ -147,7 +147,7 @@ export const messages = {
 	'marketing.pricing.cta.free': 'Créer un espace de travail',
 	'marketing.pricing.cta.upgrade': 'Créer un espace de travail, puis passer à {plan}',
 	'marketing.pricing.cta.enterprise': 'Contacter l’équipe commerciale',
-	'marketing.pricing.startsOnFree': 'Chaque espace de travail démarre avec {plan}. Changez d’offre depuis Facturation quand vous le souhaitez.',
+	'marketing.pricing.startsOnFree': 'Chaque espace de travail démarre avec {plan}. Changez d’offre depuis Paramètres → Abonnement quand vous le souhaitez.',
 	'marketing.pricing.aiRead.heading': 'Qu’est-ce qu’une facture lue par l’IA ?',
 	'marketing.pricing.aiRead.body': 'Une facture que notre IA lit avec succès pour vous à partir d’un PDF ou d’une photo, comptée une fois par mois civil, quel que soit le nombre de relectures. Les factures électroniques structurées (PEPPOL, UBL, Factur-X), les imports CSV et les factures lues avec votre propre clé de fournisseur d’IA ne comptent jamais.',
 	'marketing.pricing.more': 'Besoin de plus que ce que comprend {plan}, ou d’un contrat ? {sales}.',
@@ -216,7 +216,6 @@ export const messages = {
 	'profile.password.new': 'Nouveau mot de passe',
 	'profile.password.confirm': 'Confirmer le nouveau mot de passe',
 	'profile.password.submit': 'Changer le mot de passe',
-	'profile.password.mismatch': 'Les mots de passe ne correspondent pas',
 	'profile.password.updated': 'Mot de passe mis à jour',
 	'profile.password.updateFailed': 'Impossible de mettre à jour le mot de passe',
 	'profile.password.noPassword':
@@ -463,6 +462,10 @@ export const messages = {
 	// Invoices list
 	'invoices.title': 'Factures',
 	'invoices.action.bulkRecode': 'Recoder les comptes',
+	'invoices.bulkRecode.dialogLabel': "Recoder les comptes",
+	'invoices.bulkRecode.applied': "{n, plural, one {# facture recodée} other {# factures recodées}}",
+	'invoices.bulkRecode.previewFailed': "Échec de l’aperçu",
+	'invoices.bulkRecode.applyFailed': "Échec de l’application",
 	'invoices.action.create': '+ Créer une facture',
 	'invoices.action.upload': '+ Importer des factures',
 	'invoices.action.uploading': 'Importation…',
@@ -550,9 +553,9 @@ export const messages = {
 	'invoices.warning.rushPayment': 'Paiement urgent : échéance sous {days, plural, one {# jour} other {# jours}} après la date de facture',
 	'invoices.warning.pastDue': 'La facture est en retard de paiement',
 	'invoices.warning.aiAllowanceReached':
-		'Lecture IA en pause : le quota mensuel de {included, plural, one {# facture lue par IA} other {# factures lues par IA}} est épuisé. Saisissez les informations manuellement ou passez à une offre supérieure sur la page Facturation.',
+		'Lecture IA en pause : le quota mensuel de {included, plural, one {# facture lue par IA} other {# factures lues par IA}} est épuisé. Saisissez les informations manuellement ou passez à une offre supérieure dans Paramètres → Abonnement.',
 	'invoices.warning.aiSpendCapReached':
-		'Lecture IA en pause : le plafond de dépenses IA de ce mois est atteint. Saisissez les informations manuellement ou relevez le plafond sur la page Facturation.',
+		'Lecture IA en pause : le plafond de dépenses IA de ce mois est atteint. Saisissez les informations manuellement ou relevez le plafond dans Paramètres → Abonnement.',
 	'invoices.warning.unverifiedVendor': 'Le fournisseur n’est pas vérifié',
 	'invoices.warning.personalEmailDomain': 'L’e-mail du fournisseur utilise un domaine personnel : {domain}',
 	'invoices.warning.newVendorLargeAmount': 'Nouveau fournisseur (créé il y a {days, plural, one {# jour} other {# jours}}) présentant une facture élevée de {amount}',
@@ -627,6 +630,7 @@ export const messages = {
 	'payments.queue.unconvertedRows':
 		'{n, plural, one {# facture n\'a} other {# factures n\'ont}} pas de taux de change vers la devise de reporting ; les totaux de la file les excluent donc. Les lignes restent affichées et payables, chacune dans sa propre devise.',
 	'payments.summary.pending': 'En attente',
+	'payments.summary.loadFailed': "Impossible de charger le récapitulatif des paiements.",
 	'payments.summary.readyToPay': 'Prêt à payer',
 	'payments.summary.payments': 'Paiements',
 	'payments.summary.rebatesEarned': 'Remises obtenues',
@@ -647,6 +651,9 @@ export const messages = {
 	'payments.queue.empty': 'Aucune facture prête au paiement.',
 	'payments.queue.empty.errored': "Impossible de charger la file d'attente de paiement. Réessayez.",
 	'payments.queue.createFailed': 'Échec de la campagne de paiement',
+	'payments.queue.draftCreated': "Lot de paiement créé en brouillon — vérifiez-le puis exécutez-le",
+	'payments.queue.loadFailed': "Impossible de charger la file d’attente des paiements.",
+	'payments.queue.loadMoreFailed': "Impossible de charger la suite de la file d’attente des paiements.",
 	'payments.queue.mixedCurrency':
 		'Cette sélection couvre {n} devises : les sous-totaux sont donc affichés séparément et NE sont PAS additionnés. Une campagne de paiement doit être dans une seule devise — réduisez la sélection à une devise pour continuer.',
 	'payments.queue.mixedCurrencyBlocked': 'Une campagne de paiement doit être dans une seule devise.',
@@ -756,6 +763,8 @@ export const messages = {
 	'payments.overdue': 'En retard',
 	'payments.history.empty': 'Aucun paiement ne correspond à vos filtres.',
 	'payments.history.empty.errored': 'Impossible de charger les paiements. Réessayez.',
+	'payments.history.refreshFailed': "La liste des paiements n’a pas pu être actualisée. Rechargez la page pour voir le dernier statut.",
+	'payments.history.remittanceFailed': "Impossible de télécharger l’avis de paiement.",
 	'payments.history.remittance': 'Avis de paiement',
 	'payments.history.void': 'Annuler',
 	'payments.history.complianceRelease': 'Libérer',
@@ -767,6 +776,7 @@ export const messages = {
 	'payments.history.showingAll': '{total, plural, one {Affichage du # paiement} other {Affichage des # paiements}}',
 	'payments.runs.empty': 'Aucun lot de paiement pour le moment.',
 	'payments.runs.empty.errored': 'Impossible de charger les lots de paiement.',
+	'payments.runs.loadFailed': "Impossible de charger les lots de paiement.",
 	'payments.runs.retry': 'Réessayer',
 	'payments.runs.erpSync': 'Relancer la synchro ERP',
 	'payments.runs.erpSyncAria': 'Relancer la synchro ERP — lot de paiement {run}',
@@ -780,6 +790,7 @@ export const messages = {
 	'payments.cards.loading': 'Chargement des cartes…',
 	'payments.cards.empty': 'Aucune carte virtuelle émise pour le moment.',
 	'payments.cards.errored': 'Impossible de charger les cartes virtuelles.',
+	'payments.cards.revealFailed': "Les données de la carte n’ont pas pu être affichées.",
 	'payments.cards.reveal': 'Afficher',
 	'payments.cards.loadMore': 'Charger plus ({shown} sur {total})',
 	'payments.cards.showingAll': '{total, plural, one {Affichage de la # carte} other {Affichage des # cartes}}',
@@ -815,6 +826,7 @@ export const messages = {
 	'payments.rebates.dialog.markPaidWarning':
 		"Enregistre que le versement du processeur pour cette remise est déjà arrivé — par exemple sous forme de ligne sur votre propre relevé bancaire. Aucun fonds n'est déplacé : il s'agit d'une écriture comptable d'un versement effectué en dehors de cette application. Journalisé.",
 	'payments.rebates.dialog.busy': 'Enregistrement…',
+	'payments.rebates.dialog.label': "Mettre à jour la remise carte",
 	'payments.rebates.dialog.confirmCta': 'Enregistrer comme confirmée',
 	'payments.rebates.dialog.markPaidCta': 'Enregistrer comme versée',
 	'payments.rebates.confirmed': 'Remise enregistrée comme confirmée.',
@@ -827,6 +839,8 @@ export const messages = {
 	'payments.void.voiding': 'Annulation…',
 	'payments.void.confirm': 'Annuler le paiement',
 	'payments.void.failed': "Le paiement n'a pas pu être annulé.",
+	'payments.void.done': "Paiement annulé",
+	'payments.void.reasonRequired': "Indiquez le motif de l’annulation.",
 	'payments.void.card.title': 'Carte virtuelle non clôturée',
 	'payments.void.card.retryable':
 		"Le paiement a été annulé, mais sa carte virtuelle n'a pas été clôturée chez le fournisseur. La carte reste active et peut être débitée tant qu'elle n'est pas clôturée.",
@@ -858,6 +872,7 @@ export const messages = {
 	'payments.compliance.dismiss.failed': 'Échec de l’abandon',
 	'payments.compliance.reason': 'Motif',
 	'payments.compliance.reasonPlaceholder': 'Pourquoi ce paiement est-il abandonné ?',
+	'payments.compliance.dialogLabel': "Résoudre la retenue de conformité",
 	'payments.compliance.reasonRequired': 'Un motif est requis pour abandonner un paiement retenu',
 	'payments.close': 'Fermer',
 	'payments.settlement.title': 'Accepter le règlement comme définitif',
@@ -878,6 +893,7 @@ export const messages = {
 	'payments.erpSync.confirm': 'Lancer la synchro ERP',
 	'payments.erpSync.busy': 'Synchronisation…',
 	'payments.erpSync.failed': 'Échec de la relance de la synchronisation ERP',
+	'payments.erpSync.dialogLabel': "Relancer la synchronisation ERP du lot de paiement",
 	'payments.erpSync.recovered': '{count, plural, one {# facture passée à payée} other {# factures passées à payées}}',
 	'payments.erpSync.nothing': 'Rien à récupérer — aucune facture déplacée.',
 	'payments.erpSync.counts.transitioned': 'Factures libérées',
@@ -887,6 +903,7 @@ export const messages = {
 	'payments.erpSync.counts.failed': 'En échec',
 	'payments.erpSync.countsHint': 'Factures libérées est le compte de récupération. Opérations synchronisées compte le travail ERP effectué et reste identique si vous relancez.',
 	'payments.cardDetails.title': 'Détails de la carte virtuelle',
+	'payments.cardDetails.dialogLabel': "Données de la carte",
 	'payments.cardDetails.hint': "Ces valeurs sont récupérées à la demande et l'accès est consigné dans le journal d'audit. Traitez-les comme un numéro de carte bancaire — collez-les dans le portail du fournisseur et fermez cette boîte de dialogue une fois terminé.",
 	'payments.cardDetails.cardNumber': 'Numéro de carte',
 	'payments.cardDetails.cvv': 'CVV',
@@ -3075,7 +3092,7 @@ export const messages = {
 	// Auth — login (routes/login/+page.svelte)
 	'auth.login.heading': "Se connecter",
 	'auth.login.subtitle': 'Connectez-vous pour continuer',
-	'auth.login.pageTitle': "Se connecter — FeohLedger",
+	'auth.login.pageTitle': "Se connecter — {product}",
 	'auth.login.workspace': "Espace de travail : {workspace}",
 	'auth.login.loadingOptions': "Chargement des options de connexion…",
 	'auth.login.email': 'E-mail',
@@ -3096,6 +3113,7 @@ export const messages = {
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Réinitialiser votre mot de passe',
+	'auth.forgotPassword.pageTitle': 'Réinitialiser votre mot de passe — {product}',
 	'auth.forgotPassword.subtitle':
 		'Saisissez votre e-mail et nous vous enverrons un lien pour réinitialiser votre mot de passe.',
 	'auth.forgotPassword.email': 'E-mail',
@@ -3107,6 +3125,7 @@ export const messages = {
 
 	// Auth — reset password (routes/login/reset-password/+page.svelte)
 	'auth.resetPassword.heading': 'Définir un nouveau mot de passe',
+	'auth.resetPassword.pageTitle': 'Définir un nouveau mot de passe — {product}',
 	'auth.resetPassword.subtitle': 'Choisissez un nouveau mot de passe pour votre compte.',
 	'auth.resetPassword.newPassword': 'Nouveau mot de passe',
 	'auth.resetPassword.confirmPassword': 'Confirmer le nouveau mot de passe',
@@ -3130,6 +3149,7 @@ export const messages = {
 	'auth.resetPassword.setSubmit': 'Définir le mot de passe',
 	'auth.resetPassword.setSubtitle': 'Choisissez un mot de passe pour votre nouveau compte.',
 	'auth.resetPassword.setHeading': 'Définir votre mot de passe',
+	'auth.resetPassword.setPageTitle': 'Définir votre mot de passe — {product}',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Vérification à deux facteurs',
@@ -3156,7 +3176,7 @@ export const messages = {
 	'auth.mfa.error.verify': 'Échec de la vérification',
 
 	// Auth — SSO / SAML callback (routes/login/{sso,saml}-callback/+page.svelte)
-	'auth.callback.pageTitle': 'Connexion en cours… — FeohLedger',
+	'auth.callback.pageTitle': 'Connexion en cours… — {product}',
 	'auth.callback.signingIn': 'Connexion en cours…',
 	'auth.callback.idpAccessDenied': "La connexion a été annulée, ou votre fournisseur d'identité ne vous a pas autorisé à accéder à cette application.",
 	'auth.callback.idpLoginRequired': "Votre fournisseur d'identité vous demande de vous reconnecter auprès de lui. Réessayez.",
@@ -3223,7 +3243,7 @@ export const messages = {
 		'Choisissez-le directement sur la page de confirmation, ou depuis le lien de votre e-mail de bienvenue.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
-	'auth.changePassword.pageTitle': 'Changer le mot de passe — FeohLedger',
+	'auth.changePassword.pageTitle': 'Changer le mot de passe — {product}',
 	'auth.changePassword.heading': 'Définir un nouveau mot de passe',
 	'auth.changePassword.subForced': 'Vous vous êtes connecté avec un mot de passe temporaire. Choisissez-en un nouveau pour continuer.',
 	'auth.changePassword.subVoluntary': 'Mettez à jour votre mot de passe.',
@@ -3252,7 +3272,7 @@ export const messages = {
 	'auth.changePassword.signOut': 'Se déconnecter',
 
 	// Auth — verify / provisioning (routes/verify/+page.svelte)
-	'auth.verify.pageTitle': 'Vérification — FeohLedger',
+	'auth.verify.pageTitle': 'Vérification — {product}',
 	'auth.verify.noToken': 'Aucun jeton de vérification dans l\'URL.',
 	'auth.verify.failed': 'Échec de la vérification.',
 	'auth.verify.pendingHeading': 'Création de votre espace de travail…',
@@ -4691,6 +4711,7 @@ export const messages = {
 	'paymentRuns.runDetail.cancelling': 'Annulation…',
 	'paymentRuns.runDetail.cfoApprovedNote': '✓ Approuvé par le directeur financier le {date} · prêt à exécuter.',
 	'paymentRuns.runDetail.close': 'Fermer',
+	'paymentRuns.runDetail.dialogLabel': "Lot de paiement",
 	'paymentRuns.runDetail.colAmount': 'Montant',
 	'paymentRuns.runDetail.colInvoice': 'Facture',
 	'paymentRuns.runDetail.colMethod': 'Méthode',
@@ -4802,7 +4823,7 @@ export const messages = {
 
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "FeohLedger n'envoie pas de paiements pour cette organisation. Payez le fournisseur depuis votre banque ou votre ERP, puis enregistrez le paiement comme payé en dehors de FeohLedger.",
-	'refusal.planFeatureRequired': "{feature} n'est pas inclus dans votre formule. Disponible avec la formule {plan} — passez à la formule supérieure dans Facturation pour l'utiliser.",
+	'refusal.planFeatureRequired': "{feature} n'est pas inclus dans votre formule. Disponible avec la formule {plan} — passez à la formule supérieure dans Paramètres → Abonnement pour l'utiliser.",
 	'refusal.externalPaymentForInvoice': "Facture {invoice} : {reason}",
 	'refusal.externalPaymentNotPayable': "Seule une facture approuvée et non payée peut être enregistrée comme payée (celle-ci est au statut {status}).",
 	'refusal.externalPaymentSegregation': "Séparation des tâches : vous avez créé ou modifié cette facture, un autre utilisateur doit donc enregistrer son paiement.",

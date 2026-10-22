@@ -146,7 +146,7 @@ export const messages = {
 	'marketing.pricing.cta.free': 'Arbeitsbereich erstellen',
 	'marketing.pricing.cta.upgrade': 'Arbeitsbereich erstellen, dann auf {plan} upgraden',
 	'marketing.pricing.cta.enterprise': 'Vertrieb kontaktieren',
-	'marketing.pricing.startsOnFree': 'Jeder Arbeitsbereich beginnt mit {plan}. Upgraden Sie unter Abrechnung, wann immer Sie bereit sind.',
+	'marketing.pricing.startsOnFree': 'Jeder Arbeitsbereich beginnt mit {plan}. Upgraden Sie unter Einstellungen → Abonnement, wann immer Sie bereit sind.',
 	'marketing.pricing.aiRead.heading': 'Was zählt als KI-gelesene Rechnung?',
 	'marketing.pricing.aiRead.body': 'Eine Rechnung, die unsere KI erfolgreich aus einem PDF oder Foto für Sie liest. Sie zählt einmal pro Kalendermonat, egal wie oft sie erneut gelesen wird. Strukturierte E-Rechnungen (PEPPOL, UBL, Factur-X), CSV-Importe und mit Ihrem eigenen KI-Anbieterschlüssel gelesene Rechnungen zählen nie.',
 	'marketing.pricing.more': 'Sie brauchen mehr, als {plan} enthält, oder einen Vertrag? {sales}.',
@@ -214,7 +214,6 @@ export const messages = {
 	'profile.password.new': 'Neues Passwort',
 	'profile.password.confirm': 'Neues Passwort bestätigen',
 	'profile.password.submit': 'Passwort ändern',
-	'profile.password.mismatch': 'Die Passwörter stimmen nicht überein',
 	'profile.password.updated': 'Passwort aktualisiert',
 	'profile.password.updateFailed': 'Passwort konnte nicht aktualisiert werden',
 	'profile.password.noPassword':
@@ -460,6 +459,10 @@ export const messages = {
 	// Invoices list
 	'invoices.title': 'Rechnungen',
 	'invoices.action.bulkRecode': 'Sachkonten neu zuordnen',
+	'invoices.bulkRecode.dialogLabel': "Sachkonten neu zuordnen",
+	'invoices.bulkRecode.applied': "{n, plural, one {# Rechnung neu zugeordnet} other {# Rechnungen neu zugeordnet}}",
+	'invoices.bulkRecode.previewFailed': "Vorschau fehlgeschlagen",
+	'invoices.bulkRecode.applyFailed': "Anwenden fehlgeschlagen",
 	'invoices.action.create': '+ Rechnung erstellen',
 	'invoices.action.upload': '+ Rechnungen hochladen',
 	'invoices.action.uploading': 'Wird hochgeladen …',
@@ -547,9 +550,9 @@ export const messages = {
 	'invoices.warning.rushPayment': 'Eilzahlung: fällig innerhalb von {days, plural, one {# Tag} other {# Tagen}} nach dem Rechnungsdatum',
 	'invoices.warning.pastDue': 'Die Rechnung ist überfällig',
 	'invoices.warning.aiAllowanceReached':
-		'KI-Erfassung pausiert: Das Monatskontingent von {included, plural, one {# KI-gelesenen Rechnung} other {# KI-gelesenen Rechnungen}} ist aufgebraucht. Erfassen Sie die Angaben manuell oder wechseln Sie auf der Seite „Abrechnung“ in einen höheren Tarif.',
+		'KI-Erfassung pausiert: Das Monatskontingent von {included, plural, one {# KI-gelesenen Rechnung} other {# KI-gelesenen Rechnungen}} ist aufgebraucht. Erfassen Sie die Angaben manuell oder wechseln Sie unter Einstellungen → Abonnement in einen höheren Tarif.',
 	'invoices.warning.aiSpendCapReached':
-		'KI-Erfassung pausiert: Das KI-Ausgabenlimit für diesen Monat ist erreicht. Erfassen Sie die Angaben manuell oder erhöhen Sie das Limit auf der Seite „Abrechnung“.',
+		'KI-Erfassung pausiert: Das KI-Ausgabenlimit für diesen Monat ist erreicht. Erfassen Sie die Angaben manuell oder erhöhen Sie das Limit unter Einstellungen → Abonnement.',
 	'invoices.warning.unverifiedVendor': 'Der Lieferant ist nicht verifiziert',
 	'invoices.warning.personalEmailDomain': 'Die E-Mail-Adresse des Lieferanten nutzt eine private Domain: {domain}',
 	'invoices.warning.newVendorLargeAmount': 'Neuer Lieferant (vor {days, plural, one {# Tag} other {# Tagen}} angelegt) stellt eine hohe Rechnung über {amount}',
@@ -624,6 +627,7 @@ export const messages = {
 	'payments.queue.unconvertedRows':
 		'{n, plural, one {# Rechnung hat} other {# Rechnungen haben}} keinen Wechselkurs in die Berichtswährung, daher bleiben sie in den Summen der Warteschlange unberücksichtigt. Die Zeilen selbst werden angezeigt und sind zahlbar — jeweils in ihrer eigenen Währung.',
 	'payments.summary.pending': 'Ausstehend',
+	'payments.summary.loadFailed': "Die Zahlungsübersicht konnte nicht geladen werden.",
 	'payments.summary.readyToPay': 'Zahlbereit',
 	'payments.summary.payments': 'Zahlungen',
 	'payments.summary.rebatesEarned': 'Erzielte Rückvergütungen',
@@ -644,6 +648,9 @@ export const messages = {
 	'payments.queue.empty': 'Keine Rechnungen zur Zahlung bereit.',
 	'payments.queue.empty.errored': 'Zahlungswarteschlange konnte nicht geladen werden. Bitte erneut versuchen.',
 	'payments.queue.createFailed': 'Zahlungslauf fehlgeschlagen',
+	'payments.queue.draftCreated': "Zahlungslauf als Entwurf angelegt — prüfen und ausführen",
+	'payments.queue.loadFailed': "Die Zahlungswarteschlange konnte nicht geladen werden.",
+	'payments.queue.loadMoreFailed': "Weitere Einträge der Zahlungswarteschlange konnten nicht geladen werden.",
 	'payments.queue.mixedCurrency':
 		'Diese Auswahl umfasst {n} Währungen. Die Zwischensummen werden daher getrennt angezeigt und NICHT addiert. Ein Zahlungslauf muss eine einzige Währung haben — reduzieren Sie die Auswahl auf eine Währung, um fortzufahren.',
 	'payments.queue.mixedCurrencyBlocked': 'Ein Zahlungslauf muss eine einzige Währung haben.',
@@ -754,6 +761,8 @@ export const messages = {
 	'payments.overdue': 'Überfällig',
 	'payments.history.empty': 'Keine Zahlungen entsprechen Ihren Filtern.',
 	'payments.history.empty.errored': 'Zahlungen konnten nicht geladen werden. Bitte erneut versuchen.',
+	'payments.history.refreshFailed': "Die Zahlungsliste konnte nicht aktualisiert werden. Laden Sie die Seite neu, um den aktuellen Status zu sehen.",
+	'payments.history.remittanceFailed': "Das Zahlungsavis konnte nicht heruntergeladen werden.",
 	'payments.history.remittance': 'Zahlungsavis',
 	'payments.history.void': 'Stornieren',
 	'payments.history.complianceRelease': 'Freigeben',
@@ -765,6 +774,7 @@ export const messages = {
 	'payments.history.showingAll': '{total, plural, one {Alle # Zahlung werden angezeigt} other {Alle # Zahlungen werden angezeigt}}',
 	'payments.runs.empty': 'Noch keine Zahlungsläufe.',
 	'payments.runs.empty.errored': 'Zahlungsläufe konnten nicht geladen werden.',
+	'payments.runs.loadFailed': "Zahlungsläufe konnten nicht geladen werden.",
 	'payments.runs.retry': 'Erneut versuchen',
 	'payments.runs.erpSync': 'ERP-Abgleich wiederholen',
 	'payments.runs.erpSyncAria': 'ERP-Abgleich wiederholen — Zahlungslauf {run}',
@@ -778,6 +788,7 @@ export const messages = {
 	'payments.cards.loading': 'Karten werden geladen …',
 	'payments.cards.empty': 'Noch keine virtuellen Karten ausgegeben.',
 	'payments.cards.errored': 'Virtuelle Karten konnten nicht geladen werden.',
+	'payments.cards.revealFailed': "Die Kartendaten konnten nicht angezeigt werden.",
 	'payments.cards.reveal': 'Anzeigen',
 	'payments.cards.loadMore': 'Mehr laden ({shown} von {total})',
 	'payments.cards.showingAll': '{total, plural, one {Alle # Karte werden angezeigt} other {Alle # Karten werden angezeigt}}',
@@ -813,6 +824,7 @@ export const messages = {
 	'payments.rebates.dialog.markPaidWarning':
 		'Dokumentiert, dass die Auszahlung des Prozessors für diese Rückvergütung bereits eingegangen ist — zum Beispiel als Position auf Ihrem eigenen Kontoauszug. Es wird kein Geld bewegt: Dies ist eine buchhalterische Erfassung einer Auszahlung, die außerhalb dieser App erfolgt ist. Wird protokolliert.',
 	'payments.rebates.dialog.busy': 'Wird erfasst …',
+	'payments.rebates.dialog.label': "Kartenrückvergütung aktualisieren",
 	'payments.rebates.dialog.confirmCta': 'Als bestätigt erfassen',
 	'payments.rebates.dialog.markPaidCta': 'Als ausgezahlt erfassen',
 	'payments.rebates.confirmed': 'Rückvergütung als bestätigt erfasst.',
@@ -825,6 +837,8 @@ export const messages = {
 	'payments.void.voiding': 'Wird storniert …',
 	'payments.void.confirm': 'Zahlung stornieren',
 	'payments.void.failed': 'Die Zahlung konnte nicht storniert werden.',
+	'payments.void.done': "Zahlung storniert",
+	'payments.void.reasonRequired': "Geben Sie einen Grund für die Stornierung ein.",
 	'payments.void.card.title': 'Virtuelle Karte nicht geschlossen',
 	'payments.void.card.retryable':
 		'Die Zahlung wurde storniert, ihre virtuelle Karte wurde beim Anbieter jedoch nicht geschlossen. Die Karte ist weiterhin aktiv und kann belastet werden, bis sie geschlossen wird.',
@@ -857,6 +871,7 @@ export const messages = {
 	'payments.compliance.dismiss.failed': 'Verwerfen fehlgeschlagen',
 	'payments.compliance.reason': 'Grund',
 	'payments.compliance.reasonPlaceholder': 'Warum wird diese Zahlung verworfen?',
+	'payments.compliance.dialogLabel': "Compliance-Sperre auflösen",
 	'payments.compliance.reasonRequired': 'Für das Verwerfen einer gesperrten Zahlung ist ein Grund erforderlich',
 	'payments.close': 'Schließen',
 	'payments.settlement.title': 'Zahlungseingang als endgültig akzeptieren',
@@ -877,6 +892,7 @@ export const messages = {
 	'payments.erpSync.confirm': 'ERP-Abgleich ausführen',
 	'payments.erpSync.busy': 'Wird abgeglichen…',
 	'payments.erpSync.failed': 'Wiederholung des ERP-Abgleichs fehlgeschlagen',
+	'payments.erpSync.dialogLabel': "ERP-Synchronisierung für Zahlungslauf wiederholen",
 	'payments.erpSync.recovered': '{count, plural, one {# Rechnung auf bezahlt gesetzt} other {# Rechnungen auf bezahlt gesetzt}}',
 	'payments.erpSync.nothing': 'Nichts wiederherzustellen — keine Rechnung wurde bewegt.',
 	'payments.erpSync.counts.transitioned': 'Freigegebene Rechnungen',
@@ -886,6 +902,7 @@ export const messages = {
 	'payments.erpSync.counts.failed': 'Fehlgeschlagen',
 	'payments.erpSync.countsHint': 'Freigegebene Rechnungen ist die Wiederherstellungszahl. Abgeglichene Vorgänge zählt die ausgeführte ERP-Arbeit und bleibt bei einem erneuten Lauf gleich.',
 	'payments.cardDetails.title': 'Details der virtuellen Karte',
+	'payments.cardDetails.dialogLabel': "Kartendaten",
 	'payments.cardDetails.hint': 'Diese Werte werden bei Bedarf abgerufen und der Zugriff wird im Prüfprotokoll erfasst. Behandeln Sie sie wie eine Kreditkartennummer — fügen Sie sie in das Portal des Lieferanten ein und schließen Sie diesen Dialog, wenn Sie fertig sind.',
 	'payments.cardDetails.cardNumber': 'Kartennummer',
 	'payments.cardDetails.cvv': 'Prüfziffer (CVV)',
@@ -3074,7 +3091,7 @@ export const messages = {
 	// Auth — login (routes/login/+page.svelte)
 	'auth.login.heading': "Anmelden",
 	'auth.login.subtitle': 'Zum Fortfahren anmelden',
-	'auth.login.pageTitle': "Anmelden — FeohLedger",
+	'auth.login.pageTitle': "Anmelden — {product}",
 	'auth.login.workspace': "Arbeitsbereich: {workspace}",
 	'auth.login.loadingOptions': "Anmeldeoptionen werden geladen…",
 	'auth.login.email': 'E-Mail',
@@ -3095,6 +3112,7 @@ export const messages = {
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'Passwort zurücksetzen',
+	'auth.forgotPassword.pageTitle': 'Passwort zurücksetzen — {product}',
 	'auth.forgotPassword.subtitle':
 		'Geben Sie Ihre E-Mail-Adresse ein, und wir senden Ihnen einen Link zum Zurücksetzen Ihres Passworts.',
 	'auth.forgotPassword.email': 'E-Mail',
@@ -3106,6 +3124,7 @@ export const messages = {
 
 	// Auth — reset password (routes/login/reset-password/+page.svelte)
 	'auth.resetPassword.heading': 'Neues Passwort festlegen',
+	'auth.resetPassword.pageTitle': 'Neues Passwort festlegen — {product}',
 	'auth.resetPassword.subtitle': 'Wählen Sie ein neues Passwort für Ihr Konto.',
 	'auth.resetPassword.newPassword': 'Neues Passwort',
 	'auth.resetPassword.confirmPassword': 'Neues Passwort bestätigen',
@@ -3128,6 +3147,7 @@ export const messages = {
 	'auth.resetPassword.setSubmit': 'Passwort festlegen',
 	'auth.resetPassword.setSubtitle': 'Wählen Sie ein Passwort für Ihr neues Konto.',
 	'auth.resetPassword.setHeading': 'Passwort festlegen',
+	'auth.resetPassword.setPageTitle': 'Passwort festlegen — {product}',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': 'Zwei-Faktor-Verifizierung',
@@ -3154,7 +3174,7 @@ export const messages = {
 	'auth.mfa.error.verify': 'Verifizierung fehlgeschlagen',
 
 	// Auth — SSO / SAML callback (routes/login/{sso,saml}-callback/+page.svelte)
-	'auth.callback.pageTitle': 'Anmeldung läuft… — FeohLedger',
+	'auth.callback.pageTitle': 'Anmeldung läuft… — {product}',
 	'auth.callback.signingIn': 'Sie werden angemeldet…',
 	'auth.callback.idpAccessDenied': "Die Anmeldung wurde abgebrochen, oder Ihr Identitätsanbieter hat Ihnen den Zugriff auf diese App nicht erlaubt.",
 	'auth.callback.idpLoginRequired': "Ihr Identitätsanbieter verlangt, dass Sie sich dort erneut anmelden. Versuchen Sie es noch einmal.",
@@ -3221,7 +3241,7 @@ export const messages = {
 		'Legen Sie es direkt auf der Bestätigungsseite fest oder über den Link in Ihrer Willkommens-E-Mail.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
-	'auth.changePassword.pageTitle': 'Passwort ändern — FeohLedger',
+	'auth.changePassword.pageTitle': 'Passwort ändern — {product}',
 	'auth.changePassword.heading': 'Neues Passwort festlegen',
 	'auth.changePassword.subForced': 'Sie haben sich mit einem temporären Passwort angemeldet. Wählen Sie ein neues, um fortzufahren.',
 	'auth.changePassword.subVoluntary': 'Aktualisieren Sie Ihr Passwort.',
@@ -3250,7 +3270,7 @@ export const messages = {
 	'auth.changePassword.signOut': 'Abmelden',
 
 	// Auth — verify / provisioning (routes/verify/+page.svelte)
-	'auth.verify.pageTitle': 'Wird überprüft — FeohLedger',
+	'auth.verify.pageTitle': 'Wird überprüft — {product}',
 	'auth.verify.noToken': 'Kein Bestätigungstoken in der URL.',
 	'auth.verify.failed': 'Bestätigung fehlgeschlagen.',
 	'auth.verify.pendingHeading': 'Ihr Arbeitsbereich wird erstellt…',
@@ -4691,6 +4711,7 @@ export const messages = {
 	'paymentRuns.runDetail.cancelling': 'Wird storniert…',
 	'paymentRuns.runDetail.cfoApprovedNote': '✓ CFO-genehmigt am {date} · ausführbereit.',
 	'paymentRuns.runDetail.close': 'Schließen',
+	'paymentRuns.runDetail.dialogLabel': "Zahlungslauf",
 	'paymentRuns.runDetail.colAmount': 'Betrag',
 	'paymentRuns.runDetail.colInvoice': 'Rechnung',
 	'paymentRuns.runDetail.colMethod': 'Methode',
@@ -4802,7 +4823,7 @@ export const messages = {
 
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "FeohLedger versendet für diese Organisation keine Zahlungen. Bezahlen Sie den Lieferanten über Ihre Bank oder Ihr ERP und erfassen Sie die Zahlung dann als außerhalb von FeohLedger bezahlt.",
-	'refusal.planFeatureRequired': "{feature} ist in Ihrem Tarif nicht enthalten. Verfügbar ab dem Tarif {plan} — führen Sie unter Abrechnung ein Upgrade durch, um die Funktion zu nutzen.",
+	'refusal.planFeatureRequired': "{feature} ist in Ihrem Tarif nicht enthalten. Verfügbar ab dem Tarif {plan} — führen Sie unter Einstellungen → Abonnement ein Upgrade durch, um die Funktion zu nutzen.",
 	'refusal.externalPaymentForInvoice': "Rechnung {invoice}: {reason}",
 	'refusal.externalPaymentNotPayable': "Nur eine freigegebene, noch nicht bezahlte Rechnung kann als bezahlt erfasst werden (diese hat den Status {status}).",
 	'refusal.externalPaymentSegregation': "Funktionstrennung: Sie haben diese Rechnung erstellt oder mitgestaltet, daher muss ein anderer Benutzer ihre Zahlung erfassen.",

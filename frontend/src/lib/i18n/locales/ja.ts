@@ -150,7 +150,7 @@ export const messages = {
 	'marketing.pricing.cta.free': 'ワークスペースを作成',
 	'marketing.pricing.cta.upgrade': 'ワークスペースを作成して {plan} にアップグレード',
 	'marketing.pricing.cta.enterprise': '営業に問い合わせる',
-	'marketing.pricing.startsOnFree': 'すべてのワークスペースは {plan} から始まります。準備ができたら請求画面からアップグレードできます。',
+	'marketing.pricing.startsOnFree': 'すべてのワークスペースは {plan} から始まります。準備ができたら「設定」→「サブスクリプション」からアップグレードできます。',
 	'marketing.pricing.aiRead.heading': 'AI 読み取り請求書とは?',
 	'marketing.pricing.aiRead.body': 'AI が PDF や写真から読み取りに成功した請求書のことです。同じ暦月内であれば何度読み直しても一度だけ数えます。構造化された電子請求書 (PEPPOL、UBL、Factur-X)、CSV インポート、お客様ご自身の AI プロバイダーキーで読み取った請求書は数えません。',
 	'marketing.pricing.more': '{plan} の内容では足りない場合や、契約をご希望の場合は {sales}。',
@@ -217,7 +217,6 @@ export const messages = {
 	'profile.password.new': '新しいパスワード',
 	'profile.password.confirm': '新しいパスワード（確認）',
 	'profile.password.submit': 'パスワードを変更',
-	'profile.password.mismatch': 'パスワードが一致しません',
 	'profile.password.updated': 'パスワードを更新しました',
 	'profile.password.updateFailed': 'パスワードを更新できませんでした',
 	'profile.password.noPassword':
@@ -455,6 +454,10 @@ export const messages = {
 	// Invoices list
 	'invoices.title': '請求書',
 	'invoices.action.bulkRecode': '勘定科目を一括再コード',
+	'invoices.bulkRecode.dialogLabel': "勘定科目の一括再コード",
+	'invoices.bulkRecode.applied': "{n, plural, other {# 件の請求書を再コードしました}}",
+	'invoices.bulkRecode.previewFailed': "プレビューに失敗しました",
+	'invoices.bulkRecode.applyFailed': "適用に失敗しました",
 	'invoices.action.create': '+ 請求書を作成',
 	'invoices.action.upload': '+ 請求書をアップロード',
 	'invoices.action.uploading': 'アップロード中…',
@@ -542,9 +545,9 @@ export const messages = {
 	'invoices.warning.rushPayment': '至急支払い: 請求日から{days, plural, other {#日}}以内に支払期限が到来します',
 	'invoices.warning.pastDue': '請求書が支払期限を過ぎています',
 	'invoices.warning.aiAllowanceReached':
-		'AI読み取りを一時停止しました: 今月のAI読み取り枠（{included, plural, other {#件}}）を使い切りました。手動で入力するか、請求ページでプランをアップグレードしてください。',
+		'AI読み取りを一時停止しました: 今月のAI読み取り枠（{included, plural, other {#件}}）を使い切りました。手動で入力するか、「設定」→「サブスクリプション」でプランをアップグレードしてください。',
 	'invoices.warning.aiSpendCapReached':
-		'AI読み取りを一時停止しました: 今月のAI利用上限額に達しました。手動で入力するか、請求ページで上限額を引き上げてください。',
+		'AI読み取りを一時停止しました: 今月のAI利用上限額に達しました。手動で入力するか、「設定」→「サブスクリプション」で上限額を引き上げてください。',
 	'invoices.warning.unverifiedVendor': '仕入先が未検証です',
 	'invoices.warning.personalEmailDomain': '仕入先のメールアドレスが個人向けドメインです: {domain}',
 	'invoices.warning.newVendorLargeAmount': '新規仕入先（{days, plural, other {#日}}前に登録）が高額請求 {amount} を提出しています',
@@ -619,6 +622,7 @@ export const messages = {
 	'payments.queue.unconvertedRows':
 		'報告通貨への為替レートがない{n, plural, other {# 件の請求書}}は、キューの合計から除外されています。行自体は表示され、それぞれの通貨で支払い可能です。',
 	'payments.summary.pending': '保留中',
+	'payments.summary.loadFailed': "支払いの概要を読み込めませんでした。",
 	'payments.summary.readyToPay': '支払準備完了',
 	'payments.summary.payments': '支払い',
 	'payments.summary.rebatesEarned': '獲得リベート',
@@ -639,6 +643,9 @@ export const messages = {
 	'payments.queue.empty': '支払い可能な請求書はありません。',
 	'payments.queue.empty.errored': '支払いキューを読み込めませんでした。もう一度お試しください。',
 	'payments.queue.createFailed': '支払ランの作成に失敗しました',
+	'payments.queue.draftCreated': "支払バッチを下書きとして作成しました。内容を確認して実行してください",
+	'payments.queue.loadFailed': "支払キューを読み込めませんでした。",
+	'payments.queue.loadMoreFailed': "支払キューの続きを読み込めませんでした。",
 	'payments.queue.mixedCurrency':
 		'この選択には {n} 種類の通貨が含まれるため、小計は個別に表示され、合算されません。支払ランは単一通貨である必要があります。続行するには選択を 1 つの通貨に絞ってください。',
 	'payments.queue.mixedCurrencyBlocked': '支払ランは単一通貨である必要があります。',
@@ -745,6 +752,8 @@ export const messages = {
 	'payments.overdue': '期限超過',
 	'payments.history.empty': 'フィルターに一致する支払いはありません。',
 	'payments.history.empty.errored': '支払いを読み込めませんでした。もう一度お試しください。',
+	'payments.history.refreshFailed': "支払い一覧を更新できませんでした。最新の状態を表示するにはページを再読み込みしてください。",
+	'payments.history.remittanceFailed': "送金通知書をダウンロードできませんでした。",
 	'payments.history.remittance': '送金通知書',
 	'payments.history.void': '取消',
 	'payments.history.complianceRelease': '解除',
@@ -756,6 +765,7 @@ export const messages = {
 	'payments.history.showingAll': '{total, plural, other {#件すべての支払いを表示中}}',
 	'payments.runs.empty': 'まだ支払いバッチはありません。',
 	'payments.runs.empty.errored': '支払いバッチを読み込めませんでした。',
+	'payments.runs.loadFailed': "支払バッチを読み込めませんでした。",
 	'payments.runs.retry': '再試行',
 	'payments.runs.erpSync': 'ERP連携を再実行',
 	'payments.runs.erpSyncAria': 'ERP連携を再実行 — 支払実行 {run}',
@@ -769,6 +779,7 @@ export const messages = {
 	'payments.cards.loading': 'カードを読み込み中…',
 	'payments.cards.empty': 'まだ発行されたバーチャルカードはありません。',
 	'payments.cards.errored': 'バーチャルカードを読み込めませんでした。',
+	'payments.cards.revealFailed': "カード情報を表示できませんでした。",
 	'payments.cards.reveal': '表示',
 	'payments.cards.loadMore': 'さらに読み込む（{total}件中{shown}件）',
 	'payments.cards.showingAll': '{total, plural, other {#件すべてのカードを表示中}}',
@@ -803,6 +814,7 @@ export const messages = {
 	'payments.rebates.dialog.markPaidWarning':
 		'このリベートに対する処理会社からの入金が（例えば自社の銀行明細の1行として）すでに着金したことを記録します。資金は動きません。本アプリの外で起きた入金を帳簿に記録するだけです。監査ログに記録されます。',
 	'payments.rebates.dialog.busy': '記録中…',
+	'payments.rebates.dialog.label': "カードリベートを更新",
 	'payments.rebates.dialog.confirmCta': '確定として記録',
 	'payments.rebates.dialog.markPaidCta': '支払済みとして記録',
 	'payments.rebates.confirmed': 'リベートを確定済みとして記録しました。',
@@ -815,6 +827,8 @@ export const messages = {
 	'payments.void.voiding': '取消中…',
 	'payments.void.confirm': '支払いを取消',
 	'payments.void.failed': '支払いを取り消せませんでした。',
+	'payments.void.done': "支払いを取り消しました",
+	'payments.void.reasonRequired': "取り消しの理由を入力してください。",
 	'payments.void.card.title': 'バーチャルカードが閉鎖されていません',
 	'payments.void.card.retryable':
 		'支払いは取り消されましたが、バーチャルカードはプロバイダー側で閉鎖されていません。閉鎖されるまでカードは有効なままで、利用される可能性があります。',
@@ -846,6 +860,7 @@ export const messages = {
 	'payments.compliance.dismiss.failed': '取下げに失敗しました',
 	'payments.compliance.reason': '理由',
 	'payments.compliance.reasonPlaceholder': 'この支払いを取り下げる理由は何ですか?',
+	'payments.compliance.dialogLabel': "コンプライアンス保留を解決",
 	'payments.compliance.reasonRequired': '保留中の支払いを取り下げるには理由が必要です',
 	'payments.close': '閉じる',
 	'payments.settlement.title': '決済額を最終として承認',
@@ -866,6 +881,7 @@ export const messages = {
 	'payments.erpSync.confirm': 'ERP連携を実行',
 	'payments.erpSync.busy': '連携中…',
 	'payments.erpSync.failed': 'ERP連携の再実行に失敗しました',
+	'payments.erpSync.dialogLabel': "支払バッチの ERP 同期を再試行",
 	'payments.erpSync.recovered': '{count, plural, other {#件の請求書を支払済みに解放しました}}',
 	'payments.erpSync.nothing': '回復対象はありません — 移動した請求書はありません。',
 	'payments.erpSync.counts.transitioned': '解放された請求書',
@@ -875,6 +891,7 @@ export const messages = {
 	'payments.erpSync.counts.failed': '失敗',
 	'payments.erpSync.countsHint': '「解放された請求書」が回復件数です。「連携した処理」は実行されたERP処理の数で、再実行しても変わりません。',
 	'payments.cardDetails.title': 'バーチャルカードの詳細',
+	'payments.cardDetails.dialogLabel': "カード情報",
 	'payments.cardDetails.hint': 'これらの値はオンデマンドで取得され、アクセスは監査ログに記録されます。クレジットカード番号と同様に扱い、取引先のポータルに貼り付けたら、このダイアログを閉じてください。',
 	'payments.cardDetails.cardNumber': 'カード番号',
 	'payments.cardDetails.cvv': 'CVV',
@@ -3016,7 +3033,7 @@ export const messages = {
 	// Auth — login (routes/login/+page.svelte)
 	'auth.login.heading': "サインイン",
 	'auth.login.subtitle': '続行するにはサインインしてください',
-	'auth.login.pageTitle': "サインイン — FeohLedger",
+	'auth.login.pageTitle': "サインイン — {product}",
 	'auth.login.workspace': "ワークスペース: {workspace}",
 	'auth.login.loadingOptions': "サインイン方法を読み込んでいます…",
 	'auth.login.email': 'メールアドレス',
@@ -3037,6 +3054,7 @@ export const messages = {
 
 	// Auth — forgot password (routes/login/forgot-password/+page.svelte)
 	'auth.forgotPassword.heading': 'パスワードをリセット',
+	'auth.forgotPassword.pageTitle': 'パスワードをリセット — {product}',
 	'auth.forgotPassword.subtitle':
 		'メールアドレスを入力すると、パスワードをリセットするリンクをお送りします。',
 	'auth.forgotPassword.email': 'メールアドレス',
@@ -3048,6 +3066,7 @@ export const messages = {
 
 	// Auth — reset password (routes/login/reset-password/+page.svelte)
 	'auth.resetPassword.heading': '新しいパスワードを設定',
+	'auth.resetPassword.pageTitle': '新しいパスワードを設定 — {product}',
 	'auth.resetPassword.subtitle': 'アカウントの新しいパスワードを選択してください。',
 	'auth.resetPassword.newPassword': '新しいパスワード',
 	'auth.resetPassword.confirmPassword': '新しいパスワード（確認）',
@@ -3069,6 +3088,7 @@ export const messages = {
 	'auth.resetPassword.setSubmit': 'パスワードを設定',
 	'auth.resetPassword.setSubtitle': '新しいアカウントのパスワードを選択してください。',
 	'auth.resetPassword.setHeading': 'パスワードを設定',
+	'auth.resetPassword.setPageTitle': 'パスワードを設定 — {product}',
 
 	// Auth — MFA verification (routes/login/mfa/+page.svelte)
 	'auth.mfa.heading': '二要素認証',
@@ -3095,7 +3115,7 @@ export const messages = {
 	'auth.mfa.error.verify': '認証に失敗しました',
 
 	// Auth — SSO / SAML callback (routes/login/{sso,saml}-callback/+page.svelte)
-	'auth.callback.pageTitle': 'サインインしています… — FeohLedger',
+	'auth.callback.pageTitle': 'サインインしています… — {product}',
 	'auth.callback.signingIn': 'サインインしています…',
 	'auth.callback.idpAccessDenied': "サインインがキャンセルされたか、IDプロバイダーがこのアプリへのアクセスを許可しませんでした。",
 	'auth.callback.idpLoginRequired': "IDプロバイダーで再度サインインする必要があります。もう一度お試しください。",
@@ -3162,7 +3182,7 @@ export const messages = {
 		'確認ページから直接、またはウェルカムメールのリンクから設定できます。',
 
 	// Auth — change password (routes/change-password/+page.svelte)
-	'auth.changePassword.pageTitle': 'パスワード変更 — FeohLedger',
+	'auth.changePassword.pageTitle': 'パスワード変更 — {product}',
 	'auth.changePassword.heading': '新しいパスワードを設定',
 	'auth.changePassword.subForced': '一時パスワードでサインインしました。続行するには新しいパスワードを選択してください。',
 	'auth.changePassword.subVoluntary': 'パスワードを更新します。',
@@ -3191,7 +3211,7 @@ export const messages = {
 	'auth.changePassword.signOut': 'サインアウト',
 
 	// Auth — verify / provisioning (routes/verify/+page.svelte)
-	'auth.verify.pageTitle': '確認中 — FeohLedger',
+	'auth.verify.pageTitle': '確認中 — {product}',
 	'auth.verify.noToken': 'URLに確認トークンがありません。',
 	'auth.verify.failed': '確認に失敗しました。',
 	'auth.verify.pendingHeading': 'ワークスペースを作成しています…',
@@ -4603,6 +4623,7 @@ export const messages = {
 	'paymentRuns.runDetail.cancelling': 'キャンセル中…',
 	'paymentRuns.runDetail.cfoApprovedNote': '✓ {date} に CFO が承認 · 実行可能です。',
 	'paymentRuns.runDetail.close': '閉じる',
+	'paymentRuns.runDetail.dialogLabel': "支払バッチ",
 	'paymentRuns.runDetail.colAmount': '金額',
 	'paymentRuns.runDetail.colInvoice': '請求書',
 	'paymentRuns.runDetail.colMethod': '方法',
@@ -4714,7 +4735,7 @@ export const messages = {
 
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "この組織では FeohLedger は支払いを送金しません。銀行または ERP から仕入先に支払い、その後 FeohLedger 外で支払済みとして記録してください。",
-	'refusal.planFeatureRequired': "{feature} はご利用のプランに含まれていません。{plan} プランで利用できます。請求からプランをアップグレードしてください。",
+	'refusal.planFeatureRequired': "{feature} はご利用のプランに含まれていません。{plan} プランで利用できます。「設定」→「サブスクリプション」からプランをアップグレードしてください。",
 	'refusal.externalPaymentForInvoice': "請求書 {invoice}：{reason}",
 	'refusal.externalPaymentNotPayable': "支払済みとして記録できるのは、承認済みで未払いの請求書だけです（この請求書のステータスは {status} です）。",
 	'refusal.externalPaymentSegregation': "職務分掌：あなたはこの請求書を作成または編集したため、支払いの記録は別のユーザーが行う必要があります。",
