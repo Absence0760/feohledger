@@ -166,7 +166,14 @@ describe('marketing landing page follows the theme', () => {
 		for (const { path, css } of sources.filter((s) => s.path.startsWith(MARKETING_PATH))) scan(path, css);
 		// Inline `style="…"` in the markup is a stylesheet the block scan never sees.
 		for (const { path, source } of MARKETING) {
-			const markup = source.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+			// Repeat until stable: removing one block can join its neighbours into
+			// a new `<style…>…</style>` that a single pass would leave behind.
+			let markup = source;
+			let previous: string;
+			do {
+				previous = markup;
+				markup = markup.replace(/<style[^>]*>[\s\S]*?<\/style[^>]*>/gi, '');
+			} while (markup !== previous);
 			for (const attr of markup.matchAll(/\sstyle="([^"]*)"/g)) scan(`${path} (style=)`, `{${attr[1]};}`);
 		}
 		expect(found, `\n${found.join('\n')}\n`).toEqual([]);

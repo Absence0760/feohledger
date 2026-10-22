@@ -45,7 +45,10 @@ if [ -z "${BLENDER:-}" ]; then
 fi
 
 command -v magick >/dev/null 2>&1 || { echo "error: 'magick' not on PATH" >&2; exit 1; }
-[ -n "$BLENDER" ] && [ -x "$BLENDER" ] || { echo "error: blender not found (set \$BLENDER)" >&2; exit 1; }
+if [ -z "$BLENDER" ] || [ ! -x "$BLENDER" ]; then
+  echo "error: blender not found (set \$BLENDER)" >&2
+  exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 

@@ -120,8 +120,12 @@ test.describe('consent banner', () => {
 		const passwords = page.locator('input[type="password"]');
 		await passwords.first().fill('BrandNewPassw0rd!42');
 		await passwords.nth(1).fill('BrandNewPassw0rd!42');
-		// The keyboard path: Tab from the last field lands on the enabled submit.
+		// The keyboard path: Tab from the last field reaches its show-password
+		// toggle (PasswordInput), then the enabled submit.
 		await passwords.nth(1).press('Tab');
+		const reveal = page.getByRole('button', { name: 'Show password' }).nth(1);
+		await expect(reveal).toBeFocused();
+		await reveal.press('Tab');
 		const submit = page.getByRole('button', { name: /Reset password/i });
 		await expect(submit).toBeFocused();
 

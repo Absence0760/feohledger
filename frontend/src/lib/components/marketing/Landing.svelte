@@ -544,10 +544,23 @@
 
 	/* The menu takes over at 1024px, not at the phone breakpoint: with Sign
 	   in beside them, the section links, the CTA and the theme switch need
-	   about 970px in French, and a bar that wraps onto a second row is a
-	   taller sticky header than `scroll-padding-top` allows for (WCAG
-	   2.4.11). landing.spec.ts measures the bar from 320px to 1025px in every
-	   locale. */
+	   about 970px in French with Noto Sans as `system-ui`, and about 1030px
+	   with DejaVu Sans (CI's Ubuntu runner; it sets wider). A bar that wraps
+	   onto a second row is a taller sticky header than `scroll-padding-top`
+	   allows for (WCAG 2.4.11). landing.spec.ts measures the bar from 320px to
+	   1025px in every locale.
+
+	   So just above the breakpoint the bar's gaps close up a little, which
+	   gives the widest locale (French) about 25px to spare at 1025px in
+	   DejaVu Sans; from 1201px there is room for the full spacing. */
+	@media (max-width: 1200px) {
+		.nav-links {
+			gap: 16px;
+		}
+		.nav-end {
+			gap: 12px;
+		}
+	}
 	@media (max-width: 1024px) {
 		.nav {
 			row-gap: 0;
