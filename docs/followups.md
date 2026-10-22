@@ -39,7 +39,14 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-21 — pruning the `feoh_app` cutover (#633: production signs in over IAM, master password rotated), taking the file to 133. Before that, 2026-10-21 — merging main (§305, §306) into the #575 round-1 branch, both sides' entries kept, taking the file to 134. Before that, 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
+**Last reconciled:** 2026-10-21 — merging main (the `feoh_app` cutover prune, #638, and the bundle-metric change, #640) into the uptime-checks branch; both sides kept, taking the file to 134. Before that, 2026-10-21 — merging main (§307, §308, §310 and the #575
+round-1 entries) into the uptime-checks branch; both sides' entries kept, taking
+the file to 136. Before that, 2026-10-21 — merging main (§305, §306) into the
+uptime-checks branch; both sides' entries kept, taking the file to 133.
+Before that, 2026-10-21 — the external uptime checks (decisions §311)
+opened one (c) entry, the VM's Let's Encrypt certificates going unwatched,
+and one (b) entry, turning on SMS paging, taking the file from 126 → 128.
+Before that, 2026-10-21 — merging main (§305, §306) into the #575 round-1 branch, both sides' entries kept, taking the file to 134. Before that, 2026-10-21 — merging main (the UI action-verdict pass, §305) into the workspace-closure branch; both sides' entries kept, taking the file to 131. Before that, 2026-10-21 — the UI action-verdict pass (issue #575,
 decisions §305) opened three (c) entries — the modal's assignee clause, bulk
 status approving a draft past review, and the pages still restating server
 predicates — taking the file from 126 → 129. Before that, 2026-10-21 — storing the ERP document id on the invoice
@@ -214,7 +221,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**132 open: 114 (c) · 10 (a) · 8 (b)** — re-derived from the file, never carried
+**134 open: 115 (c) · 10 (a) · 9 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2136,6 +2143,27 @@ providers still have the same gap.
       **Trigger:** the next change to any of those controls, or a report of a
       button that 403s / 409s.
 
+### Surfaced by adding external uptime checks (2026-10-21, decisions §311)
+
+- [ ] **(c) Nothing watches the Let's Encrypt certificates Caddy holds on the
+      VM.** `infra/uptime.tf` alarms on the ACM certificate's `DaysToExpiry`,
+      but `api.feohledger.com` (and, until the CloudFront cutover, the apex and
+      every tenant host) is served on a certificate Caddy obtains and renews
+      itself, which no AWS metric sees. The Route 53 health checks do not help:
+      they complete the TLS handshake without validating the certificate, so an
+      expired one still reads healthy while every browser refuses the API.
+      Caddy renews 30 days ahead and retries, so this needs a renewal failing
+      for a month unnoticed (an ACME rate limit, DNS moved away, port 80 closed
+      by a security-group change). **Durable fix:** a CloudWatch Synthetics
+      canary (an API canary, hourly: ~$0.86 a month at $0.0012 a run) that
+      fetches `https://api.<domain>/api/health` with certificate validation on
+      and fails under 14 days to expiry, alarming to the pager topic; it needs
+      an artifacts bucket and an execution role in `infra/`. The alternative,
+      a cron on the VM reporting Caddy's certificate expiry as a custom metric,
+      is cheaper and is blind exactly when the VM is. **Trigger:** before
+      customer #1, with the status-page work, or at once if Caddy's logs show
+      a renewal failure.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
@@ -2186,7 +2214,9 @@ as oversights.
       decision and a vendor contract, but **not all engineering prereqs are
       complete** (*corrected 2026-10-07*): `soc2-readiness.md` still lists
       moving the existing S3 buckets onto Object Lock as pending code work,
-      and 5xx/RBAC-denial alerting and uptime monitoring as pending.
+      and 5xx/RBAC-denial alerting as pending. (Uptime monitoring is built,
+      `infra/uptime.tf`, decisions §311, and waits on the SMS-paging (b)
+      entry below.)
       Ref: [soc2-readiness.md](soc2-readiness.md).
 - [ ] **Live government e-invoice clearance** — SdI (IT), SAT-PAC (MX), SEFAZ
       (BR), DIAN (CO). The generators and national validation ship as pure
@@ -2235,6 +2265,17 @@ as oversights.
       comes first.
 
 ## (b) Operator steps on merged code
+
+- [ ] **Turn on SMS paging for the uptime checks.** Built (decisions §311,
+      `infra/uptime.tf`): with no phone number set the checks only email. In
+      us-east-1, lease a toll-free number in AWS End User Messaging SMS and
+      complete its registration (sole proprietor, ~15 days), give SNS the
+      resource policy on the number, verify the operator's phone in the SNS
+      SMS sandbox, then set `alert_phone_number` and `uptime_tenant_slug` in
+      `infra-secrets/feohledger/prod.tfvars` (never in this repo), apply, and
+      ring the phone with `aws cloudwatch set-alarm-state`. Every step is
+      `infra/README.md` § Uptime checks and paging. **Trigger:** before
+      customer #1 (#446 § Support + status).
 
 - [ ] **Register the platform OAuth apps for QuickBooks Online, Xero, Sage
       Accounting and Blackbaud.** Until then those ERPs connect only when a

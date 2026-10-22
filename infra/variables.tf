@@ -72,7 +72,7 @@ variable "domain_name" {
 }
 
 variable "monthly_budget_limit_usd" {
-  description = "Monthly AWS spend ceiling (USD) for the account-wide budget. The single-VM workload stack runs ~$45–55/month (t4g.medium VM + EBS + public IPv4 ~$31, db.t4g.micro RDS + storage ~$15, KMS, Route 53, S3, flow logs and alarms a few dollars), so 75 leaves headroom while still flagging a runaway within days. Raise it deliberately when the stack grows."
+  description = "Monthly AWS spend ceiling (USD) for the account-wide budget. The single-VM workload stack runs ~$45–55/month (t4g.medium VM + EBS + public IPv4 ~$31, db.t4g.micro RDS + storage ~$15, KMS, Route 53, S3, flow logs and alarms a few dollars), plus ~$8–13 for the external uptime checks and SMS paging (uptime.tf), so 75 leaves headroom while still flagging a runaway within days. Raise it deliberately when the stack grows."
   type        = number
   default     = 75
 
@@ -242,6 +242,29 @@ variable "alert_emails" {
   validation {
     condition     = alltrue([for e in var.alert_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
     error_message = "Every entry in alert_emails must be an email address."
+  }
+}
+
+variable "alert_phone_number" {
+  description = "Mobile number the pager topic texts (uptime.tf's external checks and database storage), in E.164 form such as +15555550123. Personal data and this repo is public, so there is no default: set it only in the private prod.tfvars. Null creates no SMS subscription. In the SNS SMS sandbox it must first be verified in the SNS console (us-east-1), and US delivery needs a registered toll-free origination number (README.md § Uptime checks and paging)."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.alert_phone_number == null || can(regex("^\\+[1-9][0-9]{7,14}$", var.alert_phone_number))
+    error_message = "alert_phone_number must be in E.164 form: a plus sign, the country code and the number, with no spaces or punctuation."
+  }
+}
+
+variable "uptime_tenant_slug" {
+  description = "Slug of one tenant whose host (<slug>.<domain>) uptime.tf checks from outside, covering the tenant wildcard's DNS and certificate and, before the CloudFront cutover, its Caddy site block. Use a tenant you control, such as a test tenant. No default, so the repo names no real tenant; set it in the private prod.tfvars. Null skips the tenant check; the apex and API checks run regardless."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.uptime_tenant_slug == null || can(regex("^[a-z][a-z0-9-]{2,29}$", var.uptime_tenant_slug))
+    error_message = "uptime_tenant_slug must be a tenant slug (backend/app/utils/slug.py: a lowercase letter, then 2-29 lowercase letters, digits or hyphens), not a hostname."
   }
 }
 

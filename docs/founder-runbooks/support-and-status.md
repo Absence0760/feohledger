@@ -51,6 +51,16 @@ customers — it's a time sink when you have 2.
 **Recommendation**: Better Stack. You get status page + uptime
 monitoring + on-call in one product. Free tier works for pre-launch.
 
+**The uptime-and-phone half is already built, in Terraform**
+(`infra/uptime.tf`, `infra/README.md` § Uptime checks and paging,
+`docs/decisions.md` §311): Route 53 HTTPS checks on the apex, one tenant host
+and `https://api.feohledger.com/api/health`, from three regions every 30
+seconds, each with an alarm that texts the operator's phone and emails
+`alert_emails`, on failure and on recovery. So the vendor choice here is only
+the **public status page**. A status page that runs its own monitors is fine,
+and so is one you update by hand. Either way it does not replace the Route 53
+checks, which are the pager.
+
 ### What to put on it
 
 1. **Components**: Break your product into user-visible pieces —
@@ -64,15 +74,16 @@ monitoring + on-call in one product. Free tier works for pre-launch.
 
 ## Monitoring → status page automation
 
-Connect Better Stack (or your monitor) to the status page so:
+The pager is Route 53 (above). If the status page vendor runs its own
+monitors, connect them to the page so:
 - Repeated health-check failures auto-post "Investigating" on the
   status page
 - Recovery posts "Resolved" automatically
 
-For our backend, point Better Stack at:
-- `https://api.feohledger.com/api/health` (every 1 min from 3 regions)
-- Frontend root URL (loads the static bundle)
-- Core dependency checks — if RDS or S3 is down, acknowledge it
+Point them at the same three hosts the Route 53 checks use:
+- `https://api.feohledger.com/api/health` (the body is `{"status":"ok"}`)
+- `https://feohledger.com/` (the SPA)
+- one tenant host, `https://<slug>.feohledger.com/`
 
 See the
 [`/api/health` endpoint](../../backend/app/api/health.py) — it's already
@@ -85,8 +96,12 @@ health route, until 2026-09-17.
 ## On-call
 
 For a solo founder, "on-call" is just "you". Minimum setup:
-1. Alerts on critical monitors → SMS or phone call (Better Stack
-   does this; so does PagerDuty free tier for up to 5 users).
+1. Alerts on critical monitors → SMS. **Built**: the pager topic texts
+   `alert_phone_number` for the uptime checks and for database storage
+   running out (`infra/README.md` § Uptime checks and paging). What is left is
+   operator work: register a toll-free number, verify your phone in the SNS SMS
+   sandbox, set the number in `prod.tfvars`, apply, and test-fire an alarm. A
+   phone *call* rather than a text would need PagerDuty or similar on top.
 2. Commit to responding within 15 min during business hours, 1h
    off-hours.
 3. Document the 3 most likely incidents (DB down, extraction stuck,
@@ -127,7 +142,10 @@ Insurance is its own pre-customer checklist — see
       lands in `ops@`, which is a mailbox, not a support queue
 - [ ] First-response SLA published on marketing site (or in MSA)
 - [ ] Status page live at `status.feohledger.com`
-- [ ] Uptime monitoring alerts to your phone
+- [ ] Uptime monitoring alerts to your phone — built in Terraform
+      (`infra/uptime.tf`, decisions §311); ticks once the operator steps in
+      `infra/README.md` § Uptime checks and paging are applied and a test
+      alarm has rung the phone
 - [ ] Incident response runbook written (one page)
 - [ ] Cyber + E&O insurance quoted + bound
 

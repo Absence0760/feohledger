@@ -565,6 +565,34 @@ async def test_public_health_probe_contract_is_unchanged():
     assert resp.json() == {"status": "ok"}
 
 
+async def test_public_health_probe_body_matches_the_external_uptime_check():
+    """Route 53's external check on api.<domain> (infra/uptime.tf) passes only
+    when the raw body contains a literal string. Pin that string against the
+    bytes this endpoint actually sends, so a change to either side — a body
+    reformatted with spaces, or the Terraform string edited — fails here
+    instead of paging the operator for an API that is up."""
+    import re
+
+    import httpx
+
+    from app.main import app
+
+    uptime_tf = Path(__file__).resolve().parents[2] / "infra" / "uptime.tf"
+    match = re.search(r'api_health_search_string\s*=\s*"((?:[^"\\]|\\.)*)"', uptime_tf.read_text())
+    assert match, "infra/uptime.tf no longer declares api_health_search_string"
+    search_string = match.group(1).replace('\\"', '"')
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/health")
+
+    assert resp.status_code == 200
+    assert search_string in resp.text
+    # Route 53 only reads the first 5,120 bytes of the body.
+    assert resp.text.index(search_string) + len(search_string) <= 5120
+
+
 async def test_sweep_report_returns_every_sweep_for_an_admin(health_client, monkeypatch):
     _disable_all(monkeypatch)
     sweep_health.sweep_started(_TEST_SWEEP)
