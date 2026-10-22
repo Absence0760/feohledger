@@ -12,7 +12,7 @@ them is stored in ``settings.erp``: they are sealed in the control-plane
 §266), written only through the audited ``PUT
 /api/organization/credentials/erp`` and never read back. What this module
 decides about them is *when they stop applying*: a save that points the block
-at a different ERP or a different destination (:data:`DESTINATION_KEYS`) drops
+at a different ERP or a different destination (:func:`destination_keys`) drops
 them (:func:`secrets_to_drop`). ``settings.erp.oauth`` — the consent metadata
 ``services/erp_oauth`` writes beside its sealed tokens — is never writable
 through the settings API, and reads see only ``{"connected": bool}``.
@@ -62,9 +62,9 @@ _EXISTING_LABEL_KEYS: dict[str, str] = {
 #: host itself (``base_url``), or a value an adapter builds the host or the
 #: target books from (NetSuite's ``account_id`` is a hostname label; Business
 #: Central's ``tenant_id`` / ``environment`` / ``company_id`` are URL path
-#: segments; QuickBooks' ``environment`` picks its API host; SYSPRO and Intacct
-#: log in to ``company_id``). A save that changes any of them is a NEW
-#: connection: the sealed secrets are dropped and have to be typed again
+#: segments; SYSPRO and Intacct log in to ``company_id``). A save that changes
+#: any of them is a NEW connection: the sealed secrets are dropped and have to
+#: be typed again
 #: (:func:`secrets_to_drop`; the inbound webhook key, :data:`EXTRA_SECRET_KEYS`,
 #: is never sent outbound and so survives), and a connection test against the
 #: changed form gets none of them. Without this, ``{"type": "syspro",
@@ -73,6 +73,16 @@ _EXISTING_LABEL_KEYS: dict[str, str] = {
 #: ``POST /organization/test-erp`` or a settings PATCH. A catalogue field that
 #: names a host belongs here: ``tests/test_erp_catalog.py`` fails on any
 #: ``*_url`` / ``*host*`` field left out.
+#:
+#: This is the DEFAULT, by name, for every provider — including for a key the
+#: provider's form does not render, since an adapter may still read it. A
+#: provider narrows it only by declaring one of its own fields
+#: ``destination=False`` (:func:`destination_keys`), and only with evidence that
+#: no value of that field moves the credentials off the vendor's own hosts.
+#: QuickBooks Online's ``environment`` is the one such field: it picks between
+#: two Intuit hosts and nothing else (decisions §316).
+#: ``tests/test_erp_catalog.py`` pins the opt-outs, so a new one is a reviewed
+#: change.
 DESTINATION_KEYS: frozenset[str] = frozenset(
     {"base_url", "tenant_id", "account_id", "company_id", "environment"}
 )
@@ -87,16 +97,22 @@ def _field(
     help_key: str | None = None,
     label_key: str | None = None,
     options: list[str] | None = None,
+    destination: bool | None = None,
 ) -> dict[str, Any]:
-    """One form field. ``label_key`` is a frontend i18n ``MessageKey``."""
+    """One form field. ``label_key`` is a frontend i18n ``MessageKey``.
+
+    ``destination`` defaults to membership of :data:`DESTINATION_KEYS`; pass it
+    only to override that for this provider (see :func:`destination_keys`).
+    """
     out: dict[str, Any] = {
         "name": name,
         "label_key": label_key or _EXISTING_LABEL_KEYS.get(name, f"org.erp.field.{name}"),
         "secret": secret,
         "required": required,
         # Changing a destination field starts a new connection: the form then
-        # asks for the secrets again rather than claiming they are kept.
-        "destination": name in DESTINATION_KEYS,
+        # asks for the secrets again rather than claiming they are kept. The
+        # backend's own rule (`destination_keys`) reads this same flag.
+        "destination": (name in DESTINATION_KEYS) if destination is None else destination,
     }
     if placeholder is not None:
         out["placeholder"] = placeholder
@@ -136,7 +152,18 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
         "auth": "oauth",
         "fields": [
             *_byo_app_fields(),
-            _field("environment", options=["production", "sandbox"], placeholder="production"),
+            # Not a destination: it only picks between Intuit's sandbox and
+            # production API hosts (the adapter maps any other value to
+            # production), and the OAuth endpoints are Intuit constants, so no
+            # value sends a credential anywhere but Intuit. Treated as one, it
+            # dropped a bring-your-own-app client_secret on every switch, which
+            # made a sandbox connection impossible to save (decisions §316).
+            _field(
+                "environment",
+                options=["production", "sandbox"],
+                placeholder="production",
+                destination=False,
+            ),
             # The GL codes (our chart) of the accounts a FeohLedger payment is
             # written back from as a QuickBooks BillPayment (decisions §295).
             # Not required: without one, write-back refuses
@@ -419,18 +446,35 @@ def same_erp(stored: Any, incoming: Any) -> bool:
     )
 
 
+def destination_keys(erp_config: Any) -> frozenset[str]:
+    """The ``settings.erp`` keys that are a destination for this block's ERP.
+
+    :data:`DESTINATION_KEYS`, plus any field the provider's entry marks
+    ``destination``, minus any field it explicitly marks not one. The by-name
+    default still covers every key the provider does not declare, rendered or
+    not: narrowing is opt-in per field, never inferred from what a form shows.
+    """
+    entry = provider(catalog_key(erp_config)) if isinstance(erp_config, dict) else None
+    fields = entry["fields"] if entry else []
+    declared = frozenset(f["name"] for f in fields if f["destination"])
+    excluded = frozenset(f["name"] for f in fields if not f["destination"])
+    return (DESTINATION_KEYS | declared) - excluded
+
+
 def same_connection(stored: Any, incoming: Any) -> bool:
     """Does ``incoming`` name the same ERP, at the same destination, as ``stored``?
 
     The one condition under which the sealed secrets stay with the block across
     a save (:func:`secrets_to_drop`), and under which a connection test may use
-    them (``provider_credentials.config_for_connection_test``).
+    them (``provider_credentials.config_for_connection_test``). Which keys are
+    the destination is per ERP (:func:`destination_keys`); both blocks select
+    the same ERP by this point, so either one names it.
     """
     if not same_erp(stored, incoming):
         return False
     return all(
         _destination_value(stored.get(key)) == _destination_value(incoming.get(key))
-        for key in DESTINATION_KEYS
+        for key in destination_keys(stored)
     )
 
 

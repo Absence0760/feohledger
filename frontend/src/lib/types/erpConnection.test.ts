@@ -59,7 +59,44 @@ const qbo: ErpProvider = {
 			label_key: 'org.erp.environment',
 			secret: false,
 			required: true,
-			options: ['production', 'sandbox']
+			options: ['production', 'sandbox'],
+			// As the backend catalogue serves it (decisions §316).
+			destination: false
+		}
+	]
+};
+
+/** Business Central: here `environment` IS a destination (a URL path segment). */
+const bc: ErpProvider = {
+	key: 'dynamics_365_bc',
+	label: 'Microsoft Dynamics 365 Business Central',
+	regions: ['US', 'ZA'],
+	auth: 'credentials',
+	docs_url: 'https://example.invalid/bc',
+	available: true,
+	fields: [
+		{
+			name: 'environment',
+			label_key: 'org.erp.environment',
+			secret: false,
+			required: false,
+			destination: true
+		},
+		{
+			name: 'tenant_id',
+			label_key: 'org.erp.tenantId',
+			secret: false,
+			required: true,
+			destination: true
+		},
+		{ name: 'client_id', label_key: 'org.erp.clientId', secret: false, required: true },
+		{ name: 'client_secret', label_key: 'org.erp.clientSecret', secret: true, required: true },
+		{
+			name: 'company_id',
+			label_key: 'org.erp.companyId',
+			secret: false,
+			required: true,
+			destination: true
 		}
 	]
 };
@@ -156,6 +193,43 @@ describe('initialValues / secretIsSaved', () => {
 
 	it('defaults a choice field to its first option', () => {
 		expect(initialValues(qbo, undefined).environment).toBe('production');
+	});
+
+	it("keeps QuickBooks' own-app secret across an environment change", () => {
+		// The catalogue marks QuickBooks' environment destination: false (it
+		// only picks between two Intuit hosts), so production → sandbox is the
+		// same connection and Save must not ask for the client secret again.
+		const stored = {
+			type: 'quickbooks_online',
+			integration_method: 'direct',
+			client_id: 'byo',
+			environment: 'production'
+		};
+		const values = { client_id: 'byo', client_secret: '', environment: 'sandbox' };
+		const secret = qbo.fields[1];
+		expect(destinationChanged(qbo, values, stored)).toBe(false);
+		expect(secretIsSaved(qbo, secret, stored, ['client_secret'], values)).toBe(true);
+		expect(
+			missingRequired(qbo, values, stored, ['client_secret'], { requireByoApp: true })
+		).toEqual([]);
+	});
+
+	it('still asks again when a Business Central environment changes', () => {
+		const stored = {
+			type: 'dynamics_365_bc',
+			integration_method: 'direct',
+			environment: 'production',
+			tenant_id: 't',
+			client_id: 'c',
+			company_id: 'co'
+		};
+		const values = { ...initialValues(bc, stored), environment: 'sandbox' };
+		const secret = bc.fields.find((f) => f.name === 'client_secret')!;
+		expect(destinationChanged(bc, values, stored)).toBe(true);
+		expect(secretIsSaved(bc, secret, stored, ['client_secret'], values)).toBe(false);
+		expect(missingRequired(bc, values, stored, ['client_secret']).map((f) => f.name)).toEqual([
+			'client_secret'
+		]);
 	});
 });
 

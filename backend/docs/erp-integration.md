@@ -410,8 +410,8 @@ webhooks, older spelling `webhook_secret`) — are **not** in
 - **Connection test.** `POST /api/organization/test-erp` with a form body uses
   the STORED secrets only while the body names the saved ERP at the saved
   destination (`catalog.same_connection`: same `type` + routing, and the same
-  `catalog.DESTINATION_KEYS` — `base_url`, `tenant_id`, `account_id`,
-  `company_id`, `environment`); otherwise only the secrets typed into the body.
+  values for that ERP's `catalog.destination_keys` — see the next bullet but
+  one); otherwise only the secrets typed into the body.
   The body is completed from the saved block first (the OAuth metadata, keys the
   form does not render), exactly as a save would. A test can therefore never
   send a sealed credential to a host that has been typed but not saved. When
@@ -433,6 +433,31 @@ webhooks, older spelling `webhook_secret`) — are **not** in
   `base_url` to whatever host a save named. A block that selected no ERP yet
   binds nothing, so secrets entered before the first configuration save stay
   (decisions §271).
+- **What counts as a destination is per ERP.** The default is by name,
+  `catalog.DESTINATION_KEYS` — `base_url`, `tenant_id`, `account_id`,
+  `company_id`, `environment` — and it covers every key a provider does not
+  declare, rendered or not. A provider narrows it only by declaring one of its
+  own fields `destination=False` in the catalogue, and the backend
+  (`catalog.destination_keys`) and the settings form (the field's
+  `destination` flag in `GET /organization/erp/providers`) read that one flag.
+  The only opt-out is **QuickBooks Online's `environment`**: it picks
+  `sandbox-quickbooks.api.intuit.com` or `quickbooks.api.intuit.com` (any other
+  value is production) and the OAuth endpoints are Intuit constants, so no value
+  sends a credential anywhere but Intuit. Switching production ↔ sandbox
+  therefore keeps a bring-your-own-app `client_secret`; before this, the switch
+  dropped it and the form refused to save without it, so a sandbox connection
+  could not be configured (decisions §316). Business Central's `environment` is
+  a URL path segment — other books — and stays a destination. A `*_url` /
+  `*host*` field can never opt out, and `tests/test_erp_catalog.py` pins the
+  list of opt-outs.
+  | Provider | Field | Destination? | Why |
+  |---|---|---|---|
+  | QuickBooks Online | `environment` | No | Selects one of two fixed Intuit hosts |
+  | Dynamics 365 BC | `environment` | Yes | Path segment: `{base}/{environment}/api/v2.0/…` |
+  | Dynamics 365 BC | `base_url`, `tenant_id`, `company_id` | Yes | Host / path the token rides on |
+  | NetSuite | `account_id` | Yes | Hostname label |
+  | SYSPRO, Sage Business Cloud Accounting (SA) | `base_url`, `company_id` | Yes | Host; company logged in to |
+  | Sage Intacct | `company_id` | Yes | Company logged in to |
 - **OAuth tokens.** Sealed in the same row at the service-only paths
   `oauth.access_token` / `oauth.refresh_token`
   (`provider_credentials.SERVICE_SECRET_FIELDS`). They are never merged into an
