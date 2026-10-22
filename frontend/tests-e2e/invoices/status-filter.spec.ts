@@ -29,7 +29,10 @@ test.describe('/invoices status filter', () => {
 		await expect(approvedChip).toBeVisible();
 
 		// Capture the All-row count before clicking — used to confirm
-		// the filter actually narrowed the result.
+		// the filter actually narrowed the result. Gate it on a real invoice
+		// row first: the chips can draw before the list lands, and a bare
+		// `.count()` there read the single "Loading…" row as the whole set.
+		await expect(page.locator('table tbody tr input[type="checkbox"]').first()).toBeVisible();
 		const beforeRows = await page.locator('table tbody tr').count();
 
 		// Wait for the specific filtered fetch to land. networkidle is
@@ -45,19 +48,20 @@ test.describe('/invoices status filter', () => {
 		await expect(approvedChip).toHaveClass(/active/);
 
 		// Every row's status badge should read "Approved" — narrower
-		// than the unfiltered set.
-		const rows = page.locator('table tbody tr');
-		const afterRows = await rows.count();
+		// than the unfiltered set. The Status column is third-to-last
+		// (Assigned To, then Actions, follow it). Polled: the response has
+		// landed, but the table re-renders from it a tick later, so a bare
+		// read here could still see the unfiltered rows.
+		const badges = page.locator('table tbody tr td:nth-last-child(3)');
+		await expect
+			.poll(async () => {
+				const texts = await badges.allTextContents();
+				return texts.length > 0 && texts.every((b) => b.toLowerCase().includes('approved'));
+			})
+			.toBe(true);
+		const afterRows = await page.locator('table tbody tr').count();
 		expect(afterRows).toBeGreaterThan(0);
 		expect(afterRows).toBeLessThanOrEqual(beforeRows);
-
-		// All visible status badges in the body show 'Approved'. The
-		// Status column is now third-to-last (Assigned To, then Actions,
-		// follow it).
-		const badges = await page
-			.locator('table tbody tr td:nth-last-child(3)')
-			.allTextContents();
-		expect(badges.every((b) => b.toLowerCase().includes('approved'))).toBe(true);
 	});
 
 	test('clicking All clears the filter', async ({ page }) => {
