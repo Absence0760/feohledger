@@ -76,6 +76,11 @@ test.describe('/login/reset-password', () => {
 			'href',
 			'/login/forgot-password'
 		);
+		// Found on load, with nothing pressed and nothing focused: the alert is
+		// what announces it (the pressed paths focus it instead).
+		await expect(
+			page.getByRole('alert').filter({ hasText: /invalid or has expired/i })
+		).toHaveCount(1);
 	});
 
 	test('a used set-password link names Forgot password as the way back in', async ({ page }) => {
@@ -200,6 +205,57 @@ test.describe('/login/reset-password', () => {
 		await expect(page.locator('form input[autocomplete="username"]')).toHaveValue(
 			'retry@acme.example'
 		);
+		// The Try again button went with the failed state; focus lands on the
+		// first field of the form that replaced it, not on <body>.
+		await expect(page.locator('input[type="password"]').first()).toBeFocused();
+	});
+
+	test('a retried check that finds the link dead switches to the request-a-new-link screen, focused', async ({
+		page
+	}) => {
+		// The first check failed for a reason that says nothing about the link (a
+		// rate limit); the retry then answers 400, the link is dead. Try again
+		// went with the failed state, so the explanation takes focus — that is
+		// what announces it (WCAG 2.4.3, 4.1.3).
+		let status = 429;
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) =>
+				status === 429
+					? route.fulfill({ status: 429, json: { detail: 'Too many requests. Slow down.' } })
+					: route.fulfill({ status: 400, json: { detail: 'Invalid or expired reset link.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token&mode=set');
+		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
+
+		status = 400;
+		await page.getByRole('button', { name: 'Try again' }).click();
+
+		const focused = page.locator(':focus');
+		await expect(focused).toContainText(
+			'This reset link is invalid or has expired. Please request a new one.'
+		);
+		await expect(focused).toContainText(/set-password links work once and expire/i);
+		// Focus announces it; an alert as well would read it twice.
+		await expect(focused).not.toHaveAttribute('role', 'alert');
+		await expect(page.getByRole('link', { name: /Reset your password/i })).toHaveAttribute(
+			'href',
+			'/login/forgot-password'
+		);
+		await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+		await expect(page.getByText('Too many requests. Slow down.')).toHaveCount(0);
+	});
+
+	test('a retried check that fails again keeps focus on Try again', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password/check',
+			(route) =>
+				route.fulfill({ status: 429, json: { detail: 'Too many requests. Slow down.' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+		await page.getByRole('button', { name: 'Try again' }).click();
+		await expect(page.getByText('Too many requests. Slow down.')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Try again' })).toBeFocused();
 	});
 
 	test('a link that dies between loading and submitting switches to the request-a-new-link screen', async ({

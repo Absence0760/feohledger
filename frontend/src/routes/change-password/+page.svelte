@@ -9,6 +9,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { brand } from '#lib/stores/brand.svelte.ts';
 	import { nextFromParams, postLoginTarget } from '#lib/utils/postLoginRedirect.ts';
 
 	interface UserResponse {
@@ -91,7 +92,7 @@
 </script>
 
 <svelte:head>
-	<title>{m('auth.changePassword.pageTitle')}</title>
+	<title>{m('auth.changePassword.pageTitle', { product: brand.productName })}</title>
 </svelte:head>
 
 <AuthShell>

@@ -5,6 +5,7 @@
 	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
 	import { api, ApiError } from '#lib/api.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { brand } from '#lib/stores/brand.svelte.ts';
 	import { signInHref } from '#lib/utils/prefillEmail.ts';
 
 	// Two links land here, both redeeming the same single-use reset token:
@@ -28,10 +29,14 @@
 	let newServerError = $state('');
 	let successEl = $state<HTMLParagraphElement | null>(null);
 	let invalidEl = $state<HTMLDivElement | null>(null);
-	// The link died on submit rather than on load: the explanation is then
-	// focused (the submit button went with the form), and focus is what
-	// announces it — a `role="alert"` as well would read it twice.
-	let invalidOnSubmit = $state(false);
+	let retryEl = $state<HTMLButtonElement | null>(null);
+	// The link was found dead by something the visitor pressed (submit, or
+	// Retry after a failed check) rather than on load: the control they pressed
+	// went with the content it sat in, so the explanation is focused instead,
+	// and focus is what announces it — a `role="alert"` as well would read it
+	// twice. On load nothing was pressed and nothing has focus, so the alert is
+	// what announces it.
+	let invalidFocused = $state(false);
 
 	onMount(async () => {
 		token = page.url.searchParams.get('token') ?? '';
@@ -45,7 +50,20 @@
 		await checkToken();
 	});
 
-	async function checkToken() {
+	// Retry is the visitor's own press, and the button disappears the moment
+	// the check starts (the `checking` status replaces it) — focus drops to
+	// <body> and a screen reader is left with nothing. Wherever the check lands,
+	// put focus on what replaced the button (WCAG 2.4.3, 4.1.3): the dead-link
+	// explanation, the first password field, or Retry again beside the banner.
+	async function retryCheck() {
+		await checkToken(true);
+		await tick();
+		if (phase === 'invalid') invalidEl?.focus();
+		else if (phase === 'ready') newFields?.focusNew();
+		else if (phase === 'unavailable') retryEl?.focus();
+	}
+
+	async function checkToken(pressed = false) {
 		phase = 'checking';
 		error = '';
 		try {
@@ -57,7 +75,7 @@
 			// says nothing about the link, so telling the visitor to request a
 			// new one would be wrong: say what happened and let them retry.
 			if (err instanceof ApiError && err.status === 400) {
-				invalidOnSubmit = true;
+				invalidFocused = pressed;
 				phase = 'invalid';
 			} else {
 				error = err instanceof Error ? err.message : m('auth.resetPassword.checkFailed');
@@ -68,6 +86,13 @@
 
 	let heading = $derived(
 		setMode ? m('auth.resetPassword.setHeading') : m('auth.resetPassword.heading')
+	);
+	// The tab title carries the tenant's product name, not a hardcoded one, so
+	// a white-label host never shows the platform's name in the tab.
+	let pageTitle = $derived(
+		m(setMode ? 'auth.resetPassword.setPageTitle' : 'auth.resetPassword.pageTitle', {
+			product: brand.productName
+		})
 	);
 
 	async function handleSubmit(e: Event) {
@@ -98,7 +123,7 @@
 			// coded `rate_limited` refusal, localized by `api/codedRefusals.ts` —
 			// in the banner and leaves the form to retry.
 			if (err instanceof ApiError && err.status === 400) {
-				invalidOnSubmit = true;
+				invalidFocused = true;
 				phase = 'invalid';
 				// The focused submit button went with the form; land focus on the
 				// explanation so it is announced (as the success branch does).
@@ -118,7 +143,7 @@
 </script>
 
 <svelte:head>
-	<title>{heading} — FeohLedger</title>
+	<title>{pageTitle}</title>
 </svelte:head>
 
 <AuthCard
@@ -177,7 +202,7 @@
 		     screen reader hears what to do next, not only what went wrong. -->
 		<div
 			class="invalid"
-			role={invalidOnSubmit ? undefined : 'alert'}
+			role={invalidFocused ? undefined : 'alert'}
 			tabindex="-1"
 			bind:this={invalidEl}
 		>
@@ -191,7 +216,9 @@
 		<a class="link-btn" href="/login/forgot-password">{m('auth.forgotPassword.heading')}</a>
 	{:else if phase === 'unavailable'}
 		<!-- The failure itself is in AuthCard's error banner. -->
-		<button type="button" onclick={checkToken}>{m('auth.resetPassword.retry')}</button>
+		<button type="button" bind:this={retryEl} onclick={retryCheck}>
+			{m('auth.resetPassword.retry')}
+		</button>
 	{:else}
 		<p class="explain" role="status">{m('auth.resetPassword.checking')}</p>
 	{/if}

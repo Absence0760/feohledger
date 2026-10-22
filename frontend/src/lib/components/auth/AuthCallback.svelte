@@ -6,6 +6,7 @@
 	import { setToken } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { brand } from '#lib/stores/brand.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { postLoginTarget, takeNextForSso, withNext } from '#lib/utils/postLoginRedirect.ts';
 	import { idpErrorCodeForDisplay, idpErrorKey } from '#lib/utils/idpCallbackError.ts';
@@ -86,7 +87,7 @@
 </script>
 
 <svelte:head>
-	<title>{m('auth.callback.pageTitle')}</title>
+	<title>{m('auth.callback.pageTitle', { product: brand.productName })}</title>
 </svelte:head>
 
 <AuthCard

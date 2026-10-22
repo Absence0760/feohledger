@@ -9,6 +9,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { brand } from '#lib/stores/brand.svelte.ts';
 
 	interface CompleteResponse {
 		status: string;
@@ -110,7 +111,7 @@
 </script>
 
 <svelte:head>
-	<title>{m('auth.verify.pageTitle')}</title>
+	<title>{m('auth.verify.pageTitle', { product: brand.productName })}</title>
 </svelte:head>
 
 <AuthShell>
