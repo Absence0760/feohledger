@@ -93,8 +93,17 @@ SAGE_ACCOUNTING_OAUTH = register_oauth_provider(
         extra_authorize_params={"filter": "apiv3.1"},
         # Sage's token endpoint takes client_id / client_secret as form fields.
         token_auth="body",
+        # Revoking the refresh token ends the grant (access tokens live out
+        # their few minutes). Form body `token` + the client as form fields,
+        # like the token endpoint — never HTTP Basic (decisions §320). The
+        # v3.1 central-OAuth URL is the one Sage client libraries use
+        # (olsgreen/oauth2-sage-business-cloud, nook-io/python-sage); Sage's own
+        # page refuses automated fetches, so it is on the sandbox checklist
+        # (docs/followups.md (a)). The v3.0 guide's regional hosts are retired.
+        revoke_url="https://oauth.accounting.sage.com/revoke",
         authorize_url_setting="erp_sage_accounting_authorize_url",
         token_url_setting="erp_sage_accounting_token_url",
+        revoke_url_setting="erp_sage_accounting_revoke_url",
     )
 )
 
@@ -186,7 +195,12 @@ class SageAccountingAdapter(OAuthErpAdapter):
 
     @classmethod
     async def resolve_external_tenant_id(
-        cls, *, access_token: str, token_response: dict, callback_params: dict[str, str]
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
     ) -> str | None:
         """The business this consent connected (``GET /businesses``).
 

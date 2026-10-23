@@ -4,13 +4,19 @@ QuickBooks Online (and Xero / Sage Accounting once their adapters land) need
 the customer's admin to consent in the provider's UI. The flow:
 
 1. The settings page calls ``GET /api/organization/erp/oauth/{provider}/authorize``
-   (admin, plan-gated) and navigates the browser to the ``authorize_url`` it
-   returns.
+   (admin, plan-gated) with ``credentials: 'include'`` and navigates the browser
+   to the ``authorize_url`` it returns. The response also sets an HttpOnly,
+   Secure, ``__Host-`` binding cookie on the API host whose digest is signed
+   into the ``state`` (decisions §320). A call that did not arrive on the
+   callback's host (a custom-domain tenant's same-origin ``/api``) is refused
+   with 409 ``erp_oauth_platform_host_required`` before any consent, since the
+   cookie would land where the callback never sees it.
 2. The provider redirects to the ONE fixed redirect URI every app registers,
    ``FEOH_API_PUBLIC_URL`` + ``/api/erp/oauth/callback``. It carries no JWT and
    no tenant header, so the tenant comes from the signed, single-use ``state``
    minted in step 1 (the SAML ACS pattern: tenant from server-minted state,
-   never from the URL).
+   never from the URL) — and only in the browser that holds the matching
+   binding cookie; any other browser gets a plain 400 and nothing is exchanged.
 3. The callback exchanges the code, seals the tokens in ``provider_credentials``
    beside the consent metadata in ``settings.erp.oauth``, and 302s the browser
    back to the tenant's own origin (``tenant_urls.tenant_base_url`` —
@@ -31,9 +37,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -43,6 +49,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ensure_live_erp_entitled, require_roles
+from app.api.refusals import coded_refusal
+from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.user import User
@@ -98,7 +106,13 @@ class OAuthStatusResponse(BaseModel):
 
 class DisconnectResponse(BaseModel):
     disconnected: bool
+    #: The provider confirmed the grant is gone (``revocation == "revoked"``).
     revoked: bool
+    #: ``revoked`` | ``failed`` (the provider did not confirm) | ``unsupported``
+    #: (it documents no revocation endpoint, e.g. Blackbaud SKY) | None (nothing
+    #: was connected). Anything but ``revoked`` means the customer must remove
+    #: the app on the provider's side; the settings page says so (§320).
+    revocation: str | None = None
 
 
 def _direct(provider: str) -> dict:
@@ -180,9 +194,62 @@ async def oauth_status(
     )
 
 
+#: ``/authorize`` reached on a host other than the callback's — a custom-domain
+#: (vanity) tenant, whose SPA calls ``/api`` on its own origin. The binding
+#: cookie would land on that host and never reach the callback, so the connect
+#: is refused BEFORE consent rather than failing after it (decisions §320).
+ERP_OAUTH_PLATFORM_HOST_REQUIRED = "erp_oauth_platform_host_required"
+
+
+def _callback_host() -> str:
+    return (urlsplit(settings.api_public_url).hostname or "").lower()
+
+
+def _platform_host_refusal(org: Organization) -> HTTPException:
+    """409 naming where the connect CAN start: the tenant's platform address
+    (``FEOH_TENANT_URL_TEMPLATE``), never its own custom domain."""
+    base = tenant_base_url(org.slug, None)
+    connect_url = f"{base}/organization?section=erp" if base else ""
+    message = (
+        "Connect this ERP from your FeohLedger address"
+        + (f" ({connect_url})" if connect_url else "")
+        + ", not from your custom domain: the provider returns to FeohLedger's own address, "
+        "which only a connect started there can be matched to."
+    )
+    return HTTPException(
+        status_code=409,
+        detail=coded_refusal(ERP_OAUTH_PLATFORM_HOST_REQUIRED, message, connect_url=connect_url),
+    )
+
+
+def _set_binding_cookie(response: Response, value: str) -> None:
+    response.set_cookie(
+        erp_oauth.BINDING_COOKIE,
+        value,
+        max_age=int(settings.erp_oauth_state_ttl_seconds),
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite=settings.erp_oauth_binding_cookie_samesite,
+    )
+
+
+def _clear_binding_cookie(response: Response) -> Response:
+    response.delete_cookie(
+        erp_oauth.BINDING_COOKIE,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite=settings.erp_oauth_binding_cookie_samesite,
+    )
+    return response
+
+
 @router.get("/{provider}/authorize", response_model=AuthorizeResponse)
 async def oauth_authorize(
     provider: str,
+    request: Request,
+    response: Response,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
     db: AsyncSession = Depends(get_control_db),
@@ -191,7 +258,16 @@ async def oauth_authorize(
 
     JSON rather than a 302 because the SPA authenticates with a bearer header a
     top-level navigation can't carry; the page navigates to the URL itself.
+
+    **Bound to this browser** (decisions §320). The SPA calls this with
+    ``credentials: 'include'``; the response sets :data:`erp_oauth.BINDING_COOKIE`
+    on the API host, and the ``state`` carries its digest. The provider's
+    redirect lands on the same host, so the callback sees the cookie only in the
+    browser that made THIS authenticated request. A consent URL forwarded to
+    anyone else completes nothing.
     """
+    if (request.url.hostname or "").lower() != _callback_host():
+        raise _platform_host_refusal(org)
     spec = _spec_or_404(provider)
     await ensure_live_erp_entitled(db, org.id, _direct(spec.key))
     resolved = await _resolved_erp_or_none(org, db)
@@ -213,13 +289,16 @@ async def oauth_authorize(
                 "client id and secret, or ask the operator to configure the platform app."
             ),
         )
+    cookie_value, binding = erp_oauth.new_browser_binding()
     state = await erp_oauth.create_state(
         org_id=org.id,
         org_slug=org.slug,
         user_id=user.id,
         provider=spec.key,
         client_source=creds.source,
+        browser_binding=binding,
     )
+    _set_binding_cookie(response, cookie_value)
     return AuthorizeResponse(authorize_url=erp_oauth.build_authorize_url(spec, creds, state))
 
 
@@ -299,10 +378,13 @@ async def oauth_disconnect(
     # Revoke AFTER the commit: the provider's latency is not charged to a
     # transaction holding the org row lock, and a failed revoke must not leave
     # the tenant believing it is still connected.
-    revoked = False
     spec = erp_oauth.load_providers().get(provider)
-    if spec is not None:
-        revoked = await erp_oauth.revoke(spec, resolved, oauth_with_tokens)
+    revocation = (
+        await erp_oauth.revoke_grant(spec, resolved, oauth_with_tokens)
+        if spec is not None
+        else erp_oauth.REVOKE_FAILED
+    )
+    revoked = revocation == erp_oauth.REVOKED
 
     await dispatch_auth_audit(
         organization_id=org.id,
@@ -310,9 +392,9 @@ async def oauth_disconnect(
         action="organization.erp_token_revoked",
         entity_id=org.id,
         entity_type="organization",
-        details={"provider": provider, "revoked": revoked},
+        details={"provider": provider, "revoked": revoked, "revocation": revocation},
     )
-    return DisconnectResponse(disconnected=True, revoked=revoked)
+    return DisconnectResponse(disconnected=True, revoked=revoked, revocation=revocation)
 
 
 async def _record_or_503(org_id: uuid.UUID, actor_id: uuid.UUID, action: str, details: dict):
@@ -373,10 +455,31 @@ async def _realm_claimed_elsewhere(
 
 @public_router.get("/callback")
 async def oauth_callback(request: Request, db: AsyncSession = Depends(get_control_db)):
+    """Finish a connect. Every answer clears the binding cookie: it is single-use
+    like the ``state`` it pairs with, whichever way this ends."""
+    return _clear_binding_cookie(await _complete_callback(request, db))
+
+
+async def _complete_callback(request: Request, db: AsyncSession) -> Response:
     params = {k: v for k, v in request.query_params.items()}
     try:
-        bound = await erp_oauth.consume_state(params.get("state", ""))
+        bound = await erp_oauth.consume_state(
+            params.get("state", ""),
+            browser_binding=request.cookies.get(erp_oauth.BINDING_COOKIE),
+        )
     except erp_oauth.OAuthStateError as exc:
+        if exc.code == "browser_mismatch":
+            # Not the browser that started this connect: a consent link sent to
+            # someone else (the login-CSRF this binding exists for), or a
+            # connect started in another browser or a since-cleared session.
+            # Nothing was exchanged; the state is spent. No redirect: this
+            # browser has no business on the minting tenant's pages.
+            return PlainTextResponse(
+                "This ERP connection was not started in this browser, so it was not "
+                "completed. Start it again from FeohLedger → Organization → ERP, in the "
+                "browser you are signed in with.",
+                status_code=400,
+            )
         if exc.org_slug is None:
             # Forged / malformed: we don't know whose tenant to send it to,
             # and must not let the URL choose.
@@ -462,6 +565,7 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
                 access_token=str(token_response["access_token"]),
                 token_response=token_response,
                 callback_params=params,
+                erp_settings=(resolved if resolved and resolved.get("type") == spec.key else {}),
             )
         except Exception:  # noqa: BLE001 — any lookup failure refuses the connect
             logger.warning("erp_oauth: %s company lookup failed for org %s", spec.key, org.id)

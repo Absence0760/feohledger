@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
@@ -322,6 +323,7 @@ class Settings(BaseSettings):
     # every call. Empty → Sage's real endpoints. Dev points them at fake-erp.
     erp_sage_accounting_authorize_url: str = ""
     erp_sage_accounting_token_url: str = ""
+    erp_sage_accounting_revoke_url: str = ""
     # Sage Business Cloud Accounting (South Africa) API base. Empty = the
     # admin-config base_url (https-only, SSRF guard) or, absent that, the real
     # https://accounting.sageone.co.za/api/2.0.0.
@@ -347,6 +349,16 @@ class Settings(BaseSettings):
     # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
     # `state` carried across the provider's consent redirect.
     erp_oauth_state_ttl_seconds: int = 600
+    # SameSite attribute of the ERP OAuth browser-binding cookie
+    # (`__Host-feoh_erp_oauth`, decisions §320). `lax` (the default) is right
+    # wherever the SPA and the API share a registrable domain, as every deployed
+    # shape does (`<slug>.feohledger.com` → `api.feohledger.com`). `none` exists
+    # for local dev only: `acme.localhost:7777` → `localhost:8000` is CROSS-site
+    # by the public-suffix rule, and browsers refuse to set a Lax cookie from a
+    # cross-site fetch response, so `.env.development` sets `none`. Never a
+    # security weakening for this cookie: its value is a nonce compared against
+    # the signed `state`, not an ambient credential.
+    erp_oauth_binding_cookie_samesite: Literal["lax", "none"] = "lax"
     # QuickBooks Online platform app (one Intuit app serves every tenant; a
     # tenant may bring its own: settings.erp.client_id + the sealed client_secret).
     # Secrets: sops in infra-secrets. Empty (the default) = no platform app —

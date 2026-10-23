@@ -212,6 +212,15 @@ BLACKBAUD_OAUTH = register_oauth_provider(
         scopes=(),
         client_id_setting="erp_blackbaud_client_id",
         client_secret_setting="erp_blackbaud_client_secret",
+        # SKY API's OAuth service documents only /authorization and /token;
+        # there is no revocation endpoint. A grant ends when the application
+        # is disconnected from the environment — by the customer in Blackbaud
+        # Marketplace, or by the developer under My Applications (decisions §320).
+        no_revoke_endpoint_reason=(
+            "Blackbaud SKY API has no token-revocation endpoint. The environment "
+            "admin disconnects the app in Financial Edge NXT (Control Panel → Applications) "
+            "or in Blackbaud Marketplace."
+        ),
     )
 )
 

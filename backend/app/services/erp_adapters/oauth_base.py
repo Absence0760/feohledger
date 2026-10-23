@@ -58,9 +58,16 @@ class OAuthProviderSpec:
     #: Extra query parameters on the authorize redirect (e.g. Sage's
     #: ``filter=apiv3.1``). Never secrets.
     extra_authorize_params: dict[str, str] = field(default_factory=dict)
-    #: The provider's token-revocation endpoint, or None when it has none.
-    #: Disconnect calls it best-effort before clearing local state.
+    #: The provider's token-revocation endpoint. Disconnect and tenant deletion
+    #: call it best-effort (``erp_oauth.revoke_grant``). None ONLY together with
+    #: ``no_revoke_endpoint_reason``: a provider that documents no way to
+    #: revoke is stated, never assumed (``tests/test_erp_oauth_revocation.py``).
     revoke_url: str | None = None
+    #: Why ``revoke_url`` is None — the provider's own documented way to end a
+    #: grant, which the customer then has to take themselves. Disconnect reports
+    #: ``revocation: "unsupported"`` and the settings page says so (decisions
+    #: §320). Never set beside a ``revoke_url``.
+    no_revoke_endpoint_reason: str | None = None
     #: How the revoke endpoint takes the token: a form body (``token=…``,
     #: RFC 7009 — Xero, Sage) or, when True, a JSON object
     #: (``{"token": …}``), which is what Intuit documents. A provider sent the
@@ -69,15 +76,16 @@ class OAuthProviderSpec:
     #: How the token endpoint takes the client credentials: ``"basic"`` (HTTP
     #: Basic auth — Intuit, Xero) or ``"body"`` (form fields — Sage).
     token_auth: str = "basic"
-    #: The callback query parameter carrying the provider's company id
-    #: (Intuit's ``realmId``). None when the id has to be looked up after the
-    #: token exchange instead — override
-    #: :meth:`OAuthErpAdapter.resolve_external_tenant_id` for that.
+    #: The callback query parameter NAMING the provider's company id (Intuit's
+    #: ``realmId``). Unsigned — it rides the browser's redirect — so it is only
+    #: a candidate: the adapter's ``resolve_external_tenant_id`` must confirm it
+    #: under the new token before it is stored (decisions §320). The default
+    #: resolver does not read it.
     external_tenant_id_param: str | None = None
     #: The token-response field carrying the company id (Blackbaud's
-    #: ``environment_id``). Checked after ``external_tenant_id_param``. A
-    #: provider needing an API call instead (Xero ``GET /connections``, Sage's
-    #: business lookup) overrides ``resolve_external_tenant_id``.
+    #: ``environment_id``), read by the default resolver. A provider needing an
+    #: API call instead (Xero ``GET /connections``, Sage's business lookup,
+    #: QuickBooks' ``companyinfo``) overrides ``resolve_external_tenant_id``.
     external_tenant_id_token_field: str | None = None
     #: Extra headers on every token-endpoint call (code exchange, refresh,
     #: revoke), built from the tenant's stored ``settings.erp`` — e.g.
@@ -167,24 +175,33 @@ class OAuthErpAdapter(ErpAdapter):
 
     @classmethod
     async def resolve_external_tenant_id(
-        cls, *, access_token: str, token_response: dict, callback_params: dict[str, str]
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
     ) -> str | None:
         """The provider-side company id for a fresh consent, or None.
 
         Called once by the OAuth callback after the code exchange. The default
-        reads the callback query parameter named by
-        ``oauth_provider.external_tenant_id_param`` (QuickBooks' ``realmId``),
-        then the token-response field ``external_tenant_id_token_field``
-        (Blackbaud's ``environment_id``).
-        A provider that only reveals it through an API call (Xero's
-        ``GET /connections``, Sage's ``/businesses``) overrides this. None
-        refuses the connection (``erp_error=no_external_tenant``).
+        reads the token-response field ``external_tenant_id_token_field``
+        (Blackbaud's ``environment_id``) — the token response comes straight
+        from the provider over TLS, so it is the provider's word.
+
+        **Never the callback query alone.** It arrives through the browser,
+        unsigned, so whoever consents can name any company there. A provider
+        that names its company in the redirect (QuickBooks' ``realmId``,
+        ``external_tenant_id_param``) overrides this to CONFIRM the value with
+        one call under the new token, as Xero (``GET /connections``) and Sage
+        (``/businesses``) resolve theirs (decisions §320). None refuses the
+        connection (``erp_error=no_external_tenant``).
+
+        ``erp_settings`` is the tenant's resolved ``settings.erp`` when it names
+        this provider (``{}`` otherwise), for a lookup whose host depends on it
+        (QuickBooks' sandbox vs production).
         """
         spec = cls.oauth_provider
-        if spec.external_tenant_id_param:
-            value = str(callback_params.get(spec.external_tenant_id_param) or "").strip()
-            if value:
-                return value
         if spec.external_tenant_id_token_field:
             value = str(token_response.get(spec.external_tenant_id_token_field) or "").strip()
             if value:

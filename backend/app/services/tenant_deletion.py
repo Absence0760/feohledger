@@ -35,6 +35,15 @@ gone, so a request on that tenant's host errors. ``deploy/remove-tenant.sh``
 removes the Caddy host block and reloads *before* calling this, so in the
 deployment path nothing is serving that host by then.
 
+**An ERP OAuth grant is revoked on the way out** (decisions §320). Its tokens
+are sealed in ``provider_credentials``, which the control-plane step deletes, so
+just before it they are read once and the provider is asked to revoke the
+refresh token — otherwise it stays valid at Intuit / Xero / Sage for up to years.
+Best-effort: a refusal, an outage, a provider with no revocation endpoint
+(Blackbaud) or an unopenable store never stops the deletion; the outcome goes
+into the written confirmation so the operator can tell the customer what to
+remove on the provider's side.
+
 **What this does not reach** is disclosed rather than quietly omitted, because
 the DPA discloses it too: backup objects (the deploy script removes the
 per-tenant dumps; the shared control-plane dump is not selectively editable and
@@ -53,6 +62,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import control_session_factory
 from app.services import storage
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.tenant_provisioning import (
     CONTROL_TABLES,
     _assert_safe_db_name,
@@ -174,6 +184,36 @@ class TenantDeletionResult:
     database_dropped: bool
     control_rows_deleted: dict[str, int] = field(default_factory=dict)
     dry_run: bool = False
+    #: The tenant's ERP OAuth grant, revoked best-effort before the sealed
+    #: tokens went with the control plane (decisions §320): the provider key and
+    #: one of ``erp_oauth.REVOKED`` / ``REVOKE_FAILED`` / ``REVOKE_UNSUPPORTED``,
+    #: or :data:`GRANT_UNREADABLE`. Both None when no grant was held.
+    erp_grant_provider: str | None = None
+    erp_grant_revocation: str | None = None
+
+
+#: The sealed store could not be opened, so the tokens could not be read to
+#: revoke them. The deletion still proceeds; the report says so.
+GRANT_UNREADABLE = "unreadable"
+
+#: How the written confirmation states each revocation outcome. Anything short
+#: of "revoked" tells the operator what is still live, because the customer's
+#: books stay reachable by the grant until the provider is told or it expires.
+_GRANT_OUTCOME_TEXT = {
+    "revoked": "revoked at the provider",
+    "failed": (
+        "NOT revoked (the provider refused or could not be reached); the customer "
+        "should remove FeohLedger from the provider's connected apps"
+    ),
+    "unsupported": (
+        "NOT revoked: the provider has no revocation endpoint; the customer "
+        "should remove FeohLedger from the provider's connected apps"
+    ),
+    GRANT_UNREADABLE: (
+        "NOT revoked: the sealed tokens could not be opened; the customer should "
+        "remove FeohLedger from the provider's connected apps"
+    ),
+}
 
 
 async def _load_plan(session, slug: str) -> TenantDeletionPlan:
@@ -306,6 +346,19 @@ async def delete_tenant(
         "[tenant-deletion] %s: removed %d object(s) under %s", slug, objects_deleted, prefix
     )
 
+    # 2b. The ERP OAuth grant. Its tokens are sealed in `provider_credentials`,
+    #     which step 3 deletes — the last moment they can be read to tell the
+    #     provider. Best-effort: a provider that refuses or is unreachable must
+    #     not keep a tenant alive, so the outcome is reported, never raised.
+    grant_provider, grant_revocation = await _revoke_erp_grant(plan, control_session)
+    if grant_provider is not None:
+        logger.info(
+            "[tenant-deletion] %s: ERP OAuth grant (%s) %s",
+            slug,
+            grant_provider,
+            grant_revocation,
+        )
+
     # 3. The control plane, in one transaction: either the tenant is gone from
     #    it or nothing changed, never a half-deleted org.
     if control_session is not None:
@@ -326,7 +379,62 @@ async def delete_tenant(
         objects_deleted=objects_deleted,
         database_dropped=database_dropped,
         control_rows_deleted=deleted,
+        erp_grant_provider=grant_provider,
+        erp_grant_revocation=grant_revocation,
     )
+
+
+async def _revoke_erp_grant(
+    plan: TenantDeletionPlan, control_session: AsyncSession | None
+) -> tuple[str | None, str | None]:
+    """Revoke the tenant's ERP OAuth grant at the provider, if it holds one.
+
+    ``(provider, outcome)``, or ``(None, None)`` with no grant. Reads the
+    settings and the sealed tokens on ``control_session`` when given (a closure
+    holding the org row), else on a short session of its own that is CLOSED
+    before the provider is called, so no transaction waits on its latency.
+    Never raises: anything unexpected reads as ``failed``.
+    """
+    from app.services import erp_oauth
+
+    named: str | None = None  # the provider the consent metadata names, if any
+
+    async def _read(session: AsyncSession) -> tuple[dict, dict]:
+        nonlocal named
+        org_settings = (
+            await session.execute(
+                text("SELECT settings FROM organizations WHERE id = :org"),
+                {"org": plan.organization_id},
+            )
+        ).scalar_one_or_none()
+        erp = (org_settings or {}).get("erp") if isinstance(org_settings, dict) else None
+        meta = erp.get("oauth") if isinstance(erp, dict) else None
+        if isinstance(meta, dict):
+            named = str(meta.get("provider") or "") or None
+        return await erp_oauth.resolved_erp(plan.organization_id, org_settings, session)
+
+    try:
+        if control_session is not None:
+            resolved, oauth = await _read(control_session)
+        else:
+            async with control_session_factory() as session:
+                resolved, oauth = await _read(session)
+    except CredentialCryptoError:
+        # The tokens cannot be read, so they cannot be revoked. Reported only
+        # when the metadata says a grant existed; the store is about to go.
+        return (named, GRANT_UNREADABLE) if named else (None, None)
+    except Exception:  # noqa: BLE001 — a deletion is never stopped by its courtesy call
+        logger.warning("[tenant-deletion] %s: ERP grant could not be read", plan.slug)
+        return (named, erp_oauth.REVOKE_FAILED) if named else (None, None)
+
+    if not any(oauth.get(path.split(".", 1)[1]) for path in erp_oauth.TOKEN_PATHS):
+        return None, None
+    provider = str(oauth.get("provider") or "") or "unknown"
+    spec = erp_oauth.load_providers().get(provider)
+    if spec is None:
+        # Tokens without metadata naming a known provider: nothing to call.
+        return provider, erp_oauth.REVOKE_FAILED
+    return provider, await erp_oauth.revoke_grant(spec, resolved, oauth)
 
 
 async def _delete_control_rows(session: AsyncSession, plan: TenantDeletionPlan) -> dict[str, int]:
@@ -358,6 +466,13 @@ def format_confirmation(result: TenantDeletionResult) -> str:
     for table, count in result.control_rows_deleted.items():
         if count:
             lines.append(f"      {table}: {count}")
+    if result.erp_grant_provider is not None:
+        lines.append(
+            f"  ERP OAuth grant:      {result.erp_grant_provider} — "
+            + _GRANT_OUTCOME_TEXT.get(
+                result.erp_grant_revocation or "", _GRANT_OUTCOME_TEXT["failed"]
+            )
+        )
     lines += [
         "",
         "  Not reached by this step, as disclosed in /legal/dpa § 13:",

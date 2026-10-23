@@ -68,6 +68,7 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -378,6 +379,39 @@ def _account_codes(payload: InvoicePayload) -> dict[str, str]:
     return {str(erp_id): code for erp_id, code in pairs if erp_id and code}
 
 
+def _api_base(erp_config: dict) -> str:
+    """The QuickBooks API host for a tenant's ``settings.erp``."""
+    if settings.erp_qbo_api_base:
+        # OPERATOR-controlled override (env, not tenant config) pointing
+        # local dev + e2e at fake-erp; trusted, like erp_d365_api_base.
+        return settings.erp_qbo_api_base.rstrip("/")
+    if (erp_config.get("environment") or "production") == "sandbox":
+        return _SANDBOX_BASE
+    return _PRODUCTION_BASE
+
+
+async def _token_covers_realm(base: str, realm: str, access_token: str) -> bool:
+    """Does Intuit answer ``companyinfo`` for ``realm`` under ``access_token``?
+
+    The realm is path-quoted: it came from the browser, and must not be able
+    to reshape the URL. Any non-200, or a body without ``CompanyInfo``, is no.
+    """
+    path = quote(realm, safe="")
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"{base}/v3/company/{path}/companyinfo/{path}",
+            params={"minorversion": MINOR_VERSION},
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        )
+    if resp.status_code != 200:
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and isinstance(body.get("CompanyInfo"), dict)
+
+
 def _quote(value: str) -> str:
     """Quote a value for Intuit's query language (backslash-escaped quotes)."""
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
@@ -395,15 +429,35 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
     # -- transport ---------------------------------------------------------
 
     def _company_url(self, path: str) -> str:
-        if settings.erp_qbo_api_base:
-            # OPERATOR-controlled override (env, not tenant config) pointing
-            # local dev + e2e at fake-erp; trusted, like erp_d365_api_base.
-            base = settings.erp_qbo_api_base.rstrip("/")
-        elif (self.config.get("environment") or "production") == "sandbox":
-            base = _SANDBOX_BASE
-        else:
-            base = _PRODUCTION_BASE
-        return f"{base}/v3/company/{self.external_tenant_id()}/{path}"
+        return f"{_api_base(self.config)}/v3/company/{self.external_tenant_id()}/{path}"
+
+    @classmethod
+    async def resolve_external_tenant_id(
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
+    ) -> str | None:
+        """The ``realmId`` the redirect names, CONFIRMED under the new token.
+
+        The redirect is unsigned: a tenant admin could consent to their own
+        company and name someone else's realm, squatting it so its real owner
+        reads ``already_linked``. Intuit scopes an access token to the one
+        company it was granted for, so ``GET companyinfo/{realmId}`` answering
+        200 with a ``CompanyInfo`` is Intuit's word that this consent covers
+        that realm; anything else refuses the connect (decisions §320). Asked
+        on the host the tenant's saved ``environment`` names — the host every
+        later call uses — so a sandbox consent made under a production setting
+        is refused here rather than failing on every push.
+        """
+        realm = str(callback_params.get(QBO_OAUTH.external_tenant_id_param or "") or "").strip()
+        if not realm or len(realm) > 64:
+            return None
+        if not await _token_covers_realm(_api_base(erp_settings or {}), realm, access_token):
+            return None
+        return realm
 
     async def _request(
         self,

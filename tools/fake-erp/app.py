@@ -160,8 +160,9 @@ class FakeOAuthApp:
             "expires_in": st["lifetime"],
         }
 
-    async def revoke(self, request: Request) -> Response:
-        """RFC 7009 revocation (HTTP Basic client auth, form ``token``).
+    async def revoke(self, request: Request, *, client_auth: str = "basic") -> Response:
+        """RFC 7009 revocation (form ``token``; the client by HTTP Basic, or
+        as ``client_id`` / ``client_secret`` form fields — Sage's way).
 
         Revoking the live refresh token ends the consent: it and every access
         token issued under it stop working. An unknown token is still a 200, as
@@ -169,16 +170,30 @@ class FakeOAuthApp:
         """
         import base64
 
-        header = request.headers.get("authorization", "")
-        try:
-            decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
-        except Exception:  # noqa: BLE001
-            decoded = ""
-        cid, _, secret = decoded.partition(":")
+        raw = (await request.body()).decode("utf-8", errors="replace")
+        form = {k: v[0] for k, v in parse_qs(raw).items()}
+        if not request.headers.get("content-type", "").startswith(
+            "application/x-www-form-urlencoded"
+        ) or not form.get("token"):
+            # RFC 7009: a form body carrying `token`. A JSON body (Intuit's
+            # shape) is refused, so a client sending the wrong one is caught.
+            raise ProviderError(400, {"error": "invalid_request"})
+        if client_auth == "body" and request.headers.get("authorization"):
+            # Sage takes the client ONLY as form fields, as its token endpoint
+            # does; a Basic header is refused rather than ignored.
+            raise ProviderError(401, {"error": "invalid_client"})
+        if client_auth == "basic":
+            header = request.headers.get("authorization", "")
+            try:
+                decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
+            except Exception:  # noqa: BLE001
+                decoded = ""
+            cid, _, secret = decoded.partition(":")
+        else:
+            cid, secret = form.get("client_id", ""), form.get("client_secret", "")
         if (cid, secret) != (self.client_id, self.client_secret):
             raise ProviderError(401, {"error": "invalid_client"})
-        raw = (await request.body()).decode("utf-8", errors="replace")
-        token = (parse_qs(raw).get("token") or [""])[0]
+        token = form["token"]
         st = self._state()
         if token and token == st["refresh_token"]:
             st["refresh_token"] = None
@@ -1975,6 +1990,14 @@ async def sage_authorize(
 @app.post("/sage/oauth2/token")
 async def sage_token(request: Request) -> dict:
     return await SAGE_OAUTH.token(request, client_auth="body")
+
+
+@app.post("/sage/oauth2/revoke")
+async def sage_revoke(request: Request) -> Response:
+    """Sage's revocation (``https://oauth.accounting.sage.com/revoke``): the
+    refresh token as form ``token``, the client as form fields like the token
+    endpoint. Ends the consent — a later refresh is invalid_grant."""
+    return await SAGE_OAUTH.revoke(request, client_auth="body")
 
 
 @sage.get("/businesses")

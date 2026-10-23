@@ -114,6 +114,37 @@ def provider(monkeypatch):
     return _ScriptedProvider().install(monkeypatch)
 
 
+@pytest.fixture(autouse=True)
+def _api_on_the_test_host(monkeypatch):
+    """The ASGI client calls `http://test`; make that the callback's host too,
+    as a deployment's SPA calls the API host the provider redirects back to.
+    `/authorize` refuses any other host (decisions §320)."""
+    monkeypatch.setattr(settings, "api_public_url", "http://test")
+
+
+class _FakeIntuit:
+    """Intuit's `companyinfo` answer to the realm check (decisions §320): every
+    realm is covered by the new token except those in `refused` — Intuit's 403
+    for a realm the consent was not granted for."""
+
+    def __init__(self):
+        self.refused: set[str] = set()
+        self.asked: list[tuple[str, str, str]] = []
+
+    async def __call__(self, base: str, realm: str, access_token: str) -> bool:
+        self.asked.append((base, realm, access_token))
+        return realm not in self.refused
+
+
+@pytest.fixture(autouse=True)
+def intuit(monkeypatch):
+    from app.services.erp_adapters import quickbooks_online
+
+    fake = _FakeIntuit()
+    monkeypatch.setattr(quickbooks_online, "_token_covers_realm", fake)
+    return fake
+
+
 def _token_body(n: int = 1) -> dict:
     return {
         "access_token": f"ACCESS-SECRET-{n}",
@@ -201,20 +232,45 @@ async def _audit_actions(realdb, key: str = "a") -> list[AuditLog]:
         )
 
 
+#: state -> the binding cookie the browser that minted it holds. `_callback`
+#: sends it, as that browser would; a test of a DIFFERENT browser drops it.
+_COOKIES: dict[str, str] = {}
+
+
+def _binding_cookie(resp: httpx.Response) -> str:
+    """The binding cookie `/authorize` set, after asserting its attributes."""
+    header = next(
+        h for h in resp.headers.get_list("set-cookie") if h.startswith(erp_oauth.BINDING_COOKIE)
+    )
+    attrs = {a.strip().lower() for a in header.split(";")[1:]}
+    assert {"httponly", "secure", "path=/"} <= attrs, header
+    assert not any(a.startswith("domain=") for a in attrs), "a __Host- cookie names no Domain"
+    return header.split(";", 1)[0].split("=", 1)[1]
+
+
 async def _authorize(realdb, key: str = "a") -> str:
     async with realdb.client(key=key, role="admin") as c:
         resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
     assert resp.status_code == 200, resp.text
-    return resp.json()["authorize_url"]
+    url = resp.json()["authorize_url"]
+    _COOKIES[_state_of(url)] = _binding_cookie(resp)
+    return url
 
 
 def _state_of(url: str) -> str:
     return parse_qs(urlsplit(url).query)["state"][0]
 
 
-async def _callback(realdb, params: dict, key: str = "a") -> httpx.Response:
+async def _callback(
+    realdb, params: dict, key: str = "a", *, cookie: str | None | object = ...
+) -> httpx.Response:
+    """The provider's redirect, landing in the browser that started the connect
+    (its binding cookie) unless ``cookie`` says otherwise (None: no cookie)."""
+    if cookie is ...:
+        cookie = _COOKIES.get(params.get("state", ""))
+    headers = {"Cookie": f"{erp_oauth.BINDING_COOKIE}={cookie}"} if cookie else {}
     async with realdb.client(key=key, role=None) as c:
-        return await c.get("/api/erp/oauth/callback", params=params)
+        return await c.get("/api/erp/oauth/callback", params=params, headers=headers)
 
 
 def _connected_block(org_id: uuid.UUID, *, expires_in: int = 3600, n: int = 1) -> dict:
@@ -244,13 +300,16 @@ async def _mint(**overrides) -> str:
         client_source="platform",
     )
     kwargs.update(overrides)
-    return await erp_oauth.create_state(**kwargs)
+    cookie, binding = erp_oauth.new_browser_binding()
+    state = await erp_oauth.create_state(browser_binding=binding, **kwargs)
+    _COOKIES[state] = cookie
+    return state
 
 
 async def test_state_round_trips_once():
     org_id = uuid.uuid4()
     state = await _mint(org_id=org_id)
-    bound = await erp_oauth.consume_state(state)
+    bound = await erp_oauth.consume_state(state, browser_binding=_COOKIES.get(state))
     assert bound["org_id"] == str(org_id)
     assert bound["org_slug"] == "acme"
     assert bound["provider"] == PROVIDER
@@ -258,9 +317,9 @@ async def test_state_round_trips_once():
 
 async def test_state_replay_is_refused():
     state = await _mint()
-    await erp_oauth.consume_state(state)
+    await erp_oauth.consume_state(state, browser_binding=_COOKIES.get(state))
     with pytest.raises(erp_oauth.OAuthStateError) as exc:
-        await erp_oauth.consume_state(state)
+        await erp_oauth.consume_state(state, browser_binding=_COOKIES.get(state))
     assert exc.value.code == "state_expired"
     assert exc.value.org_slug == "acme"
 
@@ -274,7 +333,7 @@ async def test_state_with_tampered_payload_is_forged():
     payload["o"] = str(uuid.uuid4())
     forged_body = erp_oauth._b64(json.dumps(payload, separators=(",", ":")).encode())
     with pytest.raises(erp_oauth.OAuthStateError) as exc:
-        await erp_oauth.consume_state(f"{forged_body}.{mac}")
+        await erp_oauth.consume_state(f"{forged_body}.{mac}", browser_binding=_COOKIES[state])
     assert exc.value.code == "invalid_state"
     assert exc.value.org_slug is None
 
@@ -282,7 +341,7 @@ async def test_state_with_tampered_payload_is_forged():
 @pytest.mark.parametrize("bad", ["", "no-dot", "a.b.c", "x" * 3000 + ".y", "Zm9v.bm9wZQ"])
 async def test_state_garbage_is_forged(bad):
     with pytest.raises(erp_oauth.OAuthStateError) as exc:
-        await erp_oauth.consume_state(bad)
+        await erp_oauth.consume_state(bad, browser_binding=None)
     assert exc.value.code == "invalid_state"
 
 
@@ -290,7 +349,7 @@ async def test_state_signed_with_another_key_is_forged(monkeypatch):
     state = await _mint()
     monkeypatch.setattr(settings, "secret_key", "a-different-signing-key-of-sufficient-length")
     with pytest.raises(erp_oauth.OAuthStateError) as exc:
-        await erp_oauth.consume_state(state)
+        await erp_oauth.consume_state(state, browser_binding=_COOKIES.get(state))
     assert exc.value.code == "invalid_state"
 
 
@@ -301,7 +360,7 @@ async def test_state_past_its_ttl_is_expired(monkeypatch):
         erp_oauth.time, "time", lambda: real_time() + settings.erp_oauth_state_ttl_seconds + 5
     )
     with pytest.raises(erp_oauth.OAuthStateError) as exc:
-        await erp_oauth.consume_state(state)
+        await erp_oauth.consume_state(state, browser_binding=_COOKIES.get(state))
     assert exc.value.code == "state_expired"
 
 
@@ -315,7 +374,7 @@ async def test_state_whose_nonce_redis_dropped_is_expired():
     for key in [k for k in r._kv if k.startswith("erp:oauth:state:")]:
         await r.delete(key)
     with pytest.raises(erp_oauth.OAuthStateError):
-        await erp_oauth.consume_state(state)
+        await erp_oauth.consume_state(state, browser_binding=_COOKIES.get(state))
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +424,7 @@ async def test_authorize_returns_provider_url_with_state(realdb, platform_app):
     assert q["scope"] == ["com.intuit.quickbooks.accounting"]
     assert q["redirect_uri"] == [f"{settings.api_public_url.rstrip('/')}/api/erp/oauth/callback"]
     assert "platform-secret" not in url
-    bound = await erp_oauth.consume_state(q["state"][0])
+    bound = await erp_oauth.consume_state(q["state"][0], browser_binding=_COOKIES[q["state"][0]])
     assert bound["org_id"] == str(realdb.info("a").org_id)
     assert bound["user_id"] == str(realdb.info("a").users["admin"])
 
@@ -892,7 +951,7 @@ async def test_disconnect_revokes_clears_and_audits(realdb, platform_app, provid
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post("/api/organization/erp/oauth/disconnect")
     assert resp.status_code == 200
-    assert resp.json() == {"disconnected": True, "revoked": True}
+    assert resp.json() == {"disconnected": True, "revoked": True, "revocation": "revoked"}
 
     (call,) = provider.calls
     assert call["url"] == QBO_OAUTH.revoke_url
@@ -910,12 +969,12 @@ async def test_disconnect_revokes_clears_and_audits(realdb, platform_app, provid
         "cleared": ["oauth.access_token", "oauth.refresh_token"],
     }
     assert revoked.action == "organization.erp_token_revoked"
-    assert revoked.details == {"provider": PROVIDER, "revoked": True}
+    assert revoked.details == {"provider": PROVIDER, "revoked": True, "revocation": "revoked"}
     assert await _sealed(realdb) == {}
 
     async with realdb.client(key="a", role="admin") as c:
         again = await c.post("/api/organization/erp/oauth/disconnect")
-    assert again.json() == {"disconnected": False, "revoked": False}
+    assert again.json() == {"disconnected": False, "revoked": False, "revocation": None}
 
 
 @pytest.mark.plan("scale")
@@ -930,7 +989,7 @@ async def test_disconnect_clears_even_when_revoke_fails(realdb, platform_app, pr
     provider.handler = _boom
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post("/api/organization/erp/oauth/disconnect")
-    assert resp.json() == {"disconnected": True, "revoked": False}
+    assert resp.json() == {"disconnected": True, "revoked": False, "revocation": "failed"}
     assert "oauth" not in (await _org_settings(realdb))["erp"]
 
 
@@ -1351,13 +1410,47 @@ async def test_tenant_id_from_the_token_response():
     assert none is None
 
 
-async def test_tenant_id_from_the_callback_param_for_qbo():
-    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+async def test_qbo_takes_the_callback_realm_only_once_intuit_confirms_it(intuit, monkeypatch):
+    """The redirect's realmId is unsigned; it is stored only after Intuit
+    answers companyinfo for it under the NEW token (decisions §320)."""
+    from app.services.erp_adapters import quickbooks_online as qbo
 
-    got = await QuickBooksOnlineAdapter.resolve_external_tenant_id(
-        access_token="t", token_response={}, callback_params={"realmId": " 123 "}
+    monkeypatch.setattr(settings, "erp_qbo_api_base", "")
+    got = await qbo.QuickBooksOnlineAdapter.resolve_external_tenant_id(
+        access_token="NEW-TOKEN", token_response={}, callback_params={"realmId": " 123 "}
     )
     assert got == "123"
+    assert intuit.asked == [(qbo._PRODUCTION_BASE, "123", "NEW-TOKEN")]
+
+    intuit.refused.add("456")
+    refused = await qbo.QuickBooksOnlineAdapter.resolve_external_tenant_id(
+        access_token="NEW-TOKEN", token_response={}, callback_params={"realmId": "456"}
+    )
+    assert refused is None
+
+
+async def test_qbo_realm_check_asks_the_host_the_saved_environment_names(intuit, monkeypatch):
+    from app.services.erp_adapters import quickbooks_online as qbo
+
+    monkeypatch.setattr(settings, "erp_qbo_api_base", "")
+    await qbo.QuickBooksOnlineAdapter.resolve_external_tenant_id(
+        access_token="t",
+        token_response={},
+        callback_params={"realmId": "9"},
+        erp_settings={"type": PROVIDER, "environment": "sandbox"},
+    )
+    assert intuit.asked[-1][0] == qbo._SANDBOX_BASE
+
+
+@pytest.mark.parametrize("realm", ["", "   ", "x" * 65])
+async def test_qbo_never_asks_about_an_empty_or_oversized_realm(intuit, realm):
+    from app.services.erp_adapters import quickbooks_online as qbo
+
+    got = await qbo.QuickBooksOnlineAdapter.resolve_external_tenant_id(
+        access_token="t", token_response={}, callback_params={"realmId": realm}
+    )
+    assert got is None
+    assert intuit.asked == []
 
 
 async def test_extra_token_headers_reach_the_token_endpoint(platform_app, provider):
@@ -1565,3 +1658,270 @@ async def test_test_erp_on_a_disconnected_oauth_erp_is_a_coded_failure(
         "connection_failed",
         PROVIDER,
     )
+
+
+# ---------------------------------------------------------------------------
+# Browser binding — the login-CSRF fix (decisions §320)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_state_reaching_a_browser_without_the_cookie_is_refused_and_burned():
+    state = await _mint()
+    with pytest.raises(erp_oauth.OAuthStateError) as exc:
+        await erp_oauth.consume_state(state, browser_binding=None)
+    assert exc.value.code == "browser_mismatch"
+    # No tenant attached: that browser is not sent to the minting tenant's pages.
+    assert exc.value.org_slug is None
+    # Spent: the minting browser cannot use it afterwards either.
+    with pytest.raises(erp_oauth.OAuthStateError) as again:
+        await erp_oauth.consume_state(state, browser_binding=_COOKIES[state])
+    assert again.value.code == "state_expired"
+
+
+async def test_a_state_reaching_a_browser_with_another_connects_cookie_is_refused():
+    """The attacker's consent URL in a victim browser that holds a binding
+    cookie of its own (a connect the victim started) still does not match."""
+    attackers = await _mint(org_slug="attacker")
+    victims = await _mint(org_slug="victim")
+    with pytest.raises(erp_oauth.OAuthStateError) as exc:
+        await erp_oauth.consume_state(attackers, browser_binding=_COOKIES[victims])
+    assert exc.value.code == "browser_mismatch"
+
+
+async def test_a_validly_signed_state_with_no_binding_is_refused():
+    """A state minted before the binding existed (or any state without it) is
+    signed and live in Redis, and still refused: the binding is not optional."""
+    import hashlib
+
+    from app import redis as app_redis
+
+    payload = {
+        "n": "nonce-without-binding",
+        "o": str(uuid.uuid4()),
+        "s": "acme",
+        "u": str(uuid.uuid4()),
+        "p": PROVIDER,
+        "c": "platform",
+        "e": int(time.time()) + 60,
+    }
+    body = erp_oauth._b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+    r = await app_redis.get_redis()
+    await r.setex(
+        "erp:oauth:state:nonce-without-binding", 60, hashlib.sha256(body.encode()).hexdigest()
+    )
+    with pytest.raises(erp_oauth.OAuthStateError) as exc:
+        await erp_oauth.consume_state(
+            f"{body}.{erp_oauth._state_mac(body)}", browser_binding="anything"
+        )
+    assert exc.value.code == "browser_mismatch"
+
+
+async def test_a_state_cannot_be_minted_unbound():
+    with pytest.raises(ValueError):
+        await erp_oauth.create_state(
+            org_id=uuid.uuid4(),
+            org_slug="acme",
+            user_id=uuid.uuid4(),
+            provider=PROVIDER,
+            client_source="platform",
+            browser_binding="",
+        )
+
+
+def test_the_state_carries_only_the_cookies_digest():
+    """The state rides the provider's URLs and logs; the cookie value must not."""
+    cookie, binding = erp_oauth.new_browser_binding()
+    assert cookie not in binding and binding == erp_oauth._binding_digest(cookie)
+    assert len(cookie) >= 40  # 32 random bytes, urlsafe
+
+
+@pytest.mark.plan("scale")
+async def test_authorize_sets_a_host_only_secure_httponly_lax_cookie(realdb, platform_app):
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
+    assert resp.status_code == 200, resp.text
+    header = next(
+        h for h in resp.headers.get_list("set-cookie") if h.startswith(erp_oauth.BINDING_COOKIE)
+    )
+    attrs = {a.strip().lower() for a in header.split(";")[1:]}
+    assert {"httponly", "secure", "path=/", "samesite=lax"} <= attrs
+    assert f"max-age={settings.erp_oauth_state_ttl_seconds}" in attrs
+    # The digest in the state matches the cookie this response set.
+    payload = json.loads(erp_oauth._unb64(_state_of(resp.json()["authorize_url"]).split(".")[0]))
+    assert payload["b"] == erp_oauth._binding_digest(_binding_cookie(resp))
+
+
+@pytest.mark.plan("scale")
+async def test_the_cookie_samesite_follows_the_setting(realdb, platform_app, monkeypatch):
+    monkeypatch.setattr(settings, "erp_oauth_binding_cookie_samesite", "none")
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
+    header = next(
+        h for h in resp.headers.get_list("set-cookie") if h.startswith(erp_oauth.BINDING_COOKIE)
+    )
+    assert "samesite=none" in header.lower() and "secure" in header.lower()
+
+
+@pytest.mark.plan("scale")
+async def test_a_consent_link_completed_in_another_browser_links_nothing(
+    realdb, platform_app, provider
+):
+    """The login-CSRF: an admin mints a consent URL and gets a victim to approve
+    it. The victim's browser has no binding cookie, so nothing is exchanged and
+    nothing is linked, and the victim is not sent to the admin's tenant."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM}, cookie=None)
+
+    assert resp.status_code == 400
+    assert "location" not in resp.headers
+    assert "not started in this browser" in resp.text
+    assert provider.calls == []  # the code was never exchanged
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    # ...and the minting admin's own browser cannot finish it afterwards.
+    late = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    assert late.headers["location"].endswith("erp_error=state_expired")
+
+
+@pytest.mark.plan("scale")
+async def test_a_wrong_binding_cookie_links_nothing(realdb, platform_app, provider):
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(
+        realdb, {"code": "c", "state": state, "realmId": REALM}, cookie="someone-elses"
+    )
+    assert resp.status_code == 400
+    assert provider.calls == []
+
+
+@pytest.mark.plan("scale")
+async def test_every_callback_answer_clears_the_binding_cookie(realdb, platform_app, provider):
+    provider.handler = lambda url, data: _resp(200, _token_body())
+
+    def _cleared(resp: httpx.Response) -> bool:
+        return any(
+            h.startswith(f"{erp_oauth.BINDING_COOKIE}=") and "max-age=0" in h.lower()
+            for h in resp.headers.get_list("set-cookie")
+        )
+
+    ok = await _callback(
+        realdb, {"code": "c", "state": _state_of(await _authorize(realdb)), "realmId": REALM}
+    )
+    assert "erp_connected" in ok.headers["location"] and _cleared(ok)
+    declined = await _callback(
+        realdb, {"error": "access_denied", "state": _state_of(await _authorize(realdb))}
+    )
+    assert "erp_error=access_denied" in declined.headers["location"] and _cleared(declined)
+    forged = await _callback(realdb, {"code": "c", "state": "garbage"})
+    assert forged.status_code == 400 and _cleared(forged)
+
+
+@pytest.mark.plan("scale")
+async def test_authorize_on_a_custom_domain_is_refused_before_any_consent(
+    realdb, platform_app, monkeypatch
+):
+    """A vanity host calls /api on its own origin, so the cookie would land
+    where the callback never sees it. Refused up front, naming where to go."""
+    from app import redis as app_redis
+
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.feohledger.test")
+    r = await app_redis.get_redis()
+    before = {k for k in r._kv if k.startswith("erp:oauth:state:")}
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(
+            f"/api/organization/erp/oauth/{PROVIDER}/authorize",
+            headers={"Host": "ap.customer-domain.test"},
+        )
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    slug = realdb.info("a").slug
+    assert detail["code"] == "erp_oauth_platform_host_required"
+    assert detail["params"]["connect_url"] == (
+        f"https://{slug}.feohledger.test/organization?section=erp"
+    )
+    assert not resp.headers.get_list("set-cookie")
+    assert {k for k in r._kv if k.startswith("erp:oauth:state:")} == before
+
+
+@pytest.mark.plan("scale")
+async def test_a_realm_the_new_token_does_not_cover_is_never_linked(
+    realdb, platform_app, provider, intuit
+):
+    """Squatting: consent to your own QuickBooks company, name someone else's
+    realm in the redirect. Intuit does not answer companyinfo for it under this
+    token, so the connect is refused and the realm stays free for its owner."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    intuit.refused.add("victims-realm")
+    state = _state_of(await _authorize(realdb))
+
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": "victims-realm"})
+
+    assert resp.headers["location"].endswith("erp_error=no_external_tenant")
+    assert intuit.asked[-1][1:] == ("victims-realm", "ACCESS-SECRET-1")
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    # Tenant B, whose company it really is, can still connect it.
+    state_b = _state_of(await _authorize(realdb, key="b"))
+    intuit.refused.clear()
+    ok = await _callback(
+        realdb, {"code": "c", "state": state_b, "realmId": "victims-realm"}, key="b"
+    )
+    assert ok.headers["location"].endswith(f"erp_connected={PROVIDER}")
+
+
+# ---------------------------------------------------------------------------
+# Revocation per provider (decisions §320)
+# ---------------------------------------------------------------------------
+
+
+def test_every_oauth_provider_revokes_or_says_why_it_cannot():
+    for spec in erp_oauth.load_providers().values():
+        assert bool(spec.revoke_url) != bool(spec.no_revoke_endpoint_reason), spec.key
+
+
+async def test_sage_revokes_with_the_client_in_the_form_body_not_basic(provider, monkeypatch):
+    from app.services.erp_adapters.sage_accounting import SAGE_ACCOUNTING_OAUTH
+
+    monkeypatch.setattr(settings, "erp_sage_accounting_client_id", "sage-id")
+    monkeypatch.setattr(settings, "erp_sage_accounting_client_secret", "sage-secret")
+    monkeypatch.setattr(settings, "erp_sage_accounting_revoke_url", "")
+    provider.handler = lambda url, data: _resp(200)
+    outcome = await erp_oauth.revoke_grant(
+        SAGE_ACCOUNTING_OAUTH, {}, {"refresh_token": "RT", "client_source": "platform"}
+    )
+    assert outcome == erp_oauth.REVOKED
+    (call,) = provider.calls
+    assert call["url"] == "https://oauth.accounting.sage.com/revoke"
+    assert call["data"] == {"token": "RT", "client_id": "sage-id", "client_secret": "sage-secret"}
+    assert call["auth"] is None and call["json"] is None
+
+
+async def test_a_provider_without_a_revoke_endpoint_reports_unsupported(provider):
+    from app.services.erp_adapters.blackbaud_fe_nxt import BLACKBAUD_OAUTH
+
+    provider.handler = lambda url, data: pytest.fail("there is nothing to call")
+    outcome = await erp_oauth.revoke_grant(
+        BLACKBAUD_OAUTH, {}, {"refresh_token": "RT", "client_source": "platform"}
+    )
+    assert outcome == erp_oauth.REVOKE_UNSUPPORTED
+
+
+async def test_a_revoke_that_raises_reports_failed(platform_app, monkeypatch):
+    async def _boom(*_a, **_k):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(erp_oauth, "revoke", _boom)
+    outcome = await erp_oauth.revoke_grant(QBO_OAUTH, {}, {"refresh_token": "RT"})
+    assert outcome == erp_oauth.REVOKE_FAILED
+
+
+@pytest.mark.plan("scale")
+async def test_disconnecting_blackbaud_says_the_grant_must_be_removed_there(
+    realdb, platform_app, provider
+):
+    block = {**_connected_block(realdb.info("a").org_id), "provider": "blackbaud_fe_nxt"}
+    await _set_settings(realdb, {"erp": {"type": "blackbaud_fe_nxt", "oauth": block}})
+    provider.handler = lambda url, data: pytest.fail("Blackbaud has no revoke endpoint")
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/erp/oauth/disconnect")
+    assert resp.json() == {"disconnected": True, "revoked": False, "revocation": "unsupported"}

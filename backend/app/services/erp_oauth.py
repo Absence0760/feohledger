@@ -6,10 +6,12 @@ and we hold a rotating refresh token afterwards. This module is that flow, once,
 for every such adapter (``erp_adapters/oauth_base.OAuthErpAdapter``):
 
 * :func:`build_authorize_url` / :func:`consume_state` — the signed, single-use
-  ``state`` that carries org + user + provider across the provider's redirect;
+  ``state`` that carries org + user + provider across the provider's redirect,
+  bound to the browser that started it by :data:`BINDING_COOKIE` (§320);
 * :func:`exchange_code` — the callback's code → token exchange;
 * :func:`get_access_token` — what adapters call; refreshes and persists;
-* :func:`revoke` — best-effort revocation on disconnect.
+* :func:`revoke` / :func:`revoke_grant` — best-effort revocation on disconnect
+  and on tenant deletion.
 
 The routes live in ``app/api/erp_oauth.py``.
 
@@ -311,15 +313,49 @@ def _state_ttl() -> int:
     return int(settings.erp_oauth_state_ttl_seconds)
 
 
+#: The cookie that binds a connect to the browser that started it (decisions
+#: §320). ``__Host-``: Secure, ``Path=/``, no ``Domain`` — so no sibling host
+#: can plant one, which is exactly the attack it exists to stop. Set by
+#: ``/authorize`` on the API host (a credentialed fetch); read and cleared by
+#: the callback, which the provider redirects to on that same host.
+BINDING_COOKIE = "__Host-feoh_erp_oauth"
+
+
+def new_browser_binding() -> tuple[str, str]:
+    """``(cookie value, its digest for the state)``. The value lives only in the
+    browser's cookie jar and the response that set it; only the digest is signed
+    into ``state``, which travels through the provider's URLs and logs."""
+    value = secrets.token_urlsafe(32)
+    return value, _binding_digest(value)
+
+
+def _binding_digest(value: str) -> str:
+    return hashlib.sha256(b"feoh-erp-oauth-binding\x00" + value.encode()).hexdigest()
+
+
 async def create_state(
-    *, org_id: uuid.UUID, org_slug: str, user_id: uuid.UUID, provider: str, client_source: str
+    *,
+    org_id: uuid.UUID,
+    org_slug: str,
+    user_id: uuid.UUID,
+    provider: str,
+    client_source: str,
+    browser_binding: str,
 ) -> str:
     """Mint a signed ``state`` and record its nonce in Redis (single use).
 
     The signature stops forgery (the callback is public); the Redis nonce makes
     it single-use and is what an expired or replayed state fails on. Both carry
     the same binding, so neither alone is enough.
+
+    ``browser_binding`` is the digest half of :func:`new_browser_binding`. The
+    callback refuses unless the browser it lands in presents the matching
+    cookie, so a consent URL minted by one admin cannot complete in anyone
+    else's browser — the login-CSRF that would link a victim's books to the
+    minting tenant (decisions §320).
     """
+    if not browser_binding:
+        raise ValueError("an ERP OAuth state must be bound to a browser")
     nonce = secrets.token_urlsafe(24)
     payload = {
         "n": nonce,
@@ -328,6 +364,7 @@ async def create_state(
         "u": str(user_id),
         "p": provider,
         "c": client_source,
+        "b": browser_binding,
         "e": int(time.time()) + _state_ttl(),
     }
     body = _b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
@@ -337,9 +374,16 @@ async def create_state(
     return f"{body}.{_state_mac(body)}"
 
 
-async def consume_state(state: str) -> dict[str, str]:
+async def consume_state(state: str, *, browser_binding: str | None) -> dict[str, str]:
     """Verify and burn ``state``. Returns ``{org_id, org_slug, user_id, provider,
-    client_source}``; raises :class:`OAuthStateError` otherwise."""
+    client_source}``; raises :class:`OAuthStateError` otherwise.
+
+    ``browser_binding`` is the :data:`BINDING_COOKIE` value the callback request
+    carried (None when it carried none). A state that reached a browser other
+    than the one that started the connect is burned and refused as
+    ``browser_mismatch`` with no tenant attached, so that browser is not sent to
+    the minting tenant's pages either.
+    """
     if not isinstance(state, str) or state.count(".") != 1 or len(state) > 2048:
         raise OAuthStateError("invalid_state")
     body, mac = state.split(".")
@@ -350,14 +394,22 @@ async def consume_state(state: str) -> dict[str, str]:
         nonce = str(payload["n"])
         slug = str(payload["s"])
         expires = int(payload["e"])
+        bound_to = str(payload.get("b") or "")
     except (ValueError, KeyError, TypeError):
         raise OAuthStateError("invalid_state") from None
     r = await app_redis.get_redis()
     # GETDEL, one round trip: two concurrent callbacks with the same state
-    # can't both read the nonce before either deletes it.
+    # can't both read the nonce before either deletes it. Burned BEFORE the
+    # browser check, so a state that reached the wrong browser is spent too.
     stored = await r.getdel(f"{_STATE_PREFIX}{nonce}")
     if isinstance(stored, bytes):
         stored = stored.decode()
+    if (
+        not bound_to
+        or not browser_binding
+        or not hmac.compare_digest(bound_to, _binding_digest(browser_binding))
+    ):
+        raise OAuthStateError("browser_mismatch")
     if expires < int(time.time()):
         raise OAuthStateError("state_expired", org_slug=slug)
     if not stored or not hmac.compare_digest(stored, hashlib.sha256(body.encode()).hexdigest()):
@@ -550,6 +602,10 @@ async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bo
 
     ``erp_settings`` is the resolved block and ``oauth`` carries the tokens
     (:func:`resolved_erp`), both read before the disconnect cleared them.
+
+    The client authenticates the way the provider's token endpoint takes it
+    (``spec.token_auth``): HTTP Basic for Intuit and Xero, form fields for Sage,
+    whose revoke endpoint takes ``client_id`` / ``client_secret`` in the body.
     """
     url = revoke_endpoint(spec)
     token = oauth.get("refresh_token") or oauth.get("access_token")
@@ -559,18 +615,49 @@ async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bo
     headers = token_headers(spec, erp_settings)
     if creds is None:
         return False
+    body = {"token": str(token)}
+    auth = None
+    if spec.token_auth == "body":
+        body["client_id"] = creds.client_id
+        body["client_secret"] = creds.client_secret
+    else:
+        auth = httpx.BasicAuth(creds.client_id, creds.client_secret)
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            body = {"token": str(token)}
             resp = await client.post(
                 url,
                 **({"json": body} if spec.revoke_json else {"data": body}),
                 headers=headers,
-                auth=httpx.BasicAuth(creds.client_id, creds.client_secret),
+                auth=auth,
             )
         return resp.status_code in (200, 204)
     except httpx.HTTPError:
         return False
+
+
+#: :func:`revoke_grant`'s answers. ``unsupported``: the provider documents no
+#: revocation endpoint (``OAuthProviderSpec.no_revoke_endpoint_reason``), so the
+#: customer must remove the app on the provider's side. ``failed``: it has one,
+#: and did not confirm (refused, unreachable, or no usable app or token).
+REVOKED = "revoked"
+REVOKE_FAILED = "failed"
+REVOKE_UNSUPPORTED = "unsupported"
+
+
+async def revoke_grant(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> str:
+    """:func:`revoke`, stated as :data:`REVOKED` / :data:`REVOKE_FAILED` /
+    :data:`REVOKE_UNSUPPORTED` — what Disconnect and tenant deletion report.
+
+    Never raises: both callers have already decided to forget the grant, and a
+    provider that cannot be told must not undo that.
+    """
+    if not revoke_endpoint(spec):
+        return REVOKE_UNSUPPORTED
+    try:
+        return REVOKED if await revoke(spec, erp_settings, oauth) else REVOKE_FAILED
+    except Exception:  # noqa: BLE001 — best-effort by contract; the outcome says so
+        logger.warning("erp_oauth: %s revocation raised", spec.key)
+        return REVOKE_FAILED
 
 
 # ---------------------------------------------------------------------------

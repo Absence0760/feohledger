@@ -259,8 +259,10 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
   `POST /sage/oauth2/token` takes `client_id` / `client_secret` as **form fields**
   (Sage's shape — HTTP Basic is refused), makes each code single-use and bound to
   its `redirect_uri`, and rotates refresh tokens; `GET /sage/v3.1/businesses` (bearer
-  must be one it issued) lists the one business, `fake-sage-business`. Same
-  `FakeOAuthApp` as Xero's.
+  must be one it issued) lists the one business, `fake-sage-business`;
+  `POST /sage/oauth2/revoke` (form `token`, client as form fields, like Sage's
+  `https://oauth.accounting.sage.com/revoke`) ends the consent, so a later refresh
+  is `invalid_grant`. Same `FakeOAuthApp` as Xero's.
 - Test hook `POST /sage/v3.1/__set-status {"id", "status",
   "outstanding_amount"?}`. `POST /__reset` clears this state too.
 
