@@ -339,6 +339,12 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
         "audits via services/external_payment.record_invoice_paid_outside "
         "(`payment.recorded_outside`, plus the invoice transitions)"
     ),
+    ("app.api.exceptions", "record_erp_payment"): (
+        "audits via services/external_payment.record_invoice_paid_outside "
+        "(`payment.recorded_outside`, the invoice transitions, and the answered "
+        "row's `exception.resolved` through erp_status_sync.close_erp_paid_reports "
+        "→ exception_lifecycle.record_decision); writes nothing on any refusal"
+    ),
     ("app.api.portal", "resubmit_invoice"): (
         "audits via workflow_engine.transition_invoice + exception_lifecycle.record_decision"
     ),
