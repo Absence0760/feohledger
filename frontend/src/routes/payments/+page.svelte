@@ -2460,7 +2460,7 @@
 							</td>
 						{/if}
 						{#if canRecordOutside()}
-							<td class="actions">
+							<td class="actions record-cell">
 								<!-- Shown on every row, disabled with its reason when the
 								     server would refuse it whoever records — hiding it left
 								     the operator hunting for an action that was not there. -->
@@ -3936,6 +3936,16 @@
 		font-size: 0.72rem;
 		font-weight: 600;
 		white-space: normal;
+	}
+
+	/* The cell holding "Record as paid" anchors its visually-hidden refusal
+	   reason. `.visually-hidden` is `position: absolute`; without a positioned
+	   ancestor INSIDE the table's scroll region, its containing block is outside
+	   that region, so at 1280px — where the queue table scrolls inside its card —
+	   the 1px reason, sitting at the far end of the row, escaped the region's
+	   clipping and scrolled the whole document sideways (`a11y/wide-layout`). */
+	.record-cell {
+		position: relative;
 	}
 
 	/* The way to the exception behind a blocked chip, and who may clear it. */
