@@ -1417,9 +1417,19 @@ app.include_router(syspro)
 # non-empty bearer plus a non-empty Xero-Tenant-Id (the OAuth handshake that
 # mints the bearer is not faked in this section). State lives under
 # STATE["xero"], created lazily so the shared POST /__reset clears it too.
-# Test hook: POST /xero/api.xro/2.0/__set-status {"id", "status", "amount_paid"?}.
+# Test hooks: POST /xero/api.xro/2.0/__set-status {"id", "status", "amount_paid"?},
+# __pay {"id", "amount"?, "account_id"?, "date"?} (a person pays a bill in Xero),
+# __credit {"id", "amount"} (a credit note allocated to a bill).
+#
+# Bills and payments carry the fields the status sync reads (decisions §320),
+# in Xero's own shapes: `AmountDue` / `AmountPaid` / `AmountCredited`, the
+# bill's `Payments` list (PaymentID, Date, Amount, Reference), dates as
+# `/Date(<ms>+0000)/`, and `UpdatedDateUTC` for `If-Modified-Since`.
 
 import json as _xero_json
+from datetime import UTC as _XERO_UTC
+from datetime import date as _xero_date
+from datetime import datetime as _xero_datetime
 from decimal import Decimal as _XeroDecimal
 
 from fastapi.encoders import jsonable_encoder as _xero_encode
@@ -1437,11 +1447,34 @@ XERO_CONTACTS = [
         "IsSupplier": True,
         "PaymentTerms": {"Bills": {"Day": 30, "Type": "DAYSAFTERBILLDATE"}},
     },
-    {"ContactID": "xero-contact-2", "Name": "Fake Xero Customer Co", "IsSupplier": False},
+    {
+        "ContactID": "xero-contact-2",
+        "Name": "Fake Xero Customer Co",
+        "IsSupplier": False,
+        "IsCustomer": True,
+    },
     # Real Xero sets IsSupplier only once a contact has a bill, so a supplier
     # that has only been sent purchase orders is NOT one (seen live in the
     # Demo Company). The vendor sync must still find it, through its POs.
     {"ContactID": "xero-contact-3", "Name": "Fake Xero PO-only Supplier", "IsSupplier": False},
+    # A supplier just created in Xero: no bill and no PO, so neither flag is
+    # set (audit X1). The vendor sync must find it by `IsCustomer==false`.
+    {
+        "ContactID": "xero-contact-4",
+        "Name": "Fake Xero New Supplier",
+        "IsSupplier": False,
+        "IsCustomer": False,
+        "ContactStatus": "ACTIVE",
+    },
+    # A contact erased on a GDPR request: Xero keeps it, obfuscated, with
+    # this status. It must sync as inactive, never as a payee (audit X3).
+    {
+        "ContactID": "xero-contact-5",
+        "Name": "GDPR Request 5",
+        "IsSupplier": True,
+        "IsCustomer": False,
+        "ContactStatus": "GDPRREQUEST",
+    },
 ]
 XERO_ACCOUNTS = [
     {
@@ -1467,6 +1500,24 @@ XERO_ACCOUNTS = [
         "Code": "6300",
         "Name": "Fake Consulting",
         "Class": "EXPENSE",
+        "Status": "ACTIVE",
+    },
+    # What a bill is paid FROM: a bank account, and a company credit card
+    # (Xero keeps both as accounts; only `Type` tells them apart).
+    {
+        "AccountID": "xero-acc-090",
+        "Code": "090",
+        "Name": "Fake Business Bank",
+        "Class": "ASSET",
+        "Type": "BANK",
+        "Status": "ACTIVE",
+    },
+    {
+        "AccountID": "xero-acc-800",
+        "Code": "800",
+        "Name": "Fake Company Card",
+        "Class": "LIABILITY",
+        "Type": "CREDITCARD",
         "Status": "ACTIVE",
     },
 ]
@@ -1528,7 +1579,98 @@ XERO_PURCHASE_ORDERS = [
 
 
 def _xero_state() -> dict[str, Any]:
-    return STATE.setdefault("xero", {"invoices": {}, "idempotency": {}, "counter": 0})
+    state = STATE.setdefault("xero", {"invoices": {}, "idempotency": {}, "counter": 0})
+    state.setdefault("payments", {})
+    state.setdefault("payment_idempotency", {})
+    return state
+
+
+def _xero_ms(moment: _xero_datetime) -> str:
+    """Xero's JSON date: `/Date(<ms since the epoch>+0000)/`."""
+    return f"/Date({int(moment.timestamp() * 1000)}+0000)/"
+
+
+def _xero_day(day: _xero_date) -> str:
+    return _xero_ms(_xero_datetime(day.year, day.month, day.day, tzinfo=_XERO_UTC))
+
+
+def _xero_touch(record: dict) -> None:
+    """Recompute what Xero derives on a bill after any change: what is due,
+    PAID once nothing is, and the modification stamp `If-Modified-Since` reads."""
+    record["AmountDue"] = record["Total"] - record["AmountPaid"] - record["AmountCredited"]
+    if record["Status"] in ("AUTHORISED", "PAID"):
+        record["Status"] = "PAID" if record["AmountDue"] == 0 else "AUTHORISED"
+    now = _xero_datetime.now(_XERO_UTC)
+    record["UpdatedDateUTC"] = _xero_ms(now)
+    record["_updated"] = now.timestamp()
+
+
+def _xero_public(record: dict) -> dict:
+    return {k: copy.deepcopy(v) for k, v in record.items() if not k.startswith("_")}
+
+
+def _xero_modified_since(request: Request):
+    """The `If-Modified-Since` header as epoch seconds, or None."""
+    raw = request.headers.get("if-modified-since")
+    if not raw:
+        return None
+    try:
+        moment = _xero_datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _xero_error(400, "Invalid If-Modified-Since") from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=_XERO_UTC)
+    return moment.timestamp()
+
+
+def _xero_page(request: Request, rows: list) -> list:
+    """Xero paging: `page` (1-based) of `pageSize` rows (default 100, max 1000)."""
+    q = request.query_params
+    page = max(1, int(q.get("page", "1") or 1))
+    size = min(1000, max(1, int(q.get("pageSize", "100") or 100)))
+    return rows[(page - 1) * size : page * size]
+
+
+def _xero_apply_payment(
+    record: dict,
+    amount: _XeroDecimal,
+    *,
+    account_id: str,
+    day: _xero_date,
+    reference: str = "",
+) -> dict:
+    """Apply a payment to a bill the way Xero does, and return the payment."""
+    state = _xero_state()
+    state["counter"] += 1
+    payment_id = f"xero-pay-{state['counter']}"
+    now = _xero_datetime.now(_XERO_UTC)
+    payment = {
+        "PaymentID": payment_id,
+        "Date": _xero_day(day),
+        "Amount": amount,
+        "BankAmount": amount,
+        "Reference": reference,
+        "CurrencyRate": _XeroDecimal(1),
+        "PaymentType": "ACCPAYPAYMENT",
+        "Status": "AUTHORISED",
+        "IsReconciled": False,
+        "UpdatedDateUTC": _xero_ms(now),
+        "_updated": now.timestamp(),
+        "Account": {"AccountID": account_id},
+        "Invoice": {
+            "InvoiceID": record["InvoiceID"],
+            "InvoiceNumber": record.get("InvoiceNumber"),
+            "Type": "ACCPAY",
+        },
+    }
+    state["payments"][payment_id] = payment
+    # The bill lists its live payments with these four fields (Xero's shape).
+    record["Payments"].append(
+        {"PaymentID": payment_id, "Date": payment["Date"], "Amount": amount, "Reference": reference}
+    )
+    record["AmountPaid"] += amount
+    _xero_touch(record)
+    return payment
 
 
 def _xero_error(status: int, message: str) -> ProviderError:
@@ -1568,12 +1710,39 @@ async def xero_organisation(request: Request) -> JSONResponse:
 async def xero_contacts(request: Request, page: int = 1) -> JSONResponse:
     _require_xero_auth(request)
     rows = XERO_CONTACTS
-    if request.query_params.get("where", "").replace(" ", "") == "IsSupplier==true":
+    where = request.query_params.get("where", "").replace(" ", "")
+    if where == "IsSupplier==true":
         rows = [c for c in rows if c.get("IsSupplier")]
+    elif where == "IsSupplier==trueORIsCustomer==false":
+        rows = [c for c in rows if c.get("IsSupplier") or not c.get("IsCustomer")]
     ids = {i for i in request.query_params.get("IDs", "").split(",") if i}
     if ids:
         rows = [c for c in rows if c["ContactID"] in ids]
     return _xero_response({"Contacts": copy.deepcopy(rows) if page == 1 else []})
+
+
+@xero.get("/Contacts/{contact_id}")
+async def xero_contact(request: Request, contact_id: str) -> JSONResponse:
+    _require_xero_auth(request)
+    for contact in XERO_CONTACTS:
+        if contact["ContactID"] == contact_id:
+            return _xero_response({"Contacts": [{"ContactStatus": "ACTIVE", **contact}]})
+    raise _xero_error(404, "Contact not found")
+
+
+def _xero_validation(message: str) -> ProviderError:
+    """Xero's answer to a failed validation (`summarizeErrors` default): HTTP
+    400, `Type: ValidationException`, `ErrorNumber: 10`, and the reasons under
+    `Elements[].ValidationErrors[]`. Nothing is created."""
+    return ProviderError(
+        400,
+        {
+            "ErrorNumber": 10,
+            "Type": "ValidationException",
+            "Message": "A validation exception occurred",
+            "Elements": [{"ValidationErrors": [{"Message": message}]}],
+        },
+    )
 
 
 @xero.get("/Accounts")
@@ -1593,20 +1762,24 @@ async def xero_purchase_orders(request: Request, page: int = 1) -> JSONResponse:
 @xero.get("/Invoices")
 async def xero_list_invoices(request: Request) -> JSONResponse:
     """Supports the InvoiceNumbers / ContactIDs / Statuses filters the adapter's
-    pre-create idempotency lookup sends."""
+    pre-create idempotency lookup sends, and the status sync's change listing:
+    `If-Modified-Since` (bills modified at or after it) with `page` /
+    `pageSize`. Every bill here is ACCPAY, so `where=Type=="ACCPAY"` is moot."""
     _require_xero_auth(request)
     q = request.query_params
     numbers = {n for n in q.get("InvoiceNumbers", "").split(",") if n}
     contacts = {c for c in q.get("ContactIDs", "").split(",") if c}
     statuses = {s for s in q.get("Statuses", "").split(",") if s}
+    since = _xero_modified_since(request)
     rows = [
         inv
         for inv in _xero_state()["invoices"].values()
         if (not numbers or inv["InvoiceNumber"] in numbers)
         and (not contacts or inv["Contact"]["ContactID"] in contacts)
         and (not statuses or inv["Status"] in statuses)
+        and (since is None or inv["_updated"] >= since)
     ]
-    return _xero_response({"Invoices": copy.deepcopy(rows)})
+    return _xero_response({"Invoices": [_xero_public(r) for r in _xero_page(request, rows)]})
 
 
 @xero.put("/Invoices")
@@ -1619,17 +1792,23 @@ async def xero_create_invoices(request: Request) -> JSONResponse:
         return _xero_response(copy.deepcopy(state["idempotency"][key]))
     body = _xero_json.loads(await request.body(), parse_float=_XeroDecimal)
     contact_ids = {c["ContactID"] for c in XERO_CONTACTS}
-    account_ids = {a["AccountID"] for a in XERO_ACCOUNTS}
+    account_ids = {a["AccountID"] for a in XERO_ACCOUNTS if a.get("Status", "ACTIVE") == "ACTIVE"}
     created = []
     for inv in body.get("Invoices") or []:
         contact_id = (inv.get("Contact") or {}).get("ContactID")
         if contact_id not in contact_ids:
-            raise _xero_error(400, "Contact not found")
+            raise _xero_validation("The Contact does not exist")
+        contact = next(c for c in XERO_CONTACTS if c["ContactID"] == contact_id)
+        if contact.get("ContactStatus", "ACTIVE") != "ACTIVE":
+            raise _xero_validation(
+                "The Contact has been archived. This Contact must be un-archived "
+                "before creating new Invoices."
+            )
         mode = inv.get("LineAmountTypes", "Exclusive")
         total = _XeroDecimal(0)
         for li in inv.get("LineItems") or []:
             if li.get("AccountID") not in account_ids:
-                raise _xero_error(400, "Account not found")
+                raise _xero_validation("Account code has been archived, or has been deleted")
             total += _XeroDecimal(str(li.get("LineAmount", 0)))
             if mode == "Exclusive":
                 total += _XeroDecimal(str(li.get("TaxAmount", 0)))
@@ -1646,10 +1825,13 @@ async def xero_create_invoices(request: Request) -> JSONResponse:
             "Total": total,
             "AmountPaid": _XeroDecimal(0),
             "AmountCredited": _XeroDecimal(0),
+            "Payments": [],
+            "CreditNotes": [],
         }
+        _xero_touch(record)
         state["invoices"][record["InvoiceID"]] = record
         created.append(record)
-    response = {"Invoices": copy.deepcopy(created)}
+    response = {"Invoices": [_xero_public(r) for r in created]}
     if key:
         state["idempotency"][key] = response
     return _xero_response(response)
@@ -1661,7 +1843,7 @@ async def xero_get_invoice(request: Request, invoice_id: str) -> JSONResponse:
     record = _xero_state()["invoices"].get(invoice_id)
     if record is None:
         raise _xero_error(404, "Invoice not found")
-    return _xero_response({"Invoices": [copy.deepcopy(record)]})
+    return _xero_response({"Invoices": [_xero_public(record)]})
 
 
 @xero.post("/Invoices/{invoice_id}")
@@ -1679,7 +1861,120 @@ async def xero_update_invoice(request: Request, invoice_id: str) -> JSONResponse
         raise _xero_error(400, "Only unpaid authorised invoices can be voided")
     if target:
         record["Status"] = target
-    return _xero_response({"Invoices": [copy.deepcopy(record)]})
+        _xero_touch(record)
+    return _xero_response({"Invoices": [_xero_public(record)]})
+
+
+def _xero_payment_matches(payment: dict, where: str) -> bool:
+    """The `where` clauses the adapter sends: `Reference=="…"` and
+    `PaymentType=="…"` (anything else is ignored, as a fake can afford)."""
+    for field, value in re.findall(r'(Reference|PaymentType)=="([^"]*)"', where):
+        if str(payment.get(field) or "") != value:
+            return False
+    return True
+
+
+@xero.get("/Payments")
+async def xero_list_payments(request: Request) -> JSONResponse:
+    """Payments, deleted ones included (Xero lists both), filtered by `where`
+    and `If-Modified-Since`, paged like invoices."""
+    _require_xero_auth(request)
+    where = request.query_params.get("where", "")
+    since = _xero_modified_since(request)
+    rows = [
+        p
+        for p in _xero_state()["payments"].values()
+        if _xero_payment_matches(p, where) and (since is None or p["_updated"] >= since)
+    ]
+    return _xero_response({"Payments": [_xero_public(p) for p in _xero_page(request, rows)]})
+
+
+@xero.get("/Payments/{payment_id}")
+async def xero_get_payment(request: Request, payment_id: str) -> JSONResponse:
+    _require_xero_auth(request)
+    payment = _xero_state()["payments"].get(payment_id)
+    if payment is None:
+        raise _xero_error(404, "Payment not found")
+    return _xero_response({"Payments": [_xero_public(payment)]})
+
+
+@xero.put("/Payments")
+async def xero_create_payments(request: Request) -> JSONResponse:
+    """Apply payments to bills. Xero's rules that matter to the write-back:
+    the bill must be AUTHORISED, the amount at most what is due, and the
+    account a bank or credit-card account. A repeated Idempotency-Key returns
+    the original response."""
+    _require_xero_auth(request)
+    state = _xero_state()
+    key = request.headers.get("idempotency-key")
+    if key and key in state["payment_idempotency"]:
+        return _xero_response(copy.deepcopy(state["payment_idempotency"][key]))
+    body = _xero_json.loads(await request.body(), parse_float=_XeroDecimal)
+    payable_from = {
+        a["AccountID"] for a in XERO_ACCOUNTS if a.get("Type") in ("BANK", "CREDITCARD")
+    }
+    created = []
+    for item in body.get("Payments") or []:
+        record = state["invoices"].get((item.get("Invoice") or {}).get("InvoiceID"))
+        if record is None:
+            raise _xero_error(400, "Invoice not found")
+        if record["Status"] != "AUTHORISED":
+            raise _xero_error(400, "Payments can only be made against Authorised documents")
+        account_id = (item.get("Account") or {}).get("AccountID")
+        if account_id not in payable_from:
+            raise _xero_error(400, "Account is not a bank account")
+        amount = _XeroDecimal(str(item.get("Amount")))
+        if amount <= 0 or amount > record["AmountDue"]:
+            raise _xero_error(400, "Payment amount exceeds the amount outstanding on this document")
+        created.append(
+            _xero_apply_payment(
+                record,
+                amount,
+                account_id=account_id,
+                day=_xero_date.fromisoformat(str(item.get("Date"))[:10]),
+                reference=str(item.get("Reference") or ""),
+            )
+        )
+    response = {"Payments": [_xero_public(p) for p in created]}
+    if key:
+        state["payment_idempotency"][key] = response
+    return _xero_response(response)
+
+
+@xero.post("/Payments/{payment_id}")
+async def xero_delete_payment(request: Request, payment_id: str) -> JSONResponse:
+    """`{"Status": "DELETED"}` (or the `Payments` wrapper): the payment stays
+    readable as DELETED and leaves the bill's list, which is due again."""
+    _require_xero_auth(request)
+    state = _xero_state()
+    payment = state["payments"].get(payment_id)
+    if payment is None:
+        raise _xero_error(404, "Payment not found")
+    body = await request.json()
+    target = (body.get("Payments") or [body])[0].get("Status")
+    if target != "DELETED":
+        raise _xero_error(400, "Only a status change to DELETED is supported")
+    if payment["IsReconciled"]:
+        raise _xero_error(400, "Payment has been reconciled")
+    if payment["Status"] != "DELETED":
+        payment["Status"] = "DELETED"
+        now = _xero_datetime.now(_XERO_UTC)
+        payment["UpdatedDateUTC"] = _xero_ms(now)
+        payment["_updated"] = now.timestamp()
+        record = state["invoices"][payment["Invoice"]["InvoiceID"]]
+        record["Payments"] = [p for p in record["Payments"] if p["PaymentID"] != payment_id]
+        record["AmountPaid"] -= payment["Amount"]
+        _xero_touch(record)
+    return _xero_response({"Payments": [_xero_public(payment)]})
+
+
+@xero.get("/Accounts/{account_id}")
+async def xero_get_account(request: Request, account_id: str) -> JSONResponse:
+    _require_xero_auth(request)
+    for account in XERO_ACCOUNTS:
+        if account["AccountID"] == account_id:
+            return _xero_response({"Accounts": [copy.deepcopy(account)]})
+    raise _xero_error(404, "Account not found")
 
 
 @xero.post("/__set-status")
@@ -1690,6 +1985,41 @@ async def xero_set_status(body: dict) -> dict:
     record["Status"] = body["status"]
     if body.get("amount_paid") is not None:
         record["AmountPaid"] = _XeroDecimal(str(body["amount_paid"]))
+    record["AmountDue"] = record["Total"] - record["AmountPaid"] - record["AmountCredited"]
+    record["_updated"] = _xero_datetime.now(_XERO_UTC).timestamp()
+    return {"status": "ok"}
+
+
+@xero.post("/__pay")
+async def xero_pay(body: dict) -> dict:
+    """A person pays a bill in Xero (no FeohLedger marker): the whole amount
+    due unless `amount` says otherwise, from the bank account unless
+    `account_id` names another (`xero-acc-800` is the company card)."""
+    record = _xero_state()["invoices"].get(str(body.get("id", "")))
+    if record is None or record["Status"] != "AUTHORISED":
+        raise ProviderError(404, {"detail": "unknown id, or the bill is not awaiting payment"})
+    amount = _XeroDecimal(str(body.get("amount") or record["AmountDue"]))
+    if body.get("date"):
+        day = _xero_date.fromisoformat(body["date"])
+    else:
+        day = _xero_datetime.now(_XERO_UTC).date()
+    payment = _xero_apply_payment(
+        record, amount, account_id=str(body.get("account_id") or "xero-acc-090"), day=day
+    )
+    return {"status": "ok", "payment_id": payment["PaymentID"]}
+
+
+@xero.post("/__credit")
+async def xero_credit(body: dict) -> dict:
+    """A supplier credit note allocated to the bill: counted in
+    `AmountCredited`, never among its payments (Xero's shape)."""
+    record = _xero_state()["invoices"].get(str(body.get("id", "")))
+    if record is None or record["Status"] != "AUTHORISED":
+        raise ProviderError(404, {"detail": "unknown id, or the bill is not awaiting payment"})
+    amount = _XeroDecimal(str(body["amount"]))
+    record["CreditNotes"].append({"CreditNoteID": f"xero-cn-{len(record['CreditNotes']) + 1}"})
+    record["AmountCredited"] += amount
+    _xero_touch(record)
     return {"status": "ok"}
 
 

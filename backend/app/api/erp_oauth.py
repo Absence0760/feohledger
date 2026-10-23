@@ -315,6 +315,65 @@ async def oauth_disconnect(
     return DisconnectResponse(disconnected=True, revoked=revoked)
 
 
+class StatusSyncNowResponse(BaseModel):
+    bills_read: int
+    invoices_changed: int
+    #: True when the pass read back every bill still payable here, because
+    #: the ERP's change listing could not vouch for the whole gap.
+    full_reconciliation: bool
+
+
+@router.post("/status-sync", response_model=StatusSyncNowResponse)
+async def oauth_status_sync_now(
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+):
+    """Run the status-sync sweep's pass for this tenant now (decisions §320).
+
+    For a bill just paid in the ERP: the sweep runs every few hours, and an
+    ERP without a webhook here (Xero) has no faster channel. The pass is the
+    sweep's own (``erp_status_sync.sync_org_now``), so every change it makes
+    is the audited change the sweep would have made. 409 with a code when no
+    pass can run (status sync off, an ERP that does not report back, a
+    connection that needs reconnecting); 502 when the ERP could not be read,
+    with nothing half-applied beyond the bills already read (each is its own
+    transaction, and re-reading one changes nothing).
+    """
+    from app.services import erp_status_sync
+
+    refusal = await erp_status_sync.status_sync_now_refusal(org)
+    if refusal is not None:
+        raise HTTPException(status_code=409, detail=refusal)
+    try:
+        result = await erp_status_sync.sync_org_now(org)
+    except Exception as exc:  # noqa: BLE001 — any failed read is the ERP's answer, not ours
+        logger.warning(
+            "[erp-status-sync] on-request pass for org %s failed: %s",
+            org.id,
+            exc.__class__.__name__,
+        )
+        raise HTTPException(status_code=502, detail="erp_status_sync_failed") from None
+    await dispatch_auth_audit(
+        organization_id=org.id,
+        actor_id=user.id,
+        action="organization.erp_status_synced",
+        entity_id=org.id,
+        entity_type="organization",
+        details={
+            "provider": (((org.settings or {}).get("erp") or {}).get("oauth") or {}).get(
+                "provider"
+            ),
+            "bills_read": result.bills_read,
+            "invoices_changed": result.invoices_changed,
+        },
+    )
+    return StatusSyncNowResponse(
+        bills_read=result.bills_read,
+        invoices_changed=result.invoices_changed,
+        full_reconciliation=bool(result.full_reconciliations),
+    )
+
+
 async def _record_or_503(org_id: uuid.UUID, actor_id: uuid.UUID, action: str, details: dict):
     """Write an audit row or refuse with 503 — the audit-first rule (§239)."""
     try:

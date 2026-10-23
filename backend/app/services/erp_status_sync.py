@@ -94,7 +94,7 @@ DOUBLE_PAY_REFUSALS = frozenset(
     }
 )
 
-#: The adapter whose bills sync back today (the only ``supports_status_sync``).
+#: QuickBooks Online: the adapter whose CloudEvents webhook this module serves.
 QBO_PROVIDER = "quickbooks_online"
 
 
@@ -806,7 +806,10 @@ async def _matching_invoice_id(
     keyed in the ERP by hand, or copied, matches nothing. A deleted bill can no
     longer be read, so it is matched by the reference alone, and only within
     the connection realm the push recorded (QuickBooks numbers bills per
-    company, so a sandbox bill id names something else in production).
+    company, so a sandbox bill id names something else in production). An ERP
+    that writes no marker onto its bills but never reuses a bill id (Xero,
+    ``ErpBillReport.match_by_reference``) is matched the same way in every
+    state (§320). Either way exactly one invoice must name the bill.
     """
     bill_id = str(report.bill_id)
     if report.correlation_id:
@@ -830,7 +833,8 @@ async def _matching_invoice_id(
         if recorded and realm and recorded != realm:
             return None
         return invoice_id
-    if report.state is not ErpBillState.deleted or not realm:
+    by_reference = report.state is ErpBillState.deleted or report.match_by_reference
+    if not by_reference or not realm:
         return None
     rows = (
         await db.execute(
@@ -1531,7 +1535,7 @@ async def sync_org(org: Organization, *, now: datetime, result: StatusSyncResult
         result.invoices_changed += await sync_bills(org, bill_ids, event_id=None)
     result.voids_pending += await resume_pending_voids(org)
     await update_connection_metadata(
-        QBO_PROVIDER,
+        str(oauth_meta.get("provider") or adapter.erp_type),
         org.id,
         str(oauth_meta.get("connection_id") or ""),
         {SYNCED_THROUGH_KEY: now.isoformat()},
@@ -1539,11 +1543,15 @@ async def sync_org(org: Organization, *, now: datetime, result: StatusSyncResult
 
 
 async def run_status_sync_once(*, now: datetime | None = None) -> StatusSyncResult:
-    """One pass over every tenant connected to QuickBooks: ask its company for
-    the bills and bill payments changed since its last complete pass (at least
-    the lookback window) and apply each bill; read back every still-payable
-    bill when CDC cannot vouch for the gap. Re-applying a report changes
-    nothing. One tenant's failure never stops the others."""
+    """One pass over every tenant connected to an ERP whose bills sync back
+    (QuickBooks Online, Xero — ``status_sync_adapter_keys``): ask its company
+    for the bills and bill payments changed since its last complete pass (at
+    least the lookback window) and apply each bill; read back every
+    still-payable bill when the change feed cannot vouch for the gap.
+    Re-applying a report changes nothing. One tenant's failure never stops the
+    others."""
+    from app.services.erp_adapters.dispatcher import status_sync_adapter_keys
+
     result = StatusSyncResult()
     if not settings.erp_status_sync_enabled:
         return result
@@ -1553,7 +1561,9 @@ async def run_status_sync_once(*, now: datetime | None = None) -> StatusSyncResu
         orgs = (
             (
                 await ctrl.execute(
-                    select(Organization).where(oauth["provider"].astext == QBO_PROVIDER)
+                    select(Organization).where(
+                        oauth["provider"].astext.in_(status_sync_adapter_keys())
+                    )
                 )
             )
             .scalars()
@@ -1580,6 +1590,44 @@ async def run_status_sync_once(*, now: datetime | None = None) -> StatusSyncResu
             result.invoices_changed,
             result.failures,
         )
+    return result
+
+
+#: Why :func:`sync_org_now` did not run a pass (``POST
+#: /api/organization/erp/oauth/status-sync`` answers 409 with the code).
+STATUS_SYNC_OFF = "status_sync_off"
+STATUS_SYNC_UNSUPPORTED = "status_sync_unsupported"
+STATUS_SYNC_NEEDS_RECONNECT = "status_sync_needs_reconnect"
+
+
+async def status_sync_now_refusal(org: Organization) -> str | None:
+    """Why this tenant cannot run a status-sync pass on request, or None."""
+    from app.services.erp_adapters.dispatcher import status_sync_adapter_keys
+
+    if not settings.erp_status_sync_enabled:
+        return STATUS_SYNC_OFF
+    oauth_meta = ((org.settings or {}).get("erp") or {}).get("oauth") or {}
+    if oauth_meta.get("provider") not in status_sync_adapter_keys():
+        return STATUS_SYNC_UNSUPPORTED
+    if oauth_meta.get("needs_reconnect"):
+        return STATUS_SYNC_NEEDS_RECONNECT
+    adapter = _adapter_or_none(await _resolved_erp(org) or {})
+    if adapter is None or not adapter.supports_status_sync:
+        return STATUS_SYNC_UNSUPPORTED
+    return None
+
+
+async def sync_org_now(org: Organization, *, now: datetime | None = None) -> StatusSyncResult:
+    """The sweep's pass for ONE tenant, on an admin's request ("a bill was
+    just paid in the ERP; bring it in now" rather than at the next tick).
+
+    Exactly :func:`sync_org`, so it is as safe to run beside the sweep as two
+    sweep ticks are: every report is applied under the invoice row lock and
+    re-applying one changes nothing, and each pass moves the high-water mark
+    only to its own start, after it completed. Raises on a failed read; the
+    caller checks :func:`status_sync_now_refusal` first."""
+    result = StatusSyncResult(orgs_scanned=1)
+    await sync_org(org, now=now or datetime.now(UTC), result=result)
     return result
 
 

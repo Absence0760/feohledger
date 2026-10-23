@@ -110,6 +110,9 @@ def _get_router(
         if "/Invoices/" in url:
             bill = (bills or {}).get(url.rsplit("/", 1)[1])
             return _resp(200, {"Invoices": [bill]}) if bill else _resp(404, {})
+        if "/Contacts/" in url or url.endswith("/Organisation"):
+            # The facts a refused create is explained by: unreadable here.
+            return _resp(404, {})
         raise AssertionError(f"unexpected GET {url}")
 
     return AsyncMock(side_effect=get)
@@ -609,6 +612,8 @@ def test_validation_failure_message_carries_no_response_body(token):
         )
     assert result.message == "Xero post failed: HTTP 400 (invalid_request)"
     assert "4123456789" not in result.message and "Long Street" not in result.message
+    # A ValidationException creates nothing: not left "possibly posted".
+    assert result.not_posted
 
 
 def test_not_connected_propagates_the_fixed_message(token):
@@ -728,7 +733,9 @@ def test_list_vendors_filters_suppliers_and_maps_fields(token):
         client.get = AsyncMock(return_value=_resp(200, {"Contacts": [contact]}))
         vendors = _run(_adapter().list_vendors())
     params = client.get.await_args_list[0].kwargs["params"]
-    assert params["where"] == "IsSupplier==true"
+    # Not IsSupplier alone: Xero sets it only once a contact has a bill, so a
+    # supplier created with none (neither flag set) must be read too (X1).
+    assert params["where"] == "IsSupplier==true OR IsCustomer==false"
     # Archived contacts are asked for: Xero omits them otherwise, and a vendor
     # linked to one would look like a dead link (§284).
     assert params["includeArchived"] == "true"
@@ -1127,3 +1134,107 @@ def test_the_revoke_url_override_is_honoured(monkeypatch):
         monkeypatch, _resp(200), override="http://localhost:12112/xero/identity/connect/revocation"
     )
     assert call["url"] == "http://localhost:12112/xero/identity/connect/revocation"
+
+
+# ---------------------------------------------------------------------------
+# Inactive records (audit X3, X4): only ACTIVE is active
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("status", "active"),
+    [("ACTIVE", True), ("ARCHIVED", False), ("GDPRREQUEST", False), (None, True)],
+)
+def test_a_contact_is_active_only_when_xero_says_active(token, status, active):
+    contact = {"ContactID": VENDOR, "Name": "Erased"}
+    if status:
+        contact["ContactStatus"] = status
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = _route_get({("Contacts", None): _resp(200, {"Contacts": [contact]})})
+        (v,) = _run(_adapter().list_vendors())
+    assert v.active is active
+
+
+@pytest.mark.parametrize(
+    ("status", "active"), [("ACTIVE", True), ("ARCHIVED", False), ("DELETED", False)]
+)
+def test_an_account_is_active_only_when_xero_says_active(token, status, active):
+    row = {"AccountID": ACCOUNT, "Code": "6100", "Name": "Supplies", "Status": status}
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(200, {"Accounts": [row]}))
+        (a,) = _run(_adapter().list_gl_accounts())
+    assert a.active is active
+
+
+# ---------------------------------------------------------------------------
+# A refused create is coded and not "possibly posted" (audit X2, §285)
+# ---------------------------------------------------------------------------
+
+_VALIDATION = {
+    "ErrorNumber": 10,
+    "Type": "ValidationException",
+    "Message": "A validation exception occurred",
+    "Elements": [{"ValidationErrors": [{"Message": "Acme Supplies quoted back verbatim"}]}],
+}
+
+
+def _refused_create(*, contact_status="ACTIVE", account_status="ACTIVE", locks=None, put=None):
+    """Push a no-tax bill whose PUT Xero answers ``put`` (a ValidationException
+    by default), with the contact, chart and organisation as given."""
+    org = {"Name": "Acme", **(locks or {})}
+
+    async def get(url, params=None, headers=None):
+        if url.endswith("/Invoices"):
+            return _resp(200, {"Invoices": []})
+        if "/Contacts/" in url:
+            return _resp(200, {"Contacts": [{"ContactID": VENDOR, "ContactStatus": contact_status}]})
+        if url.endswith("/Accounts"):
+            return _resp(200, {"Accounts": [{"AccountID": ACCOUNT, "Status": account_status}]})
+        if url.endswith("/Organisation"):
+            return _resp(200, {"Organisations": [org]})
+        raise AssertionError(url)
+
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(side_effect=get)
+        client.put = AsyncMock(return_value=put or _resp(400, _VALIDATION))
+        return _run(
+            _adapter().post_invoice(
+                _payload(tax_amount=None, gl_account="6100", amount=Decimal("1000.00"))
+            )
+        )
+
+
+def test_a_create_refused_for_an_archived_contact_is_vendor_inactive(token):
+    result = _refused_create(contact_status="ARCHIVED")
+    assert result.refusal_code == "vendor_inactive"
+    assert result.not_posted and not result.retryable
+    assert "verbatim" not in result.message  # Xero's text never reaches the row
+
+
+def test_a_create_refused_for_an_archived_account_names_our_code(token):
+    result = _refused_create(account_status="ARCHIVED")
+    assert result.refusal_code == "account_inactive"
+    assert result.refusal_params == {"accounts": ["6100"]}
+    assert result.not_posted
+
+
+def test_a_create_dated_inside_the_lock_date_is_period_closed(token):
+    # The payload's invoice date is 2026-09-01.
+    before = {"PeriodLockDate": "/Date(1788134400000+0000)/"}  # 2026-08-31
+    assert _refused_create(locks=before).refusal_code is None
+    on = {"EndOfYearLockDate": "/Date(1788220800000+0000)/"}  # 2026-09-01
+    result = _refused_create(locks=on)
+    assert result.refusal_code == "period_closed" and result.not_posted
+
+
+def test_an_unexplained_validation_failure_is_still_not_possibly_posted(token):
+    result = _refused_create()
+    assert result.refusal_code is None
+    assert result.not_posted and not result.retryable
+
+
+@pytest.mark.parametrize("status", [500, 503, 429])
+def test_a_create_that_failed_on_xero_side_may_have_posted(token, status):
+    result = _refused_create(put=_resp(status, {}))
+    assert not result.not_posted and result.retryable

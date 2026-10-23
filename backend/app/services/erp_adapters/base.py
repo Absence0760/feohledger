@@ -444,6 +444,12 @@ class ErpBillReport:
     #: the ``PrivateNote`` marker), or None when the bill carries none — a bill
     #: someone keyed in the ERP by hand, or one we can no longer read.
     correlation_id: str | None = None
+    #: True for an ERP that writes no marker of ours onto a bill but whose bill
+    #: ids are never reused within a company (Xero's InvoiceID is a GUID). The
+    #: sync then matches the bill by the invoice's ``erp_reference`` within the
+    #: connection realm the push recorded, in any state — not only a deleted
+    #: bill, as it does for an ERP that marks its bills (§320).
+    match_by_reference: bool = False
     #: The date of the latest payment the ERP applied that FeohLedger did NOT
     #: post itself, and that payment's rail as a ``Payment.method`` value
     #: (None = not stated; it then counts as 1099-reportable).
