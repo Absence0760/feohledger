@@ -25,9 +25,10 @@ tokens, a Demo Company resets every 28 days, and this repository is public.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
+
+from tests.live_erp import live_erp_adapter
 
 LIVE = os.environ.get("FEOH_XERO_LIVE") == "1"
 TENANT = os.environ.get("FEOH_XERO_LIVE_TENANT", "acme")
@@ -40,66 +41,11 @@ pytestmark = pytest.mark.skipif(
 _PO_STATUSES = ("DRAFT", "SUBMITTED", "AUTHORISED", "BILLED")
 
 
-def _load_local_settings() -> None:
-    """Give this process the same settings `python main.py` would have.
-
-    ``app.config.settings`` was built when the suite imported ``app``, from the
-    bare process environment. The tenant's sealed Xero tokens and the app
-    credentials live in ``backend/.env`` / ``.env.development``, which only the
-    local entrypoint loads, so load them the same way (``.env`` first, neither
-    overriding the real environment) and refresh the settings object in place.
-    """
-    from dotenv import load_dotenv
-
-    from app.config import Settings, settings
-
-    backend = Path(__file__).resolve().parents[1]
-    load_dotenv(backend / ".env", override=False)
-    load_dotenv(backend / ".env.development", override=False)
-    fresh = Settings()
-    for name in type(fresh).model_fields:
-        setattr(settings, name, getattr(fresh, name))
-
-
 @pytest.fixture
 async def xero():
-    """The tenant's live Xero adapter, built the way a sync builds it.
-
-    Per test, on a NullPool engine bound to this test's event loop: every test
-    runs on its own loop, and a pooled asyncpg connection cannot cross loops.
-    `dispatch_engine_scope` points the adapter's own control-plane reads (the
-    token store) at the same engine.
-    """
-    _load_local_settings()
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from sqlalchemy.pool import NullPool
-
-    from app.config import settings
-    from app.database import dispatch_engine_scope
-    from app.models.organization import Organization
-    from app.services.erp_adapters import get_erp_adapter
-    from app.services.provider_credentials import provider_config
-
-    engine = create_async_engine(settings.database_url, poolclass=NullPool)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    try:
-        async with dispatch_engine_scope(control_sessionmaker=sessions):
-            async with sessions() as db:
-                org = (
-                    await db.execute(select(Organization).where(Organization.slug == TENANT))
-                ).scalar_one_or_none()
-                assert org is not None, f"no local tenant '{TENANT}' (FEOH_XERO_LIVE_TENANT)"
-                config = await provider_config(org, "erp", db=db) or {}
-            # Opted in but not connected is a failure, not a skip: a green run
-            # must mean Xero was actually asked.
-            assert config.get("type") == "xero", (
-                f"tenant '{TENANT}' is not set to Xero — connect it under "
-                "Organization → ERP Integration"
-            )
-            yield get_erp_adapter(config)
-    finally:
-        await engine.dispose()
+    """The tenant's live Xero adapter (``tests/live_erp.py``)."""
+    async with live_erp_adapter(TENANT, "xero", env_var="FEOH_XERO_LIVE_TENANT") as adapter:
+        yield adapter
 
 
 async def _get(adapter, path: str, params: dict | None = None) -> dict:

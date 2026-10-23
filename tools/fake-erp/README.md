@@ -351,6 +351,14 @@ answers the bills and payments changed since that time, deleted bills as
 "txn_date"?}` (no FeohLedger marker on it), `POST /__qbo/delete-bill {"id"}`,
 and `POST /__qbo/token-lifetime {"seconds"}` (the `x_refresh_token_expires_in`
 later token responses carry, to stand a connection near its expiry).
+The Bill, BillPayment, void and CDC records are built in `qbo_records.py`
+(stdlib only), which `backend/tests/test_qbo_recorded_replay.py` compares
+against answers recorded from a real QuickBooks sandbox company
+(`fixtures/qbo_recorded/`, written by
+`backend/scripts/record_qbo_contract_fixtures.py`; decisions §318): a field the
+status sync reads that QuickBooks sends and the fake does not, or sends with
+another type or link type, fails the backend suite. Change those shapes there,
+never inline in `app.py`.
 State: `STATE["qbo"]` (`payments`, `deleted_bills`, `refresh_lifetime`).
 Bill and BillPayment Ids come from one sequence that `POST /__reset` does NOT
 restart and that starts from the clock, so a restarted container does not
