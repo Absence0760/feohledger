@@ -4979,6 +4979,7 @@ export const messages = {
 	'erpRefusal.taxNotItemised': "{provider} necesita el impuesto de cada línea, pero esta factura solo indica el total. Introduzca el impuesto por línea y vuelva a intentarlo.",
 	'erpRefusal.taxRateUnresolved': "{provider} no tiene ninguna tasa de impuesto que coincida con el impuesto de esta factura. Configure la tasa en {provider} o corrija el impuesto y vuelva a intentarlo.",
 	'erpRefusal.missingDates': "{provider} necesita la fecha de factura y la fecha de vencimiento. Añádalas y vuelva a intentarlo.",
+	'erpRefusal.billRefused': "{provider} rechazó esta factura y no la creó. Compruebe el proveedor, las cuentas, las fechas y los importes de la factura en {provider}, corríjalos y vuelva a intentarlo.",
 	'erpRefusal.duplicateNumber': "{provider} ya tiene una factura con este número. Busque un duplicado en {provider} antes de volver a intentarlo.",
 	'erpRefusal.docNumberTooLong': "El número de factura es más largo de lo que admite {provider}. Acórtelo y vuelva a intentarlo.",
 	'erpRefusal.currencyUnknown': "{provider} no indica ninguna moneda local, así que no se puede comprobar la moneda de la factura. Configure la moneda local en {provider} y vuelva a intentarlo.",

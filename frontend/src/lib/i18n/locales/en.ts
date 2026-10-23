@@ -5169,6 +5169,7 @@ export const en = {
 	'erpRefusal.taxNotItemised': "{provider} needs the tax on each line, but this invoice states it only in total. Enter the tax per line, then retry.",
 	'erpRefusal.taxRateUnresolved': "{provider} has no tax rate that matches this invoice's tax. Set the rate up in {provider}, or correct the tax, then retry.",
 	'erpRefusal.missingDates': "{provider} needs both an invoice date and a due date. Add them, then retry.",
+	'erpRefusal.billRefused': "{provider} refused this bill and did not create it. Check the bill's vendor, accounts, dates and amounts against {provider}, correct them, then retry.",
 	'erpRefusal.duplicateNumber': "{provider} already has a bill with this invoice number. Check {provider} for a duplicate before you retry.",
 	'erpRefusal.docNumberTooLong': "The invoice number is longer than {provider} allows. Shorten it, then retry.",
 	'erpRefusal.currencyUnknown': "{provider} reports no home currency, so the bill's currency can't be checked. Set the home currency in {provider}, then retry.",

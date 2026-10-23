@@ -78,6 +78,7 @@ const KEYS: Record<string, MessageKey> = {
 	tax_not_itemised: 'erpRefusal.taxNotItemised',
 	tax_rate_unresolved: 'erpRefusal.taxRateUnresolved',
 	missing_dates: 'erpRefusal.missingDates',
+	bill_refused: 'erpRefusal.billRefused',
 	duplicate_document_number: 'erpRefusal.duplicateNumber',
 	duplicate_invoice_number: 'erpRefusal.duplicateNumber',
 	doc_number_too_long: 'erpRefusal.docNumberTooLong',

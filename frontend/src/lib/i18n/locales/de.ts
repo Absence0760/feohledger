@@ -4986,6 +4986,7 @@ export const messages = {
 	'erpRefusal.taxNotItemised': "{provider} benötigt die Steuer je Position, diese Rechnung weist sie aber nur insgesamt aus. Erfassen Sie die Steuer je Position und versuchen Sie es dann erneut.",
 	'erpRefusal.taxRateUnresolved': "{provider} hat keinen Steuersatz, der zur Steuer dieser Rechnung passt. Legen Sie den Satz in {provider} an oder korrigieren Sie die Steuer und versuchen Sie es dann erneut.",
 	'erpRefusal.missingDates': "{provider} benötigt ein Rechnungsdatum und ein Fälligkeitsdatum. Ergänzen Sie beide und versuchen Sie es dann erneut.",
+	'erpRefusal.billRefused': "{provider} hat diese Rechnung abgelehnt und nicht angelegt. Gleichen Sie Lieferant, Konten, Daten und Beträge der Rechnung mit {provider} ab, korrigieren Sie sie, und versuchen Sie es dann erneut.",
 	'erpRefusal.duplicateNumber': "{provider} enthält bereits eine Rechnung mit dieser Rechnungsnummer. Prüfen Sie {provider} auf ein Duplikat, bevor Sie es erneut versuchen.",
 	'erpRefusal.docNumberTooLong': "Die Rechnungsnummer ist länger, als {provider} zulässt. Kürzen Sie sie und versuchen Sie es dann erneut.",
 	'erpRefusal.currencyUnknown': "{provider} meldet keine Hauswährung, daher kann die Währung der Rechnung nicht geprüft werden. Legen Sie die Hauswährung in {provider} fest und versuchen Sie es dann erneut.",

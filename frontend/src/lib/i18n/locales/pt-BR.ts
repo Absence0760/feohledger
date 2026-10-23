@@ -4980,6 +4980,7 @@ export const messages = {
 	'erpRefusal.taxNotItemised': "O {provider} precisa do imposto de cada linha, mas esta fatura informa apenas o total. Informe o imposto por linha e tente novamente.",
 	'erpRefusal.taxRateUnresolved': "O {provider} não tem alíquota que corresponda ao imposto desta fatura. Configure a alíquota no {provider} ou corrija o imposto e tente novamente.",
 	'erpRefusal.missingDates': "O {provider} precisa da data da fatura e da data de vencimento. Adicione-as e tente novamente.",
+	'erpRefusal.billRefused': "O {provider} recusou esta fatura e não a criou. Confira o fornecedor, as contas, as datas e os valores da fatura no {provider}, corrija-os e tente novamente.",
 	'erpRefusal.duplicateNumber': "O {provider} já tem uma conta com este número de fatura. Procure uma duplicata no {provider} antes de tentar novamente.",
 	'erpRefusal.docNumberTooLong': "O número da fatura é mais longo do que o {provider} permite. Encurte-o e tente novamente.",
 	'erpRefusal.currencyUnknown': "O {provider} não informa moeda principal, então a moeda da conta não pode ser verificada. Defina a moeda principal no {provider} e tente novamente.",

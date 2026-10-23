@@ -4986,6 +4986,7 @@ export const messages = {
 	'erpRefusal.taxNotItemised': "{provider} a besoin de la taxe de chaque ligne, mais cette facture ne l'indique qu'au total. Saisissez la taxe par ligne, puis réessayez.",
 	'erpRefusal.taxRateUnresolved': "{provider} n'a aucun taux de taxe correspondant à la taxe de cette facture. Créez le taux dans {provider} ou corrigez la taxe, puis réessayez.",
 	'erpRefusal.missingDates': "{provider} a besoin d'une date de facture et d'une date d'échéance. Ajoutez-les, puis réessayez.",
+	'erpRefusal.billRefused': "{provider} a refusé cette facture et ne l'a pas créée. Vérifiez le fournisseur, les comptes, les dates et les montants de la facture dans {provider}, corrigez-les, puis réessayez.",
 	'erpRefusal.duplicateNumber': "{provider} contient déjà une facture portant ce numéro. Recherchez un doublon dans {provider} avant de réessayer.",
 	'erpRefusal.docNumberTooLong': "Le numéro de facture est plus long que ce que {provider} accepte. Raccourcissez-le, puis réessayez.",
 	'erpRefusal.currencyUnknown': "{provider} n'indique aucune devise principale : la devise de la facture ne peut pas être vérifiée. Définissez la devise principale dans {provider}, puis réessayez.",
