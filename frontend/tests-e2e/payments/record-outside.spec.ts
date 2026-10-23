@@ -21,8 +21,8 @@ import {
  *    bank-file refusal for an unconfigured tenant is stated in the dialog.
  *  - The record action follows what record-outside accepts, not the run's
  *    `blocked` flag: an invoice from a new, unverified vendor is blocked for a
- *    run yet still recordable, while a blocking-exception row offers neither
- *    (issue #566).
+ *    run yet still recordable, while a blocking-exception row shows the action
+ *    disabled with its reason (issue #566, decisions §318).
  *  - The NACHA bank-file lifecycle: the first export CLAIMS the run
  *    (`draft → exported`, no Execute, no Cancel), a second file must be asked
  *    for explicitly (armed Regenerate; the bare re-export 409s), "Bank
@@ -248,10 +248,14 @@ test.describe('/payments — paying outside FeohLedger', () => {
 				name: `Record as paid — invoice ${tag}-OK`
 			});
 			await expect(recordOk).toBeVisible();
-			// ...and the one it would refuse whoever recorded it offers none.
-			await expect(
-				dupRow.getByRole('button', { name: `Record as paid — invoice ${tag}-DUP` })
-			).toHaveCount(0);
+			// ...and the one it would refuse whoever recorded it shows the action
+			// DISABLED, with the reason as its accessible description — hiding it
+			// left the operator hunting for a button that was not there (§318).
+			const recordDup = dupRow.getByRole('button', {
+				name: `Record as paid — invoice ${tag}-DUP`
+			});
+			await expect(recordDup).toBeDisabled();
+			await expect(recordDup).toHaveAccessibleDescription(/Duplicate Invoice/);
 
 			await recordOk.click();
 			const dialog = page.getByRole('dialog', {

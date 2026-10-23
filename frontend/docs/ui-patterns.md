@@ -754,6 +754,12 @@ for every per-row button across every grid page. Variants:
 Renders as `<a>` when given `href`, otherwise `<button>`. Never copy
 the `padding: 4px 12px; ...` recipe inline — use the component.
 
+An action the server would refuse for a reason the reader can act on is
+rendered `disabled`, not hidden, with the reason as its accessible
+description: pass `describedby` naming a `.visually-hidden` element that holds
+the localized reason (and `title` for pointer users). The payment queue's
+"Record as paid" is the worked example (decisions §318).
+
 The actions cell is **always the last column** (right side of the row),
 preceded by a header `<th class="actions-col"></th>`. The `<td>` uses
 `class="actions"` with the standard left-aligned flex layout:

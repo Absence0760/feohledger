@@ -49,6 +49,10 @@
 		exceptionDescriptionTitle,
 		type ExceptionDescriptionText
 	} from '#lib/api/exceptionDescription.ts';
+	import { erpPrefill, isErpPaidReport, type ErpReport } from '#lib/types/erpReport.ts';
+	import type { PaymentMethod } from '#lib/types/payment.ts';
+	import { localToday } from '#lib/types/paymentExecution.ts';
+	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
 
 	interface ExceptionItem {
 		id: string;
@@ -93,6 +97,14 @@
 		 *  a duplicate invoice was offered a Resolve that 403'd (issue #575).
 		 *  Absent on a row from any other payload = unknown = nothing offered. */
 		decision_refusals?: Record<Action, ActionRefusal>;
+		/** What the ERP reported, as data (decisions §318) — null on every row
+		 *  but the ERP reconciliation ones. */
+		erp_report?: ErpReport | null;
+		/** The ERP's product name for that report, or null ("your ERP"). */
+		erp_name?: string | null;
+		/** Only on a row carrying an ERP-reported payment: the caller's verdict
+		 *  on `POST /{id}/record-erp-payment`. Absent = unknown = not offered. */
+		record_erp_payment_refusal?: ActionRefusal;
 	}
 
 	/** Every chip tally on the page — see {@link ExceptionSummary}. */
@@ -216,12 +228,29 @@
 				params.set('sort', sortField);
 				params.set('order', sortOrder);
 			}
+			// The open dialog is part of the view, so a link can open it
+			// (`/exceptions?id=` — the payment queue links a blocked row here).
+			const openId = resolveTarget?.id ?? pendingOpenId;
+			if (openId) params.set('id', openId);
 			const qs = params.toString();
 			replaceState(`${pageStore.url.pathname}${qs ? `?${qs}` : ''}`, {});
 		});
 	}
 
 	let resolveTarget = $state<ExceptionItem | null>(null); // single-row resolve modal
+	// `?id=` names an exception whose dialog the page opens once it has loaded
+	// that row — the payment queue's "Open exception" link lands here.
+	let pendingOpenId = $state<string | null>(pageStore.url.searchParams.get('id'));
+
+	// "Record the ERP's payment" — the one-click path for a row holding a
+	// payment the ERP reported and FeohLedger could not record (decisions
+	// §318). Pre-filled from the row's `erp_report` when the dialog opens.
+	let erpMethod = $state<PaymentMethod | ''>('');
+	let erpReference = $state('');
+	let erpPaidOn = $state('');
+	let erpMaxDate = $state(localToday());
+	let recordingErp = $state(false);
+	let erpError = $state('');
 	let bulkResolveOpen = $state(false);                    // bulk-resolve modal
 	let resolutionText = $state('');
 	let saving = $state(false);
@@ -572,6 +601,74 @@
 	function openResolve(exc: ExceptionItem) {
 		resolveTarget = exc;
 		resolutionText = '';
+		erpError = '';
+		erpMaxDate = localToday();
+		if (isErpPaidReport(exc.erp_report)) {
+			const prefill = erpPrefill(exc.erp_report, erpMaxDate);
+			erpMethod = prefill.method;
+			erpReference = prefill.reference;
+			erpPaidOn = prefill.paidOn;
+		}
+	}
+
+	// The open dialog rides the URL (`?id=`), like every other piece of view
+	// state here — so opening or closing it rewrites the query string.
+	$effect(() => {
+		void resolveTarget?.id;
+		void pendingOpenId;
+		syncUrl();
+	});
+
+	// Open the dialog a link asked for (`?id=`), once. The row comes from the
+	// detail read, which carries the same verdicts as a list row, so the
+	// dialog offers exactly what the server would accept.
+	$effect(() => {
+		const id = pendingOpenId;
+		if (!id) return;
+		untrack(async () => {
+			try {
+				openResolve(await api.get<ExceptionItem>(`/api/exceptions/${encodeURIComponent(id)}`));
+			} catch {
+				toast(m('exceptions.toast.notFound'), 'error');
+			} finally {
+				pendingOpenId = null;
+			}
+		});
+	});
+
+	/** The ERP's name for the record panel, in the reader's words when the
+	 *  adapter has no product name. */
+	function erpName(exc: ExceptionItem): string {
+		return exc.erp_name ?? m('payments.recordOutside.yourErp');
+	}
+
+	async function commitRecordErpPayment() {
+		const target = resolveTarget;
+		const reference = erpReference.trim();
+		const method = erpMethod;
+		if (!target || !method || !reference || !erpPaidOn) return;
+		recordingErp = true;
+		erpError = '';
+		try {
+			// No `amount`: the server records what the invoice owes on that date.
+			await api.post(`/api/exceptions/${target.id}/record-erp-payment`, {
+				method,
+				reference,
+				paid_on: erpPaidOn
+			});
+			toast(
+				m('exceptions.erpPayment.recorded', { invoice: target.invoice_number ?? '—' }),
+				'success'
+			);
+			resolveTarget = null;
+			await Promise.all([loadExceptions(), loadSummary()]);
+		} catch (err) {
+			// In the dialog, beside the form (role="alert"): the coded refusal
+			// names what is still in the way, already in the reader's language.
+			erpError = err instanceof Error ? err.message : m('exceptions.erpPayment.failed');
+		} finally {
+			recordingErp = false;
+		}
 	}
 
 	function openBulkResolve() {
@@ -1208,6 +1305,56 @@
 				{/if}
 			</div>
 		{/if}
+		{#if isErpPaidReport(resolveTarget.erp_report) && isOffered(resolveTarget.record_erp_payment_refusal)}
+			<!-- The payment the ERP reported, pre-filled, recorded in one step.
+			     Resolving this exception and recording the payment happen in one
+			     transaction server-side, so neither can land without the other. -->
+			<section class="erp-payment" data-testid="erp-payment-panel" aria-labelledby="erp-payment-title">
+				<h3 id="erp-payment-title">
+					{m('exceptions.erpPayment.title', { erp: erpName(resolveTarget) })}
+				</h3>
+				<p class="modal-hint">{m('exceptions.erpPayment.intro')}</p>
+				<form
+					data-testid="erp-payment-form"
+					onsubmit={(e) => { e.preventDefault(); commitRecordErpPayment(); }}
+				>
+					<RecordPaymentFields
+						bind:method={erpMethod}
+						bind:reference={erpReference}
+						bind:paidOn={erpPaidOn}
+						maxDate={erpMaxDate}
+						idPrefix="erp-payment"
+						testid="erp-payment"
+					/>
+					{#if erpError}
+						<p class="modal-error" role="alert" data-testid="erp-payment-error">{erpError}</p>
+					{/if}
+					<div class="modal-footer">
+						<button
+							type="submit"
+							class="btn-primary"
+							data-testid="erp-payment-submit"
+							aria-describedby={resolveTarget.record_erp_payment_refusal
+								? 'erp-payment-refusal'
+								: undefined}
+							disabled={recordingErp ||
+								!isAllowed(resolveTarget.record_erp_payment_refusal) ||
+								!erpMethod ||
+								!erpReference.trim() ||
+								!erpPaidOn ||
+								erpPaidOn > erpMaxDate}
+						>
+							{recordingErp ? m('exceptions.erpPayment.recording') : m('exceptions.erpPayment.record')}
+						</button>
+					</div>
+					{#if resolveTarget.record_erp_payment_refusal}
+						<p class="modal-hint" id="erp-payment-refusal" data-testid="erp-payment-refusal">
+							{refusalText(resolveTarget.record_erp_payment_refusal, m)}
+						</p>
+					{/if}
+				</form>
+			</section>
+		{/if}
 		<!-- `data-testid` is the e2e suite's handle on this dialog, so a spec
 		     never has to name it by its accessible name — which is translated. -->
 		<form
@@ -1515,6 +1662,35 @@
 
 	.modal-description p {
 		margin: 0;
+	}
+
+	/* The ERP-reported payment, recorded from the dialog (decisions §318). */
+	.erp-payment {
+		margin: 0 0 16px;
+		padding: 12px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+	}
+
+	.erp-payment h3 {
+		margin: 0 0 6px;
+		font-size: 0.9rem;
+	}
+
+	.erp-payment form {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.modal-error {
+		margin: 0;
+		padding: 8px 10px;
+		border: 1px solid var(--danger);
+		border-radius: 6px;
+		background: var(--danger-tint);
+		color: var(--text);
+		font-size: 0.82rem;
 	}
 
 	.modal-description ul {
