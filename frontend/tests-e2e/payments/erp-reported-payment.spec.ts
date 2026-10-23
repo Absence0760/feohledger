@@ -11,7 +11,7 @@ import {
 
 /**
  * A payment the ERP reported, kept and recorded without re-keying it
- * (decisions §318). The production confusion this pins:
+ * (decisions §319). The production confusion this pins:
  *
  *  - a payment-queue row blocked by an exception now NAMES it, links to it
  *    (`/exceptions?id=` opens that exception's dialog), and says when someone
@@ -73,7 +73,7 @@ function openException(
 	const report = erpReport ? `'${JSON.stringify(erpReport)}'::jsonb` : 'NULL';
 	return tenantPsql(
 		`INSERT INTO exceptions (id, invoice_id, organization_id, entity_id, exception_type, severity, description, status, erp_report, created_at, updated_at)
-		 SELECT gen_random_uuid(), i.id, i.organization_id, i.entity_id, '${type}', 'error', 'e2e §318', 'open', ${report}, now(), now()
+		 SELECT gen_random_uuid(), i.id, i.organization_id, i.entity_id, '${type}', 'error', 'e2e §319', 'open', ${report}, now(), now()
 		 FROM invoices i WHERE i.id='${invoiceId}' RETURNING id`
 	)
 		.split('\n')[0]

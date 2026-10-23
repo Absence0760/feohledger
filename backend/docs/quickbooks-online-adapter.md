@@ -457,6 +457,58 @@ sandbox. Build and test against free Intuit sandbox companies throughout.
   goes into that fixture, so CI keeps it found.
 - A manual sandbox checklist per release: one bill end to end, a duplicate
   retry, a payment write-back, a token refresh.
+- Recorded payment shapes and the live check: see § Recorded payment shapes,
+  below.
+
+## Recorded payment shapes (decisions §318)
+
+The status sync's reads (`bill_report`, `map_bill_status`, `bills_for_payment`,
+`changed_bills`, `parse_qbo_events`) are replayed in CI over answers recorded
+from a real sandbox company, because hand-written doubles once agreed with a
+reader real QuickBooks never matched (§317).
+
+| Scenario file (`tools/fake-erp/fixtures/qbo_recorded/`) | What the replay asserts |
+|---|---|
+| `bill_paid_by_check.json`, `bill_paid_by_credit_card.json` | `paid`, reduced outside, NOT by credit, rail `check` / `card`, the payment's date, its id external |
+| `bill_part_paid.json` | `partially_paid`, reduced outside, cash by cheque |
+| `bill_vendor_credit.json` | `paid`, reduced outside, `settled_by_credit`, no date or rail booked |
+| `bill_paid_by_feohledger.json` | `paid_only_by_us`, not reduced outside, nothing external |
+| `bill_payment_voided.json` | `open`, the voided payment not external |
+| `bill_deleted.json` | `deleted` |
+| `cdc.json` | `changed_bills` names every bill the recording run changed |
+| `webhook.json` | `parse_qbo_events` reads every bill / bill-payment event, company = the placeholder realm |
+
+Each bill scenario also checks `bills_for_payment` on its payments and, for the
+cheque, card, void and CDC files, that `tools/fake-erp/qbo_records.py` builds
+records carrying every field the sync reads with QuickBooks' types and link
+types. A file not recorded yet is a skip naming the command below.
+
+**Making the recording** (operator, not CI — it writes to the sandbox):
+
+1. In `backend/.env`, a real Intuit development app's keys
+   (`FEOH_ERP_QBO_CLIENT_ID`, `FEOH_ERP_QBO_CLIENT_SECRET`) and the four
+   fake-erp overrides blanked (`FEOH_ERP_QBO_API_BASE=`,
+   `FEOH_ERP_QBO_AUTHORIZE_URL=`, `FEOH_ERP_QBO_TOKEN_URL=`,
+   `FEOH_ERP_QBO_REVOKE_URL=`); the app's redirect URI must include
+   `http://localhost:8000/api/erp/oauth/callback`.
+2. `pnpm dev`, then connect the `acme` tenant (Organization → ERP Integration)
+   to a sandbox company with Environment = Sandbox.
+3. `pnpm gen:qbo-recordings` — creates and records every scenario except the
+   webhook. `--only <scenario>` repeats one; `--bill bill_paid_by_check=<id>`
+   records a bill you paid by hand with Pay Bills instead of creating one.
+4. The webhook body: point the Intuit app's webhook URL at a tunnel to
+   `/api/erp/webhook/quickbooks` (`ngrok http 8000`), pay a bill in the sandbox,
+   then `pnpm gen:qbo-recordings --only webhook --webhook-from-ngrok` (or
+   `--webhook-body <saved.json>`).
+5. Review the diff (every string not read by the sync reads `[scrubbed]`), run
+   `pytest tests/test_qbo_recorded_replay.py`, and commit the files.
+
+Re-record when QuickBooks' minor version (`MINOR_VERSION`) moves, and whenever a
+live check fails.
+
+**The live check.** `pnpm test:erp:qbo-live` (`backend/tests/test_qbo_live_contract.py`)
+re-asks a connected company, read-only — see `erp-integration.md` § Live
+QuickBooks contract check.
 
 ## Docs this touches when it lands
 

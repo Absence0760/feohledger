@@ -1,6 +1,6 @@
 /**
  * What the ERP reported, as the backend keeps it on a reconciliation exception
- * (`backend/app/models/exception.py::erp_report`, decisions §318), and the
+ * (`backend/app/models/exception.py::erp_report`, decisions §319), and the
  * pure helpers that turn it into a pre-filled "record this payment" form.
  *
  * Pure (no Svelte runtime, no `$app/*`), so vitest reaches it directly.

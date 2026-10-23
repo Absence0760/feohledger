@@ -90,7 +90,7 @@ async def create_exception(
 
     ``erp_report`` is what the ERP reported, as PII-free data, on the
     reconciliation rows the ERP paths open (``erp_status_sync``, decisions
-    §318); ``None`` everywhere else.
+    §319); ``None`` everywhere else.
     """
     resolved_invoice_id = invoice_id if invoice_id is not None else getattr(invoice, "id", None)
     resolved_entity_id = entity_id if entity_id is not None else getattr(invoice, "entity_id", None)

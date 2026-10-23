@@ -22,7 +22,7 @@ import {
  *  - The record action follows what record-outside accepts, not the run's
  *    `blocked` flag: an invoice from a new, unverified vendor is blocked for a
  *    run yet still recordable, while a blocking-exception row shows the action
- *    disabled with its reason (issue #566, decisions §318).
+ *    disabled with its reason (issue #566, decisions §319).
  *  - The NACHA bank-file lifecycle: the first export CLAIMS the run
  *    (`draft → exported`, no Execute, no Cancel), a second file must be asked
  *    for explicitly (armed Regenerate; the bare re-export 409s), "Bank
@@ -250,7 +250,7 @@ test.describe('/payments — paying outside FeohLedger', () => {
 			await expect(recordOk).toBeVisible();
 			// ...and the one it would refuse whoever recorded it shows the action
 			// DISABLED, with the reason as its accessible description — hiding it
-			// left the operator hunting for a button that was not there (§318).
+			// left the operator hunting for a button that was not there (§319).
 			const recordDup = dupRow.getByRole('button', {
 				name: `Record as paid — invoice ${tag}-DUP`
 			});

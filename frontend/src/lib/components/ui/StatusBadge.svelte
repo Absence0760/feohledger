@@ -1,6 +1,7 @@
 <script lang="ts">
+	import Badge from './Badge.svelte';
 	import type { InvoiceStatus } from '#lib/types/invoice.ts';
-	import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
+	import { invoiceStatusLabelKey, invoiceStatusTone } from '#lib/types/invoice.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let { status }: { status: InvoiceStatus } = $props();
@@ -13,70 +14,14 @@
 		const key = invoiceStatusLabelKey(status);
 		return key ? m(key) : status;
 	});
+
+	// Colour comes from `INVOICE_STATUS_TONES` (total over the union) through
+	// the shared `Badge` primitive — never from a per-status rule here. This
+	// component used to carry its own colour rules and only six of the twelve
+	// statuses had one, so `paid`, `posted_in_erp` and four others rendered as
+	// bare text. `status` stays on as the variant class: it is the semantic
+	// hook (`.badge.paid`) selectors read.
+	let tone = $derived(invoiceStatusTone(status));
 </script>
 
-<span class="badge {status}">{label}</span>
-
-<style>
-	.badge {
-		display: inline-block;
-		padding: 3px 10px;
-		border-radius: 12px;
-		font-size: 0.75rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-		white-space: nowrap;
-	}
-
-	/* WCAG 1.4.3 — these badges are small but bold uppercase, so they are held
-	   to the normal-text bar (≥4.5:1), not the large-text one.
-
-	   This component worked out the lifted-text answer for the tinted-badge
-	   recipe before the palette had a name for it, and carried the resulting
-	   hexes as private literals. They are now the `--<tone>-tint` /
-	   `--<tone>-on-tint` pairs in app.css — same values, one owner — so a tone
-	   is recalibrated in one place instead of here and in the 20-odd badges
-	   that copied these numbers. See `frontend/CLAUDE.md` § Colour tokens and
-	   contrast, and decisions.md §30.
-
-	   Two drifts went with the move: `.done` and `.ready_for_review` had two
-	   different greens (a 15% tint of #1fa86a vs of #32c882) that composite
-	   within a few units of each other, so the difference was accidental
-	   rather than meaningful; and `.failed` / `.pending` gain a little margin
-	   (4.74→5.36 and 4.87→5.50) by taking the tokens' text. */
-	.new {
-		background: var(--accent-tint);
-		color: var(--accent-on-tint);
-	}
-
-	.pending {
-		background: var(--warning-tint);
-		color: var(--warning-on-tint);
-	}
-
-	.ready_for_review {
-		background: var(--success-tint);
-		color: var(--success-on-tint);
-	}
-
-	.failed {
-		background: var(--danger-tint);
-		color: var(--danger-on-tint);
-	}
-
-	/* Purple carries no semantic meaning the other four share — it exists to
-	   make "handed to the ERP" scannable mid-pipeline. It was a literal while
-	   there was one theme ("a token with one caller"); a second theme needs a
-	   second value, so it is the `--violet-*` pair now (decisions §289),
-	   asserted per theme like the other tones. */
-	.sent_to_erp {
-		background: var(--violet-tint);
-		color: var(--violet-on-tint);
-	}
-
-	.done {
-		background: var(--success-tint);
-		color: var(--success-on-tint);
-	}
-</style>
+<Badge {tone} variant={status}>{label}</Badge>

@@ -713,7 +713,7 @@ async def record_erp_payment(
 ):
     """Record the payment an ERP reported, from the exception that holds it.
 
-    The one-click path for a ``paid_not_recorded`` row (decisions §318): the
+    The one-click path for a ``paid_not_recorded`` row (decisions §319): the
     dialog arrives pre-filled from the row's ``erp_report`` and the person
     confirms or corrects the rail, reference and date. In ONE transaction the
     payment is recorded through ``external_payment.record_invoice_paid_outside``

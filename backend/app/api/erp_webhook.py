@@ -357,7 +357,7 @@ async def erp_webhook(
             # Any status but `Paid` for an invoice still payable here means the
             # ERP no longer shows the bill paid (a voided cheque reads `Open`):
             # a payment it reported earlier, which FeohLedger could not record,
-            # must never be recorded now (decisions §318). Before the
+            # must never be recorded now (decisions §319). Before the
             # transition screen, because `posted_in_erp → posted_in_erp` is a
             # silent no-op below.
             withdrawn = 0
@@ -542,7 +542,7 @@ async def _raise_erp_reconciliation_exception(
     in flight, so this is a review signal — we deliberately do NOT
     auto-transition the invoice. (A payment the ERP reported earlier and
     FeohLedger could not record has already been withdrawn by the handler,
-    which does so for every non-`Paid` status — decisions §318.)
+    which does so for every non-`Paid` status — decisions §319.)
     """
     await _open_erp_reconciliation_exception(
         db,

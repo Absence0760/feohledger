@@ -184,7 +184,7 @@ closed.
 
 Because every clearing door passes through it, `record_decision` is also where a
 payment the ERP reported, and FeohLedger could not record, is tried again
-(decisions §318). After a `resolve` / `dismiss` of a payment-blocking
+(decisions §319). After a `resolve` / `dismiss` of a payment-blocking
 exception, if the invoice holds a live, non-blocking row whose
 `erp_report.kind` is `paid_not_recorded`, `erp_status_sync.
 retry_erp_reported_payments` re-runs `record_erp_reported_payment` with the

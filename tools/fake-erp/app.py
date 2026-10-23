@@ -30,6 +30,7 @@ from defusedxml import ElementTree as SafeET
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+import qbo_records
 import qbo_sandbox
 
 app = FastAPI(title="fake-erp", docs_url=None, redoc_url=None)
@@ -3021,8 +3022,6 @@ async def qbo_query(request: Request, realm: str, query: str) -> dict:
 
 @qbo.post("/v3/company/{realm}/bill")
 async def qbo_create_bill(request: Request, realm: str) -> dict:
-    from decimal import Decimal
-
     _require_qbo_auth(request, realm)
     st = _qbo()
     body = await request.json()
@@ -3042,11 +3041,7 @@ async def qbo_create_bill(request: Request, realm: str) -> dict:
     if not (body.get("VendorRef") or {}).get("value"):
         raise _qbo_fault(400, "2020", "Required param missing: VendorRef")
     _qbo_validate_bill(body)
-    total = float(sum(Decimal(str(line.get("Amount") or 0)) for line in body.get("Line") or []))
-    bill = {**body, "Id": str(next(_QBO_TXN_IDS)), "SyncToken": "0", "TotalAmt": total}
-    bill["Balance"] = total
-    bill["LinkedTxn"] = []
-    _qbo_touch(bill)
+    bill = qbo_records.new_bill(body, str(next(_QBO_TXN_IDS)))
     st["bills"][bill["Id"]] = bill
     response = {"Bill": copy.deepcopy(bill)}
     if request_id:
@@ -3095,42 +3090,19 @@ async def qbo_set_balance(body: dict) -> dict:
 #   POST /__qbo/token-lifetime {"seconds"} — x_refresh_token_expires_in from now on
 
 
-def _qbo_now() -> str:
-    from datetime import UTC, datetime
-
-    return datetime.now(UTC).isoformat(timespec="microseconds")
-
-
-def _qbo_touch(record: dict) -> None:
-    record["MetaData"] = {"LastUpdatedTime": _qbo_now()}
+# The records themselves are built in ``qbo_records`` (stdlib only), which the
+# backend suite compares against responses recorded from a real QuickBooks
+# company, so the fake's shapes cannot drift from Intuit's unseen again.
+_qbo_now = qbo_records.now
+_qbo_touch = qbo_records.touch
 
 
 def _qbo_apply_payment(bill: dict, amount, *, note: str, pay_type: str, txn_date: str) -> dict:
-    from decimal import Decimal
-
-    st = _qbo()
     pid = str(next(_QBO_TXN_IDS))
-    amount = Decimal(str(amount))
-    record = {
-        "Id": pid,
-        "SyncToken": "0",
-        "PayType": pay_type,
-        "TxnDate": txn_date,
-        "TotalAmt": float(amount),
-        "PrivateNote": note,
-        "VendorRef": copy.deepcopy(bill.get("VendorRef") or {}),
-        "Line": [{"Amount": float(amount), "LinkedTxn": [{"TxnId": bill["Id"], "TxnType": "Bill"}]}],
-    }
-    _qbo_touch(record)
-    st["payments"][pid] = record
-    bill["Balance"] = float(Decimal(str(bill["Balance"])) - amount)
-    # A Bill names its payment by how it was paid, never as "BillPayment": real
-    # QuickBooks links a cheque/bank payment as BillPaymentCheck and a card one
-    # as BillPaymentCreditCard (docs/decisions.md §317).
-    link_type = "BillPaymentCreditCard" if pay_type == "CreditCard" else "BillPaymentCheck"
-    bill.setdefault("LinkedTxn", []).append({"TxnId": pid, "TxnType": link_type})
-    bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
-    _qbo_touch(bill)
+    record = qbo_records.apply_payment(
+        bill, amount, payment_id=pid, note=note, pay_type=pay_type, txn_date=txn_date
+    )
+    _qbo()["payments"][pid] = record
     return record
 
 
@@ -3148,14 +3120,7 @@ async def qbo_bill_payment(request: Request, realm: str) -> dict:
         if str(body.get("SyncToken")) != record["SyncToken"]:
             raise _qbo_fault(400, "5010", "Stale Object Error")
         bill = st["bills"].get(record["Line"][0]["LinkedTxn"][0]["TxnId"])
-        if bill is not None:
-            bill["Balance"] = float(Decimal(str(bill["Balance"])) + Decimal(str(record["TotalAmt"])))
-            bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
-            _qbo_touch(bill)
-        record["TotalAmt"] = 0
-        record["PrivateNote"] = f"Voided - {record['PrivateNote']}"
-        record["SyncToken"] = str(int(record["SyncToken"]) + 1)
-        _qbo_touch(record)
+        qbo_records.void_payment(record, bill)
         return {"BillPayment": copy.deepcopy(record)}
 
     request_id = request.query_params.get("requestid")
@@ -3204,7 +3169,7 @@ async def qbo_cdc(request: Request, realm: str, entities: str, changedSince: str
     if "Bill" in wanted:
         bills = [copy.deepcopy(b) for b in st["bills"].values() if changed(b)]
         bills += [
-            {"Id": i, "status": "Deleted", "MetaData": {"LastUpdatedTime": at}}
+            qbo_records.deleted_bill(i, at)
             for i, at in st["deleted_bills"].items()
             if at >= changedSince
         ]
@@ -3213,7 +3178,7 @@ async def qbo_cdc(request: Request, realm: str, entities: str, changedSince: str
         blocks.append(
             {"BillPayment": [copy.deepcopy(p) for p in st["payments"].values() if changed(p)]}
         )
-    return {"CDCResponse": [{"QueryResponse": blocks}]}
+    return qbo_records.cdc_response(blocks)
 
 
 @app.post("/__qbo/pay-bill")

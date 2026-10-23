@@ -309,7 +309,7 @@
 			clear_refusal: string | null;
 		} | null;
 		// The payment the ERP reported for this invoice and FeohLedger could
-		// not record (decisions §318). "Record as paid" opens pre-filled with it.
+		// not record (decisions §319). "Record as paid" opens pre-filled with it.
 		erp_reported_payment?: QueueErpReportedPayment | null;
 	}
 

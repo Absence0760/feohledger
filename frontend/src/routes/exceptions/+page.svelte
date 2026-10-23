@@ -97,7 +97,7 @@
 		 *  a duplicate invoice was offered a Resolve that 403'd (issue #575).
 		 *  Absent on a row from any other payload = unknown = nothing offered. */
 		decision_refusals?: Record<Action, ActionRefusal>;
-		/** What the ERP reported, as data (decisions §318) — null on every row
+		/** What the ERP reported, as data (decisions §319) — null on every row
 		 *  but the ERP reconciliation ones. */
 		erp_report?: ErpReport | null;
 		/** The ERP's product name for that report, or null ("your ERP"). */
@@ -244,7 +244,7 @@
 
 	// "Record the ERP's payment" — the one-click path for a row holding a
 	// payment the ERP reported and FeohLedger could not record (decisions
-	// §318). Pre-filled from the row's `erp_report` when the dialog opens.
+	// §319). Pre-filled from the row's `erp_report` when the dialog opens.
 	let erpMethod = $state<PaymentMethod | ''>('');
 	let erpReference = $state('');
 	let erpPaidOn = $state('');
@@ -1664,7 +1664,7 @@
 		margin: 0;
 	}
 
-	/* The ERP-reported payment, recorded from the dialog (decisions §318). */
+	/* The ERP-reported payment, recorded from the dialog (decisions §319). */
 	.erp-payment {
 		margin: 0 0 16px;
 		padding: 12px;

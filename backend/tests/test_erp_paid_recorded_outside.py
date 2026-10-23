@@ -149,7 +149,7 @@ async def test_a_refusal_opens_a_reconciliation_exception(realdb):
     assert payments == []
     assert recon.status == "open"
     # The ERP's payment is KEPT, as data, so it can be recorded later without
-    # anyone re-keying it (decisions §318) — and the sentence is for an AP user.
+    # anyone re-keying it (decisions §319) — and the sentence is for an AP user.
     assert recon.erp_report["kind"] == "paid_not_recorded"
     assert recon.erp_report["refusal_code"] == "external_payment_blocking_exception"
     assert recon.erp_report["reference"] == "BILLPAY-77"

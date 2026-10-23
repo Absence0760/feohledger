@@ -14782,7 +14782,68 @@ or card, is found, read as ours and voided through the real link),
 bill, carried through `apply_bill_report`, records `paid_recorded` with no
 exception).
 
-## 318. The ERP's reported payment is kept as data, and recorded once what blocked it clears (2026-10-22)
+## 318. QuickBooks payment shapes come from a recording of a real company, not from the author of the reader (2026-10-22)
+
+**What broke.** §317: the status sync read a bill's payments under
+`LinkedTxn.TxnType: "BillPayment"`, real QuickBooks says `BillPaymentCheck` /
+`BillPaymentCreditCard`, and CI was green because `tools/fake-erp` and the
+adapter tests emitted `BillPayment` too. Every double was written by the same
+hand, from the same belief, as the code it checked. Fixing the reader fixed
+that belief; this entry is about the next one we do not know is wrong.
+
+**The shape.**
+
+- **Recorded fixtures.** `backend/scripts/record_qbo_contract_fixtures.py`
+  (`pnpm gen:qbo-recordings`) uses a local tenant's QuickBooks connection to
+  build each status-sync scenario in a SANDBOX company — a bill paid by cheque,
+  by card, in part, by a vendor credit, by our own write-back marker; a voided
+  payment; a deleted bill; change-data-capture over the run; a webhook body —
+  and writes Intuit's answers to `tools/fake-erp/fixtures/qbo_recorded/`.
+  `backend/tests/test_qbo_recorded_replay.py` replays them through the real
+  adapter over a `MockTransport` and asserts what each scenario MEANS (a bill
+  paid by cheque is cash, paid outside FeohLedger, by cheque, on the payment's
+  date), never what the adapter happened to answer. A bill can also be recorded
+  as a person made it (`--bill SCENARIO=ID`), since the production defect came
+  from QuickBooks' own Pay Bills screen.
+- **Scrubbed by allowlist, because the repository is public.** Strings survive
+  only under the keys the sync reads (ids, `SyncToken`, `TxnType`, `PayType`,
+  dates, reference values, `status`, Fault `code`); a memo keeps only a leading
+  "Voided" and our markers; names and addresses become fake ones; the realm id
+  becomes a placeholder; numbers stay. No token passes through the script: the
+  access token stays inside `erp_oauth` and the adapter's `_request`. The
+  scrubber is pinned by tests, and every committed recording must be a fixed
+  point of it.
+- **A scenario not recorded yet is a named skip**, with the command that
+  records it. That is a visible state in every run, not a masked failure; the
+  recording itself is the operator's step (`docs/followups.md`).
+- **The fake is compared to the recording, not fed from it.** The fake mints
+  bills per test with fresh ids, so it cannot serve recorded records verbatim.
+  Instead its Bill / BillPayment / void / CDC builders moved to
+  `tools/fake-erp/qbo_records.py` (stdlib only, so the backend suite can import
+  it; `app.py` needs FastAPI and defusedxml), and the replay suite fails when a
+  field the sync reads is missing from the fake's record, has another JSON
+  type, or carries another link type than QuickBooks used.
+- **A live check as well** (`pnpm test:erp:qbo-live`,
+  `backend/tests/test_qbo_live_contract.py`), mirroring Xero's (§ live Xero
+  contract check): opt-in, local, read-only, never in CI. A recording pins one
+  run; the live check re-asks the company, so a shape the recording never
+  covered still surfaces as a named failure.
+
+**Considered and rejected.**
+- *Committing raw responses and trusting review to catch PII.* The repository
+  is public and a review of a 500-line JSON blob is not a control.
+- *Calling Intuit from CI.* Needs an interactive OAuth consent and a rotating
+  refresh token held by a public repository's runners.
+- *Generating the fake's records from the recording at runtime.* It would make
+  the fake agree with the recording by construction while hiding what the fake
+  does with a shape the recording lacks; the comparison keeps the fake's
+  behaviour explicit and its drift loud.
+
+Tests: `backend/tests/test_qbo_recorded_replay.py` (scrubber, replay per
+scenario, fake against recording); `backend/tests/test_qbo_live_contract.py`
+(opt-in).
+
+## 319. The ERP's reported payment is kept as data, and recorded once what blocked it clears (2026-10-22)
 
 **What happened.** §317's production case, after its fix deployed: the sweep
 read the QuickBooks bill as paid and called `record_invoice_paid_outside`,

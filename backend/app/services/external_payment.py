@@ -445,7 +445,7 @@ async def _complete(
     )
 
     # A "the ERP reported this paid and we couldn't record it" exception is
-    # answered now, whichever door recorded the payment (decisions §318).
+    # answered now, whichever door recorded the payment (decisions §319).
     from app.services.erp_status_sync import close_erp_paid_reports
 
     await close_erp_paid_reports(
@@ -478,7 +478,7 @@ async def record_invoice_paid_outside(
     design, and which has already applied that row's clearing rules to the
     caller under lock. Every other gate still runs, and every refusal is raised
     before anything is written or audited. On success that row is resolved by
-    `erp_status_sync.close_erp_paid_reports`, as ``actor_name`` (decisions §318).
+    `erp_status_sync.close_erp_paid_reports`, as ``actor_name`` (decisions §319).
 
     **Idempotent**: replaying the same record (same reference and paid-on date)
     for an invoice it already paid returns the existing payment with

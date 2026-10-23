@@ -563,7 +563,7 @@ async def test_voiding_an_erp_reported_payment_holds_the_invoice_out_of_runs(rea
 
 
 # ---------------------------------------------------------------------------
-# a payment the ERP withdrew is never recorded later (decisions §318)
+# a payment the ERP withdrew is never recorded later (decisions §319)
 # ---------------------------------------------------------------------------
 
 

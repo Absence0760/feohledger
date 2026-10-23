@@ -3,7 +3,7 @@
 	 * The three facts a payment made outside FeohLedger is recorded with — how
 	 * it was paid, its reference, and the paid-on date. Shared by the payment
 	 * queue's "Record as paid" dialog and the exception queue's "Record the
-	 * ERP's payment" (decisions §318), so the two cannot drift on what the
+	 * ERP's payment" (decisions §319), so the two cannot drift on what the
 	 * server's `RecordErpReportedPaymentRequest` accepts.
 	 *
 	 * `method` may be `''`: the form was pre-filled from an ERP report that

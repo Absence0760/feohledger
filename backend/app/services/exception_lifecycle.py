@@ -693,7 +693,7 @@ async def record_decision(
         # A blocker just cleared. If it was what stopped FeohLedger recording a
         # payment the ERP reported, record it now, through the same gates — in
         # this transaction, so the decision and the record commit or roll back
-        # together (decisions §318).
+        # together (decisions §319).
         from app.services.erp_status_sync import is_erp_paid_report, retry_erp_reported_payments
 
         if not is_erp_paid_report(exception):

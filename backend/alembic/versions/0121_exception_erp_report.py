@@ -8,7 +8,7 @@ the reconciliation exception kept the ERP's facts only as prose — an English
 sentence telling an AP clerk to call an API path with ids copied out of it. Once
 the blocker was cleared nothing recorded the payment, and a person had to
 re-key the method, reference and date the ERP had already stated (decisions
-§318). The row now keeps what the ERP reported as data: the rail, reference and
+§319). The row now keeps what the ERP reported as data: the rail, reference and
 paid-on date, the ERP document and event ids, and the refusal code. That is
 what lets FeohLedger record the payment itself once the blocker clears, and
 lets the queue offer it in one click.

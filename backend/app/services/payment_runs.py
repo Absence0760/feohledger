@@ -445,7 +445,7 @@ async def blocking_exception_types(
     if exclude_exception_ids:
         # The one caller that passes this is the exception queue's one-click
         # record of an ERP-reported payment, which resolves exactly these rows
-        # in the same transaction once the record succeeds (decisions §318).
+        # in the same transaction once the record succeeds (decisions §319).
         query = query.where(InvoiceException.id.notin_(exclude_exception_ids))
     rows = await db.execute(query)
     rank = {t: i for i, t in enumerate(blocking)}

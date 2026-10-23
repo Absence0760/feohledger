@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-22 — keeping the ERP's reported payment (decisions §318) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 143 → 144. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**144 open: 124 (c) · 10 (a) · 10 (b)** — re-derived from the file, never carried
+**148 open: 127 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2297,7 +2297,59 @@ providers still have the same gap.
       any of those pages, or a second report of pages "jumping" once the
       vertical shifts fixed here have shipped.
 
-### Surfaced by keeping the ERP's reported payment (2026-10-22, decisions §318)
+### Surfaced by the 2026-10-22 production walkthrough (decisions §317–§318)
+
+The walkthrough found defects the suite could not see because each check
+covered the one page or shape it was written for. #646 / §318 closed the
+QuickBooks half with recorded shapes and a live check; these are the
+user-visible halves still open.
+
+- [ ] **(c) Key fields and primary actions are checked to be on screen only on
+      /login.** #642 added the check there (`tests-e2e/auth/login.spec.ts`:
+      the email and password fields in the viewport of a short window, no
+      scrolling) after a global class pushed them below the fold on every
+      screen. Every other spec fills fields and clicks buttons by locator,
+      and Playwright scrolls to them first, so a page whose search box,
+      filters or primary action ends up below the fold still passes.
+      **Durable fix:** one table-driven spec over every sidebar page and the
+      signup / set-password / supplier-portal entry pages, at 1280×720,
+      1366×768 and 390×844, asserting with `toBeInViewport()` (no scroll) the
+      page's heading, its primary action and its first input or filter;
+      each page's row names those three locators, and a new sidebar page
+      without a row fails the spec (the `lib/help/pages.ts` pattern).
+      **Trigger:** the next page added to the sidebar, or the next "I could
+      not find the button" report.
+- [ ] **(c) The layout-shift budget covers three list pages.** #644's
+      `tests-e2e/reactivity/layout-stability.spec.ts` holds /invoices,
+      /payments and /exceptions' late responses behind a gate and asserts the
+      table does not move; /vendors, /purchase-orders, /gl-accounts,
+      /credit-memos, /expenses, /contracts, /bank-reconciliation and the
+      dashboard have no such check, and the measurement
+      showed small shifts on some of them. **Durable fix:** make the spec
+      table-driven over every main list page, with each page's late
+      responses delayed by a realistic latency (the 2026-10-22 production
+      timings, not zero), a cumulative layout-shift budget per page
+      (`PerformanceObserver` `layout-shift`, under 0.1, the Core Web Vitals
+      "good" line), and a new list page without a row failing the spec.
+      **Trigger:** the next list page added, or the next polish pass on any of
+      those pages.
+- [ ] **(c) No scripted "first customer" release rehearsal.** The 2026-10-22
+      walkthrough — sign up, connect QuickBooks, sync the chart and vendors,
+      enter an invoice, approve it, push it, pay the bill in QuickBooks, watch
+      the status come back — was done by hand and found what no spec did,
+      because every spec seeds its own starting state. The day-one suite
+      (`tests-e2e/day-one/`) covers signup to first invoice against an empty
+      database, and stops there. **Durable fix:** extend the day-one journey
+      through ERP connect (fake-erp's QuickBooks sandbox company,
+      `fake_company=sandbox`), sync, approve, push, a person paying the bill
+      in the fake (`/__qbo/pay-bill`), and the webhook / CDC sweep bringing
+      the invoice to paid, asserting what the customer sees at each step; run
+      it in CI's day-one job, and once per release by hand against the real
+      sandbox with `pnpm test:erp:qbo-live` alongside. **Trigger:** before
+      the next release tag, which is when the walkthrough would otherwise be
+      repeated by hand.
+
+### Surfaced by keeping the ERP's reported payment (2026-10-22, decisions §319)
 
 - [ ] **(c) ERP reconciliation sentences render in English in every locale.**
       The rows `erp_status_sync` and `api/erp_webhook` open now carry a
@@ -2416,6 +2468,19 @@ as oversights.
       comes first.
 
 ## (b) Operator steps on merged code
+
+- [ ] **Make the first recording of real QuickBooks payment shapes.** Built
+      (decisions §318): `backend/tests/test_qbo_recorded_replay.py` replays
+      `tools/fake-erp/fixtures/qbo_recorded/`, and until those files exist its
+      replay and fake-comparison tests skip with the command that records
+      them. Steps: real Intuit development app keys in `backend/.env` with the
+      fake-erp `FEOH_ERP_QBO_*` overrides blanked; `pnpm dev`; connect `acme`
+      to a sandbox company (Environment = Sandbox); `pnpm gen:qbo-recordings`;
+      for the webhook, a tunnel to `/api/erp/webhook/quickbooks` and
+      `pnpm gen:qbo-recordings --only webhook --webhook-from-ngrok`; review the
+      diff and commit it. Then `pnpm test:erp:qbo-live`. Every step is
+      `backend/docs/quickbooks-online-adapter.md` § Recorded payment shapes.
+      **Trigger:** once #646 (§317) is on `main`, before the next release.
 
 - [ ] **Turn on SMS paging for the uptime checks.** Built (decisions §311,
       `infra/uptime.tf`): with no phone number set the checks only email. In

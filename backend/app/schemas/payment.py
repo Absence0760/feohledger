@@ -108,7 +108,7 @@ class PaymentCreate(BaseModel):
 class RecordErpReportedPaymentRequest(BaseModel):
     """`POST /api/exceptions/{id}/record-erp-payment` — the payment an ERP
     reported, as the person confirms it (pre-filled from the exception's
-    `erp_report`, decisions §318). Also the body `record-outside` extends.
+    `erp_report`, decisions §319). Also the body `record-outside` extends.
 
     `services/external_payment.py` owns the rules; see it for why each gate is
     (or deliberately is not) applied.

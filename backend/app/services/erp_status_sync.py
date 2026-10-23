@@ -140,7 +140,7 @@ def reported_payment_method(value: object) -> str | None:
 
 
 #: ``Exception.erp_report["kind"]`` values — what the ERP reported that a
-#: person now has to reconcile (decisions §318).
+#: person now has to reconcile (decisions §319).
 #:
 #: * ``paid_not_recorded`` — the ERP reported the bill paid and FeohLedger could
 #:   not record that payment. The row keeps the payment's facts, which is what
@@ -251,7 +251,7 @@ async def open_erp_reconciliation_exception(
 
     ``description`` is the sentence for a person and carries nothing from the
     ERP's payload, which may include vendor bank / tax / address fields.
-    ``erp_report`` is the PII-free machine detail, as data (decisions §318).
+    ``erp_report`` is the PII-free machine detail, as data (decisions §319).
     """
     if (erp_report or {}).get("kind") == ERP_REPORT_PAID_NOT_RECORDED:
         return await _keep_erp_paid_report(
@@ -449,7 +449,7 @@ async def record_erp_reported_payment(
     make this a double payment, a credit we can't net) is never silent: it
     opens a reconciliation exception that says, in an AP user's words, what
     stopped it — and keeps the payment's facts in ``erp_report`` so it can be
-    recorded later without anyone re-keying them (decisions §318). Returns
+    recorded later without anyone re-keying them (decisions §319). Returns
     whether the payment was recorded. Never commits.
 
     ``paid_on_reported`` says whether ``paid_on`` came from the ERP. A
@@ -633,7 +633,7 @@ async def withdraw_erp_paid_reports(
     sentence saying so: a blocking row in particular is never cleared by a
     machine. Without this, a payment the ERP had since voided would be booked
     the moment someone cleared an unrelated blocker, and an invoice still owed
-    would read paid (decisions §318). Returns how many were withdrawn.
+    would read paid (decisions §319). Returns how many were withdrawn.
     """
     rows = await live_erp_paid_reports(db, [invoice.id])
     for row in rows:
@@ -898,7 +898,7 @@ async def apply_bill_report(
     if report.state in (ErpBillState.open, ErpBillState.partially_paid, ErpBillState.deleted):
         # Whatever else this report means, it is no longer a bill paid in full:
         # a payment the ERP reported earlier, which FeohLedger could not record,
-        # must never be recorded now (decisions §318).
+        # must never be recorded now (decisions §319).
         if await withdraw_erp_paid_reports(
             db, invoice, erp_type=erp_type, erp_state=report.state.value
         ):

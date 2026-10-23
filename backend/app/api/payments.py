@@ -1065,7 +1065,7 @@ async def payment_queue(
     # Which exception blocks each row, so the page can NAME it, link to it and
     # say whether this caller may clear it — and what the ERP reported for a
     # row whose ERP payment could not be recorded, so "Record as paid" opens
-    # pre-filled with it (decisions §318).
+    # pre-filled with it (decisions §319).
     blockers = await _queue_blocking_exceptions(db, [inv for inv, _ in rows], user, org.settings)
     erp_reports = await _queue_erp_reported_payments(db, [inv.id for inv, _ in rows])
 

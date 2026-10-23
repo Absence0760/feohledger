@@ -1,6 +1,6 @@
 """A payment the ERP reported is kept, and recorded once what blocked it clears.
 
-The production shape this closes (decisions §318): an invoice paid in
+The production shape this closes (decisions §319): an invoice paid in
 QuickBooks while a stale payment-blocking exception was open. The sweep saw the
 bill paid, `record_invoice_paid_outside` refused on the blocker, and a second,
 `erp_reconciliation` exception told the AP user to call an API path with ids

@@ -246,7 +246,7 @@ async def test_forbidden_void_while_advanced_opens_reconciliation_exception(fake
     assert exc.invoice_id == invoice.id
     assert exc.organization_id == org.id
     # The description is for an AP user: what happened and what to do, with no
-    # API path or raw ids (decisions §318). The machine detail is the
+    # API path or raw ids (decisions §319). The machine detail is the
     # structured `erp_report` — whitelisted routing identifiers only, never the
     # raw ERP `details` payload (no bank/tax/address).
     assert "voided or cancelled" in exc.description
@@ -268,7 +268,7 @@ async def test_a_bill_unpaid_again_withdraws_the_erp_payment_kept_earlier(fake_r
     """A generic ERP reporting the bill back to unpaid (a voided cheque reads
     `Open`) withdraws a payment it reported earlier and FeohLedger could not
     record — even though `posted_in_erp → posted_in_erp` is a silent no-op, and
-    the withdrawal is committed (decisions §318)."""
+    the withdrawal is committed (decisions §319)."""
     org = _org_with_erp_secret("erp-secret")
     invoice = SimpleNamespace(
         id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.posted_in_erp
@@ -535,7 +535,7 @@ async def test_scheduled_to_paid_is_held_when_the_rail_settled_short(fake_redis)
     assert exc.status == "open"
     assert exc.invoice_id == invoice.id
     # A sentence for an AP user (what to do, no API path); the figures and ids
-    # are data on `erp_report` (decisions §318).
+    # are data on `erp_report` (decisions §319).
     assert "accept the settled amount or void the payment" in exc.description
     assert "/api/" not in exc.description
     assert exc.erp_report["kind"] == "settled_short"

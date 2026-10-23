@@ -94,7 +94,7 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # NULL everywhere else, and on every row closed before 0116.
     finding_fingerprint: Mapped[str | None] = mapped_column(String(64))
     # What the ERP reported, kept as data rather than prose (migration 0121,
-    # decisions §318). Set only on the reconciliation rows the ERP paths open
+    # decisions §319). Set only on the reconciliation rows the ERP paths open
     # (`services/erp_status_sync`, `api/erp_webhook`): PII-free ids, a status,
     # and — for ``kind == "paid_not_recorded"`` — the payment the ERP reported
     # (rail, reference, paid-on date) plus the refusal code that stopped
