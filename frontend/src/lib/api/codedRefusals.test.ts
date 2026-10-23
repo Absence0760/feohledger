@@ -597,6 +597,31 @@ describe('the ERP send refused because FeohLedger is already paying the invoice'
 	});
 });
 
+describe('the ERP send refused for a vendor the payment path will not pay (§320)', () => {
+	it('states the 409 the send doors answer with, per vendor state', () => {
+		expect(
+			localizeApiDetail(
+				detail('vendor_blocks_erp_export', { vendor_state: 'payments_blocked' }),
+				enT
+			)
+		).toBe(EN_ALL['erpRefusal.vendorBlockedExport']);
+		expect(
+			codedRefusalText('vendor_blocks_erp_export', { vendor_state: 'inactive' }, deT)
+		).toBe(de['erpRefusal.vendorInactiveExport']);
+		expect(
+			codedRefusalText(
+				'vendor_blocks_erp_export',
+				{ vendor_state: 'rejected', possibly_posted: true },
+				enT
+			)
+		).toContain('an earlier attempt may already have created the bill in the ERP');
+	});
+
+	it('falls back to the server sentence when the state is missing', () => {
+		expect(codedRefusalText('vendor_blocks_erp_export', {}, enT)).toBeNull();
+	});
+});
+
 describe('the ERP send refused for an open duplicate or fraud exception (§286)', () => {
 	it('states the 409 the send doors answer with, in the reader’s language', () => {
 		expect(

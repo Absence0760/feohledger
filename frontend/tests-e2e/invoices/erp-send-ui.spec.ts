@@ -129,4 +129,60 @@ test.describe('/invoices — Send to ERP button', () => {
 			await setErp(page, null);
 		}
 	});
+
+	test('a vendor blocked from payment: "Send to ERP" is refused with the vendor sentence (decisions §320)', async ({
+		page
+	}) => {
+		await setErp(page, { type: 'mock', integration_method: 'direct' });
+		const inv = await createNewInvoice(page);
+		let vendorId: string | null = null;
+		try {
+			expect((await action(page, inv.id, 'complete')).status()).toBe(200);
+			await expect.poll(() => getStatus(page, inv.id), { timeout: 10_000 }).toBe('ready_for_review');
+			expect((await action(page, inv.id, 'approve', await managerCreds(page))).status()).toBe(
+				200
+			);
+			await expect.poll(() => getStatus(page, inv.id), { timeout: 10_000 }).toBe('approved');
+
+			// Manual entry links the typed name to a vendor (an unverified one,
+			// which the push still books). Block it, as AP or a sanctions match would.
+			const detail = await page.request.get(`${API_BASE}/api/invoices/${inv.id}`, {
+				headers: await authedTenantHeaders(page)
+			});
+			vendorId = ((await detail.json()) as { vendor_id: string | null }).vendor_id;
+			expect(vendorId, 'manual entry links a vendor').toBeTruthy();
+			const blocked = await page.request.post(`${API_BASE}/api/vendors/${vendorId}/block`, {
+				headers: await authedTenantHeaders(page),
+				data: { reason: 'e2e block' }
+			});
+			expect(blocked.status(), await blocked.text()).toBe(200);
+
+			await page.goto('/invoices');
+			const row = page.locator('table tbody tr', { hasText: inv.invoice_number }).first();
+			await expect(row).toBeVisible({ timeout: 10_000 });
+			await row.getByRole('button', { name: 'Edit' }).click();
+			const modal = page.locator('div.modal[role="dialog"]', { hasText: inv.invoice_number }).first();
+			await expect(modal).toBeVisible();
+			await modal.getByRole('button', { name: 'Send to ERP' }).click();
+
+			// The 409's coded refusal, stated in the reader's language
+			// (erpRefusal.vendorBlockedExport), not the raw code.
+			await expect(page.locator('.toast.error')).toContainText(
+				'blocked from payment (a sanctions match or a block by AP)'
+			);
+			expect(await getStatus(page, inv.id)).toBe('approved');
+		} finally {
+			if (vendorId) {
+				await page.request
+					.post(`${API_BASE}/api/vendors/${vendorId}/unblock`, {
+						headers: await authedTenantHeaders(page)
+					})
+					.catch(() => {});
+			}
+			await page.request
+				.delete(`${API_BASE}/api/invoices/${inv.id}`, { headers: await authedTenantHeaders(page) })
+				.catch(() => {});
+			await setErp(page, null);
+		}
+	});
 });

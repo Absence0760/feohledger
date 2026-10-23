@@ -45,6 +45,37 @@ export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
  *  send doors answer with. */
 export const PAYMENT_BLOCKS_ERP_EXPORT = 'payment_blocks_erp_export';
 
+/** The invoice's vendor may not be paid, and its bill may not be booked
+ *  either — under the hard payment block, inactive, rejected — so the push was
+ *  refused before any adapter ran (same module, decisions §320).
+ *  `params.vendor_state` is the payment path's answer (`payments_blocked`, or
+ *  the vendor's status); a state this build has no sentence for gets the
+ *  general one. `possibly_posted: true` appears as on the other two. Also a 409
+ *  the send doors answer with. */
+export const VENDOR_BLOCKS_ERP_EXPORT = 'vendor_blocks_erp_export';
+
+/** The sentence per `vendor_state`, plain and possibly-posted. */
+const VENDOR_STATE_KEYS: Record<string, { plain: MessageKey; posted: MessageKey }> = {
+	payments_blocked: {
+		plain: 'erpRefusal.vendorBlockedExport',
+		posted: 'erpRefusal.vendorBlockedExportPossiblyPosted'
+	},
+	inactive: {
+		plain: 'erpRefusal.vendorInactiveExport',
+		posted: 'erpRefusal.vendorInactiveExportPossiblyPosted'
+	},
+	rejected: {
+		plain: 'erpRefusal.vendorRejectedExport',
+		posted: 'erpRefusal.vendorRejectedExportPossiblyPosted'
+	}
+};
+
+/** Any other `vendor_state` (one this build does not know). */
+const VENDOR_STATE_FALLBACK = {
+	plain: 'erpRefusal.vendorNotPayableExport',
+	posted: 'erpRefusal.vendorNotPayableExportPossiblyPosted'
+} as const satisfies { plain: MessageKey; posted: MessageKey };
+
 /** The sentence per `claim`, plain and possibly-posted. */
 const CLAIM_KEYS: Record<string, { plain: MessageKey; posted: MessageKey }> = {
 	payment: {
@@ -109,6 +140,7 @@ const KEYS: Record<string, MessageKey> = {
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',
+	[VENDOR_BLOCKS_ERP_EXPORT]: 'erpRefusal.vendorNotPayableExport',
 	// A FeohLedger payment written back to the ERP (decisions §295)
 	payment_account_not_mapped: 'erpRefusal.paymentAccountNotMapped',
 	bill_not_in_erp: 'erpRefusal.billNotInErp',
@@ -160,6 +192,12 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 		const claim = refusal.params.claim;
 		const keys = typeof claim === 'string' ? CLAIM_KEYS[claim] : undefined;
 		if (!keys) return null;
+		return t(refusal.params.possibly_posted === true ? keys.posted : keys.plain);
+	}
+	if (refusal.code === VENDOR_BLOCKS_ERP_EXPORT) {
+		const state = refusal.params.vendor_state;
+		if (typeof state !== 'string' || !state.trim()) return null;
+		const keys = VENDOR_STATE_KEYS[state] ?? VENDOR_STATE_FALLBACK;
 		return t(refusal.params.possibly_posted === true ? keys.posted : keys.plain);
 	}
 	// The adapter's fixed literal ("QuickBooks Online"). Every other sentence

@@ -55,7 +55,8 @@ describe('the registry pins the backend', () => {
 					accounts: ['6100'],
 					intuit_code: '6000',
 					exception_type: 'duplicate',
-					claim: 'payment'
+					claim: 'payment',
+					vendor_state: 'payments_blocked'
 				};
 				const text = erpRefusalText({ code, params }, t);
 				expect(text, `${locale} ${code}`).toBeTruthy();
@@ -204,8 +205,42 @@ describe('erpRefusalText', () => {
 		).toBe(en['erpRefusal.paymentBlocksExport']);
 	});
 
+	it('says the vendor may not be paid, per state, in every locale (decisions §320)', () => {
+		const code = 'vendor_blocks_erp_export';
+		const locales = { en, de, es, fr, ja, 'pt-BR': ptBR } as Record<
+			string,
+			Record<string, string>
+		>;
+		const cases: [string, boolean, string][] = [
+			['payments_blocked', false, 'erpRefusal.vendorBlockedExport'],
+			['payments_blocked', true, 'erpRefusal.vendorBlockedExportPossiblyPosted'],
+			['inactive', false, 'erpRefusal.vendorInactiveExport'],
+			['inactive', true, 'erpRefusal.vendorInactiveExportPossiblyPosted'],
+			['rejected', false, 'erpRefusal.vendorRejectedExport'],
+			['rejected', true, 'erpRefusal.vendorRejectedExportPossiblyPosted'],
+			// A state this build has no sentence for: the general one.
+			['suspended', false, 'erpRefusal.vendorNotPayableExport'],
+			['unknown', true, 'erpRefusal.vendorNotPayableExportPossiblyPosted']
+		];
+		for (const [locale, messages] of Object.entries(locales)) {
+			for (const [state, posted, key] of cases) {
+				const params = posted
+					? { vendor_state: state, possibly_posted: true }
+					: { vendor_state: state };
+				const text = erpRefusalText({ code, params }, translator(messages, locale));
+				expect(messages[key], `${locale} ${key}`).toBeTruthy();
+				expect(text, `${locale} ${key}`).toBe(messages[key]);
+			}
+		}
+	});
+
 	it.each([
 		['no refusal recorded (a row from before coded refusals)', undefined],
+		['a vendor refusal with no state', { code: 'vendor_blocks_erp_export', params: {} }],
+		[
+			'a vendor refusal with a blank state',
+			{ code: 'vendor_blocks_erp_export', params: { vendor_state: ' ' } }
+		],
 		['a paid refusal with no claim', { code: 'payment_blocks_erp_export', params: {} }],
 		[
 			'a paid refusal with an unknown claim',
