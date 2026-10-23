@@ -63,14 +63,19 @@ class _FakeSavepoint:
 
 
 def _mock_db(exc, invoice):
-    """db.execute is awaited twice: the locked-exception read, then the invoice
-    fetch. Each returns a result whose .scalar_one() yields the row."""
+    """db.execute is awaited three times: the locked-exception read, the invoice
+    fetch (each a result whose .scalar_one() yields the row), then — because
+    resolving a payment-blocking `po_mismatch` may unblock a payment the ERP
+    reported — `record_decision`'s look for a kept ERP payment on the invoice
+    (decisions §319), which finds none here."""
     exc_res = MagicMock()
     exc_res.scalar_one = MagicMock(return_value=exc)
     inv_res = MagicMock()
     inv_res.scalar_one = MagicMock(return_value=invoice)
+    no_erp_payment = MagicMock()
+    no_erp_payment.scalars.return_value.all.return_value = []
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[exc_res, inv_res])
+    db.execute = AsyncMock(side_effect=[exc_res, inv_res, no_erp_payment])
     db.add = MagicMock()
     db.savepoint = _FakeSavepoint()
     db.begin_nested = MagicMock(return_value=db.savepoint)

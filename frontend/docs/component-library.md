@@ -327,6 +327,20 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 - `EntitySwitcher.svelte` — multi-entity (subsidiary) selector; hidden for
   single-entity tenants.
 
+### `payments/`
+
+- `RecordPaymentFields.svelte` — the three fields a payment made outside
+  FeohLedger is recorded with: how it was paid (every rail but `virtual_card`),
+  the reference with its hint, and the paid-on date capped at `maxDate`. Props
+  (`$bindable`): `method` (`PaymentMethod | ''` — `''` renders a disabled
+  "Choose how it was paid" placeholder and the select is `required`, for an ERP
+  report that named no recordable rail), `reference`, `paidOn`; plus `maxDate`,
+  `idPrefix` (unique per page, for the hint's id) and `testid` (the
+  `data-testid` prefix, default `record`). Shared by the payment queue's
+  "Record as paid" dialog and the exception dialog's "Record the ERP's payment"
+  panel, which both pre-fill it with `types/erpReport.ts::erpPrefill`
+  (decisions §319).
+
 ### `organization/`
 
 - `CloseWorkspacePanel.svelte` — the Organization → Close workspace panel (decisions §306). Props:

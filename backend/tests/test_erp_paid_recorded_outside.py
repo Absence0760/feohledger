@@ -147,8 +147,19 @@ async def test_a_refusal_opens_a_reconciliation_exception(realdb):
         )
     assert invoice.status == InvoiceStatus.posted_in_erp
     assert payments == []
-    assert "external_payment_blocking_exception" in recon.description
     assert recon.status == "open"
+    # The ERP's payment is KEPT, as data, so it can be recorded later without
+    # anyone re-keying it (decisions §319) — and the sentence is for an AP user.
+    assert recon.erp_report["kind"] == "paid_not_recorded"
+    assert recon.erp_report["refusal_code"] == "external_payment_blocking_exception"
+    assert recon.erp_report["reference"] == "BILLPAY-77"
+    assert recon.erp_report["erp_document_id"] == "BILLPAY-77"
+    assert recon.erp_report["event_id"] == "ev-1"
+    assert recon.erp_report["paid_on_reported"] is False
+    assert recon.erp_report["paid_on"]  # the day the report arrived
+    assert "another exception on this invoice is blocking payment" in recon.description
+    assert "/api/" not in recon.description
+    assert "external_payment_" not in recon.description
 
 
 async def test_erp_paid_for_an_invoice_in_a_run_blocks_the_run(realdb):
@@ -195,7 +206,8 @@ async def test_erp_paid_for_an_invoice_in_a_run_blocks_the_run(realdb):
             .all()
         )
     assert flag.exception_type == "payment_reconciliation"
-    assert "external_payment_in_run" in flag.description
+    assert flag.erp_report["refusal_code"] == "external_payment_in_run"
+    assert "payment run" in flag.description
 
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post(f"/api/payments/runs/{run_id}/execute")

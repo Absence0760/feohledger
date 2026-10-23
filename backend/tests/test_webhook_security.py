@@ -694,7 +694,9 @@ async def test_erp_webhook_whitelists_audit_details_no_pii(fake_redis):
     body_bytes = json.dumps(body).encode("utf-8")
     sig = _sign(secret, body_bytes)
 
-    invoice = SimpleNamespace(status=InvoiceStatus.sent_to_erp)
+    # `id` too: a real Invoice always carries one, and a non-`Paid` status for
+    # a payable invoice now looks up any ERP payment kept on it (decisions §319).
+    invoice = SimpleNamespace(id=uuid.uuid4(), status=InvoiceStatus.sent_to_erp)
     tenant_factory, db = _fake_tenant_session_factory(invoice)
 
     captured: dict = {}

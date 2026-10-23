@@ -15,6 +15,9 @@
 		disabled?: boolean;
 		title?: string;
 		ariaLabel?: string;
+		/** Id of an element describing the action — e.g. why a disabled action
+		 *  is disabled, so a screen reader hears the reason, not just "dimmed". */
+		describedby?: string;
 		/** When set, renders as an `<a>` for client-side navigation. */
 		href?: string;
 		/** Click handler. */
@@ -31,6 +34,7 @@
 		disabled = false,
 		title,
 		ariaLabel,
+		describedby,
 		href,
 		onclick,
 		type = 'button',
@@ -65,6 +69,7 @@
 		{onclick}
 		title={title ?? null}
 		aria-label={ariaLabel ?? null}
+		aria-describedby={describedby ?? null}
 	>
 		{@render children()}
 	</button>

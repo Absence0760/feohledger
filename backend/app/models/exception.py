@@ -93,6 +93,18 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # detector or agent close nor an edit made mid-decision ever suppresses.
     # NULL everywhere else, and on every row closed before 0116.
     finding_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    # What the ERP reported, kept as data rather than prose (migration 0121,
+    # decisions §319). Set only on the reconciliation rows the ERP paths open
+    # (`services/erp_status_sync`, `api/erp_webhook`): PII-free ids, a status,
+    # and — for ``kind == "paid_not_recorded"`` — the payment the ERP reported
+    # (rail, reference, paid-on date) plus the refusal code that stopped
+    # FeohLedger recording it. Those facts are what lets the payment be
+    # recorded later without anyone re-keying it: automatically once a blocking
+    # exception on the invoice is cleared (`erp_status_sync.
+    # retry_erp_reported_payments`), or in one click from the queue. The
+    # ``description`` is the sentence for a person; machine detail lives here.
+    # NULL on every other row, and on rows raised before 0121.
+    erp_report: Mapped[dict | None] = mapped_column(JSONB)
     # SLA: deadline derived from org settings at creation time. NULL =
     # no SLA configured for this exception type.
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

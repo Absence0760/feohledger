@@ -267,9 +267,23 @@ of the no-rail pilot (issue #517) with no way to reach `paid`. The handler now
 records the ERP's payment through `services/external_payment` (a `completed`
 `provider="external"` payment, reference = the ERP document id), moving a
 `sent_to_erp` invoice to `posted_in_erp` first. A refusal — an open
-payment-blocking exception, a live FeohLedger payment or card — opens an
-`erp_reconciliation` exception naming the refusal code instead. See
-`backend/docs/payments.md` § The ERP reports an invoice paid that FeohLedger never paid.
+payment-blocking exception, a live FeohLedger payment or card — opens a
+reconciliation exception instead, whose sentence tells an AP user what stopped
+it and what to do, and whose `erp_report` keeps the ERP's payment as data (rail,
+reference, date, ids, refusal code). Clearing the blocker records it
+automatically; a blocking row is recorded in one click from its exception
+(decisions §319). See `backend/docs/payments.md` § The ERP reports an invoice
+paid that FeohLedger never paid.
+
+**ERP reconciliation rows say what to do; machine detail is data.** Every
+reconciliation exception the ERP webhook and status sync open for a reported
+payment carries an AP-user sentence in `description` (no API paths, no ids, no
+refusal codes) and the machine facts in `exceptions.erp_report` (migration
+0121): `kind` `paid_not_recorded` / `settled_short` / `voided_after_post`, the
+ERP type, document id and event id, plus per kind the payment facts, the
+settling payment and shortfall, or the ERP status. The ERP's product name in
+those sentences comes from `erp_status_sync.erp_product_name` ("Your ERP" when
+an adapter has none).
 
 **Dedup key is `event_id` only — no fallback to `erp_document_id` /
 `correlation_id`.** Both of those are constant for an invoice's entire

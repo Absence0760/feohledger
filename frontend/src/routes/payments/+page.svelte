@@ -63,12 +63,14 @@
 		type RunErpSyncResult
 	} from '#lib/api/payments.ts';
 	import {
-		EXTERNAL_PAYMENT_METHODS,
 		canDispatchPayments,
 		isExternalPayment,
 		localToday,
 		type PaymentExecutionMode
 	} from '#lib/types/paymentExecution.ts';
+	import { erpPrefill, type QueueErpReportedPayment } from '#lib/types/erpReport.ts';
+	import { codedRefusalText } from '#lib/api/codedRefusals.ts';
+	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
 	import {
 		confirmCardRebate,
 		listCardRebates,
@@ -297,6 +299,18 @@
 		// "Record as paid" action may be offered. Independent of `blocked`:
 		// a run refuses an unverified vendor, recording does not.
 		record_outside_refusal?: string | null;
+		// The open payment-blocking exception behind `blocked_reason` — its id
+		// (the row links to it), its type, and THIS reader's segregation-of-
+		// duties code for clearing it (`segregation_implicated` /
+		// `segregation_raiser`), so the row can say a colleague must clear it.
+		blocking_exception?: {
+			id: string;
+			exception_type: string;
+			clear_refusal: string | null;
+		} | null;
+		// The payment the ERP reported for this invoice and FeohLedger could
+		// not record (decisions §319). "Record as paid" opens pre-filled with it.
+		erp_reported_payment?: QueueErpReportedPayment | null;
 	}
 
 	// Per-currency slice of the WHOLE queue (or of the whole selectable set, on
@@ -744,7 +758,7 @@
 	// depends on who records), so the server's 403 explains it, localized by
 	// `api/codedRefusals.ts` like every other refusal.
 	let recordTarget = $state<QueueItem | null>(null);
-	let recordMethod = $state<PaymentMethod>('ach');
+	let recordMethod = $state<PaymentMethod | ''>('ach');
 	let recordReference = $state('');
 	let recordPaidOn = $state('');
 	let recording = $state(false);
@@ -762,13 +776,62 @@
 		return canRecordOutside() && !item.record_outside_refusal;
 	}
 
+	/**
+	 * Why "Record as paid" is disabled on this row, in the reader's language —
+	 * the action is shown disabled with this as its accessible description,
+	 * never hidden, so the operator learns what to clear rather than hunting
+	 * for a button that is not there. Localized through the same registry the
+	 * endpoint's own refusal would be (`api/codedRefusals.ts`), from the
+	 * params the row already carries; an unknown code reads generically.
+	 */
+	function recordRefusalText(item: QueueItem): string {
+		const code = item.record_outside_refusal;
+		if (!code) return '';
+		const params: Record<string, unknown> = { status: item.status };
+		if (item.blocking_exception) params.exception_type = item.blocking_exception.exception_type;
+		return codedRefusalText(code, params, m) ?? m('payments.recordOutside.unavailable');
+	}
+
+	/** The row's sentence about who may clear its blocking exception, when it
+	 *  is not this reader — or `''`. */
+	function clearRefusalText(item: QueueItem): string {
+		switch (item.blocking_exception?.clear_refusal) {
+			case 'segregation_implicated':
+				return m('payments.queue.clearRefusal.implicated');
+			case 'segregation_raiser':
+				return m('payments.queue.clearRefusal.raiser');
+			case null:
+			case undefined:
+				return '';
+			default:
+				return m('payments.queue.clearRefusal.generic');
+		}
+	}
+
+	// The ERP's product name for the pre-fill note, or the reader's own words
+	// for "your ERP" when the adapter has none.
+	let recordErpName = $state<string | null>(null);
+
 	function openRecordOutside(item: QueueItem) {
 		recordTarget = item;
-		recordMethod = 'ach';
-		recordReference = '';
 		recordMaxDate = localToday();
-		recordPaidOn = recordMaxDate;
 		recordError = '';
+		const reported = item.erp_reported_payment;
+		if (reported) {
+			// What the ERP already said — rail, reference, date — so nobody
+			// re-keys it. A rail the ERP did not state stays unchosen rather than
+			// defaulting to ACH (wrong for a cheque, which is how this started).
+			const prefill = erpPrefill(reported, recordMaxDate);
+			recordMethod = prefill.method;
+			recordReference = prefill.reference;
+			recordPaidOn = prefill.paidOn;
+			recordErpName = reported.erp_name ?? m('payments.recordOutside.yourErp');
+		} else {
+			recordMethod = 'ach';
+			recordReference = '';
+			recordPaidOn = recordMaxDate;
+			recordErpName = null;
+		}
 	}
 
 	function closeRecordOutside() {
@@ -779,7 +842,8 @@
 	async function commitRecordOutside() {
 		if (!recordTarget) return;
 		const reference = recordReference.trim();
-		if (!reference || !recordPaidOn) return;
+		const method = recordMethod;
+		if (!reference || !recordPaidOn || !method) return;
 		const target = recordTarget;
 		recording = true;
 		recordError = '';
@@ -790,7 +854,7 @@
 			// legitimate payment dated after the discount lapsed.
 			await recordPaymentOutside({
 				invoice_id: target.id,
-				method: recordMethod,
+				method,
 				reference,
 				paid_on: recordPaidOn
 			});
@@ -2349,6 +2413,26 @@
 								<span class="blocked-chip" data-testid="queue-blocked-chip">
 									{blockedReason(item)}
 								</span>
+								{#if item.blocking_exception}
+									<!-- Name the exception and lead to it: the banner
+									     alone told the operator to clear "the exception"
+									     without saying which, or where. -->
+									<a
+										class="blocked-link"
+										href="/exceptions?id={item.blocking_exception.id}"
+										data-testid="queue-blocked-exception-link"
+										aria-label={m('payments.queue.openExceptionAria', {
+											invoice: item.invoice_number
+										})}
+									>
+										{m('payments.queue.openException')}
+									</a>
+									{#if clearRefusalText(item)}
+										<span class="blocked-note" data-testid="queue-blocked-clear-refusal">
+											{clearRefusalText(item)}
+										</span>
+									{/if}
+								{/if}
 							{:else if requiredMethod(item)}
 								<!-- Not blocked — payable, but only on one rail. Its own chip,
 								     because reusing the blocked one would read as "can't be
@@ -2376,16 +2460,29 @@
 							</td>
 						{/if}
 						{#if canRecordOutside()}
-							<td class="actions">
-								{#if canRecordRow(item)}
-									<RowAction
-										ariaLabel={m('payments.recordOutside.actionAria', {
-											invoice: item.invoice_number
-										})}
-										onclick={() => openRecordOutside(item)}
+							<td class="actions record-cell">
+								<!-- Shown on every row, disabled with its reason when the
+								     server would refuse it whoever records — hiding it left
+								     the operator hunting for an action that was not there. -->
+								<RowAction
+									ariaLabel={m('payments.recordOutside.actionAria', {
+										invoice: item.invoice_number
+									})}
+									disabled={!canRecordRow(item)}
+									describedby={canRecordRow(item) ? undefined : `record-why-${item.id}`}
+									title={canRecordRow(item) ? undefined : recordRefusalText(item)}
+									onclick={() => openRecordOutside(item)}
+								>
+									{m('payments.recordOutside.action')}
+								</RowAction>
+								{#if !canRecordRow(item)}
+									<span
+										class="visually-hidden"
+										id="record-why-{item.id}"
+										data-testid="queue-record-refusal"
 									>
-										{m('payments.recordOutside.action')}
-									</RowAction>
+										{recordRefusalText(item)}
+									</span>
 								{/if}
 							</td>
 						{/if}
@@ -2926,36 +3023,18 @@
 				</strong>
 				<span class="record-owed-hint">{m('payments.recordOutside.amountHint')}</span>
 			</div>
-			<label>
-				<span>{m('payments.recordOutside.method')}</span>
-				<select bind:value={recordMethod} data-testid="record-method">
-					{#each EXTERNAL_PAYMENT_METHODS as method (method)}
-						<option value={method}>{methodLabel(method)}</option>
-					{/each}
-				</select>
-			</label>
-			<label>
-				<span>{m('payments.recordOutside.reference')}</span>
-				<input
-					type="text"
-					bind:value={recordReference}
-					maxlength="255"
-					required
-					aria-describedby="record-reference-hint"
-					data-testid="record-reference"
-				/>
-			</label>
-			<p class="field-hint" id="record-reference-hint">{m('payments.recordOutside.referenceHint')}</p>
-			<label>
-				<span>{m('payments.recordOutside.paidOn')}</span>
-				<input
-					type="date"
-					bind:value={recordPaidOn}
-					max={recordMaxDate}
-					required
-					data-testid="record-paid-on"
-				/>
-			</label>
+			{#if recordErpName}
+				<p class="modal-note" data-testid="record-prefilled-from-erp">
+					{m('payments.recordOutside.prefilledFromErp', { erp: recordErpName })}
+				</p>
+			{/if}
+			<RecordPaymentFields
+				bind:method={recordMethod}
+				bind:reference={recordReference}
+				bind:paidOn={recordPaidOn}
+				maxDate={recordMaxDate}
+				idPrefix="record"
+			/>
 			{#if recordError}
 				<p class="review-error" role="alert" data-testid="record-error">{recordError}</p>
 			{/if}
@@ -2968,6 +3047,7 @@
 					class="btn-primary"
 					data-testid="record-confirm"
 					disabled={recording ||
+						!recordMethod ||
 						!recordReference.trim() ||
 						!recordPaidOn ||
 						recordPaidOn > recordMaxDate}
@@ -3858,6 +3938,32 @@
 		white-space: normal;
 	}
 
+	/* The cell holding "Record as paid" anchors its visually-hidden refusal
+	   reason. `.visually-hidden` is `position: absolute`; without a positioned
+	   ancestor INSIDE the table's scroll region, its containing block is outside
+	   that region, so at 1280px — where the queue table scrolls inside its card —
+	   the 1px reason, sitting at the far end of the row, escaped the region's
+	   clipping and scrolled the whole document sideways (`a11y/wide-layout`). */
+	.record-cell {
+		position: relative;
+	}
+
+	/* The way to the exception behind a blocked chip, and who may clear it. */
+	.blocked-link {
+		display: inline-block;
+		margin-left: 6px;
+		font-size: 0.78rem;
+		color: var(--accent);
+	}
+
+	.blocked-note {
+		display: block;
+		margin-top: 2px;
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		white-space: normal;
+	}
+
 	/* The rail-pinned sibling of `.blocked-chip` — same shape, ACCENT tone, not
 	   danger: this row is payable, just only on one rail, and a red chip on a
 	   selectable row would read as a refusal. Same `-tint` / `-on-tint` pair
@@ -4040,16 +4146,12 @@
 		letter-spacing: 0.03em;
 	}
 
-	.record-owed-hint,
-	.field-hint {
+	/* The form's own hint lives in `RecordPaymentFields`. */
+	.record-owed-hint {
 		margin: 0;
 		font-size: 0.75rem;
 		color: var(--text-muted);
 		line-height: 1.4;
-	}
-
-	.field-hint {
-		margin-top: -8px;
 	}
 
 	/* --- Void modal --- */

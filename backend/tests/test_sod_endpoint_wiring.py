@@ -268,6 +268,9 @@ CASES = [
     ("/api/payments/execution-mode", "GET", _EXECUTE_OR_VOID),
     ("/api/payments/record-outside", "POST", _RECORD_EXTERNAL),
     ("/api/payments/runs/{run_id}/record-outside", "POST", _RECORD_EXTERNAL),
+    # The exception queue's one-click record of an ERP-reported payment
+    # (decisions §319) — a record outside FeohLedger, like the two above.
+    ("/api/exceptions/{exception_id}/record-erp-payment", "POST", _RECORD_EXTERNAL),
     # The NACHA export is the counterpart of `/execute` — uploading the file is
     # the money moving — so it gates on `payment.execute`, not on recording.
     ("/api/payments/runs/{run_id}/nacha", "GET", _EXECUTE),

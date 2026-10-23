@@ -218,6 +218,7 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0118     | Tenant  | `invoices`   | Adds `invoices.erp_document_id` varchar(255) + `erp_document_url` varchar(1024); backfills the id from the invoice's single workflow instance's `state_data.erp_reference` (not `UNKNOWN`), never the URL (decisions §302). |
 | 0119     | Control | `workspace_closures` | Creates `workspace_closures`, the control-plane record of a self-service workspace closure that outlives the deleted tenant; no foreign keys; no-op on a tenant DB (decisions §306). |
 | 0120     | Tenant  | `contracts`  | Adds `contracts.activated_at` timestamptz; backfills it from the first `contract.active` audit row, else from an `active`/`expired`/`terminated` status (decisions §306). |
+| 0121     | Tenant  | `exceptions` | Adds `exceptions.erp_report` jsonb — what the ERP reported, as data, on the reconciliation rows the ERP paths open (the payment it reported and could not be recorded, with the refusal code). No backfill (decisions §319). |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).
 

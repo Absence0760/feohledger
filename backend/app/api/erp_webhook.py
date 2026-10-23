@@ -18,8 +18,12 @@ from app.services.erp_status_sync import (
     DOUBLE_PAY_REFUSALS,
     ERP_PAID_RECORDABLE,
     ERP_RECONCILIATION_EXCEPTION_TYPE,
+    ERP_REPORT_SETTLED_SHORT,
+    ERP_REPORT_VOIDED_AFTER_POST,
+    erp_display_name,
     reported_paid_on,
     reported_payment_method,
+    withdraw_erp_paid_reports,
 )
 from app.services.erp_status_sync import (
     open_erp_reconciliation_exception as _open_erp_reconciliation_exception,
@@ -350,6 +354,17 @@ async def erp_webhook(
             # transition the machine legitimately forbids becomes a silent ack
             # (same as an unknown status / unknown invoice), not a 409.
             current = invoice.status
+            # Any status but `Paid` for an invoice still payable here means the
+            # ERP no longer shows the bill paid (a voided cheque reads `Open`):
+            # a payment it reported earlier, which FeohLedger could not record,
+            # must never be recorded now (decisions §319). Before the
+            # transition screen, because `posted_in_erp → posted_in_erp` is a
+            # silent no-op below.
+            withdrawn = 0
+            if target_status is not InvoiceStatus.paid and current in ERP_PAID_RECORDABLE:
+                withdrawn = await withdraw_erp_paid_reports(
+                    db, invoice, erp_type=erp_type, erp_state=erp_status
+                )
             if target_status not in VALID_TRANSITIONS.get(current, set()):
                 # The state machine forbids this transition for the invoice's
                 # current state. Almost always a silent no-op — a stale or
@@ -394,6 +409,8 @@ async def erp_webhook(
                         method=payment_method,
                     )
                     await db.commit()
+                elif withdrawn:
+                    await db.commit()  # the withdrawal is the whole effect
                 return  # silent 204 on every forbidden-transition path
 
             # `payment_scheduled → paid` is a legal edge, but it is the exact
@@ -438,14 +455,25 @@ async def erp_webhook(
                             invoice,
                             org_id=org.id,
                             description=(
-                                f"ERP reported 'Paid' via {erp_type} for an invoice "
-                                f"whose payment settled {coverage.state} of what AP "
-                                f"authorized (shortfall {coverage.shortfall or '-'}) — "
-                                f"held at 'payment_scheduled'. Reconcile via "
-                                f"POST /api/payments/{{id}}/settlement/accept or /void "
-                                f"(erp_document_id={erp_document_id or '-'}, "
-                                f"event={event_id or '-'})."
+                                f"{erp_display_name(erp_type)} reports this bill paid, but "
+                                "FeohLedger's own payment for it settled for less than "
+                                "AP authorized, so the invoice is held at Payment "
+                                "scheduled. Open the payment and either accept the "
+                                "settled amount or void the payment."
                             ),
+                            erp_report={
+                                "kind": ERP_REPORT_SETTLED_SHORT,
+                                "erp_type": erp_type,
+                                "erp_document_id": erp_document_id,
+                                "event_id": str(event_id) if event_id else None,
+                                "payment_id": str(settling.id),
+                                "coverage_state": coverage.state,
+                                "shortfall": (
+                                    str(coverage.shortfall)
+                                    if coverage.shortfall is not None
+                                    else None
+                                ),
+                            },
                         )
                         await db.commit()
                         return  # silent 204 — held for human reconciliation
@@ -512,16 +540,26 @@ async def _raise_erp_reconciliation_exception(
     where ``→ failed`` is a legal transition (``sent_to_erp`` /
     ``posted_in_erp`` / ``payment_scheduled`` / ``paid``). Money may already be
     in flight, so this is a review signal — we deliberately do NOT
-    auto-transition the invoice.
+    auto-transition the invoice. (A payment the ERP reported earlier and
+    FeohLedger could not record has already been withdrawn by the handler,
+    which does so for every non-`Paid` status — decisions §319.)
     """
     await _open_erp_reconciliation_exception(
         db,
         invoice,
         org_id=org_id,
         description=(
-            f"ERP reported '{erp_status}' (void/cancel) via {erp_type} for an "
-            f"invoice already at '{invoice.status.value}' — money may be in flight. "
-            f"Needs human reconciliation "
-            f"(erp_document_id={erp_document_id or '-'}, event={event_id or '-'})."
+            f"{erp_display_name(erp_type)} reports this bill voided or cancelled, but "
+            "FeohLedger had already sent it on for payment, so it was not cancelled "
+            "here. Check whether a payment is on its way to the supplier, and stop or "
+            "recover it if the bill is really void."
         ),
+        erp_report={
+            "kind": ERP_REPORT_VOIDED_AFTER_POST,
+            "erp_type": erp_type,
+            "erp_status": erp_status,
+            "erp_document_id": erp_document_id,
+            "event_id": str(event_id) if event_id else None,
+            "invoice_status": invoice.status.value,
+        },
     )

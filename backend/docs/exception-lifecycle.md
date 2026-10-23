@@ -180,6 +180,25 @@ omits it, so the check cannot be switched off by leaving an optional argument
 out, and `org_settings` defaults to enforcing so a forgetful caller fails
 closed.
 
+### Clearing a blocker re-attempts the ERP's reported payment
+
+Because every clearing door passes through it, `record_decision` is also where a
+payment the ERP reported, and FeohLedger could not record, is tried again
+(decisions §319). After a `resolve` / `dismiss` of a payment-blocking
+exception, if the invoice holds a live, non-blocking row whose
+`erp_report.kind` is `paid_not_recorded`, `erp_status_sync.
+retry_erp_reported_payments` re-runs `record_erp_reported_payment` with the
+stored facts in the caller's transaction. Every refusal is re-run; a refusal
+refreshes the row. It is skipped when the cleared row is itself an ERP payment
+row (so `close_erp_paid_reports`, which closes those rows through
+`record_decision` once the invoice is recorded, never recurses), and for a
+blocking `paid_not_recorded` row, which a person records in one click
+(`POST /api/exceptions/{id}/record-erp-payment`) because it refuses the record
+on itself by design. Because the detector's auto-close and the agent
+coordinator go through `record_decision` too, either can record the payment
+when it clears the last blocker. That is the same record the ERP sweep would
+make, under the same gates, with no human actor.
+
 ## Escalation is not a resolution
 
 `escalate` records the decision **note** — so the human picking it up reads why
@@ -250,6 +269,12 @@ compliance holds, the reconciler's aged-out payment, settlement discrepancies,
 ERP sync-back failures, extraction failures). The code families, the composite
 convention and the client fallback order are in
 [invoice-warnings.md](invoice-warnings.md) § Exception descriptions.
+
+The ERP payment rows (`erp_report`, migration 0121) write that English for an
+AP user: what happened and what to do, never an API path, id or refusal code.
+Their machine detail is in `erp_report`, which the queue reads to pre-fill the
+"Record the ERP's payment" form. Moving those sentences onto
+`description_code` is tracked in `docs/followups.md`.
 
 ## Where it surfaces
 
