@@ -289,6 +289,7 @@ export const messages = {
 	'org.erp.field.currency': '帳簿通貨',
 	'org.erp.field.project_id': 'プロジェクトID',
 	'org.erp.field.approval_status': '承認ステータス',
+	'org.erp.field.region': 'Merge のリージョン',
 	'org.erp.field.company_currency': '自国通貨',
 	'org.erp.option.AUTHORISED': '承認済み（AUTHORISED）',
 	'org.erp.option.DRAFT': '下書き',

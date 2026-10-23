@@ -71,6 +71,32 @@ def verify_hmac_sha256_base64(secret: str, raw_body: bytes, provided_b64: str | 
     return hmac.compare_digest(expected, provided)
 
 
+def verify_hmac_sha256_base64url(secret: str, raw_body: bytes, provided_b64url: str | None) -> bool:
+    """:func:`verify_hmac_sha256` for a provider that sends the digest
+    base64url encoded (Merge.dev's ``X-Merge-Webhook-Signature``).
+
+    Strict decoding: only the URL-safe alphabet is accepted (a standard-base64
+    ``+`` / ``/`` is not), padding is optional, and the raw digests are
+    compared, so a re-encoding of the signature cannot make two different
+    digests compare equal. Empty secret or signature, or undecodable → False.
+    """
+    import base64
+    import binascii
+    import re
+
+    if not secret or not provided_b64url:
+        return False
+    text = provided_b64url.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", text):
+        return False
+    try:
+        provided = base64.urlsafe_b64decode(text.rstrip("=") + "=" * (-len(text.rstrip("=")) % 4))
+    except (binascii.Error, ValueError):
+        return False
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+    return hmac.compare_digest(expected, provided)
+
+
 async def is_event_already_processed(
     provider: str, event_id: str, *, ttl_seconds: int = DEFAULT_DEDUP_TTL_SECONDS
 ) -> bool:

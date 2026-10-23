@@ -27,11 +27,22 @@ surfaces:
 
 ## Surfaces
 
-- **Merge**: `POST /invoices` (creates `merge-inv-<n>`, status `OPEN`; response
-  nests the record under `model`), `GET /invoices/{id}` (top-level `status`),
-  `GET /purchase-orders` + `GET /accounts` + `GET /vendors` (all
-  cursor-paginated 2 + 1 via `next` / `?cursor=`), `GET /account-details`
-  (test_connection).
+- **Merge** (shapes from Merge's Accounting OpenAPI spec): `POST /invoices`
+  (creates `merge-inv-<n>`, status `OPEN`; answers `{model, warnings, errors}`).
+  Each line's amount is `total_amount` — a line without one is a 400
+  `MISSING_REQUIRED_FIELD`, and lines that do not add up to the header
+  `total_amount` are a 400 `PROVIDER_ERROR`. An archived contact or an inactive
+  account is a 400 `PROVIDER_ERROR` too. Failed writes answer
+  `{"errors": [{source, title, detail, problem_type}]}`. Only the
+  `Idempotency-Key` header is honoured (same key + same body → the original
+  201; same key + another body → 400); `X-Idempotency-Key` is ignored, as Merge
+  ignores it. `GET /invoices?number=&contact_id=&type=` (exact filters),
+  `GET /invoices/{id}` (top-level `status`, `payments`, `applied_payments`,
+  `applied_credit_notes`, `applied_vendor_credits`, `remote_was_deleted`,
+  `modified_at`), `GET /purchase-orders` + `GET /accounts` + `GET /contacts`
+  (all cursor-paginated 2 + rest via `next` / `?cursor=`), `GET /accounts/{id}`,
+  `GET /contacts/{id}`, `GET /account-details` (test_connection, `status:
+  COMPLETE`). There is no `/vendors`: Merge has none.
 - **NetSuite**: `POST /vendorBill` → **204** with the new numeric id (`1001`,
   `1002`, …) in the `Location` header, status `Open` (`Pending Approval` for
   vendor `28`, which is under approval routing);
@@ -61,19 +72,24 @@ Purchase orders (`GET /merge/api/accounting/v1/purchase-orders`):
 2. `PO-FAKE-302` — vendor "Fake ERP Vendor B", total 980.50 USD
 3. `PO-FAKE-303` — vendor "Fake ERP Vendor A", total 4400.00 USD
 
+PO lines carry `total_line_amount` (a PO-line field) and a Merge account UUID
+(`merge-acct-6100` …) as `account`, never a GL code.
+
 GL accounts (`GET /merge/api/accounting/v1/accounts`):
 
 1. `6100` "Fake Office Supplies" (expense)
 2. `6200` "Fake Software" (expense)
 3. `6300` "Fake Consulting" (expense)
+4. `6900` "Fake Retired Expenses" — `status: INACTIVE`
 
-Vendors (`GET /merge/api/accounting/v1/vendors`):
+Contacts (`GET /merge/api/accounting/v1/contacts`):
 
-1. "Fake Merge Vendor Co" — Net 30, tax id `71-1234567`
-2. "Fake Merge Supply Co" — Net 45, tax id `72-2345678`
-3. "Fake Merge Services Co" — Net 60 (`payment_term` as a bare string, not an
-   object — exercises that branch of `_merge_vendor_to_payload`), tax id
-   `73-3456789`
+1. "Fake Merge Vendor Co" — supplier, tax id `71-1234567`
+2. "Fake Merge Supply Co" — supplier, tax id `72-2345678`
+3. "Fake Merge Customer Ltd" — customer only (`is_customer: true`,
+   `is_supplier: false`): never synced as a vendor
+4. "Fake Merge Services Co" — `is_supplier: false` and not a customer (Xero
+   via Merge flags a supplier only after its first bill), tax id `73-3456789`
 
 ### References are enforced by id, as the real ERPs do
 
@@ -81,9 +97,9 @@ A bill naming its vendor or account by anything but a known id is a **400**, so
 the e2e suite proves the adapters post the ids the syncs stored
 (`backend/docs/erp-integration.md` § ERP references):
 
-- **Merge** `POST /invoices`: `contact` must be a fixture vendor id
+- **Merge** `POST /invoices`: `contact` must be a fixture contact id
   (`merge-vendor-701` …); a non-null line `account` must be a fixture account id
-  (`merge-acct-6100` …).
+  (`merge-acct-6100` …). Otherwise 400 `MODEL_NOT_FOUND`.
 - **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`,
   `28`);
   the `expense` sublist must be non-empty with each `account.id` an account id;
@@ -107,7 +123,10 @@ never links one provider's vendor id onto another's vendor row.
 - `POST /__set-status` `{"provider": "merge"|"netsuite"|"d365", "id": "…",
   "status": "…"}` → force a stored invoice into a provider-native status
   (e.g. merge `PAID`, netsuite `paidInFull`, d365 `Paid`) to drive
-  `get_invoice_status()` transitions.
+  `get_invoice_status()` transitions. For merge the body may also set
+  `payments` / `applied_payments` / `applied_credit_notes` /
+  `applied_vendor_credits` (lists of ids), `remote_was_deleted` and
+  `paid_on_date`, so a bill can read paid by a payment or settled by a credit.
 - OAuth token lifecycle, for any `FakeOAuthApp` (`xero`, `sage`, `blackbaud`):
   `POST /__oauth/{key}/lifetime {"seconds"}` sets the `expires_in` of every token
   issued from then on (under the backend's 120 s refresh margin, each use must

@@ -20,6 +20,8 @@ from app.services.erp_status_sync import (
     ERP_RECONCILIATION_EXCEPTION_TYPE,
     ERP_REPORT_SETTLED_SHORT,
     ERP_REPORT_VOIDED_AFTER_POST,
+    PAYABLE_HERE,
+    PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
     erp_display_name,
     reported_paid_on,
     reported_payment_method,
@@ -169,6 +171,135 @@ async def quickbooks_webhook(request: Request):
     dispatch_qbo_events(claimed)
 
 
+#: Merge invoice ``status`` → the status vocabulary :data:`ERP_STATUS_MAP`
+#: reads. ``PAID`` is only reached through :func:`_merge_report_status`, which
+#: checks a payment is behind it (decisions §303).
+_MERGE_WEBHOOK_STATUS = {
+    "OPEN": "OPEN",
+    "SUBMITTED": "SUBMITTED",
+    "VOID": "voided",
+}
+
+
+def _merge_report_status(data: dict) -> tuple[str, bool]:
+    """``(status for ERP_STATUS_MAP, credit_settled)`` for a Merge Invoice.
+
+    The same reading as ``merge_dev.map_invoice_status``: ``PAID`` counts as a
+    payment only when Merge lists one against the bill; ``PAID`` with none is
+    a credit settlement; deleted in the ERP reads as void. Anything else
+    (DRAFT, PARTIALLY_PAID, an unknown value) maps to nothing → silent ack.
+    """
+    from app.services.erp_adapters.merge_dev import has_recorded_payment
+
+    if data.get("remote_was_deleted") is True:
+        return "voided", False
+    merge_status = str(data.get("status") or "").upper()
+    if merge_status == "PAID":
+        if has_recorded_payment(data):
+            return "paid", False
+        return "", True
+    return _MERGE_WEBHOOK_STATUS.get(merge_status, ""), False
+
+
+@router.post("/webhook/merge_dev/{tenant_slug}", status_code=status.HTTP_204_NO_CONTENT)
+async def merge_webhook(tenant_slug: str, request: Request):
+    """Merge.dev's ``Invoice.changed`` webhook for one tenant.
+
+    Declared before ``/webhook/{erp_type}``. Merge's delivery differs from the
+    generic shape in every place that matters (docs/decisions.md §DECISION):
+
+    * it names no tenant — only Merge's own ``linked_account`` — and each
+      tenant connects its OWN Merge organisation (its own API key and webhook
+      signature key), so the tenant is the URL the tenant registered in its
+      Merge dashboard. Merge invoice ids are UUIDs, unique across linked
+      accounts, so a delivery for another account can match no invoice here;
+    * ``X-Merge-Webhook-Signature`` is the HMAC-SHA256 of the raw body,
+      **base64url**-encoded, under the tenant's Merge signature key (stored as
+      the ERP block's ``webhook_signing_secret``);
+    * ``hook.event`` is the event TYPE, the same on every delivery, so the
+      dedupe key is the invoice id plus its ``modified_at``;
+    * ``data`` is the Invoice itself, which carries no correlation id of ours,
+      so the invoice is the one our push recorded ``erp_document_id = data.id``
+      for.
+
+    Every rejection is a silent 204, as on the generic route.
+    """
+    max_bytes = settings.erp_webhook_max_bytes
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_bytes:
+                return
+        except ValueError:
+            return
+    raw_body = await request.body()
+    if len(raw_body) > max_bytes:
+        return
+
+    async with control_session_factory() as ctrl_db:
+        result = await ctrl_db.execute(select(Organization).where(Organization.slug == tenant_slug))
+        org = result.scalar_one_or_none()
+        if not org:
+            return
+        try:
+            erp_config = await provider_config(org, "erp", db=ctrl_db) or {}
+        except CredentialCryptoError:
+            logger.error("ERP webhook: the tenant's ERP credentials could not be opened")
+            return _retry_please()
+
+    from app.services.erp_adapters.catalog import METHOD_MERGE_DEV, catalog_key
+    from app.services.webhook_security import verify_hmac_sha256_base64url
+
+    if catalog_key(erp_config) != METHOD_MERGE_DEV:
+        return  # this tenant is not connected through Merge
+    signing_secret = erp_config.get("webhook_signing_secret", "")
+    if not signing_secret:
+        logger.warning(
+            "ERP webhook dropped: no webhook_signing_secret configured for tenant '%s' (%s)",
+            tenant_slug,
+            METHOD_MERGE_DEV,
+        )
+        return
+    signature = extract_signature_header(dict(request.headers), "X-Merge-Webhook-Signature")
+    if not verify_hmac_sha256_base64url(signing_secret, raw_body, signature):
+        return
+
+    try:
+        body = json.loads(raw_body)
+    except ValueError:
+        return
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, dict) or not data.get("id"):
+        return
+    hook = body.get("hook") if isinstance(body.get("hook"), dict) else {}
+    if not str(hook.get("event") or "").startswith("Invoice."):
+        return  # only invoice events move an invoice
+
+    erp_document_id = str(data["id"])
+    erp_status, credit_settled = _merge_report_status(data)
+    if not erp_status and not credit_settled:
+        return
+    # One event per (invoice, version): a redelivery of the same change is a
+    # replay, a later change of the same invoice is not.
+    event_id = f"{erp_document_id}:{data.get('modified_at') or ''}"
+    if await is_event_already_processed(f"erp:{METHOD_MERGE_DEV}", event_id):
+        return
+
+    return await _apply_status_report(
+        org,
+        METHOD_MERGE_DEV,
+        correlation_id=None,
+        erp_document_id=erp_document_id,
+        erp_status=erp_status,
+        event_id=event_id,
+        claimed_event=event_id,
+        paid_on=reported_paid_on(data.get("paid_on_date")),
+        payment_method=None,
+        by_document_id=True,
+        credit_settled=credit_settled,
+    )
+
+
 @router.post("/webhook/{erp_type}", status_code=status.HTTP_204_NO_CONTENT)
 async def erp_webhook(
     erp_type: str,
@@ -224,22 +355,18 @@ async def erp_webhook(
         logger.warning("ERP webhook rejected: body exceeds size cap")
         return
 
+    if erp_type == "merge_dev":
+        # Merge never sends this shape — its deliveries name no tenant and are
+        # signed base64url — so they arrive on `/webhook/merge_dev/{tenant}`
+        # (`merge_webhook`). Silent, like every other rejection.
+        return
+
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
         return  # malformed JSON → silent 204
-
-    # Normalize — Merge.dev sends a different shape
-    if erp_type == "merge_dev" and "data" in body:
-        data = body["data"]
-        body = {
-            "tenant_slug": body.get("linked_account_id"),
-            "correlation_id": data.get("integration_params", {}).get("correlation_id"),
-            "erp_document_id": data.get("id"),
-            "event_id": body.get("hook", {}).get("event") or body.get("event"),
-            "status": data.get("status"),
-            "details": data,
-        }
+    if not isinstance(body, dict):
+        return
 
     tenant_slug = body.get("tenant_slug")
     correlation_id = body.get("correlation_id")
@@ -295,7 +422,6 @@ async def erp_webhook(
         dict(request.headers),
         "X-Webhook-Signature",
         "X-Hub-Signature-256",
-        "X-Merge-Webhook-Signature",
     )
     if not verify_hmac_sha256(signing_secret, raw_body, provided_sig):
         return  # silent 204 on bad / missing signature
@@ -313,9 +439,73 @@ async def erp_webhook(
     # billing_webhook.py / email_intake.py, which all release on failure).
     claimed_event = str(event_id) if event_id else None
 
+    return await _apply_status_report(
+        org,
+        erp_type,
+        correlation_id=correlation_id,
+        erp_document_id=erp_document_id,
+        erp_status=erp_status,
+        event_id=event_id,
+        claimed_event=claimed_event,
+        paid_on=paid_on,
+        payment_method=payment_method,
+    )
+
+
+async def _resolve_invoice_id(
+    db: AsyncSession, *, correlation_id: str | None, erp_document_id: str | None
+) -> uuid.UUID | None:
+    """The invoice a status report names: by our correlation id, else (only
+    for a provider whose webhook cannot carry it) by the ERP document id our
+    push recorded. None unless exactly one invoice matches."""
+    if correlation_id:
+        try:
+            wanted = uuid.UUID(str(correlation_id))
+        except ValueError:
+            return None
+        result = await db.execute(select(Invoice.id).where(Invoice.correlation_id == wanted))
+        return result.scalar_one_or_none()
+    if erp_document_id:
+        rows = (
+            (
+                await db.execute(
+                    select(Invoice.id)
+                    .where(Invoice.erp_document_id == str(erp_document_id))
+                    .limit(2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return rows[0] if len(rows) == 1 else None
+    return None
+
+
+async def _apply_status_report(
+    org: Organization,
+    erp_type: str,
+    *,
+    correlation_id: str | None,
+    erp_document_id: str | None,
+    erp_status: str,
+    event_id,
+    claimed_event: str | None,
+    paid_on,
+    payment_method,
+    by_document_id: bool = False,
+    credit_settled: bool = False,
+) -> Response | None:
+    """Apply one verified, deduplicated ERP status report to its invoice.
+
+    Shared by the generic route and Merge's. ``by_document_id`` lets the
+    invoice be found by ``erp_document_id`` when the provider cannot echo our
+    correlation id (Merge). ``credit_settled`` is a bill the ERP calls settled
+    with no payment behind it: flagged for a person, never recorded as paid.
+    Returns the bodyless 503 on OUR failure, else None (a silent 204).
+    """
     # Map ERP status to our internal status
     target_status = ERP_STATUS_MAP.get(erp_status)
-    if not target_status:
+    if not target_status and not credit_settled:
         return  # unknown status — silent ack
 
     # Open tenant DB and find the invoice
@@ -324,23 +514,41 @@ async def erp_webhook(
 
     async with factory() as db:
         try:
-            if not correlation_id:
-                return  # erp_document_id-only path not supported yet
-
-            # Resolve the invoice id by correlation_id first (not unique
-            # enough to lock on directly), then re-fetch WITH a row lock
-            # before evaluating/applying the transition — the documented
-            # convention for any status transition (get_invoice_for_update()).
-            # Without the lock, a concurrent human approval racing this
-            # webhook can silently overwrite the other, corrupting the audit
-            # trail's from/to narrative.
-            id_result = await db.execute(
-                select(Invoice.id).where(Invoice.correlation_id == uuid.UUID(correlation_id))
+            # Resolve the invoice id first (not unique enough to lock on
+            # directly), then re-fetch WITH a row lock before evaluating /
+            # applying the transition — the documented convention for any
+            # status transition (get_invoice_for_update()). Without the lock, a
+            # concurrent human approval racing this webhook can silently
+            # overwrite the other, corrupting the audit trail's from/to
+            # narrative.
+            invoice_id = await _resolve_invoice_id(
+                db,
+                correlation_id=correlation_id,
+                erp_document_id=erp_document_id if by_document_id else None,
             )
-            invoice_id = id_result.scalar_one_or_none()
             if not invoice_id:
                 return  # no matching invoice → silent ack
             invoice = await get_invoice_for_update(db, invoice_id)
+            if credit_settled:
+                # The ERP calls the bill settled with no payment behind it (a
+                # credit note or vendor credit, docs/decisions.md §303): never
+                # a cash payment, and never payable here until a person says
+                # what is still owed.
+                if invoice.status in PAYABLE_HERE:
+                    await _open_erp_reconciliation_exception(
+                        db,
+                        invoice,
+                        org_id=org.id,
+                        exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
+                        description=(
+                            f"{erp_display_name(erp_type)} shows this bill settled without "
+                            "a payment (a credit note or vendor credit was applied there). "
+                            "FeohLedger will not pay it until someone confirms what is "
+                            "still owed."
+                        ),
+                    )
+                    await db.commit()
+                return
 
             # Only transition if the AUTHORITATIVE state machine permits it.
             # We deliberately do NOT keep a second local transition map here: a

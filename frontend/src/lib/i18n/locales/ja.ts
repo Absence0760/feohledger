@@ -4898,6 +4898,7 @@ export const messages = {
 	'erpRefusal.taxNotItemised': "{provider} では明細ごとの税額が必要ですが、この請求書には合計の税額しかありません。明細ごとに税額を入力してから再試行してください。",
 	'erpRefusal.taxRateUnresolved': "{provider} にこの請求書の税額に一致する税率がありません。{provider} で税率を設定するか、税額を修正してから再試行してください。",
 	'erpRefusal.missingDates': "{provider} には請求日と支払期日の両方が必要です。入力してから再試行してください。",
+	'erpRefusal.billRefused': "{provider} はこの請求書を拒否し、作成しませんでした。請求書の仕入先、勘定科目、日付、金額を {provider} で確認して修正してから、再試行してください。",
 	'erpRefusal.duplicateNumber': "{provider} にはこの請求書番号の請求がすでにあります。再試行する前に {provider} で重複を確認してください。",
 	'erpRefusal.docNumberTooLong': "請求書番号が {provider} で使える長さを超えています。短くしてから再試行してください。",
 	'erpRefusal.currencyUnknown': "{provider} に基本通貨が設定されていないため、請求書の通貨を確認できません。{provider} で基本通貨を設定してから再試行してください。",

@@ -290,6 +290,7 @@ export const messages = {
 	'org.erp.field.currency': 'Devise comptable',
 	'org.erp.field.project_id': 'ID du projet',
 	'org.erp.field.approval_status': 'Statut d’approbation',
+	'org.erp.field.region': 'Région Merge',
 	'org.erp.field.company_currency': 'Devise locale',
 	'org.erp.option.AUTHORISED': 'Approuvée (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Brouillon',

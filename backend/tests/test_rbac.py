@@ -394,6 +394,11 @@ ALTERNATE_AUTH: dict[tuple[str, str], AlternateGate] = {
         "event-id dedupe; the company in each event picks the tenant.",
         symbols=("verify_hmac_sha256_base64", "claim_qbo_events"),
     ),
+    ("POST", "/erp/webhook/merge_dev/{tenant_slug}"): AlternateGate(
+        "The tenant's own Merge webhook signature key (base64url HMAC over the "
+        "raw body), then dedupe on the invoice id + modified_at.",
+        symbols=("verify_hmac_sha256_base64url", "is_event_already_processed"),
+    ),
     ("POST", "/erp/webhook/{erp_type}"): AlternateGate(
         "Per-tenant ERP webhook signing secret, then event-id dedupe.",
         symbols=("verify_hmac_sha256", "is_event_already_processed"),

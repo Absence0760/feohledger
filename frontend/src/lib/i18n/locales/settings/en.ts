@@ -296,6 +296,7 @@ export const enSettings = {
 	'org.erp.field.currency': 'Ledger currency',
 	'org.erp.field.project_id': 'Project ID',
 	'org.erp.field.approval_status': 'Approval status',
+	'org.erp.field.region': 'Merge region',
 	'org.erp.field.company_currency': 'Company currency',
 	'org.erp.option.AUTHORISED': 'Approved (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Draft',

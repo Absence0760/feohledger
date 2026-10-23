@@ -335,6 +335,11 @@ MERGE_DEV_PROVIDER: dict[str, Any] = {
     "fields": [
         _field("api_key", secret=True, label_key="org.erp.mergeApiKey", placeholder="test_..."),
         _field("account_token", secret=True, label_key="org.erp.accountToken"),
+        # The Merge stack the linked account lives on; the token is refused by
+        # the others. Not a destination: every region is Merge's own host
+        # (`merge_dev.MERGE_REGION_BASES`), so the secrets never reach anyone
+        # else, and a blank stored value (US) must not read as a new connection.
+        _field("region", required=False, options=["us", "eu", "ap"], destination=False),
     ],
     "docs_url": "https://docs.merge.dev/accounting/",
 }
