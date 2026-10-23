@@ -1,3 +1,4 @@
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { MoneyAmount } from '#lib/utils/money.ts';
@@ -72,6 +73,53 @@ export const INVOICE_STATUS_LABEL_KEYS: Record<InvoiceStatus, MessageKey> = {
  */
 export function invoiceStatusLabelKey(status: string): MessageKey | null {
 	return INVOICE_STATUS_LABEL_KEYS[status as InvoiceStatus] ?? null;
+}
+
+/**
+ * The `Badge` tone each status renders in — `StatusBadge` reads this and
+ * nothing else, so a pill's colour is owned beside its label.
+ *
+ * `StatusBadge` used to carry its own per-status CSS rules, and only six of the
+ * twelve statuses had one: `approved`, `rejected`, `sending_to_erp`,
+ * `posted_in_erp`, `payment_scheduled` and `paid` fell through to the bare
+ * layout rule and rendered as uppercase text with no pill — on `/invoices`,
+ * `DONE` was green while `PAID` beside it had no background at all. A CSS class
+ * per status is invisible to the typechecker; `Record<InvoiceStatus, BadgeTone>`
+ * makes a new status a compile error rather than a missing pill, and
+ * `invoiceStatus.test.ts` checks it against every status the state machine
+ * names.
+ *
+ * The families, read along the pipeline:
+ *   - `new` / `payment_scheduled` — `accent`: in hand, nothing wrong.
+ *   - `pending` — `warning`: mid-extraction, not yet usable.
+ *   - `ready_for_review` / `approved` / `paid` / `done` — `success`.
+ *   - `sending_to_erp` / `sent_to_erp` / `posted_in_erp` — `erp` (violet): the
+ *     one hue that means "the ERP has it", so the hand-off stretch of the
+ *     pipeline scans as one band (decisions.md §289).
+ *   - `rejected` / `failed` — `danger`: someone has to act before it moves.
+ */
+export const INVOICE_STATUS_TONES: Record<InvoiceStatus, BadgeTone> = {
+	new: 'accent',
+	pending: 'warning',
+	ready_for_review: 'success',
+	approved: 'success',
+	rejected: 'danger',
+	sending_to_erp: 'erp',
+	sent_to_erp: 'erp',
+	posted_in_erp: 'erp',
+	payment_scheduled: 'accent',
+	paid: 'success',
+	done: 'success',
+	failed: 'danger'
+};
+
+/**
+ * The tone for a status, or `neutral` (`Badge`'s flat "no signal" chip) for one
+ * this frontend doesn't know — the pill still renders, labelled with the raw
+ * value, rather than dropping to bare text (see {@link invoiceStatusLabelKey}).
+ */
+export function invoiceStatusTone(status: string): BadgeTone {
+	return INVOICE_STATUS_TONES[status as InvoiceStatus] ?? 'neutral';
 }
 
 /** Statuses managed by the system — users should not select or bulk-act on these. */

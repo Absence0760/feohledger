@@ -1005,7 +1005,7 @@ the `ui/` primitive in the Source column.
 | Load more | `.btn-load-more` / `.load-more-row` / `.load-more-end` | per-route, copy /admin |
 | Modal dialog | `.modal[role="dialog"]` + `.backdrop` | `ui/Modal.svelte` |
 | KPI card | `.kpi` / `.kpi-value` / `.kpi-label` | `ui/KpiCard.svelte` |
-| Status badge (invoice) | `<StatusBadge>` | `ui/StatusBadge.svelte` |
+| Status badge (invoice) | `<StatusBadge>` (tone from `INVOICE_STATUS_TONES`) | `ui/StatusBadge.svelte` |
 | Tinted badge (any tone) | `<Badge tone=…>` | `ui/Badge.svelte` |
 | Money / currency | `<Money>` / `formatMoney` | `ui/Money.svelte` / `utils/money.ts` |
 | Field-level advisory | `.field-warning` (`role="status"`) | `ui/FieldWarning.svelte` |
