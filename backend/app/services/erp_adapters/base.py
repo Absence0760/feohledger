@@ -266,6 +266,7 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "tax_rate_unresolved",
         "missing_dates",
         "duplicate_document_number",
+        "bill_refused",
         # QuickBooks Online
         "doc_number_too_long",
         "currency_unknown",
@@ -279,6 +280,7 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "intuit_fault",
         # Sage Business Cloud Accounting
         "idempotency_lookup_incomplete",
+        "purchases_not_permitted",
         # Business Central
         "existing_invoice_not_open",
         "line_amount_precision",

@@ -44,7 +44,11 @@ import {
  *      the ledger's own GB_STANDARD rate.
  *   3. Fail closed — an unlinked vendor, and a taxed invoice on a ledger
  *      with no default tax rate, are refused before anything is posted.
- *   4. Disconnect — clears the connection.
+ *   4. Refused creates — a create Sage refuses (a date inside the year-end
+ *      lockdown, a business on Accounting Start) is recorded with its coded
+ *      reason and as having created nothing (decisions §285), never as an
+ *      uncoded HTTP failure that may have posted.
+ *   5. Disconnect — clears the connection.
  */
 
 const PROVIDER = 'sage_accounting';
@@ -88,6 +92,15 @@ async function sageInvoice(request: APIRequestContext, id: string) {
 	});
 	expect(resp.ok(), await resp.text()).toBe(true);
 	return resp.json();
+}
+
+/** Change the fake business (its plan, lockdown date) through the fake's hook. */
+async function setSageBusiness(
+	request: APIRequestContext,
+	data: { plan?: string; year_end_lockdown_date?: string | null }
+) {
+	const resp = await request.post(`${FAKE_ERP_BASE}/sage/v3.1/__set-business`, { data });
+	expect(resp.ok(), await resp.text()).toBe(true);
 }
 
 test.describe('/erp sage_accounting adapter against fake-erp', () => {
@@ -190,6 +203,64 @@ test.describe('/erp sage_accounting adapter against fake-erp', () => {
 				'Sage Accounting post refused: tax_rate_unresolved'
 			);
 		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a create dated inside the lockdown is refused period_closed, nothing posted', async ({
+		page,
+		request
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-SAGE-LOCKED',
+			invoiceDate: '2026-10-01',
+			dueDate: '2026-10-31',
+			amount: '1260.00',
+			taxAmount: '210.00',
+			currency: 'GBP',
+			vendor: SUPPLIER,
+			glAccount: '7500'
+		});
+		try {
+			// Sage answers the create 422 with an undocumented $dataCode; the
+			// adapter reads the lockdown date back to say why.
+			await setSageBusiness(request, { year_end_lockdown_date: '2026-12-31' });
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Sage Accounting post refused: period_closed (HTTP 422)'
+			);
+		} finally {
+			await setSageBusiness(request, { year_end_lockdown_date: null });
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a business on Accounting Start is refused purchases_not_permitted', async ({
+		page,
+		request
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-SAGE-START',
+			invoiceDate: '2026-10-01',
+			dueDate: '2026-10-31',
+			amount: '1260.00',
+			taxAmount: '210.00',
+			currency: 'GBP',
+			vendor: SUPPLIER,
+			glAccount: '7500'
+		});
+		try {
+			await setSageBusiness(request, { plan: 'start' });
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Sage Accounting post refused: purchases_not_permitted (HTTP 403)'
+			);
+		} finally {
+			await setSageBusiness(request, { plan: 'plus' });
 			await deleteInvoice(page, inv.id);
 		}
 	});

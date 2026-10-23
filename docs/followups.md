@@ -1852,16 +1852,15 @@ scope (§260) — do not fold them into any of these.
       rule the realm pass applies would call them one supplier. **Durable fix:** count on the same normalised key
       `_identity_keys` builds, in both the pull and the local query.
       **Trigger:** the next change to `vendor_sync`'s name fallback.
-- [ ] **(c) Three adapters still drop or mislabel records the syncs read as
-      evidence.** (1) Sage Accounting (UK) skips ledgers with
-      `included_in_chart: false`, so a row linked to one reads as a dead link.
-      (2) Merge.dev's account `status` and Business Central's vendor `blocked`
+- [ ] **(c) Two adapters still drop or mislabel records the syncs read as
+      evidence.** (Sage Accounting UK's out-of-chart ledgers were the third;
+      decisions §320 emits them inactive.)
+      (1) Merge.dev's account `status` and Business Central's vendor `blocked`
       are not mapped to `active=False`, so an inactive record can be linked
-      or created as a payee. (3) Merge.dev's GL `parent_code` holds the
-      parent's Merge id, not its code. **Durable fix:** emit the out-of-chart
-      ledger with `active=False`, map both inactive flags, and resolve the
-      Merge parent id to its code within the pull. **Trigger:** the next
-      change to any of those three adapters' listings.
+      or created as a payee. (2) Merge.dev's GL `parent_code` holds the
+      parent's Merge id, not its code. **Durable fix:** map both inactive
+      flags, and resolve the Merge parent id to its code within the pull.
+      **Trigger:** the next change to either adapter's listings.
 - [ ] **(c) Vendor linking has three gaps of its own.** (1)
       `vendors.erp_vendor_id` has no unique index, so two rows sharing an id
       make `scalar_one_or_none` in `services/vendor_sync` raise and abort the

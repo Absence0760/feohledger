@@ -2092,13 +2092,23 @@ complete its consent flow. A ZA Sage adapter is separate work.
 
 | Method | Sage call | Notes |
 |---|---|---|
-| `test_connection` | `GET business_settings` | |
-| `list_vendors` | `GET contacts?contact_type_id=VENDOR` | 200/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); system contacts skipped |
-| `list_gl_accounts` | `GET ledger_accounts` | `nominal_code` → code; `ledger_account_type` → account_type; out-of-chart skipped |
-| `list_pos` | — | base default `[]` (no v3.1 PO collection on every plan) |
+| `test_connection` | `GET business_settings` | passes on every plan, Accounting Start included (see below) |
+| `list_vendors` | `GET contacts?contact_type_id=VENDOR` | 200/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); system contacts skipped; a `gdpr_obfuscated` (or `deleted_at`) contact → `active=False` |
+| `list_gl_accounts` | `GET ledger_accounts`, once with `show_included_in_chart=true` and once `=false`, joined by id | `nominal_code` → code; `ledger_account_type` → account_type; out-of-chart and control (`is_control_account`) ledgers emitted `active=False`, never dropped (§284; the filter's default is undocumented) |
+| `list_pos` | — | base default `[]`: the v3.1 Accounting API has no purchase-order resource at all, on any plan |
 | `post_invoice` | `POST purchase_invoices` | below |
-| `get_invoice_status` | `GET purchase_invoices/{id}` | DRAFT → draft; UNPAID/DISPUTED → open; PART_PAID → partially_paid; PAID → paid; VOID → cancelled |
-| `void_invoice` | `DELETE purchase_invoices/{id}` | DRAFT deleted; unpaid UNPAID/DISPUTED voided with `void_reason`; anything with a payment allocated → `False` |
+| `get_invoice_status` | `GET purchase_invoices/{id}?show_payments_allocations=true` | DRAFT → draft; UNPAID/DISPUTED → open; PAID → paid only with a `contact_payment` allocation, else `settled_no_payment` (a credit note sets PAID too); PART_PAID → partially_paid on the same test, else open; VOID → cancelled (decisions §303, §320) |
+| `void_invoice` | `DELETE purchase_invoices/{id}` | DRAFT deleted; unpaid UNPAID/DISPUTED voided with `void_reason`; anything with a payment allocated → `False`. The Swagger documents no parameter on the purchase DELETE, so whether Sage honours `void_reason` there is unverified (#654) |
+
+**Plan: Accounting Start cannot post.** The Swagger's Endpoint Availability
+lists `POST` / `DELETE purchase_invoices` for Accounting Plus (CA, DE, ES, FR,
+GB, IE) and Accounting Standard (GB, IE) only; `GET` also works on Start. The
+v3.1 Accounting API reports no plan, so a Start business connects, syncs and
+passes the connection test, and its first push is refused
+`purchases_not_permitted` when Sage answers the create 403. A connected user
+without `Purchases: Full Access` or `Restricted Access` gets the same answer.
+Voiding needs `Purchases: Full Access`. Which status Sage gives Start is to be
+confirmed in a sandbox (#654).
 
 **`post_invoice`:**
 
@@ -2126,7 +2136,19 @@ complete its consent flow. A ZA Sage adapter is separate work.
   than `amount` voids/deletes the invoice just created and fails non-retryable
   `posted_total_mismatch`, and a create that reports none fails non-retryable
   `posted_total_unconfirmed` (`erp_adapters/posted_total.py`).
-- 429 → `rate_limited` (no sleep loop); failures through
+- **A refused create is coded, non-retryable and `not_posted`** (decisions
+  §285, §320). Any 4xx a re-send cannot change created nothing. A 403 is
+  `purchases_not_permitted`; any other is explained by reading back what the
+  Swagger documents: an invoice date on or before
+  `financial_settings.year_end_lockdown_date` → `period_closed`; a foreign
+  currency with `multi_currency_enabled: false` → `currency_not_enabled`; the
+  contact gone, `deleted_at` or `gdpr_obfuscated` → `vendor_inactive`; a
+  ledger gone or `included_in_chart: false` → `account_inactive` (naming our
+  codes); otherwise `bill_refused`. Sage's `$dataCode` / `$message` are never
+  read (undocumented; the message echoes the payload). The message ends
+  `(HTTP <status>)`.
+- 5xx, 401 and 429 stay plain, retryable failures that may have posted
+  (`rate_limited` for a 429, no sleep loop); failures through
   `erp_failure_message`.
 
 Tests: `backend/tests/test_erp_sage_accounting_adapter.py`. Fake surface:

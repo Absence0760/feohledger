@@ -241,18 +241,28 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
 `{"$items", "$next", ...}` envelope. Point the backend at it with
 `FEOH_ERP_SAGE_ACCOUNTING_API_BASE=http://localhost:12112/sage/v3.1`.
 
-- `GET /business_settings` (the connection test).
+- `GET /business_settings` (the connection test); `GET /financial_settings`
+  (`year_end_lockdown_date`, `base_currency` GBP, `multi_currency_enabled`).
 - `GET /contacts?contact_type_id=VENDOR` — `sage-contact-1` *Fake Sage
-  Supplier Ltd* (the customer `sage-contact-2` is filtered out).
+  Supplier Ltd* and the GDPR-obfuscated `sage-contact-3` (the customer
+  `sage-contact-2` is filtered out, and the deleted `sage-contact-4` leaves
+  the listing); `GET /contacts/{id}` answers for all four, `sage-contact-4`
+  with `deleted_at`.
 - `GET /ledger_accounts`, `GET /ledger_accounts/{id}` — `sage-ledger-5000`,
   `sage-ledger-7500` (default tax rate `GB_STANDARD`), `sage-ledger-7600` (no
   default rate: a taxed invoice is refused unless the org sets
-  `default_tax_rate_id`).
+  `default_tax_rate_id`), the control account `sage-ledger-2100`
+  (`is_control_account`), and `sage-ledger-7700`, out of the chart: listed
+  only with `show_included_in_chart=false` (the real default is undocumented).
 - `GET /purchase_invoices` with `contact_id` / `from_date` / `to_date` (the
   pre-create idempotency lookup); `POST /purchase_invoices` creates
-  `sage-pi-<n>` as `UNPAID`, and 422s on an unknown contact or ledger, a taxed
-  line with no `tax_rate_id`, or net + tax that does not equal the total;
-  `GET /purchase_invoices/{id}`; `DELETE /purchase_invoices/{id}` deletes a
+  `sage-pi-<n>` as `UNPAID`, and answers Sage's 422 error array on an unknown
+  or deleted contact, an unknown or out-of-chart ledger, a date on or before the
+  lockdown date, a foreign currency without multi-currency, a taxed line with no
+  `tax_rate_id`, or net + tax that does not equal the total; on the `start`
+  plan every purchase-invoice write is a 403 (Accounting Start has none);
+  `GET /purchase_invoices/{id}` (with `payments_allocations` only under
+  `show_payments_allocations=true`); `DELETE /purchase_invoices/{id}` deletes a
   draft and voids an unpaid invoice (`void_reason` required).
 - OAuth (the backend's real connect flow): `GET /sage/oauth2/auth/central` 302s to a
   **registered** `redirect_uri` with a `code` (client `fake-sage-client`);
@@ -261,8 +271,11 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
   its `redirect_uri`, and rotates refresh tokens; `GET /sage/v3.1/businesses` (bearer
   must be one it issued) lists the one business, `fake-sage-business`. Same
   `FakeOAuthApp` as Xero's.
-- Test hook `POST /sage/v3.1/__set-status {"id", "status",
-  "outstanding_amount"?}`. `POST /__reset` clears this state too.
+- Test hooks `POST /sage/v3.1/__set-status {"id", "status",
+  "outstanding_amount"?, "payments_allocations"?}` (a credit-note settlement is
+  `PAID` with a `contact_allocation` entry and no `contact_payment`) and
+  `POST /sage/v3.1/__set-business {"plan"?, "year_end_lockdown_date"?,
+  "multi_currency_enabled"?}`. `POST /__reset` clears this state too.
 
 ## Blackbaud Financial Edge NXT — SKY API (`/blackbaud`)
 

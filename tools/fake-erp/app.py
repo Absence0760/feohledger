@@ -1742,8 +1742,21 @@ app.include_router(xero)
 # Backs backend/app/services/erp_adapters/sage_accounting.py. Auth is
 # shape-only: any non-empty bearer plus a non-empty X-Business. Collections use
 # Sage's {"$items", "$next", ...} envelope. State lives under STATE["sage"],
-# created lazily so the shared POST /__reset clears it too. Test hook:
-# POST /sage/v3.1/__set-status {"id", "status", "outstanding_amount"?}.
+# created lazily so the shared POST /__reset clears it too. Test hooks:
+# POST /sage/v3.1/__set-status {"id", "status", "outstanding_amount"?,
+#   "payments_allocations"?} — a PAID set by a credit note carries an
+#   allocation with `contact_allocation` and no `contact_payment`, as Sage's;
+# POST /sage/v3.1/__set-business {"plan"?, "year_end_lockdown_date"?,
+#   "multi_currency_enabled"?} — "start" refuses every purchase-invoice write
+#   with 403 (the v3.1 Swagger's Endpoint Availability: Plus / Standard only).
+#
+# What the real API does and the fake does too (the v3.1 Swagger,
+# github.com/nook-io/python-sage openapi.json): a create dated on or before
+# `financial_settings.year_end_lockdown_date`, or naming a deleted contact or an
+# out-of-chart ledger, is a 422 error array; `payments_allocations` comes back
+# only with `show_payments_allocations=true`; `ledger_accounts` honours
+# `show_included_in_chart` (its default is undocumented — the fake leaves
+# out-of-chart ledgers out unless asked, the conservative reading).
 
 sage = APIRouter(prefix="/sage/v3.1")
 
@@ -1765,6 +1778,24 @@ SAGE_CONTACTS = [
         "name": "Fake Sage Customer Ltd",
         "contact_types": [{"id": "CUSTOMER"}],
         "system": False,
+    },
+    # A supplier whose personal data was erased under GDPR: still listed, no
+    # longer a payee (synced inactive).
+    {
+        "id": "sage-contact-3",
+        "name": "Obfuscated",
+        "contact_types": [{"id": "VENDOR"}],
+        "system": False,
+        "gdpr_obfuscated": True,
+    },
+    # A supplier deleted in Sage after it was synced: a create naming it is
+    # refused, and it reads back with `deleted_at`.
+    {
+        "id": "sage-contact-4",
+        "name": "Fake Sage Deleted Supplier Ltd",
+        "contact_types": [{"id": "VENDOR"}],
+        "system": False,
+        "deleted_at": "2026-09-01T00:00:00Z",
     },
 ]
 SAGE_LEDGERS = [
@@ -1793,11 +1824,42 @@ SAGE_LEDGERS = [
         "ledger_account_type": {"id": "OVERHEADS"},
         "included_in_chart": True,
     },
+    # Taken out of the chart: listed only with show_included_in_chart=false,
+    # and refused on a create.
+    {
+        "id": "sage-ledger-7700",
+        "name": "Fake Retired Costs",
+        "nominal_code": 7700,
+        "ledger_account_type": {"id": "OVERHEADS"},
+        "included_in_chart": False,
+        "tax_rate": {"id": "GB_STANDARD", "displayed_as": "Standard 20.00%"},
+    },
+    # A control account Sage reserves for its own postings.
+    {
+        "id": "sage-ledger-2100",
+        "name": "Fake Purchase Ledger Control",
+        "nominal_code": 2100,
+        "ledger_account_type": {"id": "CURRENT_LIABILITY"},
+        "included_in_chart": True,
+        "is_control_account": True,
+    },
 ]
 
 
 def _sage_state() -> dict[str, Any]:
-    return STATE.setdefault("sage", {"invoices": {}, "counter": 0})
+    return STATE.setdefault(
+        "sage",
+        {
+            "invoices": {},
+            "counter": 0,
+            "business": {
+                "plan": "plus",
+                "year_end_lockdown_date": None,
+                "base_currency": {"id": "GBP"},
+                "multi_currency_enabled": True,
+            },
+        },
+    )
 
 
 def _sage_error(status: int, code: str, message: str) -> ProviderError:
@@ -1829,18 +1891,43 @@ async def sage_business_settings(request: Request) -> dict:
 async def sage_contacts(request: Request, page: int = 1) -> JSONResponse:
     _require_sage_auth(request)
     type_id = request.query_params.get("contact_type_id")
+    # A deleted contact leaves the listing (Sage lists it only under
+    # `deleted_since`); GET /contacts/{key} still answers for it.
     rows = [
         c
         for c in SAGE_CONTACTS
-        if not type_id or any(t["id"] == type_id for t in c.get("contact_types", []))
+        if (not type_id or any(t["id"] == type_id for t in c.get("contact_types", [])))
+        and not c.get("deleted_at")
     ]
     return _sage_page(rows if page == 1 else [])
+
+
+@sage.get("/contacts/{key}")
+async def sage_contact(request: Request, key: str) -> JSONResponse:
+    _require_sage_auth(request)
+    for contact in SAGE_CONTACTS:
+        if contact["id"] == key:
+            return JSONResponse(copy.deepcopy(contact))
+    raise _sage_error(404, "RecordNotFound", "Contact not found")
+
+
+@sage.get("/financial_settings")
+async def sage_financial_settings(request: Request) -> dict:
+    _require_sage_auth(request)
+    business = _sage_state()["business"]
+    return {
+        "year_end_lockdown_date": business["year_end_lockdown_date"],
+        "base_currency": business["base_currency"],
+        "multi_currency_enabled": business["multi_currency_enabled"],
+    }
 
 
 @sage.get("/ledger_accounts")
 async def sage_ledger_accounts(request: Request, page: int = 1) -> JSONResponse:
     _require_sage_auth(request)
-    return _sage_page(SAGE_LEDGERS if page == 1 else [])
+    in_chart = request.query_params.get("show_included_in_chart", "true").lower() != "false"
+    rows = [ledger for ledger in SAGE_LEDGERS if ledger["included_in_chart"] is in_chart]
+    return _sage_page(rows if page == 1 else [])
 
 
 @sage.get("/ledger_accounts/{key}")
@@ -1874,17 +1961,33 @@ async def sage_create_purchase_invoice(request: Request) -> JSONResponse:
     """Validates what v3.1 validates for us: known contact and ledgers, a tax
     rate on any taxed line, and net + tax == total per line and overall."""
     _require_sage_auth(request)
+    business = _sage_state()["business"]
+    if business["plan"] == "start":
+        raise _sage_error(403, "Forbidden", "Not available on this subscription")
     body = _xero_json.loads(await request.body(), parse_float=_XeroDecimal)
     inv = body.get("purchase_invoice") or {}
     for field in ("contact_id", "date", "due_date", "invoice_lines"):
         if not inv.get(field):
             raise _sage_error(422, "RecordInvalid", f"{field} is required")
-    if inv["contact_id"] not in {c["id"] for c in SAGE_CONTACTS}:
+    lockdown = business["year_end_lockdown_date"]
+    if lockdown and inv["date"] <= lockdown:
+        raise _sage_error(422, "RecordInvalid", "date is on or before the lockdown date")
+    currency = inv.get("currency_id")
+    if (
+        currency
+        and currency != business["base_currency"]["id"]
+        and not business["multi_currency_enabled"]
+    ):
+        raise _sage_error(422, "RecordInvalid", "currency is not enabled")
+    contacts = {c["id"]: c for c in SAGE_CONTACTS}
+    contact = contacts.get(inv["contact_id"])
+    if contact is None or contact.get("deleted_at"):
         raise _sage_error(422, "RecordInvalid", "contact not found")
-    ledgers = {ledger["id"] for ledger in SAGE_LEDGERS}
+    ledgers = {ledger["id"]: ledger for ledger in SAGE_LEDGERS}
     total = _XeroDecimal(0)
     for line in inv["invoice_lines"]:
-        if line.get("ledger_account_id") not in ledgers:
+        ledger = ledgers.get(line.get("ledger_account_id"))
+        if ledger is None or not ledger["included_in_chart"]:
             raise _sage_error(422, "RecordInvalid", "ledger account not found")
         tax = _XeroDecimal(str(line.get("tax_amount", 0)))
         if tax and not line.get("tax_rate_id"):
@@ -1912,6 +2015,7 @@ async def sage_create_purchase_invoice(request: Request) -> JSONResponse:
         "status": {"id": "UNPAID"},
         "void_reason": None,
         "deleted_at": None,
+        "payments_allocations": [],
     }
     state["invoices"][record["id"]] = record
     return JSONResponse(_xero_encode(copy.deepcopy(record)), status_code=201)
@@ -1923,13 +2027,18 @@ async def sage_get_purchase_invoice(request: Request, key: str) -> JSONResponse:
     record = _sage_state()["invoices"].get(key)
     if record is None or record.get("deleted_at"):
         raise _sage_error(404, "RecordNotFound", "Purchase invoice not found")
-    return JSONResponse(_xero_encode(copy.deepcopy(record)))
+    out = copy.deepcopy(record)
+    if request.query_params.get("show_payments_allocations", "").lower() != "true":
+        out.pop("payments_allocations", None)
+    return JSONResponse(_xero_encode(out))
 
 
 @sage.delete("/purchase_invoices/{key}")
 async def sage_delete_purchase_invoice(request: Request, key: str) -> Response:
     """Deletes a draft; voids an unpaid posted invoice (void_reason required)."""
     _require_sage_auth(request)
+    if _sage_state()["business"]["plan"] == "start":
+        raise _sage_error(403, "Forbidden", "Not available on this subscription")
     record = _sage_state()["invoices"].get(key)
     if record is None or record.get("deleted_at"):
         raise _sage_error(404, "RecordNotFound", "Purchase invoice not found")
@@ -1955,6 +2064,17 @@ async def sage_set_status(body: dict) -> dict:
     record["status"] = {"id": body["status"]}
     if body.get("outstanding_amount") is not None:
         record["outstanding_amount"] = _XeroDecimal(str(body["outstanding_amount"]))
+    if isinstance(body.get("payments_allocations"), list):
+        record["payments_allocations"] = body["payments_allocations"]
+    return {"status": "ok"}
+
+
+@sage.post("/__set-business")
+async def sage_set_business(body: dict) -> dict:
+    business = _sage_state()["business"]
+    for key in ("plan", "year_end_lockdown_date", "multi_currency_enabled"):
+        if key in body:
+            business[key] = body[key]
     return {"status": "ok"}
 
 
