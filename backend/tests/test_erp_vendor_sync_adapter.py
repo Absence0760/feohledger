@@ -400,7 +400,7 @@ def _d365_config() -> dict:
         "client_id": "client-1",
         "client_secret": "secret-1",
         "environment": "production",
-        "company_id": "company-1",
+        "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
     }
 
 
@@ -450,6 +450,18 @@ def test_d365_list_vendors_maps_response_into_vendor_payloads():
     # vendor's `paymentTermsId` GUID, which the sync used to store as the text.
     assert v.payment_terms == "30 DAYS"
     assert "$expand=paymentTerm" in client.get.await_args.args[0]
+
+
+def test_d365_a_vendor_bc_blocked_is_not_a_payee():
+    """`blocked` is `" "`, `Payment` or `All`. `All` stops posting; `Payment`
+    stops BC paying the vendor, so FeohLedger's own runs must not either: both
+    are emitted inactive, which the sync never makes a payee."""
+    from app.services.erp_adapters.dynamics_365_bc import _d365_vendor_to_payload
+
+    assert [
+        _d365_vendor_to_payload({"id": "v", "blocked": b}).active
+        for b in (None, "", " ", "Payment", "All")
+    ] == [True, True, True, False, False]
 
 
 def test_d365_vendor_payment_terms_are_never_the_guid():

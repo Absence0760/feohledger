@@ -103,6 +103,8 @@ def test_bc_list_gl_accounts_maps_accounts_into_payloads(monkeypatch):
                 "category": "Liabilities",
                 "accountType": "Posting",
                 "blocked": False,
+                # A control account: BC refuses a purchase line on it.
+                "directPosting": False,
             },
             {
                 "id": "g-1000",
@@ -140,7 +142,7 @@ def test_bc_list_gl_accounts_maps_accounts_into_payloads(monkeypatch):
     # and the sync retires the row rather than leaving it codable.
     assert [(a.code, a.name, a.account_type, a.erp_account_id, a.active) for a in out] == [
         ("6100", "Office Supplies", "expense", "g-6100", True),
-        ("2100", "Accounts Payable", "liability", "g-2100", True),
+        ("2100", "Accounts Payable", "liability", "g-2100", False),
         ("1000", "Cash", "asset", "g-1000", True),
         ("3000", "Capital", "equity", "g-3000", True),
         ("4000", "Sales", "revenue", "g-4000", True),

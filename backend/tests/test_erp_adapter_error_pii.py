@@ -107,7 +107,7 @@ def _payload(**overrides) -> InvoicePayload:
         vendor_address="17 Bank Street, Springfield IL 62704",
         remit_to_address="PO Box 9001, Springfield IL 62704",
         bill_to_address="1 Corporate Plaza, Chicago IL 60601",
-        vendor_erp_id="ERP-V-1",
+        vendor_erp_id="00000000-0000-0000-0000-0000000000a1",
         gl_account_erp_id="ERP-6000",
     )
     base.update(overrides)
@@ -199,7 +199,7 @@ def test_business_central_failure_message_is_pii_free():
             "client_id": "c",
             "client_secret": "s",
             "environment": "sandbox",
-            "company_id": "co",
+            "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
             "base_url": "https://api.businesscentral.dynamics.com/v2.0",
         }
     )
@@ -208,7 +208,7 @@ def test_business_central_failure_message_is_pii_free():
         patch("httpx.AsyncClient") as cm,
     ):
         client = cm.return_value.__aenter__.return_value
-        # The pre-create externalDocumentNumber lookup must miss.
+        # The pre-create vendor + vendorInvoiceNumber lookup must miss.
         client.get = AsyncMock(return_value=_ok_response({"value": []}))
         client.post = AsyncMock(return_value=_error_response(409))
         result = _run(adapter.post_invoice(_payload()))

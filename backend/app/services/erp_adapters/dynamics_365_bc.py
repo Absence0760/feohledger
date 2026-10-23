@@ -5,6 +5,7 @@ API reference (API v2.0): https://learn.microsoft.com/en-us/dynamics365/business
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -31,9 +32,11 @@ from app.services.erp_adapters.base import (
     erp_http_failure,
     erp_preflight_refusal,
     erp_refusal,
+    erp_status_retryable,
     sync_listing_pages,
 )
 from app.services.erp_adapters.bill_allocation import (
+    DUPLICATE_DOCUMENT_NUMBER,
     TAX_NOT_ITEMISED,
     BillRefusal,
     allocate_bill_lines,
@@ -67,15 +70,42 @@ _DEFAULT_BASE_URL = f"https://{_BC_API_HOST}/v2.0"
 #: deleted where BC allows it; a posted invoice never is, and the message says
 #: which.)
 #:
-#: A purchaseInvoice for this correlation id already exists but is neither a
-#: draft we can finish nor posted (``In Review``, ``Canceled``, ``Corrective``).
-#: Creating another would be a second bill; the accountant decides in BC.
+#: A purchaseInvoice for this vendor and invoice number already exists but is
+#: neither a draft we can finish nor posted (``In Review``, ``Canceled``,
+#: ``Corrective``). Creating another would be a second bill; the accountant
+#: decides in BC.
 EXISTING_INVOICE_NOT_OPEN = "existing_invoice_not_open"
 #: A line's gross has more decimal places than the invoice currency carries, so
 #: it cannot be sent at the currency's scale without rounding money.
 LINE_AMOUNT_PRECISION = "line_amount_precision"
+#: The invoice number is longer than BC's ``Vendor Invoice No.`` (35).
+DOC_NUMBER_TOO_LONG = "doc_number_too_long"
+#: BC refused the create or the post, and a read-back says why: the vendor is
+#: blocked ``All`` (or gone), an account is blocked / not a direct-posting
+#: account (or gone), or the posting date is outside the allowed range. The
+#: same codes QuickBooks' create refusals use (decisions §285).
+VENDOR_INACTIVE = "vendor_inactive"
+ACCOUNT_INACTIVE = "account_inactive"
+PERIOD_CLOSED = "period_closed"
 
 _PROVIDER = "Business Central"
+
+#: ``Vendor Invoice No.`` is ``Code[35]`` on the Purchase Header (table 38,
+#: field 68): longer is refused by BC, and BC stores a Code field upper-cased.
+_VENDOR_INVOICE_NO_MAX = 35
+#: A purchase line's ``Description`` is ``Text[100]``. A longer memo is cut,
+#: not refused: a description is not money.
+_LINE_DESCRIPTION_MAX = 100
+
+#: A BC record id. ``vendorId`` is spliced into an OData ``$filter`` and
+#: ``company_id`` into the URL, so both must be a GUID, never free text.
+_GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
+
+#: The dialog BC raises at ``Microsoft.NAV.post`` for a posting date outside
+#: the allowed range (General Ledger Setup / User Setup "Allow Posting From /
+#: To"). Matched to CODE the refusal and never stored: BC's message text can
+#: echo a record. English-only, so a localized BC refuses uncoded instead.
+_PERIOD_CLOSED_MESSAGE = re.compile(r"allowed posting dates|posting date is not within", re.I)
 
 
 class BusinessCentralConfigError(ValueError):
@@ -92,7 +122,7 @@ class BusinessCentralAdapter(ErpAdapter):
         client_id: App registration client ID
         client_secret: App registration client secret
         environment: e.g. "production" or "sandbox"
-        company_id: BC company ID or name
+        company_id: the BC company's id (a GUID, from ``GET companies``)
     """
 
     erp_type = "dynamics_365_bc"
@@ -128,7 +158,9 @@ class BusinessCentralAdapter(ErpAdapter):
             # container (backend/docker-compose.yml `fake-erp`, host port
             # 12112). Trusted, so the SSRF guard below is deliberately skipped
             # — it exists to police admin-supplied config, not operator env.
+            # The company id is the fake's own fixture key there, unchecked.
             base = settings.erp_d365_api_base.rstrip("/")
+            company = self.config.get("company_id", "")
         else:
             base = self._admin_base_url()
             # SSRF guard on top of the host allowlist: base_url is admin-supplied
@@ -137,8 +169,8 @@ class BusinessCentralAdapter(ErpAdapter):
             from app.utils.url_safety import assert_public_url_async
 
             await assert_public_url_async(base)
+            company = self._company_id()
         env = self.config.get("environment", "production")
-        company = self.config.get("company_id", "")
         return f"{base}/{env}/api/v2.0/companies({company})/{path}"
 
     def _admin_base_url(self) -> str:
@@ -171,34 +203,60 @@ class BusinessCentralAdapter(ErpAdapter):
             )
         return raw.rstrip("/")
 
-    async def _find_by_external_document_number(
-        self, token: str, external_document_number: str
-    ) -> tuple[int, dict | None]:
-        """Look up an existing purchaseInvoice by externalDocumentNumber — the
-        pre-create idempotency check (issue #143): a retried push after a
-        client-side timeout on the FIRST attempt's response (which may have
-        already succeeded server-side) finds the already-created invoice here
-        instead of blindly POSTing a second one.
+    def _company_id(self) -> str:
+        """The configured ``company_id``, which must be the company's GUID.
 
-        Returns ``(status_code, record)``. A non-200 comes back as-is so the
-        caller fails the push: a lookup that could not be made is not a miss,
-        and reading it as one would create a second invoice on the retry. A hit
-        is the whole record, because a draft is not a posted invoice.
+        ``companies({id})`` takes the id only; a company *name* there is a 400
+        on every call, and the value is spliced into the URL. Raises
+        :class:`BusinessCentralConfigError` naming the key, never the value.
         """
-        headers = {"Authorization": f"Bearer {token}"}
-        filter_expr = f"externalDocumentNumber eq '{external_document_number}'"
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                await self._api_url("purchaseInvoices"),
-                params={"$filter": filter_expr},
-                headers=headers,
+        company = str(self.config.get("company_id") or "").strip()
+        if not _GUID_RE.fullmatch(company):
+            raise BusinessCentralConfigError(
+                "Business Central config 'company_id' must be the company's id (a GUID)"
             )
+        return company
+
+    async def _find_existing(
+        self, client, headers: dict, payload: InvoicePayload
+    ) -> tuple[int, dict | None, int]:
+        """The pre-create idempotency lookup: purchaseInvoices for this vendor
+        with this ``vendorInvoiceNumber``.
+
+        A retried push after a lost response finds the invoice the first
+        attempt created here instead of POSTing a second one (issue #143). API
+        v2.0's purchaseInvoice has no ``externalDocumentNumber`` (that is a
+        salesInvoice field), so the natural key is the one BC itself checks
+        for duplicates: the vendor and the Vendor Invoice No. That field is a
+        ``Code`` field, stored upper-cased, so the filter asks for the
+        upper-cased number; a quote in it is doubled (OData's escape).
+
+        Returns ``(status_code, record, hits)``. A non-200 comes back as-is so
+        the caller fails the push: a lookup that could not be made is not a
+        miss. ``hits`` > 1 means BC already holds several, which only a person
+        can sort out.
+        """
+        number = payload.invoice_number.upper().replace("'", "''")
+        filter_expr = f"vendorId eq {payload.vendor_erp_id} and vendorInvoiceNumber eq '{number}'"
+        resp = await client.get(
+            await self._api_url("purchaseInvoices"),
+            params={"$filter": filter_expr},
+            headers=headers,
+        )
         if resp.status_code != 200:
-            return resp.status_code, None
-        values = resp.json().get("value", [])
-        if not values or not isinstance(values[0], dict) or not values[0].get("id"):
-            return 200, None
-        return 200, values[0]
+            return resp.status_code, None, 0
+        # Only ids, statuses and etags are read here; money comes from the
+        # fresh, exactly-parsed read of the one record.
+        try:
+            body = resp.json()
+        except ValueError:
+            return 200, None, 0
+        values = [
+            v
+            for v in (body.get("value") or [] if isinstance(body, dict) else [])
+            if isinstance(v, dict) and v.get("id")
+        ]
+        return 200, (values[0] if len(values) == 1 else None), len(values)
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         """Create the purchaseInvoice as a draft, check BC's total, post it, and
@@ -218,42 +276,49 @@ class BusinessCentralAdapter(ErpAdapter):
         check and our post.
         """
         # Refuse before the token exchange: a purchaseInvoice is posted against
-        # the vendor's id (`vendorId`), never its name. `vendorNumber` holds the
-        # vendor's NUMBER (V00010) — the name we used to send there could only
-        # fail, or match another vendor whose number happens to equal it.
-        if not payload.vendor_erp_id:
+        # the vendor's id (`vendorId`, a GUID), never its name. `vendorNumber`
+        # holds the vendor's NUMBER (V00010) — the name we used to send there
+        # could only fail, or match another vendor whose number equals it.
+        if not payload.vendor_erp_id or not _GUID_RE.fullmatch(str(payload.vendor_erp_id)):
             return erp_preflight_refusal(_PROVIDER, VENDOR_NOT_LINKED)
+        if len(payload.invoice_number) > _VENDOR_INVOICE_NO_MAX:
+            return erp_preflight_refusal(_PROVIDER, DOC_NUMBER_TOO_LONG)
         lines = _bc_invoice_lines(payload)
         if isinstance(lines, str):
             return erp_preflight_refusal(_PROVIDER, lines)
         if not settings.erp_d365_api_base:
             try:
                 self._admin_base_url()
+                self._company_id()
             except BusinessCentralConfigError as exc:
                 # Retrying cannot fix the config; the message names the key only.
-                return ErpPostResult(success=False, message=str(exc), retryable=False)
+                result = ErpPostResult(success=False, message=str(exc), retryable=False)
+                result.not_posted = True
+                return result
         token = await self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
 
-        lookup_status, existing = await self._find_by_external_document_number(
-            token, payload.correlation_id
-        )
+        async with httpx.AsyncClient(timeout=15) as client:
+            lookup_status, existing, hits = await self._find_existing(client, headers, payload)
         if lookup_status != 200:
             return erp_http_failure(_PROVIDER, lookup_status)
+        if hits > 1:
+            return erp_refusal(_PROVIDER, DUPLICATE_DOCUMENT_NUMBER)
         if existing is not None:
             status = str(existing.get("status") or "").lower()
             if status not in ("open", "paid", "draft"):
                 return erp_refusal(_PROVIDER, EXISTING_INVOICE_NOT_OPEN)
-            # An earlier attempt created it. A draft (the post step failed, or
-            # its response was lost) is finished after the same total check a
-            # fresh draft gets; an Open / Paid one counts as posted only when
-            # BC's total is the approved amount — a draft taxed above it that
-            # a BC user posted after our DELETE failed is not a success. Either
-            # way the record is re-read whole, exactly (the lookup's list body
-            # is not parsed for money).
+            # This vendor's invoice under this number is already in BC: an
+            # earlier attempt of ours, or the same bill keyed by hand. A draft
+            # is finished after the same total check a fresh draft gets; an
+            # Open / Paid one counts as posted only at the approved total. A
+            # different total is refused, and what the lookup found is never
+            # deleted: we cannot prove we created it. Either way the record is
+            # re-read whole, exactly (the lookup's list body is not trusted for
+            # money).
             return await self._verify_and_post(
                 str(existing["id"]),
                 payload,
@@ -276,13 +341,17 @@ class BusinessCentralAdapter(ErpAdapter):
     ) -> tuple[str, object] | ErpPostResult:
         """POST the purchaseInvoice (a draft) and return ``(id, etag)``, or the
         failed result. Only the id and etag are read from the response; the
-        total is checked on a fresh, exactly-parsed read."""
+        total is checked on a fresh, exactly-parsed read.
+
+        A create BC refused outright left nothing in BC (``not_posted``): it is
+        coded where a read of the vendor and accounts says why
+        (``_coded_refusal``), else the plain non-retryable HTTP failure.
+        """
         body = {
             "vendorId": payload.vendor_erp_id,
             "invoiceDate": payload.invoice_date.isoformat() if payload.invoice_date else None,
             "dueDate": payload.due_date.isoformat() if payload.due_date else None,
             "vendorInvoiceNumber": payload.invoice_number,
-            "externalDocumentNumber": payload.correlation_id,
             "currencyCode": payload.currency,
             # Lines from `_bc_invoice_lines`: each on `accountId`, the G/L
             # account's id from the chart sync (`gl_accounts.erp_account_id`).
@@ -294,23 +363,84 @@ class BusinessCentralAdapter(ErpAdapter):
                 content=dumps_exact_json(body),
                 headers=headers,
             )
-        if resp.status_code not in (200, 201):
-            return erp_http_failure(
-                _PROVIDER,
-                resp.status_code,
-                raw_response=resp.json()
-                if resp.headers.get("content-type", "").startswith("application/json")
-                else None,
-            )
+            if resp.status_code not in (200, 201):
+                if erp_status_retryable(resp.status_code):
+                    return erp_http_failure(_PROVIDER, resp.status_code)
+                result = await self._coded_refusal(client, headers, payload, resp)
+                result.not_posted = True
+                return result
         created = resp.json()
         doc_id = created.get("id") if isinstance(created, dict) else None
         if not doc_id:
             # Nothing to check or post. A retry's lookup finds the draft, if BC
-            # made one, by externalDocumentNumber.
+            # made one.
             return ErpPostResult(
                 success=False, message=erp_failure_message(_PROVIDER, resp.status_code)
             )
         return str(doc_id), created.get("@odata.etag")
+
+    async def _coded_refusal(
+        self, client, headers: dict, payload: InvoicePayload, resp
+    ) -> ErpPostResult:
+        """Why BC refused a create or a post, as a coded non-retryable result.
+
+        The refusal is coded from facts, the way QuickBooks' is (decisions
+        §285): the bill's vendor read back blocked ``All`` (or gone) is
+        ``vendor_inactive``; an account it posts on read back blocked, not a
+        direct-posting account, or gone is ``account_inactive``; and BC's
+        allowed-posting-dates dialog (``_PERIOD_CLOSED_MESSAGE``, matched and
+        never stored) is ``period_closed``. Anything else stays the plain HTTP
+        failure. BC's own message never reaches the result: it can echo a
+        vendor's name.
+        """
+        if await self._vendor_blocked(client, headers, str(payload.vendor_erp_id)):
+            return erp_refusal(_PROVIDER, VENDOR_INACTIVE)
+        inactive = await self._inactive_accounts(client, headers, payload)
+        if inactive:
+            result = erp_refusal(_PROVIDER, ACCOUNT_INACTIVE)
+            result.refusal_params = {"accounts": inactive}
+            return result
+        if _bc_error_message_matches(resp, _PERIOD_CLOSED_MESSAGE):
+            return erp_refusal(_PROVIDER, PERIOD_CLOSED)
+        return erp_http_failure(_PROVIDER, resp.status_code)
+
+    async def _vendor_blocked(self, client, headers: dict, vendor_id: str) -> bool:
+        """True when the vendor reads back blocked ``All`` or no longer exists.
+        An unreadable answer is "don't know", never "blocked"."""
+        resp = await client.get(await self._api_url(f"vendors({vendor_id})"), headers=headers)
+        if resp.status_code == 404:
+            return True
+        if resp.status_code != 200:
+            return False
+        try:
+            record = loads_exact_json(resp.content)
+        except ValueError:
+            return False
+        return isinstance(record, dict) and str(record.get("blocked") or "").strip() == "All"
+
+    async def _inactive_accounts(self, client, headers: dict, payload: InvoicePayload) -> list[str]:
+        """Our GL codes for the bill's accounts BC reads back as unpostable:
+        blocked, not open to direct posting, or gone. Only ids this bill sends
+        are read; an unreadable answer is "don't know"."""
+        out: list[str] = []
+        for account_id, code in _bc_account_codes(payload).items():
+            if not _GUID_RE.fullmatch(account_id):
+                continue
+            resp = await client.get(await self._api_url(f"accounts({account_id})"), headers=headers)
+            if resp.status_code == 404:
+                out.append(code)
+                continue
+            if resp.status_code != 200:
+                continue
+            try:
+                record = loads_exact_json(resp.content)
+            except ValueError:
+                continue
+            if isinstance(record, dict) and (
+                record.get("blocked") is True or record.get("directPosting") is False
+            ):
+                out.append(code)
+        return out
 
     async def _verify_and_post(
         self,
@@ -330,19 +460,22 @@ class BusinessCentralAdapter(ErpAdapter):
           it again.
         * Open / Paid (posted in between, or found by the lookup) → success
           only when BC's total is the approved amount. Otherwise refused,
-          non-retryably: ``posted_total_mismatch`` (a different total) or
-          ``posted_total_unconfirmed`` (none stated). A posted invoice is never
-          deleted — reversing it is an accountant's corrective credit memo in
-          BC — and the message says so.
+          non-retryably and never deleted (reversing a posted invoice is an
+          accountant's corrective credit memo in BC): ``posted_total_mismatch``,
+          or ``posted_total_unconfirmed`` when no total is stated.
         * Draft that BC taxed on top of our gross lines → replaced, once, by a
           draft at the invoice's net amounts (``_reprice_to_net``). An invoice
           with no per-line net is refused instead: ``tax_not_itemised`` (or
           ``line_amount_precision`` for a net finer than the currency).
-        * Any other draft with a total ≠ ``payload.amount`` (or none) → DELETE
-          it, still unposted, and refuse non-retryably
-          (``posted_total_mismatch``; see ``_delete_and_refuse``).
-        * Post fails → retryable, PII-free. It used to be swallowed, reporting
-          success for an invoice BC held only as a draft.
+        * Any other draft with a total ≠ ``payload.amount`` (or none) → when
+          we created it, DELETE it, still unposted, and refuse
+          ``posted_total_mismatch`` (``_delete_and_refuse``). When the lookup
+          found it, it may be a BC user's own draft under this number, so it is
+          refused the same way but left in BC, and the message says so.
+        * Post refused → a refusal coded by ``_coded_refusal`` deletes the
+          draft first (re-posting it cannot succeed); any other non-2xx is a
+          PII-free failure, retryable as its status says, with the draft kept
+          for the retry's lookup to finish.
         * Posted → read again. BC carries a draft's id to the posted invoice,
           so the same URL now names it, and its total is checked once more: a
           BC user who edited the draft after our check had it posted at a total
@@ -370,6 +503,10 @@ class BusinessCentralAdapter(ErpAdapter):
                     if not await _delete_draft(client, url, headers, etag):
                         return _draft_not_deleted(doc_id, POSTED_TOTAL_MISMATCH)
                     return await self._reprice_to_net(payload, lines, headers)
+                if found_by_lookup:
+                    # Maybe ours, maybe a BC user's draft of this number: never
+                    # delete what we cannot prove we created.
+                    return _draft_not_deleted(doc_id, POSTED_TOTAL_MISMATCH)
                 return await _delete_and_refuse(
                     client, url, headers, etag, doc_id, POSTED_TOTAL_MISMATCH
                 )
@@ -379,6 +516,13 @@ class BusinessCentralAdapter(ErpAdapter):
                 headers=headers,
             )
             if post_resp.status_code not in (200, 204):
+                if not erp_status_retryable(post_resp.status_code):
+                    coded = await self._coded_refusal(client, headers, payload, post_resp)
+                    if coded.refusal_code:
+                        etag = record.get("@odata.etag") or known_etag
+                        return await _delete_and_refuse(
+                            client, url, headers, etag, doc_id, coded.refusal_code, coded
+                        )
                 return erp_http_failure(_PROVIDER, post_resp.status_code, erp_document_id=doc_id)
             posted = await _read_invoice(client, url, headers)
         if isinstance(posted, ErpPostResult):
@@ -446,12 +590,14 @@ class BusinessCentralAdapter(ErpAdapter):
         data = resp.json()
         bc_status = data.get("status", "").lower()
 
+        # `Corrective` marks an invoice BC created by cancelling a posted
+        # credit memo — a live document, not a cancelled one, and never one we
+        # pushed — so it is `unknown`, as is BC's blank status.
         status_map = {
             "draft": ErpInvoiceStatus.draft,
             "open": ErpInvoiceStatus.open,
             "paid": ErpInvoiceStatus.paid,
             "canceled": ErpInvoiceStatus.cancelled,
-            "corrective": ErpInvoiceStatus.cancelled,
         }
         return status_map.get(bc_status, ErpInvoiceStatus.unknown)
 
@@ -652,7 +798,7 @@ def _bc_posted(
             refusal_provider=_PROVIDER,
         )
     message = (
-        "Already posted to Business Central (idempotent — found by externalDocumentNumber)"
+        "Already posted to Business Central (idempotent — found by vendor and invoice number)"
         if found_by_lookup
         else "Posted to Business Central"
     )
@@ -683,6 +829,14 @@ def _d365_vendor_to_payload(raw: dict) -> VendorPayload | None:
     with no term, or an expansion BC did not return, maps to None, never the
     GUID.
 
+    ``active`` is False for a vendor BC has ``blocked`` (``NAV.vendorBlocked``:
+    blank, ``Payment`` or ``All``). ``All`` blocks posting; ``Payment`` lets an
+    invoice post but blocks paying the vendor, and a vendor BC will not pay is
+    not one FeohLedger's own payment runs may pay either. The sync never makes
+    a blocked vendor a payee and marks a linked one ``inactive`` — which a
+    payment run refuses (``payment_runs.PAYABLE_VENDOR_STATUS``) — and never
+    re-activates it when BC unblocks it: that is a person's call.
+
     ``erp_vendor_id`` is the vendor's GUID ``id`` and nothing else: it is what
     ``post_invoice`` posts as ``vendorId``. The vendor No. is another kind of
     key (a stored No. would be posted as a GUID and refused), and a name is no
@@ -705,6 +859,7 @@ def _d365_vendor_to_payload(raw: dict) -> VendorPayload | None:
         phone=raw.get("phoneNumber"),
         tax_id=raw.get("taxRegistrationNumber"),
         payment_terms=terms or None,
+        active=str(raw.get("blocked") or "").strip() not in ("Payment", "All"),
     )
 
 
@@ -727,7 +882,7 @@ def _bc_line(account_id: str, amount: Decimal, memo: str) -> dict:
     return {
         "lineType": "Account",
         "accountId": account_id,
-        "description": memo or "",
+        "description": (memo or "")[:_LINE_DESCRIPTION_MAX],
         "quantity": Decimal(1),
         "unitCost": amount,
     }
@@ -825,7 +980,7 @@ async def _delete_draft(client, url: str, headers: dict, etag: object) -> bool:
     return resp.status_code in (200, 204)
 
 
-def _draft_not_deleted(doc_id: str, reason: str) -> ErpPostResult:
+def _draft_not_deleted(doc_id: str, reason: str, params: dict | None = None) -> ErpPostResult:
     return ErpPostResult(
         success=False,
         erp_document_id=doc_id,
@@ -833,21 +988,52 @@ def _draft_not_deleted(doc_id: str, reason: str) -> ErpPostResult:
         retryable=False,
         refusal_code=reason,
         refusal_provider=_PROVIDER,
+        refusal_params=params,
     )
 
 
 async def _delete_and_refuse(
-    client, url: str, headers: dict, etag: object, doc_id: str, reason: str
+    client,
+    url: str,
+    headers: dict,
+    etag: object,
+    doc_id: str,
+    reason: str,
+    coded: ErpPostResult | None = None,
 ) -> ErpPostResult:
     """Delete a draft we will not post, then refuse ``reason`` non-retryably.
 
     The DELETE carries the draft's real etag (the one just read, else the
     create / lookup response's). The message says whether the draft is gone,
-    so the accountant knows when one is still sitting in BC.
+    so the accountant knows when one is still sitting in BC. ``coded`` is a
+    refusal already built (with its params) to return when the draft is gone.
     """
     if await _delete_draft(client, url, headers, etag):
-        return erp_refusal(_PROVIDER, reason)
-    return _draft_not_deleted(doc_id, reason)
+        return coded if coded is not None else erp_refusal(_PROVIDER, reason)
+    return _draft_not_deleted(doc_id, reason, coded.refusal_params if coded else None)
+
+
+def _bc_error_message_matches(resp, pattern: re.Pattern) -> bool:
+    """Whether BC's ``error.message`` matches ``pattern``. Read to code a
+    refusal and never kept: the text can name a record."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    error = body.get("error") if isinstance(body, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+    return isinstance(message, str) and bool(pattern.search(message))
+
+
+def _bc_account_codes(payload: InvoicePayload) -> dict[str, str]:
+    """Our GL code for each BC account id the payload posts on."""
+    out: dict[str, str] = {}
+    for line in payload.line_items:
+        if line.gl_account_erp_id:
+            out.setdefault(line.gl_account_erp_id, line.gl_account or line.gl_account_erp_id)
+    if payload.gl_account_erp_id:
+        out.setdefault(payload.gl_account_erp_id, payload.gl_account or payload.gl_account_erp_id)
+    return out
 
 
 #: BC ``category`` (NAV.glAccountCategory) -> ``GLAccountPayload.account_type``.
@@ -868,7 +1054,9 @@ def _bc_account_to_payload(raw: dict) -> GLAccountPayload | None:
     ``code`` is the account No. (``number``), the code an AP clerk picks;
     ``erp_account_id`` is its ``id`` GUID, what a bill line is posted on.
     Only ``Posting`` accounts are kept (a Heading / Total / Begin-End Total
-    cannot carry an entry).
+    cannot carry an entry). A Posting account with ``directPosting`` false (a
+    control account: payables, bank, inventory) refuses a purchase line, so it
+    is emitted ``active=False`` like a blocked one: in the chart, not codable.
 
     Emitted, not dropped: a blocked account as ``active=False`` and a No.
     longer than ``gl_accounts.code`` as it is — the sync marks the first
@@ -887,7 +1075,7 @@ def _bc_account_to_payload(raw: dict) -> GLAccountPayload | None:
         name=str(raw.get("displayName") or number)[:255],
         account_type=_BC_ACCOUNT_CATEGORIES.get(str(raw.get("category") or "").strip().lower()),
         erp_account_id=str(account_id),
-        active=raw.get("blocked") is not True,
+        active=raw.get("blocked") is not True and raw.get("directPosting") is not False,
     )
 
 

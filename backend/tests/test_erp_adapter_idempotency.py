@@ -8,7 +8,7 @@ retry-safe via whichever mechanism its target ERP actually supports:
   - `merge_dev`  — an `X-Idempotency-Key` header on the create POST.
   - `netsuite`   — a pre-create lookup by `externalId` (NetSuite enforces
     uniqueness on it); a match short-circuits to success WITHOUT posting.
-  - `dynamics_365_bc` — a pre-create lookup by `externalDocumentNumber`; same
+  - `dynamics_365_bc` — a pre-create lookup by vendor + `vendorInvoiceNumber`; same
     short-circuit shape.
 
 HTTP is mocked with the same `patch("httpx.AsyncClient")` style as
@@ -52,7 +52,7 @@ def _payload(**overrides) -> InvoicePayload:
         currency="USD",
         invoice_date=date(2026, 1, 1),
         correlation_id="corr-idem-1",
-        vendor_erp_id="ERP-V-1",
+        vendor_erp_id="00000000-0000-0000-0000-0000000000a1",
         gl_account_erp_id="ERP-6000",
     )
     base.update(overrides)
@@ -312,7 +312,7 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
     import json
 
     body = json.loads(client.post.await_args.kwargs["content"])
-    assert body["entity"] == {"id": "ERP-V-1"}
+    assert body["entity"] == {"id": "00000000-0000-0000-0000-0000000000a1"}
     assert body["expense"]["items"] == [
         {"account": {"id": "ERP-6000"}, "amount": 100.00, "memo": "INV-1"}
     ]
@@ -347,7 +347,7 @@ def test_netsuite_post_invoice_fails_retryably_when_lookup_fails():
 
 
 def test_d365_post_invoice_fails_retryably_when_lookup_fails():
-    """Same rule for Business Central's externalDocumentNumber lookup."""
+    """Same rule for Business Central's vendor + vendorInvoiceNumber lookup."""
     adapter = _bc_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
@@ -367,7 +367,7 @@ def test_d365_post_invoice_fails_retryably_when_lookup_fails():
 
 
 # ---------------------------------------------------------------------------
-# dynamics_365_bc — pre-create lookup by externalDocumentNumber
+# dynamics_365_bc — pre-create lookup by vendor + vendorInvoiceNumber
 # ---------------------------------------------------------------------------
 
 
@@ -378,14 +378,14 @@ def _bc_adapter() -> BusinessCentralAdapter:
             "client_id": "cid",
             "client_secret": "sec",
             "environment": "sandbox",
-            "company_id": "c-1",
+            "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
             "base_url": "https://api.businesscentral.dynamics.com/v2.0",
         }
     )
     return adapter
 
 
-def test_d365_post_invoice_short_circuits_when_external_document_number_already_exists(
+def test_d365_post_invoice_short_circuits_when_the_vendor_invoice_number_already_exists(
     monkeypatch,
 ):
     """An Open invoice found by the lookup is a success — once BC's own total,
@@ -396,7 +396,7 @@ def test_d365_post_invoice_short_circuits_when_external_document_number_already_
         client.post = AsyncMock(
             side_effect=[
                 _mock_response(200, {"access_token": "tok"}),  # token exchange
-                AssertionError("must not create when externalDocumentNumber already exists"),
+                AssertionError("must not create when the invoice already exists"),
             ]
         )
         client.get = AsyncMock(
@@ -406,7 +406,7 @@ def test_d365_post_invoice_short_circuits_when_external_document_number_already_
             ]
         )
         client.delete = AsyncMock(side_effect=AssertionError("a posted invoice is never deleted"))
-        result = _run(adapter.post_invoice(_payload(correlation_id="corr-bc-existing")))
+        result = _run(adapter.post_invoice(_payload(invoice_number="inv-o'brien-1")))
 
     assert result.success
     assert result.erp_document_id == "bc-doc-1"
@@ -415,8 +415,14 @@ def test_d365_post_invoice_short_circuits_when_external_document_number_already_
     # Only the token exchange POST happened — no purchaseInvoices create.
     assert client.post.await_count == 1
 
+    # API v2.0's purchaseInvoice has no externalDocumentNumber: the key is the
+    # vendor and its Vendor Invoice No. — a Code field, so upper-cased, with an
+    # OData-doubled quote.
     filter_params = client.get.await_args_list[0].kwargs["params"]
-    assert "corr-bc-existing" in filter_params["$filter"]
+    assert filter_params["$filter"] == (
+        "vendorId eq 00000000-0000-0000-0000-0000000000a1 "
+        "and vendorInvoiceNumber eq 'INV-O''BRIEN-1'"
+    )
 
 
 def _bc_record(
@@ -494,7 +500,7 @@ def test_d365_post_invoice_proceeds_to_create_when_no_match(monkeypatch):
     import json
 
     body = json.loads(client.post.await_args_list[1].kwargs["content"])
-    assert body["vendorId"] == "ERP-V-1"
+    assert body["vendorId"] == "00000000-0000-0000-0000-0000000000a1"
     assert "vendorNumber" not in body
     # Each line on the G/L account's id from the chart sync, never its No.
     assert body["purchaseInvoiceLines"] == [
@@ -649,7 +655,7 @@ def test_d365_lookup_hit_on_a_draft_rechecks_the_total_and_posts_it(monkeypatch)
     assert "content" not in client.post.await_args_list[1].kwargs  # no second create
 
 
-def test_d365_lookup_hit_on_a_mismatched_draft_is_deleted_and_refused(monkeypatch):
+def test_d365_lookup_hit_on_a_mismatched_draft_is_refused_and_left_in_bc(monkeypatch):
     adapter = _offline_bc(monkeypatch)
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
@@ -665,12 +671,17 @@ def test_d365_lookup_hit_on_a_mismatched_draft_is_deleted_and_refused(monkeypatc
                 _bc_record("bc-m", "Draft", Decimal("120.00")),
             ]
         )
-        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        client.delete = AsyncMock(side_effect=AssertionError("never delete a found draft"))
         result = _run(adapter.post_invoice(_payload()))
 
+    # Found by vendor + number, so it may be a BC user's own draft: refused,
+    # never deleted, and the message says it is still there.
     assert result.retryable is False
-    assert result.message == "Business Central post refused: posted_total_mismatch"
-    client.delete.assert_awaited_once()
+    assert result.message == (
+        "Business Central post refused: posted_total_mismatch "
+        "(the draft was not deleted in Business Central)"
+    )
+    client.delete.assert_not_awaited()
 
 
 def _posted_after_a_failed_delete(adapter, *, lookup_status: str, total: Decimal | None):
@@ -995,7 +1006,8 @@ def test_d365_a_vat_company_gets_the_net_amounts_and_posts_the_approved_gross(mo
     assert [line["unitCost"] for line in net["purchaseInvoiceLines"]] == [100.00]
     # The second draft is the same invoice: same correlation id, so a retry's
     # lookup finds it, and no tax field is sent (BC computes every one).
-    assert net["externalDocumentNumber"] == gross["externalDocumentNumber"]
+    assert net["vendorInvoiceNumber"] == gross["vendorInvoiceNumber"]
+    assert "externalDocumentNumber" not in gross
     assert set(net["purchaseInvoiceLines"][0]) == set(gross["purchaseInvoiceLines"][0])
     assert (
         client.post.await_args_list[3].args[0].endswith("purchaseInvoices(bc-n)/Microsoft.NAV.post")
@@ -1197,11 +1209,11 @@ def test_d365_a_net_draft_found_by_the_lookup_is_not_repriced_again(monkeypatch)
                 ),
             ]
         )
-        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        client.delete = AsyncMock(side_effect=AssertionError("never delete a found draft"))
         result = _run(adapter.post_invoice(_vat_payload()))
 
     assert result.refusal_code == "posted_total_mismatch"
-    client.delete.assert_awaited_once()
+    assert result.message.endswith("(the draft was not deleted in Business Central)")
 
 
 def test_bc_net_lines_are_each_lines_gross_less_its_own_tax():
@@ -1243,6 +1255,236 @@ def test_bc_net_lines_are_each_lines_gross_less_its_own_tax():
     )
     assert fine.net is None
     assert fine.net_refusal == "line_amount_precision"
+
+
+# ---------------------------------------------------------------------------
+# dynamics_365_bc — the lookup key, and refusals coded from facts (ERP audit)
+# ---------------------------------------------------------------------------
+
+
+def test_d365_never_sends_external_document_number():
+    """API v2.0's purchaseInvoice has no `externalDocumentNumber` (only a
+    salesInvoice does): BC answers a `$filter` or a body naming it with 400, so
+    every push used to fail at the lookup."""
+    import inspect
+
+    from app.services.erp_adapters import dynamics_365_bc
+
+    assert "externalDocumentNumber" not in inspect.getsource(dynamics_365_bc).replace(
+        "no ``externalDocumentNumber``", ""
+    )
+
+
+def test_d365_several_invoices_under_the_number_are_refused_not_guessed(monkeypatch):
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[_mock_response(200, {"access_token": "tok"}), AssertionError("no create")]
+        )
+        client.get = AsyncMock(
+            return_value=_mock_response(
+                200, {"value": [{"id": "a", "status": "Open"}, {"id": "b", "status": "Draft"}]}
+            )
+        )
+        result = _run(adapter.post_invoice(_payload()))
+    assert result.retryable is False
+    assert result.refusal_code == "duplicate_document_number"
+
+
+def test_d365_preflight_refusals_send_nothing():
+    """An invoice number past BC's Code[35] and a vendor id that is not a BC
+    GUID (it is spliced into the lookup's `$filter`) are refused before any
+    request, `not_posted`."""
+    for payload, code in (
+        (_payload(invoice_number="X" * 36), "doc_number_too_long"),
+        (_payload(vendor_erp_id="V0001"), "vendor_not_linked"),
+        (_payload(vendor_erp_id="x' or 1 eq 1 or vendorId eq '"), "vendor_not_linked"),
+    ):
+        with patch("httpx.AsyncClient") as cm:
+            result = _run(_bc_adapter().post_invoice(payload))
+        cm.assert_not_called()
+        assert result.refusal_code == code
+        assert result.not_posted is True
+
+
+def test_d365_a_company_name_in_company_id_is_refused_before_any_request(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "erp_d365_api_base", "")
+    adapter = BusinessCentralAdapter(
+        {
+            "tenant_id": "t",
+            "client_id": "c",
+            "client_secret": "s",
+            "environment": "sandbox",
+            "company_id": "CRONUS USA, Inc.",
+        }
+    )
+    with patch("httpx.AsyncClient") as cm:
+        result = _run(adapter.post_invoice(_payload()))
+    cm.assert_not_called()
+    assert result.retryable is False
+    assert result.message == (
+        "Business Central config 'company_id' must be the company's id (a GUID)"
+    )
+
+
+def test_bc_line_descriptions_are_cut_to_bcs_text_100():
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    lines = _bc_invoice_lines(_payload(description="d" * 150, line_items=[]))
+    assert lines.gross[0]["description"] == "d" * 100
+
+
+def _bc_error(status: int, code: str, message: str):
+    return _mock_response(status, {"error": {"code": code, "message": message}})
+
+
+def _create_refused(adapter, gets, payload=None):
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _bc_error(400, "Application_DialogException", "You cannot post: Acme, Main St."),
+            ]
+        )
+        client.get = AsyncMock(side_effect=[_mock_response(200, {"value": []}), *gets])
+        result = _run(adapter.post_invoice(payload or _payload()))
+    return result, client
+
+
+def _bc_json(body: dict):
+    from app.utils.json_money import dumps_exact_json
+
+    resp = _mock_response(200, body)
+    resp.content = dumps_exact_json(body).encode()
+    return resp
+
+
+def test_d365_a_create_refused_for_a_blocked_vendor_is_coded_and_not_posted(monkeypatch):
+    """BC refused the create, and the vendor reads back blocked `All`: coded
+    `vendor_inactive` from that fact (decisions §285's rule), never from BC's
+    message, which can name the vendor; nothing was created."""
+    result, client = _create_refused(
+        _offline_bc(monkeypatch), [_bc_json({"id": "v", "blocked": "All"})]
+    )
+    assert result.refusal_code == "vendor_inactive"
+    assert result.not_posted is True
+    assert result.retryable is False
+    assert "Acme" not in result.message
+    assert (
+        client.get.await_args_list[1]
+        .args[0]
+        .endswith("vendors(00000000-0000-0000-0000-0000000000a1)")
+    )
+
+
+def test_d365_a_create_refused_for_an_unpostable_account_names_our_code(monkeypatch):
+    account = "a6100000-0000-0000-0000-000000006100"
+    payload = _payload(gl_account="6100", gl_account_erp_id=account, line_items=[])
+    result, _ = _create_refused(
+        _offline_bc(monkeypatch),
+        [_bc_json({"id": "v", "blocked": " "}), _bc_json({"id": account, "directPosting": False})],
+        payload,
+    )
+    assert result.refusal_code == "account_inactive"
+    assert result.refusal_params == {"accounts": ["6100"]}
+    assert result.not_posted is True
+
+
+def test_d365_an_unexplained_create_refusal_is_uncoded_but_not_posted(monkeypatch):
+    account = "a6100000-0000-0000-0000-000000006100"
+    payload = _payload(gl_account_erp_id=account, line_items=[])
+    result, _ = _create_refused(
+        _offline_bc(monkeypatch),
+        [_bc_json({"id": "v", "blocked": " "}), _bc_json({"id": account, "blocked": False})],
+        payload,
+    )
+    assert result.refusal_code is None
+    assert result.not_posted is True
+    assert result.message == "Business Central post failed: HTTP 400 (invalid_request)"
+
+
+def test_d365_a_post_refused_for_a_closed_period_deletes_the_draft(monkeypatch):
+    """BC refuses `Microsoft.NAV.post` for a posting date outside the allowed
+    range. Re-posting that draft cannot succeed, so it is deleted (with its
+    etag) and the refusal is `period_closed`."""
+    adapter = _offline_bc(monkeypatch)
+    account = "a6100000-0000-0000-0000-000000006100"
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-pc", "number": "PI-1"}),
+                _bc_error(
+                    400,
+                    "Application_DialogException",
+                    "Posting Date is not within your range of allowed posting dates.",
+                ),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_record("bc-pc", "Draft", Decimal("100.00"), 'W/"pc"'),
+                _bc_json({"id": "v", "blocked": " "}),
+                _bc_json({"id": account, "blocked": False}),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_payload(gl_account_erp_id=account, line_items=[])))
+
+    assert result.refusal_code == "period_closed"
+    assert result.retryable is False
+    client.delete.assert_awaited_once()
+    assert client.delete.await_args.kwargs["headers"]["If-Match"] == 'W/"pc"'
+
+
+def test_d365_an_uncoded_post_refusal_keeps_the_draft_for_the_retry(monkeypatch):
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-u", "number": "PI-1"}),
+                _bc_error(400, "Application_DialogException", "Something else."),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_record("bc-u", "Draft", Decimal("100.00")),
+                _bc_json({"id": "v", "blocked": " "}),
+                _bc_json({"id": "ERP-6000"}),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("kept for the retry"))
+        result = _run(adapter.post_invoice(_payload(line_items=[])))
+
+    assert result.refusal_code is None
+    assert result.erp_document_id == "bc-u"
+    assert result.message == "Business Central post failed: HTTP 400 (invalid_request)"
+
+
+def test_d365_status_corrective_and_blank_are_unknown(monkeypatch):
+    from app.services.erp_adapters.base import ErpInvoiceStatus
+
+    adapter = _offline_bc(monkeypatch)
+    for status, expected in (
+        ("Corrective", ErpInvoiceStatus.unknown),
+        (" ", ErpInvoiceStatus.unknown),
+        ("Canceled", ErpInvoiceStatus.cancelled),
+        ("Paid", ErpInvoiceStatus.paid),
+    ):
+        with patch("httpx.AsyncClient") as cm:
+            client = cm.return_value.__aenter__.return_value
+            client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+            client.get = AsyncMock(return_value=_mock_response(200, {"status": status}))
+            assert _run(adapter.get_invoice_status("d")) == expected
 
 
 # ---------------------------------------------------------------------------

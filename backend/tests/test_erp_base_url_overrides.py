@@ -267,9 +267,14 @@ def test_d365_api_url_uses_override_and_skips_ssrf_guard(monkeypatch):
     """The operator override is trusted: a localhost base must NOT raise
     UnsafeUrlError, and config base_url must not be required at all."""
     monkeypatch.setattr(settings, "erp_d365_api_base", FAKE_D365)
-    adapter = BusinessCentralAdapter({"environment": "sandbox", "company_id": "c-1"})
+    adapter = BusinessCentralAdapter(
+        {"environment": "sandbox", "company_id": "1b2c3d4e-0000-0000-0000-00000000c001"}
+    )
     url = _run(adapter._api_url("purchaseInvoices"))
-    assert url == f"{FAKE_D365}/sandbox/api/v2.0/companies(c-1)/purchaseInvoices"
+    assert (
+        url
+        == f"{FAKE_D365}/sandbox/api/v2.0/companies(1b2c3d4e-0000-0000-0000-00000000c001)/purchaseInvoices"
+    )
 
 
 @pytest.mark.parametrize(
@@ -293,7 +298,9 @@ def test_d365_admin_base_url_must_be_https_on_microsofts_api_host(monkeypatch, b
     SSRF guard would happily pass — is a credential leak. The error names the
     key, never the value."""
     monkeypatch.setattr(settings, "erp_d365_api_base", "")
-    adapter = BusinessCentralAdapter({"base_url": base_url, "company_id": "c-1"})
+    adapter = BusinessCentralAdapter(
+        {"base_url": base_url, "company_id": "1b2c3d4e-0000-0000-0000-00000000c001"}
+    )
     with pytest.raises(BusinessCentralConfigError) as exc:
         _run(adapter._api_url("purchaseInvoices"))
     assert "'base_url'" in str(exc.value)
@@ -303,11 +310,13 @@ def test_d365_admin_base_url_must_be_https_on_microsofts_api_host(monkeypatch, b
 def test_d365_blank_base_url_is_microsofts_default(monkeypatch):
     """`base_url` is optional in the provider catalogue; blank used to KeyError."""
     monkeypatch.setattr(settings, "erp_d365_api_base", "")
-    adapter = BusinessCentralAdapter({"environment": "production", "company_id": "c-1"})
+    adapter = BusinessCentralAdapter(
+        {"environment": "production", "company_id": "1b2c3d4e-0000-0000-0000-00000000c001"}
+    )
     with patch("app.utils.url_safety.assert_public_url_async", AsyncMock()):
         url = _run(adapter._api_url("vendors"))
     assert url == (
-        "https://api.businesscentral.dynamics.com/v2.0/production/api/v2.0/companies(c-1)/vendors"
+        "https://api.businesscentral.dynamics.com/v2.0/production/api/v2.0/companies(1b2c3d4e-0000-0000-0000-00000000c001)/vendors"
     )
 
 
@@ -316,7 +325,10 @@ def test_d365_microsofts_host_still_passes_through_the_ssrf_guard(monkeypatch):
     allowed host ever resolved inward, the request is still refused."""
     monkeypatch.setattr(settings, "erp_d365_api_base", "")
     adapter = BusinessCentralAdapter(
-        {"base_url": "https://api.businesscentral.dynamics.com/v2.0", "company_id": "c-1"}
+        {
+            "base_url": "https://api.businesscentral.dynamics.com/v2.0",
+            "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
+        }
     )
     guard = AsyncMock(side_effect=UnsafeUrlError("internal"))
     with patch("app.utils.url_safety.assert_public_url_async", guard):
@@ -340,7 +352,7 @@ def test_d365_post_invoice_refuses_a_bad_base_url_before_any_request(monkeypatch
             "tenant_id": "t",
             "client_id": "c",
             "client_secret": "s",
-            "company_id": "c-1",
+            "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
         }
     )
     payload = InvoicePayload(
@@ -350,7 +362,7 @@ def test_d365_post_invoice_refuses_a_bad_base_url_before_any_request(monkeypatch
         currency="USD",
         invoice_date=date(2026, 1, 1),
         correlation_id="corr-1",
-        vendor_erp_id="V-1",
+        vendor_erp_id="00000000-0000-0000-0000-0000000000a1",
         gl_account_erp_id="A-1",
     )
     with patch("httpx.AsyncClient") as cm:
@@ -374,7 +386,7 @@ def test_d365_list_syncs_keep_the_ssrf_guard_on_admin_config(monkeypatch, method
             "base_url": "http://169.254.169.254/latest",
             "client_id": "c",
             "client_secret": "s",
-            "company_id": "c-1",
+            "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
         }
     )
     with patch("httpx.AsyncClient") as cm:
@@ -390,7 +402,10 @@ def test_d365_api_url_override_takes_precedence_over_admin_config(monkeypatch):
     """Both set → the operator env wins (and the admin value is never fetched)."""
     monkeypatch.setattr(settings, "erp_d365_api_base", FAKE_D365 + "/")  # rstrip
     adapter = BusinessCentralAdapter(
-        {"base_url": "https://api.businesscentral.dynamics.com/v2.0", "company_id": "c-1"}
+        {
+            "base_url": "https://api.businesscentral.dynamics.com/v2.0",
+            "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
+        }
     )
     url = _run(adapter._api_url("vendors"))
     assert url.startswith(f"{FAKE_D365}/production/")

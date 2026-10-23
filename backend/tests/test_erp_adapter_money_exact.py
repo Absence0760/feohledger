@@ -91,7 +91,7 @@ def _payload(**overrides) -> InvoicePayload:
         tax_amount=Decimal("0.10"),
         discount_amount=Decimal("5.50"),
         gl_account="6000",
-        vendor_erp_id="ERP-V-1",
+        vendor_erp_id="00000000-0000-0000-0000-0000000000a1",
         gl_account_erp_id="ERP-6000",
         line_items=[
             LineItemPayload(
@@ -363,7 +363,7 @@ def _bc_adapter() -> BusinessCentralAdapter:
             "client_id": "cid",
             "client_secret": "sec",
             "environment": "sandbox",
-            "company_id": "c-1",
+            "company_id": "1b2c3d4e-0000-0000-0000-00000000c001",
             "base_url": "https://api.businesscentral.dynamics.com/v2.0",
         }
     )
