@@ -266,6 +266,7 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "tax_rate_unresolved",
         "missing_dates",
         "duplicate_document_number",
+        "bill_refused",
         # QuickBooks Online
         "doc_number_too_long",
         "currency_unknown",
@@ -300,6 +301,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "due_date_missing",
         "amount_not_positive",
         "job_unconfirmed",
+        # Sage Intacct
+        "bill_left_unposted",
         # `services/erp` itself: the sealed ERP credentials could not be opened
         "erp_credentials_unavailable",
         # `services/erp_export_gate`: an open duplicate / fraud exception (§286)

@@ -31,11 +31,14 @@ import {
  *   2. Full send — after the vendor + GL syncs an approved invoice posts as an
  *      AP bill; the bill read back FROM THE FAKE carries the exact total as a
  *      decimal STRING (the fake refuses a numeric `txnAmount`, as Intacct
- *      does), the synced vendor id, our bill number and an idempotency
- *      reference.
+ *      does), the synced vendor id, our bill number, an idempotency reference,
+ *      and state `posted` (the fake, like Intacct, makes a bill created
+ *      without `state` a draft that books nothing).
  *   3. Fail closed — an unlinked vendor is refused before anything is posted.
- *   4. PO sync — purchasing documents import with exact totals, mapped states
- *      and currency.
+ *   4. A create Intacct refuses (a closed period) is the coded `bill_refused`.
+ *   5. PO sync — purchasing documents import with exact totals, mapped states
+ *      and currency (the fake 400s a query naming a field the object lacks,
+ *      such as the `txnTotal` the adapter once asked for).
  */
 
 const INTACCT_ERP_CONFIG = {
@@ -122,6 +125,31 @@ test.describe('/erp sage_intacct adapter against fake-erp', () => {
 			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
 			expect(await erpFailureFromAudit(page, inv.id)).toBe(
 				'Sage Intacct post refused: vendor_not_linked'
+			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a bill Intacct refuses (closed period) is a coded refusal, not "possibly posted"', async ({
+		page
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		// fake-erp answers a bill dated before 2020-01-01 with Intacct's 422
+		// business-validation refusal, as a closed period does.
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-INTACCT-CLOSED',
+			invoiceDate: '2019-06-01',
+			dueDate: '2019-06-30',
+			amount: '75.00',
+			vendor: 'Fake Intacct Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Sage Intacct post refused: bill_refused'
 			);
 		} finally {
 			await deleteInvoice(page, inv.id);

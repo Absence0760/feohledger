@@ -308,6 +308,7 @@ export const enSettings = {
 	'org.erp.help.sageZaBaseUrl': 'Only for a Sage partner endpoint. Leave blank to use Sage\'s South African API.',
 	'org.erp.help.byoApp': 'Only if you registered your own app with the ERP.',
 	'org.erp.help.intacctLocation': 'Leave blank to post at the company level rather than to one entity.',
+	'org.erp.help.intacctUser': 'A Web Services user. The company must subscribe to Web Services, authorize our sender ID, and add our client ID with this user under Company > Setup > Company > Security > Authorized Client Applications.',
 	'org.erp.oauth.byoHint': 'Leave the client ID and secret blank to connect through FeohLedger\'s app. Fill them in only if you registered your own app with {erp}.',
 	'org.erp.oauth.connect': 'Connect to {erp}',
 	'org.erp.oauth.redirecting': 'Opening {erp}…',

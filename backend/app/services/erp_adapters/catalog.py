@@ -133,12 +133,14 @@ def _byo_app_fields() -> list[dict[str, Any]]:
 
 
 #: Sage Intacct's REST API, client-credentials grant. Kept as one list so the
-#: field names can be changed in one place to match the adapter.
+#: field names can be changed in one place to match the adapter. The REST API
+#: still needs a Web Services licence (sender ID) authorized in the customer's
+#: company, which the ``user_id`` help says (decisions §269 corrected).
 SAGE_INTACCT_FIELDS: list[dict[str, Any]] = [
     _field("client_id"),
     _field("client_secret", secret=True),
     _field("company_id"),
-    _field("user_id"),
+    _field("user_id", help_key="org.erp.help.intacctUser"),
     _field("location_id", required=False, help_key="org.erp.help.intacctLocation"),
     _field("po_document_type", required=False, placeholder="Purchase Order"),
 ]
@@ -272,7 +274,7 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
         "regions": ["US", "ZA"],
         "auth": "credentials",
         "fields": SAGE_INTACCT_FIELDS,
-        "docs_url": "https://developer.intacct.com/web-services/",
+        "docs_url": "https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/",
     },
     {
         "key": "netsuite",

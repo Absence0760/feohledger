@@ -2454,8 +2454,15 @@ as oversights.
       against fake-erp only (decisions §269). Unverified:
       **SYSPRO:** the APSTIN / COMFND schemas and the `ApInvoice` /
       `PorMasterHdr` / `PorMasterDetail` column names.
-      **Intacct:** bill `state` values, the purchasing-document query name,
-      `txnTotal`, and whether REST can reverse a paid bill.
+      **Intacct** (the documented mismatches are fixed, decisions §320;
+      the rest is #654): whether a `state: "posted"` create is honoured or
+      refused in a company with bill approvals, the `errorId`s for a closed
+      period / inactive vendor or account / duplicate bill number (to map
+      `period_closed` and `duplicate_document_number`), whether a bill
+      settled by a debit memo reads `paid`, multi-currency without an
+      exchange rate, a top-level create in a multi-entity company, whether the
+      token endpoint takes the form-encoded body, and the reverse-workflow
+      answer in a reversal-enabled company.
       **Sage SA:** the `SupplierInvoice/Save` body, `DocumentNumber` and
       `Reference` limits, OData filters, `CurrencyId` for home-currency
       suppliers, account categories, and delete in a locked period.

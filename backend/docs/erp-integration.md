@@ -1805,13 +1805,19 @@ AP; set up by pasting credentials — no OAuth consent screen.
 
 **API choice: the REST API, not the XML gateway.** Intacct has two APIs. The
 XML Web Services gateway (`https://api.intacct.com/ia/xml/xmlgw.phtml`) needs a
-paid Web Services *sender ID* that each customer company must authorize, a
-session per request batch, and XML whose error blocks echo the submitted
-fields. The REST API (`https://api.intacct.com/ia/api/v1`) went generally
-available in 2025, is where Sage points new integrations, and covers every
-object used here. Its OAuth 2.0 **client-credentials** grant authenticates a
-Web Services user directly, so the setup page stays a paste-the-credentials
-form. JSON throughout — no XML parser on this path.
+session per request batch and answers in XML whose error blocks echo the
+submitted fields. The REST API (`https://api.intacct.com/ia/api/v1`) went
+generally available in 2025, is where Sage points new integrations, and covers
+every object used here. JSON throughout — no XML parser on this path.
+
+**Licensing: REST still needs a Web Services licence** (decisions §320, which
+corrects §269). The app is enrolled in Sage's developer programme against a
+Web Services sender ID, and each customer company must subscribe to Web
+Services, authorize that sender ID, and add our client id together with its
+Web Services user under *Company > Setup > Company > Security > Authorized
+Client Applications*. The `user_id` field's help on the setup page says so.
+Disconnecting on the customer's side means removing that entry: no long-lived
+token is stored here to revoke.
 
 | `settings.erp` key | Secret | Meaning |
 |---|---|---|
@@ -1824,11 +1830,11 @@ form. JSON throughout — no XML parser on this path.
 
 | Operation | Call |
 |---|---|
-| token | `POST <base>/oauth2/token` (form: `grant_type=client_credentials`, `client_id`, `client_secret`, `username`) — one per adapter operation |
-| `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`) or any GL account ERP id (`account_not_linked`) → `POST services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` |
-| `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` only — never `totalTxnAmountDue = 0` (decisions §303) |
-| `void_invoice` | deletes a draft / posted-unpaid bill; a bill that is paid, partially paid, selected for payment or reversed returns `False` (reversal with its payment is an accountant's call) |
-| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors and accounts up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort |
+| token | `POST <base>/oauth2/token` (form: `grant_type=client_credentials`, `client_id`, `client_secret`, `username`), cached per process under a digest of the credentials until 5 min before `expires_in` (12 h); a 401 from any call re-mints once. 400 / 401 / 403 → `not_connected` (non-retryable, nothing posted); 5xx → retryable failure |
+| `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`), either date (`missing_dates`) or a linked GL account (`account_not_linked`) → `services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` with `state: "posted"` → `GET` the bill back. Success only when it reads posted at exactly `payload.amount`; a draft / submitted bill → `bill_left_unposted`; another total → `posted_total_mismatch` (bill removed). A retry that finds our bill applies the same read-back |
+| `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` only — never `totalTxnAmountDue = 0` (decisions §303); `analyzing` → draft, `noValue` → `settled_no_payment` |
+| `void_invoice` | deletes a draft / posted-unpaid bill; when a reversal-enabled company refuses the delete of a `posted` bill, reverses it (`POST workflows/accounts-payable/bill/reverse`, dated after its posting date). A bill that is paid, partially paid, selected for payment or reversed returns `False` (Intacct needs its payment voided first — an accountant's call) |
+| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page, every query `orderBy: [{"key": "asc"}]`; vendors and accounts up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), each with `active=False` for an `inactive` account or an `inactive` / `activeNonPosting` / approval-pending (`state` `s` / `r`) vendor; POs 10 pages best-effort, total `totalInTxnCurrency`, currency `txnCurrency` (a PO with no total is skipped, never synced at 0) |
 | `test_connection` | token + a one-row vendor query |
 
 Request rules worth knowing:
@@ -1849,8 +1855,14 @@ Request rules worth knowing:
   no exponent form, scale preserved.
 - **Idempotency.** The pre-create lookup by `referenceNumber`; a *failed*
   lookup is a failure, never read as "not posted yet".
-- **Failure messages** come from `erp_failure_message("Sage Intacct", status)`;
-  a token failure raises with the status only.
+- **Refusals** (decisions §320, the §285 pattern). A deterministic 4xx from the
+  create created nothing (`not_posted`) and is never retried: the bill's vendor
+  and accounts are read back by id and an unusable one is named
+  (`vendor_inactive` / `account_inactive`, by our code); anything else is
+  `bill_refused`. Intacct's error text is never read. 5xx / 429 stay retryable
+  and are counted as possibly posted. Intacct's error ids for a closed period
+  or a duplicate bill number are unpublished, so they are not yet mapped to
+  `period_closed` / `duplicate_document_number` (#654).
 - **GL account types.** Intacct classifies only balance sheet vs income
   statement, so balance-sheet credit accounts (liability or equity) stay
   unclassified rather than guessed.

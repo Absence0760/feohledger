@@ -1044,16 +1044,33 @@ app.include_router(d365)
 # ---------------------------------------------------------------------------
 #
 # OAuth 2.0 client-credentials token, services/core/query, and the
-# accounts-payable/bill object. State lives under STATE["intacct"], created on
-# first use so POST /__reset clears it without touching _fresh_state.
+# accounts-payable/bill object (create / get / delete) plus the bill reverse
+# workflow. State lives under STATE["intacct"], created on first use so
+# POST /__reset clears it without touching _fresh_state.
+#
+# Shaped on Sage's published OpenAPI (decisions §269 and the newer Intacct §):
+#   * a bill created without `state` is a `draft` (the spec's default) — a
+#     client that forgets `state: "posted"` gets a bill that books nothing;
+#   * `createdDate` and `dueDate` are required;
+#   * a query naming a field the object does not have is a 400 (the PO object
+#     has `totalInTxnCurrency` / `txnCurrency`, never `txnTotal`);
+#   * an inactive vendor or GL account, or a date in a closed period, is a 422
+#     business-validation refusal;
+#   * a "reversal-enabled" company refuses every DELETE; a posted bill is
+#     reversed through `workflows/accounts-payable/bill/reverse` instead.
+# Errors keep the spec's shape: `ia::error` nested under `ia::result`.
 
 intacct = APIRouter(prefix="/intacct/ia/api/v1")
 
 INTACCT_TOKEN = "fake-intacct-token"
 
+#: Any bill dated before this is in a closed period (422).
+INTACCT_CLOSED_BEFORE = "2020-01-01"
+
 INTACCT_VENDOR_FIXTURES: list[dict] = [
-    {"key": "11", "id": "V-ACME", "name": "Fake Intacct Vendor A"},
-    {"key": "12", "id": "V-BETA", "name": "Fake Intacct Vendor B"},
+    {"key": "11", "id": "V-ACME", "name": "Fake Intacct Vendor A", "status": "active"},
+    {"key": "12", "id": "V-BETA", "name": "Fake Intacct Vendor B", "status": "active"},
+    {"key": "13", "id": "V-GONE", "name": "Fake Intacct Inactive Vendor", "status": "inactive"},
 ]
 INTACCT_GL_FIXTURES: list[dict] = [
     {
@@ -1062,6 +1079,7 @@ INTACCT_GL_FIXTURES: list[dict] = [
         "name": "Fake Office Supplies",
         "accountType": "incomeStatement",
         "normalBalance": "debit",
+        "status": "active",
     },
     {
         "key": "62",
@@ -1069,6 +1087,15 @@ INTACCT_GL_FIXTURES: list[dict] = [
         "name": "Fake Software",
         "accountType": "incomeStatement",
         "normalBalance": "debit",
+        "status": "active",
+    },
+    {
+        "key": "69",
+        "id": "6900",
+        "name": "Fake Retired Expenses",
+        "accountType": "incomeStatement",
+        "normalBalance": "debit",
+        "status": "inactive",
     },
     {
         "key": "20",
@@ -1076,34 +1103,76 @@ INTACCT_GL_FIXTURES: list[dict] = [
         "name": "Fake Accounts Payable",
         "accountType": "balanceSheet",
         "normalBalance": "credit",
+        "status": "active",
     },
 ]
 INTACCT_PO_FIXTURES: list[dict] = [
     {
         "key": "401",
         "documentNumber": "PO-INTACCT-401",
-        "vendor": {"name": "Fake Intacct Vendor A"},
+        "vendor": {"key": "11", "id": "V-ACME", "name": "Fake Intacct Vendor A"},
         "state": "pending",
-        "txnTotal": "1250.00",
-        "currency": {"txnCurrency": "USD"},
+        "totalInTxnCurrency": "1250.00",
+        "txnCurrency": "USD",
     },
     {
         "key": "402",
         "documentNumber": "PO-INTACCT-402",
-        "vendor": {"name": "Fake Intacct Vendor B"},
+        "vendor": {"key": "12", "id": "V-BETA", "name": "Fake Intacct Vendor B"},
         "state": "closed",
-        "txnTotal": "980.50",
-        "currency": {"txnCurrency": "USD"},
+        "totalInTxnCurrency": "980.50",
+        "txnCurrency": "USD",
     },
 ]
 
+#: The fields each object's query may select (a dotted field names a child of
+#: a reference object). Anything else is a 400, as Intacct answers.
+_INTACCT_FIELDS: dict[str, set[str]] = {
+    "accounts-payable/vendor": {"key", "id", "name", "status", "state"},
+    "general-ledger/account": {"key", "id", "name", "accountType", "normalBalance", "status"},
+    "purchasing/document::Purchase Order": {
+        "key",
+        "documentNumber",
+        "vendor.key",
+        "vendor.id",
+        "vendor.name",
+        "state",
+        "total",
+        "totalInTxnCurrency",
+        "txnCurrency",
+        "baseCurrency",
+    },
+    "accounts-payable/bill": {
+        "key",
+        "id",
+        "billNumber",
+        "referenceNumber",
+        "state",
+        "totalTxnAmount",
+        "totalTxnAmountDue",
+    },
+}
+
+_INTACCT_CREATE_STATES = {"draft", "posted", "submitted"}
+
 
 def _intacct_state() -> dict[str, Any]:
-    return STATE.setdefault("intacct", {"bills": {}, "next_key": 5000})
+    return STATE.setdefault(
+        "intacct", {"bills": {}, "next_key": 5000, "reversals_enabled": False}
+    )
 
 
-def _intacct_error(status: int, code: str, message: str) -> ProviderError:
-    return ProviderError(status, {"ia::result": {"ia::error": {"code": code, "message": message}}})
+def _intacct_error(status: int, code: str, message: str, error_id: str = "") -> ProviderError:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if error_id:
+        error["errorId"] = error_id
+    return ProviderError(
+        status,
+        {
+            "ia::result": {"ia::error": error},
+            "ia::meta": {"totalCount": 1, "totalSuccess": 0, "totalError": 1},
+        },
+    )
 
 
 def _require_intacct_auth(request: Request) -> None:
@@ -1122,7 +1191,7 @@ async def intacct_token(request: Request) -> dict:
         or "@" not in form.get("username", "")
     ):
         raise ProviderError(400, {"error": "invalid_client"})
-    return {"access_token": INTACCT_TOKEN, "token_type": "Bearer", "expires_in": 21600}
+    return {"access_token": INTACCT_TOKEN, "token_type": "Bearer", "expires_in": 43200}
 
 
 def _intacct_rows(obj: str) -> list[dict]:
@@ -1145,15 +1214,38 @@ def _intacct_matches(row: dict, filters: list[dict]) -> bool:
     return True
 
 
+def _intacct_select(row: dict, fields: list[str]) -> dict:
+    out: dict[str, Any] = {}
+    for field in fields:
+        if "." in field:
+            parent, child = field.split(".", 1)
+            value = (row.get(parent) or {}).get(child)
+            out.setdefault(parent, {})[child] = value
+        else:
+            out[field] = row.get(field)
+    return out
+
+
 @intacct.post("/services/core/query")
 async def intacct_query(request: Request) -> dict:
     _require_intacct_auth(request)
     body = await request.json()
+    obj = body.get("object", "")
+    rows = _intacct_rows(obj)
+    fields = body.get("fields") or ["key"]
+    unknown = [f for f in fields if f not in _INTACCT_FIELDS[obj]]
+    if unknown:
+        raise _intacct_error(
+            400, "invalidRequest", f"{unknown[0]} is not a valid field", "REST-1043"
+        )
     filters = body.get("filters") or []
-    rows = [r for r in _intacct_rows(body.get("object", "")) if _intacct_matches(r, filters)]
+    rows = [r for r in rows if _intacct_matches(r, filters)]
+    for order in reversed(body.get("orderBy") or []):
+        for field, direction in order.items():
+            rows = sorted(rows, key=lambda r: str(r.get(field)), reverse=direction == "desc")
     start = int(body.get("start") or 1)
     size = int(body.get("size") or 100)
-    page = rows[start - 1 : start - 1 + size]
+    page = [_intacct_select(r, fields) for r in rows[start - 1 : start - 1 + size]]
     nxt = start + size if start - 1 + size < len(rows) else None
     return {
         "ia::result": copy.deepcopy(page),
@@ -1165,17 +1257,30 @@ async def intacct_query(request: Request) -> dict:
 async def intacct_create_bill(request: Request) -> dict:
     _require_intacct_auth(request)
     body = await request.json()
+    if not body.get("createdDate") or not body.get("dueDate"):
+        raise _intacct_error(400, "invalidRequest", "createdDate and dueDate are required.")
+    bill_state = body.get("state") or "draft"
+    if bill_state not in _INTACCT_CREATE_STATES:
+        raise _intacct_error(400, "invalidRequest", "Invalid state.")
     vendor_id = (body.get("vendor") or {}).get("id")
-    if vendor_id not in {v["id"] for v in INTACCT_VENDOR_FIXTURES}:
-        raise _intacct_error(400, "invalidVendor", "Invalid vendor.")
+    vendor = next((v for v in INTACCT_VENDOR_FIXTURES if v["id"] == vendor_id), None)
+    if vendor is None:
+        raise _intacct_error(422, "invalidRequest", "Invalid vendor.", "BL01001973")
+    if vendor.get("status") != "active":
+        raise _intacct_error(422, "invalidRequest", "The vendor is inactive.", "BL01001973")
+    if str(body["createdDate"]) < INTACCT_CLOSED_BEFORE:
+        raise _intacct_error(422, "invalidRequest", "The period is closed.", "BL03000018")
     lines = body.get("lines") or []
     if not lines:
         raise _intacct_error(422, "noLines", "A bill needs at least one line.")
-    known_gl = {a["id"] for a in INTACCT_GL_FIXTURES}
+    accounts = {a["id"]: a for a in INTACCT_GL_FIXTURES}
     total = Decimal(0)
     for line in lines:
-        if (line.get("glAccount") or {}).get("id") not in known_gl:
-            raise _intacct_error(400, "invalidGlAccount", "Invalid GL account.")
+        account = accounts.get((line.get("glAccount") or {}).get("id"))
+        if account is None:
+            raise _intacct_error(422, "invalidRequest", "Invalid GL account.", "BL01001973")
+        if account.get("status") != "active":
+            raise _intacct_error(422, "invalidRequest", "The account is inactive.", "BL01001973")
         amount = line.get("txnAmount")
         if not isinstance(amount, str):
             raise _intacct_error(422, "invalidAmount", "txnAmount must be a decimal string.")
@@ -1189,7 +1294,10 @@ async def intacct_create_bill(request: Request) -> dict:
         "billNumber": body.get("billNumber"),
         "referenceNumber": body.get("referenceNumber"),
         "vendor": {"id": vendor_id},
-        "state": "posted",
+        "state": bill_state,
+        "createdDate": body.get("createdDate"),
+        "postingDate": body.get("createdDate"),
+        "dueDate": body.get("dueDate"),
         "totalTxnAmount": str(total),
         "totalTxnAmountDue": str(total),
     }
@@ -1208,18 +1316,42 @@ async def intacct_get_bill(request: Request, key: str) -> dict:
 @intacct.delete("/objects/accounts-payable/bill/{key}")
 async def intacct_delete_bill(request: Request, key: str) -> Response:
     _require_intacct_auth(request)
-    bills = _intacct_state()["bills"]
+    state = _intacct_state()
+    bills = state["bills"]
     if key not in bills:
         raise _intacct_error(404, "notFound", "Bill not found.")
-    if bills[key]["state"] in {"paid", "partiallyPaid"}:
-        raise _intacct_error(400, "paidBill", "A paid bill cannot be deleted.")
+    if state["reversals_enabled"]:
+        raise _intacct_error(400, "operationNotAllowed", "Bills must be reversed in this company.")
+    if bills[key]["state"] not in {"posted", "draft", "declined"}:
+        raise _intacct_error(400, "operationNotAllowed", "This bill cannot be deleted.")
     del bills[key]
     return Response(status_code=204)
 
 
+@intacct.post("/workflows/accounts-payable/bill/reverse")
+async def intacct_reverse_bill(request: Request) -> dict:
+    _require_intacct_auth(request)
+    body = await request.json()
+    bill = _intacct_state()["bills"].get(str(body.get("key", "")))
+    if bill is None:
+        raise _intacct_error(404, "notFound", "Bill not found.")
+    if bill["state"] != "posted":
+        raise _intacct_error(400, "operationNotAllowed", "Only a posted bill can be reversed.")
+    if not body.get("reverseDate") or str(body["reverseDate"]) <= str(bill.get("postingDate")):
+        raise _intacct_error(
+            400, "invalidRequest", "The reversal date must be after the posting date."
+        )
+    bill["state"] = "reversed"
+    return {"ia::result": {"key": bill["key"], "id": bill["id"], "state": "reversed"}}
+
+
 @intacct.post("/__set-state")
 async def intacct_set_state(body: dict) -> dict:
-    """Test hook: {"key": "...", "state": "paid", "totalTxnAmountDue": "0"}."""
+    """Test hook: {"key": "...", "state": "paid", "totalTxnAmountDue": "0"}, or
+    {"reversals_enabled": true} for the company (DELETE then always refuses)."""
+    if "reversals_enabled" in body:
+        _intacct_state()["reversals_enabled"] = bool(body["reversals_enabled"])
+        return {"status": "ok"}
     bill = _intacct_state()["bills"].get(str(body.get("key", "")))
     if bill is None:
         raise ProviderError(404, {"detail": "unknown bill"})

@@ -301,6 +301,7 @@ export const messages = {
 	'org.erp.help.sageZaBaseUrl': 'Sage パートナーのエンドポイントを使う場合のみ入力します。空欄の場合は Sage の南アフリカ向け API を使用します。',
 	'org.erp.help.byoApp': 'ERP に独自のアプリを登録した場合のみ入力してください。',
 	'org.erp.help.intacctLocation': '空欄にすると、特定のエンティティではなく会社レベルで記帳します。',
+	'org.erp.help.intacctUser': 'Web Services ユーザーです。会社側で Web Services を購読し、当社の送信者 ID を承認し、Company > Setup > Company > Security > Authorized Client Applications に当社のクライアント ID とこのユーザーを追加する必要があります。',
 	'org.erp.oauth.byoHint': 'クライアント ID とシークレットを空欄にすると、FeohLedger のアプリで接続します。{erp} に独自のアプリを登録した場合のみ入力してください。',
 	'org.erp.oauth.connect': '{erp} に接続',
 	'org.erp.oauth.redirecting': '{erp} を開いています…',

@@ -165,18 +165,28 @@ Backs `erp_adapters/sage_intacct.py` (`FEOH_ERP_INTACCT_API_BASE`).
 
 - `POST /oauth2/token` — `client_credentials` form with non-empty
   `client_id` / `client_secret` and a `username` containing `@` → bearer
-  `fake-intacct-token`, required on every other call.
+  `fake-intacct-token` (`expires_in` 43200), required on every other call.
 - `POST /services/core/query` — `accounts-payable/vendor` (`V-ACME`,
-  `V-BETA`), `general-ledger/account` (`6100`, `6200`, `2000`),
+  `V-BETA`, and `V-GONE` with `status: inactive`), `general-ledger/account`
+  (`6100`, `6200`, `2000`, and `6900` inactive),
   `purchasing/document::Purchase Order` (`PO-INTACCT-401` 1250.00 pending,
-  `PO-INTACCT-402` 980.50 closed) and the created bills; `$eq` filters,
-  `start` / `size` paging with `ia::meta.next`.
-- `POST /objects/accounts-payable/bill` → 201 key `5001`, `5002`, …, state
-  `posted`; rejects an unknown vendor / GL account or a non-string `txnAmount`.
-  `GET` / `DELETE /objects/accounts-payable/bill/{key}` (a paid bill refuses
-  deletion).
+  `PO-INTACCT-402` 980.50 closed, as `totalInTxnCurrency` / `txnCurrency`) and
+  the created bills; `$eq` filters, `orderBy`, `start` / `size` paging with
+  `ia::meta.next`. A field the object does not have (e.g. `txnTotal`) is a
+  400, as Intacct answers.
+- `POST /objects/accounts-payable/bill` → 201 key `5001`, `5002`, …. Like
+  Intacct, a bill created without `state` is a **`draft`**; `createdDate` and
+  `dueDate` are required (400); an unknown or inactive vendor / GL account, or a
+  `createdDate` before 2020-01-01 (a closed period), is a 422; a non-string
+  `txnAmount` is refused. `GET` / `DELETE /objects/accounts-payable/bill/{key}`
+  (only a posted / draft / declined bill deletes).
+- `POST /workflows/accounts-payable/bill/reverse` — `{key, reverseDate}`
+  reverses a posted bill; the date must be after its posting date.
+- Errors are `{"ia::result": {"ia::error": {...}}, "ia::meta": {...}}`, the
+  published OpenAPI's `error-response`.
 - `POST /intacct/ia/api/v1/__set-state` — test hook
-  `{"key", "state", "totalTxnAmountDue"}`.
+  `{"key", "state", "totalTxnAmountDue"}`, or `{"reversals_enabled": true}`
+  (every DELETE then refuses, as in a company enabled for reversals).
 
 ## SYSPRO 8 e.net REST (`/syspro/SYSPROWCFService/Rest`)
 

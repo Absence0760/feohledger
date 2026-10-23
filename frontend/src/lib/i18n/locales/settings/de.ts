@@ -302,6 +302,7 @@ export const messages = {
 	'org.erp.help.sageZaBaseUrl': 'Nur für einen Sage-Partner-Endpunkt. Leer lassen, um die südafrikanische API von Sage zu verwenden.',
 	'org.erp.help.byoApp': 'Nur wenn Sie eine eigene App beim ERP registriert haben.',
 	'org.erp.help.intacctLocation': 'Leer lassen, um auf Unternehmensebene statt auf eine einzelne Einheit zu buchen.',
+	'org.erp.help.intacctUser': 'Ein Web-Services-Benutzer. Das Unternehmen muss Web Services abonnieren, unsere Sender-ID autorisieren und unsere Client-ID mit diesem Benutzer unter Company > Setup > Company > Security > Authorized Client Applications hinzufügen.',
 	'org.erp.oauth.byoHint': 'Lassen Sie Client-ID und Secret leer, um über die App von FeohLedger zu verbinden. Füllen Sie sie nur aus, wenn Sie eine eigene App bei {erp} registriert haben.',
 	'org.erp.oauth.connect': 'Mit {erp} verbinden',
 	'org.erp.oauth.redirecting': '{erp} wird geöffnet…',

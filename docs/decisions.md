@@ -14992,3 +14992,84 @@ deleted or part-paid — is not recorded when every blocker is cleared),
 `test_erp_paid_recorded_outside.py`, `test_erp_webhook_transitions.py`,
 `frontend/src/lib/types/erpReport.test.ts`,
 `frontend/tests-e2e/payments/erp-reported-payment.spec.ts`.
+
+## 320. Sage Intacct: a bill counts as posted only when Intacct shows it posted, and the REST API still needs a sender ID (2026-10-23)
+
+**What happened.** A docs-against-code audit of the Intacct adapter (part of
+#655), checked against Sage's published OpenAPI rather than our memory of it,
+found the adapter could not have worked against a real company, and that
+fake-erp hid it:
+
+- The bill create sent no `state`. The spec's default is `draft`, which books
+  nothing to AP or the GL and cannot be paid; the state moves afterwards only
+  through a workflow, never a PATCH. We recorded "Posted to Sage Intacct", and
+  the fake hard-coded `posted`.
+- The PO query selected `txnTotal` and `currency.txnCurrency`. The purchasing
+  document has `totalInTxnCurrency` and a top-level `txnCurrency`; an unknown
+  field 400s the query, and `list_pos` swallowed it, so PO sync silently synced
+  nothing. Had Intacct tolerated the field, every PO would have synced at 0.
+- A create Intacct refused (400 schema, 422 business validation: a closed
+  period, an inactive vendor or account) was the generic `erp_http_failure`,
+  recorded as possibly posted (QuickBooks lesson 3, §285).
+- §269 said REST avoids the XML gateway's paid Web Services sender ID. It does
+  not: Sage's REST quick start requires a Web Services licence, the developer
+  app is enrolled against that sender ID, and each customer company authorizes
+  it and lists our client id with its Web Services user under Authorized Client
+  Applications. (Sage's guide pages refuse automated fetches, so this rests on
+  the quick start's wording as quoted by third-party integration guides
+  (Merge's help centre, Celigo, Agave), which agree; a sandbox confirms it, #654.)
+  §269 stands for the API choice; its licensing reason is withdrawn.
+
+**Decision.**
+
+- **The create sends `state: "posted"`, and nothing counts as posted until it
+  is read back.** After a 201, and on a retry that finds our earlier bill by
+  `referenceNumber`, the adapter `GET`s the bill. A draft / submitted /
+  analyzing / unknown state is the non-retryable `bill_left_unposted` (the bill
+  exists, so not `not_posted`; a retry once someone posts it in Intacct finds
+  it and succeeds). A posted bill must show `totalTxnAmount` equal to the
+  approved amount (`posted_total`), because a tax-enabled company's tax
+  solution computes it. An unreadable read-back is a retryable failure, never
+  success. Making the state configurable (`submitted` for companies with bill
+  approvals) is deferred until a sandbox shows how such a company answers a
+  `posted` create (#654).
+- **A deterministic 4xx from the create is coded and created nothing.** The
+  adapter reads the bill's vendor and accounts back by id: one Intacct reports
+  inactive, `activeNonPosting`, awaiting or declined approval (vendor `state`
+  `s` / `r`), or absent is `vendor_inactive` / `account_inactive` (named by our
+  code); anything else is the new shared `bill_refused`. Both set `not_posted`.
+  Intacct's `errorId`s for a closed period or a duplicate bill number are not
+  published, so they are not mapped yet; a sandbox capture can add
+  `period_closed` (#654). Intacct's error text is never read. 5xx / 429 stay
+  retryable and possibly posted.
+- **The token is cached and a refusal of it is coded.** A client-credentials
+  token lives 12 h, so it is cached per process under a digest of the
+  credentials until 5 minutes before `expires_in`; a 401 from any call mints a
+  fresh one once. A 400 / 401 / 403 from the token exchange is
+  `not_connected` (non-retryable, nothing posted); a 5xx or network failure is
+  a retryable failure naming the status only.
+- **Smaller corrections, all from the spec:** both dates are required
+  (`missing_dates` before any call); `analyzing` reads draft and `noValue`
+  ("posted but has not affected the GL") reads `settled_no_payment` (§303);
+  every query sends `orderBy: [{"key": "asc"}]` because Intacct evaluates each
+  page independently; vendors and accounts sync their `status` (and vendor
+  approval `state`) as `active=False` instead of linking a dead record (§284);
+  a PO whose total Intacct does not report is skipped, never synced at 0; and
+  `void_invoice` falls back to the `bill/reverse` workflow, dated after the
+  posting date, when a reversal-enabled company refuses the delete of a posted
+  bill. A paid bill is still never reversed automatically: Intacct requires its
+  payment voided first, which is an accountant's call.
+- **fake-erp behaves like the spec, so it fails the old code**: a create
+  without `state` is a draft, dates are required, a query naming a field the
+  object lacks is a 400, inactive vendor / account and a pre-2020 date are 422s,
+  `expires_in` is 43200, and a reversal-enabled switch refuses every DELETE. The
+  audit's claim that Intacct's error body is a top-level `ia::error` is
+  **refuted** by the published OpenAPI (`error-response`: `ia::error` nested in
+  `ia::result`), so the fake keeps that shape and the adapter reads neither.
+
+**Rejected.** Mapping 422 → `period_closed` by status alone (a 422 is any
+business rule, so it would mislabel an inactive vendor as a closed period);
+keeping the read-back optional for a 201 that carries a key (the 201 says
+nothing about state, which is the bug); adding `location_id` to the link realm
+in this change (it is a realm migration with its own rollout, tracked as a
+follow-up).
