@@ -546,26 +546,27 @@ def is_erp_paid_report(exception: APException) -> bool:
 
 
 async def live_erp_paid_reports(
-    db: AsyncSession, invoice_ids: list[uuid.UUID]
+    db: AsyncSession, invoice_ids: list[uuid.UUID], *, fresh: bool = False
 ) -> list[APException]:
-    """The open / escalated ``paid_not_recorded`` rows on these invoices, newest first."""
+    """The open / escalated ``paid_not_recorded`` rows on these invoices, newest first.
+
+    ``fresh`` re-reads loaded rows from the database instead of serving the
+    identity map's copy — for a caller that acts on the facts under a lock.
+    """
     if not invoice_ids:
         return []
-    return list(
-        (
-            await db.execute(
-                select(APException)
-                .where(
-                    APException.invoice_id.in_(invoice_ids),
-                    APException.status.in_(("open", "escalated")),
-                    APException.erp_report["kind"].astext == ERP_REPORT_PAID_NOT_RECORDED,
-                )
-                .order_by(APException.created_at.desc(), APException.id.desc())
-            )
+    query = (
+        select(APException)
+        .where(
+            APException.invoice_id.in_(invoice_ids),
+            APException.status.in_(("open", "escalated")),
+            APException.erp_report["kind"].astext == ERP_REPORT_PAID_NOT_RECORDED,
         )
-        .scalars()
-        .all()
+        .order_by(APException.created_at.desc(), APException.id.desc())
     )
+    if fresh:
+        query = query.execution_options(populate_existing=True)
+    return list((await db.execute(query)).scalars().all())
 
 
 #: ``resolved_by`` on a row FeohLedger closed itself because the payment it was
@@ -675,17 +676,12 @@ async def retry_erp_reported_payments(
     """
     from app.services.exception_lifecycle import is_payment_blocking
 
-    candidates = [
-        row
-        for row in await live_erp_paid_reports(db, [invoice_id])
-        if not is_payment_blocking(row.exception_type)
-    ]
-    if not candidates:
-        return False
-    facts = candidates[0].erp_report or {}
-    try:
-        paid_on = date.fromisoformat(str(facts.get("paid_on")))
-    except ValueError:
+    def _candidates(rows: list[APException]) -> list[APException]:
+        return [row for row in rows if not is_payment_blocking(row.exception_type)]
+
+    # A cheap look first, so the common case (nothing kept) costs one query and
+    # takes no lock. NOT what is acted on: see below.
+    if not _candidates(await live_erp_paid_reports(db, [invoice_id])):
         return False
     try:
         async with control_session_factory() as ctrl:
@@ -698,9 +694,8 @@ async def retry_erp_reported_payments(
     # In a SAVEPOINT: this is a follow-on to the decision that triggered it. A
     # failure of ours here (a lock timeout, a bug) must not undo a person's
     # clearing of a duplicate or fraud flag. It rolls back only this attempt —
-    # and `post_commit` drops whatever the attempt queued — and leaves the row
-    # open with its facts for the one-click record. A REFUSAL is not a failure:
-    # `record_erp_reported_payment` turns it into the refreshed row itself.
+    # and `post_commit` drops whatever the attempt queued. A REFUSAL is not a
+    # failure: `record_erp_reported_payment` turns it into the refreshed row.
     try:
         async with db.begin_nested():
             invoice = (
@@ -714,6 +709,18 @@ async def retry_erp_reported_payments(
             if invoice is None or invoice.status not in ERP_PAID_RECORDABLE:
                 # Paid some other way, voided back, or not posted yet: no longer
                 # the question the row asked, so a person reads it as it stands.
+                return False
+            # Which payment, chosen only NOW, under the invoice lock every ERP
+            # writer takes before touching these rows, and re-read rather than
+            # served from the identity map — so a withdrawal the sweep committed
+            # while this transaction waited is seen, and never recorded.
+            fresh = _candidates(await live_erp_paid_reports(db, [invoice_id], fresh=True))
+            if not fresh:
+                return False
+            facts = fresh[0].erp_report or {}
+            try:
+                paid_on = date.fromisoformat(str(facts.get("paid_on")))
+            except ValueError:
                 return False
             return await record_erp_reported_payment(
                 db,
@@ -731,7 +738,30 @@ async def retry_erp_reported_payments(
         logger.exception(
             "ERP-reported payment re-attempt failed: invoice=%s org=%s", invoice_id, organization_id
         )
+        await _mark_retry_failed(db, invoice_id)
         return False
+
+
+async def _mark_retry_failed(db: AsyncSession, invoice_id: uuid.UUID) -> None:
+    """After a re-attempt failed on OUR side, stop the kept rows promising an
+    automatic record that will not come: stamp the failure, and point the
+    reader at the one-click record instead. Best-effort — the failure is
+    already logged, and this must not fail the decision either."""
+    try:
+        for row in await live_erp_paid_reports(db, [invoice_id], fresh=True):
+            row.erp_report = {
+                **(row.erp_report or {}),
+                "retry_failed_at": datetime.now(UTC).isoformat(),
+            }
+            row.description = (
+                f"{erp_display_name((row.erp_report or {}).get('erp_type'))} reports this bill "
+                "paid, but FeohLedger couldn't record that payment automatically. Check the "
+                "details, then record the ERP's payment from this exception."
+            )
+    except Exception:  # noqa: BLE001 — best-effort annotation of an already-logged failure
+        logger.exception(
+            "ERP-reported payment: could not mark retry failure: invoice=%s", invoice_id
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -741,33 +741,34 @@ async def record_erp_payment(
     )
 
     _refuse_future_paid_on(body.paid_on)
-    # Locked (exception, then invoice — the order a resolve takes them in, via
-    # its flush and then the re-attempt) and re-read, so a second click that
-    # waited on the first judges the row as the first left it, not as it was.
-    row = (
-        await db.execute(
-            apply_entity_scope(
-                select(APException).where(APException.id == exception_id),
-                APException,
-                entity_id,
-            )
-            .with_for_update(of=APException)
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
-    if row is None:
+    scoped = apply_entity_scope(
+        select(APException).where(APException.id == exception_id), APException, entity_id
+    )
+    found = (await db.execute(scoped)).scalar_one_or_none()
+    if found is None:
         raise HTTPException(status_code=404, detail="Exception not found")
     invoice = None
-    if row.invoice_id is not None:
-        # Locked before anything is judged, like every status change.
+    if found.invoice_id is not None:
+        # The INVOICE first, then the row: the order every ERP writer
+        # (`apply_bill_report`, the webhook, the re-attempt) takes them in, so
+        # a click racing a sweep tick waits rather than deadlocks.
         invoice = (
             await db.execute(
                 select(Invoice)
-                .where(Invoice.id == row.invoice_id)
+                .where(Invoice.id == found.invoice_id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
+    # Then the row, locked and RE-READ, so a second click that waited on the
+    # first judges it as the first left it (resolved → 409), not as it was.
+    row = (
+        await db.execute(
+            scoped.with_for_update(of=APException).execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if row is None or row.invoice_id != found.invoice_id:
+        raise HTTPException(status_code=404, detail="Exception not found")
 
     verdict = record_erp_payment_refusal(row, invoice, user, org.settings)
     if verdict is not None:

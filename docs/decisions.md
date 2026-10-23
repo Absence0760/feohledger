@@ -14823,8 +14823,10 @@ The two other ERP-webhook rows carry their ids too (`settled_short`,
   same payment, and a stale one would be re-attempted against a decision a
   person made on the other.
 - **A payment the ERP withdraws is retired, not kept.** When the ERP later
-  reports the bill open, part-paid, deleted or voided
-  (`apply_bill_report`, the generic webhook's void path), every live
+  reports the bill open, part-paid, deleted or voided (`apply_bill_report`;
+  the generic webhook on ANY status but `Paid` for an invoice still payable
+  here, checked before its transition screen because
+  `posted_in_erp → posted_in_erp` is a silent no-op), every live
   `paid_not_recorded` row on the invoice becomes `paid_withdrawn`: it stays
   open for a person, with a sentence saying so, but nothing re-attempts it and
   no one-click offers it. Without this, a cheque voided in QuickBooks after the
@@ -14850,10 +14852,14 @@ The two other ERP-webhook rows carry their ids too (`settled_short`,
   NULL, `source="erp"`), exactly as the first attempt was, so the clearer needs
   no `payment.record_external` and the recorder's segregation rule does not
   apply to them. Their own act — clearing the blocker — has already passed the
-  queue's segregation rule. The attempt runs in a SAVEPOINT: an unexpected
+  queue's segregation rule. The payment to record is chosen only under the
+  invoice lock every ERP writer takes first, and re-read rather than served
+  from the identity map, so a withdrawal the sweep committed while the
+  decision waited is seen. The attempt runs in a SAVEPOINT: an unexpected
   failure (a lock timeout, a bug) rolls back only the attempt, is logged with
-  its traceback, and leaves the row open with its facts. It must not undo a
-  person's clearing of a duplicate or fraud flag.
+  its traceback, and stamps the row (`retry_failed_at`) with a sentence
+  pointing at the one-click record instead of promising an automatic one. It
+  must not undo a person's clearing of a duplicate or fraud flag.
 - *In one click.* `POST /api/exceptions/{id}/record-erp-payment`, from the
   exception dialog, pre-filled from `erp_report`. It records the payment as a
   user record (`source="user"`) and resolves the row as the caller, in one
@@ -14863,9 +14869,10 @@ The two other ERP-webhook rows carry their ids too (`settled_short`,
   `exception.resolved` for a row that stays open. So the record runs first,
   with this one row not counted as a blocker (`answering_exception_ids`, the
   only door that passes one), and `_complete` resolves the row as the caller
-  once the payment is booked. The exception row and the invoice are locked and
-  re-read before anything is judged, so a second click finds the row resolved
-  and 409s. Not `record-outside`: a
+  once the payment is booked. The invoice and then the exception row are
+  locked (the order every ERP writer takes them in, so a click racing a sweep
+  tick waits instead of deadlocking) and re-read before anything is judged, so
+  a second click finds the row resolved and 409s. Not `record-outside`: a
   `paid_not_recorded` row opened for a double-pay refusal is itself
   payment-blocking, so `record-outside` refuses on it. Clearing it first in a
   separate request would leave a window with the invoice payable and nothing

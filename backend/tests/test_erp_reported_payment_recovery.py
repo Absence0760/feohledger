@@ -378,6 +378,29 @@ async def test_a_failed_re_attempt_never_undoes_the_clear(realdb, monkeypatch):
     assert await _payments(mk, inv_id) == []
     row = await _erp_row(mk, inv_id)
     assert row.status == "open" and row.erp_report["method"] == "check"
+    # It no longer promises an automatic record that will not come.
+    assert row.erp_report["retry_failed_at"]
+    assert "record the ERP's payment from this exception" in row.description
+
+
+async def test_resolving_a_withdrawn_row_records_nothing(realdb):
+    """A blocking row whose payment the ERP withdrew is a person's to clear;
+    clearing it re-runs the re-attempt, which must find nothing to record."""
+    from app.services.erp_status_sync import withdraw_erp_paid_reports
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id, row_id = await _blocking_erp_row(realdb, mk, info, number="ERP-WD-1")
+    async with mk() as s:
+        invoice = await get_invoice_for_update(s, inv_id)
+        assert await withdraw_erp_paid_reports(
+            s, invoice, erp_type="quickbooks_online", erp_state="open"
+        )
+        await s.commit()
+
+    assert (await _dismiss(realdb, row_id)).status_code == 200
+    assert (await _invoice(mk, inv_id)).status == InvoiceStatus.posted_in_erp
+    assert [p for p in await _payments(mk, inv_id) if p.status == "completed"] == []
 
 
 async def test_escalating_the_blocker_records_nothing(realdb):

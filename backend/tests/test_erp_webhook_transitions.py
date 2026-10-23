@@ -263,6 +263,45 @@ async def test_forbidden_void_while_advanced_opens_reconciliation_exception(fake
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("erp_status", ["Open", "open", "posted", "OPEN"])
+async def test_a_bill_unpaid_again_withdraws_the_erp_payment_kept_earlier(fake_redis, erp_status):
+    """A generic ERP reporting the bill back to unpaid (a voided cheque reads
+    `Open`) withdraws a payment it reported earlier and FeohLedger could not
+    record — even though `posted_in_erp → posted_in_erp` is a silent no-op, and
+    the withdrawal is committed (decisions §318)."""
+    org = _org_with_erp_secret("erp-secret")
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.posted_in_erp
+    )
+    withdraw = AsyncMock(return_value=1)
+    with patch("app.api.erp_webhook.withdraw_erp_paid_reports", withdraw):
+        result, db, transition_calls = await _post(
+            org=org, invoice=invoice, status_value=erp_status, event_id=f"ev_{erp_status}"
+        )
+
+    assert result is None
+    assert transition_calls == []
+    withdraw.assert_awaited_once()
+    assert withdraw.await_args.kwargs == {"erp_type": "generic", "erp_state": erp_status}
+    db.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_paid_report_never_withdraws(fake_redis):
+    org = _org_with_erp_secret("erp-secret")
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.posted_in_erp
+    )
+    withdraw = AsyncMock(return_value=0)
+    with (
+        patch("app.api.erp_webhook.withdraw_erp_paid_reports", withdraw),
+        patch("app.api.erp_webhook._record_erp_reported_payment", AsyncMock()),
+    ):
+        await _post(org=org, invoice=invoice, status_value="Paid", event_id="ev_paid_again")
+    withdraw.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_forbidden_void_skips_when_open_reconciliation_exists(fake_redis):
     """A DISTINCT later ERP void event (different event id, so the webhook
     event-id dedup doesn't fire) for an invoice that ALREADY has an open
@@ -377,7 +416,7 @@ async def test_permitted_transition_sent_to_posted_applies_and_audits(fake_redis
     `Open` (→ posted_in_erp) for an invoice at `sent_to_erp` — a legal edge —
     so it must go through transition_invoice (the audit chokepoint) and commit."""
     org = _org_with_erp_secret("erp-secret")
-    invoice = SimpleNamespace(status=InvoiceStatus.sent_to_erp)
+    invoice = SimpleNamespace(id=uuid.uuid4(), status=InvoiceStatus.sent_to_erp)
 
     result, db, transition_calls = await _post(
         org=org, invoice=invoice, status_value="Open", event_id="ev_open"
@@ -623,7 +662,7 @@ async def test_normal_signed_request_under_cap_still_succeeds(fake_redis):
     """Regression guard: the new size-cap check must not break a legitimate,
     normal-sized signed request (default cap is a few MB; this body is tiny)."""
     org = _org_with_erp_secret("erp-secret")
-    invoice = SimpleNamespace(status=InvoiceStatus.sent_to_erp)
+    invoice = SimpleNamespace(id=uuid.uuid4(), status=InvoiceStatus.sent_to_erp)
 
     result, db, transition_calls = await _post(
         org=org, invoice=invoice, status_value="Open", event_id="ev_size_ok"

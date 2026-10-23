@@ -354,6 +354,17 @@ async def erp_webhook(
             # transition the machine legitimately forbids becomes a silent ack
             # (same as an unknown status / unknown invoice), not a 409.
             current = invoice.status
+            # Any status but `Paid` for an invoice still payable here means the
+            # ERP no longer shows the bill paid (a voided cheque reads `Open`):
+            # a payment it reported earlier, which FeohLedger could not record,
+            # must never be recorded now (decisions §318). Before the
+            # transition screen, because `posted_in_erp → posted_in_erp` is a
+            # silent no-op below.
+            withdrawn = 0
+            if target_status is not InvoiceStatus.paid and current in ERP_PAID_RECORDABLE:
+                withdrawn = await withdraw_erp_paid_reports(
+                    db, invoice, erp_type=erp_type, erp_state=erp_status
+                )
             if target_status not in VALID_TRANSITIONS.get(current, set()):
                 # The state machine forbids this transition for the invoice's
                 # current state. Almost always a silent no-op — a stale or
@@ -398,6 +409,8 @@ async def erp_webhook(
                         method=payment_method,
                     )
                     await db.commit()
+                elif withdrawn:
+                    await db.commit()  # the withdrawal is the whole effect
                 return  # silent 204 on every forbidden-transition path
 
             # `payment_scheduled → paid` is a legal edge, but it is the exact
@@ -527,12 +540,10 @@ async def _raise_erp_reconciliation_exception(
     where ``→ failed`` is a legal transition (``sent_to_erp`` /
     ``posted_in_erp`` / ``payment_scheduled`` / ``paid``). Money may already be
     in flight, so this is a review signal — we deliberately do NOT
-    auto-transition the invoice.
-
-    A payment the ERP reported earlier, which FeohLedger could not record, is
-    withdrawn first: a voided bill was not paid (decisions §318).
+    auto-transition the invoice. (A payment the ERP reported earlier and
+    FeohLedger could not record has already been withdrawn by the handler,
+    which does so for every non-`Paid` status — decisions §318.)
     """
-    await withdraw_erp_paid_reports(db, invoice, erp_type=erp_type, erp_state=erp_status)
     await _open_erp_reconciliation_exception(
         db,
         invoice,
