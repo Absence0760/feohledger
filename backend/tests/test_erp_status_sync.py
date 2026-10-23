@@ -560,3 +560,72 @@ async def test_voiding_an_erp_reported_payment_holds_the_invoice_out_of_runs(rea
     # QuickBooks may still show the bill paid: a person confirms before re-paying.
     flags = [e for e in await _exceptions(realdb, inv_id) if e.status == "open"]
     assert [f.exception_type for f in flags] == ["payment_reconciliation"]
+
+
+# ---------------------------------------------------------------------------
+# a payment the ERP withdrew is never recorded later (decisions §318)
+# ---------------------------------------------------------------------------
+
+
+async def _paid_but_blocked(realdb):
+    """A bill paid in QuickBooks while a stale blocker is open: the record is
+    refused, and the ERP's payment is kept on a `paid_not_recorded` row."""
+    inv_id, corr = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    blocker = uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            APException(
+                id=blocker,
+                organization_id=realdb.info("a").org_id,
+                invoice_id=inv_id,
+                exception_type="duplicate",
+                severity="error",
+                description="stale",
+                status="open",
+            )
+        )
+        await s.commit()
+    await _apply(
+        realdb,
+        _report(corr, ErpBillState.paid, external_payment_ids=("901",), payment_method="check"),
+    )
+    [row] = [e for e in await _exceptions(realdb, inv_id) if e.erp_report]
+    assert row.erp_report["kind"] == "paid_not_recorded"
+    return inv_id, corr, blocker, row.id
+
+
+@pytest.mark.parametrize(
+    "state", [ErpBillState.open, ErpBillState.deleted, ErpBillState.partially_paid]
+)
+async def test_a_payment_the_erp_withdrew_is_not_recorded_when_the_blocker_clears(realdb, state):
+    inv_id, corr, blocker, row_id = await _paid_but_blocked(realdb)
+
+    # The cheque is voided / the bill deleted / part of it un-paid in QuickBooks.
+    await _apply(realdb, _report(corr, state, reduced_outside=state is not ErpBillState.open))
+    # Every blocker is cleared — the stale one, and the one the deletion or
+    # part-payment opened ("still owed"): clearing must never book the payment
+    # the ERP withdrew.
+    blockers = [
+        e.id for e in await _exceptions(realdb, inv_id) if e.status == "open" and e.id != row_id
+    ]
+    assert blocker in blockers
+    async with realdb.client(key="a", role="admin") as c:
+        for exc_id in blockers:
+            resp = await c.post(
+                f"/api/exceptions/{exc_id}/resolve",
+                json={"action": "dismiss", "resolution": "stale"},
+            )
+            assert resp.status_code == 200, resp.text
+
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.posted_in_erp
+    async with realdb.sessionmaker("a")() as s:
+        payments = (
+            (await s.execute(select(Payment).where(Payment.invoice_id == inv_id))).scalars().all()
+        )
+        row = await s.get(APException, row_id)
+    assert payments == []
+    # Left open for a person, but no longer something to record.
+    assert row.status == "open"
+    assert row.erp_report["kind"] == "paid_withdrawn"
+    assert row.erp_report["withdrawn_as"] == state.value
+    assert "no longer shows it paid" in row.description

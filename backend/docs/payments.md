@@ -2151,7 +2151,39 @@ still holds its own claim on paying the invoice — a live payment, a draft or
 exported run, a live card (`erp_webhook.DOUBLE_PAY_REFUSALS`) — that claim
 proceeding would pay the supplier twice, so the flag is the **payment-blocking**
 `payment_reconciliation`, which `dispatch_preflight` refuses on; any other
-refusal opens the non-blocking `erp_reconciliation`. Both name the refusal code.
+refusal opens the non-blocking `erp_reconciliation`. Both carry a sentence for
+an AP user (what stopped it, what to do; no API path) and keep the payment in
+`exceptions.erp_report` (`kind: "paid_not_recorded"`: rail, reference, paid-on
+date and whether the ERP stated it, document and event ids, refusal code). A
+later report while the row is open refreshes those facts (never replacing a
+stated date or a document reference with less), and an invoice holds at most
+one live such row. When the ERP later reports the bill open, part-paid, deleted
+or voided, the row's payment is **withdrawn** (`kind: "paid_withdrawn"`): it
+stays open for a person but is never recorded.
+
+**Recording it later — never around the gates (decisions §318).**
+
+- *When the blocker clears.* Resolving or dismissing a payment-blocking
+  exception on the invoice (`exception_lifecycle.record_decision`, every door)
+  re-attempts a live, non-blocking `paid_not_recorded` row through
+  `erp_status_sync.retry_erp_reported_payments` → `record_erp_reported_payment`,
+  in the same transaction and with the same refusals. A refusal refreshes the
+  row's code and sentence; a double-pay refusal opens the blocking
+  `payment_reconciliation` as a first report would. The payment is dated from
+  the report, not from the clear. Escalating records nothing.
+- *In one click.* `POST /api/exceptions/{id}/record-erp-payment`
+  `{method, reference, paid_on, amount?}` (`payment.record_external`) records
+  the payment as a user record and resolves the row as the caller, in one
+  transaction. Every refusal comes before anything is written or audited (the
+  record runs first, with this row not counted as a blocker), so a refusal
+  leaves the row open and ships no audit row even in `lambda` audit mode. A blocking row (the double-pay
+  refusals) is only recorded this way, because it refuses `record-outside` on
+  itself; the caller then also needs the exception queue's role and must pass
+  its segregation rule. The recorder's segregation rule always applies.
+  `GET /api/exceptions` (and the detail) report the caller's verdict as
+  `record_erp_payment_refusal`.
+- *Any other record.* Whichever door records the invoice paid, `_complete`
+  resolves its live `paid_not_recorded` rows (`via: payment_recorded`).
 Segregation of duties doesn't apply — there is no human actor. The payment is
 dated by the ERP's own payment date and classified by its rail when the report
 states them — the generic webhook's optional `paid_on` / `payment_method`, or
@@ -2609,6 +2641,8 @@ and clear.
 | `blocked_reason` | the stable, PII-free reason code — set for a `required_method` row too, so the UI can say WHY the rail is pinned |
 | `required_method` | the one rail this invoice is still payable on, or `null` |
 | `record_outside_refusal` | a different question: the code `POST /api/payments/record-outside` would refuse this row with, or `null` — see § Recording a payment made outside FeohLedger |
+| `blocking_exception` | `{id, exception_type, clear_refusal}` of the open payment-blocking exception behind the row (the type `blocked_reason` names), or `null`. `clear_refusal` is `exception_lifecycle.segregation_refusal` for THIS caller resolving it (`segregation_implicated` / `segregation_raiser`), so the page can say someone else must clear it (decisions §318) |
+| `erp_reported_payment` | `{exception_id, erp_name, method, reference, paid_on}` from the newest live `paid_not_recorded` exception on the invoice, or `null` — what "Record as paid" pre-fills |
 | `selectable_total` | rows "select all N matching" resolves (`/queue/ids`) — excludes blocked AND rail-pinned rows |
 | `blocked_total` | rows whose checkbox is disabled, i.e. exactly the `blocked` ones |
 

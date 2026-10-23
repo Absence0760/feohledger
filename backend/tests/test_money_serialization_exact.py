@@ -329,6 +329,7 @@ def test_exception_payload_round_trips_a_cent_precise_amount():
         description="d",
         description_code=None,
         description_params=None,
+        erp_report=None,
         status="open",
         resolution=None,
         resolved_by=None,

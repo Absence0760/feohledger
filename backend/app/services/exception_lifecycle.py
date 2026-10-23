@@ -684,6 +684,24 @@ async def record_decision(
         details=details,
         correlation_id=correlation_id,
     )
+
+    if (
+        action in CLEARING_ACTIONS
+        and exception.invoice_id is not None
+        and is_payment_blocking(exception.exception_type)
+    ):
+        # A blocker just cleared. If it was what stopped FeohLedger recording a
+        # payment the ERP reported, record it now, through the same gates — in
+        # this transaction, so the decision and the record commit or roll back
+        # together (decisions §318).
+        from app.services.erp_status_sync import is_erp_paid_report, retry_erp_reported_payments
+
+        if not is_erp_paid_report(exception):
+            await retry_erp_reported_payments(
+                db,
+                invoice_id=exception.invoice_id,
+                organization_id=exception.organization_id,
+            )
     return new_status
 
 

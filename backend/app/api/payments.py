@@ -902,6 +902,82 @@ async def _payment_queue_rollup(
     }
 
 
+async def _queue_blocking_exceptions(
+    db: AsyncSession, invoices: list[Invoice], user: User, org_settings: dict | None
+) -> dict[uuid.UUID, dict]:
+    """``{invoice_id: {id, exception_type, clear_refusal}}`` for the page's rows
+    an open payment-blocking exception holds, in ONE query.
+
+    The exception picked per invoice is the one ``payment_runs.
+    blocking_exception_types`` names (earliest type in
+    ``PAYMENT_BLOCKING_EXCEPTION_TYPES``, then oldest), so the link always
+    leads to the exception the row's ``blocked_reason`` already names.
+    ``clear_refusal`` is ``exception_lifecycle.segregation_refusal``'s code for
+    THIS caller resolving it — the predicate ``record_decision`` raises from —
+    so the banner can say a colleague must clear it instead of leaving the
+    uploader to find that out from a 403. PII-free: ids, a type, a code.
+    """
+    from app.services.exception_lifecycle import segregation_refusal
+
+    by_id = {inv.id: inv for inv in invoices}
+    if not by_id:
+        return {}
+    rows = (
+        (
+            await db.execute(
+                select(APException)
+                .where(
+                    APException.invoice_id.in_(list(by_id)),
+                    APException.exception_type.in_(PAYMENT_BLOCKING_EXCEPTION_TYPES),
+                    APException.status.notin_(("resolved", "dismissed")),
+                )
+                .order_by(APException.created_at.asc(), APException.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    rank = {t: i for i, t in enumerate(PAYMENT_BLOCKING_EXCEPTION_TYPES)}
+    chosen: dict[uuid.UUID, APException] = {}
+    for exc in rows:
+        best = chosen.get(exc.invoice_id)
+        if best is None or rank[exc.exception_type] < rank[best.exception_type]:
+            chosen[exc.invoice_id] = exc
+    return {
+        inv_id: {
+            "id": str(exc.id),
+            "exception_type": exc.exception_type,
+            "clear_refusal": segregation_refusal(
+                exc, by_id[inv_id], user.id, action="resolve", org_settings=org_settings
+            ),
+        }
+        for inv_id, exc in chosen.items()
+    }
+
+
+async def _queue_erp_reported_payments(
+    db: AsyncSession, invoice_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict]:
+    """``{invoice_id: what the ERP reported}`` for rows holding a live
+    ``paid_not_recorded`` exception — the newest one per invoice. Only the
+    fields the "Record as paid" dialog pre-fills, plus the exception's id."""
+    from app.services.erp_status_sync import erp_product_name, live_erp_paid_reports
+
+    out: dict[uuid.UUID, dict] = {}
+    for exc in await live_erp_paid_reports(db, invoice_ids):
+        if exc.invoice_id in out:
+            continue  # newest first; the first seen is the latest report
+        report = exc.erp_report or {}
+        out[exc.invoice_id] = {
+            "exception_id": str(exc.id),
+            "erp_name": erp_product_name(report.get("erp_type")),
+            "method": report.get("method"),
+            "reference": report.get("reference"),
+            "paid_on": report.get("paid_on"),
+        }
+    return out
+
+
 @router.get("/queue")
 async def payment_queue(
     pagination: PaginationParams = Depends(pagination_params),
@@ -986,6 +1062,12 @@ async def payment_queue(
     # from `discount_*` below, which is the invoice's STATIC term ("2/10 net
     # 30") on its payment schedule and is only ever advisory.
     payables = await payable_amounts(db, [inv for inv, _ in rows], pay_date=today)
+    # Which exception blocks each row, so the page can NAME it, link to it and
+    # say whether this caller may clear it — and what the ERP reported for a
+    # row whose ERP payment could not be recorded, so "Record as paid" opens
+    # pre-filled with it (decisions §318).
+    blockers = await _queue_blocking_exceptions(db, [inv for inv, _ in rows], user, org.settings)
+    erp_reports = await _queue_erp_reported_payments(db, [inv.id for inv, _ in rows])
 
     items: list[dict] = []
     for inv, sched in rows:
@@ -1071,6 +1153,17 @@ async def payment_queue(
                 "record_outside_refusal": (
                     record_refusals[inv.id].code if inv.id in record_refusals else None
                 ),
+                # The open payment-blocking exception behind `blocked_reason` /
+                # an `external_payment_blocking_exception` refusal: its id (to
+                # link to), its type, and the caller's own verdict on clearing
+                # it — a segregation-of-duties code when they may not (the
+                # uploader of the invoice, say), so the page can say a
+                # colleague must. `None` when nothing blocks the row.
+                "blocking_exception": blockers.get(inv.id),
+                # The payment the ERP reported for this invoice and FeohLedger
+                # could not record, or `None`: rail, reference and paid-on date
+                # straight from the open `paid_not_recorded` exception.
+                "erp_reported_payment": erp_reports.get(inv.id),
             }
         )
 

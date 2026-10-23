@@ -60,6 +60,7 @@ async def create_exception(
     raised_by_user_id: uuid.UUID | None = None,
     description_code: str | None = None,
     description_params: dict | None = None,
+    erp_report: dict | None = None,
 ) -> APException:
     """Create + persist an ``Exception`` and best-effort emit ``exception.raised``.
 
@@ -86,6 +87,10 @@ async def create_exception(
     language; ``description`` is then the English fallback. Detector-raised
     exceptions pass all three (``invoice_warnings._ensure_exception``); a
     human-authored description (a rejection reason) passes neither.
+
+    ``erp_report`` is what the ERP reported, as PII-free data, on the
+    reconciliation rows the ERP paths open (``erp_status_sync``, decisions
+    §318); ``None`` everywhere else.
     """
     resolved_invoice_id = invoice_id if invoice_id is not None else getattr(invoice, "id", None)
     resolved_entity_id = entity_id if entity_id is not None else getattr(invoice, "entity_id", None)
@@ -103,6 +108,7 @@ async def create_exception(
         assigned_to_user_id=assigned_to_user_id,
         due_at=due_at,
         raised_by_user_id=raised_by_user_id,
+        erp_report=erp_report,
     )
     db.add(exc)
     # Flush so the row gets its id before we emit (the id is the webhook

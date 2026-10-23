@@ -204,10 +204,13 @@ async def check_recordable(
     org: Organization,
     invoice: Invoice,
     actor_id: uuid.UUID | None,
+    answering: frozenset[uuid.UUID] = frozenset(),
 ) -> Refusal | None:
     """Every invoice-level gate except the live-payment one. ``None`` = recordable.
 
-    The caller holds ``invoice`` FOR UPDATE.
+    The caller holds ``invoice`` FOR UPDATE. ``answering`` names exceptions this
+    very record answers, which therefore do not refuse it — see
+    :func:`record_invoice_paid_outside`.
     """
     from app.api.payments import PAYABLE_INVOICE_STATUSES
 
@@ -220,10 +223,15 @@ async def check_recordable(
     refusal = segregation_refusal(invoice, actor_id, org.settings)
     if refusal is not None:
         return refusal
-    return (await _state_refusals(db, [invoice])).get(invoice.id)
+    return (await _state_refusals(db, [invoice], answering=answering)).get(invoice.id)
 
 
-async def _state_refusals(db: AsyncSession, invoices: list[Invoice]) -> dict[uuid.UUID, Refusal]:
+async def _state_refusals(
+    db: AsyncSession,
+    invoices: list[Invoice],
+    *,
+    answering: frozenset[uuid.UUID] = frozenset(),
+) -> dict[uuid.UUID, Refusal]:
     """The actor-independent invoice-level gates of :func:`check_recordable`, batched.
 
     The ONE implementation of those gates: :func:`check_recordable` asks it about
@@ -232,7 +240,7 @@ async def _state_refusals(db: AsyncSession, invoices: list[Invoice]) -> dict[uui
     if not invoices:
         return {}
     ids = [inv.id for inv in invoices]
-    blocking = await blocking_exception_types(db, ids)
+    blocking = await blocking_exception_types(db, ids, exclude_exception_ids=answering)
     # `None` method: a recorded payment takes no card leg, so it may never be
     # booked against a card-claimed invoice — the fail-closed reading.
     card_claimed = await card_claimed_invoice_ids(db, ((i, None) for i in ids))
@@ -365,6 +373,7 @@ async def _complete(
     actor_id: uuid.UUID | None,
     source: Source,
     converted: bool,
+    actor_name: str | None = None,
 ) -> None:
     """Book ``payment`` as completed outside FeohLedger and walk the invoice to ``paid``."""
     from app.api.payments import _capture_discount_offers
@@ -435,6 +444,14 @@ async def _complete(
         details=details,
     )
 
+    # A "the ERP reported this paid and we couldn't record it" exception is
+    # answered now, whichever door recorded the payment (decisions §318).
+    from app.services.erp_status_sync import close_erp_paid_reports
+
+    await close_erp_paid_reports(
+        db, invoice, actor_id=actor_id, actor_name=actor_name, org_settings=org.settings
+    )
+
 
 async def record_invoice_paid_outside(
     db: AsyncSession,
@@ -447,10 +464,21 @@ async def record_invoice_paid_outside(
     actor_id: uuid.UUID | None,
     source: Source,
     amount: Decimal | None = None,
+    answering_exception_ids: frozenset[uuid.UUID] = frozenset(),
+    actor_name: str | None = None,
 ) -> RecordedPayment:
     """Record one invoice as paid outside FeohLedger. Never commits.
 
     The caller holds ``invoice`` FOR UPDATE (`get_invoice_for_update`).
+
+    ``answering_exception_ids`` names exceptions this record ANSWERS, so they do
+    not refuse it on the blocking-exception gate. One caller passes any: the
+    exception queue's one-click record of an ERP-reported payment
+    (`api/exceptions.record_erp_payment`), whose own row is payment-blocking by
+    design, and which has already applied that row's clearing rules to the
+    caller under lock. Every other gate still runs, and every refusal is raised
+    before anything is written or audited. On success that row is resolved by
+    `erp_status_sync.close_erp_paid_reports`, as ``actor_name`` (decisions §318).
 
     **Idempotent**: replaying the same record (same reference and paid-on date)
     for an invoice it already paid returns the existing payment with
@@ -463,7 +491,9 @@ async def record_invoice_paid_outside(
             if _same_record(existing, reference=reference, paid_on=paid_on):
                 return RecordedPayment(existing, created=False)
 
-    refusal = await check_recordable(db, org=org, invoice=invoice, actor_id=actor_id)
+    refusal = await check_recordable(
+        db, org=org, invoice=invoice, actor_id=actor_id, answering=answering_exception_ids
+    )
     if refusal is not None:
         raise ExternalPaymentRefused(refusal)
 
@@ -506,6 +536,7 @@ async def record_invoice_paid_outside(
             actor_id=actor_id,
             source=source,
             converted=True,
+            actor_name=actor_name,
         )
         return RecordedPayment(target, created=True)
 
@@ -549,6 +580,7 @@ async def record_invoice_paid_outside(
         actor_id=actor_id,
         source=source,
         converted=False,
+        actor_name=actor_name,
     )
     return RecordedPayment(payment, created=True)
 

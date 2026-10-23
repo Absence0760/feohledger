@@ -139,6 +139,97 @@ def reported_payment_method(value: object) -> str | None:
     return None if method == PaymentMethod.virtual_card else method.value
 
 
+#: ``Exception.erp_report["kind"]`` values — what the ERP reported that a
+#: person now has to reconcile (decisions §318).
+#:
+#: * ``paid_not_recorded`` — the ERP reported the bill paid and FeohLedger could
+#:   not record that payment. The row keeps the payment's facts, which is what
+#:   :func:`retry_erp_reported_payments` and the queue's one-click record read.
+#: * ``settled_short`` — the ERP reported paid while FeohLedger's own payment
+#:   settled short of what AP authorized.
+#: * ``voided_after_post`` — the ERP voided a bill FeohLedger had already
+#:   moved past the point a void can be applied.
+ERP_REPORT_PAID_NOT_RECORDED = "paid_not_recorded"
+ERP_REPORT_SETTLED_SHORT = "settled_short"
+ERP_REPORT_VOIDED_AFTER_POST = "voided_after_post"
+
+#: How each ERP adapter is named to an AP user. An adapter missing here reads
+#: as "your ERP" — never its raw registry key.
+_ERP_DISPLAY_NAMES = {
+    "quickbooks_online": "QuickBooks Online",
+    "netsuite": "NetSuite",
+    "xero": "Xero",
+    "dynamics_365_bc": "Dynamics 365 Business Central",
+    "sage_intacct": "Sage Intacct",
+}
+
+
+def erp_product_name(erp_type: str | None) -> str | None:
+    """The ERP's product name (a proper noun, never translated), or None for an
+    adapter with none — a client then says "your ERP" in its own language."""
+    return _ERP_DISPLAY_NAMES.get((erp_type or "").strip().lower())
+
+
+def erp_display_name(erp_type: str | None) -> str:
+    """The ERP's name for an English sentence an AP user reads."""
+    return erp_product_name(erp_type) or "Your ERP"
+
+
+#: What stopped FeohLedger recording the ERP's payment, and what the reader does
+#: about it — one clause per ``external_payment`` refusal code. A code missing
+#: here falls back to the generic clause.
+_UNRECORDED_REASONS: dict[str, str] = {
+    "external_payment_blocking_exception": (
+        "another exception on this invoice is blocking payment. Clear that exception "
+        "and FeohLedger records the payment automatically."
+    ),
+    "external_payment_in_run": (
+        "the invoice is also in a FeohLedger payment run, so the supplier could be paid "
+        "twice. Take it out of the run or cancel the run, then record the ERP's payment "
+        "from this exception."
+    ),
+    "external_payment_payment_live": (
+        "FeohLedger has its own payment in progress for this invoice, so the supplier "
+        "could be paid twice. Void that payment if the ERP's payment is the real one, "
+        "then record the ERP's payment from this exception."
+    ),
+    "external_payment_card_live": (
+        "a virtual card is still live for this invoice, so the supplier could be paid "
+        "twice. Cancel the card, then record the ERP's payment from this exception."
+    ),
+    "external_payment_credit_conflict": (
+        "an applied credit memo no longer matches this invoice's supplier or currency, "
+        "so the amount owed can't be stated. Correct the credit memo, then record the "
+        "ERP's payment from this exception."
+    ),
+    "external_payment_nothing_to_pay": (
+        "credit memos already cover the whole invoice, so there is no payment to record. "
+        "Check the bill in the ERP, then resolve this exception."
+    ),
+    "external_payment_not_payable": (
+        "the invoice is not at a status that can be marked paid. Check the invoice, then "
+        "record the ERP's payment from this exception or resolve it."
+    ),
+}
+_UNRECORDED_FALLBACK = (
+    "FeohLedger refused to record it. Check the invoice, then record the ERP's payment "
+    "from this exception or resolve it."
+)
+
+
+def unrecorded_payment_description(erp_type: str | None, refusal_code: str) -> str:
+    """The sentence an AP user reads on a ``paid_not_recorded`` exception.
+
+    What happened and what to do — no API path, no ids, no refusal code: those
+    are machine detail and live in ``Exception.erp_report``.
+    """
+    reason = _UNRECORDED_REASONS.get(refusal_code, _UNRECORDED_FALLBACK)
+    return (
+        f"{erp_display_name(erp_type)} reports this bill paid, but FeohLedger couldn't "
+        f"record that payment because {reason}"
+    )
+
+
 async def open_erp_reconciliation_exception(
     db: AsyncSession,
     invoice: Invoice,
@@ -146,6 +237,7 @@ async def open_erp_reconciliation_exception(
     org_id,
     description: str,
     exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
+    erp_report: dict | None = None,
 ) -> bool:
     """Open ONE reconciliation exception for human review, PII-free.
 
@@ -154,18 +246,171 @@ async def open_erp_reconciliation_exception(
     sweep reporting the same change) never pile up duplicates. Returns whether
     one was opened.
 
-    ``description`` carries only safe routing identifiers and statuses — never
-    the ERP's payload, which may include vendor bank / tax / address fields.
+    A ``paid_not_recorded`` report goes through :func:`_keep_erp_paid_report`
+    instead, which keeps at most ONE live such row per invoice and refreshes it.
+
+    ``description`` is the sentence for a person and carries nothing from the
+    ERP's payload, which may include vendor bank / tax / address fields.
+    ``erp_report`` is the PII-free machine detail, as data (decisions §318).
     """
+    if (erp_report or {}).get("kind") == ERP_REPORT_PAID_NOT_RECORDED:
+        return await _keep_erp_paid_report(
+            db,
+            invoice,
+            org_id=org_id,
+            description=description,
+            exception_type=exception_type,
+            erp_report=erp_report,
+        )
+    if await _live_of_type(db, invoice.id, exception_type):
+        return False
+    await _create_reconciliation(
+        db,
+        invoice,
+        org_id=org_id,
+        description=description,
+        exception_type=exception_type,
+        erp_report=erp_report,
+    )
+    return True
+
+
+async def _live_of_type(db: AsyncSession, invoice_id: uuid.UUID, exception_type: str) -> bool:
     existing = await db.execute(
         select(func.count()).where(
-            APException.invoice_id == invoice.id,
+            APException.invoice_id == invoice_id,
             APException.exception_type == exception_type,
             APException.status.in_(("open", "escalated")),
         )
     )
-    if (existing.scalar() or 0) > 0:
+    return (existing.scalar() or 0) > 0
+
+
+def _merged_report(old: dict | None, new: dict, *, keep_refusal: bool) -> dict:
+    """A later report folded into the facts a live row already holds.
+
+    The payment is the one the ERP first reported, unless the ERP now says more:
+    a stated date replaces a stand-in one but an undated report never replaces
+    a date; a document id replaces an event-derived reference but an id-less
+    report never replaces a reference (the event id changes per delivery, and
+    the reference is the replay key `_same_record` reads). ``first_reported_at``
+    keeps the age of the claim.
+    """
+    merged = dict(new)
+    old = old or {}
+    if not new.get("paid_on_reported") and old.get("paid_on"):
+        merged["paid_on"] = old["paid_on"]
+        merged["paid_on_reported"] = bool(old.get("paid_on_reported"))
+    if not new.get("erp_document_id") and old.get("reference"):
+        merged["reference"] = old["reference"]
+        merged["erp_document_id"] = old.get("erp_document_id")
+    merged["first_reported_at"] = old.get("first_reported_at") or old.get("reported_at")
+    if keep_refusal and old.get("refusal_code"):
+        merged["refusal_code"] = old["refusal_code"]
+    return merged
+
+
+async def _keep_erp_paid_report(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    org_id,
+    description: str,
+    exception_type: str,
+    erp_report: dict,
+) -> bool:
+    """Keep ONE live ``paid_not_recorded`` row per invoice, whatever its type.
+
+    * A live BLOCKING row (a double-pay refusal) stays the row. A later report
+      is refused BY it (its own type blocks the record), which says nothing new
+      about why, so its refusal and sentence stand unless the new refusal is
+      itself a double-pay one; its payment facts are refreshed.
+    * A new double-pay refusal over a live non-blocking row opens the blocking
+      row — the run must stop — and closes the non-blocking one as superseded.
+      If an older blocker of that type with no ERP facts is already open, the
+      run is stopped anyway: the non-blocking row is refreshed instead.
+    * Otherwise the live non-blocking row is refreshed, or a row is opened.
+
+    Two live rows would each offer to record the same payment, and a stale one
+    would be re-attempted against a decision made on the other.
+    """
+    from app.services.exception_lifecycle import is_payment_blocking
+
+    live = await live_erp_paid_reports(db, [invoice.id])
+    blocking = [r for r in live if is_payment_blocking(r.exception_type)]
+    others = [r for r in live if not is_payment_blocking(r.exception_type)]
+    new_blocking = is_payment_blocking(exception_type)
+
+    if blocking:
+        row = blocking[0]
+        row.erp_report = _merged_report(row.erp_report, erp_report, keep_refusal=not new_blocking)
+        if new_blocking:
+            row.description = description
+        await _supersede(db, invoice, others)
         return False
+    if new_blocking and not await _live_of_type(db, invoice.id, exception_type):
+        await _supersede(db, invoice, others)
+        await _create_reconciliation(
+            db,
+            invoice,
+            org_id=org_id,
+            description=description,
+            exception_type=exception_type,
+            erp_report=erp_report,
+        )
+        return True
+    if others:
+        row = others[0]
+        row.erp_report = _merged_report(row.erp_report, erp_report, keep_refusal=False)
+        row.description = description
+        await _supersede(db, invoice, others[1:])
+        return False
+    # The facts ride a row of their own, never swallowed by the per-type dedupe
+    # other ERP rows use. Non-blocking even for a double-pay refusal here: we
+    # only reach this with one when a blocker of that type is already open,
+    # which stops the run on its own.
+    await _create_reconciliation(
+        db,
+        invoice,
+        org_id=org_id,
+        description=description,
+        exception_type=ERP_RECONCILIATION_EXCEPTION_TYPE,
+        erp_report=erp_report,
+    )
+    return True
+
+
+_SUPERSEDED = "Closed automatically: a later report from the ERP replaced this one."
+
+
+async def _supersede(db: AsyncSession, invoice: Invoice, rows: list[APException]) -> None:
+    """Close NON-blocking ``paid_not_recorded`` rows a newer row replaces —
+    through ``record_decision``, so each close is audited. Never a blocking
+    row: closing one would be a machine clearing a payment block."""
+    from app.services.exception_lifecycle import record_decision
+
+    for row in rows:
+        await record_decision(
+            db,
+            exception=row,
+            action="resolve",
+            resolution=_SUPERSEDED,
+            actor_id=None,
+            actor_name=ERP_REPORT_CLOSER,
+            invoice=invoice,
+            via="erp_superseded",
+        )
+
+
+async def _create_reconciliation(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    org_id,
+    description: str,
+    exception_type: str,
+    erp_report: dict | None,
+) -> None:
     await create_exception(
         db,
         exception_type=exception_type,
@@ -176,8 +421,8 @@ async def open_erp_reconciliation_exception(
         invoice=invoice,
         # Raised from what the tenant's ERP reported, not by a control-plane user.
         raised_by_user_id=None,
+        erp_report=erp_report,
     )
-    return True
 
 
 async def record_erp_reported_payment(
@@ -190,7 +435,8 @@ async def record_erp_reported_payment(
     event_id: str | None,
     paid_on: date | None = None,
     method: str | None = None,
-) -> None:
+    paid_on_reported: bool | None = None,
+) -> bool:
     """Book the ERP's `Paid` as a payment made outside FeohLedger.
 
     Through `services/external_payment.record_invoice_paid_outside` — the same
@@ -201,7 +447,14 @@ async def record_erp_reported_payment(
     report arrived and its rail is NULL (1099-reportable). A refusal (an open
     payment-blocking exception, a live FeohLedger payment or card that would
     make this a double payment, a credit we can't net) is never silent: it
-    opens a reconciliation exception naming the refusal code. Never commits.
+    opens a reconciliation exception that says, in an AP user's words, what
+    stopped it — and keeps the payment's facts in ``erp_report`` so it can be
+    recorded later without anyone re-keying them (decisions §318). Returns
+    whether the payment was recorded. Never commits.
+
+    ``paid_on_reported`` says whether ``paid_on`` came from the ERP. A
+    re-attempt (:func:`retry_erp_reported_payments`) passes the stored flag,
+    since by then ``paid_on`` is always set.
     """
     from app.services.external_payment import (
         ExternalPaymentRefused,
@@ -225,9 +478,13 @@ async def record_erp_reported_payment(
             },
         )
 
-    reference = (erp_document_id or (f"erp-event:{event_id}" if event_id else None) or erp_type)[
-        :255
-    ]
+    if paid_on_reported is None:
+        paid_on_reported = paid_on is not None
+    # Fixed at the first report, never at a later re-attempt: the payment is
+    # dated the day the ERP said, or the day it reported, never the day a
+    # blocker happened to clear.
+    paid_on = paid_on or utc_today()
+    reference = erp_paid_reference(erp_type, erp_document_id, event_id)
     try:
         await record_invoice_paid_outside(
             db,
@@ -235,7 +492,7 @@ async def record_erp_reported_payment(
             invoice=invoice,
             method=method,
             reference=reference,
-            paid_on=paid_on or utc_today(),
+            paid_on=paid_on,
             actor_id=None,
             source="erp",
         )
@@ -257,13 +514,224 @@ async def record_erp_reported_payment(
                 if double_pay
                 else ERP_RECONCILIATION_EXCEPTION_TYPE
             ),
-            description=(
-                f"ERP reported 'Paid' via {erp_type} for an invoice FeohLedger has not "
-                f"paid, but it could not be recorded ({exc.refusal.code}). Resolve the "
-                f"cause, then record it via POST /api/payments/record-outside "
-                f"(erp_document_id={erp_document_id or '-'}, event={event_id or '-'})."
-            ),
+            description=unrecorded_payment_description(erp_type, exc.refusal.code),
+            erp_report={
+                "kind": ERP_REPORT_PAID_NOT_RECORDED,
+                "erp_type": erp_type,
+                "erp_document_id": erp_document_id,
+                "event_id": str(event_id) if event_id else None,
+                "method": method,
+                "reference": reference,
+                "paid_on": paid_on.isoformat(),
+                "paid_on_reported": paid_on_reported,
+                "refusal_code": exc.refusal.code,
+                "reported_at": datetime.now(UTC).isoformat(),
+            },
         )
+        return False
+    return True
+
+
+def erp_paid_reference(erp_type: str, erp_document_id: str | None, event_id: str | None) -> str:
+    """The reference an ERP-reported payment is recorded under: the ERP's own
+    document id, else the event, else the ERP's name. Stable for one report,
+    which is what makes a re-attempt an idempotent replay."""
+    return (erp_document_id or (f"erp-event:{event_id}" if event_id else None) or erp_type)[:255]
+
+
+def is_erp_paid_report(exception: APException) -> bool:
+    """Does this row carry an ERP-reported payment FeohLedger could not record?"""
+    report = getattr(exception, "erp_report", None)
+    return isinstance(report, dict) and report.get("kind") == ERP_REPORT_PAID_NOT_RECORDED
+
+
+async def live_erp_paid_reports(
+    db: AsyncSession, invoice_ids: list[uuid.UUID]
+) -> list[APException]:
+    """The open / escalated ``paid_not_recorded`` rows on these invoices, newest first."""
+    if not invoice_ids:
+        return []
+    return list(
+        (
+            await db.execute(
+                select(APException)
+                .where(
+                    APException.invoice_id.in_(invoice_ids),
+                    APException.status.in_(("open", "escalated")),
+                    APException.erp_report["kind"].astext == ERP_REPORT_PAID_NOT_RECORDED,
+                )
+                .order_by(APException.created_at.desc(), APException.id.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+#: ``resolved_by`` on a row FeohLedger closed itself because the payment it was
+#: about has been recorded. The audit row's ``actor_id`` still names the person
+#: whose act recorded it, when a person's did.
+ERP_REPORT_CLOSER = "FeohLedger"
+_CLOSED_BY_RECORD = "Closed automatically: the payment the ERP reported has been recorded."
+
+
+async def close_erp_paid_reports(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    actor_id: uuid.UUID | None,
+    actor_name: str | None = None,
+    org_settings: dict | None = None,
+) -> int:
+    """Resolve every live ``paid_not_recorded`` row on ``invoice``.
+
+    Called once the invoice HAS been recorded as paid outside FeohLedger
+    (``external_payment._complete``), by whichever door: the automatic
+    re-attempt, the queue's one-click record, a user's own "Record as paid", a
+    run recorded outside. The question the row asked is answered, and leaving
+    it open would only invite a second record.
+
+    Through ``exception_lifecycle.record_decision``, so each close writes its
+    ``exception.resolved`` audit row, as ``actor_name`` when a person recorded
+    it. A payment-blocking row is live here only on the one-click path, which
+    has already applied its clearing rules to that caller under lock; the same
+    rule runs again here with the org's own settings.
+    Returns how many were closed.
+    """
+    from app.services.exception_lifecycle import record_decision
+
+    rows = await live_erp_paid_reports(db, [invoice.id])
+    for row in rows:
+        await record_decision(
+            db,
+            exception=row,
+            action="resolve",
+            resolution=_CLOSED_BY_RECORD,
+            actor_id=actor_id,
+            actor_name=actor_name or ERP_REPORT_CLOSER,
+            invoice=invoice,
+            via="payment_recorded",
+            org_settings=org_settings,
+        )
+    return len(rows)
+
+
+#: ``erp_report["kind"]`` of a ``paid_not_recorded`` row whose payment the ERP
+#: has since withdrawn — the bill reads open, part-paid, deleted or voided.
+ERP_REPORT_PAID_WITHDRAWN = "paid_withdrawn"
+
+
+async def withdraw_erp_paid_reports(
+    db: AsyncSession, invoice: Invoice, *, erp_type: str, erp_state: str
+) -> int:
+    """The ERP no longer shows the bill paid: retire the payment it reported.
+
+    Every live ``paid_not_recorded`` row on the invoice stops being one — its
+    kind becomes ``paid_withdrawn``, so nothing re-attempts the record and no
+    one-click offers it. The row itself stays OPEN for a person, with a
+    sentence saying so: a blocking row in particular is never cleared by a
+    machine. Without this, a payment the ERP had since voided would be booked
+    the moment someone cleared an unrelated blocker, and an invoice still owed
+    would read paid (decisions §318). Returns how many were withdrawn.
+    """
+    rows = await live_erp_paid_reports(db, [invoice.id])
+    for row in rows:
+        row.erp_report = {
+            **(row.erp_report or {}),
+            "kind": ERP_REPORT_PAID_WITHDRAWN,
+            "withdrawn_as": erp_state,
+            "withdrawn_at": datetime.now(UTC).isoformat(),
+        }
+        row.description = (
+            f"{erp_display_name(erp_type)} reported this bill paid, but no longer shows it "
+            "paid. FeohLedger did not record that payment. Check the bill in the ERP: if it "
+            "is still owed, resolve this exception and pay it as usual."
+        )
+    return len(rows)
+
+
+async def retry_erp_reported_payments(
+    db: AsyncSession, *, invoice_id: uuid.UUID, organization_id: uuid.UUID
+) -> bool:
+    """Re-attempt recording the ERP's payment once a blocker on the invoice clears.
+
+    Called by ``exception_lifecycle.record_decision`` when a payment-blocking
+    exception on ``invoice_id`` is resolved or dismissed. If the invoice has a
+    live, NON-blocking ``paid_not_recorded`` row, its stored facts go back
+    through :func:`record_erp_reported_payment` — the very gates the first
+    attempt ran, so nothing is bypassed: another open blocker, a FeohLedger
+    payment or card that would pay twice, a credit we can't net all still
+    refuse, and a refusal refreshes the row with the new reason. On success
+    ``external_payment._complete`` closes the row.
+
+    A BLOCKING ``paid_not_recorded`` row (the double-pay refusals) is never
+    retried here: it refuses the record itself, by design, until a person who
+    may clear it decides the ERP's payment is the one that stands — which is the
+    queue's one-click record (``POST /api/exceptions/{id}/record-erp-payment``).
+
+    Same transaction as the decision that triggered it; never commits.
+    Idempotent: nothing is live once it succeeds. Returns whether a payment
+    was recorded.
+    """
+    from app.services.exception_lifecycle import is_payment_blocking
+
+    candidates = [
+        row
+        for row in await live_erp_paid_reports(db, [invoice_id])
+        if not is_payment_blocking(row.exception_type)
+    ]
+    if not candidates:
+        return False
+    facts = candidates[0].erp_report or {}
+    try:
+        paid_on = date.fromisoformat(str(facts.get("paid_on")))
+    except ValueError:
+        return False
+    try:
+        async with control_session_factory() as ctrl:
+            org = await ctrl.get(Organization, organization_id)
+    except Exception:  # noqa: BLE001 — isolated follow-on, like the attempt below
+        logger.exception("ERP-reported payment re-attempt: org unreadable: org=%s", organization_id)
+        return False
+    if org is None:
+        return False
+    # In a SAVEPOINT: this is a follow-on to the decision that triggered it. A
+    # failure of ours here (a lock timeout, a bug) must not undo a person's
+    # clearing of a duplicate or fraud flag. It rolls back only this attempt —
+    # and `post_commit` drops whatever the attempt queued — and leaves the row
+    # open with its facts for the one-click record. A REFUSAL is not a failure:
+    # `record_erp_reported_payment` turns it into the refreshed row itself.
+    try:
+        async with db.begin_nested():
+            invoice = (
+                await db.execute(
+                    select(Invoice)
+                    .where(Invoice.id == invoice_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if invoice is None or invoice.status not in ERP_PAID_RECORDABLE:
+                # Paid some other way, voided back, or not posted yet: no longer
+                # the question the row asked, so a person reads it as it stands.
+                return False
+            return await record_erp_reported_payment(
+                db,
+                invoice,
+                org=org,
+                erp_type=str(facts.get("erp_type") or ""),
+                erp_document_id=facts.get("erp_document_id"),
+                event_id=facts.get("event_id"),
+                paid_on=paid_on,
+                method=reported_payment_method(facts.get("method")),
+                paid_on_reported=bool(facts.get("paid_on_reported")),
+            )
+    except Exception:  # noqa: BLE001 — isolated follow-on; logged with its traceback
+        # ids only — no vendor, no amount, no reference.
+        logger.exception(
+            "ERP-reported payment re-attempt failed: invoice=%s org=%s", invoice_id, organization_id
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +864,15 @@ async def apply_bill_report(
     status = invoice.status
     where = _describe(report, erp_type, event_id)
     action = "unchanged"
+
+    if report.state in (ErpBillState.open, ErpBillState.partially_paid, ErpBillState.deleted):
+        # Whatever else this report means, it is no longer a bill paid in full:
+        # a payment the ERP reported earlier, which FeohLedger could not record,
+        # must never be recorded now (decisions §318).
+        if await withdraw_erp_paid_reports(
+            db, invoice, erp_type=erp_type, erp_state=report.state.value
+        ):
+            action = "erp_payment_withdrawn"
 
     if report.state is ErpBillState.paid and report.reduced_outside:
         if report.settled_by_credit and status in PAYABLE_HERE:

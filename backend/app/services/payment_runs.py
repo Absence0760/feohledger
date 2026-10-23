@@ -408,6 +408,7 @@ async def blocking_exception_types(
     invoice_ids: list[uuid.UUID],
     *,
     types: tuple[str, ...] | None = None,
+    exclude_exception_ids: frozenset[uuid.UUID] = frozenset(),
 ) -> dict[uuid.UUID, str]:
     """Map each blocked invoice id → the TYPE of exception blocking it.
 
@@ -436,13 +437,17 @@ async def blocking_exception_types(
     if not invoice_ids:
         return {}
     blocking = PAYMENT_BLOCKING_EXCEPTION_TYPES if types is None else types
-    rows = await db.execute(
-        select(InvoiceException.invoice_id, InvoiceException.exception_type).where(
-            InvoiceException.invoice_id.in_(invoice_ids),
-            InvoiceException.exception_type.in_(blocking),
-            InvoiceException.status.notin_(("resolved", "dismissed")),
-        )
+    query = select(InvoiceException.invoice_id, InvoiceException.exception_type).where(
+        InvoiceException.invoice_id.in_(invoice_ids),
+        InvoiceException.exception_type.in_(blocking),
+        InvoiceException.status.notin_(("resolved", "dismissed")),
     )
+    if exclude_exception_ids:
+        # The one caller that passes this is the exception queue's one-click
+        # record of an ERP-reported payment, which resolves exactly these rows
+        # in the same transaction once the record succeeds (decisions §318).
+        query = query.where(InvoiceException.id.notin_(exclude_exception_ids))
+    rows = await db.execute(query)
     rank = {t: i for i, t in enumerate(blocking)}
     unranked = len(rank)
     out: dict[uuid.UUID, str] = {}

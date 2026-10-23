@@ -18,8 +18,12 @@ from app.services.erp_status_sync import (
     DOUBLE_PAY_REFUSALS,
     ERP_PAID_RECORDABLE,
     ERP_RECONCILIATION_EXCEPTION_TYPE,
+    ERP_REPORT_SETTLED_SHORT,
+    ERP_REPORT_VOIDED_AFTER_POST,
+    erp_display_name,
     reported_paid_on,
     reported_payment_method,
+    withdraw_erp_paid_reports,
 )
 from app.services.erp_status_sync import (
     open_erp_reconciliation_exception as _open_erp_reconciliation_exception,
@@ -438,14 +442,25 @@ async def erp_webhook(
                             invoice,
                             org_id=org.id,
                             description=(
-                                f"ERP reported 'Paid' via {erp_type} for an invoice "
-                                f"whose payment settled {coverage.state} of what AP "
-                                f"authorized (shortfall {coverage.shortfall or '-'}) — "
-                                f"held at 'payment_scheduled'. Reconcile via "
-                                f"POST /api/payments/{{id}}/settlement/accept or /void "
-                                f"(erp_document_id={erp_document_id or '-'}, "
-                                f"event={event_id or '-'})."
+                                f"{erp_display_name(erp_type)} reports this bill paid, but "
+                                "FeohLedger's own payment for it settled for less than "
+                                "AP authorized, so the invoice is held at Payment "
+                                "scheduled. Open the payment and either accept the "
+                                "settled amount or void the payment."
                             ),
+                            erp_report={
+                                "kind": ERP_REPORT_SETTLED_SHORT,
+                                "erp_type": erp_type,
+                                "erp_document_id": erp_document_id,
+                                "event_id": str(event_id) if event_id else None,
+                                "payment_id": str(settling.id),
+                                "coverage_state": coverage.state,
+                                "shortfall": (
+                                    str(coverage.shortfall)
+                                    if coverage.shortfall is not None
+                                    else None
+                                ),
+                            },
                         )
                         await db.commit()
                         return  # silent 204 — held for human reconciliation
@@ -513,15 +528,27 @@ async def _raise_erp_reconciliation_exception(
     ``posted_in_erp`` / ``payment_scheduled`` / ``paid``). Money may already be
     in flight, so this is a review signal — we deliberately do NOT
     auto-transition the invoice.
+
+    A payment the ERP reported earlier, which FeohLedger could not record, is
+    withdrawn first: a voided bill was not paid (decisions §318).
     """
+    await withdraw_erp_paid_reports(db, invoice, erp_type=erp_type, erp_state=erp_status)
     await _open_erp_reconciliation_exception(
         db,
         invoice,
         org_id=org_id,
         description=(
-            f"ERP reported '{erp_status}' (void/cancel) via {erp_type} for an "
-            f"invoice already at '{invoice.status.value}' — money may be in flight. "
-            f"Needs human reconciliation "
-            f"(erp_document_id={erp_document_id or '-'}, event={event_id or '-'})."
+            f"{erp_display_name(erp_type)} reports this bill voided or cancelled, but "
+            "FeohLedger had already sent it on for payment, so it was not cancelled "
+            "here. Check whether a payment is on its way to the supplier, and stop or "
+            "recover it if the bill is really void."
         ),
+        erp_report={
+            "kind": ERP_REPORT_VOIDED_AFTER_POST,
+            "erp_type": erp_type,
+            "erp_status": erp_status,
+            "erp_document_id": erp_document_id,
+            "event_id": str(event_id) if event_id else None,
+            "invoice_status": invoice.status.value,
+        },
     )

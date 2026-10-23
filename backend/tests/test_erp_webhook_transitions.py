@@ -245,10 +245,20 @@ async def test_forbidden_void_while_advanced_opens_reconciliation_exception(fake
     assert exc.severity == "error"
     assert exc.invoice_id == invoice.id
     assert exc.organization_id == org.id
-    # PII-free description: whitelisted ERP routing identifiers only, no raw
-    # ERP `details` payload (no bank/tax/address). Sanity-check the shape.
-    assert "voided" in exc.description
-    assert "posted_in_erp" in exc.description
+    # The description is for an AP user: what happened and what to do, with no
+    # API path or raw ids (decisions §318). The machine detail is the
+    # structured `erp_report` — whitelisted routing identifiers only, never the
+    # raw ERP `details` payload (no bank/tax/address).
+    assert "voided or cancelled" in exc.description
+    assert "/api/" not in exc.description and "doc_1" not in exc.description
+    assert exc.erp_report == {
+        "kind": "voided_after_post",
+        "erp_type": "generic",
+        "erp_status": "voided",
+        "erp_document_id": "doc_1",
+        "event_id": "ev_void",
+        "invoice_status": "posted_in_erp",
+    }
     db.commit.assert_awaited()
 
 
@@ -465,13 +475,14 @@ async def test_scheduled_to_paid_is_held_when_the_rail_settled_short(fake_redis)
         status=InvoiceStatus.payment_scheduled,
     )
 
+    settling = _payment(settled_amount="250.00", amount="1000.00")
     result, db, transition_calls = await _post(
         org=org,
         invoice=invoice,
         status_value="paid",
         event_id="ev_paid_short",
         # Authorized $1000, rail moved $250 — a clear shortfall.
-        settling_payment=_payment(settled_amount="250.00", amount="1000.00"),
+        settling_payment=settling,
     )
 
     assert result is None
@@ -484,7 +495,14 @@ async def test_scheduled_to_paid_is_held_when_the_rail_settled_short(fake_redis)
     assert exc.exception_type == ERP_RECONCILIATION_EXCEPTION_TYPE
     assert exc.status == "open"
     assert exc.invoice_id == invoice.id
-    assert "settled" in exc.description and "payment_scheduled" in exc.description
+    # A sentence for an AP user (what to do, no API path); the figures and ids
+    # are data on `erp_report` (decisions §318).
+    assert "accept the settled amount or void the payment" in exc.description
+    assert "/api/" not in exc.description
+    assert exc.erp_report["kind"] == "settled_short"
+    assert exc.erp_report["payment_id"] == str(settling.id)
+    assert exc.erp_report["shortfall"] == "750.00"
+    assert exc.erp_report["event_id"] == "ev_paid_short"
     db.commit.assert_awaited()
 
 

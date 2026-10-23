@@ -105,14 +105,15 @@ class PaymentCreate(BaseModel):
     # key, so a stray one is simply not honoured rather than 422-ing.
 
 
-class RecordPaymentOutsideRequest(BaseModel):
-    """`POST /api/payments/record-outside` — an invoice the customer paid themselves.
+class RecordErpReportedPaymentRequest(BaseModel):
+    """`POST /api/exceptions/{id}/record-erp-payment` — the payment an ERP
+    reported, as the person confirms it (pre-filled from the exception's
+    `erp_report`, decisions §318). Also the body `record-outside` extends.
 
     `services/external_payment.py` owns the rules; see it for why each gate is
     (or deliberately is not) applied.
     """
 
-    invoice_id: uuid.UUID
     # How the customer paid — it decides 1099 treatment (`payment_methods`).
     # `virtual_card` is FeohLedger's own card program, never a way to pay
     # outside it.
@@ -141,6 +142,12 @@ class RecordPaymentOutsideRequest(BaseModel):
         if not v:
             raise ValueError("reference must not be blank")
         return v
+
+
+class RecordPaymentOutsideRequest(RecordErpReportedPaymentRequest):
+    """`POST /api/payments/record-outside` — an invoice the customer paid themselves."""
+
+    invoice_id: uuid.UUID
 
 
 class RecordRunOutsideRequest(BaseModel):
