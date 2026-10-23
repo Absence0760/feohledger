@@ -1420,3 +1420,215 @@ async def test_call_erp_refuses_a_live_payment_before_any_adapter_is_built():
             await _call_erp(_Db(), SimpleNamespace(id=inv_id), {"type": "quickbooks_online"})
     factory.assert_not_called()
     assert exc.value.refusal == {"code": PAID_CODE, "params": {"claim": "payment"}}
+
+
+# ---------------------------------------------------------------------------
+# A payee the payment path refuses refuses the push too (decisions §320)
+# ---------------------------------------------------------------------------
+#
+# The payment path refuses a vendor under the hard block (`payments_blocked`)
+# or one whose status is not `active`. A bill in the ERP is payable there past
+# both, so the push asks the same rule (`payment_runs.vendor_payment_refusal`).
+# It still books an `unverified` vendor's bill (a real debt, owed to the
+# supplier record the ERP holds) and refuses everything else.
+
+VENDOR_CODE = "vendor_blocks_erp_export"
+
+
+async def _link_vendor(
+    mk, org_id, inv_id, *, status: str = "active", blocked: bool = False
+) -> uuid.UUID:
+    from app.models.vendor import Vendor
+
+    async with mk() as s:
+        vendor = Vendor(
+            organization_id=org_id,
+            name=f"Northwind {uuid.uuid4().hex[:6]}",
+            status=status,
+            payments_blocked=blocked,
+            payments_blocked_reason="OFAC hit ref 4471" if blocked else None,
+        )
+        s.add(vendor)
+        await s.flush()
+        inv = await s.get(Invoice, inv_id)
+        inv.vendor_id = vendor.id
+        await s.commit()
+        return vendor.id
+
+
+def _assert_vendor_refusal(res, vendor_state: str, *, posted: bool = False) -> None:
+    assert res.status_code == 409, res.text
+    detail = res.json()["detail"]
+    assert detail["code"] == VENDOR_CODE
+    expected = {"vendor_state": vendor_state}
+    if posted:
+        expected["possibly_posted"] = True
+    assert detail["params"] == expected
+    assert "before sending" in detail["message"]
+    # PII guard: neither the vendor's name nor the block's free-text reason.
+    assert "Northwind" not in res.text
+    assert "OFAC hit ref 4471" not in res.text
+
+
+def test_the_vendor_refusal_code_is_registered_for_the_browser():
+    from app.services.erp_adapters.base import ERP_REFUSAL_CODES
+    from app.services.erp_export_gate import ERP_BOOKABLE_VENDOR_STATES, VENDOR_BLOCKS_ERP_EXPORT
+    from app.services.payment_runs import PAYABLE_VENDOR_STATUS, VENDOR_PAYMENTS_BLOCKED
+
+    assert VENDOR_BLOCKS_ERP_EXPORT == VENDOR_CODE
+    assert VENDOR_CODE in ERP_REFUSAL_CODES
+    # The bookable set is named, and never holds the hard block or the one
+    # payable status (which the rule never reports).
+    assert ERP_BOOKABLE_VENDOR_STATES == frozenset({"unverified"})
+    assert VENDOR_PAYMENTS_BLOCKED not in ERP_BOOKABLE_VENDOR_STATES
+    assert PAYABLE_VENDOR_STATUS not in ERP_BOOKABLE_VENDOR_STATES
+
+
+# (status, payments_blocked) -> the refused `vendor_state`, or None (pushed).
+_VENDOR_MATRIX = [
+    ("active", False, None),
+    ("unverified", False, None),
+    ("inactive", False, "inactive"),
+    ("rejected", False, "rejected"),
+    ("active", True, "payments_blocked"),
+    ("unverified", True, "payments_blocked"),
+    ("inactive", True, "payments_blocked"),
+    # A status this build does not know is refused until someone decides.
+    ("suspended", False, "suspended"),
+]
+
+
+@pytest.mark.parametrize("status,blocked,refused", _VENDOR_MATRIX)
+@pytest.mark.parametrize("door", ["send-to-erp", "complete"])
+async def test_each_vendor_state_at_the_http_doors(
+    realdb, dispatched, door, status, blocked, refused
+):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number=f"VNDX-{door}-{status}-{blocked}")
+    await _link_vendor(mk, info.org_id, inv_id, status=status, blocked=blocked)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/{door}")
+
+    if refused is None:
+        assert res.status_code in (200, 202), res.text
+        assert dispatched == [inv_id]
+        return
+    _assert_vendor_refusal(res, refused)
+    assert await _status(mk, inv_id) == InvoiceStatus.approved
+    assert dispatched == []
+    assert await _audit(mk, inv_id, "invoice.erp_submitted") == []
+
+
+async def test_an_invoice_with_no_vendor_is_not_refused_by_the_vendor_check(realdb, dispatched):
+    """Nothing to screen: the adapter's own `vendor_not_linked` answers it."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-NONE")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert res.status_code == 202, res.text
+    assert dispatched == [inv_id]
+
+
+@pytest.mark.parametrize("status,blocked,refused", [r for r in _VENDOR_MATRIX if r[2]])
+async def test_a_vendor_refused_after_the_push_was_queued_stops_it_at_call_erp(
+    realdb, status, blocked, refused
+):
+    """The door passed; the vendor was blocked or deactivated before the
+    dispatcher (local or Lambda, both through `_call_erp`) ran. Refused before
+    any adapter, at `failed`, on the first attempt, coded and audited."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(
+        mk,
+        info.org_id,
+        number=f"VNDX-QUEUED-{status}-{blocked}",
+        status=InvoiceStatus.sending_to_erp,
+    )
+    await _link_vendor(mk, info.org_id, inv_id, status=status, blocked=blocked)
+
+    spy = _SpyAdapter()
+    await _push(mk, inv_id, adapter=spy)
+
+    assert spy.posted == 0
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    (failed,) = await _audit(mk, inv_id, "invoice.erp_failed")
+    assert failed.details["refusal"] == {"code": VENDOR_CODE, "params": {"vendor_state": refused}}
+    assert failed.details["error"] == f"ERP post refused: {VENDOR_CODE} ({refused})"
+    assert failed.details["retries"] == 1, "a refusal must not spend the backoff budget"
+    assert "Northwind" not in str(failed.details)
+    assert "OFAC hit ref 4471" not in str(failed.details)
+
+
+async def test_retry_erp_for_a_blocked_vendor_says_the_bill_may_be_posted(realdb, dispatched):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-RETRY", status=InvoiceStatus.failed)
+    await _set_state(
+        mk, inv_id, {"erp_retries": 3, "last_error": "HTTP 503", "erp_outcome_unknown": True}
+    )
+    await _link_vendor(mk, info.org_id, inv_id, blocked=True)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/retry-erp")
+
+    _assert_vendor_refusal(res, "payments_blocked", posted=True)
+    assert "may already have created the bill in the ERP" in res.json()["detail"]["message"]
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    assert dispatched == []
+
+
+async def test_blocking_the_vendor_refuses_and_unblocking_allows_the_push(realdb, dispatched):
+    """End to end through the real block / unblock endpoints."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-E2E")
+    vendor_id = await _link_vendor(mk, info.org_id, inv_id)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        blocked = await c.post(
+            f"/api/vendors/{vendor_id}/block", json={"reason": "OFAC hit ref 4471"}
+        )
+        assert blocked.status_code == 200, blocked.text
+        _assert_vendor_refusal(
+            await c.post(f"/api/invoices/{inv_id}/send-to-erp"), "payments_blocked"
+        )
+        assert dispatched == []
+
+        unblocked = await c.post(f"/api/vendors/{vendor_id}/unblock")
+        assert unblocked.status_code == 200, unblocked.text
+        sent = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert sent.status_code == 202, sent.text
+    assert dispatched == [inv_id]
+
+
+async def test_a_live_payment_is_named_before_the_vendor(realdb, dispatched):
+    """Both hold the invoice; §309 comes before §320."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-BOTH")
+    await _link_vendor(mk, info.org_id, inv_id, blocked=True)
+    await _stage_payment(mk, info.org_id, inv_id)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    _assert_paid_refusal(res, "payment")
+
+
+async def test_vendor_payment_refusal_matches_the_run_builder_on_status(realdb):
+    """One rule: whatever status `inactive_vendor_statuses` refuses, the ERP
+    gate's `vendor_payment_refusal` reports the same way."""
+    from app.services.payment_runs import inactive_vendor_statuses, vendor_payment_refusal
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    for status in ("active", "unverified", "inactive", "rejected", "suspended"):
+        inv_id = await _seed(mk, info.org_id, number=f"VNDX-RULE-{status}", with_instance=False)
+        await _link_vendor(mk, info.org_id, inv_id, status=status)
+        async with mk() as s:
+            inv = await s.get(Invoice, inv_id)
+            run_refused = (await inactive_vendor_statuses(s, [inv])).get(inv_id)
+            assert await vendor_payment_refusal(s, inv_id) == run_refused

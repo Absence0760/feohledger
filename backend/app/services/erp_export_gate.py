@@ -38,7 +38,19 @@ definition (``api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`` and the card slot
 index). It runs at the same two places, after the exception check, and
 :func:`erp_export_refusal` is the one answer both take.
 
-Every string here is PII-free: an exception type and a claim are fixed literals.
+**A payee the payment path refuses refuses the push too, unless the bill is
+still a debt to book** (decisions §320). The payment path will not pay a vendor
+under the hard block (``payments_blocked``: a sanctions match or an AP block) or
+one whose status is not ``active``; a bill in the ERP is payable there past both.
+:func:`erp_export_vendor_state` asks the payment path's own rule,
+``payment_runs.vendor_payment_refusal``, and refuses every answer except the
+ones in :data:`ERP_BOOKABLE_VENDOR_STATES`: an ``unverified`` vendor's bill is a
+real debt (the payee is unconfirmed in FeohLedger, not refused), and the ERP
+pays the supplier record it already holds. It runs at the same two places,
+last.
+
+Every string here is PII-free: an exception type, a claim and a vendor state
+are fixed literals.
 """
 
 from __future__ import annotations
@@ -62,6 +74,26 @@ PAYMENT_BLOCKS_ERP_EXPORT = "payment_blocks_erp_export"
 #: executing or settled payment) or a live ``VirtualCard``.
 CLAIM_PAYMENT = "payment"
 CLAIM_VIRTUAL_CARD = "virtual_card"
+
+#: The refusal code when the invoice's vendor may not be paid and its bill may
+#: not be booked either, registered in the same two places. Its
+#: ``vendor_state`` param is ``payment_runs.vendor_payment_refusal``'s answer:
+#: ``payments_blocked``, or the vendor's status (``inactive`` / ``rejected`` /
+#: ``unknown`` / any status this build does not know).
+VENDOR_BLOCKS_ERP_EXPORT = "vendor_blocks_erp_export"
+
+#: The payment refusals that still let the bill be booked. Named, like the
+#: payment gate's one payable status, so a state added later is refused here
+#: until someone decides otherwise. ``unverified``: an AI-extracted or intake
+#: vendor nobody has reviewed yet. Its bill is a real liability, the ERP pays
+#: the supplier record it holds rather than ours, and refusing would keep a
+#: true debt off the books until someone gets round to a vendor review.
+#: ``inactive`` (deactivated, or merged away) and ``rejected`` (invalid or a
+#: duplicate) are refused: the vendor was turned off on purpose, and a bill for
+#: it is a decision to reactivate or re-point, not one to post past. The hard
+#: block (a sanctions match or an AP block) is never booked: the bill would sit
+#: where it can be paid to that payee, which is what the block forbids.
+ERP_BOOKABLE_VENDOR_STATES: frozenset[str] = frozenset({"unverified"})
 
 
 async def erp_export_blocking_exception(db: AsyncSession, invoice_id: uuid.UUID) -> str | None:
@@ -139,6 +171,31 @@ def claimed_export_message(claim: str, *, possibly_posted: bool = False) -> str:
     return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
 
 
+async def erp_export_vendor_state(db: AsyncSession, invoice_id: uuid.UUID) -> str | None:
+    """The payment refusal of this invoice's vendor that also refuses the push,
+    or None (no vendor linked, a payable vendor, or a bookable state)."""
+    from app.services.payment_runs import vendor_payment_refusal
+
+    state = await vendor_payment_refusal(db, invoice_id)
+    if state is None or state in ERP_BOOKABLE_VENDOR_STATES:
+        return None
+    return state
+
+
+def vendor_export_params(vendor_state: str, *, possibly_posted: bool = False) -> dict:
+    """The vendor refusal's params; ``possibly_posted`` only when true."""
+    params: dict = {"vendor_state": vendor_state}
+    if possibly_posted:
+        params["possibly_posted"] = True
+    return params
+
+
+def vendor_export_message(vendor_state: str, *, possibly_posted: bool = False) -> str:
+    """The English ``error`` on the ``invoice.erp_failed`` row."""
+    message = f"ERP post refused: {VENDOR_BLOCKS_ERP_EXPORT} ({vendor_state})"
+    return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
+
+
 @dataclass(frozen=True)
 class ExportRefusal:
     """Why the push is refused: the coded refusal, and its English for the
@@ -159,7 +216,8 @@ async def erp_export_refusal(
 ) -> ExportRefusal | None:
     """Every reason this invoice may not be pushed now, or None. The first wins:
     an open duplicate / fraud exception (§286), then a live payment or card
-    (§309). Both the HTTP doors and ``erp._call_erp`` ask this one function."""
+    (§309), then a vendor the bill may not be booked to (§320). Both the HTTP
+    doors and ``erp._call_erp`` ask this one function."""
     exception_type = await erp_export_blocking_exception(db, invoice_id)
     if exception_type is not None:
         return ExportRefusal(
@@ -173,6 +231,13 @@ async def erp_export_refusal(
             PAYMENT_BLOCKS_ERP_EXPORT,
             claimed_export_params(claim, possibly_posted=possibly_posted),
             claimed_export_message(claim, possibly_posted=possibly_posted),
+        )
+    vendor_state = await erp_export_vendor_state(db, invoice_id)
+    if vendor_state is not None:
+        return ExportRefusal(
+            VENDOR_BLOCKS_ERP_EXPORT,
+            vendor_export_params(vendor_state, possibly_posted=possibly_posted),
+            vendor_export_message(vendor_state, possibly_posted=possibly_posted),
         )
     return None
 
@@ -188,6 +253,27 @@ _CLAIM_SENTENCE = {
         "Cancel the card before sending the invoice to the ERP."
     ),
 }
+
+#: The 409's English for a vendor refusal, per ``vendor_state``. A state with
+#: no sentence here (one this build does not know) takes the fallback.
+_VENDOR_SENTENCE = {
+    "payments_blocked": (
+        "This invoice's vendor is blocked from payment (a sanctions match or a block by AP). "
+        "Review the vendor and unblock it before sending the invoice to the ERP."
+    ),
+    "inactive": (
+        "This invoice's vendor is inactive. "
+        "Reactivate the vendor, or correct the invoice's vendor, before sending it to the ERP."
+    ),
+    "rejected": (
+        "This invoice's vendor was rejected. "
+        "Correct the invoice's vendor before sending it to the ERP."
+    ),
+}
+_VENDOR_FALLBACK = (
+    "This invoice's vendor may not be paid. "
+    "Review the vendor before sending the invoice to the ERP."
+)
 
 
 async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> None:
@@ -218,8 +304,10 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> 
             f"This invoice has an open {exception_type.replace('_', ' ')} exception. "
             "Resolve or dismiss it in Exceptions, then send it to the ERP."
         )
-    else:
+    elif refused.code == PAYMENT_BLOCKS_ERP_EXPORT:
         message = _CLAIM_SENTENCE[refused.params["claim"]]
+    else:
+        message = _VENDOR_SENTENCE.get(refused.params["vendor_state"], _VENDOR_FALLBACK)
     if posted:
         message += (
             " An earlier attempt may already have created the bill in the ERP; "

@@ -518,10 +518,57 @@ async def inactive_vendor_statuses(
     for inv in rows:
         if inv.vendor_id is None or inv.vendor_id not in statuses:
             continue
-        status = statuses[inv.vendor_id]
-        if status != PAYABLE_VENDOR_STATUS:
-            out[inv.id] = status or "unknown"
+        refusal = vendor_status_refusal(statuses[inv.vendor_id])
+        if refusal is not None:
+            out[inv.id] = refusal
     return out
+
+
+def vendor_status_refusal(status: str | None) -> str | None:
+    """The status half of the payee rule: None when a vendor in ``status`` may
+    be paid, else the status itself (``unknown`` for NULL). One function, so the
+    payment gate and the ERP push (``services/erp_export_gate``) read the same
+    allow-one-status rule."""
+    return None if status == PAYABLE_VENDOR_STATUS else (status or "unknown")
+
+
+#: The refusal :func:`vendor_payment_refusal` gives for a vendor under the
+#: sticky hard payment block (``Vendor.payments_blocked``: a sanctions match, or
+#: an AP block), which ``services/compliance.check_payment_compliance`` refuses
+#: at dispatch before any rail or FX call. Not a ``Vendor.status`` value.
+VENDOR_PAYMENTS_BLOCKED = "payments_blocked"
+
+
+async def vendor_payment_refusal(db: AsyncSession, invoice_id: uuid.UUID) -> str | None:
+    """Why the payment path would refuse this invoice's payee, or None.
+
+    Both vendor-level refusals the payment path makes, as one answer: the hard
+    block (:data:`VENDOR_PAYMENTS_BLOCKED`, which wins: it is the sticky
+    sanctions / AP decision) and then :func:`vendor_status_refusal`. An invoice
+    with no linked vendor, or one whose vendor row is gone, answers None, as in
+    :func:`inactive_vendor_statuses`. The answer is a fixed PII-free vocabulary,
+    never the vendor's name or the block's free-text reason.
+
+    The ERP push asks this (decisions §320) and decides per answer whether the
+    bill may still be booked; the payment path itself keeps its two call sites,
+    the run builder's :func:`inactive_vendor_statuses` and dispatch's
+    compliance check.
+    """
+    from app.models.vendor import Vendor
+
+    row = (
+        await db.execute(
+            select(Vendor.status, Vendor.payments_blocked)
+            .join(Invoice, Invoice.vendor_id == Vendor.id)
+            .where(Invoice.id == invoice_id)
+        )
+    ).first()
+    if row is None:
+        return None
+    status, blocked = row
+    if blocked:
+        return VENDOR_PAYMENTS_BLOCKED
+    return vendor_status_refusal(status)
 
 
 #: The only rail that can legitimately pay an invoice already holding a live

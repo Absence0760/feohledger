@@ -529,6 +529,46 @@ async def test_a_live_card_refuses_the_auto_send_and_the_invoice_stays_approved(
     assert refused.details["status_code"] == 409
 
 
+@pytest.mark.plan("growth")
+async def test_a_blocked_vendor_refuses_the_auto_send_and_the_invoice_stays_approved(
+    realdb, dispatched
+):
+    """Decisions §320 reaches the auto path through the same gate: a vendor
+    under the hard payment block is not booked on approval either."""
+    from app.models.invoice import Invoice
+    from app.models.vendor import Vendor
+
+    await _write_erp(realdb, LIVE_ERP)
+    inv_id = await _seed(realdb, snapshot=_snapshot())
+    async with realdb.sessionmaker(TENANT)() as s:
+        vendor = Vendor(
+            organization_id=realdb.info(TENANT).org_id,
+            name="Northwind Blocked",
+            status="active",
+            payments_blocked=True,
+            payments_blocked_reason="OFAC hit ref 4471",
+        )
+        s.add(vendor)
+        await s.flush()
+        (await s.get(Invoice, inv_id)).vendor_id = vendor.id
+        await s.commit()
+
+    res = await _approve(realdb, inv_id)
+
+    assert res.status_code == 200, res.text
+    assert dispatched == []
+    assert await _status(realdb, inv_id) == InvoiceStatus.approved
+    assert await _audit(realdb, inv_id, "invoice.erp_submitted") == []
+    [refused] = await _audit(realdb, inv_id, AUTO_SEND_REFUSED_ACTION)
+    assert refused.details["refusal"] == {
+        "code": "vendor_blocks_erp_export",
+        "params": {"vendor_state": "payments_blocked"},
+    }
+    assert refused.details["status_code"] == 409
+    assert "Northwind" not in str(refused.details)
+    assert "OFAC" not in str(refused.details)
+
+
 async def test_a_plan_without_the_erp_feature_refuses_the_auto_send(realdb, dispatched):
     """A Merge.dev ERP on Free (§256/§258): the manual send would 402, so the
     auto-send records that refusal and leaves the invoice approved."""
