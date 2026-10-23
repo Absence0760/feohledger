@@ -14781,3 +14781,146 @@ or card, is found, read as ours and voided through the real link),
 `backend/tests/test_erp_status_sync.py` (the adapter's report from a real-shape
 bill, carried through `apply_bill_report`, records `paid_recorded` with no
 exception).
+
+## 318. The ERP's reported payment is kept as data, and recorded once what blocked it clears (2026-10-22)
+
+**What happened.** §317's production case, after its fix deployed: the sweep
+read the QuickBooks bill as paid and called `record_invoice_paid_outside`,
+which refused because the stale `payment_reconciliation` from the old bug was
+still open. That refusal opened a second exception, `erp_reconciliation`, whose
+description told an AP user to "record it via POST /api/payments/record-outside
+(erp_document_id=…, event=…)". To clean up, the operator had to work out that
+the two rows were linked and in which order to clear them; find that the
+payment queue's banner said "clear the exception first" without naming it,
+linking to it or saying the uploader may not clear it; find that "Record as
+paid" was hidden (not disabled) on the row; and re-key the rail, reference and
+date the ERP had already reported, in a form that defaulted to ACH for a
+cheque. Dismissing the blocker recorded nothing: the sweep reads only bills
+that change, so nothing would ever try again.
+
+**The rule.** A reconciliation exception the ERP paths open keeps what the ERP
+reported as **data**, in `exceptions.erp_report` (JSONB, migration 0121), and
+its `description` is a sentence for an AP user: what happened, what to do, no
+API path, no ids, no refusal code. For `kind: "paid_not_recorded"` the data is
+the payment itself (rail, reference, paid-on date and whether the ERP stated
+it, the ERP document and event ids) plus the refusal code that stopped it.
+The two other ERP-webhook rows carry their ids too (`settled_short`,
+`voided_after_post`).
+
+**One live row per invoice, refreshed, never stale.**
+
+- A later report while a `paid_not_recorded` row is open refreshes that row
+  instead of being dropped by the per-type dedupe. It refreshes the payment
+  conservatively: an undated report never replaces a stated date, an id-less
+  report never replaces the reference (an event-derived reference changes per
+  delivery, and the reference is the replay key), and `first_reported_at` keeps
+  the claim's age.
+- There is at most one live `paid_not_recorded` row per invoice, whatever its
+  type. A new double-pay refusal over a non-blocking row opens the blocking row
+  and closes the other as superseded (audited). A live blocking row stays the
+  row, keeping its own reason, because a later report is refused by that very
+  row and so says nothing new. Two live rows would each offer to record the
+  same payment, and a stale one would be re-attempted against a decision a
+  person made on the other.
+- **A payment the ERP withdraws is retired, not kept.** When the ERP later
+  reports the bill open, part-paid, deleted or voided
+  (`apply_bill_report`, the generic webhook's void path), every live
+  `paid_not_recorded` row on the invoice becomes `paid_withdrawn`: it stays
+  open for a person, with a sentence saying so, but nothing re-attempts it and
+  no one-click offers it. Without this, a cheque voided in QuickBooks after the
+  first report would be booked as paid the moment someone cleared an unrelated
+  blocker, or cleared the deletion row to say "still owed". The sweep reads
+  only bills that change, so nothing would ever have flagged it. A blocking row
+  is never closed by a machine here.
+
+**Recording it later goes through the same gates, never around them.**
+
+- *Automatically.* When `exception_lifecycle.record_decision` resolves or
+  dismisses a payment-blocking exception, and the invoice holds a live,
+  non-blocking `paid_not_recorded` row, the stored facts go back through
+  `record_erp_reported_payment` in the same transaction
+  (`erp_status_sync.retry_erp_reported_payments`). Every refusal is re-run:
+  another open blocker, a live FeohLedger payment, run or card (which now opens
+  the blocking `payment_reconciliation`, exactly as a first report would), a
+  credit that cannot be netted. A refusal refreshes the row's code and
+  sentence. The payment is dated from the first report, never the day the
+  blocker cleared. `record_decision` is the hook because it is the one
+  chokepoint every clearing door shares (§169); escalating is not a clear and
+  records nothing. The record is the ERP's, not the clearer's (`actor_id`
+  NULL, `source="erp"`), exactly as the first attempt was, so the clearer needs
+  no `payment.record_external` and the recorder's segregation rule does not
+  apply to them. Their own act — clearing the blocker — has already passed the
+  queue's segregation rule. The attempt runs in a SAVEPOINT: an unexpected
+  failure (a lock timeout, a bug) rolls back only the attempt, is logged with
+  its traceback, and leaves the row open with its facts. It must not undo a
+  person's clearing of a duplicate or fraud flag.
+- *In one click.* `POST /api/exceptions/{id}/record-erp-payment`, from the
+  exception dialog, pre-filled from `erp_report`. It records the payment as a
+  user record (`source="user"`) and resolves the row as the caller, in one
+  transaction. **Every refusal comes before anything is written or audited.**
+  In `lambda` audit mode an audit row leaves for SQS when it is dispatched, so
+  resolving first and rolling back on a refused record would ship an
+  `exception.resolved` for a row that stays open. So the record runs first,
+  with this one row not counted as a blocker (`answering_exception_ids`, the
+  only door that passes one), and `_complete` resolves the row as the caller
+  once the payment is booked. The exception row and the invoice are locked and
+  re-read before anything is judged, so a second click finds the row resolved
+  and 409s. Not `record-outside`: a
+  `paid_not_recorded` row opened for a double-pay refusal is itself
+  payment-blocking, so `record-outside` refuses on it. Clearing it first in a
+  separate request would leave a window with the invoice payable and nothing
+  recorded. The caller needs `payment.record_external`; for a blocking row also
+  the queue's role and its segregation rule (`segregation_refusal`), and
+  always the recorder's (`external_payment.segregation_refusal`). Both are
+  reported per row as `record_erp_payment_refusal`, so the button is offered
+  exactly when the server would take it (issue #575's rule).
+- *Whichever door records the invoice as paid outside FeohLedger* (the
+  re-attempt, the one-click, a user's own "Record as paid", a run recorded
+  outside), `external_payment._complete` resolves every live
+  `paid_not_recorded` row on it through `record_decision`
+  (`via: payment_recorded`), because the question is answered. A FeohLedger
+  rail cannot pay such an invoice in the meantime: every refusal that leaves a
+  non-blocking row open (another blocker, an applied-credit conflict, nothing
+  left to pay) also refuses the payment run, and a double-pay refusal opens the
+  blocking row.
+
+**Why a blocking `paid_not_recorded` row is not re-attempted automatically.**
+It exists because FeohLedger held its own claim on paying the invoice when the
+ERP paid it. Which of the two payments stands is a person's call, and the row
+refuses the record on itself by design until someone who may clear it makes
+that call. The one-click path is that call.
+
+**Why not parse the old rows.** Rows raised before 0121 hold their facts only in
+prose. Parsing them back into a payment record would invent precision the row
+never had, so they are recorded by hand as before. The production row that
+prompted this is one of them.
+
+**The payment queue says what blocks a row.** Each row now carries
+`blocking_exception` (the exception's id and type, and this caller's
+segregation code for clearing it, or null) and `erp_reported_payment`. The
+blocked chip links to `/exceptions?id=…`, which opens that exception's dialog,
+and says when someone else must clear it. "Record as paid" is shown disabled
+with its reason as an accessible description instead of hidden. It opens
+pre-filled from the ERP's report when there is one, with no method chosen when
+the ERP stated none, rather than ACH.
+
+**Not done: localized ERP descriptions.** ERP reconciliation sentences are
+English, like every non-detector exception description, so the queue shows them
+in English in every locale. The dialog's own chrome and the ERP-payment panel
+are catalogued in all six locales. Moving these sentences onto
+`description_code` is tracked in `docs/followups.md`.
+
+Tests: `backend/tests/test_erp_reported_payment_recovery.py` (facts stored and
+refreshed, an undated report keeping the stated date; dismissing the blocker
+records with the ERP's rail, reference and date and closes the row with an
+audit row; a second blocker and a FeohLedger run still refuse, leaving one live
+row; idempotent; a failed re-attempt never undoes the clear; escalate records
+nothing; a user's own record closes the row; the one-click records and resolves
+a blocking row as the caller, is refused to the uploader on both SoD rules, a
+second click 409s, and a money-gate refusal books nothing and ships no audit
+row in `lambda` mode; the queue names the blocker and carries the ERP's
+payment), `test_erp_status_sync.py` (a payment the ERP withdrew — bill open,
+deleted or part-paid — is not recorded when every blocker is cleared),
+`test_erp_paid_recorded_outside.py`, `test_erp_webhook_transitions.py`,
+`frontend/src/lib/types/erpReport.test.ts`,
+`frontend/tests-e2e/payments/erp-reported-payment.spec.ts`.

@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-22 — keeping the ERP's reported payment (decisions §318) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 143 → 144. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**143 open: 123 (c) · 10 (a) · 10 (b)** — re-derived from the file, never carried
+**144 open: 124 (c) · 10 (a) · 10 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2296,6 +2296,24 @@ providers still have the same gap.
       x-position check per converted page. **Trigger:** the next polish pass on
       any of those pages, or a second report of pages "jumping" once the
       vertical shifts fixed here have shipped.
+
+### Surfaced by keeping the ERP's reported payment (2026-10-22, decisions §318)
+
+- [ ] **(c) ERP reconciliation sentences render in English in every locale.**
+      The rows `erp_status_sync` and `api/erp_webhook` open now carry a
+      sentence written for an AP user, with the machine detail in
+      `exceptions.erp_report`, but the sentence is still composed English with
+      no `description_code`, like every non-detector exception (Positive Pay,
+      compliance holds, sync-back failures). The queue's own chrome and the
+      "Record the ERP's payment" panel are catalogued; the sentence above them
+      is not. **Durable fix:** give each ERP sentence an `exception.erp*` code
+      in `invoice_warning_catalog` with typed params (the ERP product name, the
+      refusal code, the invoice status), pass `description_code` /
+      `description_params` from `open_erp_reconciliation_exception`, and
+      regenerate the web and mobile catalogues (`pnpm gen:warning-messages`).
+      **Trigger:** the first tenant whose users read a locale other than
+      English and run an ERP connection, or the next change to these
+      sentences.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
