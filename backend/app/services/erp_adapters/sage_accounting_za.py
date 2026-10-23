@@ -69,16 +69,50 @@ is hardcoded here. The VAT that split books must be the VAT the invoice states
 line's resolved rate is 0% (``tax_not_stated``), so input VAT the supplier never
 charged is never claimed.
 
-**Posted total.** Sage recalculates ``Total`` on save. A different total deletes
-the invoice just saved and fails ``posted_total_mismatch``; a save that reports
-no total fails ``posted_total_unconfirmed``. Both are non-retryable
+**Document number.** ``SupplierInvoice/Save`` is called with
+``useSystemDocumentNumber=false``. The parameter defaults to true, and then Sage
+replaces the supplier's invoice number with its own sequence: the number in Sage
+would never be the supplier's, and the duplicate guard below could never match
+it. The number recorded as ``erp_document_number`` is the one Sage echoes back.
+
+**Idempotency lookup.** "Filter and Orderby will not work for string values of
+any kind" (DeveloperProgram.aspx), so ``Reference`` / ``DocumentNumber`` cannot
+be filtered on. The lookup filters on integers and dates only (``SupplierId``
+plus a one-day window on ``Date``, which every push sends since Sage requires
+it), orders by ``ID``, reads every page of that window, and compares the two
+strings here. A window it cannot read to the end fails closed
+(``idempotency_lookup_incomplete``): it must never miss our own first attempt.
+So the duplicate-number guard covers the supplier's invoices dated the same day;
+FeohLedger's own duplicate detection covers the rest.
+
+**Refusals.** A 4xx from ``SupplierInvoice/Save`` created nothing, so it becomes
+a coded, non-retryable refusal with ``not_posted`` (the shape decisions §285
+gave QuickBooks): 401 ``not_connected``, 402 ``company_subscription_inactive``,
+and any other 4xx classified by reading back what Sage holds — the company's
+``LockProcessingDate`` (``period_closed``), the supplier's and the accounts'
+``Active`` flags (``vendor_inactive`` / ``account_inactive``) — else
+``bill_refused``. Sage's ``Message`` / ``ModelState`` text is never read into the
+result. A 429 is not retried automatically: Sage blocks the company for an hour
+and warns that further requests extend the block. A 401 on any call is never
+retried either: 20 failed logins in an hour block the Sage user for 24 hours.
+
+**Posted total.** Sage recalculates ``Total`` on save. A different total fails
+``posted_total_mismatch``; a save that reports no total fails
+``posted_total_unconfirmed``. Both are non-retryable
 (``posted_total.check_posted_total``).
+
+**No void.** API 2.0.0 has no ``SupplierInvoice/Delete`` (the Help method list
+for SupplierInvoice is Get, Get/{id}, Save, Calculate, Email and Export), so
+:meth:`SageAccountingZaAdapter.void_invoice` always answers False, and a
+mismatched invoice is reported "could not be voided". Reversing one means a
+``SupplierReturn`` allocated against it, which is an accountant's decision
+(decisions §303), never an automatic one.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
@@ -87,6 +121,7 @@ import httpx
 from app.config import settings
 from app.services.erp_adapters.base import (
     ACCOUNT_NOT_LINKED,
+    NOT_CONNECTED,
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
@@ -100,8 +135,10 @@ from app.services.erp_adapters.base import (
     erp_http_failure,
     erp_preflight_refusal,
     erp_refusal,
+    erp_status_retryable,
     sync_listing_pages,
 )
+from app.services.erp_adapters.bill_allocation import MISSING_DATES
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.log_redaction import redact_query_strings_containing
@@ -126,6 +163,22 @@ CORRELATION_TOTAL_MISMATCH = "correlation_total_mismatch"
 TAX_TYPE_NOT_RESOLVED = "tax_type_not_resolved"
 TAX_MISMATCH = "tax_mismatch"
 TAX_NOT_STATED = "tax_not_stated"
+# Shared codes (``base.ERP_REFUSAL_CODES``) this adapter refuses with too.
+BILL_REFUSED = "bill_refused"
+PERIOD_CLOSED = "period_closed"
+VENDOR_INACTIVE = "vendor_inactive"
+ACCOUNT_INACTIVE = "account_inactive"
+COMPANY_SUBSCRIPTION_INACTIVE = "company_subscription_inactive"
+DOC_NUMBER_TOO_LONG = "doc_number_too_long"
+LOOKUP_INCOMPLETE = "idempotency_lookup_incomplete"
+
+#: ``DocumentNumber`` and ``Reference`` are 0-100 characters; ``Message`` 0-8000.
+_DOCUMENT_NUMBER_MAX = 100
+_MESSAGE_MAX = 8000
+
+#: The idempotency lookup reads at most this many pages (of 100) of one
+#: supplier's invoices dated on one day; past it the lookup fails closed.
+_LOOKUP_MAX_PAGES = 10
 
 #: Sage returns at most 100 rows per request; the PO list stops at 10 pages.
 #: The chart and vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise
@@ -145,6 +198,14 @@ class SageZaError(RuntimeError):
 
 class SageZaConfigError(ValueError):
     """``settings.erp`` is missing or has a bad field. Names the key only."""
+
+
+class SageZaUnauthorized(SageZaError):
+    """Sage answered 401: the login, the API key or the company is wrong.
+
+    Never retried. Sage blocks a user for 24 hours after 20 failed logins in an
+    hour, so retrying would lock the customer out of their own books.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -176,11 +237,6 @@ def _int_id(raw: object) -> int | None:
     """A Sage id is a positive integer; anything else was never synced from Sage."""
     text = str(raw or "").strip()
     return int(text) if text.isdigit() and int(text) > 0 else None
-
-
-def _odata_str(value: str) -> str:
-    """An OData string literal (single quotes doubled)."""
-    return "'" + value.replace("'", "''") + "'"
 
 
 def _json(resp: httpx.Response) -> object:
@@ -339,11 +395,16 @@ class SageAccountingZaAdapter(ErpAdapter):
             kwargs["content"] = _dumps(body)
             kwargs["headers"] = {"Content-Type": "application/json"}
         try:
-            return await client.request(method, f"{base}/{path}", **kwargs)
+            resp = await client.request(method, f"{base}/{path}", **kwargs)
         except httpx.HTTPError as exc:
             # httpx error strings can carry the request URL, whose query holds
             # the API key. Name the step and the exception class only.
             raise SageZaError(f"{PROVIDER} {step} failed: {type(exc).__name__}") from None
+        if resp.status_code == 401:
+            # Every call stops here: a wrong login retried counts toward Sage's
+            # 20-failures-an-hour block on the customer's own Sage user.
+            raise SageZaUnauthorized(f"{PROVIDER} {step} failed: HTTP 401 (unauthorized)")
+        return resp
 
     async def _get_list(
         self,
@@ -367,10 +428,25 @@ class SageAccountingZaAdapter(ErpAdapter):
         """
         rows: list[dict] = []
         for page in range(max_pages):
-            query = {**(params or {}), "$top": str(page_size), "$skip": str(page * page_size)}
-            resp = await self._call(
-                client, base, "GET", f"{resource}/Get", step, query, company=company
-            )
+            # Paging is only stable under an explicit order ("If no default
+            # order clause is specified, you will need to provide one"), and ID
+            # is an integer, which Sage can order by (it cannot order strings).
+            query = {
+                "$orderby": "ID",
+                **(params or {}),
+                "$top": str(page_size),
+                "$skip": str(page * page_size),
+            }
+            try:
+                resp = await self._call(
+                    client, base, "GET", f"{resource}/Get", step, query, company=company
+                )
+            except SageZaUnauthorized:
+                if complete:
+                    raise ErpListingIncomplete(
+                        PROVIDER, resource, ListingGap.fetch_failed
+                    ) from None
+                raise
             payload = _json(resp) if resp.status_code == 200 else None
             batch = _results(payload)
             if batch is None:
@@ -397,11 +473,13 @@ class SageAccountingZaAdapter(ErpAdapter):
 
     async def _resolve_tax_types(
         self, client: httpx.AsyncClient, base: str, account_ids: list[int]
-    ) -> dict[int, dict] | str | None:
+    ) -> dict[int, dict] | tuple[str, list[int]] | None:
         """Tax type per account: the account's default, else the company default.
 
-        Returns ``{account_id: tax_type_row}``, a refusal reason, or None when a
-        lookup failed (retryable).
+        Returns ``{account_id: tax_type_row}``, a ``(refusal reason, account
+        ids)`` pair, or None when a lookup failed (retryable). An account Sage
+        does not return is ``account_not_linked``; one it returns ``Active:
+        false`` is ``account_inactive`` (it is linked; it is inactive).
         """
         id_filter = " or ".join(f"ID eq {a}" for a in account_ids)
         accounts = await self._get_list(
@@ -414,25 +492,32 @@ class SageAccountingZaAdapter(ErpAdapter):
         by_tax_id = {_int_id(t.get("ID")): t for t in tax_types if t.get("Active", True)}
         default_tax = next((t for t in by_tax_id.values() if t.get("IsDefault")), None)
 
+        missing = [a for a in account_ids if a not in by_account]
+        if missing:
+            return ACCOUNT_NOT_LINKED, missing
+        inactive = [a for a in account_ids if by_account[a].get("Active") is False]
+        if inactive:
+            return ACCOUNT_INACTIVE, inactive
         resolved: dict[int, dict] = {}
         for account_id in account_ids:
-            account = by_account.get(account_id)
-            if account is None or account.get("Active") is False:
-                return ACCOUNT_NOT_LINKED
+            account = by_account[account_id]
             tax = by_tax_id.get(_int_id(account.get("DefaultTaxTypeId"))) or default_tax
             if tax is None or tax.get("IsManualTax") or _decimal(tax.get("Percentage")) is None:
-                return TAX_TYPE_NOT_RESOLVED
+                return TAX_TYPE_NOT_RESOLVED, []
             resolved[account_id] = tax
         return resolved
 
-    async def _foreign_currency_supplier(
+    async def _supplier_check(
         self, client: httpx.AsyncClient, base: str, supplier_id: int
-    ) -> bool | str | None:
-        """True when the supplier is billed in a currency other than the company's.
+    ) -> str | None | bool:
+        """Whether this supplier can take the invoice.
 
-        Returns VENDOR_NOT_LINKED when Sage doesn't know the supplier, and None
-        when a lookup failed. Only a currency id the API actually reported on
-        both records is compared; an absent one is not guessed.
+        False when it can; a refusal reason when it cannot —
+        ``vendor_not_linked`` when Sage doesn't know it, ``vendor_inactive``
+        when Sage says ``Active: false``, ``foreign_currency_supplier`` when it is
+        billed in a currency other than the company's — and None when a lookup
+        failed. Only a currency id the API actually reported on both records is
+        compared; an absent one is not guessed.
         """
         supplier_resp = await self._call(
             client, base, "GET", f"Supplier/Get/{supplier_id}", "supplier lookup"
@@ -442,6 +527,8 @@ class SageAccountingZaAdapter(ErpAdapter):
         supplier = _json(supplier_resp) if supplier_resp.status_code == 200 else None
         if not isinstance(supplier, dict):
             return None
+        if supplier.get("Active") is False:
+            return VENDOR_INACTIVE
         supplier_currency = _int_id(supplier.get("CurrencyId"))
         if supplier_currency is None:
             return False
@@ -449,23 +536,58 @@ class SageAccountingZaAdapter(ErpAdapter):
         if company is None:
             return None
         home = _int_id(company.get("HomeCurrencyId")) or _int_id(company.get("CurrencyId"))
-        return home is not None and supplier_currency != home
+        if home is not None and supplier_currency != home:
+            return FOREIGN_CURRENCY_SUPPLIER
+        return False
 
     async def _find_existing(
-        self, client: httpx.AsyncClient, base: str, supplier_id: int, payload: InvoicePayload
-    ) -> list[dict] | None:
+        self, client: httpx.AsyncClient, base: str, supplier_id: int, invoice_date: date
+    ) -> list[dict] | str:
+        """Every invoice of this supplier dated ``invoice_date``, or a reason it
+        could not be read whole.
+
+        Integers and dates only: Sage's OData cannot filter or order on strings,
+        so ``Reference`` / ``DocumentNumber`` are compared by the caller. Our
+        own earlier attempt carries the same ``Date``, so it is in this window.
+        A page that fails, or a window past ``_LOOKUP_MAX_PAGES`` pages, is
+        never read as "not there": a miss here posts a second invoice.
+        """
+        start = invoice_date.isoformat()
+        end = (invoice_date + timedelta(days=1)).isoformat()
         flt = (
-            f"SupplierId eq {supplier_id} and (Reference eq {_odata_str(payload.correlation_id)}"
-            f" or DocumentNumber eq {_odata_str(payload.invoice_number)})"
+            f"SupplierId eq {supplier_id} and Date ge datetime'{start}T00:00:00'"
+            f" and Date lt datetime'{end}T00:00:00'"
         )
-        return await self._get_list(
-            client, base, "SupplierInvoice", "idempotency lookup", {"$filter": flt}, max_pages=1
-        )
+        rows: list[dict] = []
+        for page in range(_LOOKUP_MAX_PAGES):
+            query = {
+                "$filter": flt,
+                "$orderby": "ID desc",
+                "$top": str(_PAGE_SIZE),
+                "$skip": str(page * _PAGE_SIZE),
+            }
+            resp = await self._call(
+                client, base, "GET", "SupplierInvoice/Get", "idempotency lookup", query
+            )
+            batch = _results(_json(resp)) if resp.status_code == 200 else None
+            if batch is None:
+                return "unavailable"
+            rows.extend(batch)
+            total = _decimal(_json(resp).get("TotalResults"))  # type: ignore[union-attr]
+            if len(batch) < _PAGE_SIZE or (total is not None and len(rows) >= total):
+                return rows
+        return LOOKUP_INCOMPLETE
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         supplier_id = _int_id(payload.vendor_erp_id)
         if supplier_id is None:
             return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
+        # Sage marks both dates Required on the SupplierInvoice model; refuse
+        # before any call rather than spend the lookups on a certain 400.
+        if payload.invoice_date is None or payload.due_date is None:
+            return erp_preflight_refusal(PROVIDER, MISSING_DATES)
+        if len(payload.invoice_number or "") > _DOCUMENT_NUMBER_MAX:
+            return erp_preflight_refusal(PROVIDER, DOC_NUMBER_TOO_LONG)
         lines = bill_lines(payload)
         if isinstance(lines, str):
             return erp_preflight_refusal(PROVIDER, lines)
@@ -476,72 +598,40 @@ class SageAccountingZaAdapter(ErpAdapter):
             return erp_preflight_refusal(PROVIDER, CURRENCY_NOT_SUPPORTED)
 
         base = await self._base()
-        async with self._client(30) as client:
-            # Idempotency: our correlation id rides in Reference. A retry after
-            # a timed-out save finds the first attempt here instead of posting
-            # a second invoice. The same supplier invoice number under another
-            # reference is a different document and is never double-booked.
-            existing = await self._find_existing(client, base, supplier_id, payload)
-            # A matching row without an ID can't be referenced later; treat it as
-            # an unusable lookup rather than a miss or a match.
-            if existing is None or any(_int_id(r.get("ID")) is None for r in existing):
-                return ErpPostResult(
-                    success=False,
-                    message=f"{PROVIDER} post failed: idempotency lookup unavailable",
+        account_ids = list(dict.fromkeys(a for a, _, _ in account_lines if a is not None))
+        try:
+            async with self._client(30) as client:
+                prepared = await self._prepare(client, base, supplier_id, payload, account_lines)
+                if isinstance(prepared, ErpPostResult):
+                    return prepared
+                resp = await self._call(
+                    client,
+                    base,
+                    "POST",
+                    "SupplierInvoice/Save",
+                    "post",
+                    # Default true: Sage would replace the supplier's number
+                    # with its own sequence.
+                    {"useSystemDocumentNumber": "false"},
+                    body=prepared,
                 )
-            ours = [r for r in existing if r.get("Reference") == payload.correlation_id]
-            if ours:
-                if _decimal(ours[0].get("Total")) != payload.amount:
-                    return erp_refusal(PROVIDER, CORRELATION_TOTAL_MISMATCH)
-                return ErpPostResult(
-                    success=True,
-                    erp_document_id=str(ours[0].get("ID")),
-                    erp_document_number=str(ours[0].get("DocumentNumber") or "")
-                    or payload.invoice_number,
-                    message=f"Already posted to {PROVIDER} (idempotent — found by Reference)",
-                )
-            if existing:
-                return erp_refusal(PROVIDER, DUPLICATE_INVOICE_NUMBER)
+                if resp.status_code not in (200, 201):
+                    return await self._save_refusal(
+                        client, base, resp, supplier_id, payload, account_ids
+                    )
+        except SageZaUnauthorized:
+            # Wrong login, API key or company: retrying cannot help and would
+            # count toward Sage's lockout. A 401 — on a lookup or on the save
+            # itself — created nothing.
+            refused = erp_refusal(PROVIDER, NOT_CONNECTED)
+            refused.not_posted = True
+            return refused
 
-            foreign = await self._foreign_currency_supplier(client, base, supplier_id)
-            if foreign is None:
-                return ErpPostResult(
-                    success=False, message=f"{PROVIDER} post failed: supplier lookup unavailable"
-                )
-            if foreign is True:
-                return erp_refusal(PROVIDER, FOREIGN_CURRENCY_SUPPLIER)
-            if isinstance(foreign, str):
-                return erp_refusal(PROVIDER, foreign)
-
-            distinct = list(dict.fromkeys(a for a, _, _ in account_lines))
-            taxes = await self._resolve_tax_types(client, base, distinct)
-            if taxes is None:
-                return ErpPostResult(
-                    success=False, message=f"{PROVIDER} post failed: tax type lookup unavailable"
-                )
-            if isinstance(taxes, str):
-                return erp_refusal(PROVIDER, taxes)
-
-            body, tax_total = self._invoice_body(payload, supplier_id, account_lines, taxes)
-            # The VAT Sage would book must be the VAT on the invoice we approved:
-            # a zero-rated invoice coded to a standard-rated account would
-            # otherwise claim input VAT that was never charged.
-            if payload.tax_amount is None:
-                # "No tax stated" is not "any tax is fine": unless every line's
-                # rate is 0%, Sage would book input VAT the supplier never
-                # charged.
-                if any(_decimal(t.get("Percentage")) != 0 for t in taxes.values()):
-                    return erp_refusal(PROVIDER, TAX_NOT_STATED)
-            elif abs(tax_total - payload.tax_amount) > _CENT * len(account_lines):
-                return erp_refusal(PROVIDER, TAX_MISMATCH)
-
-            resp = await self._call(client, base, "POST", "SupplierInvoice/Save", "post", body=body)
-
-        if resp.status_code not in (200, 201):
-            return erp_http_failure(PROVIDER, resp.status_code)
         saved = _json(resp)
         saved = saved if isinstance(saved, dict) else {}
         doc_id = str(saved.get("ID")) if saved.get("ID") is not None else None
+        # The number Sage stored, as it echoes it back.
+        doc_number = str(saved.get("DocumentNumber") or "") or payload.invoice_number
         # Sage recalculates the total on save; only the approved amount counts.
         # A missing total is unconfirmed, never success.
         problem = await check_posted_total(
@@ -550,16 +640,173 @@ class SageAccountingZaAdapter(ErpAdapter):
             payload,
             posted_total=_decimal(saved.get("Total")),
             document_id=doc_id,
-            document_number=payload.invoice_number,
+            document_number=doc_number,
         )
         if problem:
             return problem
         return ErpPostResult(
             success=True,
             erp_document_id=doc_id,
-            erp_document_number=payload.invoice_number,
+            erp_document_number=doc_number,
             message=f"Posted to {PROVIDER}",
         )
+
+    async def _prepare(
+        self,
+        client: httpx.AsyncClient,
+        base: str,
+        supplier_id: int,
+        payload: InvoicePayload,
+        account_lines: list[tuple[int | None, Decimal, str]],
+    ) -> dict | ErpPostResult:
+        """Everything before the save: the idempotency lookup, the supplier and
+        account checks and the VAT split. The save body, or the result to
+        return instead (our earlier invoice, a refusal, a failed lookup)."""
+        # Idempotency: our correlation id rides in Reference. A retry after a
+        # timed-out save finds the first attempt here instead of posting a
+        # second invoice. The same supplier invoice number under another
+        # reference is a different document and is never double-booked.
+        assert payload.invoice_date is not None  # checked by the caller
+        existing = await self._find_existing(client, base, supplier_id, payload.invoice_date)
+        if existing == LOOKUP_INCOMPLETE:
+            return erp_refusal(PROVIDER, LOOKUP_INCOMPLETE)
+        # A row without an ID can't be referenced later; treat it as an
+        # unusable lookup rather than a miss or a match.
+        if isinstance(existing, str) or any(_int_id(r.get("ID")) is None for r in existing):
+            return ErpPostResult(
+                success=False,
+                message=f"{PROVIDER} post failed: idempotency lookup unavailable",
+            )
+        ours = [r for r in existing if r.get("Reference") == payload.correlation_id]
+        if ours:
+            if _decimal(ours[0].get("Total")) != payload.amount:
+                return erp_refusal(PROVIDER, CORRELATION_TOTAL_MISMATCH)
+            return ErpPostResult(
+                success=True,
+                erp_document_id=str(ours[0].get("ID")),
+                erp_document_number=str(ours[0].get("DocumentNumber") or "")
+                or payload.invoice_number,
+                message=f"Already posted to {PROVIDER} (idempotent — found by Reference)",
+            )
+        if any(r.get("DocumentNumber") == payload.invoice_number for r in existing):
+            return erp_refusal(PROVIDER, DUPLICATE_INVOICE_NUMBER)
+
+        supplier = await self._supplier_check(client, base, supplier_id)
+        if supplier is None:
+            return ErpPostResult(
+                success=False, message=f"{PROVIDER} post failed: supplier lookup unavailable"
+            )
+        if isinstance(supplier, str):
+            return erp_refusal(PROVIDER, supplier)
+
+        distinct = list(dict.fromkeys(a for a, _, _ in account_lines if a is not None))
+        taxes = await self._resolve_tax_types(client, base, distinct)
+        if taxes is None:
+            return ErpPostResult(
+                success=False, message=f"{PROVIDER} post failed: tax type lookup unavailable"
+            )
+        if isinstance(taxes, tuple):
+            reason, accounts = taxes
+            refused = erp_refusal(PROVIDER, reason)
+            if reason == ACCOUNT_INACTIVE:
+                refused.refusal_params = {"accounts": _our_codes(payload, accounts)}
+            return refused
+
+        body, tax_total = self._invoice_body(payload, supplier_id, account_lines, taxes)
+        # The VAT Sage would book must be the VAT on the invoice we approved: a
+        # zero-rated invoice coded to a standard-rated account would otherwise
+        # claim input VAT that was never charged.
+        if payload.tax_amount is None:
+            # "No tax stated" is not "any tax is fine": unless every line's rate
+            # is 0%, Sage would book input VAT the supplier never charged.
+            if any(_decimal(t.get("Percentage")) != 0 for t in taxes.values()):
+                return erp_refusal(PROVIDER, TAX_NOT_STATED)
+        elif abs(tax_total - payload.tax_amount) > _CENT * len(account_lines):
+            return erp_refusal(PROVIDER, TAX_MISMATCH)
+        return body
+
+    async def _save_refusal(
+        self,
+        client: httpx.AsyncClient,
+        base: str,
+        resp: httpx.Response,
+        supplier_id: int,
+        payload: InvoicePayload,
+        account_ids: list[int],
+    ) -> ErpPostResult:
+        """Why ``SupplierInvoice/Save`` refused, as a coded result.
+
+        A 5xx (or anything else a re-send could change) is the plain retryable
+        failure: it may have saved. A 429 is not retried automatically — Sage
+        blocks the company for an hour and warns that further requests extend
+        it — but created nothing. Every other 4xx is Sage's answer to the
+        invoice and created nothing (``not_posted``): 402 is an expired
+        registration; anything else is classified from what Sage holds, never
+        from its ``Message`` / ``ModelState`` text, which can echo the invoice.
+        """
+        status = resp.status_code
+        if status == 429:
+            result = erp_http_failure(PROVIDER, status)
+            result.retryable = False
+            result.not_posted = True
+            return result
+        if not 400 <= status < 500 or erp_status_retryable(status):
+            # 5xx, 408, 409, 423, 425: the answer can change on a re-send, and
+            # the save may have landed — never ``not_posted``.
+            return erp_http_failure(PROVIDER, status)
+        if status == 402:
+            reason, params = COMPANY_SUBSCRIPTION_INACTIVE, None
+        else:
+            reason, params = await self._classify_refusal(
+                client, base, supplier_id, payload, account_ids
+            )
+        refused = erp_refusal(PROVIDER, reason)
+        refused.refusal_params = params
+        refused.not_posted = True
+        return refused
+
+    async def _classify_refusal(
+        self,
+        client: httpx.AsyncClient,
+        base: str,
+        supplier_id: int,
+        payload: InvoicePayload,
+        account_ids: list[int],
+    ) -> tuple[str, dict | None]:
+        """The coded reason for a refused save, from what Sage reports now.
+
+        ``period_closed`` when the company locks processing on or after the
+        invoice date (``Company.LockProcessing`` / ``LockProcessingDate``);
+        ``vendor_inactive`` / ``account_inactive`` when Sage positively says
+        ``Active: false``; else ``bill_refused``. An unreadable answer is "don't
+        know" (``bill_refused``), never a guess.
+        """
+        try:
+            company = await self._get_one(
+                client, base, "Company", self._company_id(), "refusal lookup"
+            )
+            lock = _iso_date(str((company or {}).get("LockProcessingDate") or "")[:10])
+            if (
+                company
+                and company.get("LockProcessing") is True
+                and lock is not None
+                and payload.invoice_date is not None
+                and payload.invoice_date <= lock
+            ):
+                return PERIOD_CLOSED, None
+            supplier = await self._get_one(client, base, "Supplier", supplier_id, "refusal lookup")
+            if supplier is not None and supplier.get("Active") is False:
+                return VENDOR_INACTIVE, None
+            inactive = []
+            for account_id in account_ids:
+                account = await self._get_one(client, base, "Account", account_id, "refusal lookup")
+                if account is not None and account.get("Active") is False:
+                    inactive.append(account_id)
+            if inactive:
+                return ACCOUNT_INACTIVE, {"accounts": _our_codes(payload, inactive)}
+        except SageZaError:
+            pass
+        return BILL_REFUSED, None
 
     def _invoice_body(
         self,
@@ -599,8 +846,11 @@ class SageAccountingZaAdapter(ErpAdapter):
                     "Total": gross,
                 }
             )
+        assert payload.invoice_date is not None and payload.due_date is not None
         body: dict = {
             "SupplierId": supplier_id,
+            "Date": payload.invoice_date.isoformat(),
+            "DueDate": payload.due_date.isoformat(),
             "DocumentNumber": payload.invoice_number,
             "Reference": payload.correlation_id,
             "Inclusive": True,
@@ -611,12 +861,8 @@ class SageAccountingZaAdapter(ErpAdapter):
             "Total": payload.amount,
             "Lines": lines,
         }
-        if payload.invoice_date:
-            body["Date"] = payload.invoice_date.isoformat()
-        if payload.due_date:
-            body["DueDate"] = payload.due_date.isoformat()
         if payload.description:
-            body["Message"] = payload.description[:250]
+            body["Message"] = payload.description[:_MESSAGE_MAX]
         return body, tax_total
 
     # -- status / void --------------------------------------------------------
@@ -626,35 +872,27 @@ class SageAccountingZaAdapter(ErpAdapter):
         if doc_id is None:
             return ErpInvoiceStatus.unknown
         base = await self._base()
-        async with self._client(15) as client:
-            record = await self._get_one(client, base, "SupplierInvoice", doc_id, "status")
+        try:
+            async with self._client(15) as client:
+                record = await self._get_one(client, base, "SupplierInvoice", doc_id, "status")
+        except SageZaUnauthorized:
+            return ErpInvoiceStatus.unknown
         if record is None:
             return ErpInvoiceStatus.unknown
         return map_invoice_status(record)
 
     async def void_invoice(self, erp_document_id: str) -> bool:
-        """Delete an untouched supplier invoice (``SupplierInvoice/Delete/{id}``).
+        """Always False: API 2.0.0 cannot void or delete a supplier invoice.
 
-        Only when nothing has been allocated to it (``AmountDue`` equals
-        ``Total``) and Sage doesn't report it locked (a closed period). One with
-        a payment allocated is refused: it has to be reversed in Sage with its
-        payment, which is an accountant's decision.
+        The SupplierInvoice methods are Get, Get/{id}, Save, Calculate, Email
+        and Export — there is no Delete. Reversing an invoice in Sage means a
+        ``SupplierReturn`` allocated against it, which changes the supplier's
+        balance and the VAT return and is an accountant's decision (decisions
+        §303), so nothing is attempted and no call is made. A
+        ``posted_total_mismatch`` therefore reports the invoice "could not be
+        voided", which is true: it stays in Sage until a person reverses it.
         """
-        doc_id = _int_id(erp_document_id)
-        if doc_id is None:
-            return False
-        base = await self._base()
-        async with self._client(30) as client:
-            record = await self._get_one(client, base, "SupplierInvoice", doc_id, "void lookup")
-            if record is None or record.get("Locked") or record.get("Paid"):
-                return False
-            total, due = _decimal(record.get("Total")), _decimal(record.get("AmountDue"))
-            if total is None or due != total:
-                return False
-            resp = await self._call(
-                client, base, "DELETE", f"SupplierInvoice/Delete/{doc_id}", "void"
-            )
-        return resp.status_code in (200, 202, 204)
+        return False
 
     # -- syncs ----------------------------------------------------------------
 
@@ -676,7 +914,14 @@ class SageAccountingZaAdapter(ErpAdapter):
             return await self._get_list(client, base, resource, f"{resource} sync", params)
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Every supplier, or :class:`ErpListingIncomplete`; never a partial list."""
+        """Every supplier, or :class:`ErpListingIncomplete`; never a partial list.
+
+        An inactive supplier is emitted ``active=False``, not dropped (§284): the
+        sync never makes it a payee, and the push refuses it
+        (``vendor_inactive``). ``Supplier/Get`` "excludes records where Personal
+        Information was cleared", so a supplier missing from the pull may have
+        been erased under POPIA rather than deleted; both read as a dead link.
+        """
         rows = await self._list("Supplier", complete=True)
         vendors = []
         for row in rows or []:
@@ -690,6 +935,7 @@ class SageAccountingZaAdapter(ErpAdapter):
                     email=row.get("Email") or None,
                     phone=row.get("Telephone") or None,
                     tax_id=row.get("TaxReference") or None,
+                    active=row.get("Active") is not False,
                 )
             )
         return vendors
@@ -759,6 +1005,15 @@ class SageAccountingZaAdapter(ErpAdapter):
         except Exception:
             return False
         return any(_int_id(r.get("ID")) == company_id for r in rows or [])
+
+
+def _our_codes(payload: InvoicePayload, account_ids: list[int]) -> list[str]:
+    """Our GL codes for these Sage account ids (the id itself when we hold no
+    code for it), for the ``accounts`` param of ``account_inactive``."""
+    pairs = [(payload.gl_account_erp_id, payload.gl_account)]
+    pairs += [(li.gl_account_erp_id, li.gl_account) for li in payload.line_items]
+    codes = {_int_id(erp_id): code for erp_id, code in pairs if _int_id(erp_id) and code}
+    return sorted({codes.get(a) or str(a) for a in account_ids})
 
 
 def _iso_date(text: str) -> date | None:

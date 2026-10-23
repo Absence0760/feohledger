@@ -1992,20 +1992,36 @@ app.include_router(sage)
 # ---------------------------------------------------------------------------
 #
 # The SA Accounting API v2.0.0: `apikey` + `companyid` query parameters, HTTP
-# basic auth, `<Resource>/Get` paging envelopes with the OData subset the
-# adapter sends ($top / $skip, and `$filter` as `ID eq N or ...` or the
-# supplier-invoice idempotency filter). State lives under STATE["sageza"],
-# created on first use (reset-safe).
+# basic auth, `<Resource>/Get` paging envelopes with the OData subset Sage
+# documents (DeveloperProgram.aspx): `$top` / `$skip` (100 rows at most),
+# `$orderby` — required to page ("If no default order clause is specified, you
+# will need to provide one") — and `$filter` on integers and dates only ("Filter
+# and Orderby will not work for string values of any kind"; a string literal is
+# answered 400 here). `SupplierInvoice/Save` keeps the DocumentNumber sent only
+# with `useSystemDocumentNumber=false` (its documented default is true) and has
+# no Delete (API 2.0.0 has none). The company locks processing up to
+# `LockProcessingDate`. State lives under STATE["sageza"], created on first use
+# (reset-safe).
 
 sageza = APIRouter(prefix="/sageza/api/2.0.0")
 
 SAGEZA_COMPANY_ID = 4711
+#: Invoices dated on or before this are refused as in a locked period.
+SAGEZA_LOCK_DATE = "2020-12-31"
 SAGEZA_COMPANIES: list[dict] = [
-    {"ID": SAGEZA_COMPANY_ID, "Name": "Fake Sage ZA Co", "HomeCurrencyId": 1, "CurrencyId": 1}
+    {
+        "ID": SAGEZA_COMPANY_ID,
+        "Name": "Fake Sage ZA Co",
+        "HomeCurrencyId": 1,
+        "CurrencyId": 1,
+        "LockProcessing": True,
+        "LockProcessingDate": SAGEZA_LOCK_DATE,
+    }
 ]
 SAGEZA_SUPPLIERS: list[dict] = [
     {"ID": 101, "Name": "Fake Sage ZA Supplier A", "Active": True, "CurrencyId": None},
     {"ID": 102, "Name": "Fake Sage ZA Supplier B", "Active": True, "CurrencyId": None},
+    {"ID": 103, "Name": "Fake Sage ZA Supplier Inactive", "Active": False, "CurrencyId": None},
 ]
 SAGEZA_TAX_TYPES: list[dict] = [
     {"ID": 1, "Name": "Standard Rate", "Percentage": 15, "IsDefault": True, "Active": True},
@@ -2033,6 +2049,13 @@ SAGEZA_ACCOUNTS: list[dict] = [
         "DefaultTaxTypeId": None,
         "Category": {"ID": 4, "Description": "Current Liabilities"},
     },
+    {
+        "ID": 6900,
+        "Name": "Fake Closed Account",
+        "Active": False,
+        "DefaultTaxTypeId": 1,
+        "Category": {"ID": 9, "Description": "Expenses"},
+    },
 ]
 SAGEZA_POS: list[dict] = [
     {
@@ -2059,13 +2082,29 @@ def _sageza_auth(request: Request, company: bool = True) -> None:
         raise ProviderError(401, {"Message": "Invalid company."})
 
 
+def _sageza_validation(message: str) -> ProviderError:
+    """Sage's 400: "a validation rule failed. Validation messages will be
+    returned in the response body"."""
+    return ProviderError(400, {"Message": message})
+
+
 def _sageza_page(request: Request, rows: list[dict]) -> dict:
-    flt = request.query_params.get("$filter", "")
+    params = request.query_params
+    flt = params.get("$filter", "")
+    if "'" in re.sub(r"datetime'[^']*'", "", flt):
+        raise _sageza_validation("Filter is not supported on string values.")
+    orderby = params.get("$orderby", "")
+    if params.get("$skip") is not None and not orderby:
+        raise _sageza_validation("An order clause is required to page.")
+    if orderby and orderby.split()[0] != "ID":
+        raise _sageza_validation("Order by is only supported on ID here.")
     ids = {int(m) for m in re.findall(r"\bID eq (\d+)", flt)}
     if ids:
         rows = [r for r in rows if r.get("ID") in ids]
-    skip = int(request.query_params.get("$skip") or 0)
-    top = int(request.query_params.get("$top") or 100)
+    if orderby:
+        rows = sorted(rows, key=lambda r: r.get("ID", 0), reverse=orderby.endswith(" desc"))
+    skip = int(params.get("$skip") or 0)
+    top = min(int(params.get("$top") or 100), 100)
     page = copy.deepcopy(rows[skip : skip + top])
     return {"TotalResults": len(rows), "ReturnedResults": len(page), "Results": page}
 
@@ -2103,6 +2142,15 @@ async def sageza_accounts(request: Request) -> dict:
     return _sageza_page(request, SAGEZA_ACCOUNTS)
 
 
+@sageza.get("/Account/Get/{account_id}")
+async def sageza_account(request: Request, account_id: int) -> dict:
+    _sageza_auth(request)
+    for account in SAGEZA_ACCOUNTS:
+        if account["ID"] == account_id:
+            return copy.deepcopy(account)
+    raise ProviderError(404, {"Message": "Account not found."})
+
+
 @sageza.get("/TaxType/Get")
 async def sageza_tax_types(request: Request) -> dict:
     _sageza_auth(request)
@@ -2122,13 +2170,9 @@ async def sageza_invoices(request: Request) -> dict:
     flt = request.query_params.get("$filter", "")
     supplier = re.search(r"SupplierId eq (\d+)", flt)
     if supplier:
-        literals = {v.replace("''", "'") for v in re.findall(r"eq '((?:[^']|'')*)'", flt)}
-        rows = [
-            r
-            for r in rows
-            if str(r["SupplierId"]) == supplier.group(1)
-            and (r["Reference"] in literals or r["DocumentNumber"] in literals)
-        ]
+        rows = [r for r in rows if str(r["SupplierId"]) == supplier.group(1)]
+    for op, day in re.findall(r"Date (ge|lt) datetime'(\d{4}-\d{2}-\d{2})", flt):
+        rows = [r for r in rows if (r["Date"][:10] >= day if op == "ge" else r["Date"][:10] < day)]
     return _sageza_page(request, rows)
 
 
@@ -2145,26 +2189,42 @@ async def sageza_invoice(request: Request, invoice_id: int) -> dict:
 async def sageza_save_invoice(request: Request) -> dict:
     _sageza_auth(request)
     body = json.loads(await request.body(), parse_float=Decimal)
-    if body.get("SupplierId") not in {s["ID"] for s in SAGEZA_SUPPLIERS}:
-        raise ProviderError(400, {"Message": "Invalid supplier."})
+    # Date, DueDate and SupplierId are Required on the SupplierInvoice model.
+    if not body.get("Date") or not body.get("DueDate"):
+        raise _sageza_validation("Date and DueDate are required.")
+    supplier = next((s for s in SAGEZA_SUPPLIERS if s["ID"] == body.get("SupplierId")), None)
+    if supplier is None:
+        raise _sageza_validation("Invalid supplier.")
+    if not supplier["Active"]:
+        raise _sageza_validation("The supplier is inactive.")
+    if str(body["Date"])[:10] <= SAGEZA_LOCK_DATE:
+        raise _sageza_validation("Processing is locked for this date.")
     lines = body.get("Lines") or []
     if not lines:
-        raise ProviderError(400, {"Message": "A document needs at least one line."})
-    accounts = {a["ID"] for a in SAGEZA_ACCOUNTS}
+        raise _sageza_validation("A document needs at least one line.")
+    accounts = {a["ID"]: a for a in SAGEZA_ACCOUNTS}
     taxes = {t["ID"] for t in SAGEZA_TAX_TYPES}
     total = Decimal(0)
     for line in lines:
-        if line.get("LineType") != 1 or line.get("SelectionId") not in accounts:
-            raise ProviderError(400, {"Message": "Invalid account."})
+        account = accounts.get(line.get("SelectionId"))
+        if line.get("LineType") != 1 or account is None:
+            raise _sageza_validation("Invalid account.")
+        if not account["Active"]:
+            raise _sageza_validation("The account is inactive.")
         if line.get("TaxTypeId") not in taxes:
-            raise ProviderError(400, {"Message": "Invalid tax type."})
+            raise _sageza_validation("Invalid tax type.")
         total += Decimal(str(line.get("Total")))
     state = _sageza_state()
     state["next_id"] += 1
+    # useSystemDocumentNumber "Default value is True": Sage's own sequence
+    # replaces the number sent unless the caller says false.
+    keep_number = request.query_params.get("useSystemDocumentNumber", "true").lower() == "false"
     invoice = {
         "ID": state["next_id"],
         "SupplierId": body["SupplierId"],
-        "DocumentNumber": body.get("DocumentNumber"),
+        "Date": str(body["Date"])[:10] + "T00:00:00",
+        "DueDate": str(body["DueDate"])[:10] + "T00:00:00",
+        "DocumentNumber": body.get("DocumentNumber") if keep_number else f"SI{state['next_id']}",
         "Reference": body.get("Reference"),
         "Total": str(total),
         "AmountDue": str(total),
@@ -2173,16 +2233,6 @@ async def sageza_save_invoice(request: Request) -> dict:
     }
     state["invoices"][invoice["ID"]] = invoice
     return {**invoice, "Total": float(total), "AmountDue": float(total)}
-
-
-@sageza.delete("/SupplierInvoice/Delete/{invoice_id}")
-async def sageza_delete_invoice(request: Request, invoice_id: int) -> Response:
-    _sageza_auth(request)
-    invoices = _sageza_state()["invoices"]
-    if invoice_id not in invoices:
-        raise ProviderError(404, {"Message": "Supplier invoice not found."})
-    del invoices[invoice_id]
-    return Response(status_code=204)
 
 
 @sageza.post("/__set-amount-due")
