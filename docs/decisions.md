@@ -14992,3 +14992,84 @@ deleted or part-paid — is not recorded when every blocker is cleared),
 `test_erp_paid_recorded_outside.py`, `test_erp_webhook_transitions.py`,
 `frontend/src/lib/types/erpReport.test.ts`,
 `frontend/tests-e2e/payments/erp-reported-payment.spec.ts`.
+
+## 320. Sage Accounting SA is driven by the 2.0.0 API as documented, not as assumed (2026-10-23)
+
+**What happened.** A docs-against-code audit of `sage_accounting_za.py` (the
+ERP audit tracked in #655) found the adapter built on four things the SA API
+2.0.0 does not do, each hidden by a fake-erp surface that did them anyway:
+
+- **`SupplierInvoice/Save` renumbered every invoice.** Its
+  `useSystemDocumentNumber` parameter is "Default value is True. Use system
+  Document Number or Document Number provided." We never sent it, so Sage gave
+  each invoice its own sequence number, the supplier's number was lost in Sage,
+  and the duplicate-number guard could never match.
+- **The idempotency lookup filtered on strings.** "Filter and Orderby will not
+  work for string values of any kind" (DeveloperProgram.aspx). The lookup's
+  `Reference eq '…' or DocumentNumber eq '…'` therefore either 400s (every push
+  fails "idempotency lookup unavailable") or is ignored (every supplier with a
+  prior invoice reads as a duplicate, and past 100 invoices a retry after a
+  timed-out save can miss its own first attempt and post twice).
+- **Void called `SupplierInvoice/Delete`, which does not exist.** The 2.0.0
+  method list for SupplierInvoice is Get, Get/{id}, Save, Calculate, Email and
+  Export. The `posted_total_mismatch` cleanup leaned on it, so a wrongly-booked
+  invoice was reported "voided" by the fake and stayed live in real Sage.
+- **Paging had no order.** "If no default order clause is specified, you will
+  need to provide one"; unordered `$skip` pages can drop rows, and a dropped
+  row reads as a dead link to the chart and vendor syncs (§284).
+
+**Decisions.**
+
+1. **The save sends `useSystemDocumentNumber=false`**, and the number recorded
+   is the one Sage echoes back.
+2. **The idempotency lookup filters on integers and dates only** —
+   `SupplierId` plus a one-day `Date` window, ordered `ID desc`, every page —
+   and compares `Reference` / `DocumentNumber` in the adapter. Our own earlier
+   attempt has the same `Date`, so it is always in the window; a window too
+   long to read (10 pages) or a failed page fails closed. *Rejected:* walking a
+   supplier's whole invoice history on every push, to keep the duplicate-number
+   guard across all dates. It costs one call per 100 invoices against a limit
+   of 100 requests a minute and 5,000 a day per company; the guard now covers
+   the same day, and FeohLedger's own duplicate detection covers the rest.
+   `Date` became required for the push (`missing_dates`), which Sage requires
+   anyway.
+3. **`void_invoice` refuses, with no call.** The documented way to reverse a
+   supplier invoice is a `SupplierReturn` allocated against it. That changes
+   the supplier's balance and the VAT return, so — like §303's payment rule —
+   it is an accountant's decision, not one an automatic cleanup makes. The
+   mismatch message now says, truthfully, that the invoice could not be
+   voided. *Rejected:* posting the SupplierReturn automatically.
+4. **A refused save is coded and known to have created nothing**, the shape
+   §285 gave QuickBooks: 402 is `company_subscription_inactive`; any other 4xx
+   is classified from what Sage holds now (`Company.LockProcessing` +
+   `LockProcessingDate` → `period_closed`; `Active: false` on the supplier or
+   an account → `vendor_inactive` / `account_inactive`), else the new shared
+   code `bill_refused`. All carry `not_posted`, so none reads as "possibly
+   posted". Sage's `Message` / `ModelState` is never read into the result: it
+   can echo the invoice. Inactive suppliers and accounts are also refused
+   before the save, and inactive suppliers are now emitted `active=False` by
+   the vendor sync rather than linked as live payees.
+5. **401 and 429 stop, they don't retry.** Sage blocks a user for 24 hours
+   after 20 failed logins in an hour, and blocks a company for an hour on a 429
+   with "do not continue to make requests as this may extend the blocking
+   period". The shared `_RETRYABLE_CLIENT_STATUSES` treats both as retryable
+   (right for OAuth ERPs whose 401 means "refresh"), so this adapter overrides
+   it: a 401 anywhere is `not_connected`, a 429 on the save is non-retryable.
+6. **fake-erp's `/sageza` now behaves like the API**: string `$filter`
+   literals are 400, paging needs `$orderby`, the save keeps the supplier's
+   number only on `useSystemDocumentNumber=false`, there is no Delete, Date and
+   DueDate are required, and it refuses an inactive supplier, an inactive
+   account and a locked period. The adapter as it stood fails against it.
+
+**Not settled without a sandbox** (#654): whether a string `$filter` 400s or is
+ignored; the exact OData `datetime'…'` literal Sage accepts; Sage's 400 body
+for a locked period, an inactive supplier or account and a duplicate number;
+whether `Paid` turns true when a SupplierReturn (credit) is allocated (if so,
+`paid` must come from a SupplierPayment allocation, §303); whether a ZAR
+supplier reports a null or a home `CurrencyId`; the real account-category
+descriptions and PO status strings; and the Resellers (Sandbox) host, which
+`base_url` is deliberately not widened to until it is confirmed. The PO's
+supplier link by id is the cross-adapter #652.
+
+Tests: `backend/tests/test_erp_sage_accounting_za_adapter.py`,
+`frontend/tests-e2e/erp/sage-accounting-za.spec.ts`.

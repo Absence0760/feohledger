@@ -2153,17 +2153,25 @@ separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
 
 Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
 HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows a
-page) and filter with `$filter`. The supplier and account listings read up to
-`SYNC_LISTING_MAX_ROWS` and raise `ErpListingIncomplete` on a failed page or
-past it; an inactive account is emitted `active=False`. Other lists stop at 10
-pages.
+page at most) and always send `$orderby=ID`: Sage says "if no default order
+clause is specified, you will need to provide one", and unordered pages can
+skip or repeat rows. **`$filter` and `$orderby` work on integers and dates
+only** — "Filter and Orderby will not work for string values of any kind"
+(`https://accounting.sageone.co.za/Marketing/DeveloperProgram.aspx`) — so no
+lookup here ever filters on a name, a reference or a document number. The
+supplier and account listings read up to `SYNC_LISTING_MAX_ROWS` and raise
+`ErpListingIncomplete` on a failed page or past it; an inactive supplier or
+account is emitted `active=False`, not dropped. `Supplier/Get` "excludes
+records where Personal Information was cleared", so a supplier erased under
+POPIA vanishes from the pull and reads as a dead link, the same as a deleted
+one. Other lists stop at 10 pages.
 
 | Operation | Calls |
 |---|---|
-| `post_invoice` | refuse pre-flight without a numeric `vendor_erp_id` (SupplierId) / numeric GL account ids, or in a non-home currency → `SupplierInvoice/Get` idempotency lookup → `Supplier/Get/{id}` (+ `Company/Get/{id}`) currency check → `Account/Get` + `TaxType/Get` → `SupplierInvoice/Save` |
+| `post_invoice` | refuse pre-flight without a numeric `vendor_erp_id` (SupplierId) / numeric GL account ids, without an invoice date and a due date (`missing_dates` — both Required in Sage), with an invoice number over 100 characters (`doc_number_too_long`), or in a non-home currency → `SupplierInvoice/Get` idempotency lookup (integers and dates only, every page) → `Supplier/Get/{id}` (`Active`, + `Company/Get/{id}` currency check) → `Account/Get` + `TaxType/Get` → `SupplierInvoice/Save?useSystemDocumentNumber=false` |
 | `get_invoice_status` | `SupplierInvoice/Get/{id}` — `AmountDue` 0 ⇒ paid with Sage's `Paid` flag and a non-zero `Total`, else `settled_no_payment` (decisions §303); below `Total` ⇒ partially paid, else open |
-| `void_invoice` | `SupplierInvoice/Delete/{id}`, only when `AmountDue == Total` and the invoice is neither `Locked` nor `Paid`; otherwise `False` (reverse it in Sage with its payment) |
-| `list_vendors` / `list_gl_accounts` / `list_pos` | `Supplier/Get` / `Account/Get` (active only; category → asset/liability/equity/revenue/expense, unknown → unclassified) / `PurchaseOrder/Get` (`currency` left NULL — decisions §197) |
+| `void_invoice` | Always `False`, with no call. API 2.0.0 has **no** `SupplierInvoice/Delete` (the Help method list for SupplierInvoice is Get, Get/{id}, Save, Calculate, Email and Export). Reversing an invoice is a `SupplierReturn` allocated against it, which is an accountant's decision (decisions §303), so it is left to a person in Sage |
+| `list_vendors` / `list_gl_accounts` / `list_pos` | `Supplier/Get` (`Active` → `active`) / `Account/Get` (`Active` → `active`; category → asset/liability/equity/revenue/expense, unknown → unclassified) / `PurchaseOrder/Get` (`currency` left NULL — decisions §197) |
 | `test_connection` | `Company/Get` answers *and* lists the configured `company_id` |
 
 - **Lines** are `LineType` 1 (account) with `SelectionId` = the account id, one
@@ -2179,24 +2187,58 @@ pages.
   input VAT never charged). A payload with **no** `tax_amount` states no VAT,
   which is not "any VAT": it posts only when every line's resolved rate is 0%,
   else `tax_not_stated`.
-- **Idempotency**: `Reference` carries our `correlation_id`. The lookup filters
-  `SupplierId eq N and (Reference eq '<corr>' or DocumentNumber eq '<inv>')`
-  (OData quotes doubled). Our reference with the same `Total` is adopted; with
-  another total → `correlation_total_mismatch`; the same invoice number under
-  another reference → `duplicate_invoice_number`. A failed lookup is a
-  retryable failure, never read as "not posted". If Sage saves a different
-  `Total` than approved, the invoice just saved is deleted (when nothing is
-  allocated to it) and the push fails non-retryable `posted_total_mismatch`; a
-  save that reports no `Total` fails non-retryable `posted_total_unconfirmed`
-  (never success — `erp_adapters/posted_total.py`, shared with QuickBooks, Xero
-  and Sage v3.1).
+- **Document number**: the save sends `useSystemDocumentNumber=false`. Sage's
+  default is true, and then it replaces the supplier's invoice number with its
+  own sequence, so the duplicate guard below could never match and the number
+  we recorded would be wrong. The `erp_document_number` recorded is the
+  `DocumentNumber` Sage echoes back.
+- **Idempotency**: `Reference` carries our `correlation_id`. Since Sage cannot
+  filter strings, the lookup is `SupplierId eq N and Date ge
+  datetime'<day>T00:00:00' and Date lt datetime'<next day>T00:00:00'`,
+  `$orderby=ID desc`, every page of that window, and `Reference` /
+  `DocumentNumber` are compared in the adapter. Our earlier attempt carries the
+  same `Date`, so it is always in the window. A window past 10 pages (1,000 of
+  one supplier's invoices on one day) → `idempotency_lookup_incomplete`; a page
+  that fails is a retryable failure — never read as "not posted". Our reference
+  with the same `Total` is adopted; with another total →
+  `correlation_total_mismatch`; the same invoice number under another reference
+  that day → `duplicate_invoice_number` (FeohLedger's own duplicate detection
+  covers other dates). If Sage saves a different `Total` than approved the push
+  fails non-retryable `posted_total_mismatch` saying the invoice **could not be
+  voided** — it stays in Sage until a person reverses it; a save that reports
+  no `Total` fails non-retryable `posted_total_unconfirmed` (never success —
+  `erp_adapters/posted_total.py`, shared with QuickBooks, Xero and Sage v3.1).
+- **A refused save** created nothing, so it is a coded, non-retryable refusal
+  with `not_posted` set (decisions §285's shape, so it never reads as "possibly
+  posted"): 402 ("the registration has expired") → `company_subscription_inactive`;
+  any other 4xx is classified from what Sage holds now — the company locks
+  processing on or after the invoice date (`Company.LockProcessing` +
+  `LockProcessingDate`) → `period_closed`, the supplier `Active: false` →
+  `vendor_inactive`, a line's account `Active: false` → `account_inactive`
+  (naming our GL codes) — else `bill_refused`. Sage's `Message` / `ModelState`
+  text is never read into the result. A 5xx stays the plain retryable failure.
+- **401 and 429 are never retried.** Sage blocks a user for 24 hours after 20
+  failed logins in an hour, so a 401 on any call stops the push at once as
+  `not_connected` (`not_posted`) and fails a sync listing as incomplete. A 429
+  blocks the company for an hour, and "do not continue to make requests as this
+  may extend the blocking period", so a rate-limited save is a non-retryable
+  failure (`not_posted`) for a person to retry later. (These override the shared
+  `base._RETRYABLE_CLIENT_STATUSES` for this adapter only.)
 - **Refusal reasons** (all non-retryable): `vendor_not_linked`,
-  `account_not_linked` (also an unknown or inactive account),
+  `vendor_inactive`, `account_not_linked` (an account Sage does not return),
+  `account_inactive`, `missing_dates`, `doc_number_too_long`,
   `currency_not_supported`, `foreign_currency_supplier`,
   `tax_type_not_resolved`, `tax_mismatch`, `tax_not_stated`,
-  `correlation_total_mismatch`, `duplicate_invoice_number`, plus the shared
-  line codes `line_amount_missing` / `amount_mismatch` / `tax_not_itemised`
-  from `bill_lines`.
+  `correlation_total_mismatch`, `duplicate_invoice_number`,
+  `idempotency_lookup_incomplete`, `not_connected`, `period_closed`,
+  `company_subscription_inactive`, `bill_refused`, plus the shared line codes
+  `line_amount_missing` / `amount_mismatch` / `tax_not_itemised` from
+  `bill_lines`.
+- **Sandbox host.** Sage issues the first API key against a separate
+  "Resellers (Sandbox)" environment. Its host is not published, so `base_url`
+  is not widened to it (it would be handed the key and the password); point
+  the operator override `FEOH_ERP_SAGE_ZA_API_BASE` at it for a sandbox run
+  until the host is confirmed (#654).
 - **Credentials.** The API key rides in the query string, so the module
   registers `apikey=` with the shared `erp_adapters/log_redaction.py` filter
   (the same filter SYSPRO uses), which sits on the `httpx` logger and on each

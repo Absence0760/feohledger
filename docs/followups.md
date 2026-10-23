@@ -2456,9 +2456,13 @@ as oversights.
       `PorMasterHdr` / `PorMasterDetail` column names.
       **Intacct:** bill `state` values, the purchasing-document query name,
       `txnTotal`, and whether REST can reverse a paid bill.
-      **Sage SA:** the `SupplierInvoice/Save` body, `DocumentNumber` and
-      `Reference` limits, OData filters, `CurrencyId` for home-currency
-      suppliers, account categories, and delete in a locked period.
+      **Sage SA** (decisions §320; the docs-level defects are fixed): whether a
+      string `$filter` 400s or is ignored, the `datetime'…'` literal the
+      lookup's date window uses, the 400 body for a locked period / inactive
+      supplier or account / duplicate number, whether `Paid` turns true on a
+      credit (SupplierReturn) allocation, `CurrencyId` for home-currency
+      suppliers, account categories and PO status strings, and the Resellers
+      (Sandbox) host (#654).
       **Blackbaud:** an empty `transaction_code_values`, the description
       length, and job latency.
       **Why blocked:** each needs a sandbox or developer-programme account.
