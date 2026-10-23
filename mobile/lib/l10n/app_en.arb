@@ -1721,6 +1721,14 @@
       }
     }
   },
+  "invoiceWarningPoNotIssued": "PO {poNumber} is not approved in the ERP yet",
+  "@invoiceWarningPoNotIssued": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningPoAmountVariance": "Amount variance {variancePct} vs PO {poNumber} (invoice {invoiceAmount} vs PO {poTotal})",
   "@invoiceWarningPoAmountVariance": {
     "placeholders": {
@@ -2078,6 +2086,14 @@
   },
   "invoicePoMatchIssuePoNotFound": "PO {poNumber} not found",
   "@invoicePoMatchIssuePoNotFound": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePoNotIssued": "PO {poNumber} is not approved in the ERP yet",
+  "@invoicePoMatchIssuePoNotIssued": {
     "placeholders": {
       "poNumber": {
         "type": "String"

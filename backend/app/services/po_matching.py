@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.invoice import Invoice
-from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
+from app.models.procurement import (
+    UNISSUED_PO_STATUS,
+    GoodsReceipt,
+    PurchaseOrder,
+    po_currency_code,
+)
 from app.models.quality_inspection import QualityInspection
 from app.services.invoice_warning_catalog import po_match_issue
 from app.services.matching_rules import resolve_match_rule
@@ -212,6 +217,12 @@ class MatchResult:
     #: split or blanket PO billed delivery by delivery) is partial BILLING, and
     #: never blocks (``invoice_warnings._refresh_po_match``).
     billed_beyond_receipt: bool = False
+    #: The PO is one the ERP has not approved or issued yet
+    #: (``models/procurement.UNISSUED_PO_STATUS``, decisions §321). Nothing is
+    #: compared against it: ``status`` is ``mismatch`` with no variance, and
+    #: ``invoice_warnings`` raises ``po_not_issued`` and a payment-blocking
+    #: ``po_mismatch`` until a re-sync brings the approved order in.
+    po_not_issued: bool = False
 
     #: One `{code, params, message}` entry per finding, built by
     #: `invoice_warning_catalog.po_match_issue` — the client localizes on
@@ -318,6 +329,25 @@ async def match_invoice_to_po(
     po_total = _to_decimal(po.total)
     tolerance = _to_decimal(tolerance_pct, Decimal("5.0"))
     result.match_type = "2-way"
+
+    # An order nobody in the ERP has approved is not an order yet: matching
+    # against it would pass the amount control on a draft (decisions §321).
+    # Refused before any leg runs, with no variance (a 0 would read as a
+    # perfect match), whatever its amount or receipts say.
+    if (po.status or "").strip().lower() == UNISSUED_PO_STATUS:
+        result.po_not_issued = True
+        result.amount_variance = None
+        result.amount_variance_pct = None
+        result.within_tolerance = False
+        result.status = "mismatch"
+        result.issues.append(po_match_issue("po_not_issued", poNumber=po.po_number))
+        result.details = {
+            "match_type": result.match_type,
+            "po_total": result.po_total,
+            "invoice_amount": invoice_amount,
+            "po_not_issued": True,
+        }
+        return result
 
     if result.currency_check == CURRENCY_DIFFERENT:
         # The currency guard. Before `purchase_orders.currency` existed this

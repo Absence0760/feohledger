@@ -732,14 +732,22 @@ def _bc_date(raw: object) -> date | None:
         return None
 
 
+#: API v2.0 ``purchaseOrder.status`` (enum ``Purchase Order Entity Buffer
+#: Status``) → ours, lower-cased. ``Open`` is not listed: it is the default.
+_BC_PO_STATUSES: dict[str, str] = {"draft": "unissued", "in review": "unissued"}
+
+
 def _bc_po_to_payload(raw: dict) -> PoPayload | None:
     """Map an API v2.0 ``purchaseOrder`` (lines expanded) to a PoPayload.
 
     * ``total`` is ``totalAmountIncludingTax`` — the figure an invoice for the
       order is billed at. No total stated → skipped, never synced at 0.
-    * ``status`` is always ``open``. The API's statuses (``Draft``, ``In
-      Review``, ``Open``) are all live orders; BC deletes a purchase order once
-      it is fully received and invoiced, so a closed or cancelled order never
+    * ``status`` is ``open`` for the API's ``Open`` (a Released order, or one
+      Pending Prepayment) and ``unissued`` for ``Draft`` (BC's own "Open", an
+      unreleased order) and ``In Review`` (Pending Approval): nothing matches
+      against an order BC has not released (decisions §321). A value this
+      build does not know stays ``open``. BC deletes a purchase order once it
+      is fully received and invoiced, so a closed or cancelled order never
       appears in this collection.
     * ``currency`` is ``currencyCode`` only when BC states one. BC leaves it
       blank for the company's local currency, and that blank stays None: the
@@ -769,7 +777,7 @@ def _bc_po_to_payload(raw: dict) -> PoPayload | None:
         po_number=str(number),
         vendor_name=raw.get("vendorName") or None,
         total=total,
-        status="open",
+        status=_BC_PO_STATUSES.get(str(raw.get("status") or "").strip().lower(), "open"),
         expected_delivery_date=_bc_date(raw.get("requestedReceiptDate")),
         line_items=lines,
         currency=currency or None,

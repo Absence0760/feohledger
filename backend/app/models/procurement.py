@@ -28,8 +28,18 @@ from app.models.base import Base, EntityMixin, TimestampMixin
 #: silently counting a cancelled order as committed spend is what makes a
 #: figure wrong. Shared by the budget-commitment leg (`services/budget_service`)
 #: and the open-PO accrual (`api/analytics`), which must not disagree about what
-#: "open" means.
-DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
+#: "open" means. An `unissued` order is not a commitment YET, so it is excluded
+#: too.
+DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided", "unissued")
+
+#: An ERP purchase order nobody in the ERP has approved or issued yet (Xero
+#: DRAFT / SUBMITTED, NetSuite Pending Supervisor Approval, Business Central
+#: Draft / In Review, ...). The PO sync stores it under this status rather than
+#: skipping it, so a re-sync can also take back an order synced earlier as
+#: `open`, and the matcher refuses it with its own finding (`po_not_issued`)
+#: instead of "PO not found". The ERP's approval moves it to `open` on the next
+#: sync. Decisions §321.
+UNISSUED_PO_STATUS = "unissued"
 
 
 def po_currency_code(value: object) -> str | None:

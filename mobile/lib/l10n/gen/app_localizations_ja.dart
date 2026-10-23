@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2614,6 +2615,11 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoNotIssued(String poNumber) {
+    return '発注 $poNumber は ERP でまだ承認されていません';
+  }
+
+  @override
   String invoiceWarningPoAmountVariance(
     String variancePct,
     String poNumber,
@@ -2837,6 +2843,11 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String invoicePoMatchIssuePoNotFound(String poNumber) {
     return '発注 $poNumber が見つかりません';
+  }
+
+  @override
+  String invoicePoMatchIssuePoNotIssued(String poNumber) {
+    return '発注 $poNumber は ERP でまだ承認されていません';
   }
 
   @override

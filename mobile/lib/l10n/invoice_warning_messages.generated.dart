@@ -85,6 +85,7 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'currency': 'currency',
   },
   'po_not_found': {'poNumber': 'text'},
+  'po_not_issued': {'poNumber': 'text'},
   'po_amount_variance': {
     'variancePct': 'percent',
     'poNumber': 'text',
@@ -188,6 +189,7 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'gl_codes_not_in_chart': {'codes': 'text'},
   'gl_code_stale_prior': {'code': 'text'},
   'po_match.issue.po_not_found': {'poNumber': 'text'},
+  'po_match.issue.po_not_issued': {'poNumber': 'text'},
   'po_match.issue.currency_mismatch': {
     'invoiceCurrency': 'text',
     'poCurrency': 'text',
@@ -404,6 +406,11 @@ String? _localizeWarningCode(
       final poNumber = _text(p['poNumber'], currency);
       if (poNumber == null) return null;
       return l.invoiceWarningPoNotFound(poNumber);
+    // PO {poNumber} is not approved in the ERP yet
+    case 'po_not_issued':
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      return l.invoiceWarningPoNotIssued(poNumber);
     // Amount variance {variancePct}% vs PO {poNumber} (invoice {invoiceAmount} {currency} vs PO {poTotal} {currency})
     case 'po_amount_variance':
       final variancePct = _percent(p['variancePct'], currency);
@@ -700,6 +707,11 @@ String? _localizeWarningCode(
       final poNumber = _text(p['poNumber'], currency);
       if (poNumber == null) return null;
       return l.invoicePoMatchIssuePoNotFound(poNumber);
+    // PO {poNumber} is not approved in the ERP yet
+    case 'po_match.issue.po_not_issued':
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      return l.invoicePoMatchIssuePoNotIssued(poNumber);
     // Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared
     case 'po_match.issue.currency_mismatch':
       final invoiceCurrency = _text(p['invoiceCurrency'], currency);

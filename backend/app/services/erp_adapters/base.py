@@ -511,10 +511,13 @@ class PoLinePayload:
 class PoPayload:
     """Normalized purchase order returned by `ErpAdapter.list_pos`.
 
-    `status` is one of {"open", "closed", "cancelled"} — the same set
-    `PurchaseOrder.status` accepts. Adapters that get something exotic
-    from their ERP should normalize to one of these or default to
-    "open" rather than passing the raw vendor string through.
+    `status` is one of {"open", "closed", "cancelled", "unissued"} — the same
+    set `PurchaseOrder.status` accepts. `unissued` is an order the ERP has not
+    approved or issued yet (a draft, or one awaiting approval): it is synced,
+    and the matcher refuses it (`models/procurement.UNISSUED_PO_STATUS`,
+    decisions §321). Adapters that get something exotic from their ERP should
+    normalize to one of these or default to "open" rather than passing the raw
+    vendor string through.
     """
 
     po_number: str

@@ -1036,6 +1036,14 @@ async def _refresh_po_match(
         flag = warning("po_not_found", "error", poNumber=invoice.po_number)
         warnings.append(flag)
         await _raise("po_mismatch", "error", flag)
+    elif match.po_not_issued:
+        # The order exists but the ERP has not approved it (decisions §321).
+        # Same severity and hold as a missing PO: nothing authorizes the spend
+        # yet. A re-sync after the ERP approves it clears this on the next
+        # refresh.
+        flag = warning("po_not_issued", "error", poNumber=match.po_number)
+        warnings.append(flag)
+        await _raise("po_mismatch", "error", flag)
     elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
         # The currency guard tripped: the two are in different currencies, so
         # the matcher compared nothing and there is no variance to state. Same

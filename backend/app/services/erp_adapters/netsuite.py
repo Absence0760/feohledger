@@ -527,10 +527,12 @@ def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload | None:
 
 
 #: Purchase-order status letters (``transaction.status`` for ``PurchOrd``) ->
-#: our PO vocabulary. A Pending Supervisor Approval (A), Pending Receipt (B),
-#: Partially Received (D), Pending Billing/Partially Received (E) or Pending
-#: Bill (F) order is still open.
+#: our PO vocabulary. A Pending Receipt (B), Partially Received (D), Pending
+#: Billing/Partially Received (E) or Pending Bill (F) order is open; a Pending
+#: Supervisor Approval (A) one is not approved yet, so nothing matches against
+#: it (decisions §321).
 _NETSUITE_PO_STATUSES: dict[str, str] = {
+    "A": "unissued",  # Pending Supervisor Approval
     "C": "cancelled",  # Rejected by Supervisor
     "G": "closed",  # Fully Billed
     "H": "closed",  # Closed

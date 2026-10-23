@@ -79,6 +79,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'price_variance_under': 'invoices.warning.priceVarianceUnder',
 	// PO {poNumber} not found
 	'po_not_found': 'invoices.warning.poNotFound',
+	// PO {poNumber} is not approved in the ERP yet
+	'po_not_issued': 'invoices.warning.poNotIssued',
 	// Amount variance {variancePct}% vs PO {poNumber} (invoice {invoiceAmount} {currency} vs PO {poTotal} {currency})
 	'po_amount_variance': 'invoices.warning.poAmountVariance',
 	// Amount variance {variancePct}% vs PO {poNumber}, which records no currency (invoice {invoiceAmount} {currency} vs PO {poTotal})
@@ -139,6 +141,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'gl_code_stale_prior': 'invoices.warning.glCodeStalePrior',
 	// PO {poNumber} not found
 	'po_match.issue.po_not_found': 'invoices.poMatch.issue.poNotFound',
+	// PO {poNumber} is not approved in the ERP yet
+	'po_match.issue.po_not_issued': 'invoices.poMatch.issue.poNotIssued',
 	// Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared
 	'po_match.issue.currency_mismatch': 'invoices.poMatch.issue.currencyMismatch',
 	// Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} {currency} ({variancePct}%)
@@ -203,6 +207,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'price_variance_over': { deltaPct: 'percent', item: 'text', unitPrice: 'money', baselineUnitPrice: 'money', currency: 'currency' },
 	'price_variance_under': { deltaPct: 'percent', item: 'text', unitPrice: 'money', baselineUnitPrice: 'money', currency: 'currency' },
 	'po_not_found': { poNumber: 'text' },
+	'po_not_issued': { poNumber: 'text' },
 	'po_amount_variance': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'money', currency: 'currency' },
 	'po_amount_variance_po_currency_unknown': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'number', currency: 'currency' },
 	'po_currency_mismatch': { invoiceCurrency: 'text', poNumber: 'text', poCurrency: 'text' },
@@ -233,6 +238,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'gl_codes_not_in_chart': { codes: 'text' },
 	'gl_code_stale_prior': { code: 'text' },
 	'po_match.issue.po_not_found': { poNumber: 'text' },
+	'po_match.issue.po_not_issued': { poNumber: 'text' },
 	'po_match.issue.currency_mismatch': { invoiceCurrency: 'text', poCurrency: 'text' },
 	'po_match.issue.amount_mismatch': { invoiceAmount: 'money', poTotal: 'money', currency: 'currency', variancePct: 'percent' },
 	'po_match.issue.amount_mismatch_po_currency_unknown': { invoiceAmount: 'money', poTotal: 'number', currency: 'currency', variancePct: 'percent' },

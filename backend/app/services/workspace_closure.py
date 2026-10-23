@@ -148,7 +148,7 @@ _POST_APPROVAL_STATUSES: tuple[str, ...] = tuple(str(s) for s in APPROVED_OR_BEY
 #: Purchase-order statuses that say nothing has happened to the order yet.
 #: `PurchaseOrder.status` is free-form (the ERP feed writes it), so this is the
 #: allow-list and anything else — received, partially received, closed — blocks.
-_UNTOUCHED_PO_STATUSES = ("open", "draft", "cancelled", "voided")
+_UNTOUCHED_PO_STATUSES = ("open", "draft", "unissued", "cancelled", "voided")
 
 
 @dataclass(frozen=True)

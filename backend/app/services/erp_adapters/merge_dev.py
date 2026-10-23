@@ -59,14 +59,20 @@ def _to_date(v) -> date | None:
             return None
 
 
-# Merge.dev's PO status enum → our internal vocabulary. Anything not
-# listed maps to "open" (the safest default — it shows up in the
-# matching pool but doesn't mark an unfamiliar PO as closed/cancelled
-# and exclude it).
+# Merge.dev's PO status enum (``DRAFT, SUBMITTED, AUTHORIZED, BILLED,
+# DELETED``; an open enum) → our internal vocabulary. ``DRAFT`` and
+# ``SUBMITTED`` are orders nobody has approved, so they sync as ``unissued``
+# and nothing matches against them (decisions §321); ``BILLED`` is fully billed
+# and ``DELETED`` gone. Anything not listed maps to "open". A PO Merge reports
+# ``remote_was_deleted`` is cancelled whatever its status says.
 _MERGE_PO_STATUS_MAP = {
+    "DRAFT": "unissued",
+    "SUBMITTED": "unissued",
+    "AUTHORIZED": "open",
+    "BILLED": "closed",
+    "DELETED": "cancelled",
     "OPEN": "open",
     "PENDING": "open",
-    "DRAFT": "open",
     "CLOSED": "closed",
     "FULFILLED": "closed",
     "CANCELLED": "cancelled",
@@ -338,6 +344,8 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
 
     raw_status = (raw.get("status") or "").upper()
     status = _MERGE_PO_STATUS_MAP.get(raw_status, "open")
+    if raw.get("remote_was_deleted") is True:
+        status = "cancelled"
 
     line_items: list[PoLinePayload] = []
     for li in raw.get("line_items") or []:

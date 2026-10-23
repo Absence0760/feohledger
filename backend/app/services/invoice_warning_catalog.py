@@ -288,6 +288,12 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         {"poNumber": "text"},
     ),
     WarningSpec(
+        "po_not_issued",
+        "po_mismatch",
+        "PO {poNumber} is not approved in the ERP yet",
+        {"poNumber": "text"},
+    ),
+    WarningSpec(
         "po_amount_variance",
         "po_mismatch",
         "Amount variance {variancePct}% vs PO {poNumber} "
@@ -594,6 +600,12 @@ PO_MATCH_ISSUE_SPECS: tuple[WarningSpec, ...] = (
         PO_MATCH_ISSUE_PREFIX + "po_not_found",
         PO_MATCH_ISSUE_TYPE,
         "PO {poNumber} not found",
+        {"poNumber": "text"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "po_not_issued",
+        PO_MATCH_ISSUE_TYPE,
+        "PO {poNumber} is not approved in the ERP yet",
         {"poNumber": "text"},
     ),
     WarningSpec(

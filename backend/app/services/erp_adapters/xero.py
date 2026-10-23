@@ -145,9 +145,12 @@ def map_bill_status(bill: dict) -> ErpInvoiceStatus:
     return _STATUS_MAP.get(status, ErpInvoiceStatus.unknown)
 
 
+#: Xero's ``PurchaseOrder.Status`` → ours. ``DRAFT`` and ``SUBMITTED``
+#: (awaiting approval) are orders nobody has approved, so they sync as
+#: ``unissued`` and nothing matches against them (decisions §321).
 _PO_STATUS_MAP = {
-    "DRAFT": "open",
-    "SUBMITTED": "open",
+    "DRAFT": "unissued",
+    "SUBMITTED": "unissued",
     "AUTHORISED": "open",
     "BILLED": "closed",
     "DELETED": "cancelled",

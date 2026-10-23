@@ -4349,6 +4349,12 @@ abstract class AppLocalizations {
   /// **'PO {poNumber} not found'**
   String invoiceWarningPoNotFound(String poNumber);
 
+  /// No description provided for @invoiceWarningPoNotIssued.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {poNumber} is not approved in the ERP yet'**
+  String invoiceWarningPoNotIssued(String poNumber);
+
   /// No description provided for @invoiceWarningPoAmountVariance.
   ///
   /// In en, this message translates to:
@@ -4604,6 +4610,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'PO {poNumber} not found'**
   String invoicePoMatchIssuePoNotFound(String poNumber);
+
+  /// No description provided for @invoicePoMatchIssuePoNotIssued.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {poNumber} is not approved in the ERP yet'**
+  String invoicePoMatchIssuePoNotIssued(String poNumber);
 
   /// No description provided for @invoicePoMatchIssueCurrencyMismatch.
   ///

@@ -482,10 +482,18 @@ def _gl_account_type(raw: dict) -> str | None:
     return None
 
 
+#: PO ``state`` values for an order not yet approved (decisions §321):
+#: draft, submitted for approval, partly through a multi-step approval, or
+#: still being analysed. Nothing matches against one.
+_UNISSUED_PO_STATES = frozenset({"draft", "submitted", "partiallyapproved", "analyzing"})
+
+
 def _po_status(state: object) -> str:
     s = str(state or "").replace(" ", "").lower()
     if s in {"closed", "converted", "convertedbyline"}:
         return "closed"
-    if s in {"canceled", "cancelled"}:
+    if s in {"canceled", "cancelled", "declined"}:
         return "cancelled"
+    if s in _UNISSUED_PO_STATES:
+        return "unissued"
     return "open"
