@@ -932,14 +932,31 @@ D365_VENDOR_FIXTURES: list[dict] = [
         "id": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
         "number": "V0001",
         "displayName": "Fake BC Vendor A",
+        "paymentTermsId": "6a4f1d2e-0000-0000-0000-000000000030",
     },
 ]
+
+# BC `paymentTerms`. A vendor names its term by `paymentTermsId` (a GUID); the
+# code is only on the term, reached through the vendor's `paymentTerm`
+# navigation (`$expand=paymentTerm`).
+D365_PAYMENT_TERMS: dict[str, dict] = {
+    "6a4f1d2e-0000-0000-0000-000000000030": {
+        "id": "6a4f1d2e-0000-0000-0000-000000000030",
+        "code": "30 DAYS",
+        "displayName": "Net 30 days",
+        "dueDateCalculation": "30D",
+    },
+}
 
 
 @d365.get("/{environment}/api/v2.0/companies({company_id})/vendors")
 async def d365_list_vendors(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)
-    return {"value": copy.deepcopy(D365_VENDOR_FIXTURES)}
+    rows = copy.deepcopy(D365_VENDOR_FIXTURES)
+    if "paymentTerm" in request.query_params.get("$expand", ""):
+        for row in rows:
+            row["paymentTerm"] = copy.deepcopy(D365_PAYMENT_TERMS.get(row.get("paymentTermsId")))
+    return {"value": rows}
 
 
 _D365_EXTERNAL_DOC_FILTER = re.compile(r"externalDocumentNumber\s+eq\s+'([^']*)'", re.IGNORECASE)
@@ -1017,6 +1034,12 @@ async def d365_post_purchase_invoice(
     if record.get("status") != "Draft":
         # Like BC: only an unposted invoice can be posted.
         raise _d365_error(400, "Application_DialogException", "The invoice is already posted.")
+    extra = D365_EDITED_BEFORE_POST_COMPANIES.get(company_id)
+    if extra is not None:
+        # A BC user added a line to the draft after the adapter checked its
+        # total and before the post ran (the BC block at the end).
+        for key in ("totalAmountExcludingTax", "totalAmountIncludingTax"):
+            record[key] = float(Decimal(str(record[key])) + extra)
     record["status"] = "Open"  # posted/finalized → Open (unpaid)
     # Like BC: any change to the record moves its etag, so a DELETE carrying
     # the draft's etag is refused once the invoice has been posted.
@@ -2539,6 +2562,12 @@ def _d365_check_invoice_lines(lines: list[dict]) -> None:
 # with no shared state another worker could trip over. Every other company is
 # untaxed (total = the lines).
 D365_VAT_COMPANIES: dict[str, Decimal] = {"fake-vat-co": Decimal("20")}
+
+# A BC company whose staff edit purchase drafts: posting a draft here first
+# adds this much to it, as a line a BC user added between the adapter's total
+# check and its `Microsoft.NAV.post`. Keyed by company like the VAT one, so a
+# spec opts in by `company_id` without touching shared state.
+D365_EDITED_BEFORE_POST_COMPANIES: dict[str, Decimal] = {"fake-edit-co": Decimal("10.00")}
 
 
 def _d365_invoice_totals(raw_body: bytes, company_id: str) -> dict:

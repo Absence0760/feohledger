@@ -419,13 +419,27 @@ def test_d365_post_invoice_short_circuits_when_external_document_number_already_
     assert "corr-bc-existing" in filter_params["$filter"]
 
 
-def _bc_record(doc_id: str, status: str, total: Decimal | None, etag: str = 'W/"e1"'):
-    """A purchaseInvoice read, with its body on the wire exactly as BC sends it."""
+def _bc_record(
+    doc_id: str,
+    status: str,
+    total: Decimal | None,
+    etag: str = 'W/"e1"',
+    *,
+    excluding: Decimal | None = None,
+    tax: Decimal | None = None,
+):
+    """A purchaseInvoice read, with its body on the wire exactly as BC sends it.
+    ``excluding`` / ``tax`` are its ``totalAmountExcludingTax`` /
+    ``totalTaxAmount``, stated only when given."""
     from app.utils.json_money import dumps_exact_json
 
     record = {"id": doc_id, "number": "PI-9", "status": status, "@odata.etag": etag}
     if total is not None:
         record["totalAmountIncludingTax"] = total
+    if excluding is not None:
+        record["totalAmountExcludingTax"] = excluding
+    if tax is not None:
+        record["totalTaxAmount"] = tax
     resp = _mock_response(200, record)
     resp.content = dumps_exact_json(record).encode()
     return resp
@@ -458,6 +472,7 @@ def test_d365_post_invoice_proceeds_to_create_when_no_match(monkeypatch):
             side_effect=[
                 _mock_response(200, {"value": []}),  # lookup: miss
                 _bc_record("bc-doc-2", "Draft", Decimal("100.00")),  # the draft's total
+                _bc_record("bc-doc-2", "Open", Decimal("100.00")),  # the posted total
             ]
         )
         client.delete = AsyncMock(side_effect=AssertionError("a matching draft is posted"))
@@ -465,7 +480,8 @@ def test_d365_post_invoice_proceeds_to_create_when_no_match(monkeypatch):
 
     assert result.success
     assert result.erp_document_id == "bc-doc-2"
-    assert client.get.await_count == 2
+    assert client.get.await_count == 3
+    assert client.get.await_args_list[2].args[0].endswith("purchaseInvoices(bc-doc-2)")
     assert client.post.await_count == 3
     assert (
         client.post.await_args_list[2]
@@ -620,6 +636,7 @@ def test_d365_lookup_hit_on_a_draft_rechecks_the_total_and_posts_it(monkeypatch)
             side_effect=[
                 _mock_response(200, {"value": [{"id": "bc-d", "status": "Draft"}]}),
                 _bc_record("bc-d", "Draft", Decimal("100.00")),
+                _bc_record("bc-d", "Open", Decimal("100.00")),
             ]
         )
         result = _run(adapter.post_invoice(_payload()))
@@ -825,6 +842,410 @@ def test_d365_lookup_hit_on_a_cancelled_invoice_is_refused_not_recreated(monkeyp
 
 
 # ---------------------------------------------------------------------------
+# dynamics_365_bc — the posted invoice's total is read back
+# ---------------------------------------------------------------------------
+
+
+def _bc_post_then_read(adapter, posted_read):
+    """A fresh create whose draft matches, a 204 post, then ``posted_read``."""
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-pr", "number": "PI-8"}),
+                _mock_response(204, None),  # Microsoft.NAV.post
+                AssertionError("one create, one post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_record("bc-pr", "Draft", Decimal("100.00")),
+                posted_read,
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("a posted invoice is never deleted"))
+        result = _run(adapter.post_invoice(_payload()))
+    return result, client
+
+
+def test_d365_a_draft_edited_between_the_check_and_the_post_is_refused(monkeypatch):
+    """The draft read 100.00, then a BC user added a line before our post ran:
+    BC posted 130.00. Reporting success would let our payment run pay 100.00
+    against a 130.00 bill. The posted invoice is read back and refused, and
+    left in BC for an accountant — never deleted."""
+    result, client = _bc_post_then_read(
+        _offline_bc(monkeypatch), _bc_record("bc-pr", "Open", Decimal("130.00"))
+    )
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-pr"
+    assert result.refusal_code == "posted_total_mismatch"
+    assert result.message == (
+        "Business Central post refused: posted_total_mismatch "
+        "(the invoice is posted in Business Central and was not deleted)"
+    )
+    client.delete.assert_not_awaited()
+
+
+def test_d365_a_posted_invoice_with_no_stated_total_is_unconfirmed(monkeypatch):
+    result, _ = _bc_post_then_read(_offline_bc(monkeypatch), _bc_record("bc-pr", "Open", None))
+    assert result.success is False
+    assert result.retryable is False
+    assert result.refusal_code == "posted_total_unconfirmed"
+
+
+def test_d365_a_failed_read_after_the_post_is_retryable_never_success(monkeypatch):
+    """The post went through; whatever the read answered, the push is
+    retryable, and the retry's lookup finds the posted invoice and checks it."""
+    for status in (503, 404):
+        result, _ = _bc_post_then_read(_offline_bc(monkeypatch), _mock_response(status, None))
+        assert result.success is False
+        assert result.retryable is True
+        assert result.erp_document_id == "bc-pr"
+
+
+def test_d365_a_draft_still_unposted_after_the_post_is_retryable(monkeypatch):
+    result, _ = _bc_post_then_read(
+        _offline_bc(monkeypatch), _bc_record("bc-pr", "Draft", Decimal("100.00"))
+    )
+    assert result.success is False
+    assert result.retryable is True
+
+
+def test_d365_an_invoice_in_review_after_the_post_is_refused(monkeypatch):
+    """A BC approval workflow can leave the invoice ``In Review``: not posted,
+    and not ours to finish."""
+    result, _ = _bc_post_then_read(
+        _offline_bc(monkeypatch), _bc_record("bc-pr", "In Review", Decimal("100.00"))
+    )
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-pr"
+    assert result.message == "Business Central post refused: existing_invoice_not_open"
+
+
+# ---------------------------------------------------------------------------
+# dynamics_365_bc — a VAT company: the draft is repriced to the net amounts
+# ---------------------------------------------------------------------------
+
+
+def _vat_payload(**overrides):
+    """100.00 net + 20.00 VAT = 120.00 approved, one header line."""
+    return _payload(
+        amount=Decimal("120.00"), tax_amount=Decimal("20.00"), line_items=[], **overrides
+    )
+
+
+def _gross_draft_taxed_on_top(doc_id="bc-g", etag='W/"gross"'):
+    """BC put 20% on top of the 120.00 gross line: 120.00 + 24.00."""
+    return _bc_record(
+        doc_id,
+        "Draft",
+        Decimal("144.00"),
+        etag,
+        excluding=Decimal("120.00"),
+        tax=Decimal("24.00"),
+    )
+
+
+def test_d365_a_vat_company_gets_the_net_amounts_and_posts_the_approved_gross(monkeypatch):
+    """The gross draft comes back taxed on top (144.00). It is deleted with its
+    own etag and created again at the net 100.00; BC's 20% brings that to the
+    approved 120.00, which is posted and read back."""
+    import json
+
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-g", "number": "PI-1"}),  # gross draft
+                _mock_response(201, {"id": "bc-n", "number": "PI-2"}),  # net draft
+                _mock_response(204, None),  # Microsoft.NAV.post (the net draft)
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _gross_draft_taxed_on_top(),
+                _bc_record(
+                    "bc-n",
+                    "Draft",
+                    Decimal("120.00"),
+                    excluding=Decimal("100.00"),
+                    tax=Decimal("20.00"),
+                ),
+                _bc_record("bc-n", "Open", Decimal("120.00")),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_vat_payload()))
+
+    assert result.success, result.message
+    assert result.erp_document_id == "bc-n"
+    client.delete.assert_awaited_once()
+    assert client.delete.await_args.args[0].endswith("purchaseInvoices(bc-g)")
+    assert client.delete.await_args.kwargs["headers"]["If-Match"] == 'W/"gross"'
+    gross = json.loads(client.post.await_args_list[1].kwargs["content"])
+    net = json.loads(client.post.await_args_list[2].kwargs["content"])
+    assert [line["unitCost"] for line in gross["purchaseInvoiceLines"]] == [120.00]
+    assert [line["unitCost"] for line in net["purchaseInvoiceLines"]] == [100.00]
+    # The second draft is the same invoice: same correlation id, so a retry's
+    # lookup finds it, and no tax field is sent (BC computes every one).
+    assert net["externalDocumentNumber"] == gross["externalDocumentNumber"]
+    assert set(net["purchaseInvoiceLines"][0]) == set(gross["purchaseInvoiceLines"][0])
+    assert (
+        client.post.await_args_list[3].args[0].endswith("purchaseInvoices(bc-n)/Microsoft.NAV.post")
+    )
+
+
+def test_d365_a_vat_rate_other_than_the_suppliers_is_refused_after_one_reprice(monkeypatch):
+    """BC's rate gives 21.00 on the 100.00 net, not the supplier's 20.00: the
+    net draft is 121.00. It is deleted and refused, never repriced again and
+    never posted."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-g", "number": "PI-1"}),
+                _mock_response(201, {"id": "bc-n", "number": "PI-2"}),
+                AssertionError("no third draft and no post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _gross_draft_taxed_on_top(),
+                _bc_record(
+                    "bc-n",
+                    "Draft",
+                    Decimal("121.00"),
+                    'W/"net"',
+                    excluding=Decimal("100.00"),
+                    tax=Decimal("21.00"),
+                ),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_vat_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.message == "Business Central post refused: posted_total_mismatch"
+    assert client.delete.await_count == 2
+    assert client.delete.await_args.kwargs["headers"]["If-Match"] == 'W/"net"'
+
+
+def test_d365_a_vat_invoice_with_only_a_header_tax_over_several_lines_is_refused(monkeypatch):
+    """Two tax-inclusive lines and one header tax give no per-line net; a
+    pro-rated split would invent one. The taxed draft is deleted and the push
+    refused ``tax_not_itemised`` — nothing at another total is posted."""
+    adapter = _offline_bc(monkeypatch)
+    lines = [_bc_line(total=Decimal("60.00")), _bc_line(line_number=2, total=Decimal("60.00"))]
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-g", "number": "PI-1"}),
+                AssertionError("no net draft and no post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, {"value": []}), _gross_draft_taxed_on_top()]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(
+            adapter.post_invoice(
+                _payload(amount=Decimal("120.00"), tax_amount=Decimal("20.00"), line_items=lines)
+            )
+        )
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.refusal_code == "tax_not_itemised"
+    assert result.message == "Business Central post refused: tax_not_itemised"
+    client.delete.assert_awaited_once()
+
+
+def test_d365_an_untaxed_invoice_bc_taxes_on_top_is_refused_not_repriced(monkeypatch):
+    """The invoice states no tax, so there is no net to send: BC's VAT on top
+    is a mismatch, refused as before."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-g", "number": "PI-1"}),
+                AssertionError("no net draft and no post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, {"value": []}), _gross_draft_taxed_on_top()]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_payload(amount=Decimal("120.00"), line_items=[])))
+
+    assert result.refusal_code == "posted_total_mismatch"
+    client.delete.assert_awaited_once()
+
+
+def test_d365_a_taxed_draft_that_cannot_be_deleted_is_not_duplicated(monkeypatch):
+    """The gross draft could not be deleted, so no second draft is created (two
+    drafts for one invoice): refused, saying the draft is still in BC."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-g", "number": "PI-1"}),
+                AssertionError("no second draft"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, {"value": []}), _gross_draft_taxed_on_top()]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(412, None))
+        result = _run(adapter.post_invoice(_vat_payload()))
+
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-g"
+    assert result.message == (
+        "Business Central post refused: posted_total_mismatch "
+        "(the draft was not deleted in Business Central)"
+    )
+
+
+def test_d365_a_failed_net_create_is_retryable_with_nothing_left_in_bc(monkeypatch):
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-g", "number": "PI-1"}),
+                _mock_response(503, {"error": {"message": "busy"}}),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, {"value": []}), _gross_draft_taxed_on_top()]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_vat_payload()))
+
+    assert result.success is False
+    assert result.retryable is True
+    assert result.message == "Business Central post failed: HTTP 503 (provider_error)"
+
+
+def test_d365_the_retry_reprices_a_taxed_gross_draft_found_by_the_lookup(monkeypatch):
+    """An earlier attempt died after the gross create. The lookup finds that
+    draft taxed on top and the retry finishes the job: net draft, post."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-n", "number": "PI-2"}),
+                _mock_response(204, None),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-g", "status": "Draft"}]}),
+                _gross_draft_taxed_on_top(),
+                _bc_record("bc-n", "Draft", Decimal("120.00"), excluding=Decimal("100.00")),
+                _bc_record("bc-n", "Open", Decimal("120.00")),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_vat_payload()))
+
+    assert result.success, result.message
+    assert result.erp_document_id == "bc-n"
+
+
+def test_d365_a_net_draft_found_by_the_lookup_is_not_repriced_again(monkeypatch):
+    """A draft already at the net amounts (100.00 excluding) whose BC tax is
+    not the supplier's: refused, not deleted-and-recreated in a loop."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                AssertionError("no create and no post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-n", "status": "Draft"}]}),
+                _bc_record(
+                    "bc-n",
+                    "Draft",
+                    Decimal("121.00"),
+                    excluding=Decimal("100.00"),
+                    tax=Decimal("21.00"),
+                ),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_vat_payload()))
+
+    assert result.refusal_code == "posted_total_mismatch"
+    client.delete.assert_awaited_once()
+
+
+def test_bc_net_lines_are_each_lines_gross_less_its_own_tax():
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    # Tax-exclusive lines with per-line tax: net = the line amounts.
+    lines = _bc_invoice_lines(
+        _payload(
+            amount=Decimal("120.00"),
+            tax_amount=Decimal("20.00"),
+            line_items=[
+                _bc_line(total=Decimal("60.00"), tax=Decimal("12.00")),
+                _bc_line(line_number=2, total=Decimal("40.00"), tax=Decimal("8.00")),
+            ],
+        )
+    )
+    assert [line["unitCost"] for line in lines.gross] == [Decimal("72.00"), Decimal("48.00")]
+    assert [line["unitCost"] for line in lines.net] == [Decimal("60.00"), Decimal("40.00")]
+    assert lines.net_refusal is None
+
+    # No tax stated: there is no net set to fall back to.
+    untaxed = _bc_invoice_lines(_payload(line_items=[]))
+    assert untaxed.net is None and untaxed.net_refusal is None
+
+    # Several tax-inclusive lines, header tax only: never pro-rated.
+    unsplit = _bc_invoice_lines(
+        _payload(
+            amount=Decimal("120.00"),
+            tax_amount=Decimal("20.00"),
+            line_items=[_bc_line(total=Decimal("60.00")), _bc_line(total=Decimal("60.00"))],
+        )
+    )
+    assert unsplit.net is None
+    assert unsplit.net_refusal == "tax_not_itemised"
+
+    # A net finer than the currency is not rounded.
+    fine = _bc_invoice_lines(
+        _payload(amount=Decimal("100.00"), tax_amount=Decimal("16.665"), line_items=[])
+    )
+    assert fine.net is None
+    assert fine.net_refusal == "line_amount_precision"
+
+
+# ---------------------------------------------------------------------------
 # dynamics_365_bc — which lines a purchaseInvoice carries
 # ---------------------------------------------------------------------------
 
@@ -851,7 +1272,7 @@ def test_bc_lines_post_per_line_when_they_sum_to_the_amount():
     )
     # Each line is quantity 1 at its gross (bill_lines' amount), and an
     # undescribed line takes the invoice's number as its memo.
-    assert lines == [
+    assert lines.gross == [
         {
             "lineType": "Account",
             "accountId": "g-6100",
@@ -921,13 +1342,13 @@ def test_bc_line_amounts_go_at_the_currencys_scale():
     from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
 
     usd = _bc_invoice_lines(_payload(line_items=[_bc_line(total=Decimal("100.000000"))]))
-    assert str(usd[0]["unitCost"]) == "100.00"
+    assert str(usd.gross[0]["unitCost"]) == "100.00"
     jpy = _bc_invoice_lines(
         _payload(
             currency="JPY", amount=Decimal("5000"), line_items=[_bc_line(total=Decimal("5000.00"))]
         )
     )
-    assert str(jpy[0]["unitCost"]) == "5000"
+    assert str(jpy.gross[0]["unitCost"]) == "5000"
     assert (
         _bc_invoice_lines(
             _payload(
@@ -943,7 +1364,7 @@ def test_bc_line_amounts_go_at_the_currencys_scale():
 def test_bc_header_only_invoice_posts_one_line_on_the_header_account():
     from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
 
-    assert _bc_invoice_lines(_payload(description="Bill", line_items=[])) == [
+    assert _bc_invoice_lines(_payload(description="Bill", line_items=[])).gross == [
         {
             "lineType": "Account",
             "accountId": "ERP-6000",

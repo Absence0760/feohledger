@@ -542,10 +542,14 @@ class SysproAdapter(ErpAdapter):
         return map_invoice_status(rows[0])
 
     async def void_invoice(self, erp_document_id: str) -> bool:
-        """Not automated: SYSPRO reverses a posted AP invoice with an
+        """Never voids anything; always False.
+
+        A SYSPRO AP invoice is posted by the same APSTIN call that creates it,
+        so there is no unposted draft to delete. Reversing a posted one is an
         adjustment/credit (APSTIN transaction type ``C``/``D``) in an open
-        period, which is an accountant's decision. Same stance as the Business
-        Central and NetSuite adapters."""
+        period, which is an accountant's decision and is not automated here.
+        (Business Central and NetSuite differ: they delete a bill still in
+        ``Draft`` / ``Pending Approval``.)"""
         return False
 
     async def _list(self, table: str, columns: list[str], rows: int = _LIST_ROWS):

@@ -369,11 +369,12 @@ def _bc_adapter() -> BusinessCentralAdapter:
     )
 
 
-def _bc_draft(doc_id: str, total: Decimal) -> MagicMock:
-    """The fresh read of a created draft: BC's own total, on the wire exactly."""
+def _bc_draft(doc_id: str, total: Decimal, status: str = "Draft") -> MagicMock:
+    """A fresh read of a purchaseInvoice: BC's own total, on the wire exactly.
+    ``status="Open"`` is the read after ``Microsoft.NAV.post``."""
     resp = _mock_response(200, {})
     resp.content = dumps_exact_json(
-        {"id": doc_id, "status": "Draft", "totalAmountIncludingTax": total}
+        {"id": doc_id, "status": status, "totalAmountIncludingTax": total}
     ).encode()
     return resp
 
@@ -388,7 +389,11 @@ def test_d365_compares_the_drafts_total_exactly(monkeypatch):
         with patch("httpx.AsyncClient") as cm:
             client = cm.return_value.__aenter__.return_value
             client.get = AsyncMock(
-                side_effect=[_mock_response(200, {"value": []}), _bc_draft("bc-9", total)]
+                side_effect=[
+                    _mock_response(200, {"value": []}),
+                    _bc_draft("bc-9", total),
+                    _bc_draft("bc-9", total, "Open"),
+                ]
             )
             client.delete = AsyncMock(return_value=_mock_response(204, None))
             client.post = AsyncMock(
@@ -412,7 +417,11 @@ def test_d365_posts_exact_decimal_unit_costs(monkeypatch):
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(
-            side_effect=[_mock_response(200, {"value": []}), _bc_draft("bc-1", LOSSY_AMOUNT)]
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_draft("bc-1", LOSSY_AMOUNT),
+                _bc_draft("bc-1", LOSSY_AMOUNT, "Open"),
+            ]
         )
         client.post = AsyncMock(
             side_effect=[
@@ -456,6 +465,7 @@ def test_d365_sends_the_line_gross_at_the_currency_scale(monkeypatch):
             side_effect=[
                 _mock_response(200, {"value": []}),
                 _bc_draft("bc-3", Decimal("4375.00")),
+                _bc_draft("bc-3", Decimal("4375.00"), "Open"),
             ]
         )
         client.post = AsyncMock(
@@ -481,7 +491,11 @@ def test_d365_header_only_invoice_posts_the_exact_amount(monkeypatch):
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(
-            side_effect=[_mock_response(200, {"value": []}), _bc_draft("bc-2", LOSSY_AMOUNT)]
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_draft("bc-2", LOSSY_AMOUNT),
+                _bc_draft("bc-2", LOSSY_AMOUNT, "Open"),
+            ]
         )
         client.post = AsyncMock(
             side_effect=[

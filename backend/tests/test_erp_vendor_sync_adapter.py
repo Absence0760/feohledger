@@ -422,7 +422,12 @@ def test_d365_list_vendors_maps_response_into_vendor_payloads():
                 "email": "ap@fake-erp.test",
                 "phoneNumber": "555-0200",
                 "taxRegistrationNumber": "TAX-1",
-                "paymentTermsId": "NET30",
+                "paymentTermsId": "6a4f1d2e-0000-0000-0000-000000000030",
+                "paymentTerm": {
+                    "id": "6a4f1d2e-0000-0000-0000-000000000030",
+                    "code": "30 DAYS",
+                    "displayName": "Net 30 days",
+                },
             }
         ]
     }
@@ -441,7 +446,24 @@ def test_d365_list_vendors_maps_response_into_vendor_payloads():
     assert v.email == "ap@fake-erp.test"
     assert v.phone == "555-0200"
     assert v.tax_id == "TAX-1"
-    assert v.payment_terms == "NET30"
+    # The payment term's code, from the expanded `paymentTerm` — never the
+    # vendor's `paymentTermsId` GUID, which the sync used to store as the text.
+    assert v.payment_terms == "30 DAYS"
+    assert "$expand=paymentTerm" in client.get.await_args.args[0]
+
+
+def test_d365_vendor_payment_terms_are_never_the_guid():
+    """A vendor with no term (BC expands it as null) or an expansion BC did
+    not return maps to no terms, not to the vendor's `paymentTermsId`."""
+    from app.services.erp_adapters.dynamics_365_bc import _d365_vendor_to_payload
+
+    guid = "6a4f1d2e-0000-0000-0000-000000000030"
+    for raw in (
+        {"id": "v1", "paymentTermsId": guid},
+        {"id": "v1", "paymentTermsId": guid, "paymentTerm": None},
+        {"id": "v1", "paymentTermsId": guid, "paymentTerm": {"id": guid, "code": "  "}},
+    ):
+        assert _d365_vendor_to_payload(raw).payment_terms is None
 
 
 def test_d365_skips_a_vendor_with_no_id_never_keys_it_by_number_or_name():
