@@ -13,13 +13,14 @@ Two sign-in methods, chosen by ``settings.erp.auth_method``:
 
 import asyncio
 import base64
-import functools
 import hashlib
 import hmac
 import logging
 import re
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl, quote, urlsplit
@@ -166,18 +167,47 @@ def _normalise_pem(raw: str) -> bytes | None:
     return f"-----BEGIN {label}-----\n{lines}\n-----END {label}-----\n".encode()
 
 
-@functools.lru_cache(maxsize=32)
+#: Parsed signing keys by ``sha256(PEM)``, least recently used first. Keyed on
+#: the digest, not the PEM: an ``lru_cache`` on the PEM argument would keep every
+#: tenant's plaintext private key alive as a dict key for the life of the
+#: process, beside the parsed key it was cached for.
+_SIGNING_KEYS: OrderedDict[str, tuple[RSAKey | ECKey, str]] = OrderedDict()
+_SIGNING_KEYS_MAX = 32
+_SIGNING_KEYS_LOCK = threading.Lock()  # callers run in worker threads
+
+
+def clear_signing_key_cache() -> None:
+    """Forget every parsed signing key."""
+    with _SIGNING_KEYS_LOCK:
+        _SIGNING_KEYS.clear()
+
+
 def _signing_key(private_key_pem: str) -> tuple[RSAKey | ECKey, str]:
     """The JWK and JWS algorithm for the certificate's private key.
 
-    Refuses, naming the key only, what NetSuite would refuse anyway: an
-    unparseable or passphrase-protected PEM, an RSA key of the wrong size, a
-    curve NetSuite does not accept, any other key type.
-
     Loading an RSA key validates it, ~150 ms of CPU for 4096 bits, so a parsed
-    key is memoised (a refusal is not) and every caller on the event loop
-    reaches this through ``asyncio.to_thread``.
+    key is memoised under the PEM's SHA-256 (a refusal is not) and every caller
+    on the event loop reaches this through ``asyncio.to_thread``.
     """
+    digest = hashlib.sha256(private_key_pem.encode()).hexdigest()
+    with _SIGNING_KEYS_LOCK:
+        hit = _SIGNING_KEYS.get(digest)
+        if hit is not None:
+            _SIGNING_KEYS.move_to_end(digest)
+            return hit
+    loaded = _load_signing_key(private_key_pem)
+    with _SIGNING_KEYS_LOCK:
+        _SIGNING_KEYS[digest] = loaded
+        _SIGNING_KEYS.move_to_end(digest)
+        while len(_SIGNING_KEYS) > _SIGNING_KEYS_MAX:
+            _SIGNING_KEYS.popitem(last=False)
+    return loaded
+
+
+def _load_signing_key(private_key_pem: str) -> tuple[RSAKey | ECKey, str]:
+    """Parse and check the key. Refuses, naming the key only, what NetSuite
+    would refuse anyway: an unparseable or passphrase-protected PEM, an RSA key
+    of the wrong size, a curve NetSuite does not accept, any other key type."""
     unusable = NetSuiteConfigError("NetSuite config 'private_key' is not a usable private key")
     pem = _normalise_pem(private_key_pem)
     if pem is None:

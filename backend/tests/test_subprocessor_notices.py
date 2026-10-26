@@ -258,6 +258,18 @@ async def test_one_unreachable_admin_does_not_stop_the_others(
             assert await sn.notify_organization(s, entry, info.org_id, now=NOW) == 1
         [row] = await _ledger(realdb, entry.id)
         assert (row.recipients, row.failed_recipients) == (1, 1)
+        # Never re-sent, so the miss must be visible: the operator's list...
+        async with realdb.control_sessionmaker()() as s:
+            partial = [p for p in await sn.partial_deliveries(s) if p.entry_id == entry.id]
+        assert [(p.organization_id, p.recipients, p.failed_recipients) for p in partial] == [
+            (info.org_id, 1, 1)
+        ]
+        # ...and the tick's counters on /api/health/sweeps.
+        ticked = _entry()
+        async with realdb.control_sessionmaker()() as s:
+            result = await sn.run_notices_once(s, now=NOW, entries=(ticked,))
+        assert result.failed_recipients == 1
+        assert result.failures == 0
     finally:
         async with realdb.control_sessionmaker()() as s:
             await s.execute(delete(UserRole).where(UserRole.user_id == extra_id))
@@ -275,7 +287,7 @@ async def test_a_failed_audit_is_retried_without_sending_the_notice_again(
     async def _broken(*args, **kwargs):
         raise ConnectionError("tenant database unreachable")
 
-    monkeypatch.setattr(sn, "dispatch_audit", _broken)
+    monkeypatch.setattr(sn, "log_action", _broken)
     async with realdb.control_sessionmaker()() as s:
         first = await sn.run_notices_once(s, now=NOW, entries=(entry,))
     assert first.failures >= 2  # one audit failure per organisation
@@ -327,6 +339,125 @@ async def test_a_claim_abandoned_mid_send_is_retaken_but_a_live_one_is_not(reald
         assert await sn.notify_organization(s, entry, org_id, now=later) == 1
     [row] = await _ledger(realdb, entry.id)
     assert row.sent_at is not None
+
+
+async def _notice_audit_rows(realdb, slot: str, notice_id: uuid.UUID) -> list[AuditLog]:
+    async with realdb.sessionmaker(slot)() as t:
+        return list(
+            (
+                await t.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == sn.AUDIT_ACTION, AuditLog.correlation_id == notice_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_stamp_lost_after_the_audit_row_landed_never_appends_a_second(
+    realdb, outbox, _tenant_engine_on_loop
+):
+    # The tenant row and the control-plane `audited_at` stamp are two commits in
+    # two databases. A stamp that fails after the tenant commit sends the next
+    # tick back to the same notice; the append-only trail must still hold one row.
+    entry = _entry()
+    async with realdb.control_sessionmaker()() as s:
+        await sn.notify_organization(s, entry, realdb.info("a").org_id, now=NOW)
+    [row] = await _ledger(realdb, entry.id)
+    async with realdb.control_sessionmaker()() as s:
+        assert await sn._write_audit(s, row.id, now=NOW) is True
+        # The stamp "never landed": exactly the state a failed control commit leaves.
+        await s.execute(
+            SubprocessorNotice.__table__.update()
+            .where(SubprocessorNotice.id == row.id)
+            .values(audited_at=None)
+        )
+        await s.commit()
+        assert await sn._write_audit(s, row.id, now=NOW) is True
+    assert len(await _notice_audit_rows(realdb, "a", row.id)) == 1
+    [row] = await _ledger(realdb, entry.id)
+    assert row.audited_at is not None
+
+
+@pytest.mark.asyncio
+async def test_the_audit_row_is_written_before_the_stamp_in_lambda_audit_mode(
+    realdb, outbox, monkeypatch, _tenant_engine_on_loop
+):
+    # In lambda mode the ordinary dispatch only enqueues to SQS, so "absent from
+    # the tenant" could mean "in flight" and a retry would duplicate it. The
+    # notice's row is written synchronously in every mode, never via SQS.
+    from app.config import settings
+    from app.services import audit_dispatch
+
+    def _no_sqs(**kwargs):
+        raise AssertionError("the notice's audit row must not go through SQS")
+
+    monkeypatch.setattr(settings, "audit_mode", "lambda")
+    monkeypatch.setattr(audit_dispatch, "_send_to_sqs", _no_sqs)
+    entry = _entry()
+    async with realdb.control_sessionmaker()() as s:
+        await sn.notify_organization(s, entry, realdb.info("a").org_id, now=NOW)
+    [row] = await _ledger(realdb, entry.id)
+    async with realdb.control_sessionmaker()() as s:
+        assert await sn._write_audit(s, row.id, now=NOW) is True
+    assert len(await _notice_audit_rows(realdb, "a", row.id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_organisation_with_no_active_admin_is_counted_apart_not_failed(
+    realdb, outbox, _tenant_engine_on_loop
+):
+    # Nobody to tell is not the sweep failing: counting it as a failure turned
+    # /api/health/sweeps red on every tick for as long as such an org existed.
+    entry = _entry(published=TODAY - timedelta(days=1))
+    orphan = uuid.uuid4()
+    async with realdb.control_sessionmaker()() as s:
+        s.add(
+            Organization(
+                id=orphan,
+                name="No Admin Scratch",
+                slug=f"spn-{orphan.hex[:12]}",
+                db_name=f"feoh_spn_{orphan.hex[:12]}",
+                created_at=NOW - timedelta(days=10),
+            )
+        )
+        await s.commit()
+    try:
+        async with realdb.control_sessionmaker()() as s:
+            with pytest.raises(sn.NoActiveAdministrator):
+                await sn.notify_organization(s, entry, orphan, now=NOW)
+            result = await sn.run_notices_once(s, now=NOW, entries=(entry,))
+        assert result.organizations_without_admin == 1
+        assert result.failures == 0
+        assert orphan not in {r.organization_id for r in await _ledger(realdb, entry.id)}
+        # Still owed: it is told once it has an administrator.
+        async with realdb.control_sessionmaker()() as s:
+            [owed] = await sn.owed_notices(s, now=NOW, entries=(entry,))
+        assert orphan in owed.organization_ids
+
+        from app.services.sweep_health import extract_counts, failure_count
+
+        counts = extract_counts(result)
+        assert counts["organizations_without_admin"] == 1
+        assert failure_count(counts) == 0
+    finally:
+        async with realdb.control_sessionmaker()() as s:
+            await s.execute(delete(Organization).where(Organization.id == orphan))
+            await s.commit()
+
+
+def test_a_line_break_in_the_organisation_name_cannot_split_the_subject():
+    from app.services.email_adapters.base import EmailMessage
+
+    subject, _ = sn.render_notice(
+        _entry(), org_name="Acme\r\nBcc: x@evil.test", recipient_name="D", sent_on=TODAY
+    )
+    message = EmailMessage(to="d@acme.test", subject=subject, body_text="x")
+    assert "\r" not in message.subject and "\n" not in message.subject
+    assert "Acme Bcc: x@evil.test" in message.subject
 
 
 @pytest.mark.asyncio
@@ -420,11 +551,38 @@ def test_the_cli_lists_and_sends_through_the_service(monkeypatch, capsys):
         return [sn.OwedNotice(entry=entry, organization_ids=[org])]
 
     async def _run(db):
-        return sn.NoticeResult(organizations_notified=1, emails_sent=2, failures=1)
+        return sn.NoticeResult(
+            organizations_notified=1,
+            emails_sent=2,
+            failed_recipients=1,
+            organizations_without_admin=3,
+            failures=1,
+        )
+
+    partial_org = uuid.uuid4()
+
+    async def _partial(db):
+        return [
+            sn.PartialDelivery(
+                entry_id=entry.id,
+                organization_id=partial_org,
+                sent_at=NOW,
+                recipients=1,
+                failed_recipients=2,
+            )
+        ]
 
     monkeypatch.setattr(cli, "control_session_factory", _Session)
     monkeypatch.setattr(cli, "owed_notices", _owed)
+    monkeypatch.setattr(cli, "partial_deliveries", _partial)
     monkeypatch.setattr(cli, "run_notices_once", _run)
     assert cli.main(["list"]) == 0
-    assert entry.id in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert entry.id in out
+    # A notice some administrators missed is never re-sent, so the operator sees it.
+    assert f"organisation {partial_org}" in out
+    assert "2 administrator(s) not reached" in out
     assert cli.main(["send"]) == 1  # a failure is a non-zero exit
+    out = capsys.readouterr().out
+    assert "administrators not reached=1" in out
+    assert "without an administrator=3" in out

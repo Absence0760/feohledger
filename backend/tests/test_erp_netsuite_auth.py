@@ -82,8 +82,10 @@ def rsa_key():
 def _fresh_cache(monkeypatch):
     monkeypatch.setattr(settings, "erp_netsuite_api_base", API_BASE)
     netsuite.clear_oauth2_token_cache()
+    netsuite.clear_signing_key_cache()
     yield
     netsuite.clear_oauth2_token_cache()
+    netsuite.clear_signing_key_cache()
 
 
 def _config(private_key_pem: str, **overrides) -> dict:
@@ -412,6 +414,36 @@ def test_a_bad_oauth2_config_is_a_non_retryable_refusal_before_any_request(
     secret = str(cfg.get("private_key") or "")
     assert not secret or secret not in result.message
     assert _run(NetSuiteAdapter(cfg).test_connection()) is False
+
+
+def test_a_parsed_key_is_cached_by_digest_never_by_its_plaintext_pem(rsa_key, monkeypatch):
+    """The parse is memoised (~150 ms of CPU per RSA load), but the cache must
+    not keep a tenant's plaintext private key alive as its lookup key."""
+    import hashlib
+
+    pem = _pem(rsa_key)
+    loads: list[str] = []
+    real = netsuite._load_signing_key
+
+    def counting(value):
+        loads.append(value)
+        return real(value)
+
+    monkeypatch.setattr(netsuite, "_load_signing_key", counting)
+    first = netsuite._signing_key(pem)
+    assert netsuite._signing_key(pem) is first
+    assert len(loads) == 1  # still memoised
+    assert list(netsuite._SIGNING_KEYS) == [hashlib.sha256(pem.encode()).hexdigest()]
+    assert all("PRIVATE KEY" not in key for key in netsuite._SIGNING_KEYS)
+
+
+def test_the_signing_key_cache_is_bounded():
+    keys = [
+        _pem(ec.generate_private_key(ec.SECP256R1())) for _ in range(netsuite._SIGNING_KEYS_MAX + 2)
+    ]
+    for pem in keys:
+        netsuite._signing_key(pem)
+    assert len(netsuite._SIGNING_KEYS) == netsuite._SIGNING_KEYS_MAX
 
 
 def test_keys_netsuite_would_refuse_are_refused_here():

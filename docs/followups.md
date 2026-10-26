@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**150 open: 126 (c) · 12 (a) · 12 (b)** — re-derived from the file, never carried
+**151 open: 127 (c) · 12 (a) · 12 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -382,6 +382,26 @@ nobody re-reads outlives the thing it describes.
       contractual call counsel should make first.
       **Trigger:** the first customer who asks for the notice at a non-admin
       address, or before the DPA is countersigned by a customer with a DPO.
+
+- [ ] **A sub-processor notice can reach nobody, and nothing tells a person.**
+      (decisions §321) Two cases leave a customer organisation without the
+      notice the DPA promises: it has **no active administrator** (the sweep
+      releases its claim, counts it as `organizations_without_admin` on
+      `GET /api/health/sweeps`, and retries every tick — it stays owed), or
+      **some of its administrators' emails were refused** on a notice that
+      otherwise went out (`failed_recipients`; never re-sent, by design, so the
+      others are not mailed twice). Both are visible — the health counters and
+      `python scripts/subprocessor_notices.py list`, which names each partly
+      delivered notice — but nobody is paged and no procedure says what to do,
+      so the 30 days can run out on a counter nobody reads.
+      **Durable fix:** an operator procedure in `docs/founder-runbooks/`
+      (resend by hand to the missed admins or the organisation's contract
+      contact, then record it), plus an alert on a non-zero
+      `organizations_without_admin` / `failed_recipients` once the sweep-health
+      alerting can key on a counter rather than `failures` alone; the
+      privacy-contact field above would give the no-admin case a second address.
+      **Trigger:** the first `notice=True` change-log entry, or the first
+      non-zero value of either counter in production.
 
 ### Live Stripe billing has no subscription to invoice against
 
@@ -2539,7 +2559,8 @@ as oversights.
       is what sends it. Set `FEOH_SUBPROCESSOR_NOTICES_ENABLED: "true"` in
       `infra-secrets/feohledger/prod.sops.yaml` (never in this repo), deploy,
       and confirm `subprocessor-notices` is running on `GET /api/health/sweeps`;
-      `deploy/decrypt-env.sh` warns on every deploy until it is set. SES must
+      until it is set `deploy/decrypt-env.sh` refuses the file and the API
+      refuses to boot (`FEOH_ENVIRONMENT=production`). SES must
       be out of its sandbox for the email to reach a customer.
       **Trigger:** before the deploy that publishes the 2026-10-26 legal text,
       and in any case before customer #1.

@@ -38,10 +38,15 @@ round trip (the ``post_commit`` rule):
 2. **Send** — to each active administrator. If nobody could be emailed the claim
    is deleted and the next tick retries; otherwise ``sent_at``, the counts, the
    recipient user ids and ``late`` are committed, and the emails are never
-   re-sent from here on.
+   re-sent from here on. An organisation with **no active administrator** is
+   not a failure of the sweep — there is nobody it could have told — so it is
+   counted apart (``organizations_without_admin``), its claim released, and it
+   stays owed until it has one (`docs/followups.md`).
 3. **Audit** — the tenant's ``privacy.subprocessor_notice_sent`` row, then
    ``audited_at``. A failed audit write counts as a tick failure and is retried
-   on its own every tick until it lands; it never re-sends the notice.
+   on its own every tick until it lands; it never re-sends the notice. The row
+   is keyed by ``correlation_id`` = the notice id and written only if absent, so
+   a stamp that failed after the row committed never appends a second one.
 
 The 30 days are measured, not assumed: each row stores the entry's effective
 date and ``late`` — true when the notice reached the organisation with fewer
@@ -50,7 +55,8 @@ switched off). The tick reports late notices as a counter, so ``GET
 /api/health/sweeps`` shows them.
 
 Disabled by default (``FEOH_SUBPROCESSOR_NOTICES_ENABLED``) like every sweep
-that emails; a deployment with customers must turn it on. Never moves money.
+that emails; a deployed environment refuses to boot with it off
+(``config._require_subprocessor_notices_in_deployed_envs``). Never moves money.
 """
 
 from __future__ import annotations
@@ -60,7 +66,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -69,7 +75,8 @@ from app.database import control_session_factory
 from app.models.organization import Organization
 from app.models.subprocessor_notice import SubprocessorNotice
 from app.models.user import Role, User, UserRole
-from app.services.audit_dispatch import dispatch_audit
+from app.models.workflow import AuditLog
+from app.services.audit import log_action
 from app.services.email_adapters import get_email_adapter
 from app.services.email_adapters.base import EmailMessage
 from app.services.subprocessor_changelog import (
@@ -94,6 +101,11 @@ class NoNoticeDelivered(RuntimeError):
     """No administrator of the organisation could be sent the notice."""
 
 
+class NoActiveAdministrator(NoNoticeDelivered):
+    """The organisation has nobody the notice could go to. Not a send failure:
+    counted as ``organizations_without_admin``, never as a tick failure."""
+
+
 @dataclass
 class NoticeResult:
     """Per-tick outcome; field names are the health payload's counters."""
@@ -102,6 +114,10 @@ class NoticeResult:
     organizations_notified: int = 0
     emails_sent: int = 0
     late_notices: int = 0
+    #: Administrators the provider refused on a notice that otherwise went out.
+    failed_recipients: int = 0
+    #: Owed organisations with no active administrator to tell (still owed).
+    organizations_without_admin: int = 0
     audits_written: int = 0
     failures: int = 0
 
@@ -111,6 +127,17 @@ class _Recipient:
     user_id: uuid.UUID
     email: str
     full_name: str
+
+
+@dataclass
+class PartialDelivery:
+    """A sent notice that some of the organisation's administrators missed."""
+
+    entry_id: str
+    organization_id: uuid.UUID
+    sent_at: datetime
+    recipients: int
+    failed_recipients: int
 
 
 @dataclass
@@ -289,8 +316,26 @@ async def _write_audit(control_db: AsyncSession, notice_id: uuid.UUID, *, now: d
     Raises on failure (the ``dunning_sweep`` rule); the notice stays sent and
     only the audit is retried. False when there is nothing to do (already
     audited, or the organisation is gone with its tenant).
+
+    **Exactly one row per notice.** The tenant row and the control-plane stamp
+    live in two databases, so a stamp that fails after the tenant commit leaves
+    the row written and ``audited_at`` NULL, and the next tick comes back. The
+    row is therefore written only when the tenant holds no ``AUDIT_ACTION`` row
+    with ``correlation_id`` = the notice id — checked and inserted in one tenant
+    transaction under an advisory lock on the notice id, so two replicas
+    retrying the same stamp cannot both insert.
+
+    That check needs the row to exist once the transaction commits, so it is
+    written **synchronously in every audit mode**, as
+    ``audit_dispatch.dispatch_durable_auth_audit`` does: in ``lambda`` mode the
+    ordinary path only enqueues to SQS, and a message still in flight is
+    invisible to the check (a retry would append a second row once the Lambda
+    caught up). It is the same ``log_action`` row the Lambda would write.
     """
-    # Resolved at call time: tests and `dispatch_engine_scope` swap it.
+    # Resolved at call time: tests and `dispatch_engine_scope` swap it. The
+    # same per-organisation tenant-engine shape as `dunning_sweep` and
+    # `audit_dispatch._write_auth_audit`: a control-plane sweep has no request,
+    # so no `X-Tenant-Slug` for `get_tenant_db` to resolve.
     from app.database import get_tenant_engine
 
     row = (
@@ -327,22 +372,59 @@ async def _write_audit(control_db: AsyncSession, notice_id: uuid.UUID, *, now: d
     await control_db.rollback()
     factory = async_sessionmaker(get_tenant_engine(db_name), expire_on_commit=False)
     async with factory() as tenant_db:
-        await dispatch_audit(
-            tenant_db,
-            correlation_id=notice_id,
-            organization_id=organization_id,
-            actor_id=None,  # the platform giving notice, no human actor
-            action=AUDIT_ACTION,
-            entity_type="organization",
-            entity_id=organization_id,
-            details=details,
-        )
-        await tenant_db.commit()
+        try:
+            await tenant_db.execute(
+                select(func.pg_advisory_xact_lock(func.hashtextextended(str(notice_id), 0)))
+            )
+            already = (
+                await tenant_db.execute(
+                    select(AuditLog.id)
+                    .where(AuditLog.action == AUDIT_ACTION, AuditLog.correlation_id == notice_id)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if already is None:
+                await log_action(
+                    tenant_db,
+                    correlation_id=notice_id,
+                    organization_id=organization_id,
+                    actor_id=None,  # the platform giving notice, no human actor
+                    action=AUDIT_ACTION,
+                    entity_type="organization",
+                    entity_id=organization_id,
+                    details=details,
+                )
+            await tenant_db.commit()
+        except BaseException:
+            await tenant_db.rollback()
+            raise
     await control_db.execute(
         update(SubprocessorNotice).where(SubprocessorNotice.id == notice_id).values(audited_at=now)
     )
     await control_db.commit()
     return True
+
+
+async def partial_deliveries(control_db: AsyncSession) -> list[PartialDelivery]:
+    """Sent notices some administrators did not receive: the operator's view
+    (``scripts/subprocessor_notices.py list``). Ids and counts only."""
+    rows = (
+        await control_db.execute(
+            select(
+                SubprocessorNotice.entry_id,
+                SubprocessorNotice.organization_id,
+                SubprocessorNotice.sent_at,
+                SubprocessorNotice.recipients,
+                SubprocessorNotice.failed_recipients,
+            )
+            .where(
+                SubprocessorNotice.sent_at.is_not(None),
+                SubprocessorNotice.failed_recipients > 0,
+            )
+            .order_by(SubprocessorNotice.entry_id, SubprocessorNotice.sent_at)
+        )
+    ).all()
+    return [PartialDelivery(*r) for r in rows]
 
 
 async def notify_organization(
@@ -373,7 +455,7 @@ async def notify_organization(
             await control_db.rollback()
             if org is None:
                 return None
-            raise NoNoticeDelivered("organisation has no active administrator")
+            raise NoActiveAdministrator("organisation has no active administrator")
         org_name = org.name
         # The claim is durable before any email leaves; no lock is held while
         # the provider is called.
@@ -497,6 +579,11 @@ async def run_notices_once(
         for org_id in item.organization_ids:
             try:
                 sent = await notify_organization(control_db, item.entry, org_id, now=now)
+            except NoActiveAdministrator:
+                # Nobody to tell is not a send failure: reported apart, so the
+                # sweep stays green while the gap shows on /api/health/sweeps.
+                result.organizations_without_admin += 1
+                continue
             except Exception as exc:  # noqa: BLE001 — one organisation must not halt the tick
                 result.failures += 1
                 logger.warning(
@@ -512,15 +599,16 @@ async def run_notices_once(
             result.emails_sent += sent
             if is_late(item.entry, now.date()):
                 result.late_notices += 1
-            notice_id = (
+            notice_id, failed = (
                 await control_db.execute(
-                    select(SubprocessorNotice.id).where(
+                    select(SubprocessorNotice.id, SubprocessorNotice.failed_recipients).where(
                         SubprocessorNotice.entry_id == item.entry.id,
                         SubprocessorNotice.organization_id == org_id,
                     )
                 )
-            ).scalar_one()
+            ).one()
             await control_db.rollback()
+            result.failed_recipients += failed
             await _audit(control_db, notice_id, now=now, result=result)
     return result
 
@@ -528,12 +616,15 @@ async def run_notices_once(
 async def _notices_tick() -> NoticeResult:
     async with control_session_factory() as control_db:
         result = await run_notices_once(control_db)
-    if result.organizations_notified or result.failures:
+    if result.organizations_notified or result.failures or result.organizations_without_admin:
         logger.info(
-            "[subprocessor-notices] notified %d organisation(s), %d email(s), late=%d, failed=%d",
+            "[subprocessor-notices] notified %d organisation(s), %d email(s), late=%d, "
+            "failed_recipients=%d, without_admin=%d, failed=%d",
             result.organizations_notified,
             result.emails_sent,
             result.late_notices,
+            result.failed_recipients,
+            result.organizations_without_admin,
             result.failures,
         )
     return result

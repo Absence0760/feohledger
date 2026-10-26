@@ -416,6 +416,7 @@ def test_config_requires_captcha_in_deployed_env():
             hcaptcha_secret="0xabc",
             hcaptcha_sitekey="site-key",
             secret_key=strong_key,
+            subprocessor_notices_enabled=True,
         ).is_deployed
         is True
     )
@@ -1461,6 +1462,7 @@ def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
         hcaptcha_secret="",
         secret_key=strong_key,
         signup_enabled=False,
+        subprocessor_notices_enabled=True,
     )
     assert closed.is_deployed is True
     assert closed.signup_enabled is False

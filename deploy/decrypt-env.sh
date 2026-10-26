@@ -160,13 +160,12 @@ fi
 
 # The published DPA (§ 8) says sub-processor change notices are emailed to
 # every customer's administrators; FEOH_SUBPROCESSOR_NOTICES_ENABLED runs the
-# sweep that sends them (docs/decisions.md §321). Off by default for local dev,
-# so a deployment that forgot it would silently break a contractual statement.
-# Warns rather than refuses: a deploy is never blocked on it, but every run
-# says so until it is set — deploy/prod.sops.yaml.example § Sub-processor.
-if ! feoh_is_true "$(env_value FEOH_SUBPROCESSOR_NOTICES_ENABLED)"; then
-	echo "WARN: FEOH_SUBPROCESSOR_NOTICES_ENABLED is not true — the sub-processor change notices the DPA says are emailed to customers will not be sent. See deploy/prod.sops.yaml.example § Sub-processor change notices." >&2
-fi
+# sweep that sends them (docs/decisions.md §321). It is off by default for
+# local dev, and the app refuses to boot a deployed env with it off
+# (config.py _require_subprocessor_notices_in_deployed_envs) — refused here
+# too, so the deploy stops before compose restarts the API into a boot loop.
+feoh_is_true "$(env_value FEOH_SUBPROCESSOR_NOTICES_ENABLED)" ||
+	die "FEOH_SUBPROCESSOR_NOTICES_ENABLED must be true — the published DPA says sub-processor change notices are emailed to customers, and the app refuses to boot a deployed env without the sweep that sends them. See deploy/prod.sops.yaml.example § Sub-processor change notices."
 
 mv .env.tmp .env
 echo "decrypt-env.sh: deploy/.env written and checked."

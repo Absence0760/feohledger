@@ -523,7 +523,9 @@ def same_connection(stored: Any, incoming: Any) -> bool:
 def secrets_to_drop(stored: Any, merged: Any) -> frozenset[str]:
     """The sealed ``erp`` secrets a save from ``stored`` to ``merged`` removes.
 
-    * Same ERP, same destination — none.
+    * Same ERP, same destination — the secrets of a sign-in method the save
+      switched away from (:func:`secrets_switched_off`): a NetSuite block moved
+      from TBA to OAuth 2.0 must not keep TBA's token secret sealed and unused.
     * Same ERP, new destination — every secret but the inbound webhook's HMAC
       key (:data:`EXTRA_SECRET_KEYS`), which verifies what the ERP sends US and
       is never sent anywhere. Without this, ``{"type": "syspro", "base_url":
@@ -544,10 +546,43 @@ def secrets_to_drop(stored: Any, merged: Any) -> frozenset[str]:
     if not isinstance(stored, dict) or not (stored.get("type") or stored.get("integration_method")):
         return frozenset()
     if same_connection(stored, merged):
-        return frozenset()
+        return secrets_switched_off(stored, merged)
     if same_erp(stored, merged):
         return SECRET_KEYS - EXTRA_SECRET_KEYS
     return SECRET_KEYS
+
+
+def secrets_switched_off(stored: Any, merged: Any) -> frozenset[str]:
+    """The provider's secret fields that applied to ``stored`` and no longer
+    apply to ``merged``, by their catalogue ``show_when``.
+
+    Only a field the save turned OFF: a secret stored for a method the block
+    was not yet on (the credentials endpoint takes secrets before or after the
+    configuration save) is left for the save that selects it. An absent
+    controlling key reads as its ``stored_default``, as the adapter reads it.
+    """
+    if not (isinstance(stored, dict) and isinstance(merged, dict)):
+        return frozenset()
+    entry = provider(catalog_key(stored))
+    if entry is None:
+        return frozenset()
+    by_name = {f["name"]: f for f in entry["fields"]}
+
+    def value(cfg: dict, name: str) -> Any:
+        current = cfg.get(name)
+        if current is None or (isinstance(current, str) and not current.strip()):
+            return by_name.get(name, {}).get("stored_default")
+        return current
+
+    off = {
+        f["name"]
+        for f in entry["fields"]
+        if f["secret"]
+        and (cond := f.get("show_when")) is not None
+        and value(stored, cond["field"]) in cond["values"]
+        and value(merged, cond["field"]) not in cond["values"]
+    }
+    return frozenset(off) & SECRET_KEYS
 
 
 def merge_erp_update(stored: Any, incoming: dict) -> dict:
