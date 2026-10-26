@@ -115,9 +115,10 @@ class ErpAdapter:
         """Pull vendors from the ERP for `POST /api/vendors/sync-erp`.
 
         Same default-empty pattern as `list_pos` / `list_gl_accounts`.
-        Implemented by all three real adapters — `merge_dev` (best-effort
-        against the unified `/vendors`, paginated), `netsuite` (`GET
-        /vendor`), and `dynamics_365_bc` (`GET .../vendors`) — plus `mock`.
+        Implemented by all three real adapters — `merge_dev` (supplier
+        Contacts at `GET /contacts?is_supplier=true`, cursor-paginated;
+        Merge has no `/vendors`), `netsuite` (`GET /vendor`), and
+        `dynamics_365_bc` (`GET .../vendors`) — plus `mock`.
         Covered by the local fake-erp e2e suite (`pnpm test:erp`); see
         "Local e2e testing" below.
         """
@@ -1324,7 +1325,8 @@ account cannot also own the code "Depreciation" in that chart (it stays
 `code_taken`): pick the account the invoices coded to the row meant.
 
 **Inactive accounts** arrive with `active=False` (QuickBooks is queried `where
-Active IN (true, false)`; NetSuite `isinactive`, BC `blocked`). Their ids are
+Active IN (true, false)`; NetSuite `isinactive`, BC `blocked`; Merge.dev
+`status: INACTIVE` or `remote_was_deleted`). Their ids are
 live, a matched row is marked inactive (`deactivated`), none is created, and a
 sync never reactivates a row. QuickBooks renames an inactive record —
 `Bank Charges (deleted)`, `Automobile:Fuel (deleted)`, a vendor's `DisplayName`
@@ -1344,7 +1346,11 @@ there, so its Software sub-account read `6020` here. An adapter that sets
 `reports_parent` (QuickBooks) states parentage outright, so a top-level account
 **clears** a stale parent — the merged "Equipment Rental" row kept "Job
 Expenses" after the account turned out to be top-level. Without
-`reports_parent`, an absent parent leaves ours alone.
+`reports_parent`, an absent parent leaves ours alone. Merge.dev's
+`parent_account` is the parent's Merge id (a uuid), so it is passed as
+`parent_erp_account_id` and resolved to the parent's code within the pull — never
+stored as a code. Merge does not set `reports_parent`: a null `parent_account`
+can mean "not reported" on the ERP behind it.
 
 A code longer than `GL_CODE_MAX_LENGTH` is refused by the sync
 (`code_too_long`), never truncated there. Adapters emit the code they have as it
@@ -1403,6 +1409,25 @@ vendor linked to one becomes `inactive` (never the reverse). Business Central
 and Merge.dev vendors with no `id` are skipped, never keyed by the vendor No.,
 `remote_id` or name.
 
+**Merge.dev suppliers are Contacts.** Merge's Accounting API has no `/vendors`
+path and no Vendor model; the adapter lists `GET /contacts?is_supplier=true`
+with `expand=addresses,phone_numbers`, following `next` cursors, and any failed
+page raises `ErpListingIncomplete` (the sync answers 502 and changes nothing).
+It maps `name`, `email_address`, `tax_number`, the first `phone_numbers[].number`
+and the first address's `street_1` / `street_2` / `city` / `state` / `zip_code` /
+`country`. A Contact carries **no payment term**, so `payment_terms` is always
+absent and the sync keeps whatever terms the vendor already has. An `ARCHIVED`
+contact, or one with `remote_was_deleted`, is emitted inactive; one that says
+`is_supplier: false` is never listed. The Contact `id` is the `erp_vendor_id`:
+it is what a Merge PurchaseOrder's `vendor` and an Invoice's `contact` hold, so
+the PO sync links by it and the push posts it. Before 2026-10-26 the adapter
+read a `/vendors` path Merge never published, so a live Merge vendor sync
+failed and every push was refused `vendor_not_linked` (`docs/known-issues.md`).
+Sources: [Merge Accounting OpenAPI](https://docs.merge.dev/openapi/accounting.json)
+(`Contact`, `GET /accounting/v1/contacts`, `PurchaseOrder.vendor`,
+`Invoice.contact`), [Contacts](https://docs.merge.dev/accounting/contacts/),
+[Pagination](https://docs.merge.dev/basics/pagination/).
+
 **A vendor value too long for its column is dropped, not truncated.** An
 over-long `code`, email, phone, address, tax id or payment terms is not written
 (the vendor keeps its old value) and the vendor still syncs; the response lists
@@ -1438,7 +1463,10 @@ PO line's GL account, so lines carry none — never the `AccountRef` name. Merge
 lines carry none for the same reason: a Merge PO line's `account` is a Merge
 Account id, which stored as a GL code would name no chart row. Merge's PO number
 is read from `purchase_order_number`, and its `BILLED` / `DELETED` statuses map to
-closed / cancelled, as Xero's do.
+closed / cancelled, as Xero's do. A Merge PO with neither a number nor a Merge
+`id` is skipped (the sync logs a count, nothing else): the sync upserts by
+`po_number`, and the `"UNKNOWN"` placeholder it used to get filed every such PO
+into one row, each overwriting the last one's vendor and total.
 
 **Repairing a chart synced before §284.** On a QuickBooks Online tenant, every
 invoice push is refused after migration 0115, with `account_not_linked` for the
@@ -1622,10 +1650,11 @@ One server fakes three provider surfaces by path prefix:
 Fixture data: purchase orders `PO-FAKE-301` (1250.00), `PO-FAKE-302` (980.50),
 `PO-FAKE-303` (4400.00) — cursor-paginated — GL accounts `6100 Fake Office
 Supplies`, `6200 Fake Software`, `6300 Fake Consulting`, and (Merge.dev only,
-issue #256) three cursor-paginated vendors — `Fake Merge Vendor Co` (Net 30),
-`Fake Merge Supply Co` (Net 45), `Fake Merge Services Co` (Net 60, and the one
-fixture whose `payment_term` is a bare string rather than an object) — full
-list in `tools/fake-erp/README.md`.
+issue #256) three cursor-paginated supplier Contacts at `/contacts` —
+`Fake Merge Vendor Co`, `Fake Merge Supply Co`, `Fake Merge Services Co`, with
+no payment terms, as on Merge — plus a customer contact served only to a request
+that does not filter `is_supplier=true`. Like Merge, the fake has no `/vendors`
+(404). Full list in `tools/fake-erp/README.md`.
 
 ### Env-overridable base URLs
 
@@ -1655,7 +1684,8 @@ pnpm test:erp    # Playwright suite frontend/tests-e2e/erp/ (merge-dev / netsuit
 
 Coverage per spec: `test_connection`, PO sync (`list_pos`), GL-account sync
 (`list_gl_accounts`), vendor sync (`list_vendors` — Merge.dev asserts the
-full field mapping — name/email/phone/address/tax id/payment terms; NetSuite
+full field mapping — name/email/phone/address/tax id, payment terms absent, and
+the customer contact never imported; NetSuite
 and Business Central prove it by posting against the synced vendor id), and a
 full send-to-ERP round trip to a terminal invoice status. The BC and NetSuite
 specs sync PO fixtures numbered `PO-FAKE-BC-4xx` / `PO-FAKE-NS-5xx`, so they
