@@ -1482,7 +1482,7 @@ name two vendors share links neither too.
 
 **A PO the adapter skips is not left trusted.** An adapter that cannot state a
 PO's total exactly (SYSPRO: a discount, a mixed-currency order, a currency it
-cannot place) leaves it out and names it in `list_pos_report().skipped`. The sync
+cannot place; Blackbaud: no order total) leaves it out and names it in `list_pos_report().skipped`. The sync
 creates nothing for it, but stamps `purchase_orders.total_unverifiable_reason`
 (the `PoSkipReason`) on the existing row the upsert would refresh for that
 number (`purchase_orders._sync_target`: this entity first, else an unstamped
@@ -1496,9 +1496,9 @@ The response carries `not_priced` (POs the ERP has that were not synced) and
 `unverifiable` (existing rows now marked); the PO list and detail return
 `total_unverifiable_reason`, and the purchase-orders page says so in a warning
 toast. The supplier portal refuses to flip such a PO into an invoice (409).
-Adapters that do not override `list_pos_report` report nothing skipped.
-**Blackbaud FE NXT still skips a PO with no order total silently**: its wiring
-is tracked in `docs/followups.md`.
+Blackbaud FE NXT reports the same way: a PO with no usable `order_total` is
+`unpriceable`. Adapters that do not override `list_pos_report` report nothing
+skipped.
 
 **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
@@ -2402,7 +2402,7 @@ so every tenant on the platform key draws on one bucket — see *Call budget* be
 | `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>&limit=500` (narrowed by `from_date`/`to_date` only when that page is full) → `GET /generalledger/v1/fiscalyears` (cached 15 min per environment) → `POST /accountspayable/v1/invoices/process` (on a 400, `GET /vendors/{id}`) → `GET …/backgroundProcess/{id}/status` (≤ 5 reads, backing off 1, 2, 4, 8 s) → `…/result` |
 | `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (a zero balance stays open until FE NXT says `Paid`, decisions §303), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
 | `void_invoice` | not automated (`False`): the AP API has no invoice delete, and cancelling a posted payable is an adjustment in an open period |
-| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), with `vendor_status` `Inactive` **and `OnHold`** emitted `active=False`; POs 10 pages best-effort, linked to their vendor by `vendor_id` (`PoPayload.vendor_erp_id`); template and deleted POs, and a PO with no `order_total`, skipped; PO `currency` stays NULL |
+| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), with `vendor_status` `Inactive` **and `OnHold`** emitted `active=False`; POs read whole the same way (`list_pos_report`; a failed page, a transport error or more than `SYNC_LISTING_MAX_ROWS` raises `ErpListingIncomplete`, never an empty or partial list), linked to their vendor by `vendor_id` (`PoPayload.vendor_erp_id`); template and deleted POs dropped; a PO with no usable `order_total` skipped and named in `skipped` as `unpriceable` (§323); PO `currency` stays NULL |
 | `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take), up to `SYNC_LISTING_MAX_ROWS`; `prevent_data_entry` accounts emitted `active=False`; `account_type` unclassified (FE NXT's `class` is a net-asset class) |
 | `test_connection` | an `environment_id` was captured at consent + `GET /accountspayable/v1/vendors?limit=1` |
 

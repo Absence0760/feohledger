@@ -184,7 +184,10 @@ from app.services.erp_adapters.base import (
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_failure_reason,
     erp_preflight_refusal,
@@ -241,8 +244,8 @@ FISCAL_YEAR_CACHE_SECONDS = 900.0
 #: Fiscal-year ``status`` values that take no posting.
 _CLOSED_YEAR_STATUSES = frozenset({"Closed", "Purged"})
 
-#: List page size and the PO list's page cap (10 × 100 rows). The chart and
-#: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it
+#: List page size and :meth:`_pages`' default cap (10 × 100 rows). The chart,
+#: vendor and PO listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it
 #: (``_sync_rows``). The idempotency search reads ListInvoices' maximum page
 #: (500): once unnarrowed, then up to 4 pages narrowed to the invoice's date.
 _PAGE_SIZE = 100
@@ -347,9 +350,10 @@ def _decimal_or_none(raw: object) -> Decimal | None:
     if raw is None or raw == "" or isinstance(raw, bool):
         return None
     try:
-        return Decimal(str(raw))
+        value = Decimal(str(raw))
     except (InvalidOperation, ValueError):
         return None
+    return value if value.is_finite() else None  # "NaN" / "Infinity" are no total
 
 
 def _json(resp: httpx.Response) -> Any:
@@ -943,14 +947,20 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
     async def _sync_rows(self, path: str, collection: str) -> list[dict]:
         """Every row of a collection, or :class:`ErpListingIncomplete` (base).
 
+        A page SKY refuses, a transport error, or a walk past
+        ``SYNC_LISTING_MAX_ROWS`` raises it; the rows read so far are never
+        returned, since the syncs read what is absent from a pull as gone.
         :class:`ErpCallBudgetExhausted` when the call budget refuses a page:
         nothing read is returned, so the sync changes nothing.
         """
         headers = await self._headers()
-        async with self._client(timeout=30, enforce=True) as client:
-            found = await self._pages(
-                client, headers, path, max_pages=sync_listing_pages(_PAGE_SIZE)
-            )
+        try:
+            async with self._client(timeout=30, enforce=True) as client:
+                found = await self._pages(
+                    client, headers, path, max_pages=sync_listing_pages(_PAGE_SIZE)
+                )
+        except httpx.HTTPError as exc:
+            raise ErpListingIncomplete(PROVIDER, collection, ListingGap.fetch_failed) from exc
         if not found.complete:
             gap = ListingGap.truncated if found.capped else ListingGap.fetch_failed
             raise ErpListingIncomplete(PROVIDER, collection, gap)
@@ -1006,23 +1016,31 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         return accounts
 
     async def list_pos(self) -> list[PoPayload]:
-        """FE NXT purchase orders. Templates and deleted orders are skipped.
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
+        """FE NXT purchase orders, and the ones left out for want of a total.
+
+        Templates and deleted orders are dropped silently: neither is a PO the
+        match may use, and neither ever had a total we should keep trusting.
+        A PO with no usable ``order_total`` is skipped, not synced at 0 (a
+        zero-value order would match nothing honestly), and named in
+        ``skipped`` as ``unpriceable``, so a total an earlier sync stored for it
+        stops being matched against (decisions §323).
 
         The PO summary carries no currency, so ``currency`` stays None (never a
         default label — decisions §197). Its ``vendor_id`` is the id
         :meth:`list_vendors` reports, so the sync links the PO by id rather than
-        by a name a rename breaks. A PO with no ``order_total`` is skipped, not
-        synced at 0 (a zero-value order would match nothing honestly).
+        by a name a rename breaks.
+
+        Read whole or not at all (:meth:`_sync_rows`): a failed or truncated
+        listing raises :class:`ErpListingIncomplete` and a budget refusal
+        :class:`ErpCallBudgetExhausted` (a coded 429), never "no purchase
+        orders" — which also hid every skip the report exists to carry.
         """
-        try:
-            headers = await self._headers()
-            async with self._client(timeout=30, enforce=True) as client:
-                rows = (await self._pages(client, headers, f"{AP}/purchaseorders")).rows
-        except ErpCallBudgetExhausted:
-            raise  # the sync says why (a coded 429), never "no purchase orders"
-        except Exception:
-            return []
-        pos = []
+        rows = await self._sync_rows(f"{AP}/purchaseorders", "purchase orders")
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
         for raw in rows:
             number = raw.get("order_number")
             status = str(raw.get("order_status") or "")
@@ -1030,6 +1048,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 continue
             total = _decimal_or_none(raw.get("order_total"))
             if total is None:
+                skipped.append(SkippedPo(str(number), PoSkipReason.unpriceable))
                 continue
             vendor_id = raw.get("vendor_id")
             if isinstance(vendor_id, bool):
@@ -1043,7 +1062,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                     status=_PO_STATUS_MAP.get(status, "open"),
                 )
             )
-        return pos
+        return PoListing(pos=pos, skipped=skipped)
 
     async def test_connection(self) -> bool:
         try:

@@ -15398,3 +15398,35 @@ a failed re-match rolling the mark back, the base default),
 `test_erp_syspro_adapter.py` (`test_list_pos_report_names_every_po_it_skips_and_why`,
 `test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping`),
 `test_migration_0123_po_total_unverifiable.py`.
+
+## 324. Blackbaud reports the POs it skips, a PO listing that fails says so, and an org can see its SKY call usage (PR #670 round 3, 2026-10-26)
+
+**1. Blackbaud FE NXT names a PO it drops for want of a total.** §323 added
+`list_pos_report` and left Blackbaud's wiring as a follow-up. A PO FE NXT lists
+with no usable `order_total` (absent, null, unreadable, or not finite) is now
+`SkippedPo(number, unpriceable)`, so a PO synced at a total and later listed
+without one is marked and held exactly as SYSPRO's are. Templates and deleted
+orders are still dropped without a report: neither is a PO the match may use,
+and a `DeletedOrder` the sync marked would hold invoices over a PO that no
+longer exists rather than one the ERP stopped pricing.
+
+**2. A PO listing that could not be read whole raises.** `list_pos` caught
+every exception except the budget refusal and returned `[]`. The PO sync read
+that as "the ERP has no POs": it synced nothing, said nothing, and dropped the
+skip report from (1) with it, so the mark could never land during an outage. It
+also read only 10 pages (1,000 POs) and returned them as the whole list. The PO
+listing now goes through `_sync_rows`, like vendors and the chart: a failed
+page, a transport error (`httpx.HTTPError`, now mapped for all three listings,
+as Business Central, Merge.dev and NetSuite already did) or more than
+`SYNC_LISTING_MAX_ROWS` raises `ErpListingIncomplete` (a coded 502), a lost
+connection is the coded 409, and a budget refusal is still the coded 429 of
+§322. Nothing is synced in any of them.
+
+Tests: `backend/tests/test_erp_blackbaud_adapter.py`
+(`test_list_pos_report_names_every_po_it_left_out_for_want_of_a_total`,
+`test_a_po_listing_that_cannot_be_read_whole_raises_rather_than_finding_none`,
+`test_a_transport_error_on_a_listing_is_an_incomplete_listing`,
+`test_a_po_listing_without_a_connection_says_so`),
+`tests/test_purchase_orders.py::test_sync_erp_marks_a_blackbaud_po_that_lost_its_order_total`
+(the real adapter through `sync-erp`: synced at 100.00, marked when the total
+goes, cleared when it returns).
