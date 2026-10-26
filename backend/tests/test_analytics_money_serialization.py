@@ -73,6 +73,10 @@ NUMERIC_FIELDS: frozenset[str] = frozenset(
         # it exists so a 10x-understated yield says so rather than looking
         # complete.
         "excluded_rebate_count",
+        # POs left out of the accrual / open-PO figures because the ERP could
+        # not confirm their total at its last sync (decisions §323). Counts.
+        "unverifiable_po_count",
+        "open_po_unverifiable_count",
     }
 )
 
