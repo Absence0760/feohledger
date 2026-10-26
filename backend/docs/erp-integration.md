@@ -2368,7 +2368,8 @@ Request rules worth knowing:
   whether they are inclusive or not) — and to each date an earlier attempt
   of this push was sent with. `services/erp._call_erp` keeps those on
   `WorkflowInstance.state_data["erp_attempt_invoice_dates"]` (recorded before
-  the call, cleared by a success, five at most) and hands the ones that differ
+  the call, given back by an attempt that states it left nothing, cleared by a
+  success) and hands the ones that differ
   from the current date to the adapter as `InvoicePayload.prior_invoice_dates`:
   an earlier attempt's bill carries the date it was sent with, and keyed on
   the current date alone a retry after a date edit missed that bill and posted
@@ -2417,7 +2418,7 @@ Request rules worth knowing:
   the reason, and the operator retries after the reset (an automatic re-send
   at the reset is an open follow-up). A sync listing is refused call by call
   (`ErpCallBudgetExhausted` → a coded 429 with `Retry-After`, nothing synced);
-  a status read is `unknown`; `list_pos` returns nothing. Org admins get an
+  a status read is `unknown`; a PO sync is refused the same way. Org admins get an
   `erp_call_quota` notice once a day each at 80% of the share, when the share
   is used, and when the subscription's quota is. Redis down → the budget fails
   open and SKY's own 403 is the backstop. A heavy tenant should still store its

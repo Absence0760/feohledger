@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**149 open: 126 (c) · 11 (a) · 12 (b)** — re-derived from the file, never carried
+**150 open: 126 (c) · 12 (a) · 12 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2018,21 +2018,18 @@ providers still have the same gap.
 
 ### Surfaced by the Blackbaud FE NXT API audit (#651, 2026-10-26)
 
-- [ ] **(c) Every Blackbaud tenant on the platform key shares one SKY call
-      quota, with no per-tenant budget.** The "Standard APIs" product allows
-      10 calls/s and 25,000 calls/day *per subscription*, and
-      `FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY` serves every tenant without its own
-      key. #651 cut the calls per push (one 500-row lookup page, cached fiscal
-      years, a backing-off status poll: about four calls), but one tenant's
-      bulk send or vendor sync can still exhaust the day for all of them, and
-      a quota 403 reaches the admin only as a failed push (`rate_limited`).
-      **Durable fix:** count SKY calls per tenant against a share of the daily
-      budget and defer (not fail) pushes past it; raise an org-visible quota
-      notice from a 403 + `Retry-After`; and ask Blackbaud whether a
-      higher-volume product exists for a multi-tenant app, else require heavy
-      tenants to store their own `subscription_key`. **Trigger:** before a
-      second production tenant connects through the platform key, or the first
-      `rate_limited` push in production.
+- [ ] **(c) A push refused by the SKY call budget is not re-sent when the
+      allowance resets.** `erp_call_budget_exhausted` (`tenant_budget` /
+      `subscription_quota`) fails the invoice before any call, with the reason
+      and `retry_after`. Someone has to retry it after 00:00 UTC, one invoice
+      or a bulk retry at a time. The original follow-up asked to *defer*
+      rather than fail. **Durable fix:** a sweep that, after the reset,
+      re-dispatches invoices whose last `invoice.erp_failed` refusal is
+      `erp_call_budget_exhausted` and whose state is unchanged since. It goes
+      through `erp_send.start_erp_send` (plan and export gates), in
+      `retry_after` order, and stops at the org's share again. **Trigger:**
+      the first tenant that hits its share in production, or a support request
+      to retry a batch by hand.
 
 ### Surfaced by refusing the ERP push for an invoice already being paid (2026-10-21, decisions §309)
 
@@ -2515,6 +2512,24 @@ as oversights.
       **Trigger:** before the first NetSuite customer, and in any case before a
       customer must onboard on NetSuite 2027.1, where TBA is closed to new
       integrations.
+
+- [ ] **Whether Blackbaud sells a higher-volume SKY product for a
+      multi-tenant app, and what the platform key's tier really is.** The
+      per-org call budget is in (decisions §322): each tenant on the platform
+      key gets `FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET` (2,500) of
+      `FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA` (25,000, "Standard APIs") a day,
+      and admins are warned at 80%. Both figures are assumptions about a
+      subscription we have not bought. Blackbaud's community posts mention
+      Partner subscriptions metered per application *per customer* and paid
+      tiers of 100K and 250K calls a day. Those would change the right
+      defaults, or make the per-tenant share unnecessary. **Durable fix:** ask
+      Blackbaud (developer support / Partner Program) which product a
+      commercial multi-tenant FE NXT integration is meant to use and its
+      limits. Set both settings in `infra-secrets` to match, and if no
+      higher tier exists, document that a tenant past its share stores its own
+      `subscription_key`. **Trigger:** before a second production tenant
+      connects through the platform key, or the first `erp_call_quota` notice
+      in production.
 
 ## (b) Operator steps on merged code
 

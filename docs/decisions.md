@@ -15153,3 +15153,136 @@ publication, the CLI), `test_migration_0122_subprocessor_notices.py`,
 `test_deploy_decrypt_env.py` (the warning),
 `frontend/src/lib/legal/subprocessorChangelog.test.ts` (the email's objection
 address is `CONTACT.privacy`).
+
+
+## 322. Blackbaud: `OnHold` vendors are not payable, the shared SKY quota is budgeted per org, and the duplicate lookup searches every attempt's date (#651, 2026-10-26)
+
+Three Blackbaud FE NXT calls from the #651 audit, recorded together because
+all three are about what the adapter may assume about FE NXT's state.
+
+**1. An `OnHold` vendor syncs as inactive and is not paid from FeohLedger.**
+FE NXT's `VendorStatus` is `Active`, `Inactive` or `OnHold` (read from the
+live SKY definitions). `list_vendors` emits both `Inactive` and `OnHold` with
+`active=False` (`_UNPAYABLE_VENDOR_STATUSES`). The sync then creates no payee
+for one and marks a linked vendor inactive, so no payment run picks it up.
+`OnHold` still *takes an invoice* in FE NXT, but FE NXT holds its payments: a
+hold is how a nonprofit's finance office says "do not pay this supplier yet"
+(a dispute, missing paperwork, an audit). Paying the vendor from FeohLedger
+would go around that hold, because our payment never passes through FE NXT's
+payables. The vendor is still emitted, not dropped (§284: absence from a pull
+unlinks, and the vendor still exists). Lifting the hold in FE NXT does **not**
+reactivate the local vendor: re-enabling a payee is a person's call, and a sync
+that silently made one payable again would undo whatever the local team
+decided in the meantime. Rejected: treating `OnHold` as active because FE NXT
+accepts invoices for it. That reads "may be billed" as "may be paid", which
+are the two things the hold separates.
+
+**2. The SKY call quota is shared, so it is budgeted per org.**
+
+*What SKY does* (Blackbaud's "Rate limits and quotas" and "Throttling and
+retry patterns" pages, checked 2026-10-26): a per-second rate limit answered
+with **429**, and a daily call quota answered with **403**, both carrying
+`Retry-After`. The quota resets at **00:00 UTC**, and Blackbaud says to wait
+`Retry-After` rather than compute a reset. "Standard APIs" is 10 calls/s and
+25,000 calls/day **per subscription**. One platform subscription key
+(`FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY`) serves every tenant without its own,
+so one tenant's bulk send or vendor sync could spend the day for all of them.
+A quota 403 used to reach the admin only as a failed push.
+
+*What we do* (`services/erp_call_budget.py`):
+
+- Every SKY call goes through an httpx request hook that counts it in Redis,
+  per subscription key (a SHA-256 digest, never the key) and per org, per UTC
+  day. A response hook records a 429's or quota 403's `Retry-After` as a
+  cool-down for the **whole key**, so no tenant keeps calling into a refusal.
+- An org on the platform key may spend
+  `FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET` (default 2,500, a tenth of
+  Standard) a day, and no org may take a key past
+  `FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA` (default 25,000; set it to the key's
+  real tier). A tenant with its own `subscription_key` is held only to its
+  key's quota, since that bucket is its own.
+- **A push is never cut off half way.** It asks for its worst case before its
+  first call (`push_call_reserve`: the lookup pages, the fiscal years, the
+  create, the 400's vendor read and the job watch; more when it reads an
+  earlier job or searches extra dates) and then runs unenforced. A call
+  refused after the create would leave the job unconfirmed and the invoice
+  in doubt, which is worse than overshooting the share by one push. The
+  check and the spend are not atomic, so concurrent pushes can overshoot by up
+  to their number times the reserve, and a 401 token replay is one call more
+  than the reserve counts. SKY's own 403 and the shared cool-down are the
+  backstop.
+- The refusal is coded, `erp_call_budget_exhausted` with `reason`
+  (`tenant_budget`, `subscription_quota`, `rate_limited`) and `retry_after`,
+  and is made before any call (`not_posted`). An earlier attempt's job stays on
+  the result, so it is still read first next time. Only `rate_limited` is
+  retryable by `services/erp`'s seconds-long backoff; the other two fail the
+  invoice with the reason, and the operator retries after the reset.
+- A sync listing is refused call by call. The hook raises
+  `ErpCallBudgetExhausted` (never an `httpx.HTTPError`, which the push reads as
+  "outcome unknown"). The listing returns nothing (§284: never a partial pull),
+  and `erp_pull_failure` answers a coded **429** with `Retry-After`. A PO
+  sync too: `list_pos` otherwise reads any failure as "no POs", and a refusal
+  must say why.
+- A 403 *with* `Retry-After` is read as the quota, as SKY documents. A
+  permission 403 that happened to carry the header would pause the whole key
+  until it passes. That is accepted as the documented contract, not guessed
+  around from the body (never parsed: it can echo the payload).
+- The org's admins get an `erp_call_quota` notification (in-app + email,
+  preference-gated), once per UTC day each, at 80% of the share, when the
+  share is used, and when the subscription's quota is. It is claimed by a
+  Redis SET NX and released if nobody could be told, delivered through
+  `erp_connection_health.notify_org_admins`: the ERP connection's existing
+  notice path, under its own event type so the "needs reconnecting" label is
+  not stretched over a quota.
+
+*Why Redis, when it held mostly auth state.* The counts last a day, must be
+shared by every worker, the dispatch task and the Lambda path, and are
+incremented on every HTTP call. That is the `services/rate_limit` shape, not a
+JSONB write under the org row lock per request. Losing them (a Redis restart)
+costs at most a day's count. **It fails open**: a Redis error lets the call go
+ahead uncounted. This is a courtesy brake on a quota SKY enforces itself, and
+its 403 stays the backstop, so failing closed would only turn a Redis blip into
+"no Blackbaud posts". (Auth fails closed on Redis; that asymmetry is
+deliberate.)
+
+*Rejected.* Sleeping on `Retry-After` inside the push: a worker held for up to
+a day, with the transaction discipline of `services/erp` built around seconds.
+An automatic re-send at the reset: worth having, but it is a re-dispatch sweep
+over `failed` invoices with its own idempotency story, so it is a follow-up.
+A share computed from the number of connected tenants (quota ÷ n): it moves as
+tenants connect, and one busy tenant could still never use what quiet ones
+leave.
+
+**3. The narrowed duplicate lookup searches every date an attempt was sent
+with.** When the unnarrowed `search_text` page (500 rows) is full, the lookup
+narrows with `from_date` / `to_date` to a day either side of the invoice date.
+It narrowed on the **current** date. If the date was edited between an
+attempt whose outcome is unknown and the retry, our own marked bill sat outside
+the window and the retry posted a second bill. `services/erp._call_erp` now
+records each attempt's invoice date on the workflow instance
+(`erp_attempt_invoice_dates`, before the call, cleared by a success). It hands the earlier ones over as
+`InvoicePayload.prior_invoice_dates`, and the adapter narrows on each.
+
+Only an attempt that may have reached the ERP keeps its date. One that
+states it left nothing (`not_posted`: a budget or pre-flight refusal) gives its
+slot back, and the list is never trimmed. A first version kept the five newest,
+so a run of date edits, each refused all day by the budget, could push out the
+date of the one bill that may exist: the hole this closes, reopened.
+
+*Trade-off kept.* A **hand-keyed** duplicate (no marker of ours) dated outside
+every window we search, for a number busy enough to fill the first 500 hits,
+is not seen. Nothing ties it to a date we know, and walking every page of a
+busy number on every post is the quota problem above. A marked bill of ours is
+always found, since every date it can carry is searched. The duplicate keyed
+by hand is still caught when the number is not busy, which is the usual case,
+and FeohLedger's own duplicate warnings run before approval.
+
+**Tests.** `backend/tests/test_erp_blackbaud_adapter.py`: the cool-down shared
+across tenants, a 429 retryable and a quota 403 not, the per-org share and the
+key quota, the own-key exemption, the 80% warning once, a notice nobody got
+retried, the pending job kept on a refusal, a sync refused page by page and
+its coded 429, a status read under a cool-down, Redis down, `Retry-After`
+parsing, and the date-edit retry finding the first bill.
+`test_erp_push_flow.py` (dates recorded and handed back),
+`test_notification_templates.py`, `frontend/src/lib/api/erpRefusals.test.ts`.
+fake-erp's `POST /blackbaud/__throttle` reproduces SKY's 429 / 403 locally.
