@@ -158,5 +158,15 @@ if ! grep -Eq '^(FEOH_ANTHROPIC_API_KEY|FEOH_EXTRACTION_PROVIDER)=.+' .env.tmp; 
 	echo "WARN: neither FEOH_ANTHROPIC_API_KEY nor FEOH_EXTRACTION_PROVIDER is set — every invoice upload's extraction will fail (manual entry only). See deploy/prod.sops.yaml.example § Invoice extraction." >&2
 fi
 
+# The published DPA (§ 8) says sub-processor change notices are emailed to
+# every customer's administrators; FEOH_SUBPROCESSOR_NOTICES_ENABLED runs the
+# sweep that sends them (docs/decisions.md §320). Off by default for local dev,
+# so a deployment that forgot it would silently break a contractual statement.
+# Warns rather than refuses: a deploy is never blocked on it, but every run
+# says so until it is set — deploy/prod.sops.yaml.example § Sub-processor.
+if ! feoh_is_true "$(env_value FEOH_SUBPROCESSOR_NOTICES_ENABLED)"; then
+	echo "WARN: FEOH_SUBPROCESSOR_NOTICES_ENABLED is not true — the sub-processor change notices the DPA says are emailed to customers will not be sent. See deploy/prod.sops.yaml.example § Sub-processor change notices." >&2
+fi
+
 mv .env.tmp .env
 echo "decrypt-env.sh: deploy/.env written and checked."
