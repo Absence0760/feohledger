@@ -975,6 +975,19 @@ async def test_sync_erp_marks_an_already_synced_po_the_adapter_now_skips(realdb,
         assert po.total_unverifiable_reason is None
         inv = await s.get(Invoice, inv_id)
         assert inv.po_match["status"] == "matched"
+        # The mark lifts, the HOLD does not: a sync never clears one (§323,
+        # amended). It stays for a person, annotated with why it now reads as
+        # clearable.
+        row = (
+            await s.execute(
+                select(ExceptionRow).where(
+                    ExceptionRow.invoice_id == inv_id,
+                    ExceptionRow.exception_type == "po_mismatch",
+                )
+            )
+        ).scalar_one()
+        assert row.status == "open"
+        assert row.erp_report["kind"] == "po_rematch_clears"
 
 
 async def test_sync_erp_skip_marks_only_rows_in_the_synced_entity_scope(realdb, monkeypatch):
@@ -1214,3 +1227,178 @@ async def test_sync_erp_rolls_back_the_mark_when_the_rematch_fails(realdb, monke
             )
         ).scalar_one()
     assert reason is None
+
+
+# ---------------------------------------------------------------------------
+# sync-erp: the re-match may raise a hold, never clear one (§323, amended)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_approved_po_invoice(realdb, *, number: str, po_number: str, amount: str):
+    """An approved, payable invoice citing ``po_number`` (no vendor, so the
+    run builder's vendor gate does not stand in for the exception gate)."""
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        inv = Invoice(
+            invoice_number=number,
+            vendor_name="Rematch Vendor",
+            amount=Decimal(amount),
+            currency="USD",
+            po_number=po_number,
+            status=InvoiceStatus.approved,
+            organization_id=org_id,
+        )
+        s.add(inv)
+        await s.commit()
+        return inv.id
+
+
+async def _po_mismatch_rows(realdb, inv_id) -> list:
+    from app.models.exception import Exception as ExceptionRow
+
+    async with realdb.sessionmaker("a")() as s:
+        return list(
+            (
+                await s.execute(
+                    select(ExceptionRow).where(
+                        ExceptionRow.invoice_id == inv_id,
+                        ExceptionRow.exception_type == "po_mismatch",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _try_run(realdb, inv_id):
+    async with realdb.client(key="a", role="admin") as c:
+        return await c.post(
+            "/api/payments/runs",
+            json={"items": [{"invoice_id": str(inv_id), "method": "ach"}]},
+        )
+
+
+async def test_sync_erp_lowering_a_po_total_opens_a_blocking_hold(realdb, monkeypatch):
+    """The ERP cuts a PO from 150 to 100 under an approved 150 invoice: the
+    sync's re-match opens a payment-blocking `po_mismatch` at once, and the
+    payment run refuses the invoice."""
+    from app.services.erp_adapters.base import PoPayload
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-LOWER", total=Decimal("150.00"), currency="USD")],
+    )
+    inv_id = await _seed_approved_po_invoice(
+        realdb, number="INV-LOWER-1", po_number="PO-LOWER", amount="150.00"
+    )
+    assert await _po_mismatch_rows(realdb, inv_id) == []
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-LOWER", total=Decimal("100.00"), currency="USD")],
+    )
+    rows = await _po_mismatch_rows(realdb, inv_id)
+    assert [r.status for r in rows] == ["open"]
+    assert rows[0].erp_report is None
+
+    resp = await _try_run(realdb, inv_id)
+    assert resp.status_code == 409, resp.text
+    assert "po_mismatch" in resp.json()["detail"]
+
+
+async def test_sync_erp_raising_a_po_total_never_clears_the_hold(realdb, monkeypatch):
+    """The over-billing hold is open; someone raises the PO total in the ERP to
+    the invoiced amount and syncs. The re-match now MATCHES, but the hold stays
+    open and blocking — an ERP-side actor is outside the invoice's implicated
+    set, so the release must be a FeohLedger person's sign-off. The row records
+    why it now reads as clearable, and the run is still refused."""
+    from app.services.erp_adapters.base import PoPayload
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-RAISE", total=Decimal("150.00"), currency="USD")],
+    )
+    inv_id = await _seed_approved_po_invoice(
+        realdb, number="INV-RAISE-1", po_number="PO-RAISE", amount="150.00"
+    )
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-RAISE", total=Decimal("100.00"), currency="USD")],
+    )
+    [held] = await _po_mismatch_rows(realdb, inv_id)
+    assert held.status == "open"
+
+    body = await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-RAISE", total=Decimal("150.00"), currency="USD")],
+    )
+    assert body["updated"] == 1
+
+    async with realdb.sessionmaker("a")() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.po_match["status"] == "matched"
+    [row] = await _po_mismatch_rows(realdb, inv_id)
+    assert row.id == held.id
+    assert row.status == "open"
+    assert row.resolved_at is None and row.resolved_by is None
+    assert row.erp_report["kind"] == "po_rematch_clears"
+    assert row.erp_report["erp_type"] == "mock"
+    assert row.erp_report["po_number"] == "PO-RAISE"
+    assert row.erp_report["observed_on"]
+
+    resp = await _try_run(realdb, inv_id)
+    assert resp.status_code == 409, resp.text
+    assert "po_mismatch" in resp.json()["detail"]
+
+    # The ERP lowers it again: the finding is back, so the "now matches" note
+    # comes off the still-open row.
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-RAISE", total=Decimal("100.00"), currency="USD")],
+    )
+    [row] = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "open" and row.erp_report is None
+
+
+async def test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before(realdb, monkeypatch):
+    """Only the sync is hold-only. A refresh a FeohLedger action triggers (an
+    invoice edit, a receipt) keeps its pre-§323 behaviour: the cleared finding's
+    row is closed under `_close_cleared_po_exceptions`' segregation limits."""
+    from app.services.erp_adapters.base import PoPayload
+    from app.services.invoice_warnings import refresh_warnings
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-HUMAN", total=Decimal("100.00"), currency="USD")],
+    )
+    inv_id = await _seed_approved_po_invoice(
+        realdb, number="INV-HUMAN-1", po_number="PO-HUMAN", amount="150.00"
+    )
+    org_id = realdb.info("a").org_id
+    async with realdb.control_sessionmaker()() as cs:
+        org = (await cs.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+        org_settings = dict(org.settings or {})
+
+    async with realdb.sessionmaker("a")() as s:
+        inv = await s.get(Invoice, inv_id)
+        await refresh_warnings(s, inv, org_settings=org_settings)
+        await s.commit()
+    [held] = await _po_mismatch_rows(realdb, inv_id)
+    assert held.status == "open"
+
+    # The amount corrected in FeohLedger to the PO's figure.
+    async with realdb.sessionmaker("a")() as s:
+        inv = await s.get(Invoice, inv_id)
+        inv.amount = Decimal("100.00")
+        await refresh_warnings(s, inv, org_settings=org_settings)
+        await s.commit()
+    [row] = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "resolved"

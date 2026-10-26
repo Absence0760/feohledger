@@ -463,8 +463,9 @@ async def sync_pos_from_erp(
     skipped = 0
     updated = 0
     # PO numbers whose verifiable / unverifiable state this sync changed: the
-    # invoices citing them are re-matched below so a hold lands (or lifts) now,
-    # not at the invoice's next edit.
+    # invoices citing them are re-matched below so a hold lands now, not at the
+    # invoice's next edit. The re-match never LIFTS one (decisions §323,
+    # amended): see the call below.
     rematch: set[str] = set()
     for erp_po in erp_pos:
         # The upsert key is (po_number, org) SCOPED TO THE ENTITY BEING SYNCED
@@ -599,12 +600,21 @@ async def sync_pos_from_erp(
         # reads only open exceptions. A mark written without its hold would
         # leave an approved invoice payable against the stale total, so a
         # failed re-match fails the sync and the whole transaction rolls back.
+        #
+        # Hold-only (`erp_po_sync`): the re-match may OPEN or keep a
+        # payment-blocking `po_mismatch` / `quality_hold` but never resolves
+        # one. Whoever can edit the PO in the ERP is outside the invoice's
+        # implicated set, so a sync that closed holds would let an ERP-side
+        # total increase release an over-billing hold with no FeohLedger
+        # sign-off. A row the re-match no longer finds stays open, annotated
+        # in `erp_report`, for a person to clear through `record_decision`.
         await refresh_invoices_citing_pos(
             db,
             org_id,
             rematch,
             org_settings=org.settings,
             caller="erp_po_sync",
+            erp_po_sync={"erp_type": adapter.erp_type},
         )
 
     # One PII-free summary row per sync (same shape as the GL chart sync): the

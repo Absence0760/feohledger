@@ -103,6 +103,12 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # exception on the invoice is cleared (`erp_status_sync.
     # retry_erp_reported_payments`), or in one click from the queue. The
     # ``description`` is the sentence for a person; machine detail lives here.
+    # Also set, with ``kind == "po_rematch_clears"``, on an open ``po_mismatch``
+    # / ``quality_hold`` row an ERP PO sync's re-match no longer finds: the
+    # sync never clears a hold, so this records that the re-check after the
+    # ERP changed the PO now matches (ERP type, PO number, day observed) —
+    # why a person may now clear it (`invoice_warnings.
+    # ERP_REPORT_PO_REMATCH_CLEARS`, decisions §323 amended).
     # NULL on every other row, and on rows raised before 0121.
     erp_report: Mapped[dict | None] = mapped_column(JSONB)
     # SLA: deadline derived from org settings at creation time. NULL =
