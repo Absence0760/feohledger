@@ -477,3 +477,69 @@ def test_a_tba_block_missing_a_secret_is_refused_by_name():
     result = _run(NetSuiteAdapter(_tba_config(token_secret="")).post_invoice(_payload()))
     assert not result.success and result.retryable is False
     assert "'token_secret'" in result.message
+
+
+def test_tba_base_string_matches_rfc_5849s_worked_example():
+    """RFC 5849 §3.4.1.1's own request and base string. The query's parameters
+    are signed as parameters, never inside the base string URI — signing them
+    in the URI (the old signer, audit finding N1) made NetSuite refuse every
+    request that carried a query: SuiteQL paging, the externalId lookup and
+    the connection test. The RFC's two form-body parameters ride in the query
+    here, which normalises identically (§3.4.1.3.1)."""
+    url = "http://example.com/request?b5=%3D%253D&a3=a&c%40=&a2=r%20b&c2=&a3=2%20q"
+    oauth = {
+        "oauth_consumer_key": "9djdj82h48djs9d2",
+        "oauth_token": "kkk9d7dh3k39sjv7",
+        "oauth_signature_method": "HMAC-SHA1",
+        "oauth_timestamp": "137131201",
+        "oauth_nonce": "7d8f3e4a",
+    }
+    assert netsuite._tba_base_string("post", url, oauth) == (
+        "POST&http%3A%2F%2Fexample.com%2Frequest&a2%3Dr%2520b%26a3%3D2%2520q"
+        "%26a3%3Da%26b5%3D%253D%25253D%26c%2540%3D%26c2%3D%26oauth_consumer_key"
+        "%3D9djdj82h48djs9d2%26oauth_nonce%3D7d8f3e4a%26oauth_signature_method"
+        "%3DHMAC-SHA1%26oauth_timestamp%3D137131201%26oauth_token%3Dkkk9d7dh3k39sjv7"
+    )
+
+
+def test_tba_base_string_uri_drops_the_default_port_and_keeps_another():
+    oauth = {"oauth_nonce": "n"}
+    assert netsuite._tba_base_string(
+        "GET", "HTTPS://Acct.SuiteTalk.api.netsuite.com:443/services/rest/record/v1/vendor", oauth
+    ).startswith(
+        "GET&https%3A%2F%2Facct.suitetalk.api.netsuite.com%2Fservices%2Frest%2Frecord%2Fv1"
+        "%2Fvendor&"
+    )
+    assert "localhost%3A12112" in netsuite._tba_base_string(
+        "GET", "http://localhost:12112/netsuite/services/rest/record/v1/vendor", oauth
+    )
+
+
+def test_tba_signature_signs_the_query_as_parameters(monkeypatch):
+    """The header's signature is the HMAC-SHA256 of the RFC base string under
+    `consumer_secret&token_secret` (each encoded), for a SuiteQL page URL."""
+    import base64
+    import hashlib
+    import hmac
+    from urllib.parse import unquote
+
+    monkeypatch.setattr(netsuite.uuid, "uuid4", lambda: type("U", (), {"hex": "nonce1"})())
+    monkeypatch.setattr(netsuite.time, "time", lambda: 1700000000)
+    adapter = NetSuiteAdapter(_tba_config(consumer_secret="c/s", token_secret="t+s"))
+    url = (
+        "https://1234567.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql"
+        "?limit=100&offset=0"
+    )
+    header = adapter._auth_header("POST", url)
+
+    expected_base = (
+        "POST&https%3A%2F%2F1234567.suitetalk.api.netsuite.com%2Fservices%2Frest%2Fquery"
+        "%2Fv1%2Fsuiteql&limit%3D100%26oauth_consumer_key%3Dck%26oauth_nonce%3Dnonce1"
+        "%26oauth_signature_method%3DHMAC-SHA256%26oauth_timestamp%3D1700000000"
+        "%26oauth_token%3Dti%26oauth_version%3D1.0%26offset%3D0"
+    )
+    digest = hmac.new(b"c%2Fs&t%2Bs", expected_base.encode(), hashlib.sha256).digest()
+    signature = header.split('oauth_signature="')[1].split('"')[0]
+    assert unquote(signature) == base64.b64encode(digest).decode()
+    # Encoded per RFC 5849 §3.6: no raw `/` or `+` from the base64 survives.
+    assert "/" not in signature and "+" not in signature

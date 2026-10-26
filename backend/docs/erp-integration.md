@@ -2585,6 +2585,16 @@ and paste `private.pem` and the Certificate ID NetSuite shows into the form.
 NetSuite caps a certificate at two years and emails before it expires; a
 rotation is a new mapping (new Certificate ID) plus a new key here.
 
+**TBA signing** (`_tba_base_string`) follows RFC 5849 §3.4.1: the base string
+URI is the URL without its query (scheme and host lower-cased, a default port
+dropped), and the query's parameters are signed beside the `oauth_*` ones,
+encoded, sorted and encoded again; every value in the header and the signing
+key is encoded per §3.6 (`/` and `+` included). The signer used to put the
+query inside the URI, so NetSuite computed a different signature for every
+request that carried one — SuiteQL paging, the `externalId` lookup, the
+connection test — and refused each 401 (audit finding N1). Pinned against the
+RFC's own worked example in `tests/test_erp_netsuite_auth.py`.
+
 **The fake.** `tools/fake-erp` answers the token endpoint with the same checks
 (alg, kid, signature, iss = the mapped client id, aud = its own URL, scope,
 iat/exp), against certificates mapped through

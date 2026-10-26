@@ -22,7 +22,7 @@ import time
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlsplit
 
 import httpx
 from cryptography.hazmat.primitives import serialization
@@ -411,25 +411,23 @@ class NetSuiteAdapter(ErpAdapter):
             "oauth_version": "1.0",
         }
 
-        # Build signature base string
-        param_str = "&".join(f"{quote(k)}={quote(v)}" for k, v in sorted(params.items()))
-        base_string = f"{method.upper()}&{quote(url, safe='')}&{quote(param_str, safe='')}"
-
+        base_string = _tba_base_string(method, url, params)
         signing_key = (
-            f"{quote(self.config['consumer_secret'])}&{quote(self.config['token_secret'])}"
+            f"{_oauth1_encode(self.config['consumer_secret'])}"
+            f"&{_oauth1_encode(self.config['token_secret'])}"
         )
         signature = hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha256).digest()
         sig_b64 = base64.b64encode(signature).decode()
 
         parts = [
             f'OAuth realm="{self._account_id()}"',
-            f'oauth_consumer_key="{params["oauth_consumer_key"]}"',
-            f'oauth_token="{params["oauth_token"]}"',
+            f'oauth_consumer_key="{_oauth1_encode(params["oauth_consumer_key"])}"',
+            f'oauth_token="{_oauth1_encode(params["oauth_token"])}"',
             f'oauth_nonce="{nonce}"',
             f'oauth_timestamp="{timestamp}"',
             'oauth_signature_method="HMAC-SHA256"',
             'oauth_version="1.0"',
-            f'oauth_signature="{quote(sig_b64)}"',
+            f'oauth_signature="{_oauth1_encode(sig_b64)}"',
         ]
         return ", ".join(parts)
 
@@ -764,6 +762,38 @@ class NetSuiteAdapter(ErpAdapter):
             return resp.status_code == 200
         except Exception:
             return False
+
+
+def _oauth1_encode(value: str) -> str:
+    """RFC 5849 §3.6 percent-encoding: everything but the unreserved set
+    (ALPHA, DIGIT, ``-._~``) is encoded — ``/`` included, which ``quote``'s
+    default leaves alone (a base64 signature can carry one)."""
+    return quote(value, safe="~")
+
+
+def _tba_base_string(method: str, url: str, oauth_params: dict[str, str]) -> str:
+    """The OAuth 1.0a signature base string (RFC 5849 §3.4.1).
+
+    The base string URI is the URL WITHOUT its query (§3.4.1.2: scheme and host
+    lower-cased, a default port dropped); the query's parameters are signed as
+    request parameters instead, beside the ``oauth_*`` ones, each name and
+    value encoded, the pairs sorted, then encoded once more as a whole
+    (§3.4.1.3). Signing the query inside the URI — what this did before — makes
+    NetSuite compute a different signature for every request that carries one
+    (SuiteQL paging, the ``externalId`` lookup, the connection test), so each
+    of them was refused 401.
+    """
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    default_port = {"http": 80, "https": 443}.get(scheme)
+    netloc = host if parts.port in (None, default_port) else f"{host}:{parts.port}"
+    base_uri = f"{scheme}://{netloc}{parts.path or '/'}"
+    pairs = [*parse_qsl(parts.query, keep_blank_values=True), *oauth_params.items()]
+    normalised = "&".join(
+        f"{k}={v}" for k, v in sorted((_oauth1_encode(k), _oauth1_encode(v)) for k, v in pairs)
+    )
+    return "&".join((method.upper(), _oauth1_encode(base_uri), _oauth1_encode(normalised)))
 
 
 async def _dispatch(
