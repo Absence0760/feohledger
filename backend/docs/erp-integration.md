@@ -488,6 +488,12 @@ webhooks, older spelling `webhook_secret`) — are **not** in
   `base_url` to whatever host a save named. A block that selected no ERP yet
   binds nothing, so secrets entered before the first configuration save stay
   (decisions §271).
+- **A switched sign-in method drops its secrets too.** Same ERP, same
+  destination, but the save moves a field another field's `show_when` keys on
+  (NetSuite's `auth_method`, TBA ↔ OAuth 2.0): the secret fields that applied
+  before and no longer apply are removed (`catalog.secrets_switched_off`), audited
+  with `reason: erp_sign_in_method_changed`. Only a field the save turned off —
+  a secret stored ahead of the save that selects its method stays for it.
 - **What counts as a destination is per ERP.** The default is by name,
   `catalog.DESTINATION_KEYS` — `base_url`, `tenant_id`, `account_id`,
   `company_id`, `environment` — and it covers every key a provider does not

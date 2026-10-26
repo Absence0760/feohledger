@@ -337,6 +337,23 @@ def test_an_unchanged_destination_drops_nothing():
     assert catalog.secrets_to_drop(SYSPRO, incoming) == frozenset()
 
 
+def test_switching_the_sign_in_method_drops_only_the_old_methods_secrets():
+    """Same NetSuite account, TBA -> OAuth 2.0: TBA's sealed secrets have no
+    reader any more and must not stay stored; the inbound webhook key and the
+    new method's secrets are untouched. An absent auth_method reads as TBA."""
+    oauth = {**STORED, "auth_method": "oauth2_m2m", "client_id": "c", "certificate_id": "k"}
+    assert catalog.secrets_to_drop(STORED, oauth) == {"consumer_secret", "token_secret"}
+    assert catalog.secrets_to_drop({**STORED, "auth_method": "tba"}, oauth) == {
+        "consumer_secret",
+        "token_secret",
+    }
+    assert catalog.secrets_to_drop(oauth, {**oauth, "auth_method": "tba"}) == {"private_key"}
+    # A save that keeps the method drops nothing — a secret PUT ahead of the
+    # save that selects its method stays for that save.
+    assert catalog.secrets_to_drop(STORED, {**STORED, "auth_method": "tba"}) == frozenset()
+    assert catalog.secrets_to_drop(oauth, dict(oauth)) == frozenset()
+
+
 def test_a_different_erp_or_a_cleared_one_drops_every_secret():
     """Business Central's client_secret must not become Xero's BYO app secret."""
     d365 = {"type": "dynamics_365_bc", "integration_method": "direct"}
@@ -643,6 +660,43 @@ async def test_patch_with_a_changed_destination_drops_the_sealed_secrets(realdb)
         "changed": ["consumer_secret", "token_secret"],
         "cleared": ["consumer_secret", "token_secret"],
         "reason": "erp_destination_changed",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+async def test_patch_switching_the_sign_in_method_drops_the_old_methods_secrets(realdb):
+    await _seed_erp(
+        realdb, dict(STORED), {**STORED_SECRETS, "private_key": "-----BEGIN PRIVATE KEY-----x"}
+    )
+    async with realdb.client(key="a", role="admin") as c:
+        shown = (await c.get("/api/organization")).json()["settings"]["erp"]
+        resp = await c.patch(
+            "/api/organization",
+            json={
+                "settings": {
+                    "erp": {
+                        **shown,
+                        "auth_method": "oauth2_m2m",
+                        "client_id": "cid",
+                        "certificate_id": "kid",
+                    }
+                }
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    assert (await _stored_erp(realdb))["auth_method"] == "oauth2_m2m"
+    assert await _sealed(realdb) == {
+        "private_key": "-----BEGIN PRIVATE KEY-----x",
+        "webhook_signing_secret": "whs-STORED",
+    }
+    rows = await _audit_rows(realdb, "organization.credentials_updated")
+    assert len(rows) == 1
+    assert rows[0].details == {
+        "block": "erp",
+        "changed": ["consumer_secret", "token_secret"],
+        "cleared": ["consumer_secret", "token_secret"],
+        "reason": "erp_sign_in_method_changed",
     }
 
 
