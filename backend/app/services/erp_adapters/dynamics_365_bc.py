@@ -732,6 +732,15 @@ def _bc_date(raw: object) -> date | None:
         return None
 
 
+_BC_EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
+
+
+def _bc_vendor_id(raw: object) -> str | None:
+    """A purchaseOrder's ``vendorId``, or None when it names no vendor."""
+    text = str(raw or "").strip()
+    return text if text and text != _BC_EMPTY_GUID else None
+
+
 def _bc_po_to_payload(raw: dict) -> PoPayload | None:
     """Map an API v2.0 ``purchaseOrder`` (lines expanded) to a PoPayload.
 
@@ -745,6 +754,10 @@ def _bc_po_to_payload(raw: dict) -> PoPayload | None:
       blank for the company's local currency, and that blank stays None: the
       code is not ours to guess (decisions §197).
     * ``expected_delivery_date`` is ``requestedReceiptDate`` when set.
+    * ``vendor_erp_id`` is ``vendorId``, the vendor's GUID — the ``id`` that
+      ``list_vendors`` reports as ``erp_vendor_id`` — so the sync links the PO
+      by id, not by ``vendorName`` (a rename breaks that, and two vendors can
+      share a name). BC's empty GUID means no vendor and maps to None.
     """
     number = raw.get("number")
     total = _bc_decimal(raw.get("totalAmountIncludingTax"))
@@ -768,6 +781,7 @@ def _bc_po_to_payload(raw: dict) -> PoPayload | None:
     return PoPayload(
         po_number=str(number),
         vendor_name=raw.get("vendorName") or None,
+        vendor_erp_id=_bc_vendor_id(raw.get("vendorId")),
         total=total,
         status="open",
         expected_delivery_date=_bc_date(raw.get("requestedReceiptDate")),

@@ -2475,11 +2475,15 @@ D365_ACCOUNT_FIXTURES: list[dict] = [
 
 # BC `purchaseOrders` with `purchaseOrderLines` expanded. BC leaves
 # `currencyCode` blank for the company's local currency and renders a blank
-# date as 0001-01-01; PO-FAKE-BC-401 carries both.
+# date as 0001-01-01; PO-FAKE-BC-401 carries both. `vendorId` is the GUID of
+# the vendor fixture above — the id the vendor sync stamps — so the PO sync
+# links each order to that vendor by id, not by `vendorName`.
 D365_PO_FIXTURES: list[dict] = [
     {
         "id": "b4010000-0000-0000-0000-000000000401",
         "number": "PO-FAKE-BC-401",
+        "vendorId": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
+        "vendorNumber": "V0001",
         "vendorName": "Fake BC Vendor A",
         "currencyCode": "",
         "requestedReceiptDate": "0001-01-01",
@@ -2500,6 +2504,8 @@ D365_PO_FIXTURES: list[dict] = [
     {
         "id": "b4020000-0000-0000-0000-000000000402",
         "number": "PO-FAKE-BC-402",
+        "vendorId": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
+        "vendorNumber": "V0001",
         "vendorName": "Fake BC Vendor A",
         "currencyCode": "EUR",
         "requestedReceiptDate": "2026-05-20",

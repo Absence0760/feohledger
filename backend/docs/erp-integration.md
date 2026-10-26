@@ -2314,7 +2314,7 @@ surface: `/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_
 |---|---|
 | `post_invoice` | refuse without `vendor_erp_id` / a line account id / a valid `base_url` → `GET purchaseInvoices?$filter=externalDocumentNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` (a draft) → `GET purchaseInvoices({id})` → total check → `POST purchaseInvoices({id})/Microsoft.NAV.post` |
 | `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts are skipped (BC refuses a line on one); blocked accounts are emitted `active=False`. |
-| `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
+| `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; vendor linked by `vendorId` (the vendor GUID `list_vendors` stamps; BC's empty GUID is no vendor) before `vendorName`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
 | `list_vendors` | `GET vendors` |
 | `void_invoice` | `GET purchaseInvoices({id})`; a `Draft` is deleted (`DELETE` with `If-Match` = the etag just read — never `*`; a read with no etag returns `False` unsent); anything else returns `False` |
 

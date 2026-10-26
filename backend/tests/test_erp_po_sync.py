@@ -230,6 +230,57 @@ def test_bc_list_pos_is_bounded_and_degrades(monkeypatch):
         assert _run(_bc_adapter(monkeypatch).list_pos()) == []
 
 
+def test_bc_list_pos_carries_the_vendor_id_list_vendors_reports(monkeypatch):
+    """A PO names its vendor by the GUID ``list_vendors`` stamps as
+    ``erp_vendor_id``, so the sync links it by id: the vendor renamed since the
+    PO was raised (``vendorName`` is the old name) and the second vendor with
+    the same name both resolve to the right supplier. BC's empty GUID is no
+    vendor."""
+    vendors = {
+        "value": [
+            {"id": "guid-acme-1", "number": "V0001", "displayName": "Acme"},
+            {"id": "guid-acme-2", "number": "V0002", "displayName": "Acme"},
+            {"id": "guid-renamed", "number": "V0003", "displayName": "Bolt Ltd"},
+        ]
+    }
+    pos = {
+        "value": [
+            {
+                "number": "PO-1",
+                "vendorId": "guid-acme-2",
+                "vendorName": "Acme",
+                "totalAmountIncludingTax": 10,
+            },
+            {
+                "number": "PO-2",
+                "vendorId": "guid-renamed",
+                "vendorName": "Bolt Old Name",
+                "totalAmountIncludingTax": 10,
+            },
+            {
+                "number": "PO-3",
+                "vendorId": "00000000-0000-0000-0000-000000000000",
+                "vendorName": "",
+                "totalAmountIncludingTax": 10,
+            },
+        ]
+    }
+
+    async def get(url, **_kw):
+        return _make_mock_response(200, pos if "purchaseOrders" in url else vendors)
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_make_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(side_effect=get)
+        adapter = _bc_adapter(monkeypatch)
+        vendor_ids = {v.erp_vendor_id for v in _run(adapter.list_vendors())}
+        by_number = {p.po_number: p.vendor_erp_id for p in _run(adapter.list_pos())}
+
+    assert by_number == {"PO-1": "guid-acme-2", "PO-2": "guid-renamed", "PO-3": None}
+    assert {"guid-acme-2", "guid-renamed"} <= vendor_ids
+
+
 # ---------- NetSuite (SuiteQL over `transaction`) -------------------------
 
 
