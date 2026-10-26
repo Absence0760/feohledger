@@ -58,6 +58,7 @@ SECRET_FIELDS: dict[str, frozenset[str]] = {
             "client_secret",  # Business Central / Intacct / a bring-your-own OAuth app
             "consumer_secret",  # NetSuite TBA
             "token_secret",  # NetSuite TBA
+            "private_key",  # NetSuite OAuth 2.0 certificate key (JWT client assertion)
             "password",  # Sage Accounting (ZA) login
             "subscription_key",  # Blackbaud SKY API subscription key
             "operator_password",  # SYSPRO operator
