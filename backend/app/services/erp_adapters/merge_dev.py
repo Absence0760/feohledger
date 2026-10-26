@@ -313,12 +313,26 @@ class MergeDevAdapter(ErpAdapter):
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """The whole chart via Merge's unified ``/accounts``, or
-        :class:`ErpListingIncomplete` — never the pages read before a failure."""
+        :class:`ErpListingIncomplete` — never the pages read before a failure.
+
+        A Merge Account's ``parent_account`` is the parent's Merge id (a uuid),
+        not a code (https://docs.merge.dev/openapi/accounting.json, ``Account``).
+        It is carried as ``parent_erp_account_id`` and resolved to the parent's
+        code within this pull; a parent outside the pull has no code here, so
+        ``parent_code`` stays None rather than holding the uuid. A null
+        ``parent_account`` may mean "top-level" or "not reported" depending on
+        the ERP behind Merge, so ``reports_parent`` stays False and the sync
+        never clears a parent on Merge's silence.
+        """
         items: list[GLAccountPayload] = []
         for raw in await self._list_complete("accounts", {"page_size": "100"}):
             payload = _merge_account_to_payload(raw)
             if payload is not None:
                 items.append(payload)
+        code_by_id = {p.erp_account_id: p.code for p in items}
+        for p in items:
+            if p.parent_erp_account_id:
+                p.parent_code = code_by_id.get(p.parent_erp_account_id)
         return items
 
     async def list_vendors(self) -> list[VendorPayload]:
@@ -454,6 +468,11 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
     and its ``erp_account_id`` would otherwise have been its code.
     A record with neither a number nor a name is dropped too: nobody could
     pick it.
+
+    An ``INACTIVE`` account, or one Merge reports deleted in the ERP
+    (``remote_was_deleted``), is emitted ``active=False``: its id is still the
+    ERP's, so a row linked to it is not dead, but no bill line may post to it.
+    ``parent_code`` is resolved by ``list_gl_accounts`` within the pull.
     """
     merge_id = raw.get("id")
     number = raw.get("account_number") or raw.get("number")
@@ -470,9 +489,12 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
         name=str(name),
         account_type=account_type,
         erp_account_id=str(merge_id),
-        parent_code=(
+        parent_erp_account_id=(
             raw.get("parent_account") if isinstance(raw.get("parent_account"), str) else None
-        ),
+        )
+        or None,
+        active=(raw.get("status") or "").upper() != "INACTIVE"
+        and raw.get("remote_was_deleted") is not True,
     )
 
 
