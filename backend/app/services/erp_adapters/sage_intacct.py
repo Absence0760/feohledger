@@ -81,7 +81,17 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
 
-_PO_FIELDS = ["key", "documentNumber", "vendor.name", "state", "txnTotal", "currency.txnCurrency"]
+# `vendor.id` is the vendor ID `list_vendors` reports as `erp_vendor_id`: the
+# PO sync links by it before `vendor.name`, which a rename breaks.
+_PO_FIELDS = [
+    "key",
+    "documentNumber",
+    "vendor.id",
+    "vendor.name",
+    "state",
+    "txnTotal",
+    "currency.txnCurrency",
+]
 
 
 class IntacctConfigError(ValueError):
@@ -436,11 +446,13 @@ class SageIntacctAdapter(ErpAdapter):
             if not number:
                 continue
             vendor_name = _field(raw, "vendor", "name")
+            vendor_id = _field(raw, "vendor", "id")
             currency = _field(raw, "currency", "txnCurrency")
             pos.append(
                 PoPayload(
                     po_number=str(number),
                     vendor_name=str(vendor_name) if vendor_name else None,
+                    vendor_erp_id=str(vendor_id) if vendor_id else None,
                     total=_decimal_or_none(raw.get("txnTotal")) or Decimal("0"),
                     status=_po_status(raw.get("state")),
                     currency=str(currency) if currency else None,

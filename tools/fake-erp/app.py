@@ -1082,7 +1082,9 @@ INTACCT_PO_FIXTURES: list[dict] = [
     {
         "key": "401",
         "documentNumber": "PO-INTACCT-401",
-        "vendor": {"name": "Fake Intacct Vendor A"},
+        # The vendor fixture's `id`: what the vendor sync stamps, and what the
+        # PO sync links by before the name.
+        "vendor": {"id": "V-ACME", "name": "Fake Intacct Vendor A"},
         "state": "pending",
         "txnTotal": "1250.00",
         "currency": {"txnCurrency": "USD"},
@@ -1090,7 +1092,7 @@ INTACCT_PO_FIXTURES: list[dict] = [
     {
         "key": "402",
         "documentNumber": "PO-INTACCT-402",
-        "vendor": {"name": "Fake Intacct Vendor B"},
+        "vendor": {"id": "V-BETA", "name": "Fake Intacct Vendor B"},
         "state": "closed",
         "txnTotal": "980.50",
         "currency": {"txnCurrency": "USD"},

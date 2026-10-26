@@ -478,6 +478,35 @@ def test_list_pos_maps_total_exactly_and_state():
     ]
 
 
+def test_list_pos_carries_the_vendor_id_list_vendors_reports():
+    """A PO names its vendor by the ``id`` ``list_vendors`` stamps as
+    ``erp_vendor_id``, so the sync links it by id: a vendor renamed since the PO
+    was raised and a second vendor with the same name both resolve to the right
+    one. The query asks for ``vendor.id``; nested or flat, it is read."""
+    fake = FakeIntacct()
+    fake.query_rows["accounts-payable/vendor"] = [
+        [
+            {"key": "1", "id": "V-ACME-1", "name": "Acme"},
+            {"key": "2", "id": "V-ACME-2", "name": "Acme"},
+            {"key": "3", "id": "V-BOLT", "name": "Bolt Ltd"},
+        ]
+    ]
+    fake.query_rows["purchasing/document::Purchase Order"] = [
+        [
+            {"documentNumber": "PO-1", "vendor": {"id": "V-ACME-2", "name": "Acme"}},
+            {"documentNumber": "PO-2", "vendor.id": "V-BOLT", "vendor.name": "Bolt Old"},
+            {"documentNumber": "PO-3", "vendor": {"name": "Acme"}},
+        ]
+    ]
+    adapter = SageIntacctAdapter(CONFIG)
+    vendor_ids = {v.erp_vendor_id for v in _run(fake, adapter.list_vendors)}
+    by_number = {p.po_number: p.vendor_erp_id for p in _run(fake, adapter.list_pos)}
+    assert by_number == {"PO-1": "V-ACME-2", "PO-2": "V-BOLT", "PO-3": None}
+    assert {"V-ACME-2", "V-BOLT"} <= vendor_ids
+    po_query = json.loads(fake.of("POST", "/services/core/query")[-1].content)
+    assert "vendor.id" in po_query["fields"]
+
+
 def test_chart_and_vendor_listings_raise_on_failure_the_po_list_degrades():
     """The chart and vendor syncs read absence as evidence, so a failed listing
     raises instead of returning [] (§284). The PO list keeps degrading."""
