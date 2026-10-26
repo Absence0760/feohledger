@@ -71,13 +71,22 @@ GL accounts (`GET /merge/api/accounting/v1/accounts`):
 2. `6200` "Fake Software" (expense)
 3. `6300` "Fake Consulting" (expense)
 
-Vendors (`GET /merge/api/accounting/v1/vendors`):
+Suppliers (`GET /merge/api/accounting/v1/contacts?is_supplier=true`). Merge has
+no `/vendors` path and no Vendor model — a supplier is a `Contact` with
+`is_supplier` true, and a Contact has **no payment term** — so the fake serves
+none either and `/vendors` is a 404, as on Merge
+([OpenAPI](https://docs.merge.dev/openapi/accounting.json),
+[Contacts](https://docs.merge.dev/accounting/contacts/)). `addresses` and
+`phone_numbers` come back as objects only when named in `expand`, else as bare
+ids:
 
-1. "Fake Merge Vendor Co" — Net 30, tax id `71-1234567`
-2. "Fake Merge Supply Co" — Net 45, tax id `72-2345678`
-3. "Fake Merge Services Co" — Net 60 (`payment_term` as a bare string, not an
-   object — exercises that branch of `_merge_vendor_to_payload`), tax id
-   `73-3456789`
+1. `merge-vendor-701` "Fake Merge Vendor Co" — tax id `71-1234567`
+2. `merge-vendor-702` "Fake Merge Supply Co" — tax id `72-2345678`
+3. `merge-vendor-703` "Fake Merge Services Co" — tax id `73-3456789`
+
+plus `merge-customer-801` "Fake Merge Customer Co", a customer
+(`is_supplier: false`) served only to a request that does not filter on
+`is_supplier=true`, so an adapter that drops the filter fails the e2e count.
 
 ### References are enforced by id, as the real ERPs do
 
@@ -85,7 +94,7 @@ A bill naming its vendor or account by anything but a known id is a **400**, so
 the e2e suite proves the adapters post the ids the syncs stored
 (`backend/docs/erp-integration.md` § ERP references):
 
-- **Merge** `POST /invoices`: `contact` must be a fixture vendor id
+- **Merge** `POST /invoices`: `contact` must be a fixture contact id
   (`merge-vendor-701` …); a non-null line `account` must be a fixture account id
   (`merge-acct-6100` …).
 - **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`,
