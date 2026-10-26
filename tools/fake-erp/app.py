@@ -315,13 +315,16 @@ async def set_status(body: dict) -> dict:
 merge = APIRouter(prefix="/merge/api/accounting/v1")
 
 # FIXED fixtures — e2e tests assert these literals. Do not change them.
+# As in Merge, a PO's `vendor` is the vendor's Merge id (a fixture vendor
+# below, so the PO sync links by id) and a line's `account` is a Merge
+# Account id, not an account number.
 MERGE_PO_FIXTURES: list[dict] = [
     {
         "id": "merge-po-301",
         "remote_id": "fake-remote-po-301",
         "number": "PO-FAKE-301",
         "status": "OPEN",
-        "vendor": {"id": "merge-vendor-a", "name": "Fake ERP Vendor A"},
+        "vendor": {"id": "merge-vendor-701", "name": "Fake Merge Vendor Co"},
         "total_amount": 1250.00,
         "currency": "USD",
         "issue_date": "2026-02-10",
@@ -332,14 +335,14 @@ MERGE_PO_FIXTURES: list[dict] = [
                 "quantity": 10,
                 "unit_price": 100.00,
                 "total_line_amount": 1000.00,
-                "account": "6100",
+                "account": "merge-acct-6100",
             },
             {
                 "description": "Fake widget installation",
                 "quantity": 1,
                 "unit_price": 250.00,
                 "total_line_amount": 250.00,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
         ],
     },
@@ -348,7 +351,7 @@ MERGE_PO_FIXTURES: list[dict] = [
         "remote_id": "fake-remote-po-302",
         "number": "PO-FAKE-302",
         "status": "OPEN",
-        "vendor": {"id": "merge-vendor-b", "name": "Fake ERP Vendor B"},
+        "vendor": {"id": "merge-vendor-702", "name": "Fake Merge Supply Co"},
         "total_amount": 980.50,
         "currency": "USD",
         "issue_date": "2026-03-05",
@@ -359,14 +362,14 @@ MERGE_PO_FIXTURES: list[dict] = [
                 "quantity": 2,
                 "unit_price": 400.00,
                 "total_line_amount": 800.00,
-                "account": "6200",
+                "account": "merge-acct-6200",
             },
             {
                 "description": "Fake support hours",
                 "quantity": 1,
                 "unit_price": 180.50,
                 "total_line_amount": 180.50,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
         ],
     },
@@ -375,7 +378,7 @@ MERGE_PO_FIXTURES: list[dict] = [
         "remote_id": "fake-remote-po-303",
         "number": "PO-FAKE-303",
         "status": "OPEN",
-        "vendor": {"id": "merge-vendor-a", "name": "Fake ERP Vendor A"},
+        "vendor": {"id": "merge-vendor-701", "name": "Fake Merge Vendor Co"},
         "total_amount": 4400.00,
         "currency": "USD",
         "issue_date": "2026-04-01",
@@ -386,14 +389,14 @@ MERGE_PO_FIXTURES: list[dict] = [
                 "quantity": 4,
                 "unit_price": 1000.00,
                 "total_line_amount": 4000.00,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
             {
                 "description": "Fake consultant travel",
                 "quantity": 1,
                 "unit_price": 400.00,
                 "total_line_amount": 400.00,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
         ],
     },

@@ -57,9 +57,13 @@ surfaces:
 
 Purchase orders (`GET /merge/api/accounting/v1/purchase-orders`):
 
-1. `PO-FAKE-301` — vendor "Fake ERP Vendor A", total 1250.00 USD
-2. `PO-FAKE-302` — vendor "Fake ERP Vendor B", total 980.50 USD
-3. `PO-FAKE-303` — vendor "Fake ERP Vendor A", total 4400.00 USD
+1. `PO-FAKE-301` — vendor `merge-vendor-701` "Fake Merge Vendor Co", total 1250.00 USD
+2. `PO-FAKE-302` — vendor `merge-vendor-702` "Fake Merge Supply Co", total 980.50 USD
+3. `PO-FAKE-303` — vendor `merge-vendor-701` "Fake Merge Vendor Co", total 4400.00 USD
+
+As in Merge, a PO's `vendor` is the vendor's Merge id — the one the vendor
+sync stores, so the PO sync links by it — and a line's `account` is a Merge
+Account id (`merge-acct-6100` …), not an account number.
 
 GL accounts (`GET /merge/api/accounting/v1/accounts`):
 

@@ -325,16 +325,26 @@ class MergeDevAdapter(ErpAdapter):
 def _merge_po_to_payload(raw: dict) -> PoPayload:
     """Map a Merge.dev PO record to our normalized PoPayload.
 
-    Merge's `vendor` field is either an expanded object (when
-    `expand=vendor` was passed) or a bare ID string. We only get a
-    name back in the expanded case — fall back to None otherwise so
-    the API endpoint can still create the PO row, just without a
-    vendor link.
+    Merge's `vendor` is the supplier's Merge object id: an expanded object
+    (when `expand=vendor` was passed) carrying it as `id`, or the bare id
+    string. That id is ``vendor_erp_id`` — the Merge ``id`` ``list_vendors``
+    reports as ``erp_vendor_id`` — so the sync links the PO by id, not by name,
+    which a rename breaks and two suppliers can share. The name is read only
+    from the expanded object.
+
+    A line's `account` is a Merge Account id (a UUID), not an account code, so
+    it is not ``gl_account``: stored as one it would be a code no chart row
+    has. Nothing persists or reads a PO line's GL account, so lines carry none
+    rather than costing the pull a chart read (the QuickBooks PO sync's rule).
     """
     vendor = raw.get("vendor")
     vendor_name: str | None = None
+    vendor_erp_id: str | None = None
     if isinstance(vendor, dict):
         vendor_name = vendor.get("name") or vendor.get("contact_name")
+        vendor_erp_id = vendor.get("id") or None
+    elif isinstance(vendor, str):
+        vendor_erp_id = vendor or None
 
     raw_status = (raw.get("status") or "").upper()
     status = _MERGE_PO_STATUS_MAP.get(raw_status, "open")
@@ -349,7 +359,6 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
                 quantity=_to_decimal(li.get("quantity")),
                 unit_price=_to_decimal(li.get("unit_price")),
                 total=_to_decimal(li.get("total_line_amount")),
-                gl_account=(li.get("account") if isinstance(li.get("account"), str) else None),
             )
         )
 
@@ -372,6 +381,7 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
     return PoPayload(
         po_number=raw.get("number") or raw.get("transaction_number") or raw.get("id") or "UNKNOWN",
         vendor_name=vendor_name,
+        vendor_erp_id=str(vendor_erp_id) if vendor_erp_id else None,
         total=total,
         status=status,
         expected_delivery_date=expected_delivery_date,

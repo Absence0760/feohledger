@@ -424,8 +424,46 @@ def test_merge_dev_list_pos_maps_response_into_po_payloads():
     assert p.line_items[0].quantity == Decimal("5")
     assert p.line_items[0].unit_price == Decimal("100")
     assert p.line_items[0].total == Decimal("500")
-    assert p.line_items[0].gl_account == "6010"
-    assert p.line_items[1].gl_account is None  # absent in payload
+    # `account` is a Merge Account id, not a code: never stored as one.
+    assert [li.gl_account for li in p.line_items] == [None, None]
+
+
+def test_merge_dev_list_pos_carries_the_vendor_id_list_vendors_reports():
+    """A PO names its vendor by the Merge id ``list_vendors`` stamps as
+    ``erp_vendor_id`` — expanded (``{"id": ...}``) or bare — so the sync links
+    it by id: a vendor renamed since the PO was raised and a second vendor with
+    the same name both resolve to the right one."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    vendors = {
+        "results": [
+            {"id": "mv-acme-1", "name": "Acme"},
+            {"id": "mv-acme-2", "name": "Acme"},
+            {"id": "mv-bolt", "name": "Bolt Ltd"},
+        ],
+        "next": None,
+    }
+    pos = {
+        "results": [
+            {"number": "PO-1", "vendor": {"id": "mv-acme-2", "name": "Acme"}},
+            {"number": "PO-2", "vendor": "mv-bolt"},
+            {"number": "PO-3", "vendor": None},
+        ],
+        "next": None,
+    }
+
+    async def get(url, **_kw):
+        return _make_mock_response(200, pos if url.endswith("/purchase-orders") else vendors)
+
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(side_effect=get)
+        vendor_ids = {v.erp_vendor_id for v in _run(adapter.list_vendors())}
+        by_number = {p.po_number: p.vendor_erp_id for p in _run(adapter.list_pos())}
+
+    assert by_number == {"PO-1": "mv-acme-2", "PO-2": "mv-bolt", "PO-3": None}
+    assert {"mv-acme-2", "mv-bolt"} <= vendor_ids
 
 
 def test_merge_dev_list_pos_maps_expected_delivery_date():
