@@ -15398,3 +15398,37 @@ a failed re-match rolling the mark back, the base default),
 `test_erp_syspro_adapter.py` (`test_list_pos_report_names_every_po_it_skips_and_why`,
 `test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping`),
 `test_migration_0123_po_total_unverifiable.py`.
+
+**Amendment (2026-10-26): the sync's re-match raises holds, never clears them.**
+A product-owner decision, **pending the CISO / Security Analyst review** the
+note above asks for. It answers that note's question for the sync itself:
+anyone with ERP access could raise a PO total and close an over-billing
+`po_mismatch` at sync time with no FeohLedger sign-off, and ERP-side actors are
+outside the implicated set `segregation_refusal` checks.
+
+- The PO sync passes `erp_po_sync` to `refresh_invoices_citing_pos`, and
+  `invoice_warnings._reconcile_po_exceptions` then never calls
+  `_close_cleared_po_exceptions`. The re-match may still open or keep a
+  `po_mismatch` / `quality_hold`. This replaces "lifts the same way" in *When it
+  lands*. Re-pricing a marked PO clears the mark, not the hold.
+- A row the re-match no longer finds stays open and payment-blocking, with
+  `erp_report = {"kind": "po_rematch_clears", "erp_type", "po_number",
+  "observed_on"}`: §319's machine-detail column, PII-free, so a reviewer can see
+  why the row now reads as clearable. Clearing it is a person's action through
+  `record_decision`, under its segregation checks. A later refresh that finds
+  the finding again removes the note.
+- Refreshes a FeohLedger action triggers (invoice save, receipt, QMS sync) keep
+  their auto-close. Before §323 the sync re-matched nothing (checked against
+  `5f833334^`), so this leaves every human-triggered path as it was. The
+  residual: an ERP-side increase can still let the hold lift at the invoice's
+  next FeohLedger edit, as it could before §323. That is the open question for
+  the CISO review (`docs/followups.md`). The note is not yet rendered by either
+  client (also `docs/followups.md`).
+- *Considered and rejected:* closing on sync when the invoice is still
+  pre-approval, as the relink rule does. An approver still reviews the invoice,
+  but not the ERP edit, and the payment gate is where this control has to hold.
+
+Guards: `test_purchase_orders.py` (`test_sync_erp_raising_a_po_total_never_clears_the_hold`:
+the run is still refused; `test_sync_erp_lowering_a_po_total_opens_a_blocking_hold`;
+`test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before`; and the
+re-price leg of `test_sync_erp_marks_an_already_synced_po_the_adapter_now_skips`).

@@ -179,8 +179,37 @@ unstamped row — the row a later priced sync clears). While it is set:
 The sync re-matches the invoices citing a PO whose mark or total changed, in the
 same transaction and not best-effort, so the hold lands at sync time or the sync
 fails and the mark is rolled back with it. The next sync that prices the PO
-clears the mark and lifts the hold the same way (`_close_cleared_po_exceptions`,
-with the org's own settings, so its past-approval and segregation limits hold).
+clears the mark — but **not the hold**.
+
+**A sync's re-match raises holds and never clears one** (decisions §323,
+amended 2026-10-26 — a product-owner call pending CISO review). That covers
+every re-match the PO sync runs, whether the ERP changed a total or re-priced a
+marked PO, and both PO-match types (`po_mismatch`, `quality_hold`). Whoever can
+edit a PO in the ERP is outside the invoice's implicated set (§267's receipt
+recorder has no ERP twin), so a sync that closed holds would let an ERP-side
+total increase release an over-billing hold at sync time with no FeohLedger
+sign-off. The sync passes `erp_po_sync` to `refresh_invoices_citing_pos`, and
+`invoice_warnings._reconcile_po_exceptions` then, instead of calling
+`_close_cleared_po_exceptions`, leaves a row it no longer finds **open and
+payment-blocking** and records why it now reads as clearable in the row's
+`erp_report`:
+
+```json
+{"kind": "po_rematch_clears", "erp_type": "syspro", "po_number": "PO-1001", "observed_on": "2026-10-26"}
+```
+
+PII-free (the ERP type, the PO number matched, the UTC day). `GET
+/api/exceptions` returns it with the rest of the row. A person clears the hold
+through the queue (`exception_lifecycle.record_decision`, with its segregation
+refusal). Any later refresh that finds the finding again — a sync lowering the
+total back, an invoice edit — removes the note from the still-open row.
+
+Refreshes a FeohLedger action triggers (an invoice save, a receipt, the QMS
+sync) are unchanged: they keep the auto-close below, as they had before §323.
+So an ERP-side increase can still let the hold lift at the invoice's *next*
+FeohLedger edit, under that close's past-approval and segregation limits — the
+behaviour that predates §323, and part of the question left to the CISO
+review.
 
 Budget commitments and spend analytics still sum `purchase_orders.total`
 without regard to the mark — reporting, not a payment path; tracked in
@@ -189,7 +218,10 @@ without regard to the mark — reporting, not a payment path; tracked in
 Covered by `test_po_matching_algorithm.py` (the two matcher cases),
 `test_po_matching_wiring.py` (the raise rule and the pure predicate agree),
 `test_purchase_orders.py::test_sync_erp_marks_an_already_synced_po_the_adapter_now_skips`
-(sync → mark → hold → re-price → clear, end to end) and
+(sync → mark → hold → re-price → the mark clears, the hold stays annotated, end
+to end), `test_sync_erp_lowering_a_po_total_opens_a_blocking_hold`,
+`test_sync_erp_raising_a_po_total_never_clears_the_hold` (the run stays
+refused), `test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before` and
 `test_exception_agents_missing_po.py`.
 
 ### Cancelled receipts do not count as delivered goods
@@ -526,6 +558,11 @@ callers. A receipt re-matches every invoice that cites its PO in the same
 transaction (`invoice_warnings.refresh_invoices_citing_pos`), so the hold lifts
 — or is raised — the moment the receipt lands. Nothing re-evaluates an
 untouched invoice on a schedule.
+
+**The ERP PO sync is the one refresh that never closes a row** — it may only
+raise. A row it no longer finds stays open, annotated
+`erp_report.kind = "po_rematch_clears"`, for a person to clear (§ A PO total
+the ERP no longer vouches for, above; decisions §323, amended).
 
 ### Quality-hold exceptions
 The 4-way leg routes inspection outcomes to a dedicated `quality_hold`

@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**153 open: 129 (c) · 12 (a) · 12 (b)** — re-derived from the file, never carried
+**155 open: 131 (c) · 12 (a) · 12 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1032,6 +1032,36 @@ or is a sibling of a fix that needs its own pass.
       as a separate "unconfirmed" figure.
       **Trigger:** the first customer on SYSPRO (or Blackbaud once wired) whose
       sync reports `unverifiable > 0`, or the next budgets / portal-PO change.
+- [ ] **(c) The "re-check now matches" note on a sync-held exception is data
+      only — no client renders it.** An ERP PO sync's re-match never clears a
+      hold (decisions §323, amended); a row it no longer finds stays open with
+      `erp_report = {"kind": "po_rematch_clears", "erp_type", "po_number",
+      "observed_on"}`. `GET /api/exceptions` returns it, but the web queue reads
+      `erp_report` only for `paid_not_recorded` and mobile not at all, so the
+      reviewer sees the original finding with nothing saying the PO total has
+      since changed in the ERP and the re-check now matches.
+      **Durable fix:** an `isPoRematchClears(report)` helper beside
+      `isErpPaidReport` in `frontend/src/lib/types/erpReport.ts`, one catalogued
+      line on `/exceptions` (all six locales: "PO {poNumber} changed in
+      {erpName} on {date}; a re-check now matches — review to clear", date
+      through the locale helper), and the same on the mobile exception detail
+      screen (`app_*.arb`).
+      **Trigger:** the next change to the exceptions queue on either client, or
+      the first customer report of a sync-held hold nobody can explain.
+- [ ] **(c) ⚠️ CISO REVIEW — an ERP-side PO increase can still lift a hold at
+      the invoice's next FeohLedger edit.** The product owner ruled that the
+      sync's own re-match is hold-only (decisions §323, amended, pending CISO
+      review). Refreshes a FeohLedger action triggers kept their pre-§323
+      auto-close (`invoice_warnings._close_cleared_po_exceptions`), so after the
+      ERP raises a total, the next invoice save / receipt re-match still closes
+      the `po_mismatch` under that close's past-approval and segregation
+      limits — none of which see who edited the PO in the ERP.
+      **Durable fix (if the review wants it):** record on the PO when its total
+      last changed by sync (or keep the `po_rematch_clears` note as the marker)
+      and have `_close_cleared_po_exceptions` refuse to close a `po_mismatch`
+      whose clearing depends on a total the ERP changed after the row was
+      raised; or accept the residual and record that in decisions §323.
+      **Trigger:** the CISO / Security Analyst review §323 asks for.
 
 ### Surfaced by the procurement bug hunt (2026-10-05, PR #498)
 
