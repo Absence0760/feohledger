@@ -35,7 +35,7 @@ from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
-from app.models.procurement import POLineItem, PurchaseOrder
+from app.models.procurement import POLineItem, PurchaseOrder, po_vouched_money
 from app.models.supplier_chat import ChatAuthorRole, ChatThreadStatus, SupplierChatMessage
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
@@ -947,7 +947,8 @@ async def list_my_purchase_orders(
                 id=str(po.id),
                 po_number=po.po_number,
                 status=po.status,
-                total=po.total,
+                total=po_vouched_money(po, po.total),
+                total_unverifiable=bool(po.total_unverifiable_reason),
                 currency=po.currency,
                 line_item_count=n,
                 created_at=po.created_at,
@@ -983,15 +984,16 @@ async def get_my_purchase_order(
         id=str(po.id),
         po_number=po.po_number,
         status=po.status,
-        total=po.total,
+        total=po_vouched_money(po, po.total),
+        total_unverifiable=bool(po.total_unverifiable_reason),
         currency=po.currency,
         created_at=po.created_at,
         line_items=[
             PortalPOLineItem(
                 description=li.description,
                 quantity=li.quantity,
-                unit_price=li.unit_price,
-                total=li.total,
+                unit_price=po_vouched_money(po, li.unit_price),
+                total=po_vouched_money(po, li.total),
             )
             for li in lines
         ],

@@ -100,6 +100,24 @@ class PurchaseOrder(Base, EntityMixin, TimestampMixin):
     )
 
 
+#: SQL predicate: this PO's stored figures are ones the ERP still vouches for.
+#: Every aggregate that sums `PurchaseOrder.total` (budget commitments, the
+#: open-PO and GR/IR accrual legs) filters on it and COUNTS what it leaves out,
+#: rather than summing a total the last sync could not confirm (decisions §323,
+#: and §35 for excluded-and-counted).
+PO_TOTAL_VOUCHED = PurchaseOrder.total_unverifiable_reason.is_(None)
+
+
+def po_vouched_money(po: PurchaseOrder, value: Decimal | None) -> Decimal | None:
+    """``value`` — the PO's total or one of its line figures — or ``None``.
+
+    ``None`` while ``total_unverifiable_reason`` is set: the figure came from a
+    sync the ERP has since stopped confirming, so no surface may present it as
+    the PO's (decisions §323). Display paths route every PO money field through
+    this; the reason itself travels beside it so the reader is told why."""
+    return None if po.total_unverifiable_reason else value
+
+
 class POLineItem(Base, TimestampMixin):
     __tablename__ = "po_line_items"
 
