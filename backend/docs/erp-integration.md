@@ -1520,7 +1520,8 @@ concurrent edit or a lock; Business Central answers a stale etag with 409).
 Every other 4xx (400, 403, 404, 422, …) is the ERP's answer to the bill itself,
 so the invoice fails on the first attempt with `retries: 1` instead of sending
 the same refused bill three times over six seconds. Blackbaud's SKY quota (403
-with `Retry-After`) stays retryable. A manual `POST /{id}/retry-erp` after the
+with `Retry-After`) stays retryable, and the next attempt is refused before
+any call (`erp_call_budget_exhausted`) while the `Retry-After` lasts. A manual `POST /{id}/retry-erp` after the
 fix is unchanged.
 
 **A failure that left a bill in the ERP names it.** Examples are a
@@ -2281,13 +2282,15 @@ Every call carries **two** credentials: the bearer token, and the SKY developer
 subscription key as `Bb-Api-Subscription-Key`. The key belongs to the developer
 account, not to a customer environment, so one platform key serves every
 tenant; the environment is burned into the token. The "Standard APIs" product's
-quota (10 calls/s, 25,000 calls/day) is **per subscription**, so every tenant on
-the platform key draws on one bucket — see *Call budget* below.
+quota (10 calls/s, 25,000 calls/day, reset at 00:00 UTC) is **per subscription**,
+so every tenant on the platform key draws on one bucket — see *Call budget* below.
 
 | Setting | Secret | Meaning |
 |---|---|---|
 | `FEOH_ERP_BLACKBAUD_CLIENT_ID` / `_CLIENT_SECRET` | secret: yes | Platform SKY application (one app, every tenant). Empty → unavailable |
 | `FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY` | **yes** | Platform subscription key. Empty and no tenant key → every post refuses `subscription_key_missing` before any call |
+| `FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA` | no | The subscription tier's daily quota (default 25,000, "Standard APIs"). No call is made past it on a key |
+| `FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET` | no | What one tenant on the **platform** key may spend a day (default 2,500; 0 = no per-tenant share). A tenant with its own key has its key's whole quota |
 | `settings.erp.ap_account_number` | no | AP liability account (`01-2000-00`) the invoice's Credit distribution posts to — **required** |
 | `settings.erp.currency` | no | ISO code of the FE NXT ledger — **required**; an invoice in another currency is refused |
 | `subscription_key` | **yes**, sealed (optional) | Tenant key overriding the platform one |
@@ -2356,8 +2359,14 @@ Request rules worth knowing:
   can fill the 500-row page. Only then is the search narrowed with
   ListInvoices' `from_date` / `to_date` to a day either side of the invoice
   date (documented as "after" / "before", so the window holds the date
-  whether they are inclusive or not), which every earlier attempt of ours
-  shares. The unnarrowed page is read first because it also catches a
+  whether they are inclusive or not) — and to each date an earlier attempt
+  of this push was sent with. `services/erp._call_erp` keeps those on
+  `WorkflowInstance.state_data["erp_attempt_invoice_dates"]` (recorded before
+  the call, cleared by a success, five at most) and hands the ones that differ
+  from the current date to the adapter as `InvoicePayload.prior_invoice_dates`:
+  an earlier attempt's bill carries the date it was sent with, and keyed on
+  the current date alone a retry after a date edit missed that bill and posted
+  a second one (decisions §322). The unnarrowed page is read first because it also catches a
   hand-keyed duplicate dated differently, which the narrowed one cannot. A
   failed lookup is a retryable failure; one still truncated after narrowing
   (more than 2,000 hits on that number within three days) is the
@@ -2382,14 +2391,32 @@ Request rules worth knowing:
   /vendors/{id}`, never the 400's body) and an `Inactive` one turns the
   uncoded `invalid_request` into `vendor_inactive`.
 - **Rate limits.** 429, and 403 with `Retry-After` (SKY's quota signal), map to
-  `rate_limited` from status and headers only. Nothing sleeps on them.
-- **Call budget.** A clean push costs about four calls: the lookup, the
-  create, one or two status reads and the result, plus the fiscal-year read
-  when it is not cached. That is why the lookup reads 500 rows a page,
-  the fiscal years are cached and the status poll backs off. All tenants on
-  the platform key share its 25,000 calls a day; a heavy tenant should
-  store its own `subscription_key`. A per-tenant budget and an org-visible
-  quota warning are open (`docs/followups.md`).
+  `rate_limited` from status and headers only. Nothing sleeps on them; the
+  call budget below records the `Retry-After` as a cool-down every tenant on
+  that key honours.
+- **Call budget** (`services/erp_call_budget.py`, decisions §322). A clean
+  push costs four or five calls: the lookup, the fiscal-year read when it is
+  not cached, the create, a status read and the result. Every SKY call is
+  counted in Redis per subscription key (a digest, never the key) and per
+  org, per UTC day. A tenant on the platform key may spend
+  `FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET` a day, and no tenant on a key
+  may take it past `FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA`. A 429 or a quota
+  403 records its `Retry-After` as a cool-down for the whole key. A push asks
+  for its worst case first (`push_call_reserve`: 14 calls, 6 more when it
+  reads an earlier job, 4 more per extra date searched) and then runs to the
+  end, so its refusal always comes before the first call:
+  `erp_call_budget_exhausted` with `params.reason` (`tenant_budget`,
+  `subscription_quota`, `rate_limited`) and `params.retry_after`. Only
+  `rate_limited` is retryable by the backoff; the others fail the invoice with
+  the reason, and the operator retries after the reset (an automatic re-send
+  at the reset is an open follow-up). A sync listing is refused call by call
+  (`ErpCallBudgetExhausted` → a coded 429 with `Retry-After`, nothing synced);
+  a status read is `unknown`; `list_pos` returns nothing. Org admins get an
+  `erp_call_quota` notice once a day each at 80% of the share, when the share
+  is used, and when the subscription's quota is. Redis down → the budget fails
+  open and SKY's own 403 is the backstop. A heavy tenant should still store its
+  own `subscription_key`; whether Blackbaud sells a higher-volume product for a
+  multi-tenant app is an operator question (`docs/followups.md`).
 - **Money** goes out through `dumps_exact_json` and is read back with
   `parse_float=Decimal`.
 - **Refusal reasons:** `vendor_not_linked` (also a non-numeric vendor id),
@@ -2397,7 +2424,8 @@ Request rules worth knowing:
   `ap_account_not_configured`, `currency_not_configured`, `currency_mismatch`,
   `invoice_date_missing`, `due_date_missing`, `amount_not_positive`,
   `duplicate_invoice_number`, `idempotency_lookup_incomplete`,
-  `period_closed`, `vendor_inactive`, `job_failed`, `job_unconfirmed`.
+  `period_closed`, `vendor_inactive`, `job_failed`, `job_unconfirmed`,
+  `erp_call_budget_exhausted`.
 
 Tests: `backend/tests/test_erp_blackbaud_adapter.py`, and end to end through the
 real OAuth connect `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`. fake-erp
