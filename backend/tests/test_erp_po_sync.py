@@ -585,6 +585,38 @@ def test_merge_dev_list_pos_reads_purchase_order_number():
     assert [(p.po_number, p.status) for p in pos] == [("PO-7", "open")]
 
 
+def test_merge_dev_list_pos_skips_a_po_with_no_number_or_id_never_a_shared_placeholder(caplog):
+    """The PO sync upserts by ``po_number``. Two records with neither a number
+    nor a Merge id used to both map to ``"UNKNOWN"``, so they landed in ONE
+    row, the second overwriting the first's vendor and total — a PO matched
+    against real invoices for an amount nobody issued. They are skipped, and
+    the log carries a count, never the record (vendor names, amounts)."""
+    import logging
+
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"purchase_order_number": "PO-7", "total_amount": 100},
+            {"total_amount": 500, "vendor": {"id": "c-1", "name": "Acme Secret Vendor"}},
+            {"purchase_order_number": "", "id": None, "total_amount": 900},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        with caplog.at_level(logging.WARNING, logger="app.services.erp_adapters.merge_dev"):
+            pos = _run(adapter.list_pos())
+
+    assert [p.po_number for p in pos] == ["PO-7"]
+    assert "UNKNOWN" not in {p.po_number for p in pos}
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("skipped 2 PO(s)" in m for m in messages), messages
+    assert not any("Acme Secret Vendor" in m or "500" in m for m in messages)
+
+
 def test_merge_dev_list_pos_follows_pagination_cursor():
     """A real Merge response splits big PO lists across pages joined by
     a `next` cursor. The adapter has to walk the chain or it'll silently

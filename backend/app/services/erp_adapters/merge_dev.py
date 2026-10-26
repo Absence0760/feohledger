@@ -1,5 +1,6 @@
 """Merge.dev unified API adapter — one integration for all ERPs."""
 
+import logging
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -25,6 +26,8 @@ from app.services.erp_adapters.base import (
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
+
+logger = logging.getLogger(__name__)
 
 
 def _to_decimal(v) -> Decimal | None:
@@ -243,6 +246,7 @@ class MergeDevAdapter(ErpAdapter):
         list comes back, capped at 1000 to bound memory.
         """
         items: list[PoPayload] = []
+        unnumbered = 0
         cursor: str | None = None
         params = {"page_size": "100", "expand": "vendor,line_items"}
 
@@ -264,12 +268,19 @@ class MergeDevAdapter(ErpAdapter):
 
                 body = resp.json() if resp.content else {}
                 for raw in body.get("results", []) or []:
-                    items.append(_merge_po_to_payload(raw))
+                    payload = _merge_po_to_payload(raw)
+                    if payload is None:
+                        unnumbered += 1
+                    else:
+                        items.append(payload)
 
                 cursor = body.get("next")
                 if not cursor:
                     break
 
+        if unnumbered:
+            # A count only: a PO record can carry vendor names and amounts.
+            logger.warning("Merge.dev PO sync skipped %d PO(s) with no number or id", unnumbered)
         return items
 
     async def _list_complete(self, path: str, params: dict[str, str]) -> list[dict]:
@@ -345,7 +356,7 @@ class MergeDevAdapter(ErpAdapter):
             return False
 
 
-def _merge_po_to_payload(raw: dict) -> PoPayload:
+def _merge_po_to_payload(raw: dict) -> PoPayload | None:
     """Map a Merge.dev PO record to our normalized PoPayload.
 
     Merge's `vendor` is the supplier's Merge object id: an expanded object
@@ -359,7 +370,24 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
     it is not ``gl_account``: stored as one it would be a code no chart row
     has. Nothing persists or reads a PO line's GL account, so lines carry none
     rather than costing the pull a chart read (the QuickBooks PO sync's rule).
+
+    A record with neither a number nor a Merge ``id`` maps to None and is
+    skipped. The sync upserts by ``po_number``, so a shared placeholder (this
+    used to be ``"UNKNOWN"``) would file every such PO into ONE row, each
+    overwriting the last one's vendor, total and lines — a PO nobody issued
+    for an amount nobody approved, matched against real invoices.
     """
+    po_number = (
+        # Merge's field is `purchase_order_number`; `number` and
+        # `transaction_number` are kept for records shaped the older way.
+        raw.get("purchase_order_number")
+        or raw.get("number")
+        or raw.get("transaction_number")
+        or raw.get("id")
+    )
+    if not po_number:
+        return None
+
     vendor = raw.get("vendor")
     vendor_name: str | None = None
     vendor_erp_id: str | None = None
@@ -402,13 +430,7 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
     raw_currency = raw.get("currency")
 
     return PoPayload(
-        # Merge's field is `purchase_order_number`; `number` and
-        # `transaction_number` are kept for records shaped the older way.
-        po_number=raw.get("purchase_order_number")
-        or raw.get("number")
-        or raw.get("transaction_number")
-        or raw.get("id")
-        or "UNKNOWN",
+        po_number=str(po_number),
         vendor_name=vendor_name,
         vendor_erp_id=str(vendor_erp_id) if vendor_erp_id else None,
         total=total,
