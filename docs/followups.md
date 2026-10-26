@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**148 open: 127 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
+**149 open: 128 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2008,9 +2008,9 @@ stay open.
       against live Xero or NetSuite POs, or the next change to the PO status
       vocabulary.
 - [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
-      Xero, QuickBooks, Business Central, Merge.dev, Sage Intacct and Sage
-      Accounting ZA fill `PoPayload.vendor_erp_id` (#652). NetSuite, SYSPRO
-      and Blackbaud FE NXT fall back to `vendor_name`, which a rename on
+      Xero, QuickBooks, Business Central, Merge.dev, Sage Intacct, Sage
+      Accounting ZA and Blackbaud FE NXT fill `PoPayload.vendor_erp_id` (#652).
+      NetSuite and SYSPRO fall back to `vendor_name`, which a rename on
       either side breaks, and which picks the wrong row when two vendors share
       a name. **Durable fix:** read each ERP's supplier id on the PO (the same
       id its `list_vendors` reports) into `vendor_erp_id`. **Trigger:** the
@@ -2033,6 +2033,24 @@ providers still have the same gap.
       none and make the Disconnect message say the grant must be removed at
       the provider. **Trigger:** the next change to either adapter's OAuth
       spec, or before either provider's platform app goes live.
+
+### Surfaced by the Blackbaud FE NXT API audit (#651, 2026-10-26)
+
+- [ ] **(c) Every Blackbaud tenant on the platform key shares one SKY call
+      quota, with no per-tenant budget.** The "Standard APIs" product allows
+      10 calls/s and 25,000 calls/day *per subscription*, and
+      `FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY` serves every tenant without its own
+      key. #651 cut the calls per push (one 500-row lookup page, cached fiscal
+      years, a backing-off status poll: about four calls), but one tenant's
+      bulk send or vendor sync can still exhaust the day for all of them, and
+      a quota 403 reaches the admin only as a failed push (`rate_limited`).
+      **Durable fix:** count SKY calls per tenant against a share of the daily
+      budget and defer (not fail) pushes past it; raise an org-visible quota
+      notice from a 403 + `Retry-After`; and ask Blackbaud whether a
+      higher-volume product exists for a multi-tenant app, else require heavy
+      tenants to store their own `subscription_key`. **Trigger:** before a
+      second production tenant connects through the platform key, or the first
+      `rate_limited` push in production.
 
 ### Surfaced by refusing the ERP push for an invoice already being paid (2026-10-21, decisions §309)
 
@@ -2460,7 +2478,14 @@ as oversights.
       `Reference` limits, OData filters, `CurrencyId` for home-currency
       suppliers, account categories, and delete in a locked period.
       **Blackbaud:** an empty `transaction_code_values`, the description
-      length, and job latency.
+      length, and job latency; which date ListInvoices' `from_date` /
+      `to_date` filter on and whether they are inclusive (the adapter
+      queries a day either side, `#651` B5); whether a closed period, an
+      inactive vendor or a missing project fails the create (400) or the
+      background job (status 7), and whether `PreClosed` years take
+      postings (B4, B7); and whether the cohort sandbox can read
+      `/generalledger/v1/fiscalyears` (a 403 is treated as "cannot
+      check").
       **Why blocked:** each needs a sandbox or developer-programme account.
       **Durable fix:** run each adapter's post / status / sync / void against
       its sandbox, then correct the adapter and fake-erp together.
@@ -2498,7 +2523,10 @@ as oversights.
       tenant brings its own app (decisions §270). Steps: register each app
       with the redirect URI `FEOH_API_PUBLIC_URL/api/erp/oauth/callback`. For
       Intuit, also pass the production app assessment and publish real
-      Disconnect / Reconnect pages; for Blackbaud, buy a SKY API subscription.
+      Disconnect / Reconnect pages; for Blackbaud, subscribe the SKY developer
+      account to the "Standard APIs" product (free, no approval: 10
+      calls/s and 25,000/day per subscription), and check whether the
+      Blackbaud Partner Program terms apply to a commercial multi-tenant app.
       Then put `FEOH_ERP_QBO_*`, `FEOH_ERP_XERO_*`,
       `FEOH_ERP_SAGE_ACCOUNTING_*` and `FEOH_ERP_BLACKBAUD_*` (client id,
       secret, subscription key) in `infra-secrets/feohledger/prod.sops.yaml`.

@@ -2231,7 +2231,9 @@ stores a token.
 Every call carries **two** credentials: the bearer token, and the SKY developer
 subscription key as `Bb-Api-Subscription-Key`. The key belongs to the developer
 account, not to a customer environment, so one platform key serves every
-tenant; the environment is burned into the token.
+tenant; the environment is burned into the token. The "Standard APIs" product's
+quota (10 calls/s, 25,000 calls/day) is **per subscription**, so every tenant on
+the platform key draws on one bucket — see *Call budget* below.
 
 | Setting | Secret | Meaning |
 |---|---|---|
@@ -2248,10 +2250,10 @@ tenant; the environment is burned into the token.
 
 | Operation | Call |
 |---|---|
-| `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>` → `POST /accountspayable/v1/invoices/process` → `GET …/backgroundProcess/{id}/status` (≤ 10 reads, 1 s apart) → `…/result` |
+| `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>&limit=500` (narrowed by `from_date`/`to_date` only when that page is full) → `GET /generalledger/v1/fiscalyears` (cached 15 min per environment) → `POST /accountspayable/v1/invoices/process` (on a 400, `GET /vendors/{id}`) → `GET …/backgroundProcess/{id}/status` (≤ 5 reads, backing off 1, 2, 4, 8 s) → `…/result` |
 | `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (a zero balance stays open until FE NXT says `Paid`, decisions §303), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
 | `void_invoice` | not automated (`False`): the AP API has no invoice delete, and cancelling a posted payable is an adjustment in an open period |
-| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort; template and deleted POs skipped; PO `currency` stays NULL |
+| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), with `vendor_status` `Inactive` **and `OnHold`** emitted `active=False`; POs 10 pages best-effort, linked to their vendor by `vendor_id` (`PoPayload.vendor_erp_id`); template and deleted POs, and a PO with no `order_total`, skipped; PO `currency` stays NULL |
 | `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take), up to `SYNC_LISTING_MAX_ROWS`; `prevent_data_entry` accounts emitted `active=False`; `account_type` unclassified (FE NXT's `class` is a net-asset class) |
 | `test_connection` | an `environment_id` was captured at consent + `GET /accountspayable/v1/vendors?limit=1` |
 
@@ -2272,14 +2274,18 @@ Request rules worth knowing:
   outcome we cannot confirm — still running after the bounded poll, or a
   429 / 403-quota / error while asking — is **non-retryable** `job_unconfirmed`:
   `services/erp` backs off for seconds and a re-submit while the first job runs
-  would create a second invoice. A job that reports canceled/failed is
-  retryable. The unconfirmed result carries the job's `process_id` as
+  would create a second invoice. A job that reports **failed** (status 7) is
+  the non-retryable `job_failed`: nothing says the failure is transient, so
+  the backoff re-sending it would fail the same way. The job's
+  `status_message` is never read (it can echo the payload). A **canceled**
+  job (6) stays retryable. The unconfirmed result carries the job's `process_id` as
   `ErpPostResult.pending_job_id`; `services/erp._call_erp` keeps it on
   `WorkflowInstance.state_data["erp_pending_job_id"]` and hands it back as
   `InvoicePayload.pending_job_id` on the next attempt. An operator's retry
   therefore polls that job first: completed → its invoice is the result (and
   the stored job is cleared); still running or unreadable → `job_unconfirmed`
-  again, nothing queued; canceled/failed → the normal lookup-then-post path.
+  again, nothing queued; canceled or failed → the normal lookup-then-post
+  path (a failed job made nothing, and the retry may follow a config fix).
 - **Transport errors are "unconfirmed", never retryable.** Any
   `httpx.HTTPError` (timeout, connect, read) once the create has been sent is
   `job_unconfirmed`, not an exception for `services/erp` to back off and
@@ -2296,21 +2302,75 @@ Request rules worth knowing:
   `[feoh:<id>]` (description bounded to 60 characters so the marker survives).
   A row with the same vendor and invoice number, not `Deleted`, carrying our
   marker is the earlier attempt; one without it is refused as
-  `duplicate_invoice_number`. A failed or truncated lookup is a failure.
+  `duplicate_invoice_number`. `search_text` matches vendor name, description
+  and PO number as well as the invoice number, so a common number ("1001")
+  can fill the 500-row page. Only then is the search narrowed with
+  ListInvoices' `from_date` / `to_date` to a day either side of the invoice
+  date (documented as "after" / "before", so the window holds the date
+  whether they are inclusive or not), which every earlier attempt of ours
+  shares. The unnarrowed page is read first because it also catches a
+  hand-keyed duplicate dated differently, which the narrowed one cannot. A
+  failed lookup is a retryable failure; one still truncated after narrowing
+  (more than 2,000 hits on that number within three days) is the
+  non-retryable `idempotency_lookup_incomplete`.
+- **Closed periods are refused before the create.** The post date (the
+  invoice date) is checked against `GET /generalledger/v1/fiscalyears`: a
+  year whose `status` is `Closed` or `Purged`, or a period of it marked
+  `closed`, refuses `period_closed`, so nothing is queued. The check runs
+  after the idempotency lookup, so an invoice an earlier attempt already
+  posted is reported rather than refused. The read is cached for 15 minutes
+  per environment. A 403 (some sandboxes lack the GL permission) or any
+  other failure is "cannot check", never "open" or "closed": the create
+  goes ahead and FE NXT judges the date itself. A date no fiscal year covers
+  is left to FE NXT too, and `PreClosed` is not treated as closed.
+- **Inactive and on-hold vendors.** `list_vendors` emits `Inactive` and
+  `OnHold` vendors with `active=False`: the sync creates no payee for one and
+  marks a linked vendor inactive. `OnHold` still takes an invoice in FE NXT,
+  but FE NXT holds its payments, and paying it from FeohLedger would go
+  around that hold — so the vendor is surfaced, not paid. Lifting the hold
+  in FE NXT does not reactivate the local vendor; that stays a person's call.
+  When the create answers 400, the vendor is read once (`GET
+  /vendors/{id}`, never the 400's body) and an `Inactive` one turns the
+  uncoded `invalid_request` into `vendor_inactive`.
 - **Rate limits.** 429, and 403 with `Retry-After` (SKY's quota signal), map to
   `rate_limited` from status and headers only. Nothing sleeps on them.
+- **Call budget.** A clean push costs about four calls: the lookup, the
+  create, one or two status reads and the result, plus the fiscal-year read
+  when it is not cached. That is why the lookup reads 500 rows a page,
+  the fiscal years are cached and the status poll backs off. All tenants on
+  the platform key share its 25,000 calls a day; a heavy tenant should
+  store its own `subscription_key`. A per-tenant budget and an org-visible
+  quota warning are open (`docs/followups.md`).
 - **Money** goes out through `dumps_exact_json` and is read back with
   `parse_float=Decimal`.
 - **Refusal reasons:** `vendor_not_linked` (also a non-numeric vendor id),
   `account_not_linked`, `subscription_key_missing`,
   `ap_account_not_configured`, `currency_not_configured`, `currency_mismatch`,
   `invoice_date_missing`, `due_date_missing`, `amount_not_positive`,
-  `duplicate_invoice_number`.
+  `duplicate_invoice_number`, `idempotency_lookup_incomplete`,
+  `period_closed`, `vendor_inactive`, `job_failed`, `job_unconfirmed`.
 
 Tests: `backend/tests/test_erp_blackbaud_adapter.py`, and end to end through the
 real OAuth connect `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`. fake-erp
 surface: `/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_URL`,
-`FEOH_ERP_BLACKBAUD_AUTHORIZE_URL`).
+`FEOH_ERP_BLACKBAUD_AUTHORIZE_URL`). The fake carries an `Inactive` and an
+`OnHold` vendor (the create refuses the first with FE NXT's 400), fiscal years
+2024–2030 with FY 2024 `Closed` and Jan–Mar 2025 closed (a create posting
+there is refused), account `01-5900-00` whose job ends at status 7, a PO with
+no `order_total`, ListInvoices' `from_date` / `to_date` (read strictly) and its
+full `search_text` match, and `POST /blackbaud/__seed-invoices` for
+hand-keyed rows.
+
+Read from the live SKY API definitions (the APIM developer-portal data API,
+2026-10-26): `VendorStatus` = `Active, Inactive, OnHold`;
+`PurchaseOrderSummary.vendor_id` (int32); `BackgroundProcessStatus` 0–7 with
+6 canceled and 7 failed; ListInvoices `limit` ≤ 500 with `from_date` /
+`to_date` and the four-field `search_text`; `FiscalYear.status` = `Open,
+PreClosed, Closed, Purged, Optimized` and `FiscalPeriod.closed`. Still
+unverified without an FE NXT environment: which date `from_date` / `to_date`
+filter on and whether they are inclusive, whether FE NXT refuses a closed
+period or an inactive vendor on the create or in the job, and whether
+`PreClosed` takes postings (`docs/followups.md`).
 
 ## Business Central: chart, POs and void
 
