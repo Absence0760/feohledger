@@ -58,6 +58,7 @@ from app.models.report_definition import ReportDefinition
 from app.models.sanctions_check import SanctionsCheck
 from app.models.scheduled_report import ScheduledReport
 from app.models.signup import EmailVerification
+from app.models.subprocessor_notice import SubprocessorNotice
 from app.models.supplier_chat import (
     ChatAuthorRole,
     ChatThreadStatus,
@@ -97,6 +98,7 @@ __all__ = [
     "WebhookSubscription",
     "WebhookDelivery",
     "WorkspaceClosure",
+    "SubprocessorNotice",
     # Tenant-scoped models
     "AgentDecision",
     "AuditLog",

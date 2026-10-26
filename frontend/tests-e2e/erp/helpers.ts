@@ -58,6 +58,7 @@ const ERP_SECRET_FIELDS = new Set([
 	'client_secret',
 	'consumer_secret',
 	'token_secret',
+	'private_key',
 	'password',
 	'subscription_key',
 	'operator_password',

@@ -74,6 +74,7 @@ def _dotenv(overrides: dict[str, str | None] | None = None) -> str:
     values: dict[str, str | None] = {
         **REQUIRED,
         "FEOH_EXTRACTION_PROVIDER": "mock",
+        "FEOH_SUBPROCESSOR_NOTICES_ENABLED": "true",
         **(overrides or {}),
     }
     lines = ["# ── Deploy-level ──"]
@@ -451,6 +452,20 @@ def test_an_unreadable_iam_flag_is_refused(deploy: Deploy, flag: str) -> None:
     result = deploy.run(_iam({"FEOH_DATABASE_IAM_AUTH": flag}))
     _assert_refused_and_kept(deploy, result)
     assert "not a boolean" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("value", "warns"),
+    [(None, True), ("", True), ("false", True), ("true", False), ("True", False), ("1", False)],
+)
+def test_warns_when_the_subprocessor_notice_sweep_is_off(
+    deploy: Deploy, value: str | None, warns: bool
+) -> None:
+    """The DPA says sub-processor notices are emailed (decisions §321); a deploy
+    with the sweep off is told so every run, but is not blocked."""
+    result = deploy.run(_dotenv({"FEOH_SUBPROCESSOR_NOTICES_ENABLED": value}))
+    assert result.returncode == 0, result.stderr
+    assert ("WARN: FEOH_SUBPROCESSOR_NOTICES_ENABLED" in result.stderr) is warns
 
 
 def test_deploy_sh_decrypts_only_through_decrypt_env() -> None:

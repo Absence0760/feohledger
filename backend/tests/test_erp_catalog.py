@@ -81,6 +81,14 @@ def test_catalogue_entries_are_well_formed():
             # changes; it learns which fields those are from this flag only.
             # The backend's own rule (`destination_keys`) reads the same flag.
             assert f["destination"] is (f["name"] in catalog.destination_keys(_block(entry))), f
+            # A conditional field names a sibling choice field and one of its
+            # options; a typo would hide the field for good.
+            if "show_when" in f:
+                by_name = {g["name"]: g for g in entry["fields"]}
+                choice = by_name[f["show_when"]["field"]]
+                assert set(f["show_when"]["values"]) <= set(choice["options"]), f
+            if "stored_default" in f:
+                assert f["stored_default"] in f["options"], f
         if entry["auth"] == "oauth":
             # OAuth providers: the BYO-app pair is optional, never required.
             assert not any(f["required"] for f in entry["fields"] if f["secret"])
@@ -112,6 +120,12 @@ def test_existing_direct_adapters_keep_their_fields():
     by_key = {e["key"]: {f["name"]: f for f in e["fields"]} for e in catalog.ERP_PROVIDERS}
     assert set(by_key["netsuite"]) == {
         "account_id",
+        "auth_method",
+        # OAuth 2.0 client credentials (issue #653)
+        "client_id",
+        "certificate_id",
+        "private_key",
+        # Token-Based Authentication, kept for integrations created before 2027.1
         "consumer_key",
         "consumer_secret",
         "token_id",
@@ -126,7 +140,29 @@ def test_existing_direct_adapters_keep_their_fields():
         "company_id",
     }
     assert by_key["netsuite"]["token_secret"]["secret"] is True
+    assert by_key["netsuite"]["private_key"]["secret"] is True
     assert by_key["dynamics_365_bc"]["client_secret"]["secret"] is True
+
+
+def test_netsuite_offers_oauth2_first_and_reads_a_saved_block_as_tba():
+    """A new NetSuite connection starts on OAuth 2.0 (TBA closes to new
+    integrations in 2027.1); a block saved before the choice existed has no
+    `auth_method`, which the adapter reads as TBA, and the form must show the
+    same — otherwise its first save would switch a working tenant to OAuth 2.0."""
+    from app.services.erp_adapters import netsuite
+
+    fields = {f["name"]: f for f in catalog.provider("netsuite")["fields"]}
+    method = fields["auth_method"]
+    assert method["options"][0] == netsuite.AUTH_OAUTH2_M2M
+    assert set(method["options"]) == set(netsuite.AUTH_METHODS)
+    assert method["stored_default"] == netsuite.AUTH_TBA
+    assert netsuite.NetSuiteAdapter({})._auth_method() == netsuite.AUTH_TBA
+    # Each method's fields show only under it, and are what the adapter needs.
+    for name, required in netsuite._REQUIRED_KEYS.items():
+        shown = {
+            f for f, spec in fields.items() if name in spec.get("show_when", {}).get("values", [])
+        }
+        assert shown == set(required), name
 
 
 def test_secret_keys_cover_every_secret_field_and_the_webhook_key():

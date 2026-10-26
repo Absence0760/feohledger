@@ -4,12 +4,15 @@ Emulates just enough of each provider's API surface to satisfy the backend's
 real ERP adapters (backend/app/services/erp_adapters/):
 
     /merge/api/accounting/v1/...            Merge.dev unified accounting API
-    /netsuite/services/rest/record/v1/...   NetSuite SuiteTalk REST (TBA)
+    /netsuite/services/rest/record/v1/...   NetSuite SuiteTalk REST (TBA or OAuth 2.0 bearer)
+    /netsuite/services/rest/auth/oauth2/v1/token   NetSuite OAuth 2.0 client credentials (M2M)
     /d365/...                               Dynamics 365 Business Central OData
 
 State is in-memory only (module-level dicts), fully deterministic, and
 resettable via POST /__reset. No external deps beyond fastapi + uvicorn, plus
-defusedxml for the request-supplied XML the SYSPRO routes parse.
+defusedxml for the request-supplied XML the SYSPRO routes parse and
+cryptography for the NetSuite OAuth 2.0 client-assertion signature check
+(`netsuite_oauth2.py`).
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from defusedxml import ElementTree as SafeET
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+import netsuite_oauth2
 import qbo_records
 import qbo_sandbox
 
@@ -647,18 +651,104 @@ def _netsuite_error(status: int, code: str, detail: str) -> ProviderError:
 
 
 def _require_netsuite_auth(request: Request) -> None:
-    """Loose OAuth 1.0 TBA check: header shape + required params only.
+    """Either sign-in method NetSuite accepts.
 
-    Does NOT verify the HMAC signature — presence of oauth_consumer_key,
-    oauth_token and oauth_signature in an `Authorization: OAuth ...` header
-    is enough for the fake.
+    * ``Bearer <token>`` (OAuth 2.0 client credentials): the token must be one
+      the fake's token endpoint issued (``netsuite_oauth2_token``) and not yet
+      expired — the assertion behind it was verified, signature included.
+    * ``OAuth ...`` (TBA): a loose check, header shape + required params only.
+      Does NOT verify the HMAC signature — presence of oauth_consumer_key,
+      oauth_token and oauth_signature is enough for the fake.
     """
     auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        expiry = _netsuite_oauth2_state()["tokens"].get(auth.removeprefix("Bearer ").strip())
+        if expiry is None or expiry <= time.time():
+            raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
+        return
     if not auth.startswith("OAuth"):
         raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
     for param in ("oauth_consumer_key", "oauth_token", "oauth_signature"):
         if f"{param}=" not in auth:
             raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
+
+
+# OAuth 2.0 client credentials (M2M). The token endpoint verifies the JWT
+# client assertion the way NetSuite does (`netsuite_oauth2.verify_token_request`:
+# alg, kid, signature, iss, aud, scope, iat/exp) against certificates registered
+# through `POST /__netsuite/oauth2/certificates` — the fake's stand-in for an
+# administrator mapping a certificate to the integration record. The mappings
+# live outside STATE, so `/__reset` (a parallel e2e worker's) never unmaps a
+# connection mid-run; issued tokens live in STATE and a reset expires them,
+# which the adapter recovers from by minting again on the 401.
+_NETSUITE_OAUTH2_CERTIFICATES: dict[str, netsuite_oauth2.Certificate] = {}
+
+
+def _netsuite_oauth2_state() -> dict[str, Any]:
+    return STATE.setdefault("netsuite_oauth2", {"tokens": {}, "counter": 0, "minted": 0})
+
+
+netsuite_oauth2_router = APIRouter(prefix="/netsuite/services/rest/auth/oauth2/v1")
+
+
+@netsuite_oauth2_router.post("/token")
+async def netsuite_oauth2_token(request: Request) -> dict:
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    form = {k: v[0] for k, v in parse_qs(raw).items()}
+    try:
+        netsuite_oauth2.verify_token_request(
+            form,
+            token_url=str(request.url.replace(query="")),
+            certificates=_NETSUITE_OAUTH2_CERTIFICATES,
+            now=int(time.time()),
+        )
+    except netsuite_oauth2.TokenError as exc:
+        raise ProviderError(400, exc.body()) from None
+    st = _netsuite_oauth2_state()
+    st["counter"] += 1
+    st["minted"] += 1
+    token = f"fake-ns-oauth2-token-{st['counter']}"
+    st["tokens"][token] = time.time() + netsuite_oauth2.TOKEN_LIFETIME_SECONDS
+    return {
+        "access_token": token,
+        "expires_in": netsuite_oauth2.TOKEN_LIFETIME_SECONDS,
+        "token_type": "Bearer",
+    }
+
+
+app.include_router(netsuite_oauth2_router)
+
+
+@app.post("/__netsuite/oauth2/certificates")
+async def netsuite_oauth2_register_certificate(body: dict) -> dict:
+    """Test hook: map a certificate (its public key, or the X.509 PEM) to an
+    integration's client id under ``certificate_id`` — what an administrator
+    does on NetSuite's OAuth 2.0 Client Credentials Setup page. Only the
+    PUBLIC half is ever sent here; the private key stays with the caller."""
+    try:
+        cert = netsuite_oauth2.register(
+            str(body.get("certificate_id") or ""),
+            str(body.get("client_id") or ""),
+            str(body.get("public_key_pem") or ""),
+        )
+    except ValueError as exc:
+        raise ProviderError(400, {"error": "invalid_request", "error_description": str(exc)})
+    _NETSUITE_OAUTH2_CERTIFICATES[cert.certificate_id] = cert
+    return {"status": "ok", "certificate_id": cert.certificate_id}
+
+
+@app.post("/__netsuite/oauth2/expire-tokens")
+async def netsuite_oauth2_expire_tokens() -> dict:
+    """Test hook: every issued bearer token stops working (NetSuite's 401 on
+    an expired token), so a test can prove the adapter mints a new one."""
+    _netsuite_oauth2_state()["tokens"].clear()
+    return {"status": "ok"}
+
+
+@app.get("/__netsuite/oauth2/stats")
+async def netsuite_oauth2_stats() -> dict:
+    """Test hook: how many tokens the endpoint has issued since the reset."""
+    return {"minted": _netsuite_oauth2_state()["minted"]}
 
 
 # Vendor and account internal ids. A vendorBill must reference both BY ID —
@@ -2932,12 +3022,15 @@ NETSUITE_SUITEQL_VENDOR_FIXTURES: list[dict] = [
 ]
 
 # SuiteQL purchase-order rows: `status` is the PurchOrd status letter
-# (B = Pending Receipt, H = Closed), `currency` the currency's ISO symbol.
+# (B = Pending Receipt, H = Closed), `currency` the currency's ISO symbol,
+# `vendorid` the `t.entity` internal id — a NETSUITE_SUITEQL_VENDOR_FIXTURES
+# `id` — and `vendorname` its display name (`BUILTIN.DF(t.entity)`).
 NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
     {
         "id": "501",
         "tranid": "PO-FAKE-NS-501",
         "status": "B",
+        "vendorid": "25",
         "vendorname": "Fake NetSuite Vendor A",
         "foreigntotal": 2100.50,
         "currency": "USD",
@@ -2947,6 +3040,7 @@ NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
         "id": "502",
         "tranid": "PO-FAKE-NS-502",
         "status": "H",
+        "vendorid": "26",
         "vendorname": "Fake NetSuite Vendor B",
         "foreigntotal": 640.00,
         "currency": "GBP",

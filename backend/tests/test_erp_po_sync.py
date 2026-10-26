@@ -302,7 +302,7 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     import json
 
     text = """{"items": [
-      {"id": "501", "tranid": "PO-501", "status": "B", "vendorname": "Acme",
+      {"id": "501", "tranid": "PO-501", "status": "B", "vendorid": 25, "vendorname": "Acme",
        "foreigntotal": 99999999999999.99, "currency": "usd", "duedate": "2026-06-01"},
       {"id": "502", "tranid": "PO-502", "status": "H", "vendorname": null,
        "foreigntotal": 640.00, "currency": null, "duedate": null},
@@ -327,6 +327,9 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     assert pos[0].total == Decimal("99999999999999.99")
     assert pos[0].currency == "USD"
     assert pos[0].vendor_name == "Acme"
+    # The vendor's internal id (`t.entity`), as the string `list_vendors` reports.
+    assert pos[0].vendor_erp_id == "25"
+    assert pos[1].vendor_erp_id is None  # absent: the name fallback only
     assert pos[0].expected_delivery_date == date(2026, 6, 1)
     assert pos[1].currency is None  # never defaulted
     assert pos[1].expected_delivery_date is None
@@ -334,9 +337,35 @@ def test_netsuite_list_pos_maps_suiteql_rows():
 
     query = json.loads(client.post.await_args.kwargs["content"])["q"]
     assert "FROM transaction" in query and "'PurchOrd'" in query
+    assert "t.entity AS vendorid" in query
     # Dates through TO_CHAR: SuiteQL otherwise formats them per user preference.
     assert "TO_CHAR(t.duedate, 'YYYY-MM-DD')" in query
     assert client.post.await_args.kwargs["headers"]["Prefer"] == "transient"
+
+
+def test_netsuite_po_links_to_the_vendor_id_list_vendors_reports_even_after_a_rename():
+    """Issue #652: the PO carries the same id the vendor sync stored, so a
+    vendor renamed in NetSuite (the PO still showing the old display name), or
+    two vendors sharing a name, still link to the right row."""
+    vendors = """{"items": [
+      {"id": 25, "entityid": "ACME-1", "companyname": "Acme Holdings (renamed)", "isinactive": "F"},
+      {"id": 26, "entityid": "ACME-2", "companyname": "Acme", "isinactive": "F"}
+    ], "hasMore": false}"""
+    pos = """{"items": [
+      {"id": "501", "tranid": "PO-501", "status": "B", "vendorid": 25, "vendorname": "Acme",
+       "foreigntotal": 10, "currency": "USD"}
+    ], "hasMore": false}"""
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_raw_json_response(200, vendors))
+        listed = _run(_netsuite_adapter().list_vendors())
+        client.post = AsyncMock(return_value=_raw_json_response(200, pos))
+        (po,) = _run(_netsuite_adapter().list_pos())
+
+    by_id = {v.erp_vendor_id: v for v in listed}
+    assert po.vendor_erp_id == "25"
+    # The id names the renamed vendor, not the one now called "Acme".
+    assert by_id[po.vendor_erp_id].name == "Acme Holdings (renamed)"
 
 
 def test_netsuite_list_pos_is_bounded_and_degrades():

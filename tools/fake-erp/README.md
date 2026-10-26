@@ -9,16 +9,31 @@ surfaces:
 | Prefix | Emulates | Adapter |
 |---|---|---|
 | `/merge/api/accounting/v1` | Merge.dev unified accounting API | `merge_dev.py` |
-| `/netsuite/services/rest/record/v1` | NetSuite SuiteTalk REST (OAuth 1.0 TBA) | `netsuite.py` |
+| `/netsuite/services/rest/record/v1` | NetSuite SuiteTalk REST (OAuth 1.0 TBA, or an OAuth 2.0 bearer) | `netsuite.py` |
+| `/netsuite/services/rest/auth/oauth2/v1/token` | NetSuite OAuth 2.0 client credentials (M2M) | `netsuite.py` |
 | `/d365` | Dynamics 365 Business Central OData v4 | `dynamics_365_bc.py` |
 
 ## Auth (fails 401 in each provider's error shape)
 
 - **Merge**: any non-empty `Authorization: Bearer …` **and** a non-empty
   `X-Account-Token` header.
-- **NetSuite**: an `Authorization: OAuth …` header containing
-  `oauth_consumer_key`, `oauth_token` and `oauth_signature` params. The HMAC
-  signature is **not** verified — shape only.
+- **NetSuite**: either sign-in NetSuite accepts.
+  - TBA: an `Authorization: OAuth …` header containing `oauth_consumer_key`,
+    `oauth_token` and `oauth_signature` params. The HMAC signature is **not**
+    verified — shape only.
+  - OAuth 2.0 client credentials (M2M): `Authorization: Bearer <token>` from
+    `POST /netsuite/services/rest/auth/oauth2/v1/token`, unexpired. That
+    endpoint **does** verify the JWT client assertion as NetSuite documents it
+    (`netsuite_oauth2.py`: `typ`, `alg` PS256/384/512 or ES256/384/512 — not
+    RS256 — `kid`, the signature, `iss` = the mapped client id, `aud` = its own
+    URL, `scope`, `iat`/`exp` under 60 minutes) and answers `{access_token,
+    expires_in: 3600, token_type: "Bearer"}`, or a 400 `{error,
+    error_description}`. Map a certificate first, as an administrator does:
+    `POST /__netsuite/oauth2/certificates {"certificate_id", "client_id",
+    "public_key_pem"}` (the PUBLIC key or X.509 PEM only; RSA 3072/4096 or EC
+    P-256/P-384/P-521). Mappings survive `/__reset`; issued tokens do not.
+    `POST /__netsuite/oauth2/expire-tokens` makes every bearer 401;
+    `GET /__netsuite/oauth2/stats` returns `{minted}`.
 - **D365**: `POST /d365/oauth2/token` (also `/d365/oauth2/v2.0/token` and
   `/d365/{tenant}/oauth2/v2.0/token`) accepts any `client_credentials` form
   POST with non-empty `client_id`/`client_secret` and returns
@@ -344,7 +359,8 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   A purchaseInvoice `Account` line must carry a posting account's `accountId`.
 - **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, `28`,
   and inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
-  (`PO-FAKE-NS-501` 2100.50 USD open, `PO-FAKE-NS-502` 640.00 GBP closed).
+  (`PO-FAKE-NS-501` 2100.50 USD open, vendor `25`; `PO-FAKE-NS-502` 640.00 GBP
+  closed, vendor `26` — each row's `vendorid` is the `t.entity` id).
   `DELETE /vendorBill/{id}` → 204 for a `pendingApproval` bill only
   (`/__set-status` with `"pendingApproval"`).
 

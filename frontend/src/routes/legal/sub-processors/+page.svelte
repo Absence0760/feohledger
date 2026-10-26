@@ -2,6 +2,7 @@
 	import LegalPage from '#lib/legal/LegalPage.svelte';
 	import Fact from '#lib/legal/Fact.svelte';
 	import { CONTACT, OPERATOR } from '#lib/legal/operator.ts';
+	import { NOTICE_PERIOD_DAYS, SUBPROCESSOR_CHANGES } from '#lib/legal/subprocessorChangelog.generated.ts';
 
 	/**
 	 * The public sub-processor register.
@@ -26,6 +27,13 @@
 	 * is the whole value of the register, and it is also the thing most likely
 	 * to rot: a change to an adapter's request body changes this page in the
 	 * same commit, and adds a § 10 change-log row.
+	 *
+	 * § 10 is not typed here. It renders `subprocessorChangelog.generated.ts`,
+	 * generated from `backend/app/services/subprocessor_changelog.py` — the
+	 * same entries the backend emails to every customer organisation's
+	 * administrators (`services/subprocessor_notices.py`, decisions §321). Add
+	 * a row there and run `pnpm gen:subprocessor-changelog`; § 9 describes
+	 * that mechanism, so it must change if the mechanism does.
 	 */
 </script>
 
@@ -860,13 +868,24 @@
 	</p>
 
 	<p>
-		The mechanism today is exactly this page: we update it, change the
-		last-updated date at the top, and record a dated row in § 10. There is no
-		automatic mailing list yet. If you want to be told directly rather than
-		having to check, write to
-		<a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> with the address
-		to notify and we will send the notice there. Objections go to the same
-		address; contractual questions about the Addendum go to
+		Each such change is recorded as a dated row in § 10 that states the date it
+		takes effect, and the same row is <strong>emailed to the active
+		administrators of each customer organisation</strong> that existed when it was
+		published. Recording the change and sending the notice are one step on our
+		side, not two: the row on this page and the email are produced from the same
+		entry, and we keep a record of when each organisation was sent it. The email
+		is a contractual notice, not a product notification, so it cannot be switched
+		off in notification settings, and it is in English, the language of the
+		<a href="/legal/dpa">Data Processing Addendum</a>.
+	</p>
+
+	<p>
+		It goes to your organisation's administrators because they are the contact
+		the service holds for your organisation; there is not yet a separate place to
+		record a privacy or data-protection contact. If someone else should also be
+		told, write to <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> with
+		the address to notify and we will copy the notice there by hand. Objections go
+		to the same address; contractual questions about the Addendum go to
 		<a href="mailto:{CONTACT.legal}">{CONTACT.legal}</a>.
 	</p>
 
@@ -878,6 +897,14 @@
 
 	<h2 id="change-log">10. Change log</h2>
 
+	<p>
+		Rows that carry a notice are the changes § 9 describes, and each is the notice
+		emailed to your administrators; its effective date is at least
+		{NOTICE_PERIOD_DAYS} days later unless the row gives the reason it is not. The
+		other rows record changes that add no sub-processor, replace none and change
+		nothing any of them receives, so no advance notice applied.
+	</p>
+
 	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="change-log">
 		<table>
 			<caption class="visually-hidden">History of changes to this register</caption>
@@ -885,33 +912,24 @@
 				<tr>
 					<th scope="col">Date</th>
 					<th scope="col">Change</th>
+					<th scope="col">Advance notice</th>
 				</tr>
 			</thead>
 			<tbody>
-				<tr>
-					<th scope="row">15 September 2026</th>
-					<td>Initial publication of the sub-processor register.</td>
-				</tr>
-				<tr>
-					<th scope="row">7 October 2026</th>
-					<td>The databases move from the EC2 instance's own disk to Amazon RDS, in the same region. RDS is added to § 2; the EC2 row no longer holds the databases.</td>
-				</tr>
-				<tr>
-					<th scope="row">9 October 2026</th>
-					<td>Your own WooCommerce store is added to § 4 as a system you control: a goods receipt can push stock quantities to it. It is not a sub-processor.</td>
-				</tr>
-				<tr>
-					<th scope="row">9 October 2026</th>
-					<td>Square (Block) is added to § 4 as a commerce platform you can connect: a goods receipt adds the received quantity to your own Square account's stock.</td>
-				</tr>
-				<tr>
-					<th scope="row">10 October 2026</th>
-					<td>Lightspeed Retail (X-Series) is added to § 4 as a commerce platform connection: your own store, receiving received-stock quantities against its own product identifiers.</td>
-				</tr>
-				<tr>
-					<th scope="row">10 October 2026</th>
-					<td>Cin7 Core (Cin7) is added to § 4 as a commerce platform connection: a goods receipt becomes a stock adjustment in your own Cin7 account, valued at Cin7's own average cost.</td>
-				</tr>
+				{#each SUBPROCESSOR_CHANGES as row (row.id)}
+					<tr>
+						<th scope="row">{row.publishedLabel}</th>
+						<td>{row.change}</td>
+						<td>
+							{#if row.notice}
+								Notice by email; takes effect {row.effectiveLabel}{#if row.urgentReason}. Shorter
+									than {NOTICE_PERIOD_DAYS} days because: {row.urgentReason}{/if}
+							{:else}
+								Not needed
+							{/if}
+						</td>
+					</tr>
+				{/each}
 			</tbody>
 		</table>
 	</div>

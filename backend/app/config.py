@@ -851,6 +851,16 @@ class Settings(BaseSettings):
     # an event re-sent after a lost marker write replays as the original.
     billing_ai_overage_sweep_interval_seconds: int = 3600
 
+    # Sub-processor change notices (`services/subprocessor_notices.py`, issue
+    # #427, decisions §321). The sweep emails every organisation's active
+    # administrators about each change-log entry that needs the DPA's 30-day
+    # notice, once per organisation, and records when. OFF by default like
+    # every sweep that emails, so local dev / tests never send one; it MUST be
+    # on in every deployment that has customers — the published DPA says the
+    # notice is emailed, and `deploy/decrypt-env.sh` warns when it is not.
+    subprocessor_notices_enabled: bool = False
+    subprocessor_notices_interval_seconds: int = 3600
+
     # SAML 2.0 SSO (Service-Provider side). Additive, separate code path from
     # OIDC; like OIDC it is gated PER-TENANT via Organization.settings.sso
     # (protocol="saml") — there is no global on/off, so a fresh clone + pnpm dev

@@ -196,6 +196,14 @@ jobs:
       - name: Pricing page is in sync with the plan catalogue
         run: python scripts/gen_pricing_catalog.py --check
 
+      # The published sub-processor change log (`/legal/sub-processors` § 10)
+      # is GENERATED from `app/services/subprocessor_changelog.py`, the same
+      # entries the customer-notice sweep emails (decisions.md §321, issue
+      # #427). It also refuses a notice entry with under 30 days' notice and no
+      # stated reason, so the DPA's period is checked here, not only promised.
+      - name: Sub-processor change log is in sync with the published register
+        run: python scripts/gen_subprocessor_changelog.py --check
+
       # The `backend-test` matrix below is partitioned by the committed
       # `backend/.test_durations`, and nothing regenerates that file on its own
       # (each shard uploads what it measured; `pnpm gen:test-durations` turns a
