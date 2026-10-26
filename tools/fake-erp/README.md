@@ -193,19 +193,33 @@ body starting `ERROR`, as SYSPRO's are.
   `GET /syspro/SYSPROWCFService/Rest/__sessions` reports how many are still
   open — the adapter should always leave it at 0.
 - `Query/Query?BusinessObject=COMFND` — tables `ApSupplier` (`0000001`,
-  `0000002`), `GenMaster` (`6100`, `6200` expense, `2000` liability),
-  `PorMasterHdr` / `PorMasterDetail` (`PO-SYS-501` 1250.00 open,
-  `PO-SYS-502` 980.50 complete) and the posted `ApInvoice` rows; `EQ`
-  expressions and `ReturnRows`.
-- `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier or
-  ledger code, a duplicate (supplier, invoice) and a distribution that does not
-  balance to `InvoiceAmount`.
+  `0000002`, and `0000003` with `OnHold=Y`), `GenMaster` (`6100`, `6200`
+  expense, `6300` expense with `AccOnHldFlag=Y`, `2000` creditors control with
+  `ControlAccFlag=Y`), `PorMasterHdr` / `PorMasterDetail` (`PO-SYS-501`
+  1250.00 open, `PO-SYS-502` 980.50 complete, `PO-SYS-503` a USD order whose
+  lines carry `MForeignPrice` 100.00 beside the local `MPrice` → 400.00 USD,
+  `PO-SYS-504` 3 × 20.00 plus a 45.50 misc-charge line and a comment line →
+  105.50), the posted `ApInvoice` rows and their `ApInvoicePay` rows.
+  `EQ` / `NE` / `GT` / `GE` / `LT` / `LE` expressions; rows come back sorted
+  by the `OrderBy` column and cut at `ReturnRows`, as COMFND's are — so a
+  caller has to page with a `GT` cursor.
+- `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier, a
+  supplier on hold (`Supplier '…' is on hold`), an unknown ledger code, one on
+  hold (`Ledger code '…' is on hold`), a control account (`… is a control
+  account and cannot be used`), a duplicate (supplier, invoice) and a
+  distribution that does not balance to `InvoiceAmount`. The wording is ours;
+  SYSPRO's is to be confirmed in a sandbox (docs/followups.md).
 - The `XmlIn` / `XmlParameters` documents are parsed with `defusedxml`, so a
   DTD or entity declaration is refused rather than expanded.
 - `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
   `{"supplier", "invoice", "balance"}`. `"0"` reads as settled with no
-  payment: SYSPRO's `ApInvoice` has no paid status, so the backend never reads
-  a zero balance as paid (docs/decisions.md §303).
+  payment: a zero balance with no `ApInvoicePay` payment row is never paid
+  (docs/decisions.md §303).
+- `POST /syspro/SYSPROWCFService/Rest/__pay` — test hook
+  `{"supplier", "invoice", "amount"?, "trn_type"?}`: records an `ApInvoicePay`
+  row (`TrnType` default `P`, a payment) and takes the amount (default: the
+  whole balance) off `MthInvBal1`. With `"trn_type": "A"` it is an adjustment
+  that zeroes the balance with no payment.
 ## Xero (`/xero/api.xro/2.0`)
 
 Backs `erp_adapters/xero.py`. Auth is shape-only: any non-empty

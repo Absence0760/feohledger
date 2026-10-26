@@ -1250,27 +1250,60 @@ app.include_router(intacct)
 syspro = APIRouter(prefix="/syspro/SYSPROWCFService/Rest")
 
 SYSPRO_SUPPLIERS: list[dict] = [
-    {"Supplier": "0000001", "SupplierName": "Fake SYSPRO Supplier A"},
-    {"Supplier": "0000002", "SupplierName": "Fake SYSPRO Supplier B"},
+    {"Supplier": "0000001", "SupplierName": "Fake SYSPRO Supplier A", "OnHold": "N"},
+    {"Supplier": "0000002", "SupplierName": "Fake SYSPRO Supplier B", "OnHold": "N"},
+    # On hold: SYSPRO's "inactive" supplier. Synced inactive; APSTIN refuses it.
+    {"Supplier": "0000003", "SupplierName": "Fake SYSPRO Supplier On Hold", "OnHold": "Y"},
 ]
 SYSPRO_GL: list[dict] = [
     {"GlCode": "6100", "Description": "Fake Office Supplies", "AccountType": "E"},
     {"GlCode": "6200", "Description": "Fake Software", "AccountType": "E"},
-    {"GlCode": "2000", "Description": "Fake Creditors Control", "AccountType": "L"},
+    # A ledger code on hold, and the creditors control account: AP Invoice
+    # Posting refuses both on a manually entered distribution.
+    {"GlCode": "6300", "Description": "Fake Suspended Costs", "AccountType": "E", "AccOnHldFlag": "Y"},
+    {
+        "GlCode": "2000",
+        "Description": "Fake Creditors Control",
+        "AccountType": "L",
+        "ControlAccFlag": "Y",
+    },
 ]
 SYSPRO_PO_HEADERS: list[dict] = [
     {"PurchaseOrder": "PO-SYS-501", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
     {"PurchaseOrder": "PO-SYS-502", "Supplier": "0000002", "OrderStatus": "9", "Currency": "ZAR"},
+    # A USD order: MPrice is the local (ZAR) price, MForeignPrice the USD one.
+    {"PurchaseOrder": "PO-SYS-503", "Supplier": "0000002", "OrderStatus": "4", "Currency": "USD"},
+    # A merchandise line, a miscellaneous charge (value, no qty x price) and a
+    # comment line.
+    {"PurchaseOrder": "PO-SYS-504", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
 ]
 SYSPRO_PO_DETAILS: list[dict] = [
-    {"PurchaseOrder": "PO-SYS-501", "MOrderQty": "10.000", "MPrice": "100.00"},
-    {"PurchaseOrder": "PO-SYS-501", "MOrderQty": "1.000", "MPrice": "250.00"},
-    {"PurchaseOrder": "PO-SYS-502", "MOrderQty": "2.000", "MPrice": "490.25"},
+    {"PurchaseOrder": "PO-SYS-501", "LineType": "1", "MOrderQty": "10.000", "MPrice": "100.00"},
+    {"PurchaseOrder": "PO-SYS-501", "LineType": "1", "MOrderQty": "1.000", "MPrice": "250.00"},
+    {"PurchaseOrder": "PO-SYS-502", "LineType": "1", "MOrderQty": "2.000", "MPrice": "490.25"},
+    {
+        "PurchaseOrder": "PO-SYS-503",
+        "LineType": "1",
+        "MOrderQty": "4.000",
+        "MPrice": "1830.00",
+        "MForeignPrice": "100.00",
+    },
+    {"PurchaseOrder": "PO-SYS-504", "LineType": "1", "MOrderQty": "3.000", "MPrice": "20.00"},
+    {
+        "PurchaseOrder": "PO-SYS-504",
+        "LineType": "5",
+        "MOrderQty": "0.000",
+        "MPrice": "0.00",
+        "NMscChargeValue": "45.50",
+    },
+    {"PurchaseOrder": "PO-SYS-504", "LineType": "6", "MOrderQty": "0.000", "MPrice": "0.00"},
 ]
 
 
 def _syspro_state() -> dict[str, Any]:
-    return STATE.setdefault("syspro", {"sessions": set(), "invoices": {}, "journal": 0})
+    return STATE.setdefault(
+        "syspro", {"sessions": set(), "invoices": {}, "payments": [], "journal": 0}
+    )
 
 
 def _syspro_text(body: str) -> Response:
@@ -1308,6 +1341,7 @@ def _syspro_table(name: str) -> list[dict]:
         "PorMasterHdr": SYSPRO_PO_HEADERS,
         "PorMasterDetail": SYSPRO_PO_DETAILS,
         "ApInvoice": invoices,
+        "ApInvoicePay": _syspro_state()["payments"],
     }
     if name not in tables:
         raise KeyError(name)
@@ -1335,6 +1369,18 @@ def _syspro_parse(document: str) -> ET.Element | None:
         return None
 
 
+#: COMFND ``Condition`` values (string comparison, as on the char key columns
+#: the adapter filters and pages by).
+_SYSPRO_CONDITIONS = {
+    "EQ": lambda a, b: a == b,
+    "NE": lambda a, b: a != b,
+    "GT": lambda a, b: a > b,
+    "GE": lambda a, b: a >= b,
+    "LT": lambda a, b: a < b,
+    "LE": lambda a, b: a <= b,
+}
+
+
 @syspro.get("/Query/Query")
 async def syspro_query(UserId: str = "", BusinessObject: str = "", XmlIn: str = "") -> Response:
     if UserId not in _syspro_state()["sessions"]:
@@ -1352,7 +1398,15 @@ async def syspro_query(UserId: str = "", BusinessObject: str = "", XmlIn: str = 
         return _syspro_text("ERROR: Table not available to COMFND")
     for expr in query.findall("Where/Expression"):
         column, value = expr.findtext("Column", ""), expr.findtext("Value", "")
-        rows = [r for r in rows if str(r.get(column, "")) == value]
+        compare = _SYSPRO_CONDITIONS.get(expr.findtext("Condition") or "EQ")
+        if compare is None:
+            return _syspro_text("ERROR: Invalid condition in Where expression")
+        rows = [r for r in rows if compare(str(r.get(column, "")), value)]
+    # COMFND returns the FIRST ReturnRows rows in OrderBy order — which is why
+    # a caller must page with a GT cursor rather than read one capped query.
+    order_by = query.findtext("OrderBy/Column")
+    if order_by:
+        rows = sorted(rows, key=lambda r: str(r.get(order_by, "")))
     rows = rows[: int(query.findtext("ReturnRows") or len(rows))]
     return _syspro_text(_syspro_rows_xml(table, rows, columns))
 
@@ -1374,16 +1428,28 @@ async def syspro_post(
         return _syspro_text("ERROR: Posting element missing")
     supplier = posting.findtext("Supplier", "")
     invoice = posting.findtext("Invoice", "")
-    if supplier not in {s["Supplier"] for s in SYSPRO_SUPPLIERS}:
+    suppliers = {s["Supplier"]: s for s in SYSPRO_SUPPLIERS}
+    if supplier not in suppliers:
         return _syspro_text(f"ERROR: Supplier '{supplier}' not on file")
+    if suppliers[supplier].get("OnHold") == "Y":
+        return _syspro_text(f"ERROR: Supplier '{supplier}' is on hold")
     if (supplier, invoice) in state["invoices"]:
         return _syspro_text(f"ERROR: Invoice '{invoice}' already on file")
     amount = Decimal(posting.findtext("InvoiceAmount", "0"))
-    known_gl = {g["GlCode"] for g in SYSPRO_GL}
+    ledgers = {g["GlCode"]: g for g in SYSPRO_GL}
     distributed = Decimal(0)
     for line in document.findall("Item/Distribution/DistributionLine"):
-        if line.findtext("LedgerCode", "") not in known_gl:
+        code = line.findtext("LedgerCode", "")
+        if code not in ledgers:
             return _syspro_text("ERROR: Ledger code not on file")
+        if ledgers[code].get("AccOnHldFlag") == "Y":
+            return _syspro_text(f"ERROR: Ledger code '{code}' is on hold")
+        if ledgers[code].get("ControlAccFlag") == "Y":
+            # AP Invoice Posting: manually entered ledger codes can't be
+            # control accounts.
+            return _syspro_text(
+                f"ERROR: Ledger code '{code}' is a control account and cannot be used"
+            )
         distributed += Decimal(line.findtext("DistributionValue", "0"))
     if distributed != amount:
         return _syspro_text("ERROR: Distribution does not balance to the invoice amount")
@@ -1409,6 +1475,31 @@ async def syspro_set_balance(body: dict) -> dict:
     if record is None:
         raise ProviderError(404, {"detail": "unknown invoice"})
     record["MthInvBal1"] = str(body.get("balance", record["MthInvBal1"]))
+    return {"status": "ok"}
+
+
+@syspro.post("/__pay")
+async def syspro_pay(body: dict) -> dict:
+    """Test hook: {"supplier", "invoice", "amount", "trn_type"?} — records an
+    ApInvoicePay row (``TrnType`` default "P", a payment) and takes the amount
+    off the balance, as an AP payment run or a manual cheque does. Pass another
+    ``trn_type`` (e.g. "A") for an adjustment that zeroes it with no payment."""
+    state = _syspro_state()
+    record = state["invoices"].get((body.get("supplier"), body.get("invoice")))
+    if record is None:
+        raise ProviderError(404, {"detail": "unknown invoice"})
+    amount = Decimal(str(body.get("amount", record["MthInvBal1"])))
+    state["journal"] += 1
+    state["payments"].append(
+        {
+            "Supplier": record["Supplier"],
+            "Invoice": record["Invoice"],
+            "TrnType": str(body.get("trn_type") or "P"),
+            "TrnValue": str(amount),
+            "PaymentNumber": f"{state['journal']:06d}",
+        }
+    )
+    record["MthInvBal1"] = str(Decimal(record["MthInvBal1"]) - amount)
     return {"status": "ok"}
 
 
