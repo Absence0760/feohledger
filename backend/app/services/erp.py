@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 from dataclasses import dataclass, field
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +39,15 @@ BASE_DELAY_SECONDS = 2
 #: ``WorkflowInstance.state_data`` key holding an ERP background job an earlier
 #: attempt queued but could not confirm (``ErpPostResult.pending_job_id``).
 PENDING_JOB_KEY = "erp_pending_job_id"
+
+#: ``WorkflowInstance.state_data`` key: the invoice dates (ISO) earlier attempts
+#: of this push sent, newest last, until one succeeds. An adapter whose
+#: duplicate lookup narrows by date (Blackbaud FE NXT) searches each of them as
+#: well as the current one, so a bill an earlier attempt may have created is
+#: still found after someone edits the invoice date (decisions §322). Bounded
+#: by :data:`_ATTEMPT_DATES_KEPT`.
+ATTEMPT_INVOICE_DATES_KEY = "erp_attempt_invoice_dates"
+_ATTEMPT_DATES_KEPT = 5
 
 #: ``WorkflowInstance.state_data`` keys naming a bill a failed attempt left in
 #: the ERP: a ``posted_total_mismatch`` the adapter could not void, a
@@ -425,6 +435,17 @@ def _possibly_posted_details(instance: WorkflowInstance | None) -> dict:
     return {}
 
 
+def _attempt_dates(state: dict) -> list[date]:
+    """:data:`ATTEMPT_INVOICE_DATES_KEY` as dates (an unreadable entry is skipped)."""
+    out: list[date] = []
+    for raw in state.get(ATTEMPT_INVOICE_DATES_KEY) or []:
+        try:
+            out.append(date.fromisoformat(str(raw)))
+        except ValueError:
+            continue
+    return out
+
+
 def _is_final(exc: BaseException) -> bool:
     """Would a re-send fail the same way? Then the push is not retried."""
     from app.services.erp_oauth import ErpNotConnectedError, ErpTokenRefreshError
@@ -687,6 +708,14 @@ async def _call_erp(
     refs = await _resolve_erp_refs(db, invoice, line_items, config)
     payload = _build_payload(invoice, line_items, refs)
     payload.pending_job_id = state.get(PENDING_JOB_KEY)
+    attempt_dates = _attempt_dates(state)
+    payload.prior_invoice_dates = [d for d in attempt_dates if d != payload.invoice_date]
+    if payload.invoice_date is not None and payload.invoice_date not in attempt_dates:
+        attempt_dates = [*attempt_dates, payload.invoice_date][-_ATTEMPT_DATES_KEPT:]
+    if attempt_dates:
+        # Recorded before the call, with the outcome-unknown flag: whatever this
+        # attempt does, a later one searches the date it was sent with.
+        state = {**state, ATTEMPT_INVOICE_DATES_KEY: [d.isoformat() for d in attempt_dates]}
     # Until the ERP answers, assume it may act on this request, and commit that
     # before the call: an exception out of the adapter reaches the caller's
     # failure path with it on the instance, and a worker that dies mid-call
@@ -726,7 +755,7 @@ async def _call_erp(
         if result.pending_job_id != payload.pending_job_id:
             new_state[PENDING_JOB_KEY] = result.pending_job_id
         if result.success:
-            for key in _ORPHAN_KEYS:
+            for key in (*_ORPHAN_KEYS, ATTEMPT_INVOICE_DATES_KEY):
                 new_state.pop(key, None)
         elif result.erp_document_id or result.erp_document_number:
             new_state[ORPHAN_DOCUMENT_ID_KEY] = result.erp_document_id

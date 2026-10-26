@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -20,10 +20,11 @@ import httpx
 import pytest
 
 from app.config import settings
-from app.services import erp_oauth
+from app.services import erp_call_budget, erp_oauth
 from app.services.erp_adapters import blackbaud_fe_nxt as bb
 from app.services.erp_adapters.base import (
     SYNC_LISTING_MAX_ROWS,
+    ErpCallBudgetExhausted,
     ErpInvoiceStatus,
     ErpListingIncomplete,
     InvoicePayload,
@@ -62,6 +63,19 @@ def _platform(monkeypatch):
         return "tok-abc"
 
     monkeypatch.setattr(BlackbaudFeNxtAdapter, "access_token", fake_token)
+
+
+@pytest.fixture(autouse=True)
+def quota_notices(monkeypatch):
+    """The call budget's admin notices, recorded instead of delivered (no DB)."""
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(org_id, *, notice, **_kwargs):
+        sent.append((str(org_id), notice.value))
+        return True
+
+    monkeypatch.setattr(erp_call_budget, "deliver_quota_notice", deliver)
+    return sent
 
 
 class FakeSky:
@@ -454,6 +468,38 @@ def test_a_busy_number_is_narrowed_to_the_invoice_date_not_failed():
     assert len(fake.of("POST", "/invoices/process")) == 1
 
 
+def test_a_retry_after_the_date_was_edited_still_finds_the_earlier_bill():
+    """Attempt 1 posted at 2026-01-01 and its outcome was lost; the invoice date
+    was then edited to 2026-01-11. The number is busy, so only the narrowed
+    search can see attempt 1's bill — keyed on the CURRENT date alone it looked
+    at 01-10..01-12, missed the bill and posted a second one (decisions §322).
+    ``services/erp`` hands back the date attempt 1 was sent with."""
+    fake = FakeSky()
+    ours = {
+        "invoice_id": 777,
+        "vendor_id": 136,
+        "invoice_number": "INV-1",
+        "description": f"{MARKER} Office supplies",
+        "invoice_date": "2026-01-01",
+        "status": "Pending",
+    }
+    fake.invoices = [*_busy(600), ours]
+    result = _post(
+        fake,
+        invoice_date=date(2026, 1, 11),
+        due_date=date(2026, 2, 10),
+        prior_invoice_dates=[date(2026, 1, 1)],
+    )
+    assert result.success and result.erp_document_id == "777"
+    assert fake.of("POST", "/invoices/process") == []
+    windows = [
+        (r.url.params["from_date"], r.url.params["to_date"])
+        for r in fake.of("GET", "/accountspayable/v1/invoices")
+        if "from_date" in r.url.params
+    ]
+    assert windows == [("2026-01-10", "2026-01-12"), ("2025-12-31", "2026-01-02")]
+
+
 def test_a_lookup_still_truncated_after_narrowing_is_a_coded_non_retryable_refusal():
     fake = FakeSky()
     fake.invoices = _busy(600, "2025-06-01") + _busy(2100, "2026-01-01")
@@ -709,6 +755,9 @@ def test_quota_403_with_retry_after_is_rate_limited():
     fake.list_headers = {"Retry-After": "3600"}
     result = _post(fake)
     assert result.message.endswith("HTTP 403 (rate_limited)")
+
+
+def test_403_without_retry_after_is_a_permission_refusal():
     fake = FakeSky()
     fake.list_status = 403
     assert _post(fake).message.endswith("HTTP 403 (forbidden)")
@@ -1090,3 +1139,188 @@ def test_oauth_endpoints_default_to_blackbaud_and_honour_the_overrides(monkeypat
     monkeypatch.setattr(settings, "erp_blackbaud_authorize_url", f"{fake}/authorization")
     assert oauth.authorize_endpoint(spec) == f"{fake}/authorization"
     assert oauth.token_endpoint(spec) == "https://oauth2.sky.blackbaud.com/token"
+
+
+# ---------------------------------------------------------------------------
+# The SKY call budget (services/erp_call_budget, decisions §322)
+# ---------------------------------------------------------------------------
+
+
+def _org_config(org_id: str, **extra) -> dict:
+    return {**CONFIG, **extra, "oauth": {"external_tenant_id": "p-env-123", "org_id": org_id}}
+
+
+def _budget_refusal(result) -> dict:
+    assert not result.success and result.not_posted
+    assert result.refusal_code == "erp_call_budget_exhausted"
+    assert result.refusal_provider == "Blackbaud FE NXT"
+    return result.refusal_params
+
+
+def test_a_quota_403_pauses_every_tenant_on_the_key_until_retry_after(quota_notices):
+    fake = FakeSky()
+    fake.list_status = 403
+    fake.list_headers = {"Retry-After": "3600"}
+    assert _post(fake, _org_config("org-a")).message.endswith("HTTP 403 (rate_limited)")
+    assert quota_notices == [("org-a", "subscription_quota")]
+
+    # Another tenant on the same platform key: refused before its first call,
+    # until SKY's Retry-After, and not retried by services/erp's backoff.
+    other = FakeSky()
+    result = _post(other, _org_config("org-b"))
+    params = _budget_refusal(result)
+    assert params["reason"] == "subscription_quota" and not result.retryable
+    assert other.requests == []
+    # The admins of each org hear once a day, however often they are refused.
+    _post(FakeSky(), _org_config("org-a"))
+    assert quota_notices.count(("org-a", "subscription_quota")) == 1
+
+
+def test_a_429_cools_the_key_down_briefly_and_stays_retryable(quota_notices):
+    fake = FakeSky()
+    fake.list_status = 429
+    fake.list_headers = {"Retry-After": "30"}
+    first = _post(fake)
+    assert first.retryable and first.message.endswith("HTTP 429 (rate_limited)")
+
+    second = FakeSky()
+    result = _post(second)
+    assert _budget_refusal(result)["reason"] == "rate_limited"
+    assert result.retryable  # seconds, not a day: the backoff may outlast it
+    assert second.requests == []
+    assert quota_notices == []  # a rate limit is not worth an admin's attention
+
+    adapter = BlackbaudFeNxtAdapter(CONFIG)
+    later = datetime.now(UTC) + timedelta(seconds=31)
+    assert asyncio.run(adapter.call_budget().check(now=later)) is None
+
+
+def test_a_tenant_on_the_platform_key_is_held_to_its_daily_share(monkeypatch, quota_notices):
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 18)
+    fake = FakeSky()
+    assert _post(fake, _org_config("org-a")).success
+    # A first push: lookup, fiscal years, create, status, result. The fiscal
+    # years are then cached, so the next costs four.
+    assert len(fake.requests) == 5
+    assert bb.push_call_reserve(False) == 14
+    # 5 spent + a 14-call reserve is more than 18: the next push never starts.
+    third = FakeSky()
+    result = _post(third, _org_config("org-a"))
+    params = _budget_refusal(result)
+    assert params["reason"] == "tenant_budget" and not result.retryable
+    assert params["retry_after"].endswith("T00:00:00+00:00")  # SKY resets at 00:00 UTC
+    assert third.requests == []
+    assert ("org-a", "tenant_budget") in quota_notices
+    # Another tenant's share is untouched.
+    assert _post(FakeSky(), _org_config("org-b")).success
+
+
+def test_the_share_warns_the_admins_at_80_percent_once(monkeypatch, quota_notices):
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 20)
+    budget = BlackbaudFeNxtAdapter(_org_config("org-a")).call_budget()
+
+    async def spend(n):
+        for _ in range(n):
+            await budget.record_call()
+
+    asyncio.run(spend(15))
+    assert quota_notices == []
+    asyncio.run(spend(3))  # 16 of 20 is 80%
+    assert quota_notices == [("org-a", "warning")]
+
+
+def test_a_tenant_with_its_own_key_is_not_held_to_the_platform_share(monkeypatch):
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 1)
+    own = _org_config("org-a", subscription_key="tenant-key")
+    assert _post(FakeSky(), own).success
+    assert _post(FakeSky(), own).success
+    # ...while its platform-key neighbours are.
+    assert not _post(FakeSky(), _org_config("org-b")).success
+
+
+def test_the_whole_keys_quota_refuses_every_tenant(monkeypatch, quota_notices):
+    monkeypatch.setattr(settings, "erp_blackbaud_daily_call_quota", 22)
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 0)
+    assert _post(FakeSky(), _org_config("org-a")).success
+    assert _post(FakeSky(), _org_config("org-b")).success  # 9 of 22 used
+    result = _post(FakeSky(), _org_config("org-c"))  # 9 + a 14-call reserve > 22
+    assert _budget_refusal(result)["reason"] == "subscription_quota"
+    assert ("org-c", "subscription_quota") in quota_notices
+
+
+def test_a_refused_push_keeps_the_earlier_attempts_job(monkeypatch):
+    # 19 < the 20-call reserve of a push that reads an earlier job first.
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 19)
+    fake = FakeSky()
+    result = _post(fake, _org_config("org-a"), pending_job_id="843")
+    assert _budget_refusal(result)["reason"] == "tenant_budget"
+    assert result.pending_job_id == "843"
+    assert fake.requests == []
+
+
+def test_a_sync_is_refused_call_by_call_and_returns_nothing(monkeypatch):
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 3)
+    fake = FakeSky()
+    fake.collections["/accountspayable/v1/vendors"] = [
+        {"vendor_id": i, "vendor_name": f"V{i}"} for i in range(450)
+    ]
+    adapter = BlackbaudFeNxtAdapter(_org_config("org-a"))
+    with pytest.raises(ErpCallBudgetExhausted) as caught:
+        _run(fake, adapter.list_vendors)
+    assert caught.value.reason == "tenant_budget"
+    assert len(fake.requests) == 3  # three pages paid for, the fourth never sent
+
+    from app.api.refusals import erp_pull_failure
+
+    http = erp_pull_failure(caught.value)
+    assert http.status_code == 429 and int(http.headers["Retry-After"]) >= 1
+    assert http.detail["code"] == "erp_call_budget_exhausted"
+    assert http.detail["params"]["reason"] == "tenant_budget"
+
+
+def test_a_status_read_under_a_cool_down_is_unknown_without_a_call():
+    fake = FakeSky()
+    fake.list_status = 429
+    fake.list_headers = {"Retry-After": "60"}
+    _post(fake)
+    status_fake = FakeSky()
+    status = _run(status_fake, lambda: BlackbaudFeNxtAdapter(CONFIG).get_invoice_status("4975"))
+    assert status is ErpInvoiceStatus.unknown
+    assert status_fake.requests == []
+
+
+def test_redis_unreachable_fails_open(monkeypatch):
+    async def down():
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(erp_call_budget, "get_redis", down)
+    assert _post(FakeSky()).success
+
+
+def test_retry_after_reads_seconds_and_http_dates_and_is_clamped():
+    now = datetime(2026, 10, 26, 12, 0, tzinfo=UTC)
+
+    def wait(value):
+        headers = {"Retry-After": value} if value is not None else {}
+        return erp_call_budget.retry_after_seconds(httpx.Response(429, headers=headers), now)
+
+    assert wait("120") == 120
+    assert wait("Mon, 26 Oct 2026 12:05:00 GMT") == 300
+    assert wait(None) == 1
+    assert wait("soon") == 1
+    assert wait("999999") == 86_400
+    assert erp_call_budget.next_reset(now) == datetime(2026, 10, 27, tzinfo=UTC)
+
+
+def test_a_notice_nobody_received_is_tried_again(monkeypatch, quota_notices):
+    attempts: list[str] = []
+
+    async def deliver(org_id, *, notice, **_kwargs):
+        attempts.append(notice.value)
+        return len(attempts) > 1  # the first finds no admin to tell
+
+    monkeypatch.setattr(erp_call_budget, "deliver_quota_notice", deliver)
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 1)
+    for _ in range(3):
+        _post(FakeSky(), _org_config("org-a"))
+    assert attempts == ["tenant_budget", "tenant_budget"]

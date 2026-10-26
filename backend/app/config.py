@@ -343,6 +343,14 @@ class Settings(BaseSettings):
     # Authorize-endpoint override (operator-trusted, non-secret). Empty →
     # Blackbaud's real one. Dev points it at fake-erp so the connect runs locally.
     erp_blackbaud_authorize_url: str = ""
+    # SKY call budget (services/erp_call_budget, decisions §322). SKY meters
+    # calls per subscription key and resets its daily quota at 00:00 UTC. The
+    # quota is the key's tier as Blackbaud states it (25,000 on "Standard
+    # APIs"); no call is made past it. The tenant budget is what ONE tenant on
+    # the shared platform key may spend a day (0 = no per-tenant share); a
+    # tenant with its own subscription_key has its key's whole quota.
+    erp_blackbaud_daily_call_quota: int = 25_000
+    erp_blackbaud_tenant_daily_call_budget: int = 2_500
     # ERP OAuth authorization-code connections (QuickBooks Online, Xero, Sage
     # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
     # `state` carried across the provider's consent redirect.

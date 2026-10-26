@@ -128,6 +128,15 @@ class _FakeRedis:
                 count += 1
         return count
 
+    async def incr(self, key: str) -> int:
+        # The ERP call budget's counters (`services/erp_call_budget.py`).
+        value = int(self._kv.get(key) or 0) + 1
+        self._kv[key] = str(value)
+        return value
+
+    async def expire(self, key: str, ttl: int) -> bool:  # noqa: ARG002 - TTL not simulated
+        return key in self._kv
+
     async def getdel(self, key: str):
         # Password-reset token consumption (`services/password_reset.py`) is
         # an atomic read+delete — GETDEL. Same non-enforced-TTL caveat as
@@ -177,6 +186,9 @@ def _autouse_fake_redis(monkeypatch):
     # the per-IP/per-account rate-limit buckets those routes also touch reset
     # between tests instead of accumulating for real across a whole suite run.
     monkeypatch.setattr("app.services.password_reset.get_redis", _get_redis)
+    # The ERP call budget counts every Blackbaud SKY call in Redis; stubbed so
+    # adapter tests count in memory, fresh per test.
+    monkeypatch.setattr("app.services.erp_call_budget.get_redis", _get_redis)
     return fake
 
 

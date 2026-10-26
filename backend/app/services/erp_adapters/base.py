@@ -87,6 +87,11 @@ class InvoicePayload:
     #: An adapter with asynchronous creates checks this job before queueing
     #: another, so a retry while the first is still running cannot post twice.
     pending_job_id: str | None = None
+    #: The invoice dates earlier attempts of this push were sent with, when
+    #: they differ from ``invoice_date`` (persisted by ``services/erp``). An
+    #: adapter whose duplicate lookup narrows by date searches these too, so
+    #: a bill an earlier attempt created is found after the date was edited.
+    prior_invoice_dates: list[date] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +306,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "amount_not_positive",
         "job_unconfirmed",
         "job_failed",
+        # `services/erp_call_budget`: the shared SKY call quota (decisions §322)
+        "erp_call_budget_exhausted",
         # `services/erp` itself: the sealed ERP credentials could not be opened
         "erp_credentials_unavailable",
         # `services/erp_export_gate`: an open duplicate / fraud exception (§286)
@@ -657,6 +664,29 @@ class ErpListingIncomplete(RuntimeError):
         self.collection = collection
         self.gap = gap
         super().__init__(f"{provider} {collection} listing incomplete: {gap.value}")
+
+
+#: Stable reason code: the adapter refused to spend an API call because the
+#: org's share of a shared provider quota is used, the whole subscription's
+#: quota is, or the provider asked us to slow down (``services/erp_call_budget``,
+#: decisions §322). ``params.reason`` says which and ``params.retry_after`` when
+#: (ISO-8601 UTC). Nothing was sent.
+ERP_CALL_BUDGET_EXHAUSTED = "erp_call_budget_exhausted"
+
+
+class ErpCallBudgetExhausted(RuntimeError):
+    """An ERP read refused before its call by ``services/erp_call_budget``.
+
+    Raised by a sync listing or status read; a push returns the coded
+    :data:`ERP_CALL_BUDGET_EXHAUSTED` result instead. PII-free: the provider
+    literal, a reason word and a UTC timestamp.
+    """
+
+    def __init__(self, provider: str, reason: str, retry_after: datetime):
+        self.provider = provider
+        self.reason = reason
+        self.retry_after = retry_after
+        super().__init__(f"{provider} call budget exhausted: {reason}")
 
 
 def sync_listing_pages(page_size: int) -> int:

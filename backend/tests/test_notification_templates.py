@@ -115,6 +115,44 @@ def test_every_event_renders():
                 )
                 assert "Reconnect" in lost.title and word in lost.body_text
             continue
+        if event_type == "erp_call_quota":
+            # A shared ERP API quota (decisions §322): an ERP name, call counts
+            # and the UTC reset, never an invoice's.
+            from datetime import UTC, datetime
+
+            from app.services.notification_templates import (
+                ERP_QUOTA_SUBSCRIPTION,
+                ERP_QUOTA_TENANT_BUDGET,
+                ERP_QUOTA_WARNING,
+                render_erp_call_quota,
+            )
+
+            reset = datetime(2026, 10, 27, tzinfo=UTC)
+            warn = render_erp_call_quota(
+                notice=ERP_QUOTA_WARNING,
+                erp_name="Blackbaud FE NXT",
+                used=2_000,
+                budget=2_500,
+                resets_at=reset,
+            )
+            assert "80%" in warn.title and "2,000 of its 2,500" in warn.body_text
+            used = render_erp_call_quota(
+                notice=ERP_QUOTA_TENANT_BUDGET,
+                erp_name="Blackbaud FE NXT",
+                used=2_500,
+                budget=2_500,
+                resets_at=reset,
+            )
+            assert "all 2,500" in used.body_text and "2026-10-27 00:00 UTC" in used.body_text
+            paused = render_erp_call_quota(
+                notice=ERP_QUOTA_SUBSCRIPTION,
+                erp_name="Blackbaud FE NXT",
+                used=None,
+                budget=25_000,
+                resets_at=reset,
+            )
+            assert "paused until 2026-10-27 00:00 UTC" in paused.title
+            continue
         rendered = render(event_type, _ctx())
         assert rendered.title
         assert rendered.body_text

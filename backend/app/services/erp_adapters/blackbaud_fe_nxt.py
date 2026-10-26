@@ -27,6 +27,10 @@ References (checked 2026-10):
 * Rate limits (429) and quotas (403 + ``Retry-After``) —
   https://developer.blackbaud.com/skyapi/docs/in-depth-topics/handle-common-errors
   and https://community.blackbaud.com/blogs/69/3799
+* Rate limit, quota figures and the 00:00 UTC quota reset, and "use the
+  ``Retry-After`` header, not a computed reset" (checked 2026-10-26) —
+  https://developer.blackbaud.com/skyapi/docs/getting-started/access-and-limits/rate-limits-and-quotas
+  and https://developer.blackbaud.com/skyapi/docs/in-depth-topics/api-request-throttling
 * Accounts Payable API (``/accountspayable/v1``) and General Ledger API
   (``/generalledger/v1``) reference —
   the "Accounts Payable" and "General Ledger" entries of the SKY API reference
@@ -114,8 +118,12 @@ posted); one without it is a document someone else entered for that vendor and
 number, and is refused as ``duplicate_invoice_number`` rather than posted twice.
 ``search_text`` also matches vendor name, description and PO number, so a
 common number ("1001") can match more than a page: the search is then narrowed
-to the invoice's own date with ListInvoices' ``from_date`` / ``to_date``, which
-every earlier attempt of ours shares. A failed lookup is a retryable failure;
+with ListInvoices' ``from_date`` / ``to_date`` to the invoice's own date AND to
+each date an earlier attempt was sent with (``InvoicePayload.
+prior_invoice_dates``, kept by ``services/erp``): an earlier attempt's bill
+carries the date it was sent with, and the invoice's may have been edited
+since — keyed on the current date alone, the retry missed that bill and posted
+a second one (decisions §322). A failed lookup is a retryable failure;
 one still truncated after narrowing is the non-retryable
 ``idempotency_lookup_incomplete``. Neither is ever read as "not posted yet".
 
@@ -129,15 +137,23 @@ ahead and FE NXT stays the judge. When the create itself answers 400, the
 vendor is read once (``GET /vendors/{id}``); an ``Inactive`` vendor turns the
 uncoded 400 into ``vendor_inactive``.
 
-**Rate limits.** SKY answers 429 for the per-second rate limit and 403 *with a
-``Retry-After`` header* for the call-volume quota. Both map to the stable
-reason ``rate_limited`` (from the status and header — never the body); nothing
-here sleeps on them. ``services/erp``'s bounded backoff is the only retry. The
-"Standard APIs" quota (10 calls/s, 25,000/day) is **per subscription**, so every
-tenant on the platform key shares one bucket. That is why the lookup reads 500
-rows a page, the fiscal years are cached and the status poll backs off rather
-than reading every second; a heavy tenant should bring its own
-``subscription_key``.
+**Rate limits and the call budget.** SKY answers 429 for the per-second rate
+limit and 403 *with a ``Retry-After`` header* for the daily call quota, which
+resets at 00:00 UTC. Both map to the stable reason ``rate_limited`` (from the
+status and header — never the body); nothing here sleeps on them. The quota is
+**per subscription key**, so every tenant on the platform key shares one
+bucket. That is why the lookup reads 500 rows a page, the fiscal years are
+cached and the status poll backs off — and why every SKY call goes through
+``services/erp_call_budget`` (decisions §322): it counts the call against the
+key and the org per UTC day, makes every tenant on the key honour a 429 / quota
+403's ``Retry-After``, and refuses a call the org's share
+(``FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET``, platform key only) or the
+key's quota (``FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA``) cannot pay for. A push
+asks for its worst case (:data:`PUSH_CALL_RESERVE`) before its first call and
+then runs to the end uncut, so a refusal (``erp_call_budget_exhausted``, with
+``reason`` and ``retry_after``) always lands before anything was sent; a sync
+listing is refused call by call (``ErpCallBudgetExhausted``, nothing synced).
+A heavy tenant should still bring its own ``subscription_key``.
 
 **Money** goes out through ``utils/json_money.dumps_exact_json`` (exact JSON
 numbers, the schema's ``number``/``decimal``) and is read back with
@@ -157,8 +173,11 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
+from app.services import erp_call_budget
 from app.services.erp_adapters.base import (
+    ERP_CALL_BUDGET_EXHAUSTED,
     VENDOR_NOT_LINKED,
+    ErpCallBudgetExhausted,
     ErpInvoiceStatus,
     ErpListingIncomplete,
     ErpPostResult,
@@ -235,6 +254,37 @@ _LOOKUP_MAX_PAGES = 4
 #: still takes an invoice in FE NXT, but FE NXT holds its payments, so paying
 #: it from FeohLedger would go around that hold.
 _UNPAYABLE_VENDOR_STATUSES = frozenset({"Inactive", "OnHold"})
+
+
+def job_watch_calls() -> int:
+    """The most SKY calls watching one job can make: each status read, the result."""
+    return len(PROCESS_POLL_DELAYS_SECONDS) + 1 + 1
+
+
+def lookup_dates(payload: InvoicePayload) -> list[date]:
+    """The dates the narrowed duplicate lookup searches: the invoice's own,
+    then each one an earlier attempt was sent with (``services/erp`` keeps them)."""
+    dates: list[date] = []
+    for when in [payload.invoice_date, *payload.prior_invoice_dates]:
+        if when is not None and when not in dates:
+            dates.append(when)
+    return dates
+
+
+def push_call_reserve(pending_job: bool, lookup_windows: int = 1) -> int:
+    """The most SKY calls one :meth:`BlackbaudFeNxtAdapter.post_invoice` can make.
+
+    The call budget is asked for this much before the first call, so a push
+    it lets start is never cut off half way (after the create, a refused call
+    would leave the job unconfirmed). Derived from the same constants the
+    push reads: the lookup (one page, then up to ``_LOOKUP_MAX_PAGES``
+    narrowed, per date searched), the fiscal years, the create, the 400's
+    vendor read, and the job watch — twice when an earlier attempt's job is
+    read first.
+    """
+    calls = 1 + _LOOKUP_MAX_PAGES * max(1, lookup_windows) + 1 + 1 + 1 + job_watch_calls()
+    return calls + (job_watch_calls() if pending_job else 0)
+
 
 #: ``(api base, environment id)`` → ``(expires at, fiscal years | None)``.
 #: None records "cannot check" (a permission refusal), so that is not re-asked
@@ -439,6 +489,60 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             raise BlackbaudConfigError(f"{PROVIDER}: no SKY API subscription key configured")
         return str(key)
 
+    def call_budget(self) -> erp_call_budget.CallBudget:
+        """This org's budget on the subscription key it calls with."""
+        own = self.config.get("subscription_key")
+        oauth = self.config.get("oauth") or {}
+        org = oauth.get("org_id") or oauth.get("external_tenant_id") or "unknown"
+        return erp_call_budget.CallBudget(
+            provider=self.erp_type,
+            erp_name=PROVIDER,
+            subscription_key=self.subscription_key(),
+            org_id=str(org),
+            shared=not own,
+            daily_quota=int(settings.erp_blackbaud_daily_call_quota),
+            tenant_budget=int(settings.erp_blackbaud_tenant_daily_call_budget),
+        )
+
+    def _client(self, *, timeout: float, enforce: bool) -> httpx.AsyncClient:
+        """:meth:`oauth_client` with every request counted against the call
+        budget and every 429 / quota 403 recorded as a cool-down.
+
+        ``enforce`` refuses a request the budget cannot pay for by raising
+        :class:`ErpCallBudgetExhausted` (never an ``httpx.HTTPError``) before
+        it is sent. A push passes False: it reserved its worst case up front,
+        and a call refused after its create would leave the job unconfirmed.
+        """
+        budget = self.call_budget()
+
+        async def on_request(request: httpx.Request) -> None:
+            if enforce:
+                refusal = await budget.check()
+                if refusal is not None:
+                    raise ErpCallBudgetExhausted(
+                        PROVIDER, refusal.reason.value, refusal.retry_after
+                    )
+            await budget.record_call()
+
+        async def on_response(response: httpx.Response) -> None:
+            await budget.record_response(response)
+
+        client = self.oauth_client(timeout=timeout)
+        client.event_hooks = {"request": [on_request], "response": [on_response]}
+        return client
+
+    def _budget_refusal(
+        self, refusal: erp_call_budget.BudgetRefusal, payload: InvoicePayload
+    ) -> ErpPostResult:
+        """Nothing was sent. An earlier attempt's job stays on the result, so
+        ``services/erp`` keeps it for the next attempt to read first."""
+        result = erp_preflight_refusal(PROVIDER, ERP_CALL_BUDGET_EXHAUSTED)
+        result.message = f"{result.message} ({refusal.reason.value})"
+        result.refusal_params = refusal.params()
+        result.retryable = refusal.retryable
+        result.pending_job_id = payload.pending_job_id
+        return result
+
     async def _headers(self) -> dict[str, str]:
         subscription_key = self.subscription_key()  # before the token: fail closed cheaply
         token = await self.access_token()
@@ -572,27 +676,32 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             return state
         if payload.invoice_date is None:  # pre-flight requires it; never guess a window
             return "incomplete", None
-        # ListInvoices documents from_date / to_date as "after" / "before" a
-        # date; a day either side holds the invoice date whether they are
-        # inclusive or not.
-        narrowed = await self._pages(
-            client,
-            headers,
-            f"{AP}/invoices",
-            {
-                **search,
-                "from_date": (payload.invoice_date - timedelta(days=1)).isoformat(),
-                "to_date": (payload.invoice_date + timedelta(days=1)).isoformat(),
-            },
-            max_pages=_LOOKUP_MAX_PAGES,
-            page_size=_LOOKUP_PAGE_SIZE,
-        )
-        if narrowed.failed is not None:
-            return "unavailable", failure_message("idempotency lookup", narrowed.failed)
-        state = self._match(narrowed.rows, payload)
-        if state[0] != "absent":
-            return state
-        if not narrowed.complete:
+        complete = True
+        for when in lookup_dates(payload):
+            # ListInvoices documents from_date / to_date as "after" / "before"
+            # a date; a day either side holds the date whether they are
+            # inclusive or not. Every date an earlier attempt was sent with is
+            # searched too: its bill carries that date, and the invoice's may
+            # have been edited since (decisions §322).
+            narrowed = await self._pages(
+                client,
+                headers,
+                f"{AP}/invoices",
+                {
+                    **search,
+                    "from_date": (when - timedelta(days=1)).isoformat(),
+                    "to_date": (when + timedelta(days=1)).isoformat(),
+                },
+                max_pages=_LOOKUP_MAX_PAGES,
+                page_size=_LOOKUP_PAGE_SIZE,
+            )
+            if narrowed.failed is not None:
+                return "unavailable", failure_message("idempotency lookup", narrowed.failed)
+            state = self._match(narrowed.rows, payload)
+            if state[0] != "absent":
+                return state
+            complete = complete and narrowed.complete
+        if not complete:
             # Retrying cannot shrink the result set: a coded refusal, never
             # the backoff re-asking the same truncated question.
             return "incomplete", None
@@ -661,8 +770,14 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         if isinstance(body, str):
             return erp_preflight_refusal(PROVIDER, body)
 
+        refusal = await self.call_budget().check(
+            reserve=push_call_reserve(bool(payload.pending_job_id), len(lookup_dates(payload)))
+        )
+        if refusal is not None:
+            return self._budget_refusal(refusal, payload)
+
         headers = await self._headers()
-        async with self.oauth_client(timeout=30) as client:
+        async with self._client(timeout=30, enforce=False) as client:
             if payload.pending_job_id:
                 # An earlier attempt queued a job we never saw finish. Its
                 # outcome decides; only a job that ended without creating the
@@ -801,11 +916,14 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         headers = await self._headers()
-        async with self.oauth_client(timeout=15) as client:
-            resp = await client.get(
-                f"{self._base()}{AP}/invoices/{quote(erp_document_id, safe='')}",
-                headers=headers,
-            )
+        try:
+            async with self._client(timeout=15, enforce=True) as client:
+                resp = await client.get(
+                    f"{self._base()}{AP}/invoices/{quote(erp_document_id, safe='')}",
+                    headers=headers,
+                )
+        except ErpCallBudgetExhausted:
+            return ErpInvoiceStatus.unknown
         if resp.status_code != 200:
             return ErpInvoiceStatus.unknown
         record = _json(resp)
@@ -823,9 +941,13 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         return False
 
     async def _sync_rows(self, path: str, collection: str) -> list[dict]:
-        """Every row of a collection, or :class:`ErpListingIncomplete` (base)."""
+        """Every row of a collection, or :class:`ErpListingIncomplete` (base).
+
+        :class:`ErpCallBudgetExhausted` when the call budget refuses a page:
+        nothing read is returned, so the sync changes nothing.
+        """
         headers = await self._headers()
-        async with self.oauth_client(timeout=30) as client:
+        async with self._client(timeout=30, enforce=True) as client:
             found = await self._pages(
                 client, headers, path, max_pages=sync_listing_pages(_PAGE_SIZE)
             )
@@ -894,7 +1016,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         """
         try:
             headers = await self._headers()
-            async with self.oauth_client(timeout=30) as client:
+            async with self._client(timeout=30, enforce=True) as client:
                 rows = (await self._pages(client, headers, f"{AP}/purchaseorders")).rows
         except Exception:
             return []
@@ -925,7 +1047,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         try:
             self.external_tenant_id()  # consent completed and captured
             headers = await self._headers()
-            async with self.oauth_client(timeout=10) as client:
+            async with self._client(timeout=10, enforce=False) as client:
                 resp = await client.get(
                     f"{self._base()}{AP}/vendors", params={"limit": "1"}, headers=headers
                 )

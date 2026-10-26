@@ -564,6 +564,47 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
     }
 
 
+@pytest.mark.asyncio
+async def test_call_erp_hands_each_earlier_attempts_invoice_date_to_the_next():
+    """An ERP whose duplicate lookup narrows by date (Blackbaud FE NXT) has to
+    search the date an earlier attempt was sent with, not only the invoice's
+    current one: an edit between a lost attempt and the retry would otherwise
+    hide the bill it made, and the retry would post a second (decisions §322).
+    The date is kept before the call and cleared by a success."""
+    from datetime import date
+
+    from app.services.erp import ATTEMPT_INVOICE_DATES_KEY, ErpPostFailedError, _call_erp
+    from app.services.erp_adapters.base import ErpPostResult
+
+    seen: list[tuple[date, list[date]]] = []
+    results = [
+        ErpPostResult(success=False, message="timed out"),
+        ErpPostResult(success=True, erp_document_id="FE-9"),
+    ]
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            seen.append((payload.invoice_date, list(payload.prior_invoice_dates)))
+            return results.pop(0)
+
+    invoice = _invoice()
+    invoice.invoice_date, invoice.due_date = date(2026, 1, 1), date(2026, 1, 31)
+    inst = _instance(state_data={"erp_retries": 0})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostFailedError):
+            await _call_erp(_line_items_db([]), invoice, {"type": "x"}, instance=inst)
+        assert inst.state_data[ATTEMPT_INVOICE_DATES_KEY] == ["2026-01-01"]
+
+        invoice.invoice_date = date(2026, 1, 11)  # edited before the retry
+        await _call_erp(_line_items_db([]), invoice, {"type": "x"}, instance=inst)
+
+    assert seen == [
+        (date(2026, 1, 1), []),
+        (date(2026, 1, 11), [date(2026, 1, 1)]),
+    ]
+    assert ATTEMPT_INVOICE_DATES_KEY not in inst.state_data
+
+
 # ---------------------------------------------------------------------------
 # _call_erp — line items reach the adapter payload.
 # ---------------------------------------------------------------------------
