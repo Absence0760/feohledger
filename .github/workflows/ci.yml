@@ -198,7 +198,7 @@ jobs:
 
       # The published sub-processor change log (`/legal/sub-processors` § 10)
       # is GENERATED from `app/services/subprocessor_changelog.py`, the same
-      # entries the customer-notice sweep emails (decisions.md §320, issue
+      # entries the customer-notice sweep emails (decisions.md §321, issue
       # #427). It also refuses a notice entry with under 30 days' notice and no
       # stated reason, so the DPA's period is checked here, not only promised.
       - name: Sub-processor change log is in sync with the published register

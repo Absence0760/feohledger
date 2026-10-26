@@ -607,7 +607,7 @@ to them, not appointing someone to process it on our behalf. These belong in the
 
   **The notice is one action: add an entry to the change log.**
   `backend/app/services/subprocessor_changelog.py` is the register's § 10 as
-  data (decisions §320, issue #427). For a change that needs notice — a new
+  data (decisions §321, issue #427). For a change that needs notice — a new
   sub-processor, a replacement, a provider promoted from "Configured only" to
   "Deployed — always", or a change to what an existing one receives — append a
   `ChangelogEntry` with `notice=True` and an `effective_on` at least 30 days

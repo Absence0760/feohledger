@@ -1,4 +1,4 @@
-"""The sub-processor change log's rules (issue #427, decisions §320).
+"""The sub-processor change log's rules (issue #427, decisions §321).
 
 The change log is the single source of the published § 10 table and of every
 notice sent to customers, so its rules are the 30-day promise in executable

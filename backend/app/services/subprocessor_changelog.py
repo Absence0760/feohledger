@@ -8,7 +8,7 @@ row on the page. Nothing told a customer, and nothing measured the 30 days.
 This module is the change log as data. Each :class:`ChangelogEntry` is one dated
 row of the register's § 10. Two things are derived from it, so that adding the
 row and notifying customers are ONE action rather than two
-(`docs/decisions.md` §320):
+(`docs/decisions.md` §321):
 
 - ``pnpm gen:subprocessor-changelog`` (``scripts/gen_subprocessor_changelog.py``)
   writes the published table, ``frontend/src/lib/legal/

@@ -1,6 +1,6 @@
 """Send the DPA's sub-processor change notice to every customer organisation.
 
-Issue #427 / `docs/decisions.md` §320. `/legal/dpa` § 8 promises at least 30
+Issue #427 / `docs/decisions.md` §321. `/legal/dpa` § 8 promises at least 30
 days' notice before a new sub-processor begins processing a customer's data.
 The change log is data (`services/subprocessor_changelog.py`); this module is
 the half that tells customers. Adding a ``notice=True`` entry to the change log

@@ -677,7 +677,7 @@ hostname, matching the endpoint's existing PII-free posture.
 ## Sub-processor change notices (contractual, not a notification event)
 
 `services/subprocessor_notices.py` emails the DPA's 30-day sub-processor change
-notice (decisions §320, issue #427). It is deliberately **outside** everything
+notice (decisions §321, issue #427). It is deliberately **outside** everything
 above: it is not a `NOTIFICATION_EVENT_TYPES` member, writes no in-app row and
 never goes through `notify_event`, because per-user preferences must not be able
 to switch off a notice the DPA promises. It calls `get_email_adapter()` directly,

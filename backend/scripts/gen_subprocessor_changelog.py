@@ -1,6 +1,6 @@
 """Generate the published sub-processor change log from the backend's data.
 
-Issue #427 / `docs/decisions.md` §320. `app/services/subprocessor_changelog.py`
+Issue #427 / `docs/decisions.md` §321. `app/services/subprocessor_changelog.py`
 is the change log as data; the same entries drive the notices emailed to
 customers (`services/subprocessor_notices.py`). This writes the table
 `/legal/sub-processors` § 10 renders, so the row a customer reads and the notice
@@ -65,7 +65,7 @@ def render() -> str:
         "//",
         "// /legal/sub-processors § 10 renders these rows. The same entries drive",
         "// the notice emailed to every customer organisation's administrators",
-        "// (backend/app/services/subprocessor_notices.py, docs/decisions.md §320),",
+        "// (backend/app/services/subprocessor_notices.py, docs/decisions.md §321),",
         "// so a row here and the notice a customer received cannot disagree.",
         "// Add a row in the Python module, never here.",
         "",

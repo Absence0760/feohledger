@@ -31,7 +31,7 @@
 	 * § 10 is not typed here. It renders `subprocessorChangelog.generated.ts`,
 	 * generated from `backend/app/services/subprocessor_changelog.py` — the
 	 * same entries the backend emails to every customer organisation's
-	 * administrators (`services/subprocessor_notices.py`, decisions §320). Add
+	 * administrators (`services/subprocessor_notices.py`, decisions §321). Add
 	 * a row there and run `pnpm gen:subprocessor-changelog`; § 9 describes
 	 * that mechanism, so it must change if the mechanism does.
 	 */

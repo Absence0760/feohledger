@@ -1,6 +1,6 @@
 """Sub-processor change notices reach each organisation once, on the record.
 
-Issue #427 / decisions §320: a ``notice=True`` change-log entry is emailed to
+Issue #427 / decisions §321: a ``notice=True`` change-log entry is emailed to
 every active administrator of every organisation that existed when it was
 published; the (entry, organisation) pair is claimed in
 ``subprocessor_notices`` before anything is sent, so a re-run or a second

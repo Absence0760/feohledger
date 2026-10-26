@@ -147,7 +147,7 @@ CONTROL_TABLES_EXEMPT: dict[str, str] = {
     "subprocessor_notices": (
         "The record that this organisation was given the sub-processor change "
         "notice the DPA promises (services/subprocessor_notices.py, decisions "
-        "§320). It is evidence of a contractual notice having been given, so it "
+        "§321). It is evidence of a contractual notice having been given, so it "
         "outlives the customer it was given to. Ids, dates and counts only — no "
         "address or name."
     ),

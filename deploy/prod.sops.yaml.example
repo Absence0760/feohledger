@@ -169,7 +169,7 @@ FEOH_SIGNUP_ENABLED: "false"
 # bills nothing — so it stays on in every deployment.
 FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED: "true"
 
-# ── Sub-processor change notices (issue #427, docs/decisions.md §320) ──
+# ── Sub-processor change notices (issue #427, docs/decisions.md §321) ──
 # The published DPA (§ 8) says every change-log entry that needs the 30-day
 # notice is EMAILED to each customer organisation's administrators; this sweep
 # is what sends it (backend/app/services/subprocessor_notices.py). Off, the DPA

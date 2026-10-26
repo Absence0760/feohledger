@@ -9,7 +9,7 @@ import {
 
 /**
  * The published § 10 change log is generated from the backend's change log
- * (`backend/app/services/subprocessor_changelog.py`, decisions §320), and the
+ * (`backend/app/services/subprocessor_changelog.py`, decisions §321), and the
  * notice email the backend sends names the objection address it was generated
  * with. These hold the two halves of that one promise together on this side.
  */

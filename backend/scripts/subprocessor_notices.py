@@ -1,7 +1,7 @@
 """Sub-processor change notices: what is owed, and sending it now.
 
 The sweep behind ``FEOH_SUBPROCESSOR_NOTICES_ENABLED`` sends these on its own
-(`services/subprocessor_notices.py`, `docs/decisions.md` §320). This is the
+(`services/subprocessor_notices.py`, `docs/decisions.md` §321). This is the
 operator's view of the same ledger, and a way to send without waiting a tick:
 
     python scripts/subprocessor_notices.py list    # entries + organisations still owed

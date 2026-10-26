@@ -160,7 +160,7 @@ fi
 
 # The published DPA (§ 8) says sub-processor change notices are emailed to
 # every customer's administrators; FEOH_SUBPROCESSOR_NOTICES_ENABLED runs the
-# sweep that sends them (docs/decisions.md §320). Off by default for local dev,
+# sweep that sends them (docs/decisions.md §321). Off by default for local dev,
 # so a deployment that forgot it would silently break a contractual statement.
 # Warns rather than refuses: a deploy is never blocked on it, but every run
 # says so until it is set — deploy/prod.sops.yaml.example § Sub-processor.

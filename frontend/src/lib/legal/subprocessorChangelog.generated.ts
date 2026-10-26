@@ -6,7 +6,7 @@
 //
 // /legal/sub-processors § 10 renders these rows. The same entries drive
 // the notice emailed to every customer organisation's administrators
-// (backend/app/services/subprocessor_notices.py, docs/decisions.md §320),
+// (backend/app/services/subprocessor_notices.py, docs/decisions.md §321),
 // so a row here and the notice a customer received cannot disagree.
 // Add a row in the Python module, never here.
 

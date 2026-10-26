@@ -844,7 +844,7 @@ class Settings(BaseSettings):
     billing_ai_overage_sweep_interval_seconds: int = 3600
 
     # Sub-processor change notices (`services/subprocessor_notices.py`, issue
-    # #427, decisions §320). The sweep emails every organisation's active
+    # #427, decisions §321). The sweep emails every organisation's active
     # administrators about each change-log entry that needs the DPA's 30-day
     # notice, once per organisation, and records when. OFF by default like
     # every sweep that emails, so local dev / tests never send one; it MUST be

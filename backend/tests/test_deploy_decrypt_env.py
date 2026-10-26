@@ -461,7 +461,7 @@ def test_an_unreadable_iam_flag_is_refused(deploy: Deploy, flag: str) -> None:
 def test_warns_when_the_subprocessor_notice_sweep_is_off(
     deploy: Deploy, value: str | None, warns: bool
 ) -> None:
-    """The DPA says sub-processor notices are emailed (decisions §320); a deploy
+    """The DPA says sub-processor notices are emailed (decisions §321); a deploy
     with the sweep off is told so every run, but is not blocked."""
     result = deploy.run(_dotenv({"FEOH_SUBPROCESSOR_NOTICES_ENABLED": value}))
     assert result.returncode == 0, result.stderr

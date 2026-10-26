@@ -80,7 +80,7 @@ pnpm gen:warning-messages     # regenerate the invoice-warning code → message-
 pnpm check:warning-messages   # its drift guard (same CI job; see backend/docs/invoice-warnings.md)
 pnpm gen:pricing              # regenerate the public pricing page's plan module from backend plan_catalog.py (decisions §253)
 pnpm check:pricing            # its drift guard (same CI job; see frontend/docs/component-library.md § marketing)
-pnpm gen:subprocessor-changelog # regenerate /legal/sub-processors § 10 from backend subprocessor_changelog.py — the same entries the customer notice sweep emails (decisions §320)
+pnpm gen:subprocessor-changelog # regenerate /legal/sub-processors § 10 from backend subprocessor_changelog.py — the same entries the customer notice sweep emails (decisions §321)
 pnpm check:subprocessor-changelog # its drift guard; also refuses a notice entry with < 30 days and no reason (same CI job)
 pnpm gen:icons                # re-render every web + mobile icon from the brand-mark masters (Inkscape + ImageMagick 7; docs/decisions.md §173)
 pnpm check:icons              # its guard: masters match assets/logo-render/gen_svg.py, every raster sized + opaque (CI's Brand assets job)

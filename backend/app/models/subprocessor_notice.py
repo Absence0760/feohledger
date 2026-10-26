@@ -5,7 +5,7 @@ One row per (change-log entry, organisation): the record that the advance notice
 claims the row (and COMMITS the claim) before it sends, so the UNIQUE pair is
 what makes the notice idempotent — an organisation is told once per entry,
 however many replicas run the sweep and however often it ticks
-(`docs/decisions.md` §320).
+(`docs/decisions.md` §321).
 
 The row moves through three timestamps, each its own short transaction so no
 lock is held across an email send or a tenant-database round trip:

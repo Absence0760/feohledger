@@ -353,7 +353,7 @@ async def lifespan(app: FastAPI):
             run_connection_health_loop(), name="erp-connection-health"
         )
 
-    # Sub-processor change notices (issue #427, decisions §320). Disabled by
+    # Sub-processor change notices (issue #427, decisions §321). Disabled by
     # default; MUST be on in a deployment with customers — the published DPA
     # says each notice is emailed. Sends email only, never moves money.
     subprocessor_notices_task: asyncio.Task | None = None

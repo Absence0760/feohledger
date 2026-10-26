@@ -9,7 +9,7 @@ emails each organisation's administrators about every entry that needs notice.
 This table is the ledger of those notices: one row per (entry, organisation),
 claimed (and committed) before the send, so an organisation is told once per
 entry; ``sent_at`` / ``audited_at`` record when it was told and when its tenant
-audit row was written (`docs/decisions.md` §320).
+audit row was written (`docs/decisions.md` §321).
 
 CONTROL PLANE ONLY: gated on ``organizations`` existing, so a no-op on every
 tenant DB (``migrate_all_tenants.py`` runs it there harmlessly). A fresh
