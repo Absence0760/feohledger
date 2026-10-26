@@ -55,7 +55,8 @@ CONFIG = {
 def _platform(monkeypatch):
     monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "platform-sub-key")
     monkeypatch.setattr(settings, "erp_blackbaud_api_base", "")
-    monkeypatch.setattr(bb, "PROCESS_POLL_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(bb, "PROCESS_POLL_DELAYS_SECONDS", (0, 0, 0, 0))
+    monkeypatch.setattr(bb, "_FISCAL_YEAR_CACHE", {})
 
     async def fake_token(self):
         return "tok-abc"
@@ -83,6 +84,12 @@ class FakeSky:
         # A transport error class raised instead of answering (timeout, reset).
         self.process_exc: type[httpx.TransportError] | None = None
         self.status_exc: type[httpx.TransportError] | None = None
+        # GET /generalledger/v1/fiscalyears: the years, or an HTTP status.
+        self.fiscal_years: list[dict] = []
+        self.fiscal_http = 200
+        self.fiscal_headers: dict[str, str] = {}
+        # GET /accountspayable/v1/vendors/{id}: the VendorDetail, or 404.
+        self.vendor: dict | None = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -90,7 +97,30 @@ class FakeSky:
         if path == "/accountspayable/v1/invoices" and request.method == "GET":
             if self.list_status != 200:
                 return httpx.Response(self.list_status, headers=self.list_headers, json={})
-            return httpx.Response(200, json={"count": len(self.invoices), "value": self.invoices})
+            # ListInvoices: limit (<= 500) / offset, and from_date / to_date
+            # read as strictly after / before (the narrower reading).
+            params = request.url.params
+            rows = [
+                r
+                for r in self.invoices
+                if (not params.get("from_date") or r.get("invoice_date", "") > params["from_date"])
+                and (not params.get("to_date") or r.get("invoice_date", "") < params["to_date"])
+            ]
+            offset = int(params.get("offset", "0"))
+            limit = min(int(params.get("limit", "100")), 500)
+            return httpx.Response(
+                200, json={"count": len(rows), "value": rows[offset : offset + limit]}
+            )
+        if path == "/generalledger/v1/fiscalyears":
+            if self.fiscal_http != 200:
+                return httpx.Response(self.fiscal_http, headers=self.fiscal_headers, json={})
+            return httpx.Response(
+                200, json={"count": len(self.fiscal_years), "value": self.fiscal_years}
+            )
+        if path.startswith("/accountspayable/v1/vendors/"):
+            if self.vendor is None:
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json=self.vendor)
         if path == "/accountspayable/v1/invoices/process":
             if self.process_exc is not None:
                 raise self.process_exc("transport failure", request=request)
@@ -373,6 +403,65 @@ def test_lookup_searches_by_invoice_number_before_creating():
     first = fake.requests[0]
     assert first.method == "GET" and first.url.path == "/accountspayable/v1/invoices"
     assert first.url.params["search_text"] == "INV-1"
+    # ListInvoices' maximum page, so a busy number costs one call, not five.
+    assert first.url.params["limit"] == "500"
+    assert "from_date" not in first.url.params
+
+
+def _busy(n: int, invoice_date: str = "2025-06-01") -> list[dict]:
+    """``n`` other invoices ``search_text`` also matches (it matches vendor
+    name, description and PO number too), dated away from ours."""
+    return [
+        {
+            "invoice_id": 10_000 + i,
+            "vendor_id": 137,
+            "invoice_number": f"X-{i}",
+            "description": "re INV-1",
+            "invoice_date": invoice_date,
+            "status": "Approved",
+        }
+        for i in range(n)
+    ]
+
+
+def test_a_busy_number_is_narrowed_to_the_invoice_date_not_failed():
+    """The regression: the search walked 5 pages of 100 and, past them,
+    reported "result set truncated" — retryably, so every push of a common
+    number failed the same way until the backoff ran out, forever."""
+    fake = FakeSky()
+    ours = {
+        "invoice_id": 777,
+        "vendor_id": 136,
+        "invoice_number": "INV-1",
+        "description": f"{MARKER} Office supplies",
+        "invoice_date": "2026-01-01",
+        "status": "Pending",
+    }
+    fake.invoices = [*_busy(600), ours]
+    result = _post(fake)
+    assert result.success and result.erp_document_id == "777"
+    lookups = fake.of("GET", "/accountspayable/v1/invoices")
+    assert len(lookups) == 2
+    assert lookups[1].url.params["from_date"] == "2025-12-31"
+    assert lookups[1].url.params["to_date"] == "2026-01-02"
+    assert lookups[1].url.params["search_text"] == "INV-1"
+    assert fake.of("POST", "/invoices/process") == []
+
+    # Nothing of ours on the date: absent, so it posts.
+    fake = FakeSky()
+    fake.invoices = _busy(600)
+    assert _post(fake).success
+    assert len(fake.of("POST", "/invoices/process")) == 1
+
+
+def test_a_lookup_still_truncated_after_narrowing_is_a_coded_non_retryable_refusal():
+    fake = FakeSky()
+    fake.invoices = _busy(600, "2025-06-01") + _busy(2100, "2026-01-01")
+    result = _post(fake)
+    assert not result.success and not result.retryable
+    assert result.refusal_code == "idempotency_lookup_incomplete"
+    assert result.message == "Blackbaud FE NXT post refused: idempotency_lookup_incomplete"
+    assert fake.of("POST", "/invoices/process") == []
 
 
 def test_earlier_attempt_with_our_marker_is_returned_without_posting():
@@ -449,7 +538,24 @@ def test_job_still_running_is_unconfirmed_and_not_retried():
     result = _post(fake)
     assert not result.success and not result.retryable
     assert "job_unconfirmed" in result.message
-    assert len(fake.of("GET", "/status")) == bb.PROCESS_POLL_ATTEMPTS
+    assert len(fake.of("GET", "/status")) == len(bb.PROCESS_POLL_DELAYS_SECONDS) + 1
+
+
+def test_status_poll_backs_off_between_reads(monkeypatch):
+    """One subscription's call quota is shared by every tenant on the
+    platform key: the poll doubles its pause instead of reading every second."""
+    slept: list[float] = []
+
+    async def record(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(bb, "PROCESS_POLL_DELAYS_SECONDS", (1.0, 2.0, 4.0, 8.0))
+    monkeypatch.setattr(bb.asyncio, "sleep", record)
+    fake = FakeSky()
+    fake.job_statuses = [3]
+    _post(fake)
+    assert slept == [1.0, 2.0, 4.0, 8.0]
+    assert len(fake.of("GET", "/status")) == 5
 
 
 def test_unconfirmed_job_carries_its_process_id_for_the_next_attempt():
@@ -567,12 +673,26 @@ def test_pending_job_read_transport_error_is_unconfirmed_and_keeps_the_job():
     assert fake.of("GET", "/accountspayable/v1/invoices") == []
 
 
-def test_job_failed_is_retryable():
+def test_job_failed_is_a_coded_non_retryable_refusal():
+    """The regression: status 7 came back retryable and uncoded, so
+    services/erp re-sent a job that failed the same way until its backoff was
+    spent, and the user saw English with no code to act on."""
     fake = FakeSky()
     fake.job_statuses = [7]
     result = _post(fake)
-    assert not result.success and result.retryable
-    assert result.message == "Blackbaud FE NXT post failed: background job status 7"
+    assert not result.success and not result.retryable
+    assert result.refusal_code == "job_failed"
+    assert result.message == "Blackbaud FE NXT post refused: job_failed"
+    assert result.pending_job_id is None  # the job is over: services/erp clears it
+    assert len(fake.of("POST", "/invoices/process")) == 1
+
+
+def test_job_canceled_stays_retryable():
+    fake = FakeSky()
+    fake.job_statuses = [6]
+    result = _post(fake)
+    assert not result.success and result.retryable and result.refusal_code is None
+    assert result.message == "Blackbaud FE NXT post failed: background job status 6"
 
 
 def test_rate_limited_create_maps_to_rate_limited_and_is_retryable():
@@ -608,6 +728,133 @@ def test_rate_limited_status_poll_stops_at_once_without_sleeping(monkeypatch):
     assert "job_unconfirmed" in result.message and "rate_limited" in result.message
     assert len(fake.of("GET", "/status")) == 1
     assert slept == []
+
+
+# ---------------------------------------------------------------------------
+# Closed fiscal periods (pre-create) and inactive vendors (on a 400)
+# ---------------------------------------------------------------------------
+
+
+def _year(year: int, *, status: str = "Open", closed_months: tuple[int, ...] = ()) -> dict:
+    return {
+        "fiscal_year_id": year,
+        "year": str(year),
+        "start_date": f"{year}-01-01T00:00:00",
+        "end_date": f"{year}-12-31T00:00:00",
+        "status": status,
+        "fiscal_periods": [
+            {
+                "fiscal_period_id": year * 100 + m,
+                "sequence": m,
+                "start_date": f"{year}-{m:02d}-01T00:00:00",
+                "end_date": f"{year}-{m:02d}-28T00:00:00",
+                "closed": m in closed_months,
+            }
+            for m in range(1, 13)
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "years",
+    [
+        [_year(2026, closed_months=(1,))],  # the period is closed
+        [_year(2026, status="Closed")],  # the whole year is
+        [_year(2026, status="Purged")],
+    ],
+)
+def test_a_post_date_in_a_closed_period_is_refused_before_the_create(years):
+    """The regression: nothing checked, and FE NXT's refusal came back as an
+    uncoded 400 (`invalid_request`) nobody could act on."""
+    fake = FakeSky()
+    fake.fiscal_years = years
+    result = _post(fake)
+    assert not result.success and not result.retryable
+    assert result.refusal_code == "period_closed"
+    assert fake.of("POST", "/invoices/process") == []
+    [read] = fake.of("GET", "/generalledger/v1/fiscalyears")
+    # The lookup ran first: an invoice an earlier attempt posted is reported.
+    assert fake.requests.index(read) > 0
+
+
+def test_an_open_period_or_an_uncovered_date_posts():
+    fake = FakeSky()
+    fake.fiscal_years = [_year(2026, closed_months=(2, 3)), _year(2025, status="Closed")]
+    assert _post(fake).success
+    fake = FakeSky()
+    fake.fiscal_years = [_year(2030, status="Closed")]  # no year covers the date
+    assert _post(fake).success
+
+
+def test_an_earlier_attempt_is_found_even_when_the_period_has_since_closed():
+    fake = FakeSky()
+    fake.fiscal_years = [_year(2026, closed_months=(1,))]
+    fake.invoices = [
+        {
+            "invoice_id": 777,
+            "vendor_id": 136,
+            "invoice_number": "INV-1",
+            "description": f"{MARKER} Office supplies",
+            "status": "Pending",
+        }
+    ]
+    result = _post(fake)
+    assert result.success and result.erp_document_id == "777"
+
+
+@pytest.mark.parametrize(("http", "headers"), [(403, {}), (403, {"Retry-After": "60"}), (503, {})])
+def test_unreadable_fiscal_years_mean_cannot_check_not_open_or_closed(http, headers):
+    """Some sandboxes refuse the GL fiscal-year read. That is "cannot check":
+    the create goes ahead and FE NXT judges the date itself."""
+    fake = FakeSky()
+    fake.fiscal_http = http
+    fake.fiscal_headers = headers
+    assert _post(fake).success
+
+
+def test_fiscal_years_are_read_once_per_environment_not_per_push():
+    fake = FakeSky()
+    fake.fiscal_years = [_year(2026)]
+    _post(fake)
+    _post(fake)
+    assert len(fake.of("GET", "/generalledger/v1/fiscalyears")) == 1
+    # A permission refusal is remembered too, so it is not re-asked every push.
+    fake = FakeSky()
+    fake.fiscal_http = 403
+    other = {**CONFIG, "oauth": {"external_tenant_id": "p-env-other"}}
+    _post(fake, other)
+    _post(fake, other)
+    assert len(fake.of("GET", "/generalledger/v1/fiscalyears")) == 1
+
+
+def test_a_400_for_an_inactive_vendor_is_coded_vendor_inactive():
+    """The regression: an Inactive FE NXT vendor's push died as an uncoded
+    400. The body is never parsed; the vendor is read back instead."""
+    fake = FakeSky()
+    fake.process_status = 400
+    fake.vendor = {"vendor_id": 136, "vendor_status": "Inactive"}
+    result = _post(fake)
+    assert not result.success and not result.retryable
+    assert result.refusal_code == "vendor_inactive"
+    [read] = fake.of("GET", "/accountspayable/v1/vendors/136")
+    assert read.headers["bb-api-subscription-key"] == "platform-sub-key"
+
+
+@pytest.mark.parametrize("vendor", [None, {"vendor_id": 136, "vendor_status": "Active"}])
+def test_a_400_for_an_active_or_unreadable_vendor_stays_invalid_request(vendor):
+    fake = FakeSky()
+    fake.process_status = 400
+    fake.vendor = vendor
+    result = _post(fake)
+    assert result.message == "Blackbaud FE NXT post failed: HTTP 400 (invalid_request)"
+    assert not result.retryable and result.refusal_code is None
+
+
+def test_a_rate_limited_create_does_not_read_the_vendor():
+    fake = FakeSky()
+    fake.process_status = 429
+    _post(fake)
+    assert fake.of("GET", "/accountspayable/v1/vendors/136") == []
 
 
 def test_failure_message_never_echoes_the_response_body():
@@ -674,6 +921,26 @@ def test_list_vendors_pages_and_maps():
     assert vendors[0].erp_vendor_id == "1" and vendors[0].code == "V1"
     assert vendors[0].payment_terms == "Net 30"
     assert [r.url.params["offset"] for r in fake.requests] == ["0", "100"]
+
+
+def test_inactive_and_on_hold_vendors_are_emitted_inactive():
+    """The regression: every vendor synced active, so an Inactive FE NXT
+    vendor got a payee (its push then died as an uncoded 400) and an OnHold
+    one could be paid from FeohLedger around FE NXT's hold."""
+    fake = FakeSky()
+    fake.collections["/accountspayable/v1/vendors"] = [
+        {"vendor_id": 1, "vendor_name": "A", "vendor_status": "Active"},
+        {"vendor_id": 2, "vendor_name": "I", "vendor_status": "Inactive"},
+        {"vendor_id": 3, "vendor_name": "H", "vendor_status": "OnHold"},
+        {"vendor_id": 4, "vendor_name": "N"},  # no status: not refused on a guess
+    ]
+    vendors = _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_vendors())
+    assert [(v.erp_vendor_id, v.active) for v in vendors] == [
+        ("1", True),
+        ("2", False),
+        ("3", False),
+        ("4", True),
+    ]
 
 
 def test_list_gl_accounts_keys_by_number_and_emits_locked_accounts_inactive():
@@ -748,6 +1015,34 @@ def test_list_pos_maps_status_and_never_labels_currency():
         ("13", "cancelled"),
     ]
     assert pos[0].total == Decimal("1250.5") and all(p.currency is None for p in pos)
+
+
+def test_list_pos_links_the_vendor_by_its_fe_id():
+    """#652: the PO named its vendor only by `vendor_name`, which a rename or
+    a shared name mislinks. `PurchaseOrderSummary.vendor_id` is the id
+    list_vendors reports as erp_vendor_id."""
+    fake = FakeSky()
+    fake.collections["/accountspayable/v1/purchaseorders"] = [
+        {"order_number": 11, "vendor_id": 136, "vendor_name": "A", "order_total": 5},
+        {"order_number": 12, "vendor_name": "B", "order_total": 5},
+    ]
+    fake.collections["/accountspayable/v1/vendors"] = [{"vendor_id": 136, "vendor_name": "A"}]
+    adapter = BlackbaudFeNxtAdapter(CONFIG)
+    pos = _run(fake, lambda: adapter.list_pos())
+    [vendor] = _run(fake, lambda: adapter.list_vendors())
+    assert pos[0].vendor_erp_id == vendor.erp_vendor_id == "136"
+    assert pos[1].vendor_erp_id is None
+
+
+def test_list_pos_skips_a_po_with_no_total_rather_than_syncing_zero():
+    fake = FakeSky()
+    fake.collections["/accountspayable/v1/purchaseorders"] = [
+        {"order_number": 11, "vendor_id": 136, "order_total": 0},
+        {"order_number": 12, "vendor_id": 136},
+        {"order_number": 13, "vendor_id": 136, "order_total": None},
+    ]
+    pos = _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos())
+    assert [(p.po_number, p.total) for p in pos] == [("11", Decimal("0"))]
 
 
 def test_test_connection_needs_a_captured_environment():

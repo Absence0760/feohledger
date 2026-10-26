@@ -5007,6 +5007,7 @@ export const messages = {
 	'erpRefusal.dueDateMissing': "{provider} a besoin d'une date d'échéance. Ajoutez-la, puis réessayez.",
 	'erpRefusal.amountNotPositive': "{provider} n'accepte que les factures d'un montant supérieur à zéro. Corrigez le montant ou enregistrez plutôt un avoir.",
 	'erpRefusal.jobUnconfirmed': "{provider} a accepté la facture mais n'a pas confirmé sa création. Réessayez pour vérifier ; elle ne sera pas envoyée deux fois.",
+	'erpRefusal.jobFailed': "{provider} a accepté la facture, mais sa tâche en arrière-plan a échoué sans rien créer. Vérifiez le fournisseur, les comptes, les codes de transaction et la période comptable dans {provider}, puis réessayez.",
 	'erpRefusal.credentialsUnavailable': "Les identifiants ERP n'ont pas pu être ouverts pour le moment. Réessayez dans quelques minutes ; si l'échec persiste, prévenez un administrateur.",
 	'erpRefusal.periodClosed': "{provider} a refusé cette facture car sa date se situe dans une période clôturée (les livres sont fermés). Modifiez la date de la facture ou rouvrez la période dans {provider}, puis réessayez.",
 	'erpRefusal.vendorInactive': "{provider} a refusé cette facture car son fournisseur y est inactif ou supprimé. Réactivez le fournisseur dans {provider}, puis réessayez.",

@@ -106,6 +106,7 @@ const KEYS: Record<string, MessageKey> = {
 	due_date_missing: 'erpRefusal.dueDateMissing',
 	amount_not_positive: 'erpRefusal.amountNotPositive',
 	job_unconfirmed: 'erpRefusal.jobUnconfirmed',
+	job_failed: 'erpRefusal.jobFailed',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',

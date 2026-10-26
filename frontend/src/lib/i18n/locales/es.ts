@@ -5000,6 +5000,7 @@ export const messages = {
 	'erpRefusal.dueDateMissing': "{provider} necesita la fecha de vencimiento. Añádala y vuelva a intentarlo.",
 	'erpRefusal.amountNotPositive': "{provider} solo admite facturas por un importe superior a cero. Corrija el importe o registre una nota de crédito.",
 	'erpRefusal.jobUnconfirmed': "{provider} aceptó la factura, pero no ha confirmado que se haya creado. Vuelva a intentarlo para comprobarlo; no se enviará dos veces.",
+	'erpRefusal.jobFailed': "{provider} aceptó la factura, pero su tarea en segundo plano falló y no creó nada. Revise el proveedor, las cuentas, los códigos de transacción y el período contable en {provider} y vuelva a intentarlo.",
 	'erpRefusal.credentialsUnavailable': "No se pudieron abrir las credenciales del ERP en este momento. Vuelva a intentarlo en unos minutos; si sigue fallando, avise a un administrador.",
 	'erpRefusal.periodClosed': "{provider} rechazó esta factura porque su fecha está en un período cerrado (los libros están cerrados). Cambie la fecha de la factura o vuelva a abrir el período en {provider} y vuelva a intentarlo.",
 	'erpRefusal.vendorInactive': "{provider} rechazó esta factura porque su proveedor está inactivo o eliminado allí. Active el proveedor en {provider} y vuelva a intentarlo.",

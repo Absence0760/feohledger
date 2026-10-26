@@ -5190,6 +5190,7 @@ export const en = {
 	'erpRefusal.dueDateMissing': "{provider} needs a due date. Add it, then retry.",
 	'erpRefusal.amountNotPositive': "{provider} takes only invoices for more than zero. Correct the amount, or record a credit memo instead.",
 	'erpRefusal.jobUnconfirmed': "{provider} accepted the invoice but hasn't confirmed it was created. Retry to check again — it won't be sent twice.",
+	'erpRefusal.jobFailed': "{provider} accepted the invoice, but its background job failed and created nothing. Check the vendor, accounts, transaction codes and posting period in {provider}, then retry.",
 	'erpRefusal.credentialsUnavailable': "The ERP credentials couldn't be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.",
 	'erpRefusal.periodClosed': "{provider} refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in {provider}, then retry.",
 	'erpRefusal.vendorInactive': "{provider} refused this bill because its vendor is inactive or deleted there. Make the vendor active in {provider}, then retry.",

@@ -5007,6 +5007,7 @@ export const messages = {
 	'erpRefusal.dueDateMissing': "{provider} benötigt ein Fälligkeitsdatum. Ergänzen Sie es und versuchen Sie es dann erneut.",
 	'erpRefusal.amountNotPositive': "{provider} nimmt nur Rechnungen über einen Betrag größer als null an. Korrigieren Sie den Betrag oder erfassen Sie stattdessen eine Gutschrift.",
 	'erpRefusal.jobUnconfirmed': "{provider} hat die Rechnung angenommen, aber noch nicht bestätigt, dass sie angelegt wurde. Versuchen Sie es erneut, um nachzusehen – sie wird nicht doppelt gesendet.",
+	'erpRefusal.jobFailed': "{provider} hat die Rechnung angenommen, aber der Hintergrundauftrag ist fehlgeschlagen und hat nichts angelegt. Prüfen Sie Lieferant, Konten, Transaktionscodes und Buchungszeitraum in {provider}, und versuchen Sie es dann erneut.",
 	'erpRefusal.credentialsUnavailable': "Die ERP-Zugangsdaten konnten gerade nicht geöffnet werden. Versuchen Sie es in einigen Minuten erneut; wenn es weiterhin fehlschlägt, wenden Sie sich an einen Administrator.",
 	'erpRefusal.periodClosed': "{provider} hat diese Rechnung abgelehnt, weil ihr Datum in einem abgeschlossenen Zeitraum liegt (die Bücher sind geschlossen). Ändern Sie das Rechnungsdatum oder öffnen Sie den Zeitraum in {provider} wieder, und versuchen Sie es dann erneut.",
 	'erpRefusal.vendorInactive': "{provider} hat diese Rechnung abgelehnt, weil der Lieferant dort inaktiv oder gelöscht ist. Aktivieren Sie den Lieferanten in {provider}, und versuchen Sie es dann erneut.",

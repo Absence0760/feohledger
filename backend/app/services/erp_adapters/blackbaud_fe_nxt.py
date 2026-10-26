@@ -80,8 +80,13 @@ the line's ``gl_account_erp_id`` is posted as-is. Accounts with
 ``POST /invoices/process``, which queues a background job and returns a
 ``process_id``; ``GET /backgroundProcess/{id}/status`` reports it (5 =
 completed, 6 = canceled, 7 = failed) and ``/result`` returns the new
-``record_id``. :meth:`post_invoice` reads the status a bounded number of times
-(:data:`PROCESS_POLL_ATTEMPTS`). Once FE NXT has accepted the job, an outcome
+``record_id``. :meth:`post_invoice` reads the status a bounded number of times,
+backing off between reads (:data:`PROCESS_POLL_DELAYS_SECONDS`). A job that
+**failed** (7) is a non-retryable ``job_failed``: nothing says the failure is
+transient, so ``services/erp`` re-sending it seconds later would only fail the
+same way. A **canceled** job (6) stays retryable. The job's ``status_message``
+is never read into the result (it may echo the payload). Once FE NXT has
+accepted the job, an outcome
 we cannot confirm (still running, a 429/403 quota or any error while asking) is
 **non-retryable** (``job_unconfirmed``): ``services/erp``'s backoff is seconds,
 a queued job can outlive it, and a re-submit while the first job runs would
@@ -102,17 +107,37 @@ job has finished.
 
 **Idempotency.** Our ``correlation_id`` rides in the invoice ``description`` as
 ``[feoh:<correlation_id>]``. Before creating, :meth:`post_invoice` searches
-``GET /invoices?search_text=<invoice number>`` and keeps rows with the same
-vendor id and invoice number that are not ``Deleted``. One carrying our marker
-is the earlier attempt (success, nothing posted); one without it is a document
-someone else entered for that vendor and number, and is refused as
-``duplicate_invoice_number`` rather than posted twice. A failed or truncated
-lookup is a failure, never read as "not posted yet".
+``GET /invoices?search_text=<invoice number>`` (one page of 500, ListInvoices'
+maximum) and keeps rows with the same vendor id and invoice number that are not
+``Deleted``. One carrying our marker is the earlier attempt (success, nothing
+posted); one without it is a document someone else entered for that vendor and
+number, and is refused as ``duplicate_invoice_number`` rather than posted twice.
+``search_text`` also matches vendor name, description and PO number, so a
+common number ("1001") can match more than a page: the search is then narrowed
+to the invoice's own date with ListInvoices' ``from_date`` / ``to_date``, which
+every earlier attempt of ours shares. A failed lookup is a retryable failure;
+one still truncated after narrowing is the non-retryable
+``idempotency_lookup_incomplete``. Neither is ever read as "not posted yet".
+
+**Pre-create checks against FE NXT's own state.** The post date must not fall
+in a closed fiscal period or year: :meth:`post_invoice` reads
+``GET /generalledger/v1/fiscalyears`` (cached per environment for
+:data:`FISCAL_YEAR_CACHE_SECONDS`) and refuses ``period_closed`` before the
+create, so nothing is queued. A fiscal-year read FE NXT refuses (some sandboxes
+lack the permission) or fails is "cannot check", never "open": the create goes
+ahead and FE NXT stays the judge. When the create itself answers 400, the
+vendor is read once (``GET /vendors/{id}``); an ``Inactive`` vendor turns the
+uncoded 400 into ``vendor_inactive``.
 
 **Rate limits.** SKY answers 429 for the per-second rate limit and 403 *with a
 ``Retry-After`` header* for the call-volume quota. Both map to the stable
 reason ``rate_limited`` (from the status and header — never the body); nothing
-here sleeps on them. ``services/erp``'s bounded backoff is the only retry.
+here sleeps on them. ``services/erp``'s bounded backoff is the only retry. The
+"Standard APIs" quota (10 calls/s, 25,000/day) is **per subscription**, so every
+tenant on the platform key shares one bucket. That is why the lookup reads 500
+rows a page, the fiscal years are cached and the status poll backs off rather
+than reading every second; a heavy tenant should bring its own
+``subscription_key``.
 
 **Money** goes out through ``utils/json_money.dumps_exact_json`` (exact JSON
 numbers, the schema's ``number``/``decimal``) and is read back with
@@ -123,6 +148,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, NamedTuple
 from urllib.parse import quote
@@ -171,22 +198,48 @@ DUE_DATE_MISSING = "due_date_missing"
 AMOUNT_NOT_POSITIVE = "amount_not_positive"
 DUPLICATE_INVOICE_NUMBER = "duplicate_invoice_number"
 JOB_UNCONFIRMED = "job_unconfirmed"
+JOB_FAILED = "job_failed"
+PERIOD_CLOSED = "period_closed"
+VENDOR_INACTIVE = "vendor_inactive"
+IDEMPOTENCY_LOOKUP_INCOMPLETE = "idempotency_lookup_incomplete"
 
 #: Background-process status codes (``BackgroundProcessStatus.status``).
 _JOB_COMPLETED = 5
-_JOB_ENDED_WITHOUT_RECORD = frozenset({6, 7})  # canceled, failed
+_JOB_CANCELED = 6
+_JOB_FAILED = 7
 
-#: How many times post_invoice reads a queued job's status, and the pause
-#: between reads. Module constants so tests can set the pause to 0.
-PROCESS_POLL_ATTEMPTS = 10
-PROCESS_POLL_INTERVAL_SECONDS = 1.0
+#: The pauses between successive status reads of a queued job: the first read
+#: is immediate, then each pause doubles, so a job is watched for ~15 s in 5
+#: calls rather than ~9 s in 10 (the call quota is shared, see the module
+#: docstring). A module constant so tests can zero it.
+PROCESS_POLL_DELAYS_SECONDS: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0)
+
+#: How long a read of the environment's fiscal years is reused. Closing or
+#: reopening a period is a month-end event: a stale "open" only means FE NXT
+#: refuses the create itself, and a stale "closed" refuses for at most this long.
+FISCAL_YEAR_CACHE_SECONDS = 900.0
+
+#: Fiscal-year ``status`` values that take no posting.
+_CLOSED_YEAR_STATUSES = frozenset({"Closed", "Purged"})
 
 #: List page size and the PO list's page cap (10 × 100 rows). The chart and
 #: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it
-#: (``_sync_rows``); the idempotency search walks at most 5 pages.
+#: (``_sync_rows``). The idempotency search reads ListInvoices' maximum page
+#: (500): once unnarrowed, then up to 4 pages narrowed to the invoice's date.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
-_LOOKUP_MAX_PAGES = 5
+_LOOKUP_PAGE_SIZE = 500
+_LOOKUP_MAX_PAGES = 4
+
+#: ``VendorStatus`` values that are not a payee FeohLedger may pay. ``OnHold``
+#: still takes an invoice in FE NXT, but FE NXT holds its payments, so paying
+#: it from FeohLedger would go around that hold.
+_UNPAYABLE_VENDOR_STATUSES = frozenset({"Inactive", "OnHold"})
+
+#: ``(api base, environment id)`` → ``(expires at, fiscal years | None)``.
+#: None records "cannot check" (a permission refusal), so that is not re-asked
+#: on every push either.
+_FISCAL_YEAR_CACHE: dict[tuple[str, str], tuple[float, list[dict] | None]] = {}
 
 #: FE NXT's invoice description limit is not published in the schema; 60 is
 #: the documented limit of its journal-entry batch description, used here as
@@ -268,6 +321,38 @@ def _field(resp: httpx.Response, key: str) -> Any:
     except ValueError:
         return None
     return body.get(key) if isinstance(body, dict) else None
+
+
+def _date_or_none(raw: object) -> date | None:
+    """The calendar date of a SKY ``date-time`` string (``2026-07-01T00:00:00``)."""
+    if not isinstance(raw, str) or len(raw) < 10:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def post_date_closed(years: list[dict], post_date: date) -> bool:
+    """True when ``post_date`` falls in a fiscal year FE NXT has closed (or
+    purged), or in a period of one marked ``closed``.
+
+    A date no year covers is not judged here: FE NXT decides it on the create.
+    """
+    for year in years:
+        start, end = _date_or_none(year.get("start_date")), _date_or_none(year.get("end_date"))
+        if start is None or end is None or not start <= post_date <= end:
+            continue
+        if year.get("status") in _CLOSED_YEAR_STATUSES:
+            return True
+        for period in year.get("fiscal_periods") or []:
+            if not isinstance(period, dict) or period.get("closed") is not True:
+                continue
+            p_start = _date_or_none(period.get("start_date"))
+            p_end = _date_or_none(period.get("end_date"))
+            if p_start and p_end and p_start <= post_date <= p_end:
+                return True
+    return False
 
 
 def failure_reason(resp: httpx.Response) -> str:
@@ -371,6 +456,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         params: dict[str, str] | None = None,
         *,
         max_pages: int = _MAX_PAGES,
+        page_size: int = _PAGE_SIZE,
     ) -> _Pages:
         """GET a SKY collection (``{"count", "value"}``) with limit/offset.
 
@@ -381,7 +467,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         """
         rows: list[dict] = []
         for page in range(max_pages):
-            query = {**(params or {}), "limit": str(_PAGE_SIZE), "offset": str(page * _PAGE_SIZE)}
+            query = {**(params or {}), "limit": str(page_size), "offset": str(page * page_size)}
             resp = await client.get(f"{self._base()}{path}", params=query, headers=headers)
             if resp.status_code != 200:
                 return _Pages(rows, complete=False, failed=resp if page == 0 else None)
@@ -389,7 +475,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             batch = [r for r in body.get("value") or [] if isinstance(r, dict)]
             rows.extend(batch)
             count = body.get("count")
-            if len(batch) < _PAGE_SIZE or (isinstance(count, int) and len(rows) >= count):
+            if len(batch) < page_size or (isinstance(count, int) and len(rows) >= count):
                 return _Pages(rows, complete=True)
         return _Pages(rows, complete=False, capped=True)
 
@@ -466,21 +552,58 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
     async def _find_existing(
         self, client: httpx.AsyncClient, headers: dict[str, str], payload: InvoicePayload
     ) -> tuple[str, str | None]:
-        """``("found", id)``, ``("absent", None)``, ``("duplicate", None)`` or
-        ``("unavailable", <failure message>)``."""
-        marker = correlation_marker(payload.correlation_id)
+        """``("found", id)``, ``("absent", None)``, ``("duplicate", None)``,
+        ``("unavailable", <failure message>)`` or ``("incomplete", None)``.
+
+        ``search_text`` matches vendor name, description and PO number as well
+        as the invoice number, so a common number can match more than a page.
+        Only then is the search narrowed to the invoice's own date, which every
+        earlier attempt of ours carries: the unnarrowed page also catches a
+        hand-keyed duplicate dated differently, which the narrowed one cannot.
+        """
+        search = {"search_text": payload.invoice_number or payload.correlation_id}
         found = await self._pages(
-            client,
-            headers,
-            f"{AP}/invoices",
-            {"search_text": payload.invoice_number or payload.correlation_id},
-            max_pages=_LOOKUP_MAX_PAGES,
+            client, headers, f"{AP}/invoices", search, max_pages=1, page_size=_LOOKUP_PAGE_SIZE
         )
         if found.failed is not None:
             return "unavailable", failure_message("idempotency lookup", found.failed)
+        state = self._match(found.rows, payload)
+        if state[0] != "absent" or found.complete:
+            return state
+        if payload.invoice_date is None:  # pre-flight requires it; never guess a window
+            return "incomplete", None
+        # ListInvoices documents from_date / to_date as "after" / "before" a
+        # date; a day either side holds the invoice date whether they are
+        # inclusive or not.
+        narrowed = await self._pages(
+            client,
+            headers,
+            f"{AP}/invoices",
+            {
+                **search,
+                "from_date": (payload.invoice_date - timedelta(days=1)).isoformat(),
+                "to_date": (payload.invoice_date + timedelta(days=1)).isoformat(),
+            },
+            max_pages=_LOOKUP_MAX_PAGES,
+            page_size=_LOOKUP_PAGE_SIZE,
+        )
+        if narrowed.failed is not None:
+            return "unavailable", failure_message("idempotency lookup", narrowed.failed)
+        state = self._match(narrowed.rows, payload)
+        if state[0] != "absent":
+            return state
+        if not narrowed.complete:
+            # Retrying cannot shrink the result set: a coded refusal, never
+            # the backoff re-asking the same truncated question.
+            return "incomplete", None
+        return "absent", None
+
+    @staticmethod
+    def _match(rows: list[dict], payload: InvoicePayload) -> tuple[str, str | None]:
+        marker = correlation_marker(payload.correlation_id)
         same_document = [
             r
-            for r in found.rows
+            for r in rows
             if str(r.get("vendor_id")) == str(payload.vendor_erp_id)
             and (not payload.invoice_number or r.get("invoice_number") == payload.invoice_number)
             and str(r.get("status") or "").lower() != "deleted"
@@ -490,9 +613,44 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 return "found", str(row["invoice_id"])
         if same_document and payload.invoice_number:
             return "duplicate", None
-        if not found.complete:
-            return "unavailable", f"{PROVIDER} idempotency lookup failed: result set truncated"
         return "absent", None
+
+    async def _fiscal_years(
+        self, client: httpx.AsyncClient, headers: dict[str, str]
+    ) -> list[dict] | None:
+        """The environment's fiscal years, or None when they cannot be read."""
+        environment = str((self.config.get("oauth") or {}).get("external_tenant_id") or "")
+        key = (self._base(), environment)
+        cached = _FISCAL_YEAR_CACHE.get(key)
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        try:
+            resp = await client.get(f"{self._base()}{GL}/fiscalyears", headers=headers)
+        except httpx.HTTPError:
+            return None
+        if resp.status_code == 200:
+            body = _field(resp, "value")
+            years = [y for y in body if isinstance(y, dict)] if isinstance(body, list) else None
+        elif resp.status_code == 403 and failure_reason(resp) != "rate_limited":
+            # No GL permission behind this consent: remember "cannot check" so
+            # every push does not spend a call to learn it again.
+            years = None
+        else:
+            return None  # an outage or the quota: ask again next time
+        _FISCAL_YEAR_CACHE[key] = (time.monotonic() + FISCAL_YEAR_CACHE_SECONDS, years)
+        return years
+
+    async def _vendor_inactive(
+        self, client: httpx.AsyncClient, headers: dict[str, str], vendor_id: str
+    ) -> bool:
+        """Whether FE NXT reports the vendor ``Inactive`` (False when unreadable)."""
+        try:
+            resp = await client.get(
+                f"{self._base()}{AP}/vendors/{quote(vendor_id, safe='')}", headers=headers
+            )
+        except httpx.HTTPError:
+            return False
+        return resp.status_code == 200 and _field(resp, "vendor_status") == "Inactive"
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         try:
@@ -510,11 +668,16 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 # outcome decides; only a job that ended without creating the
                 # invoice lets this attempt go on to post.
                 earlier = await self._await_job(client, headers, payload.pending_job_id, payload)
-                if earlier.success or not earlier.retryable:
+                # A job that failed made nothing: the operator's retry (which
+                # may follow a config fix) goes on to post, behind the lookup.
+                ended = earlier.refusal_code == JOB_FAILED
+                if earlier.success or (not earlier.retryable and not ended):
                     return earlier
             state, detail = await self._find_existing(client, headers, payload)
             if state == "unavailable":
                 return ErpPostResult(success=False, message=detail)
+            if state == "incomplete":
+                return erp_refusal(PROVIDER, IDEMPOTENCY_LOOKUP_INCOMPLETE)
             if state == "duplicate":
                 return erp_refusal(PROVIDER, DUPLICATE_INVOICE_NUMBER)
             if state == "found":
@@ -525,6 +688,12 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                     message="Already posted to Blackbaud FE NXT (idempotent — found by "
                     "vendor, invoice number and correlation marker)",
                 )
+
+            years = await self._fiscal_years(client, headers)
+            if years and payload.invoice_date and post_date_closed(years, payload.invoice_date):
+                # Checked after the lookup, so an invoice an earlier attempt
+                # already posted is reported, not refused.
+                return erp_refusal(PROVIDER, PERIOD_CLOSED)
 
             try:
                 resp = await client.post(
@@ -546,6 +715,12 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 # FE NXT answered with a refusal: nothing was queued, so a
                 # re-send is safe — but only worth it when the answer could
                 # change (an outage, a quota, a token); a 400 never does.
+                # Its body is never parsed (it can echo the payload); an
+                # inactive vendor is the one cause read back, from the vendor.
+                if resp.status_code == 400 and await self._vendor_inactive(
+                    client, headers, str(payload.vendor_erp_id)
+                ):
+                    return erp_refusal(PROVIDER, VENDOR_INACTIVE)
                 return ErpPostResult(
                     success=False,
                     message=failure_message("post", resp),
@@ -582,9 +757,9 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         payload: InvoicePayload,
     ) -> ErpPostResult:
         job = f"{self._base()}{AP}/backgroundProcess/{quote(process_id, safe='')}"
-        for attempt in range(PROCESS_POLL_ATTEMPTS):
+        for attempt in range(len(PROCESS_POLL_DELAYS_SECONDS) + 1):
             if attempt:
-                await asyncio.sleep(PROCESS_POLL_INTERVAL_SECONDS)
+                await asyncio.sleep(PROCESS_POLL_DELAYS_SECONDS[attempt - 1])
             resp = await client.get(f"{job}/status", headers=headers)
             if resp.status_code != 200:
                 # Includes 429 / quota 403: stop asking rather than wait it out.
@@ -592,9 +767,15 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                     f"status HTTP {resp.status_code} ({failure_reason(resp)})", process_id
                 )
             status = _field(resp, "status")
-            if status in _JOB_ENDED_WITHOUT_RECORD:
-                # The job ended without creating the invoice: a retry is safe,
-                # and the pre-create lookup still guards it.
+            if status == _JOB_FAILED:
+                # FE NXT ran the job and it failed (validation it does in the
+                # job rather than on the create, as far as is known). Nothing
+                # says that is transient, so the backoff must not re-send it.
+                # `status_message` is not read: it may echo the payload.
+                return erp_refusal(PROVIDER, JOB_FAILED)
+            if status == _JOB_CANCELED:
+                # Canceled without creating the invoice: a retry is safe, and
+                # the pre-create lookup still guards it.
                 return ErpPostResult(
                     success=False, message=f"{PROVIDER} post failed: background job status {status}"
                 )
@@ -654,7 +835,10 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         return found.rows
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Every vendor, or :class:`ErpListingIncomplete`; never a partial list."""
+        """Every vendor, or :class:`ErpListingIncomplete`; never a partial list.
+
+        ``active`` is False for ``vendor_status`` ``Inactive`` and ``OnHold``.
+        """
         vendors = []
         for raw in await self._sync_rows(f"{AP}/vendors", "vendors"):
             vendor_id = raw.get("vendor_id")
@@ -667,6 +851,10 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                     name=str(raw.get("vendor_name") or vendor_id),
                     code=raw.get("ui_defined_id") or None,
                     payment_terms=str(terms) if terms else None,
+                    # Inactive and OnHold are emitted, not dropped (§284): the
+                    # sync creates no payee for one and marks a linked vendor
+                    # inactive, so FeohLedger never pays around FE NXT's hold.
+                    active=raw.get("vendor_status") not in _UNPAYABLE_VENDOR_STATUSES,
                 )
             )
         return vendors
@@ -699,7 +887,10 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         """FE NXT purchase orders. Templates and deleted orders are skipped.
 
         The PO summary carries no currency, so ``currency`` stays None (never a
-        default label — decisions §197).
+        default label — decisions §197). Its ``vendor_id`` is the id
+        :meth:`list_vendors` reports, so the sync links the PO by id rather than
+        by a name a rename breaks. A PO with no ``order_total`` is skipped, not
+        synced at 0 (a zero-value order would match nothing honestly).
         """
         try:
             headers = await self._headers()
@@ -713,11 +904,18 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             status = str(raw.get("order_status") or "")
             if number is None or status == "DeletedOrder" or raw.get("type") == "Template":
                 continue
+            total = _decimal_or_none(raw.get("order_total"))
+            if total is None:
+                continue
+            vendor_id = raw.get("vendor_id")
+            if isinstance(vendor_id, bool):
+                vendor_id = None
             pos.append(
                 PoPayload(
                     po_number=str(number),
                     vendor_name=raw.get("vendor_name") or None,
-                    total=_decimal_or_none(raw.get("order_total")) or Decimal("0"),
+                    vendor_erp_id=str(vendor_id) if vendor_id is not None else None,
+                    total=total,
                     status=_PO_STATUS_MAP.get(status, "open"),
                 )
             )
