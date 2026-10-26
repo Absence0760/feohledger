@@ -445,7 +445,9 @@ async def _committed_po_legs(
     # out of the sum and counted on its own: its stored total is a figure
     # nobody vouches for any more. Counted once — `unverifiable` wins over a
     # currency mismatch, since even a re-denominated row would stay unpriced.
-    total, excluded = _leg_columns(
+    # `_leg_columns`' sum, over vouched POs only; its count is replaced below so
+    # a marked PO is not counted twice.
+    total, _ = _leg_columns(
         case((PO_TOTAL_VOUCHED, open_commitment), else_=None), PurchaseOrder.currency
     )
     excluded = func.count().filter(
