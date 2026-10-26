@@ -466,6 +466,13 @@ reset link, token or credential must set one that names none of them. The
 sign-in-code, password-reset, user-invite, supplier-invite, portal-reset and
 signup welcome senders do. Unset, the client previews the body as it always did.
 
+**The subject is one line, whatever a sender interpolates.** Subjects carry names
+nobody validated for control characters — an organisation name, a vendor name.
+`EmailMessage` folds every control character and line/paragraph separator in
+`subject` to a space on construction (`email_adapters/base.header_line`), so a
+line break can neither inject a header nor make the SMTP adapter's `email`
+policy refuse the message. Guard: `tests/test_smtp_email_adapter.py`.
+
 ## Localized email
 
 Outbound transactional email renders server-side, so the recipient's language is
