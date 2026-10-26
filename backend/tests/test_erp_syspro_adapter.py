@@ -652,6 +652,20 @@ PAID_ROW = {"OrigInvValue": "100.00", "MthInvBal1": "0.00"}
         # An adjustment / credit applied zeroes the balance but is no payment.
         ([{"TrnType": "A", "TrnValue": "100.00"}], ErpInvoiceStatus.settled_no_payment),
         ([{"TrnType": "P", "TrnValue": "0"}], ErpInvoiceStatus.settled_no_payment),
+        # Split across two payments that cover the invoice: paid.
+        (
+            [{"TrnType": "P", "TrnValue": "40.00"}, {"TrnType": "P", "TrnValue": "60.00"}],
+            ErpInvoiceStatus.paid,
+        ),
+        # SYSPRO may sign a payment negative (it reduces the balance).
+        ([{"TrnType": "P", "TrnValue": "-100.00"}], ErpInvoiceStatus.paid),
+        # 40 cash + 60 credit applied: only 40 left the customer — not paid.
+        (
+            [{"TrnType": "P", "TrnValue": "40.00"}, {"TrnType": "C", "TrnValue": "60.00"}],
+            ErpInvoiceStatus.settled_no_payment,
+        ),
+        # A single 0.01 payment beside a write-off is not a payment of 100.
+        ([{"TrnType": "P", "TrnValue": "0.01"}], ErpInvoiceStatus.settled_no_payment),
         ([], ErpInvoiceStatus.settled_no_payment),
         (None, ErpInvoiceStatus.settled_no_payment),
     ],

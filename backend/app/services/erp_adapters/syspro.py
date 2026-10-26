@@ -132,7 +132,8 @@ _COMMENT_LINE_TYPE = "6"
 
 #: ``ApInvoicePay.TrnType`` codes that are a payment (money paid to the
 #: supplier), as opposed to an adjustment, a discount or a credit applied. Only
-#: one of these makes a zero balance ``paid`` (decisions §303). SYSPRO does not
+#: these, covering the whole invoice value, make a zero balance ``paid``
+#: (:func:`map_invoice_status`, decisions §303). SYSPRO does not
 #: publish the code list: ``P`` is unconfirmed until a sandbox shows it
 #: (docs/followups.md), and an unrecognised code reads as no payment, so the
 #: failure mode is ``settled_no_payment``, never a payment nobody made.
@@ -461,19 +462,25 @@ def map_invoice_status(
     """Open / partly settled / settled / paid, from the balance against the
     original value and the ``ApInvoicePay`` rows recorded against the invoice.
 
-    ``paid`` only on a zero balance of a non-zero invoice WITH a payment row
-    (:data:`_PAYMENT_TRN_TYPES`) — the ``ApInvoice`` row states only a balance,
-    which a credit note or a write-off zeroes as readily as a cheque. A zero
-    balance with no payment to see is ``settled_no_payment``, for a person to
-    judge (docs/decisions.md §303). ``payments`` None means they were not (or
-    could not be) read, which is the same as seeing none.
+    ``paid`` only on a zero balance of a non-zero invoice whose payment rows
+    (:data:`_PAYMENT_TRN_TYPES`) account for the WHOLE original value — the
+    absolute sum of their ``TrnValue`` equal to ``abs(OrigInvValue)``. The
+    ``ApInvoice`` row states only a balance, which a credit note or a
+    write-off zeroes as readily as a cheque, and one payment row proves only
+    that some money left: an invoice settled 40 by cheque and 60 by a credit
+    note, or closed by a 0.01 payment and a write-off, is not paid. A zero
+    balance whose payments do not cover it is ``settled_no_payment``, for a
+    person to judge (docs/decisions.md §303). ``payments`` None means they were
+    not (or could not be) read, which is the same as seeing none.
     """
     original = _decimal(row.get("OrigInvValue"))
     balance = _decimal(row.get("MthInvBal1"))
     if original is None or balance is None:
         return ErpInvoiceStatus.unknown
     if balance == 0:
-        if original != 0 and any(_is_payment(p) for p in payments or []):
+        paid = [p for p in payments or [] if _is_payment(p)]
+        paid_total = sum((_decimal(p.get("TrnValue")) for p in paid), Decimal("0"))
+        if original != 0 and paid and abs(paid_total) == abs(original):
             return ErpInvoiceStatus.paid
         return ErpInvoiceStatus.settled_no_payment
     if abs(balance) < abs(original):

@@ -13437,6 +13437,13 @@ non-zero `TrnValue`); otherwise `settled_no_payment`, as before. The payment
 code is unconfirmed until a sandbox shows it, and an unrecognised code reads as
 no payment, so the failure mode stays `settled_no_payment`.
 
+*Update 2026-10-26 (PR #670 money review):* one payment row was not enough. It
+proves only that some money left, so an invoice settled 40 by cheque and 60 by
+a credit note, or closed by a 0.01 payment and a write-off, read `paid` for the
+whole 100. SYSPRO now returns `paid` only when the absolute sum of the payment
+rows' `TrnValue` equals `abs(OrigInvValue)`; any shortfall is
+`settled_no_payment`. Guard: `test_zero_balance_is_paid_only_with_a_recorded_payment`.
+
 Guards: `tests/test_erp_{quickbooks_online,xero,sage_accounting_za,syspro,sage_intacct,blackbaud}_adapter.py`.
 
 ## 304. Approval sends to the ERP when the workflow says so, and a refusal leaves the invoice approved (2026-10-20)

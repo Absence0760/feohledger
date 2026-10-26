@@ -1895,7 +1895,7 @@ query-string parameters, which is how the WCF REST host takes them:
 | Operation | Business object |
 |---|---|
 | `post_invoice` | refuse without `vendor_erp_id` / a GL account ERP id → `COMFND` on `ApInvoice` by (`Supplier`, `Invoice`) → `Transaction/Post` `APSTIN` |
-| `get_invoice_status` | `COMFND` on `ApInvoice` — below `OrigInvValue` ⇒ partially paid, else open; `MthInvBal1` 0 ⇒ a second `COMFND` on `ApInvoicePay` by the same key: `paid` only with a payment row (`TrnType` `P`, non-zero `TrnValue`), else `settled_no_payment` (decisions §303) |
+| `get_invoice_status` | `COMFND` on `ApInvoice` — below `OrigInvValue` ⇒ partially paid, else open; `MthInvBal1` 0 ⇒ a second `COMFND` on `ApInvoicePay` by the same key: `paid` only when the payment rows (`TrnType` `P`) sum, in absolute value, to `abs(OrigInvValue)` — a 40 cheque + 60 credit, or a 0.01 payment beside a write-off, is `settled_no_payment` (decisions §303) |
 | `void_invoice` | never (`False`) — reversing a posted AP invoice is an adjustment / credit in an open period, an accountant's call, and the adapter deletes nothing |
 | `list_vendors` / `list_gl_accounts` | `COMFND` on `ApSupplier` / `GenMaster` (`AccountType` A/L/C/R/E → asset/liability/equity/revenue/expense). A supplier with `OnHold = Y`, and a ledger code with `AccOnHldFlag = Y` or `ControlAccFlag = Y`, is emitted `active=False`: APSTIN refuses all three on a manual AP distribution |
 | `list_pos` | `PorMasterHdr`, `PorMasterDetail` and `ApSupplier` in one session, each read whole by a keyset walk (below); `vendor_erp_id` = `PorMasterHdr.Supplier`, the id `list_vendors` reports; `CancelledFlag = Y` or `OrderStatus *` ⇒ cancelled, `9` ⇒ closed |
