@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**148 open: 127 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
+**148 open: 126 (c) · 11 (a) · 11 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2003,14 +2003,6 @@ stay open.
       decisions.md. **Trigger:** before the first tenant matches invoices
       against live Xero or NetSuite POs, or the next change to the PO status
       vocabulary.
-- [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
-      Xero, QuickBooks, Business Central, Merge.dev, Sage Intacct, Sage
-      Accounting ZA, Blackbaud FE NXT and SYSPRO fill `PoPayload.vendor_erp_id`
-      (#652). NetSuite falls back to `vendor_name`, which a rename on
-      either side breaks, and which picks the wrong row when two vendors share
-      a name. **Durable fix:** read each ERP's supplier id on the PO (the same
-      id its `list_vendors` reports) into `vendor_erp_id`. **Trigger:** the
-      next change to that adapter's `list_pos`.
 
 ### Surfaced by Xero's Disconnect leaving the grant live (2026-10-20)
 
@@ -2510,6 +2502,25 @@ as oversights.
       its sandbox, then correct the adapter and fake-erp together.
       **Trigger:** the first customer on each ERP, or sandbox access, whichever
       comes first.
+
+- [ ] **Verify NetSuite's OAuth 2.0 client-credentials sign-in against a real
+      account** ([#653](https://github.com/Absence0760/feohledger/issues/653)).
+      The grant is built from Oracle's documentation and proven against
+      fake-erp, whose token endpoint verifies the assertion's signature and
+      claims (`tools/fake-erp/netsuite_oauth2.py`). Unverified against Oracle:
+      that `rest_webservices` alone covers SuiteQL, the exact `aud` NetSuite
+      compares (its doc pages differ in the domain they show), the token
+      endpoint's real error bodies, and whether `expires_in` arrives as a
+      number or a string (both are read).
+      **Why blocked:** needs a NetSuite account with an integration record and
+      a mapped certificate — a design partner's sandbox or the SuiteCloud
+      Developer Network.
+      **Durable fix:** map a certificate, run test-connection, the three syncs,
+      a push and a void through `auth_method: oauth2_m2m`, then correct the
+      adapter and fake-erp together.
+      **Trigger:** before the first NetSuite customer, and in any case before a
+      customer must onboard on NetSuite 2027.1, where TBA is closed to new
+      integrations.
 
 ## (b) Operator steps on merged code
 

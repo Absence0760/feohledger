@@ -29,7 +29,7 @@ Both methods use the same adapter interface. Per-organization config in **Organi
 |---|---|---|---|
 | 1 | Microsoft Dynamics 365 Business Central | REST (OData v4) | OAuth 2.0 |
 | 2 | SAP S/4HANA | REST (OData) / RFC | OAuth 2.0 / X.509 |
-| 3 | Oracle NetSuite | REST / SuiteTalk SOAP | Token-Based Auth (TBA) |
+| 3 | Oracle NetSuite | REST / SuiteTalk SOAP | OAuth 2.0 client credentials (M2M); Token-Based Auth (TBA) for integrations created before 2027.1 |
 | 4 | Epicor Kinetic | REST | API Key / OAuth 2.0 |
 | 5 | Acumatica Cloud ERP | REST | OAuth 2.0 |
 | 6 | Sage X3 | REST | Basic Auth / API Key |
@@ -432,6 +432,8 @@ The secret fields of the block — every catalogue field marked `secret`
 (`erp_adapters/catalog.SECRET_KEYS`: `api_key` and `account_token` for Merge.dev
 and the Sage ZA API key, `client_secret` for Business Central, Intacct and any
 bring-your-own OAuth app, `consumer_secret` / `token_secret` for NetSuite TBA,
+`private_key` (the certificate key that signs the OAuth 2.0 client assertion) for
+NetSuite OAuth 2.0,
 `password` for Sage ZA, `operator_password` / `company_password` for SYSPRO,
 `subscription_key` for Blackbaud) plus `webhook_signing_secret` (inbound ERP
 webhooks, older spelling `webhook_secret`) — are **not** in
@@ -555,7 +557,7 @@ included, under `erp_integrations`, §281).
 | `sage_accounting_za` | Sage Business Cloud Accounting (South Africa) | ZA | API key + Sage login + company |
 | `blackbaud_fe_nxt` | Blackbaud Financial Edge NXT | US | OAuth (optional BYO app + SKY API subscription key) |
 | `sage_intacct` | Sage Intacct | US, ZA | REST API client credentials + company / user |
-| `netsuite` | Oracle NetSuite | US, ZA | TBA (OAuth 1.0a) tokens |
+| `netsuite` | Oracle NetSuite | US, ZA | `auth_method`: OAuth 2.0 client credentials (`client_id`, `certificate_id`, sealed `private_key`) or TBA (OAuth 1.0a) tokens |
 | `dynamics_365_bc` | Business Central | US, ZA | Azure AD client credentials |
 | `syspro` | SYSPRO | ZA | Operator + company (https base URL) |
 | `merge_dev` | Other ERP via Merge.dev | — | Merge API key + account token |
@@ -668,7 +670,8 @@ POST /A_SupplierInvoice
 before it reaches the hostname or the OAuth `realm`. Before this, `evil.tld/x?` sent every
 signed request to evil.tld. A bad id raises `NetSuiteConfigError` naming `'account_id'` only;
 `post_invoice` turns it into a non-retryable failure before any request.
-**Auth:** Token-Based Authentication (TBA) — OAuth 1.0 style
+**Auth:** OAuth 2.0 client credentials (M2M), or Token-Based Authentication (TBA) —
+`settings.erp.auth_method`, § NetSuite sign-in below.
 
 **Create Vendor Bill:**
 ```
@@ -1612,7 +1615,7 @@ One server fakes three provider surfaces by path prefix:
 | Provider | Fake surface | Path prefix |
 |---|---|---|
 | Merge.dev | Unified accounting API | `/merge/api/accounting/v1` |
-| NetSuite | SuiteTalk REST records | `/netsuite/services/rest/record/v1` |
+| NetSuite | SuiteTalk REST records + SuiteQL, OAuth 2.0 token endpoint | `/netsuite/services/rest/record/v1` (token at `/netsuite/services/rest/auth/oauth2/v1/token`) |
 | Dynamics 365 BC | OData + OAuth token endpoint | `/d365` (token at `/d365/oauth2/token`) |
 
 `GET /health` reports liveness; `POST /__reset` restores the fixture state.
@@ -1665,8 +1668,11 @@ includes the `erp` profile.
 
 **Caveat — what this does and doesn't test:** the fake *shape-checks* provider
 auth (non-empty bearer + `X-Account-Token` for Merge, OAuth 1.0 header
-presence for NetSuite, client-credentials → the fixed bearer `fake-d365-token`
-for D365) but does **not** cryptographically verify signatures. It validates
+presence for NetSuite TBA, client-credentials → the fixed bearer `fake-d365-token`
+for D365) but does **not** cryptographically verify those signatures. The one
+exception is NetSuite's OAuth 2.0 token endpoint, which verifies the JWT client
+assertion's signature and claims as NetSuite documents them
+(`tools/fake-erp/netsuite_oauth2.py`, § NetSuite sign-in). It validates
 OUR client code — request shape, auth header construction, pagination, status
 mapping — not that a real provider would accept our credentials.
 
@@ -1680,7 +1686,7 @@ backend/app/services/erp_adapters/
     mock_adapter.py      # Development/testing adapter
     merge_dev.py         # Merge.dev unified API adapter (covers all 10 ERPs)
     dynamics_365_bc.py   # Direct Business Central adapter (OAuth2 + OData)
-    netsuite.py          # Direct NetSuite adapter (TBA/OAuth1 + REST)
+    netsuite.py          # Direct NetSuite adapter (OAuth 2.0 M2M or TBA/OAuth1 + REST)
 
 backend/app/services/erp.py          # send_to_erp(), retry logic, calls adapters
 backend/app/services/erp_dispatch.py  # Routes to local or Lambda, loads org ERP config
@@ -2514,6 +2520,88 @@ listing stays best-effort: it stops at 10 pages / 1,000 rows, and a failure ends
 the pull with what it read. An admin `base_url` stays behind the SSRF guard on
 every call, and that refusal is raised, not swallowed.
 
+## NetSuite sign-in: OAuth 2.0 client credentials or TBA
+
+Oracle: "As of 2027.1, no new integrations using TBA can be created for … REST
+web services … Use OAuth 2.0." So the adapter signs in either way, chosen by
+`settings.erp.auth_method` (issue #653):
+
+| `auth_method` | Config | Secret (sealed) |
+|---|---|---|
+| `oauth2_m2m` — the form's default for a new connection | `client_id` (the integration record's client ID), `certificate_id` (the Certificate ID NetSuite generates when the certificate is mapped) | `private_key` (that certificate's PEM private key) |
+| `tba` — and **absent**, which is every NetSuite block saved before this choice existed | `consumer_key`, `token_id` | `consumer_secret`, `token_secret` |
+
+Any other value is refused (`NetSuite config 'auth_method' is invalid`). The
+catalogue marks each method's fields `show_when` its method, so the form shows
+and requires only the chosen method's credentials, and `stored_default: "tba"`
+makes the form read a saved block without the key as TBA, the way the adapter
+does: showing the first option there would switch a working tenant to OAuth
+2.0 on its next save.
+
+**The OAuth 2.0 grant**
+([token request](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162755359851.html),
+[assertion](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162790605110.html)).
+`NetSuiteAdapter._client_assertion` builds a JWT with header `{"typ": "JWT",
+"alg": …, "kid": certificate_id}` and claims `iss` = `client_id`, `scope` =
+`rest_webservices` (records and SuiteQL), `aud` = the token endpoint, `iat`,
+and `exp` five minutes later (NetSuite's ceiling is under 60). It is POSTed
+form-encoded with `grant_type=client_credentials` and
+`client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`
+to `https://<account>.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`
+(or, under `FEOH_ERP_NETSUITE_API_BASE`, the same path beside the overridden
+REST root, so the fake gets it and real NetSuite never does). The answer is a
+60-minute bearer with **no refresh token**, so:
+
+- the token is cached in process (`_TOKEN_CACHE`, keyed on the token URL and a
+  hash of account, client id, certificate id and private key — a rotated key
+  never reuses the old key's token) until a minute before its `expires_in`,
+  then a new assertion is exchanged;
+- a 401 from the API drops the cached token and the call is made once more
+  with a new one; a second 401 is the answer;
+- a refused token request (`invalid_client` for an unmapped certificate,
+  `invalid_grant`…) is returned to the caller as the failed call it is — a push
+  fails `NetSuite post failed: HTTP 400 (invalid_request)`, non-retryable, and no
+  record request is made. The OAuth `error` code is logged; the assertion,
+  the token and the key never are.
+
+**The key.** The algorithm follows the key, per Oracle's
+[certificate conditions](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/subsect_162755332391.html):
+RSA of 3072 or 4096 bits signs `PS256` (RSA-PSS; NetSuite does not take
+RS256), EC on P-256 / P-384 / P-521 signs `ES256` / `ES384` / `ES512`. Anything
+else — another size or curve, a passphrase-protected or unparseable PEM — is
+refused before any request with a message that names `'private_key'` and never
+its value; so is a missing `client_id` / `certificate_id` / `private_key` (or,
+for TBA, a missing `consumer_key` / `consumer_secret` / `token_id` /
+`token_secret`). The settings form takes the key in a one-line field, where a
+browser strips a pasted PEM's newlines; the adapter re-wraps the base64 body, so
+that is harmless. Loading an RSA key validates it (~150 ms of CPU at 4096 bits),
+so the parsed key is memoised and the load and the signing both run through
+`asyncio.to_thread`, never on the event loop. The key is a write-only `erp` secret like the others
+(`provider_credentials.SECRET_FIELDS`). Generate the pair as Oracle shows, e.g.
+`openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes
+-days 365 -out public.pem -keyout private.pem`, upload `public.pem` on
+NetSuite's OAuth 2.0 Client Credentials Setup page for the integration and role,
+and paste `private.pem` and the Certificate ID NetSuite shows into the form.
+NetSuite caps a certificate at two years and emails before it expires; a
+rotation is a new mapping (new Certificate ID) plus a new key here.
+
+**The fake.** `tools/fake-erp` answers the token endpoint with the same checks
+(alg, kid, signature, iss = the mapped client id, aud = its own URL, scope,
+iat/exp), against certificates mapped through
+`POST /__netsuite/oauth2/certificates {certificate_id, client_id,
+public_key_pem}` — the public half only. Its record and SuiteQL routes take an
+issued, unexpired bearer or a TBA header. `POST /__netsuite/oauth2/expire-tokens`
+makes every bearer 401 and `GET /__netsuite/oauth2/stats` counts mints.
+
+Tests: `tests/test_erp_netsuite_auth.py` (the adapter against the fake's own
+verifier, in process: PS256 and every ES curve, caching, rotation, the 401
+retry, a refused assertion, every config refusal, and TBA unchanged),
+`tests/test_erp_catalog.py` (the method's fields and defaults),
+`frontend/src/lib/types/erpConnection.test.ts` (`show_when` /
+`stored_default`), `frontend/tests-e2e/erp/netsuite.spec.ts` (connection test,
+the re-mint after a 401, and a full send, against the running fake). Only a real
+NetSuite account proves Oracle accepts the assertion (`docs/followups.md`).
+
 ## NetSuite: SuiteQL syncs and void
 
 `erp_adapters/netsuite.py`. Every list sync is one SuiteQL query
@@ -2527,7 +2615,7 @@ pages, best-effort.
 |---|---|---|
 | `list_vendors` | `SELECT id, entityid, companyname, email, phone, BUILTIN.DF(terms) AS terms, isinactive FROM vendor` | The REST `/vendor` collection returns ids and links only — no names — so the old record-API sync could not have named a vendor. Name = `companyname`, else `entityid` (an individual); code = `entityid` (an `entityid` longer than `vendors.code` is not written and is reported in `values_too_long`); inactive vendors emitted `active=False`; a row with no `id` skipped. |
 | `list_gl_accounts` | `SELECT id, acctnumber, fullname, accttype, isinactive FROM account` | unchanged (§ ERP references) |
-| `list_pos` | `transaction` where `type = 'PurchOrd'`, `foreigntotal`, `currency.symbol`, `TO_CHAR(duedate, 'YYYY-MM-DD')` | Headers only — the PO sync stores no ERP lines. Status letter C → cancelled, G / H → closed, else open. Dates go through `TO_CHAR` because SuiteQL formats them per the user's preference. |
+| `list_pos` | `transaction` where `type = 'PurchOrd'`, `t.entity AS vendorid`, `BUILTIN.DF(t.entity) AS vendorname`, `foreigntotal`, `currency.symbol`, `TO_CHAR(duedate, 'YYYY-MM-DD')` | Headers only — the PO sync stores no ERP lines. `vendorid` (the vendor's internal id, the same `vendor.id` `list_vendors` reports as `erp_vendor_id`) fills `PoPayload.vendor_erp_id`, so the PO links to its vendor by id and a rename on either side, or two vendors sharing a name, cannot mislink it; the name is the fallback only (issue #652). Status letter C → cancelled, G / H → closed, else open. Dates go through `TO_CHAR` because SuiteQL formats them per the user's preference. |
 
 **Void.** The REST record service has no void: its record actions name neither
 `vendorBill` nor a void action

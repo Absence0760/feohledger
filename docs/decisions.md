@@ -15000,3 +15000,57 @@ deleted or part-paid — is not recorded when every blocker is cleared),
 `test_erp_paid_recorded_outside.py`, `test_erp_webhook_transitions.py`,
 `frontend/src/lib/types/erpReport.test.ts`,
 `frontend/tests-e2e/payments/erp-reported-payment.spec.ts`.
+
+## 320. NetSuite signs in with OAuth 2.0 client credentials, and a saved block without a method stays TBA (2026-10-26)
+
+**Context.** Oracle closes Token-Based Authentication to new REST integrations
+in NetSuite 2027.1 ("Use OAuth 2.0"). The adapter only spoke TBA, so a customer
+onboarding on 2027.1 could not create the integration record our setup asked
+for (issue #653).
+
+**Decision.** `settings.erp.auth_method` picks `oauth2_m2m` (the client-
+credentials grant: a JWT signed with the private key of a certificate mapped to
+the integration, exchanged for a 60-minute bearer) or `tba`. The private key is
+an `erp` secret sealed in `provider_credentials`, write-only like the others;
+the client id and certificate id are configuration.
+
+- **Absent means `tba`, in the adapter and in the form.** Every NetSuite block
+  saved before the choice existed is TBA. Making the key mandatory would have
+  needed a control-plane data migration for a value we already know; reading
+  absent as OAuth 2.0 would break every existing tenant. The form starts a NEW
+  connection on OAuth 2.0 (first option) but shows a saved block without the
+  key as TBA (`stored_default`), because showing the first option there would
+  switch a working tenant on its next save. Any other value is refused, never
+  guessed.
+- **Each method's fields apply only under it** (`show_when`), so the form never
+  requires a TBA token secret of an OAuth 2.0 connection or the reverse. That
+  is a generic catalogue attribute rather than a NetSuite branch in the panel.
+- **The bearer is cached in process, keyed by a hash of the credentials**, and
+  a 401 re-mints once. The grant has no refresh token, so the only alternative
+  is a token request per push (three calls each) against NetSuite's
+  concurrency limits; persisting the token would add a sealed secret with no
+  owner. Hashing the private key into the key means a rotated certificate can
+  never reuse the old one's token.
+- **The algorithm follows the key**: PS256 for RSA 3072/4096, ES256/384/512 by
+  curve — Oracle's certificate conditions, refused up front otherwise rather
+  than after a round trip NetSuite would refuse anyway. NetSuite does not take
+  RS256.
+- **A refused token request is returned as the failed call.** Every caller
+  already treats a non-200 as failure, so a push fails non-retryable on a 400
+  (`invalid_client`: no certificate mapped) without reaching the record API, and
+  the OAuth `error` code is logged — never the assertion or a token. A 200 with
+  no token raises instead, since as a response it would read as success.
+- **fake-erp verifies the assertion cryptographically**
+  (`tools/fake-erp/netsuite_oauth2.py`), unlike its TBA shape check: a header
+  shape check would have proved nothing about whether NetSuite accepts what we
+  sign. Certificates are mapped through a test hook with the public key only,
+  and survive `/__reset` so a parallel worker cannot unmap a running spec.
+
+**Not done: live verification.** Built from Oracle's documentation and proven
+against the fake's verifier; a real account is the remaining proof
+(`docs/followups.md` (a)).
+
+Tests: `backend/tests/test_erp_netsuite_auth.py`, `test_erp_catalog.py`,
+`frontend/src/lib/types/erpConnection.test.ts`,
+`frontend/tests-e2e/erp/netsuite.spec.ts`. Reference:
+`backend/docs/erp-integration.md` § NetSuite sign-in.
