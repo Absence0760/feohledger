@@ -15054,3 +15054,91 @@ Tests: `backend/tests/test_erp_netsuite_auth.py`, `test_erp_catalog.py`,
 `frontend/src/lib/types/erpConnection.test.ts`,
 `frontend/tests-e2e/erp/netsuite.spec.ts`. Reference:
 `backend/docs/erp-integration.md` § NetSuite sign-in.
+
+## 321. A sub-processor change is one change-log entry; the notice is emailed from it (issue #427, 2026-10-26)
+
+**What happened.** `/legal/dpa` § 8 and `/legal/sub-processors` § 9 promise
+every customer at least 30 days' notice before a new sub-processor processes
+their data. Nothing backed it: § 10 was a hand-typed `<tr>`, the DPA defined the
+notice as "this page is updated — checking it is how you receive it", and the
+30 days were prose in three places and an assertion in none. An Art. 28(2)
+general authorisation resting on "check this page" is weak, and a register row
+added without anyone told was one forgotten step away.
+
+**The rule.** The change log is data — `app/services/subprocessor_changelog.py`
+— and both halves derive from one entry, so adding the row and giving the notice
+are the same action:
+
+- `scripts/gen_subprocessor_changelog.py` (`pnpm gen:subprocessor-changelog`,
+  `check:` in CI's Backend lint job) writes the module § 10 renders.
+- `services/subprocessor_notices.py` (sweep `subprocessor-notices`) emails each
+  `notice=True` entry to every active system-`admin` of every organisation that
+  existed on its publication date.
+
+The 30 days are enforced, not described: a `notice=True` entry must state
+`effective_on` at least `NOTICE_PERIOD_DAYS` after `published_on`, or carry an
+`urgent_reason` (the DPA's security/availability carve-out). `validate` refuses
+anything else and generation refuses to write past it, so the page cannot
+publish a short notice that does not say why. The sent notice is measured too:
+each ledger row stores the entry's effective date and `late` — sent with under
+30 days to run, which an urgent entry or a sweep left off would cause — and the
+tick reports `late_notices` on `/api/health/sweeps`.
+
+**Idempotent and on the record.** A control-plane `subprocessor_notices` row,
+UNIQUE (entry, organisation), is inserted `ON CONFLICT DO NOTHING` *before* any
+email goes out, in the transaction that later records the counts; a second
+replica or a re-run finds the claim and sends nothing. The organisation counts
+as told when at least one admin's email reached the provider; if none did, the
+claim rolls back and the next tick retries. A `privacy.subprocessor_notice_sent`
+audit row lands in the tenant (recipient user ids, never addresses) and raises
+on failure, as the dunning sweep's does — a notice is never ledgered without
+its trail. Delivery is at-least-once: a crash between send and commit re-sends,
+which is recoverable; a silent miss is the defect this closes. The ledger has no
+foreign key and is exempt from tenant deletion: it is evidence a contractual
+notice was given, and should outlive the customer it was given to.
+
+**Why each choice.**
+
+- **Administrators, not a DPO field.** The platform holds no privacy contact
+  for an organisation; inventing one meant an endpoint, a settings field and a
+  contractual decision (instead of the admins, or as well?) that is counsel's,
+  not code's. The active admins are the contact the platform does hold, the
+  DPA now says exactly that, and it keeps — rather than drops — the existing
+  offer to copy the notice by hand to another address requested at `privacy@`.
+  The field is the (c) follow-up.
+- **Not a notification event.** `notify_event` is preference-gated; a user who
+  muted email would have opted their organisation out of a contractual notice.
+  The sweep sends through the email adapter directly, with no in-app row.
+- **English, unbranded.** The DPA is English-only by design (§174) and the
+  notice is given under it; a white-label child tenant is still notified by the
+  processor, which is the platform.
+- **Organisations created after publication are not told.** They signed up
+  against a register that already listed the change.
+- **Append-only, stable ids.** The ledger is keyed by entry id: renaming one
+  re-notifies everyone, deleting one leaves a sent notice the page no longer
+  shows. The id must start with its publication date; `validate` checks both
+  that and order.
+- **The sweep is off by default and required in production.** Every sweep that
+  emails is off locally (guard rail 7). Because the DPA now says the notice *is*
+  emailed, `deploy/prod.sops.yaml.example` sets it and `decrypt-env.sh` warns on
+  every deploy while it is off. Warn, not refuse: a deploy should not be blocked
+  on it, and the warning plus the (b) follow-up make it impossible to miss.
+
+**Historical rows.** All six existing rows are `notice=False`: the register's
+first publication; the move of the databases to RDS (same provider, same
+region, same data — no new party); and four systems the customer connects
+itself (§ 4), which are not sub-processors. None is ever emailed.
+
+**Rejected.** A subscribe endpoint / mailing list (a second recipient model to
+keep consistent with the admin set, and a list a customer has to know to join —
+the same weakness as "check the page"); notifying from the git diff of the page
+(no stable id to dedupe on, and nothing measures the 30 days).
+
+**Tests.** `backend/tests/test_subprocessor_changelog.py` (the rules, the
+generator's drift guard and its refusal), `test_subprocessor_notices.py` (only
+active admins, once per entry, roll back when nobody is reached, one failed
+address does not stop the rest, `late`, organisations created after
+publication, the CLI), `test_migration_0122_subprocessor_notices.py`,
+`test_deploy_decrypt_env.py` (the warning),
+`frontend/src/lib/legal/subprocessorChangelog.test.ts` (the email's objection
+address is `CONTACT.privacy`).

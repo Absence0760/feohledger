@@ -674,6 +674,19 @@ resolver a conflicting claim on one hostname, and lets one tenant claim a name
 another tenant's slug owns (or takes at the next signup). The refusal echoes no
 hostname, matching the endpoint's existing PII-free posture.
 
+## Sub-processor change notices (contractual, not a notification event)
+
+`services/subprocessor_notices.py` emails the DPA's 30-day sub-processor change
+notice (decisions §320, issue #427). It is deliberately **outside** everything
+above: it is not a `NOTIFICATION_EVENT_TYPES` member, writes no in-app row and
+never goes through `notify_event`, because per-user preferences must not be able
+to switch off a notice the DPA promises. It calls `get_email_adapter()` directly,
+once per active system-`admin` of each organisation, in English (the language of
+the DPA, decisions §174), with no tenant brand (the platform is the processor
+giving notice). Idempotency is the control-plane `subprocessor_notices` ledger,
+not a preference or a Redis key. The source is a change-log entry, not an app
+event: see `docs/sub-processors.md` § Maintenance for how to add one.
+
 ## Configuration & local-first
 
 - `FEOH_NOTIFICATIONS_ENABLED` (default `true`) — master kill switch. When off,

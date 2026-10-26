@@ -165,5 +165,6 @@ When you add an integration/provider, update this RoPA,
 [`docs/sub-processors.md`](sub-processors.md) **and the published register at
 `/legal/sub-processors`** in the same change — the published page is the one a
 customer's DPO reads, and a change to it also triggers the 30-day sub-processor
-notice in `/legal/dpa` § 8 (whose notification half is still manual — see
-`docs/sub-processors.md` § Maintenance).
+notice in `/legal/dpa` § 8: add a `notice=True` entry to
+`backend/app/services/subprocessor_changelog.py`, which publishes the § 10 row
+and emails the notice (see `docs/sub-processors.md` § Maintenance).

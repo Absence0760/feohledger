@@ -628,7 +628,7 @@ Step types: `extraction` → `approval` → `erp_export` → `done`
 
 ## Key background services
 
-Eighteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
+Nineteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
 its own `FEOH_*_ENABLED` gate. **What each one does, plus the shared loop runner,
 health registry and locking rules: `backend/docs/background-sweeps.md`.**
 
