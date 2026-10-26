@@ -15153,3 +15153,12 @@ publication, the CLI), `test_migration_0122_subprocessor_notices.py`,
 `test_deploy_decrypt_env.py` (the warning),
 `frontend/src/lib/legal/subprocessorChangelog.test.ts` (the email's objection
 address is `CONTACT.privacy`).
+
+**Amended in review (2026-10-26): refuse, not warn.** "Warn, not refuse" left
+a deployment free to run with the contractual mechanism off, the one state the
+DPA cannot describe. `config.py` now refuses to boot a deployed environment with
+`FEOH_SUBPROCESSOR_NOTICES_ENABLED` off — the same shape as the `console` email
+refusal — and `decrypt-env.sh` refuses the file instead of warning, so a deploy
+stops before compose restarts the API into that refusal
+(`test_config_boot_guards.py`, `test_deploy_decrypt_env.py`). Local dev, tests
+and CI keep it off; the day-one rehearsal (production-shaped) turns it on.

@@ -2525,7 +2525,8 @@ as oversights.
       is what sends it. Set `FEOH_SUBPROCESSOR_NOTICES_ENABLED: "true"` in
       `infra-secrets/feohledger/prod.sops.yaml` (never in this repo), deploy,
       and confirm `subprocessor-notices` is running on `GET /api/health/sweeps`;
-      `deploy/decrypt-env.sh` warns on every deploy until it is set. SES must
+      until it is set `deploy/decrypt-env.sh` refuses the file and the API
+      refuses to boot (`FEOH_ENVIRONMENT=production`). SES must
       be out of its sandbox for the email to reach a customer.
       **Trigger:** before the deploy that publishes the 2026-10-26 legal text,
       and in any case before customer #1.
