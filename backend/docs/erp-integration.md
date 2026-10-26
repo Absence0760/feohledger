@@ -1482,7 +1482,7 @@ name two vendors share links neither too.
 
 **A PO the adapter skips is not left trusted.** An adapter that cannot state a
 PO's total exactly (SYSPRO: a discount, a mixed-currency order, a currency it
-cannot place) leaves it out and names it in `list_pos_report().skipped`. The sync
+cannot place; Blackbaud: no order total) leaves it out and names it in `list_pos_report().skipped`. The sync
 creates nothing for it, but stamps `purchase_orders.total_unverifiable_reason`
 (the `PoSkipReason`) on the existing row the upsert would refresh for that
 number (`purchase_orders._sync_target`: this entity first, else an unstamped
@@ -1496,9 +1496,9 @@ The response carries `not_priced` (POs the ERP has that were not synced) and
 `unverifiable` (existing rows now marked); the PO list and detail return
 `total_unverifiable_reason`, and the purchase-orders page says so in a warning
 toast. The supplier portal refuses to flip such a PO into an invoice (409).
-Adapters that do not override `list_pos_report` report nothing skipped.
-**Blackbaud FE NXT still skips a PO with no order total silently**: its wiring
-is tracked in `docs/followups.md`.
+Blackbaud FE NXT reports the same way: a PO with no usable `order_total` is
+`unpriceable`. Adapters that do not override `list_pos_report` report nothing
+skipped.
 
 **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
@@ -2402,7 +2402,7 @@ so every tenant on the platform key draws on one bucket — see *Call budget* be
 | `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>&limit=500` (narrowed by `from_date`/`to_date` only when that page is full) → `GET /generalledger/v1/fiscalyears` (cached 15 min per environment) → `POST /accountspayable/v1/invoices/process` (on a 400, `GET /vendors/{id}`) → `GET …/backgroundProcess/{id}/status` (≤ 5 reads, backing off 1, 2, 4, 8 s) → `…/result` |
 | `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (a zero balance stays open until FE NXT says `Paid`, decisions §303), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
 | `void_invoice` | not automated (`False`): the AP API has no invoice delete, and cancelling a posted payable is an adjustment in an open period |
-| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), with `vendor_status` `Inactive` **and `OnHold`** emitted `active=False`; POs 10 pages best-effort, linked to their vendor by `vendor_id` (`PoPayload.vendor_erp_id`); template and deleted POs, and a PO with no `order_total`, skipped; PO `currency` stays NULL |
+| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 a page; vendors up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), with `vendor_status` `Inactive` **and `OnHold`** emitted `active=False`; POs read whole the same way (`list_pos_report`; a failed page, a transport error or more than `SYNC_LISTING_MAX_ROWS` raises `ErpListingIncomplete`, never an empty or partial list), linked to their vendor by `vendor_id` (`PoPayload.vendor_erp_id`); template and deleted POs dropped; a PO with no usable `order_total` skipped and named in `skipped` as `unpriceable` (§323); PO `currency` stays NULL |
 | `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take), up to `SYNC_LISTING_MAX_ROWS`; `prevent_data_entry` accounts emitted `active=False`; `account_type` unclassified (FE NXT's `class` is a net-asset class) |
 | `test_connection` | an `environment_id` was captured at consent + `GET /accountspayable/v1/vendors?limit=1` |
 
@@ -2511,8 +2511,13 @@ Request rules worth knowing:
   (`ErpCallBudgetExhausted` → a coded 429 with `Retry-After`, nothing synced);
   a status read is `unknown`; a PO sync is refused the same way. Org admins get an
   `erp_call_quota` notice once a day each at 80% of the share, when the share
-  is used, and when the subscription's quota is. Redis down → the budget fails
-  open and SKY's own 403 is the backstop. A heavy tenant should still store its
+  is used, and when the subscription's quota is. The connection status
+  (`GET /api/organization/erp/oauth/status` → `call_usage`, shown on the ERP
+  panel) carries today's count against the org's share — or, on its own key,
+  every call on that key against the key's quota — the reset, and any pause
+  with its reason and end. The platform key's total is never shown to a
+  tenant: it is every tenant's. Redis down → the budget fails
+  open, the status shows no usage, and SKY's own 403 is the backstop. A heavy tenant should still store its
   own `subscription_key`; whether Blackbaud sells a higher-volume product for a
   multi-tenant app is an operator question (`docs/followups.md`).
 - **Money** goes out through `dumps_exact_json` and is read back with
@@ -2828,7 +2833,7 @@ and calls `await self.access_token()`.
 | `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan | `200 {"authorize_url"}`; the page navigates the browser to it. `404` unknown provider, `409` no app configured, `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
 | `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>`. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant`, `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
 | `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
-| `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, connected_at, redirect_uri, providers: [{key, display_name, available, client_source}]}`. Never a token. |
+| `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
 Connect and disconnect write `organization.erp_connected` /
 `organization.erp_disconnected` (provider, client source, the sealed paths

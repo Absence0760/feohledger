@@ -821,6 +821,138 @@ async def test_status_when_not_connected(realdb, monkeypatch):
     assert qbo["available"] is False
 
 
+# ---------------------------------------------------------------------------
+# call usage on a shared-quota ERP (Blackbaud SKY, decisions §322 / §324)
+# ---------------------------------------------------------------------------
+
+BLACKBAUD = "blackbaud_fe_nxt"
+
+
+async def _connect_blackbaud(realdb, **erp_extra) -> dict:
+    block = {
+        **_connected_block(realdb.info("a").org_id),
+        "provider": BLACKBAUD,
+        "external_tenant_id": "p-env-123",
+    }
+    erp = {"type": BLACKBAUD, "integration_method": "direct", "oauth": block, **erp_extra}
+    await _set_settings(realdb, {"erp": erp})
+    return erp
+
+
+def _budget_for(erp: dict):
+    from app.services.erp_adapters.blackbaud_fe_nxt import BlackbaudFeNxtAdapter
+
+    return BlackbaudFeNxtAdapter(erp).call_budget()
+
+
+async def _status_body(realdb) -> dict:
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get("/api/organization/erp/oauth/status")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+@pytest.mark.plan("scale")
+async def test_status_shows_a_blackbaud_orgs_calls_against_its_share(realdb, monkeypatch):
+    """The 80% / used-up notices were the only place an org could see its SKY
+    usage. The connection status now carries today's count, the share it is
+    measured against and when it resets — and never the key's total, which is
+    every tenant's on the platform key."""
+    monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "platform-sub-key")
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 50)
+    monkeypatch.setattr(settings, "erp_blackbaud_daily_call_quota", 25_000)
+    erp = await _connect_blackbaud(realdb)
+    mine = _budget_for(erp)
+    for _ in range(7):
+        await mine.record_call()
+    # Another tenant on the same platform key: its calls are not ours to see.
+    other = _budget_for({**erp, "oauth": {**erp["oauth"], "org_id": str(uuid.uuid4())}})
+    for _ in range(30):
+        await other.record_call()
+
+    usage = (await _status_body(realdb))["call_usage"]
+    tomorrow = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+    assert usage == {
+        "scope": "org_share",
+        "used": 7,
+        "limit": 50,
+        "resets_at": f"{tomorrow}T00:00:00+00:00",
+        "paused_reason": None,
+        "paused_until": None,
+    }
+    assert "platform-sub-key" not in json.dumps(usage)
+
+    # SKY's 429 cools the whole key down: the page says until when.
+    await mine.record_response(httpx.Response(429, headers={"Retry-After": "120"}))
+    usage = (await _status_body(realdb))["call_usage"]
+    assert usage["paused_reason"] == "rate_limited"
+    assert datetime.fromisoformat(usage["paused_until"]) > datetime.now(UTC)
+
+
+@pytest.mark.plan("scale")
+async def test_status_reports_a_used_up_share_as_paused_until_the_reset(realdb, monkeypatch):
+    monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "platform-sub-key")
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 3)
+    erp = await _connect_blackbaud(realdb)
+    budget = _budget_for(erp)
+    for _ in range(3):
+        await budget.record_call()
+    usage = (await _status_body(realdb))["call_usage"]
+    assert usage["used"] == 3 and usage["limit"] == 3
+    assert usage["paused_reason"] == "tenant_budget"
+    assert usage["paused_until"] == usage["resets_at"]
+
+
+@pytest.mark.plan("scale")
+async def test_status_measures_an_orgs_own_key_against_its_quota(realdb, monkeypatch):
+    monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "platform-sub-key")
+    monkeypatch.setattr(settings, "erp_blackbaud_daily_call_quota", 1_000)
+    erp = await _connect_blackbaud(realdb, subscription_key="own-sub-key")
+    budget = _budget_for(erp)
+    assert budget.shared is False
+    for _ in range(4):
+        await budget.record_call()
+    usage = (await _status_body(realdb))["call_usage"]
+    assert (usage["scope"], usage["used"], usage["limit"]) == ("subscription", 4, 1_000)
+
+
+@pytest.mark.plan("scale")
+async def test_status_without_the_call_counts_shows_no_usage_rather_than_failing(
+    realdb, monkeypatch
+):
+    """The budget fails open on Redis; so does the figure. A status read the
+    budget's store cannot answer is still a status read."""
+    from app.services import erp_call_budget
+
+    monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "platform-sub-key")
+    await _connect_blackbaud(realdb)
+
+    async def down():
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(erp_call_budget, "get_redis", down)
+    body = await _status_body(realdb)
+    assert body["connected"] is True and body["call_usage"] is None
+
+
+@pytest.mark.plan("scale")
+async def test_status_has_no_call_usage_for_an_erp_without_a_shared_quota(
+    realdb, platform_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "platform-sub-key")
+    await _set_settings(
+        realdb, {"erp": {"type": PROVIDER, "oauth": _connected_block(realdb.info("a").org_id)}}
+    )
+    assert (await _status_body(realdb))["call_usage"] is None
+
+
+@pytest.mark.plan("scale")
+async def test_status_has_no_call_usage_without_a_subscription_key(realdb, monkeypatch):
+    monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "")
+    await _connect_blackbaud(realdb)
+    assert (await _status_body(realdb))["call_usage"] is None
+
+
 async def test_org_settings_never_return_the_oauth_block(realdb):
     await _set_settings(
         realdb, {"erp": {"type": PROVIDER, "oauth": _connected_block(realdb.info("a").org_id)}}

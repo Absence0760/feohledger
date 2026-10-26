@@ -81,6 +81,25 @@ export interface ErpOAuthProviderStatus {
 	client_source: 'tenant' | 'platform' | null;
 }
 
+/**
+ * Today's (UTC) API calls on an ERP whose quota is shared across tenants and
+ * budgeted per org — Blackbaud SKY (`services/erp_call_budget`, decisions
+ * §322 / §324). Absent for any other ERP, and when the counts can't be read.
+ */
+export interface ErpCallUsage {
+	/** `org_share`: this org's calls against its share of the platform key.
+	 *  `subscription`: every call on the org's own key, against its quota. */
+	scope: 'org_share' | 'subscription' | string;
+	used: number;
+	/** Null when no limit applies (a share or quota configured as 0). */
+	limit: number | null;
+	/** The next 00:00 UTC, when the counts reset. */
+	resets_at: string;
+	/** `rate_limited` | `subscription_quota` | `tenant_budget`, while refused. */
+	paused_reason: string | null;
+	paused_until: string | null;
+}
+
 /** `GET /api/organization/erp/oauth/status` (`api/erp_oauth.py`). No tokens. */
 export interface ErpOAuthStatus {
 	provider: string | null;
@@ -95,6 +114,8 @@ export interface ErpOAuthStatus {
 	/** Why `needs_reconnect`: `refresh_token_expired` | `refresh_token_revoked`. */
 	reconnect_reason?: string | null;
 	connected_at?: string | null;
+	/** Today's call usage on a shared-quota ERP (Blackbaud); see `callUsageLines`. */
+	call_usage?: ErpCallUsage | null;
 	/** What a bring-your-own app must register as its redirect URI. */
 	redirect_uri: string;
 	providers: ErpOAuthProviderStatus[];
@@ -479,4 +500,54 @@ export function erpTestResultText(
 		default:
 			return result.message;
 	}
+}
+
+const CALL_PAUSED_KEYS = {
+	rate_limited: 'org.erp.usage.paused.rateLimited',
+	tenant_budget: 'org.erp.usage.paused.tenantBudget',
+	subscription_quota: 'org.erp.usage.paused.subscriptionQuota'
+} as const satisfies Record<string, MessageKey>;
+
+/** Locale formatters `callUsageLines` renders figures and times with. */
+export interface CallUsageFormat {
+	/** A count in the reader's locale (1,234 / 1.234 / 1 234). */
+	count: (n: number) => string;
+	/** An instant in the reader's locale and time zone. */
+	time: (iso: string) => string;
+}
+
+/**
+ * The sentences the ERP panel shows for `usage`: today's count against the
+ * limit it is measured by, then — while calls are refused — why and until
+ * when. Empty when there is no usage to show (another ERP, or the counts were
+ * unreadable: the panel then says nothing rather than an error). A pause
+ * reason this build does not know reads as the generic "paused until".
+ */
+export function callUsageLines(
+	usage: ErpCallUsage | null | undefined,
+	erp: string,
+	t: Translate,
+	fmt: CallUsageFormat
+): string[] {
+	if (!usage) return [];
+	const used = fmt.count(usage.used);
+	const reset = fmt.time(usage.resets_at);
+	const lines = [
+		usage.limit == null
+			? t('org.erp.usage.noLimit', { erp, used, reset })
+			: t(usage.scope === 'org_share' ? 'org.erp.usage.ofShare' : 'org.erp.usage.ofQuota', {
+					erp,
+					used,
+					limit: fmt.count(usage.limit),
+					reset
+				})
+	];
+	if (usage.paused_reason && usage.paused_until) {
+		const reason = usage.paused_reason;
+		const key = Object.hasOwn(CALL_PAUSED_KEYS, reason)
+			? CALL_PAUSED_KEYS[reason as keyof typeof CALL_PAUSED_KEYS]
+			: 'org.erp.usage.paused';
+		lines.push(t(key, { erp, until: fmt.time(usage.paused_until) }));
+	}
+	return lines;
 }

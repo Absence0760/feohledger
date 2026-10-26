@@ -15432,3 +15432,67 @@ Guards: `test_purchase_orders.py` (`test_sync_erp_raising_a_po_total_never_clear
 the run is still refused; `test_sync_erp_lowering_a_po_total_opens_a_blocking_hold`;
 `test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before`; and the
 re-price leg of `test_sync_erp_marks_an_already_synced_po_the_adapter_now_skips`).
+
+## 324. Blackbaud reports the POs it skips, a PO listing that fails says so, and an org can see its SKY call usage (PR #670 round 3, 2026-10-26)
+
+**1. Blackbaud FE NXT names a PO it drops for want of a total.** §323 added
+`list_pos_report` and left Blackbaud's wiring as a follow-up. A PO FE NXT lists
+with no usable `order_total` (absent, null, unreadable, or not finite) is now
+`SkippedPo(number, unpriceable)`, so a PO synced at a total and later listed
+without one is marked and held exactly as SYSPRO's are. Templates and deleted
+orders are still dropped without a report: neither is a PO the match may use,
+and a `DeletedOrder` the sync marked would hold invoices over a PO that no
+longer exists rather than one the ERP stopped pricing.
+
+**2. A PO listing that could not be read whole raises.** `list_pos` caught
+every exception except the budget refusal and returned `[]`. The PO sync read
+that as "the ERP has no POs": it synced nothing, said nothing, and dropped the
+skip report from (1) with it, so the mark could never land during an outage. It
+also read only 10 pages (1,000 POs) and returned them as the whole list. The PO
+listing now goes through `_sync_rows`, like vendors and the chart: a failed
+page, a transport error (`httpx.HTTPError`, now mapped for all three listings,
+as Business Central, Merge.dev and NetSuite already did) or more than
+`SYNC_LISTING_MAX_ROWS` raises `ErpListingIncomplete` (a coded 502), a lost
+connection is the coded 409, and a budget refusal is still the coded 429 of
+§322. Nothing is synced in any of them.
+
+Tests: `backend/tests/test_erp_blackbaud_adapter.py`
+(`test_list_pos_report_names_every_po_it_left_out_for_want_of_a_total`,
+`test_a_po_listing_that_cannot_be_read_whole_raises_rather_than_finding_none`,
+`test_a_transport_error_on_a_listing_is_an_incomplete_listing`,
+`test_a_po_listing_without_a_connection_says_so`),
+`tests/test_purchase_orders.py::test_sync_erp_marks_a_blackbaud_po_that_lost_its_order_total`
+(the real adapter through `sync-erp`: synced at 100.00, marked when the total
+goes, cleared when it returns).
+
+**3. An org can see today's SKY call usage.** The `erp_call_quota` notice
+(§322) was the only place an org learned where it stood against the budget,
+and only at 80%, 100% or a refusal. `GET /api/organization/erp/oauth/status`,
+the connection status the ERP panel already reads, now carries `call_usage`
+for an adapter that has a `call_budget` (`ErpAdapter.call_budget()`, None by
+default; Blackbaud's is the one): `scope` (`org_share` on the platform key,
+`subscription` on the org's own), `used`, `limit`, `resets_at`, and
+`paused_reason` / `paused_until` while calls are refused. The panel renders it
+under the connection line in all six locales, with localized counts and times.
+
+- *The figure is the org's own.* On the platform key `used` is this org's calls
+  against its share; the key's total is not reported, since it is every
+  tenant's activity. On an org's own key it is every call on that key, against
+  the key's quota.
+- *It is a read only* (`CallBudget.usage`). `check` sends notices and is the
+  gate; a status page rendered every visit must do neither. A pause is the
+  key's cool-down, or a share or quota already used by our own count — the
+  same three reasons a push would be refused with.
+- *It fails open.* A Redis error, a missing subscription key or an adapter that
+  will not build gives `call_usage: null` and the panel shows nothing. The
+  figure is a courtesy over a courtesy brake; a status read that errored over
+  it would hide the connection state, which matters more.
+- *Rejected:* a separate usage endpoint. The status read is already the
+  panel's one call for "where does this connection stand", is admin-only, and
+  is where the expiry warning (§295) lives.
+
+Tests: `backend/tests/test_erp_oauth.py` (the share and the other tenant's
+calls kept out of it, a 429 cool-down and a used-up share as pauses, an own
+key against its quota, Redis down, a non-budgeted ERP, no key),
+`frontend/src/lib/types/erpConnection.test.ts` (`callUsageLines`, every
+sentence in every locale).

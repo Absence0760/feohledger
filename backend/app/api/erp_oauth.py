@@ -76,6 +76,25 @@ class ProviderStatus(BaseModel):
     client_source: str | None
 
 
+class ErpCallUsage(BaseModel):
+    """Today's (UTC) API calls on a quota shared across tenants (Blackbaud
+    SKY, decisions §322 / §324). Counts only — never the subscription key."""
+
+    #: ``org_share``: ``used`` is this org's calls against its daily share of
+    #: the platform key. ``subscription``: the org's own key, every call on it
+    #: against the key's daily quota.
+    scope: str
+    used: int
+    #: None when no limit applies (a share or quota configured as 0).
+    limit: int | None = None
+    #: The next 00:00 UTC, when the daily counts reset.
+    resets_at: str
+    #: Set while calls are refused: ``rate_limited`` / ``subscription_quota``
+    #: (a cool-down SKY asked for, or the quota used) or ``tenant_budget``.
+    paused_reason: str | None = None
+    paused_until: str | None = None
+
+
 class OAuthStatusResponse(BaseModel):
     provider: str | None
     connected: bool
@@ -91,6 +110,10 @@ class OAuthStatusResponse(BaseModel):
     #: can say which; None while connected.
     reconnect_reason: str | None = None
     connected_at: str | None = None
+    #: Today's call usage, for an ERP whose API quota is shared and budgeted
+    #: (Blackbaud). None for any other ERP, and when it cannot be read: the
+    #: page then shows nothing rather than an error (§324).
+    call_usage: ErpCallUsage | None = None
     #: The redirect URI to register on a bring-your-own provider app.
     redirect_uri: str
     providers: list[ProviderStatus]
@@ -129,6 +152,32 @@ def _has_own_app(org: Organization, provider: str) -> bool:
         isinstance(erp, dict)
         and erp.get("type") == provider
         and bool(str(erp.get("client_id") or "").strip())
+    )
+
+
+async def _call_usage(resolved: dict | None) -> ErpCallUsage | None:
+    """The connection's call usage today, or None: not a budgeted ERP, no key
+    to count against, or the counts unreadable. Never raises — the status
+    endpoint must answer whatever the budget's store is doing."""
+    if not resolved:
+        return None
+    from app.services.erp_adapters import get_erp_adapter
+
+    try:
+        budget = get_erp_adapter(resolved).call_budget()
+        usage = await budget.usage() if budget is not None else None
+    except Exception as exc:  # noqa: BLE001 — a courtesy figure; fail open
+        logger.info("erp call usage unavailable: %s", exc.__class__.__name__)
+        return None
+    if usage is None:
+        return None
+    return ErpCallUsage(
+        scope=usage.scope.value,
+        used=usage.used,
+        limit=usage.limit,
+        resets_at=usage.resets_at.isoformat(),
+        paused_reason=usage.paused.reason.value if usage.paused else None,
+        paused_until=usage.paused.retry_after.isoformat() if usage.paused else None,
     )
 
 
@@ -176,6 +225,7 @@ async def oauth_status(
             else None
         ),
         connected_at=oauth.get("connected_at"),
+        call_usage=await _call_usage(resolved),
         **common,
     )
 

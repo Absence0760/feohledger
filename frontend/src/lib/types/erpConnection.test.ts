@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 import {
 	buildErpPayload,
 	buildErpSecretUpdate,
 	buildErpTestPayload,
 	byoAppRequired,
+	callUsageLines,
+	type ErpCallUsage,
 	fieldApplies,
 	groupProviders,
 	initialValues,
@@ -632,5 +635,77 @@ describe('NetSuite sign-in method (show_when / stored_default)', () => {
 	it('labels both methods', () => {
 		expect(optionLabelKey('oauth2_m2m')).toBe('org.erp.option.oauth2_m2m');
 		expect(optionLabelKey('tba')).toBe('org.erp.option.tba');
+	});
+});
+
+describe('callUsageLines', () => {
+	const t = (key: string, params?: Record<string, string | number>) =>
+		`${key}${params ? ' ' + JSON.stringify(params) : ''}`;
+	// Stand-ins that show the figures went through the locale formatters.
+	const fmt = { count: (n: number) => `#${n}`, time: (iso: string) => `@${iso}` };
+	const RESET = '2026-10-27T00:00:00+00:00';
+	const usage = (overrides: Partial<ErpCallUsage> = {}): ErpCallUsage => ({
+		scope: 'org_share',
+		used: 1234,
+		limit: 2500,
+		resets_at: RESET,
+		paused_reason: null,
+		paused_until: null,
+		...overrides
+	});
+
+	it('says nothing when the status carries no usage', () => {
+		expect(callUsageLines(null, 'Blackbaud', t, fmt)).toEqual([]);
+		expect(callUsageLines(undefined, 'Blackbaud', t, fmt)).toEqual([]);
+	});
+
+	it("measures a platform-key org against its share and its own key against the key's quota", () => {
+		expect(callUsageLines(usage(), 'Blackbaud', t, fmt)).toEqual([
+			`org.erp.usage.ofShare {"erp":"Blackbaud","used":"#1234","limit":"#2500","reset":"@${RESET}"}`
+		]);
+		expect(
+			callUsageLines(usage({ scope: 'subscription', limit: 25000 }), 'Blackbaud', t, fmt)
+		).toEqual([
+			`org.erp.usage.ofQuota {"erp":"Blackbaud","used":"#1234","limit":"#25000","reset":"@${RESET}"}`
+		]);
+		expect(callUsageLines(usage({ limit: null }), 'Blackbaud', t, fmt)).toEqual([
+			`org.erp.usage.noLimit {"erp":"Blackbaud","used":"#1234","reset":"@${RESET}"}`
+		]);
+	});
+
+	it('says why calls are paused and until when, and falls back for a reason it does not know', () => {
+		const until = '2026-10-26T14:02:00+00:00';
+		const paused = (reason: string) =>
+			callUsageLines(usage({ paused_reason: reason, paused_until: until }), 'FE NXT', t, fmt)[1];
+		expect(paused('rate_limited')).toBe(
+			`org.erp.usage.paused.rateLimited {"erp":"FE NXT","until":"@${until}"}`
+		);
+		expect(paused('tenant_budget')).toBe(
+			`org.erp.usage.paused.tenantBudget {"erp":"FE NXT","until":"@${until}"}`
+		);
+		expect(paused('subscription_quota')).toBe(
+			`org.erp.usage.paused.subscriptionQuota {"erp":"FE NXT","until":"@${until}"}`
+		);
+		expect(paused('something_new')).toBe(`org.erp.usage.paused {"erp":"FE NXT","until":"@${until}"}`);
+		expect(paused('toString')).toBe(`org.erp.usage.paused {"erp":"FE NXT","until":"@${until}"}`);
+		// A reason with no time is not a pause the page can state.
+		expect(callUsageLines(usage({ paused_reason: 'rate_limited' }), 'X', t, fmt)).toHaveLength(1);
+	});
+
+	it('has every usage sentence in every locale', async () => {
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
+		const keys: MessageKey[] = [
+			'org.erp.usage.ofShare',
+			'org.erp.usage.ofQuota',
+			'org.erp.usage.noLimit',
+			'org.erp.usage.paused',
+			'org.erp.usage.paused.rateLimited',
+			'org.erp.usage.paused.tenantBudget',
+			'org.erp.usage.paused.subscriptionQuota'
+		];
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
+			for (const key of keys) expect(messages[key], `${locale}: ${key}`).toBeTruthy();
+		}
 	});
 });

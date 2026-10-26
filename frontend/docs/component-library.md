@@ -363,6 +363,11 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   (`{field, values}`) is shown and required only while that sibling choice holds one of the values
   (`fieldApplies` — NetSuite's sign-in method picks OAuth 2.0 or TBA credentials), and
   `stored_default` is what a SAVED block without the key means, shown instead of the first option so
-  opening an older connection never switches it on save. Pure helpers (grouping, the configuration
-  and secret payloads, destination changes, OAuth return params, `fieldApplies`) live in
+  opening an older connection never switches it on save. For a connected ERP whose API quota is
+  shared and budgeted (Blackbaud SKY) it shows the status's `call_usage` under the connection line
+  (`erp-call-usage`): today's calls against the org's share or its own key's quota, when the count
+  resets, and while calls are refused, why and until when (`erp-call-usage-paused`). No usage in
+  the status (another ERP, or the counts unreadable) renders nothing (decisions §324). Pure helpers
+  (grouping, the configuration and secret payloads, destination changes, OAuth return params,
+  `fieldApplies`, `callUsageLines`) live in
   `#lib/types/erpConnection.ts` with a vitest.

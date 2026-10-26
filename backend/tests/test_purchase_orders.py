@@ -1028,9 +1028,73 @@ async def test_sync_erp_skip_marks_only_rows_in_the_synced_entity_scope(realdb, 
     assert reason is None
 
 
+async def test_sync_erp_marks_a_blackbaud_po_that_lost_its_order_total(realdb, monkeypatch):
+    """The Blackbaud wiring end to end, through the real adapter: FE NXT
+    lists PO 501 at 100.00, then without an ``order_total``. The adapter used
+    to drop it silently, so the row kept 100.00 in the 3-way match; now it is
+    named ``unpriceable`` and the sync marks the row (decisions §323)."""
+    import httpx
+
+    from app.config import settings
+    from app.services.erp_adapters.blackbaud_fe_nxt import BlackbaudFeNxtAdapter
+
+    monkeypatch.setattr(settings, "erp_blackbaud_subscription_key", "platform-sub-key")
+    monkeypatch.setattr(settings, "erp_blackbaud_api_base", "")
+
+    async def token(self):
+        return "tok"
+
+    monkeypatch.setattr(BlackbaudFeNxtAdapter, "access_token", token)
+    rows: list[dict] = []
+
+    def sky(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/accountspayable/v1/purchaseorders"
+        return httpx.Response(200, json={"count": len(rows), "value": rows})
+
+    def client(self, *, timeout):
+        return httpx.AsyncClient(timeout=timeout, transport=httpx.MockTransport(sky))
+
+    monkeypatch.setattr(BlackbaudFeNxtAdapter, "oauth_client", client)
+    await _set_org_erp(
+        realdb,
+        realdb.info("a").org_id,
+        {
+            "type": "blackbaud_fe_nxt",
+            "integration_method": "direct",
+            "oauth": {"external_tenant_id": "p-env-123"},
+        },
+    )
+
+    async def sync() -> dict:
+        async with realdb.client(key="a", role="ap_manager") as c:
+            resp = await c.post("/api/purchase-orders/sync-erp")
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    async def mark() -> tuple[Decimal, str | None]:
+        async with realdb.sessionmaker("a")() as s:
+            po = (
+                await s.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == "501"))
+            ).scalar_one()
+            return po.total, po.total_unverifiable_reason
+
+    rows[:] = [{"order_number": 501, "order_total": 100, "order_status": "OpenPurchaseOrder"}]
+    assert (await sync())["created"] == 1
+    assert await mark() == (Decimal("100.00"), None)
+
+    rows[:] = [{"order_number": 501, "order_status": "OpenPurchaseOrder"}]
+    body = await sync()
+    assert body["not_priced"] == 1 and body["unverifiable"] == 1
+    assert await mark() == (Decimal("100.00"), "unpriceable")
+
+    rows[:] = [{"order_number": 501, "order_total": 120, "order_status": "OpenPurchaseOrder"}]
+    assert (await sync())["unverifiable"] == 0
+    assert await mark() == (Decimal("120.00"), None)
+
+
 def test_an_adapter_that_never_skips_reports_nothing_skipped():
     """The additive contract: an adapter that only implements ``list_pos``
-    (Blackbaud, Merge.dev, NetSuite today) works unchanged."""
+    (Merge.dev, NetSuite today) works unchanged."""
     import asyncio
 
     from app.services.erp_adapters.base import ErpAdapter, PoPayload

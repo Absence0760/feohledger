@@ -30,6 +30,8 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     LineItemPayload,
     ListingGap,
+    PoSkipReason,
+    SkippedPo,
 )
 from app.services.erp_adapters.blackbaud_fe_nxt import (
     DEFAULT_API_BASE,
@@ -1092,6 +1094,83 @@ def test_list_pos_skips_a_po_with_no_total_rather_than_syncing_zero():
     ]
     pos = _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos())
     assert [(p.po_number, p.total) for p in pos] == [("11", Decimal("0"))]
+
+
+def test_list_pos_report_names_every_po_it_left_out_for_want_of_a_total():
+    """§323: a PO synced at a total and later listed without one kept that
+    total in the 3-way match, because the skip was silent. Each one the
+    adapter drops for want of a total is now named, so the sync marks it.
+    A template or a deleted order is not a PO the match may use, and is not
+    reported."""
+    fake = FakeSky()
+    fake.collections["/accountspayable/v1/purchaseorders"] = [
+        {"order_number": 11, "order_total": 40},
+        {"order_number": 12},
+        {"order_number": 13, "order_total": None},
+        {"order_number": 14, "order_total": "not a number"},
+        {"order_number": 15, "order_total": "NaN"},
+        {"order_number": 16, "order_status": "DeletedOrder"},
+        {"order_number": 17, "type": "Template"},
+    ]
+    listing = _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos_report())
+    assert [p.po_number for p in listing.pos] == ["11"]
+    assert listing.skipped == [
+        SkippedPo(number, PoSkipReason.unpriceable) for number in ("12", "13", "14", "15")
+    ]
+
+
+def test_a_po_listing_that_cannot_be_read_whole_raises_rather_than_finding_none():
+    """It used to swallow every failure into [], which the sync read as "the
+    ERP has no POs" — and which dropped the skip report with it."""
+    path = "/accountspayable/v1/purchaseorders"
+    fake = FakeSky()
+    fake.collections[path] = [{"order_number": i, "order_total": 1} for i in range(150)]
+    fake.collection_fail_offset = 100
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos_report())
+    assert exc.value.gap is ListingGap.fetch_failed
+
+    fake.collection_fail_offset = 0
+    with pytest.raises(ErpListingIncomplete):
+        _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos())
+
+    # Past the sync bound: truncated, never the first N rows (it stopped at
+    # 1,000 rows and returned them as the whole list).
+    fake.collection_fail_offset = None
+    fake.collections[path] = [
+        {"order_number": i, "order_total": 1} for i in range(SYNC_LISTING_MAX_ROWS + 1)
+    ]
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos())
+    assert exc.value.gap is ListingGap.truncated
+
+    from app.api.refusals import erp_pull_failure
+
+    http = erp_pull_failure(exc.value)
+    assert http.status_code == 502 and http.detail["code"] == "erp_listing_incomplete"
+
+
+@pytest.mark.parametrize("listing", ["list_pos", "list_vendors", "list_gl_accounts"])
+def test_a_transport_error_on_a_listing_is_an_incomplete_listing(listing):
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    fake = FakeSky()
+    fake.handler = boom
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, lambda: getattr(BlackbaudFeNxtAdapter(CONFIG), listing)())
+    assert exc.value.gap is ListingGap.fetch_failed
+
+
+def test_a_po_listing_without_a_connection_says_so(monkeypatch):
+    """A lost connection is the sync's coded 409, not "no purchase orders"."""
+
+    async def not_connected(self):
+        raise erp_oauth.ErpNotConnectedError("blackbaud_fe_nxt")
+
+    monkeypatch.setattr(BlackbaudFeNxtAdapter, "access_token", not_connected)
+    with pytest.raises(erp_oauth.ErpNotConnectedError):
+        _run(FakeSky(), lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos_report())
 
 
 def test_test_connection_needs_a_captured_environment():
