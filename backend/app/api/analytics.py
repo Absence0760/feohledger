@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -24,6 +25,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import case, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO, require_roles
@@ -34,7 +36,7 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_status import IN_REVIEW_STATUSES
 from app.models.organization import Organization
 from app.models.payment import Payment, PaymentSchedule
-from app.models.procurement import po_currency_code
+from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
 from app.models.user import User
 from app.models.virtual_card import CardRebate, VirtualCard
 from app.services.analytics import (
@@ -1427,86 +1429,78 @@ async def _received_amounts(
     fraction of each PO via `value_received_goods`. Returns the whole-book
     figure (the legacy flat `received_amount`) and the same valuation grouped
     by each PO's own currency — a receipt is worth its PO's money, in the PO's
-    currency. Lazily imports the procurement models so a tenant without those
-    tables falls back to 0 rather than 500-ing. Receipts with no PO link can't
-    be priced and are excluded.
+    currency. Receipts with no PO link can't be priced and are excluded.
+
+    A failed read raises: the GR/IR leg is reported or the request fails,
+    never answered as a confident zero (decisions §34).
     """
-    try:
-        from collections import defaultdict
-
-        from sqlalchemy.orm import selectinload
-
-        from app.models.procurement import GoodsReceipt, PurchaseOrder
-
-        gr_rows = (
-            (
-                await db.execute(
-                    apply_entity_scope(
-                        select(GoodsReceipt)
-                        .where(GoodsReceipt.status == "received")
-                        .options(selectinload(GoodsReceipt.line_items)),
-                        GoodsReceipt,
-                        entity_id,
-                    )
+    gr_rows = (
+        (
+            await db.execute(
+                apply_entity_scope(
+                    select(GoodsReceipt)
+                    .where(GoodsReceipt.status == "received")
+                    .options(selectinload(GoodsReceipt.line_items)),
+                    GoodsReceipt,
+                    entity_id,
                 )
             )
-            .scalars()
-            .all()
         )
+        .scalars()
+        .all()
+    )
 
-        gr_qty_by_po: dict[uuid.UUID, Decimal] = defaultdict(lambda: Decimal("0"))
-        for gr in gr_rows:
-            if not gr.po_id:
-                continue
-            gr_qty_by_po[gr.po_id] += sum(
-                (li.quantity_received or Decimal("0") for li in gr.line_items), Decimal("0")
-            )
-        if not gr_qty_by_po:
-            return Decimal("0"), {}, set()
-
-        # Entity scope is carried transitively: the PO ids come only from the
-        # entity-scoped GR query above, so this fetch is already confined to the
-        # selected subsidiary. Keep the GR query's `apply_entity_scope` if you
-        # touch this — dropping it would silently widen this fetch too.
-        po_rows = (
-            (
-                await db.execute(
-                    select(PurchaseOrder)
-                    .where(PurchaseOrder.id.in_(gr_qty_by_po.keys()))
-                    .options(selectinload(PurchaseOrder.line_items))
-                )
-            )
-            .scalars()
-            .all()
+    gr_qty_by_po: dict[uuid.UUID, Decimal] = defaultdict(lambda: Decimal("0"))
+    for gr in gr_rows:
+        if not gr.po_id:
+            continue
+        gr_qty_by_po[gr.po_id] += sum(
+            (li.quantity_received or Decimal("0") for li in gr.line_items), Decimal("0")
         )
-
-        receipts_by_code: dict[str | None, list[ReceivedPO]] = defaultdict(list)
-        unverifiable: set[uuid.UUID] = set()
-        for po in po_rows:
-            # Valuing a receipt scales the PO's total; a total the ERP no longer
-            # vouches for (decisions §323) values nothing — counted instead.
-            if po.total_unverifiable_reason:
-                unverifiable.add(po.id)
-                continue
-            receipts_by_code[po_currency_code(po.currency)].append(
-                ReceivedPO(
-                    po_total=po.total or Decimal("0"),
-                    po_qty_total=sum(
-                        (li.quantity or Decimal("0") for li in po.line_items), Decimal("0")
-                    ),
-                    gr_qty_total=gr_qty_by_po[po.id],
-                )
-            )
-        # The flat figure keeps its single quantize over the whole book, so it
-        # does not move by a rounding cent against what it always reported.
-        everything = [r for group in receipts_by_code.values() for r in group]
-        return (
-            value_received_goods(everything),
-            {code: value_received_goods(group) for code, group in receipts_by_code.items()},
-            unverifiable,
-        )
-    except Exception:  # noqa: BLE001
+    if not gr_qty_by_po:
         return Decimal("0"), {}, set()
+
+    # Entity scope is carried transitively: the PO ids come only from the
+    # entity-scoped GR query above, so this fetch is already confined to the
+    # selected subsidiary. Keep the GR query's `apply_entity_scope` if you
+    # touch this — dropping it would silently widen this fetch too.
+    po_rows = (
+        (
+            await db.execute(
+                select(PurchaseOrder)
+                .where(PurchaseOrder.id.in_(gr_qty_by_po.keys()))
+                .options(selectinload(PurchaseOrder.line_items))
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    receipts_by_code: dict[str | None, list[ReceivedPO]] = defaultdict(list)
+    unverifiable: set[uuid.UUID] = set()
+    for po in po_rows:
+        # Valuing a receipt scales the PO's total; a total the ERP no longer
+        # vouches for (decisions §323) values nothing — counted instead.
+        if po.total_unverifiable_reason:
+            unverifiable.add(po.id)
+            continue
+        receipts_by_code[po_currency_code(po.currency)].append(
+            ReceivedPO(
+                po_total=po.total or Decimal("0"),
+                po_qty_total=sum(
+                    (li.quantity or Decimal("0") for li in po.line_items), Decimal("0")
+                ),
+                gr_qty_total=gr_qty_by_po[po.id],
+            )
+        )
+    # The flat figure keeps its single quantize over the whole book, so it
+    # does not move by a rounding cent against what it always reported.
+    everything = [r for group in receipts_by_code.values() for r in group]
+    return (
+        value_received_goods(everything),
+        {code: value_received_goods(group) for code, group in receipts_by_code.items()},
+        unverifiable,
+    )
 
 
 # ---------------------------------------------------------------------------
