@@ -97,6 +97,9 @@ class BudgetSpendResponse(BaseModel):
     # them rather than adding unlike face values. Non-zero means `committed` /
     # `actual` describe PART of the linked activity — say so where they render.
     excluded_row_count: int = 0
+    # A COUNT: linked open POs left out of `committed` because the ERP could not
+    # confirm their total at its last sync (decisions §323). Same rule.
+    unverifiable_po_count: int = 0
 
 
 class BudgetCurrencyTotal(BaseModel):
@@ -146,6 +149,7 @@ class BudgetCurrencyRollupEntry(BaseModel):
     utilization_pct: str | None
     over_budget_count: int
     excluded_row_count: int
+    unverifiable_po_count: int = 0
 
 
 class BudgetRollupResponse(BaseModel):
@@ -166,6 +170,9 @@ class BudgetRollupResponse(BaseModel):
     by_currency: list[BudgetCurrencyRollupEntry]
     excluded_row_count: int
     insufficient_data: bool
+    #: Linked open POs left out of ``committed`` because their total is one the
+    #: ERP no longer vouches for (decisions §323) — a second floor disclosure.
+    unverifiable_po_count: int = 0
 
 
 class BudgetCheckResponse(BaseModel):
@@ -183,6 +190,10 @@ class BudgetCheckResponse(BaseModel):
     remaining_after: MoneyAmount
     would_overspend: bool
     currency: str
+    # Linked open POs left out of `committed` (decisions §323): non-zero means
+    # `remaining` may overstate the headroom, so `would_overspend: false` is
+    # not the whole answer.
+    unverifiable_po_count: int = 0
 
 
 __all__ = [

@@ -7,7 +7,7 @@
 	} from '#lib/portalApi.ts';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import Money from '#lib/components/ui/Money.svelte';
+	import UnverifiedMoney from '#lib/components/ui/UnverifiedMoney.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -104,6 +104,11 @@
 			<p class="hint">{m('portal.po.emptyHint')}</p>
 		</div>
 	{:else}
+		{#if items.some((po) => po.total_unverifiable)}
+			<p class="unverifiable-note" id="po-unverifiable-note" role="note">
+				{m('portal.po.totalUnverifiableNote')}
+			</p>
+		{/if}
 		<table>
 			<thead>
 				<tr>
@@ -121,13 +126,23 @@
 						<td>{po.po_number}</td>
 						<td>{formatDate(po.created_at, m('portal.common.dash'))}</td>
 						<td>{po.line_item_count}</td>
-						<td class="num"><Money amount={po.total} currency={po.currency} /></td>
+						<td class="num">
+							<UnverifiedMoney
+								amount={po.total}
+								currency={po.currency}
+								unverified={po.total_unverifiable}
+								label={m('portal.po.totalUnverifiable')}
+							/>
+						</td>
 						<td><span class="status s-{po.status}">{po.status}</span></td>
 						<td class="actions">
+							<!-- The server refuses to bill a total it cannot confirm
+							     (409); the note above the table says why. -->
 							<button
 								type="button"
 								class="flip-btn"
-								disabled={flipping === po.id}
+								disabled={flipping === po.id || po.total_unverifiable}
+								aria-describedby={po.total_unverifiable ? 'po-unverifiable-note' : undefined}
 								onclick={() => flip(po)}
 							>
 								{flipping === po.id ? m('portal.po.creating') : m('portal.po.createInvoice')}
@@ -242,6 +257,13 @@
 	}
 	.empty .hint {
 		font-size: 0.82rem;
+	}
+	.unverifiable-note {
+		margin: 0 0 12px;
+		padding: 10px 12px;
+		border-left: 3px solid var(--warning);
+		color: var(--text);
+		font-size: 0.85rem;
 	}
 	.error {
 		background: color-mix(in srgb, var(--danger) 10%, transparent);

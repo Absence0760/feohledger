@@ -911,7 +911,7 @@ async def get_cfo_analytics(
     # currency (it carries no locked rate). `accruals.by_currency` is the figure
     # to render; the flat fields beside it are the legacy naive sums, kept for
     # back-compat exactly like `total_spend` (decisions §197).
-    open_po_by_currency = await _open_po_amounts_by_currency(db, entity_id)
+    open_po_by_currency, open_po_unverifiable = await _open_po_amounts_by_currency(db, entity_id)
 
     # Unposted invoices: approved + sending_to_erp + sent_to_erp
     unposted_code = func.upper(Invoice.currency)
@@ -933,7 +933,12 @@ async def get_cfo_analytics(
     unposted_by_currency = _amounts_by_code(unposted_rows.all())
     # GR-received-but-not-invoiced: fan the 3-way match out per-PO and
     # value the received fraction of each receipted PO, per PO currency.
-    received_amount, received_by_currency = await _received_amounts(db, entity_id)
+    received_amount, received_by_currency, received_unverifiable = await _received_amounts(
+        db, entity_id
+    )
+    # Distinct POs either leg left out for an unverifiable total (decisions
+    # §323) — one PO open AND receipted is one PO, not two.
+    accrual_unverifiable_po_count = len(open_po_unverifiable | received_unverifiable)
     accruals = compute_accruals(
         open_po_amount=sum(open_po_by_currency.values(), Decimal("0")),
         received_amount=received_amount,
@@ -1285,6 +1290,10 @@ async def get_cfo_analytics(
             "received_amount": _money(accruals.received_amount),
             "unposted_invoice_amount": _money(accruals.unposted_invoice_amount),
             "total_accrual": _money(accruals.total_accrual),
+            # POs left out of the open-PO and received legs because the ERP
+            # could not confirm their total at its last sync (decisions §323).
+            # A count, not money: non-zero means every leg below is a floor.
+            "unverifiable_po_count": accrual_unverifiable_po_count,
             # One row per currency, each leg in it and `total_accrual` netted
             # within it. `currency: null` is the slice nobody recorded a
             # currency for (POs only) — render it bare, never merged.
@@ -1361,7 +1370,7 @@ def _amounts_by_code(rows) -> dict[str | None, Decimal]:
 
 async def _open_po_amounts_by_currency(
     db: AsyncSession, entity_id: uuid.UUID | None
-) -> dict[str | None, Decimal]:
+) -> tuple[dict[str | None, Decimal], set[uuid.UUID]]:
     """Open-PO commitments summed per PO currency, entity-scoped when a
     subsidiary is selected — `/cfo`'s accruals leg and every by-entity row.
 
@@ -1374,26 +1383,44 @@ async def _open_po_amounts_by_currency(
     summed every PO the tenant had ever raised — a cancelled order counted as a
     live commitment forever. The exclusion list is the model's
     `DEAD_PO_STATUSES`, shared with the budget-commitment leg so the two cannot
-    disagree about what is still committed."""
-    from app.models.procurement import DEAD_PO_STATUSES, PurchaseOrder
+    disagree about what is still committed.
+
+    **A total the ERP no longer vouches for is not summed.** An open PO whose
+    last sync could not be priced (`total_unverifiable_reason`, decisions §323)
+    is left out and returned by id, so the caller counts it beside the figure —
+    the excluded-and-counted rule of §35, never a stale total in the sum."""
+    from app.models.procurement import DEAD_PO_STATUSES, PO_TOTAL_VOUCHED, PurchaseOrder
 
     rows = await db.execute(
         apply_entity_scope(
             select(PurchaseOrder.currency, func.coalesce(func.sum(PurchaseOrder.total), 0))
             .select_from(PurchaseOrder)
-            .where(PurchaseOrder.status.notin_(DEAD_PO_STATUSES))
+            .where(PurchaseOrder.status.notin_(DEAD_PO_STATUSES), PO_TOTAL_VOUCHED)
             .group_by(PurchaseOrder.currency),
             PurchaseOrder,
             entity_id,
         )
     )
-    return _amounts_by_code(rows.all())
+    marked = await db.execute(
+        apply_entity_scope(
+            select(PurchaseOrder.id).where(
+                PurchaseOrder.status.notin_(DEAD_PO_STATUSES),
+                PurchaseOrder.total_unverifiable_reason.is_not(None),
+            ),
+            PurchaseOrder,
+            entity_id,
+        )
+    )
+    return _amounts_by_code(rows.all()), set(marked.scalars().all())
 
 
 async def _received_amounts(
     db: AsyncSession, entity_id: uuid.UUID | None
-) -> tuple[Decimal, dict[str | None, Decimal]]:
+) -> tuple[Decimal, dict[str | None, Decimal], set[uuid.UUID]]:
     """Value goods received but not yet invoiced (the GR/IR accrual leg).
+
+    The third element is the ids of receipted POs left unvalued because their
+    total is marked unverifiable (decisions §323).
 
     Loads every `received` goods receipt (entity-scoped) with its line
     items, aggregates received quantity per PO, then values the received
@@ -1435,7 +1462,7 @@ async def _received_amounts(
                 (li.quantity_received or Decimal("0") for li in gr.line_items), Decimal("0")
             )
         if not gr_qty_by_po:
-            return Decimal("0"), {}
+            return Decimal("0"), {}, set()
 
         # Entity scope is carried transitively: the PO ids come only from the
         # entity-scoped GR query above, so this fetch is already confined to the
@@ -1454,7 +1481,13 @@ async def _received_amounts(
         )
 
         receipts_by_code: dict[str | None, list[ReceivedPO]] = defaultdict(list)
+        unverifiable: set[uuid.UUID] = set()
         for po in po_rows:
+            # Valuing a receipt scales the PO's total; a total the ERP no longer
+            # vouches for (decisions §323) values nothing — counted instead.
+            if po.total_unverifiable_reason:
+                unverifiable.add(po.id)
+                continue
             receipts_by_code[po_currency_code(po.currency)].append(
                 ReceivedPO(
                     po_total=po.total or Decimal("0"),
@@ -1467,11 +1500,13 @@ async def _received_amounts(
         # The flat figure keeps its single quantize over the whole book, so it
         # does not move by a rounding cent against what it always reported.
         everything = [r for group in receipts_by_code.values() for r in group]
-        return value_received_goods(everything), {
-            code: value_received_goods(group) for code, group in receipts_by_code.items()
-        }
+        return (
+            value_received_goods(everything),
+            {code: value_received_goods(group) for code, group in receipts_by_code.items()},
+            unverifiable,
+        )
     except Exception:  # noqa: BLE001
-        return Decimal("0"), {}
+        return Decimal("0"), {}, set()
 
 
 # ---------------------------------------------------------------------------
@@ -1597,7 +1632,7 @@ async def _entity_metrics(
 
     # Open-PO accrual — the same per-currency grouping `/cfo`'s accruals card
     # renders (entity-scoped), so the consolidated row and that card agree.
-    open_po_by_currency = await _open_po_amounts_by_currency(db, entity_id)
+    open_po_by_currency, open_po_unverifiable = await _open_po_amounts_by_currency(db, entity_id)
 
     return {
         # Naive cross-currency SUM, kept for API back-compat; the figure to
@@ -1626,6 +1661,9 @@ async def _entity_metrics(
             {"currency": code, "amount": _money(open_po_by_currency[code])}
             for code in sorted(open_po_by_currency, key=lambda c: (c is None, c or ""))
         ],
+        # Open POs left out of `open_po_by_currency` because their total is one
+        # the ERP no longer vouches for (decisions §323). A count, not money.
+        "open_po_unverifiable_count": len(open_po_unverifiable),
     }
 
 

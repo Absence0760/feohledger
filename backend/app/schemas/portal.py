@@ -237,7 +237,9 @@ class PortalPOListItem(BaseModel):
     id: str
     po_number: str
     status: str
-    total: Decimal
+    #: ``None`` while ``total_unverifiable`` — see ``PortalPODetail``.
+    total: Decimal | None
+    total_unverifiable: bool = False
     #: The PO's own code, or ``None`` when no source recorded one. This used to
     #: default to ``"USD"`` and the handler never set it, so every PO a
     #: supplier saw read as dollars whatever it was raised in (decisions §197).
@@ -262,7 +264,12 @@ class PortalPODetail(BaseModel):
     id: str
     po_number: str
     status: str
-    total: Decimal
+    #: ``None`` (and every line's ``unit_price`` / ``total`` too) while
+    #: ``total_unverifiable``: the buyer's ERP could not confirm this PO's total
+    #: at its last sync, so the stored figure is not one to show a supplier as
+    #: the PO's (decisions §323). The buyer's internal reason code is not sent.
+    total: Decimal | None
+    total_unverifiable: bool = False
     #: Labels ``total`` and every line figure; ``None`` renders bare.
     currency: str | None = None
     created_at: datetime

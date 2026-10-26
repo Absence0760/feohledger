@@ -203,7 +203,9 @@ export interface PortalPOListItem {
 	id: string;
 	po_number: string;
 	status: string;
-	total: number | string;
+	/** `null` while `total_unverifiable` — the buyer's ERP could not confirm it (decisions §323). */
+	total: number | string | null;
+	total_unverifiable: boolean;
 	/** The PO's own code; `null` when no source recorded one, and `<Money>`
 	 *  then renders the total bare. It used to arrive as `"USD"` for every PO,
 	 *  a schema default the handler never overrode (decisions §197). */

@@ -115,6 +115,46 @@ async def test_list_purchase_orders_happy_path(realdb):
     assert item["line_items"][0]["description"] == "Widgets"
 
 
+async def test_list_and_detail_withhold_the_money_of_a_po_whose_total_is_unverifiable(realdb):
+    """A PO the ERP's last sync could not price (decisions §323) keeps its old
+    figures in the row, but the list and the detail send `null` for the total
+    and every line figure, with the reason beside them, so no client can show
+    a stale figure as the PO's. Quantities stay — the receipt form needs them."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    po_id = await _add_po(
+        mk,
+        org_id,
+        po_number="PO-UNVERIFIABLE",
+        total=Decimal("1200.50"),
+        currency="USD",
+        line_items=[
+            {
+                "description": "Widgets",
+                "quantity": Decimal("10"),
+                "unit_price": Decimal("120.05"),
+                "total": Decimal("1200.50"),
+            }
+        ],
+    )
+    async with mk() as s:
+        po = await s.get(PurchaseOrder, po_id)
+        po.total_unverifiable_reason = "unpriceable"
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        listed = (await c.get("/api/purchase-orders")).json()["items"][0]
+        detail = (await c.get(f"/api/purchase-orders/{po_id}")).json()
+
+    for body in (listed, detail):
+        assert body["total"] is None
+        assert body["total_unverifiable_reason"] == "unpriceable"
+        assert body["currency"] == "USD"
+        line = body["line_items"][0]
+        assert line["unit_price"] is None and line["total"] is None
+        assert line["quantity"] == 10.0
+
+
 async def test_list_purchase_orders_requires_auth(realdb):
     async with realdb.client(key="a", role=None) as c:
         resp = await c.get("/api/purchase-orders")

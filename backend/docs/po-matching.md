@@ -211,9 +211,29 @@ FeohLedger edit, under that close's past-approval and segregation limits — the
 behaviour that predates §323, and part of the question left to the CISO
 review.
 
-Budget commitments and spend analytics still sum `purchase_orders.total`
-without regard to the mark — reporting, not a payment path; tracked in
-`docs/followups.md`.
+Outside the match, no surface presents or sums the stale figure:
+
+- **Display.** The PO list and detail (`/api/purchase-orders`) send `total:
+  null` and `null` line `unit_price` / `total` (quantities stay — the receipt
+  form needs them) beside `total_unverifiable_reason`; `/purchase-orders`
+  renders "Not verifiable" in place of the figure and the catalogued reason in
+  the detail. The supplier portal's list and detail send the same `null`s and
+  `total_unverifiable: true` (never the internal code); its page shows "Being
+  confirmed" and disables the flip. One owner: `models/procurement.po_vouched_money`.
+- **Aggregates — excluded and counted** (decisions §35, the rule behind
+  `excluded_rebate_count` and the budgets' `excluded_row_count`). Budget
+  `committed` leaves a marked converted PO out and reports
+  `unverifiable_po_count` on `/spend`, `/check` and `/rollup`, apart from the
+  currency count because the remedy differs. `/analytics/cfo` leaves it out of
+  the open-PO and received (GR/IR) accrual legs and reports
+  `accruals.unverifiable_po_count` (distinct POs across both legs);
+  `/analytics/by-entity` leaves it out of open POs and reports
+  `open_po_unverifiable_count`. Each surface prints the count beside the figure
+  it qualifies. Filter: `models/procurement.PO_TOTAL_VOUCHED`.
+- **Not affected.** The public `/api/v1` API carries no PO figures (only an
+  invoice's `po_number`), and no CSV / PDF export includes a PO total or the
+  accruals. A contract-generated PO (`POST /api/contracts/{id}/create-po`)
+  and a requisition conversion create a fresh row, never a marked one.
 
 Covered by `test_po_matching_algorithm.py` (the two matcher cases),
 `test_po_matching_wiring.py` (the raise rule and the pure predicate agree),
@@ -222,7 +242,11 @@ Covered by `test_po_matching_algorithm.py` (the two matcher cases),
 to end), `test_sync_erp_lowering_a_po_total_opens_a_blocking_hold`,
 `test_sync_erp_raising_a_po_total_never_clears_the_hold` (the run stays
 refused), `test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before` and
-`test_exception_agents_missing_po.py`.
+`test_exception_agents_missing_po.py`, and for the surfaces outside the match
+`test_purchase_orders.py::test_list_and_detail_withhold_the_money_of_a_po_whose_total_is_unverifiable`,
+`test_portal_self_service.py::test_portal_po_list_and_detail_withhold_a_total_the_erp_no_longer_vouches_for`,
+`test_budget_rollup.py::test_a_po_whose_total_is_unverifiable_is_left_out_of_committed_and_counted`
+and the two `*_unverifiable_po*` cases in `test_multicurrency_kpi_reporting.py`.
 
 ### Cancelled receipts do not count as delivered goods
 

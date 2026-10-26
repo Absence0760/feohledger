@@ -14,6 +14,7 @@ function row(over: Partial<BudgetCurrencyRollup> = {}): BudgetCurrencyRollup {
 		utilization_pct: '0.00',
 		over_budget_count: 0,
 		excluded_row_count: 0,
+		unverifiable_po_count: 0,
 		...over
 	};
 }
@@ -23,7 +24,8 @@ function rollup(rows: BudgetCurrencyRollup[]): BudgetRollup {
 		budget_count: rows.reduce((n, r) => n + r.budget_count, 0),
 		by_currency: rows,
 		excluded_row_count: rows.reduce((n, r) => n + r.excluded_row_count, 0),
-		insufficient_data: rows.length === 0
+		insufficient_data: rows.length === 0,
+		unverifiable_po_count: rows.reduce((n, r) => n + r.unverifiable_po_count, 0)
 	};
 }
 

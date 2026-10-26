@@ -379,6 +379,50 @@ test.describe("/portal — self-service (PO flip, remittance, company)", () => {
     }
   });
 
+  test("a PO whose total the buyer's ERP cannot confirm shows no figure and cannot be flipped", async ({
+    page,
+  }) => {
+    // The portal API sends `total: null` + `total_unverifiable: true` for such
+    // a PO (decisions §323), and the flip answers 409. The page names the
+    // state, explains it once above the table, and disables the button.
+    await portalSignIn(page);
+    await expect(page).toHaveURL(/\/portal\/invoices/, { timeout: 15_000 });
+    await page.route(
+      (url) => url.pathname === "/api/portal/purchase-orders",
+      (route) =>
+        route.fulfill({
+          json: {
+            items: [
+              {
+                id: "00000000-0000-0000-0000-00000000f002",
+                po_number: "PO-PORTAL-UNV",
+                status: "open",
+                total: null,
+                total_unverifiable: true,
+                currency: "USD",
+                line_item_count: 1,
+                created_at: "2026-09-01T10:00:00",
+              },
+            ],
+            total: 1,
+            page: 1,
+            page_size: 20,
+          },
+        }),
+    );
+    await page.getByRole("link", { name: "Purchase Orders" }).click();
+
+    const row = page.locator("table tbody tr", { hasText: "PO-PORTAL-UNV" });
+    await expect(row).toContainText("Being confirmed");
+    await expect(row).not.toContainText("$");
+    const button = row.getByRole("button", { name: "Create invoice" });
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute("aria-describedby", "po-unverifiable-note");
+    await expect(page.locator("#po-unverifiable-note")).toContainText(
+      "Submit your own invoice",
+    );
+  });
+
   test("a vendor downloads a remittance PDF for a completed payment", async ({
     page,
     request,

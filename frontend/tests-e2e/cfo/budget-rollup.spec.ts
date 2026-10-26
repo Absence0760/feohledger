@@ -26,6 +26,7 @@ function currencyRow(over: Record<string, unknown> = {}) {
 		utilization_pct: '12.00',
 		over_budget_count: 0,
 		excluded_row_count: 0,
+		unverifiable_po_count: 0,
 		...over
 	};
 }
@@ -48,6 +49,7 @@ test('renders allocated vs committed vs actual, grouped per currency', async ({ 
 			currencyRow()
 		],
 		excluded_row_count: 0,
+		unverifiable_po_count: 0,
 		insufficient_data: false
 	});
 
@@ -90,6 +92,26 @@ test('discloses currency-excluded rows beside the figures they qualify', async (
 	await expect(notice).toContainText(/floor/i);
 });
 
+test('discloses POs left out of committed for an unverifiable total', async ({ page }) => {
+	await stubRollup(page, {
+		budget_count: 1,
+		by_currency: [currencyRow({ unverifiable_po_count: 3 })],
+		excluded_row_count: 0,
+		unverifiable_po_count: 3,
+		insufficient_data: false
+	});
+
+	await page.goto('/cfo');
+
+	// A PO the ERP could not price at its last sync is not summed into
+	// committed (decisions §323); the card says how many, as a floor.
+	const notice = page.getByTestId('budget-rollup-unverifiable');
+	await expect(notice).toBeVisible({ timeout: 15_000 });
+	await expect(notice).toHaveAttribute('role', 'alert');
+	await expect(notice).toContainText('3 linked purchase orders are left out of committed');
+	await expect(page.getByTestId('budget-rollup-excluded')).toHaveCount(0);
+});
+
 test('an over-budget currency raises the breach banner', async ({ page }) => {
 	await stubRollup(page, {
 		budget_count: 2,
@@ -98,6 +120,7 @@ test('an over-budget currency raises the breach banner', async ({ page }) => {
 			currencyRow({ currency: 'GBP', over_budget_count: 1 })
 		],
 		excluded_row_count: 0,
+		unverifiable_po_count: 0,
 		insufficient_data: false
 	});
 
@@ -117,6 +140,7 @@ test('a currency allocating nothing reports no utilization, never 0%', async ({ 
 			currencyRow({ allocated: '0.00', committed: '0.00', actual: '0.00', remaining: '0.00', utilization_pct: null })
 		],
 		excluded_row_count: 0,
+		unverifiable_po_count: 0,
 		insufficient_data: false
 	});
 
@@ -135,6 +159,7 @@ test('no budgets reads as no budgets, not a row of zeros', async ({ page }) => {
 		budget_count: 0,
 		by_currency: [],
 		excluded_row_count: 0,
+		unverifiable_po_count: 0,
 		insufficient_data: true
 	});
 

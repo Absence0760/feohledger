@@ -21,7 +21,12 @@ from app.api.refusals import erp_pull_failure
 from app.database import get_control_db
 from app.models.invoice import Invoice
 from app.models.organization import Organization
-from app.models.procurement import POLineItem, PurchaseOrder, po_currency_code
+from app.models.procurement import (
+    POLineItem,
+    PurchaseOrder,
+    po_currency_code,
+    po_vouched_money,
+)
 from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.money import json_money
@@ -47,13 +52,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/purchase-orders", tags=["purchase-orders"])
 
 
-def _line_item_dict(li: POLineItem) -> dict:
+def _vouched_total(po: PurchaseOrder):
+    """``total`` for the wire: ``None`` while the PO is marked unverifiable."""
+    total = po_vouched_money(po, po.total)
+    return None if total is None else json_money(total)
+
+
+def _line_item_dict(po: PurchaseOrder, li: POLineItem) -> dict:
+    # A marked PO's line money came from the same sync as its stale total, so it
+    # is withheld the same way (`po_vouched_money`). Quantities stay: the
+    # receipt form needs them, and they are not the figure the ERP disowned.
+    unit_price = po_vouched_money(po, li.unit_price)
+    line_total = po_vouched_money(po, li.total)
     return {
         "id": str(li.id),
         "description": li.description,
         "quantity": float(li.quantity) if li.quantity else None,
-        "unit_price": json_money(li.unit_price) if li.unit_price else None,
-        "total": json_money(li.total) if li.total else None,
+        "unit_price": json_money(unit_price) if unit_price else None,
+        "total": json_money(line_total) if line_total else None,
         # Item identity (migration 0111): the SKU snapshot and the catalog item.
         "sku": li.sku,
         "catalog_item_id": str(li.catalog_item_id) if li.catalog_item_id else None,
@@ -138,15 +154,18 @@ async def list_purchase_orders(
                 "po_number": po.po_number,
                 "vendor_id": str(po.vendor_id) if po.vendor_id else None,
                 "vendor_name": vendor_names.get(str(po.vendor_id)) if po.vendor_id else None,
-                "total": json_money(po.total),
+                # `null` while the PO is marked unverifiable: the stored figure
+                # is one the ERP no longer vouches for, and a client handed it
+                # would render it as the PO's total (decisions §323).
+                "total": _vouched_total(po),
                 # The PO's own code — `null` when no source recorded one, and the
                 # client renders the figure bare rather than borrowing the org's.
                 "currency": po.currency,
-                # Set when the ERP's last sync could not price this PO: `total`
-                # is a figure the ERP no longer vouches for (decisions §323).
+                # Set when the ERP's last sync could not price this PO — why
+                # `total` (and every line figure) is `null`.
                 "total_unverifiable_reason": po.total_unverifiable_reason,
                 "status": po.status,
-                "line_items": [_line_item_dict(li) for li in po.line_items],
+                "line_items": [_line_item_dict(po, li) for li in po.line_items],
                 "created_at": po.created_at.isoformat() if po.created_at else "",
             }
             for po in pos
@@ -315,14 +334,14 @@ async def get_purchase_order(
         "po_number": po.po_number,
         "vendor_id": str(po.vendor_id) if po.vendor_id else None,
         "vendor_name": vendor_name,
-        "total": json_money(po.total),
+        "total": _vouched_total(po),  # `null` while marked — decisions §323
         # Labels `total` AND every line figure — lines carry no code of their own.
         "currency": po.currency,
-        "total_unverifiable_reason": po.total_unverifiable_reason,  # decisions §323
+        "total_unverifiable_reason": po.total_unverifiable_reason,
         "status": po.status,
         "line_items": [
             {
-                **_line_item_dict(li),
+                **_line_item_dict(po, li),
                 # Received so far against this line, across live receipts that
                 # name it — what the receipt form subtracts to show what is left.
                 "quantity_received": float(received_per_line.get(li.id, 0)),

@@ -199,4 +199,59 @@ test.describe('/purchase-orders', () => {
 			modal.locator('.line-table').nth(1).locator('tbody tr', { hasText: 'INV-GBP-1' })
 		).toContainText(/£|GBP/);
 	});
+
+	test('a PO whose total the ERP cannot vouch for says so instead of showing a figure', async ({
+		page
+	}) => {
+		// The API sends `total: null` (and null line money) while
+		// `total_unverifiable_reason` is set (decisions §323). A bare dash would
+		// read as "no total recorded"; the page names the state and, in the
+		// detail, the reason.
+		const po = {
+			id: '00000000-0000-0000-0000-00000000f001',
+			po_number: 'PO-UNVERIFIABLE',
+			vendor_id: null,
+			vendor_name: 'Stub Vendor',
+			total: null,
+			currency: 'USD',
+			total_unverifiable_reason: 'unpriceable',
+			status: 'open',
+			line_items: [
+				{
+					id: 'li-u',
+					description: 'Widget',
+					sku: null,
+					catalog_item_id: null,
+					quantity: 4,
+					unit_price: null,
+					total: null
+				}
+			],
+			created_at: '2026-09-01T10:00:00'
+		};
+		await page.route(
+			(url) => url.pathname === '/api/purchase-orders',
+			(route) => route.fulfill({ json: { items: [po], total: 1, page: 1, page_size: 20 } })
+		);
+		await page.route(
+			(url) => url.pathname === `/api/purchase-orders/${po.id}`,
+			(route) => route.fulfill({ json: { ...po, linked_invoices: [] } })
+		);
+		await page.reload();
+
+		const cell = page.locator('table tbody tr', { hasText: 'PO-UNVERIFIABLE' }).getByTestId('po-total');
+		await expect(cell).toHaveText(/Not verifiable/);
+		await expect(cell).not.toContainText('$');
+
+		await page.locator('table tbody tr', { hasText: 'PO-UNVERIFIABLE' }).click();
+		const modal = page.locator('div.modal[role="dialog"][aria-label="Purchase order"]');
+		await expect(modal.getByTestId('po-detail-total')).toHaveText(/Not verifiable/);
+		await expect(modal.getByTestId('po-unverifiable-note')).toContainText(
+			'its total cannot be worked out exactly'
+		);
+		// Quantity stays; the withheld line money is a dash, never a figure.
+		const line = modal.locator('.line-table').first().locator('tbody tr').first();
+		await expect(line).toContainText('4');
+		await expect(line).not.toContainText('$');
+	});
 });

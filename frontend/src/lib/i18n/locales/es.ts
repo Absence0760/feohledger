@@ -1833,6 +1833,8 @@ export const messages = {
 		'{n, plural, one {⚠ # presupuesto supera su asignación.} other {⚠ # presupuestos superan su asignación.}}',
 	'cfo.budgets.excluded':
 		'Parcial: {n, plural, one {# solicitud, pedido o factura vinculada está} other {# solicitudes, pedidos o facturas vinculadas están}} denominada en una moneda distinta a la del presupuesto y quedó excluida: lo comprometido y lo real de abajo son un mínimo, no la imagen completa. Cambie su moneda o consúltelos en el propio presupuesto.',
+	'cfo.budgets.unverifiablePos':
+		'Parcial: {n, plural, one {# orden de compra vinculada queda} other {# órdenes de compra vinculadas quedan}} fuera de lo comprometido porque el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización: lo comprometido de abajo es un mínimo. Vuelva a sincronizar las órdenes cuando el ERP pueda valorarlas.',
 	'cfo.budgets.empty': 'Todavía no se ha creado ningún presupuesto.',
 	'cfo.budgets.loadFailed': 'No se pudo cargar presupuesto frente a real.',
 	'cfo.forecastVariance.title': 'Previsión frente a real',
@@ -1895,6 +1897,8 @@ export const messages = {
 	'cfoMetrics.accruals.total': 'Devengo total',
 	'cfoMetrics.accruals.noCurrency':
 		'Las órdenes de compra sin moneda registrada aparecen en una línea aparte, sin símbolo. Cada moneda se compensa por separado; las líneas nunca se suman.',
+	'cfoMetrics.accruals.unverifiablePos':
+		'{n, plural, one {# orden de compra queda} other {# órdenes de compra quedan}} fuera de las órdenes abiertas y los bienes recibidos porque el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización: estas provisiones son un mínimo.',
 	'cfoMetrics.concentration.title': 'Concentración de proveedores',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} representa el {pct}% del gasto — riesgo de concentración.',
 	'cfoMetrics.concentration.top10': 'Los 10 principales proveedores',
@@ -2543,6 +2547,8 @@ export const messages = {
 	'budgets.modal.detail.allocated': 'Asignado',
 	'budgets.modal.detail.committed': 'Comprometido',
 	'budgets.modal.detail.actual': 'Real',
+	'budgets.modal.unverifiablePos':
+		'{n, plural, one {# orden de compra vinculada queda} other {# órdenes de compra vinculadas quedan}} fuera de lo comprometido: el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización, así que lo comprometido es un mínimo y lo restante puede estar sobrestimado.',
 	'budgets.modal.detail.remaining': 'Restante',
 	'budgets.modal.loadingSpend': 'Cargando gasto…',
 	'budgets.modal.field.name': 'Nombre',
@@ -2668,6 +2674,16 @@ export const messages = {
 	'purchaseOrders.modal.amount': 'Importe',
 	'purchaseOrders.modal.invoiceStatus': 'Estado',
 	'purchaseOrders.modal.noLinkedInvoices': 'Ninguna factura hace referencia a esta orden de compra.',
+	'purchaseOrders.total.unverifiable': 'No verificable',
+	'purchaseOrders.modal.unverifiableNote':
+		'El ERP no pudo valorar esta orden de compra en su última sincronización: {reason}. Su total y los importes de línea se ocultan porque el ERP ya no los respalda, y las facturas que la citan quedan retenidas hasta que una sincronización vuelva a valorarla.',
+	'purchaseOrders.unverifiableReason.unpriceable':
+		'su total no se puede calcular con exactitud (por ejemplo, un descuento, una unidad de precio o un precio que falta)',
+	'purchaseOrders.unverifiableReason.linesUnread': 'sus líneas no se pudieron leer completas',
+	'purchaseOrders.unverifiableReason.noLines': 'llegó sin líneas',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
+		'su moneda no se pudo situar frente a la moneda propia de la empresa',
+	'purchaseOrders.unverifiableReason.unknown': 'no se registró el motivo',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': 'Recepciones de mercancías',
@@ -3044,6 +3060,8 @@ export const messages = {
 		'Pendiente incluye a su valor nominal {n, plural, one {# factura abierta} other {# facturas abiertas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
 	'byEntity.unconvertedSpend':
 		'El gasto incluye a su valor nominal {n, plural, one {# factura} other {# facturas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
+	'byEntity.openPoUnverifiable':
+		'{n, plural, one {# orden de compra abierta queda} other {# órdenes de compra abiertas quedan}} fuera de Órdenes abiertas porque el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización.',
 	'byEntity.openPoNoCurrency':
 		'Algunas órdenes de compra no registran moneda; sus importes abiertos aparecen en una línea aparte, sin símbolo, y nunca se suman a los de otra moneda.',
 

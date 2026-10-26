@@ -179,6 +179,12 @@
 						{m('budgets.modal.detail.remaining')} <Money amount={spend.remaining} currency={spend.currency} accounting />
 					</span>
 				</div>
+				{#if spend.unverifiable_po_count > 0}
+					<!-- Committed leaves these POs out (decisions §323); say so beside it. -->
+					<p class="spend-floor" role="note" data-testid="budget-spend-unverifiable">
+						{m('budgets.modal.unverifiablePos', { n: spend.unverifiable_po_count })}
+					</p>
+				{/if}
 			{:else if spendLoading}
 				<p class="muted">{m('budgets.modal.loadingSpend')}</p>
 			{/if}
@@ -314,6 +320,14 @@
 	.spend-detail span.over {
 		color: var(--danger);
 		font-weight: 600;
+	}
+
+	.spend-floor {
+		margin: 6px 0 0;
+		padding-left: 10px;
+		border-left: 3px solid var(--warning);
+		font-size: 0.82rem;
+		color: var(--text);
 	}
 
 	.muted {

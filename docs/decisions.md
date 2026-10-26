@@ -15399,6 +15399,22 @@ a failed re-match rolling the mark back, the base default),
 `test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping`),
 `test_migration_0123_po_total_unverifiable.py`.
 
+**Later in PR #670: the stale total leaves every other surface too.** The
+"Elsewhere" bullet above deferred budgets and analytics; that deferral is
+closed. Display paths send `null` for a marked PO's total and line money
+(`models/procurement.po_vouched_money`) — the PO API with the reason, the
+supplier portal with only a `total_unverifiable` flag, since the reason code is
+the buyer's — and the web shows a named state, not a dash that would read as
+"no total". Aggregates follow §35 (exclude and count, the rule `excluded_rebate_count`
+(§62) and the budgets' `excluded_row_count` already apply): budget `committed`,
+the `/cfo` open-PO and GR/IR accrual legs and by-entity open POs leave the PO
+out and report `unverifiable_po_count` / `open_po_unverifiable_count`, rendered
+beside the figure. A separate count, not folded into `excluded_row_count`,
+because that one means "re-denominate the row" and this one means "the ERP has
+to price the PO". *Rejected:* showing the last-synced figure labelled "stale" —
+a labelled number still gets copied, summed and compared, which is what the mark
+exists to stop. Guards: `po-matching.md` § A PO total the ERP no longer vouches for.
+
 **Amendment (2026-10-26): the sync's re-match raises holds, never clears them.**
 A product-owner decision, **pending the CISO / Security Analyst review** the
 note above asks for. It answers that note's question for the sync itself:

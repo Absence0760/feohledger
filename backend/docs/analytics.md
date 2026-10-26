@@ -670,6 +670,10 @@ Response:
   total_accrual}` fields beside it stay the **naive sums across currencies**,
   kept for API back-compat like `total_spend` — a EUR purchase order added to a
   USD one is denominated in nothing (`docs/decisions.md` §197).
+- `accruals.unverifiable_po_count` — a COUNT of distinct POs left out of the
+  open-PO and received legs because their total is one the ERP no longer
+  vouches for (`purchase_orders.total_unverifiable_reason`, decisions §323).
+  Excluded and counted (§35); the card prints it beside the legs as a floor.
 - `accruals.{open_po_amount, received_amount, unposted_invoice_amount, total_accrual}`
   (`received_amount` values goods physically received but not yet
   invoiced — the GR/IR accrual leg. The 3-way match is fanned out per
@@ -1026,7 +1030,8 @@ returns a coherent one-row breakdown whose row equals the consolidated block.
 | `reporting_total_spend`, `reporting_outstanding_amount` | `reporting_currency` (the org's, same on every row). A foreign invoice with no locked rate is counted at **face value**, and the matching `*_unconverted_count` says how many. The consolidated spend figure is the same population and rollup as `/cfo`'s `reporting_spend`, so the two cannot disagree. |
 | `total_spend`, `outstanding_amount` | **Nothing** — naive `SUM`s across currencies, kept for API back-compat. Never render them. |
 | `open_po_amount` | **Nothing** — a naive `SUM` across the PO currencies, kept for back-compat. Never render it: `open_po_by_currency` is the figure. |
-| `open_po_by_currency[]` | Each `{currency, amount}` in its OWN `currency` — the PO's `purchase_orders.currency` (migration 0099). `currency: null` is the entry for POs that record none; it renders bare and is never merged into another. Ordered by code with that entry last, the same order `/cfo`'s `accruals.by_currency` uses, and the consolidated row equals the sum of the entity rows per currency. |
+| `open_po_by_currency[]` | Each `{currency, amount}` in its OWN `currency` — the PO's `purchase_orders.currency` (migration 0099). `currency: null` is the entry for POs that record none; it renders bare and is never merged into another. Ordered by code with that entry last, the same order `/cfo`'s `accruals.by_currency` uses, and the consolidated row equals the sum of the entity rows per currency. A PO marked `total_unverifiable_reason` is left out (decisions §323). |
+| `open_po_unverifiable_count` | A COUNT: open POs left out of `open_po_by_currency` because the ERP could not confirm their total at its last sync. The by-entity card prints the consolidated row's count under the table. |
 | `currency` (entity row) | Not a denomination: the entity's configured currency, `NULL` meaning "the org's reporting currency". It labels no figure. |
 
 The web surface is the `By entity` table on `/cfo`

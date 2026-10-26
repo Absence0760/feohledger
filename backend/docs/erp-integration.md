@@ -1494,8 +1494,11 @@ PO whose mark or total changed are re-matched in the same transaction, and
 fails the sync and rolls the mark back rather than commit a mark with no hold.
 The response carries `not_priced` (POs the ERP has that were not synced) and
 `unverifiable` (existing rows now marked); the PO list and detail return
-`total_unverifiable_reason`, and the purchase-orders page says so in a warning
-toast. The supplier portal refuses to flip such a PO into an invoice (409).
+`total_unverifiable_reason` and withhold the total and line money (`null`), and
+the purchase-orders page says so in a warning toast and in place of the figure.
+The supplier portal shows no figure for such a PO and refuses to flip it into an
+invoice (409); budgets and the CFO accruals leave it out and count it
+(`po-matching.md` § A PO total the ERP no longer vouches for).
 Blackbaud FE NXT reports the same way: a PO with no usable `order_total` is
 `unpriceable`. Adapters that do not override `list_pos_report` report nothing
 skipped.

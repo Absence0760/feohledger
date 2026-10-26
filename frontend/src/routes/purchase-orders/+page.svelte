@@ -11,6 +11,8 @@
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import UnverifiedMoney from '#lib/components/ui/UnverifiedMoney.svelte';
+	import { poUnverifiableReasonKey } from '#lib/types/poUnverifiable.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -45,7 +47,14 @@
 		po_number: string;
 		vendor_id: string | null;
 		vendor_name: string | null;
-		total: number;
+		/** `null` while `total_unverifiable_reason` is set — and so is every line's money. */
+		total: number | null;
+		/**
+		 * Set when the ERP's last sync could not price this PO (an
+		 * `erp_adapters.base.PoSkipReason` code): the stored figures are ones the
+		 * ERP no longer vouches for, so the API withholds them (decisions §323).
+		 */
+		total_unverifiable_reason: string | null;
 		/**
 		 * The PO's OWN currency — `total` and every line are in it. `null` when
 		 * no source recorded one (a PO older than migration 0099 with no
@@ -70,6 +79,11 @@
 
 	interface PODetail extends POListItem {
 		linked_invoices: POLinkedInvoice[];
+	}
+
+	/** The catalogued sentence for a `total_unverifiable_reason` code. */
+	function unverifiableReasonText(code: string | null): string {
+		return m(poUnverifiableReasonKey(code));
 	}
 
 	const PAGE_SIZE = 20;
@@ -362,7 +376,16 @@
 						</RowLink>
 					</td>
 					<td>{po.vendor_name ?? '—'}</td>
-					<td class="right mono" data-testid="po-total">{formatMoney(po.total, { currency: po.currency })}</td>
+					<td class="right mono" data-testid="po-total">
+						<UnverifiedMoney
+							amount={po.total}
+							currency={po.currency}
+							unverified={!!po.total_unverifiable_reason}
+							label={m('purchaseOrders.total.unverifiable')}
+							title={unverifiableReasonText(po.total_unverifiable_reason)}
+							mono
+						/>
+					</td>
 					<td><Badge tone={STATUS_TONES[po.status] ?? 'neutral'} variant={po.status}>{po.status}</Badge></td>
 					<td class="muted">{po.line_items.length}</td>
 					<td class="muted">{formatDate(po.created_at)}</td>
@@ -410,9 +433,27 @@
 		{:else if detail}
 			<dl class="meta">
 				<dt>{m('purchaseOrders.modal.vendor')}</dt><dd>{detail.vendor_name ?? '—'}</dd>
-				<dt>{m('purchaseOrders.modal.total')}</dt><dd class="mono" data-testid="po-detail-total">{formatMoney(detail.total, { currency: detail.currency })}</dd>
+				<dt>{m('purchaseOrders.modal.total')}</dt>
+				<dd class="mono" data-testid="po-detail-total">
+					<UnverifiedMoney
+						amount={detail.total}
+						currency={detail.currency}
+						unverified={!!detail.total_unverifiable_reason}
+						label={m('purchaseOrders.total.unverifiable')}
+						mono
+					/>
+				</dd>
 				<dt>{m('purchaseOrders.modal.created')}</dt><dd>{formatDate(detail.created_at)}</dd>
 			</dl>
+			{#if detail.total_unverifiable_reason}
+				<!-- The reason in visible text, above the lines whose money is
+				     withheld for the same reason (decisions §323). -->
+				<p class="unverifiable-note" role="note" data-testid="po-unverifiable-note">
+					{m('purchaseOrders.modal.unverifiableNote', {
+						reason: unverifiableReasonText(detail.total_unverifiable_reason)
+					})}
+				</p>
+			{/if}
 
 			<h3>{m('purchaseOrders.modal.lineItems')}</h3>
 			<table class="line-table">
@@ -551,6 +592,15 @@
 		margin: 0 0 18px;
 		padding-bottom: 14px;
 		border-bottom: 1px solid var(--border);
+	}
+
+	.unverifiable-note {
+		margin: 0 0 18px;
+		padding: 10px 12px;
+		border-left: 3px solid var(--warning);
+		background: var(--surface);
+		color: var(--text);
+		font-size: 0.85rem;
 	}
 
 	dt {

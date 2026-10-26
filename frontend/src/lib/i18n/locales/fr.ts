@@ -1835,6 +1835,8 @@ export const messages = {
 		'{n, plural, one {⚠ # budget dépasse son allocation.} other {⚠ # budgets dépassent leur allocation.}}',
 	'cfo.budgets.excluded':
 		'Partiel : {n, plural, one {# demande d’achat, commande ou facture liée est libellée} other {# demandes d’achat, commandes ou factures liées sont libellées}} dans une devise autre que celle du budget et exclue — l’engagé et le réel ci-dessous sont un plancher, pas l’image complète. Changez leur devise, ou consultez-les sur le budget lui-même.',
+	'cfo.budgets.unverifiablePos':
+		'Partiel : {n, plural, one {# bon de commande lié est exclu} other {# bons de commande liés sont exclus}} de l’engagé car l’ERP n’a pas pu confirmer {n, plural, one {son total} other {leurs totaux}} lors de la dernière synchronisation — l’engagé ci-dessous est un plancher. Resynchronisez les bons de commande dès que l’ERP peut les valoriser.',
 	'cfo.budgets.empty': 'Aucun budget n’a encore été créé.',
 	'cfo.budgets.loadFailed': 'Échec du chargement de budget vs réel.',
 	'cfo.forecastVariance.title': 'Prévu vs réel',
@@ -1897,6 +1899,8 @@ export const messages = {
 	'cfoMetrics.accruals.total': 'Total des charges à payer',
 	'cfoMetrics.accruals.noCurrency':
 		'Les commandes sans devise enregistrée figurent sur une ligne à part, sans symbole. Chaque devise est compensée séparément ; les lignes ne sont jamais additionnées.',
+	'cfoMetrics.accruals.unverifiablePos':
+		'{n, plural, one {# bon de commande est exclu} other {# bons de commande sont exclus}} des commandes ouvertes et des biens reçus car l’ERP n’a pas pu confirmer {n, plural, one {son total} other {leurs totaux}} lors de la dernière synchronisation — ces provisions sont un plancher.',
 	'cfoMetrics.concentration.title': 'Concentration fournisseurs',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} représente {pct}% des dépenses — risque de concentration.',
 	'cfoMetrics.concentration.top10': 'Top 10 fournisseurs',
@@ -2546,6 +2550,8 @@ export const messages = {
 	'budgets.modal.detail.allocated': 'Alloué',
 	'budgets.modal.detail.committed': 'Engagé',
 	'budgets.modal.detail.actual': 'Réel',
+	'budgets.modal.unverifiablePos':
+		'{n, plural, one {# bon de commande lié est exclu} other {# bons de commande liés sont exclus}} de l’engagé : l’ERP n’a pas pu confirmer {n, plural, one {son total} other {leurs totaux}} lors de la dernière synchronisation, donc l’engagé est un plancher et le restant peut être surestimé.',
 	'budgets.modal.detail.remaining': 'Restant',
 	'budgets.modal.loadingSpend': 'Chargement des dépenses…',
 	'budgets.modal.field.name': 'Nom',
@@ -2671,6 +2677,16 @@ export const messages = {
 	'purchaseOrders.modal.amount': 'Montant',
 	'purchaseOrders.modal.invoiceStatus': 'Statut',
 	'purchaseOrders.modal.noLinkedInvoices': 'Aucune facture ne référence ce bon de commande.',
+	'purchaseOrders.total.unverifiable': 'Non vérifiable',
+	'purchaseOrders.modal.unverifiableNote':
+		'L’ERP n’a pas pu valoriser ce bon de commande lors de sa dernière synchronisation : {reason}. Son total et les montants des lignes sont masqués car l’ERP ne les garantit plus, et les factures qui le citent sont retenues jusqu’à ce qu’une synchronisation le valorise à nouveau.',
+	'purchaseOrders.unverifiableReason.unpriceable':
+		'son total ne peut pas être calculé exactement (par exemple une remise, une unité de prix ou un prix manquant)',
+	'purchaseOrders.unverifiableReason.linesUnread': 'ses lignes n’ont pas pu être lues en entier',
+	'purchaseOrders.unverifiableReason.noLines': 'il est revenu sans lignes',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
+		'sa devise n’a pas pu être rapportée à celle de l’entreprise',
+	'purchaseOrders.unverifiableReason.unknown': 'le motif n’a pas été enregistré',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': 'Réceptions de marchandises',
@@ -3047,6 +3063,8 @@ export const messages = {
 		'En cours inclut au nominal {n, plural, one {# facture ouverte} other {# factures ouvertes}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
 	'byEntity.unconvertedSpend':
 		'Les dépenses incluent au nominal {n, plural, one {# facture} other {# factures}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
+	'byEntity.openPoUnverifiable':
+		'{n, plural, one {# bon de commande ouvert est exclu} other {# bons de commande ouverts sont exclus}} des commandes ouvertes car l’ERP n’a pas pu confirmer {n, plural, one {son total} other {leurs totaux}} lors de la dernière synchronisation.',
 	'byEntity.openPoNoCurrency':
 		'Certaines commandes n’indiquent aucune devise : leurs montants ouverts figurent sur une ligne à part, sans symbole, et ne sont jamais ajoutés à ceux d’une autre devise.',
 

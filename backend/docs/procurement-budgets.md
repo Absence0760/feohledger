@@ -48,6 +48,16 @@ against `Budget.currency` as a **column** rather than a Python literal — that 
 what lets one query answer for many budgets while staying literally the same
 predicate a single-budget query applies.
 
+**A PO whose total the ERP no longer vouches for is not committed spend.** The
+PO leg leaves out a converted PO marked `total_unverifiable_reason` (the ERP
+could not price it at its last sync) and counts it on `unverifiable_po_count`
+— on `/spend`, `/check` and `/rollup`, per currency and whole-set. It is a
+separate count from `excluded_row_count` because the fix differs (the ERP has to
+price the PO; nobody can re-denominate it), and a PO both marked and in another
+currency is counted once, as unverifiable. The `/cfo` budget card and the budget
+modal print it beside `committed`; non-zero means `committed` is a floor and
+`/check`'s `remaining` may overstate the headroom (decisions §323).
+
 The correlated join conditions (entity scope, the period window, the dimension
 match) are each restated once more as **set-level narrowing** predicates
 (`_invoice_scan_narrowing`) — logically redundant, provably implied, and load
