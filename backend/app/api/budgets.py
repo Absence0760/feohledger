@@ -364,11 +364,13 @@ async def budget_rollup(
                 utilization_pct=(str(c.utilization_pct) if c.utilization_pct is not None else None),
                 over_budget_count=c.over_budget_count,
                 excluded_row_count=c.excluded_row_count,
+                unverifiable_po_count=c.unverifiable_po_count,
             )
             for c in rollup.by_currency
         ],
         excluded_row_count=rollup.excluded_row_count,
         insufficient_data=rollup.insufficient_data,
+        unverifiable_po_count=rollup.unverifiable_po_count,
     )
 
 
@@ -405,6 +407,7 @@ async def check_budget(
         remaining_after=remaining_after,
         would_overspend=remaining_after < 0,
         currency=spend.currency,
+        unverifiable_po_count=spend.unverifiable_po_count,
     )
 
 
@@ -449,6 +452,7 @@ async def get_budget_spend(
         remaining=spend.remaining,
         utilization_pct=float(spend.utilization_pct),
         excluded_row_count=spend.excluded_row_count,
+        unverifiable_po_count=spend.unverifiable_po_count,
     )
 
 
