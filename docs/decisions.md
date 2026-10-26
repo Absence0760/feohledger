@@ -15162,3 +15162,17 @@ refusal — and `decrypt-env.sh` refuses the file instead of warning, so a deplo
 stops before compose restarts the API into that refusal
 (`test_config_boot_guards.py`, `test_deploy_decrypt_env.py`). Local dev, tests
 and CI keep it off; the day-one rehearsal (production-shaped) turns it on.
+
+**Also amended in review.** An organisation with no active administrator raised
+the same error as one whose every email bounced, so it counted as a tick
+failure on every tick and held `/api/health/sweeps` red indefinitely; it is now
+`organizations_without_admin`, a counter that is not a failure, and the
+organisation stays owed (the undelivered case is a (c) follow-up). The audit row
+was appended once per attempt, so a control-plane stamp lost after the tenant
+commit appended a second row to the append-only trail next tick; it is now
+written only when the tenant holds no row with that action and `correlation_id`
+= the notice id, under an advisory lock, and synchronously in every audit mode
+— in `lambda` mode a row still in SQS is invisible to that check, the reason
+`dispatch_durable_auth_audit` writes synchronously too. Per-notice
+`failed_recipients` reach the operator as a tick counter and in
+`scripts/subprocessor_notices.py list`.

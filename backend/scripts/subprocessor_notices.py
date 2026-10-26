@@ -4,7 +4,7 @@ The sweep behind ``FEOH_SUBPROCESSOR_NOTICES_ENABLED`` sends these on its own
 (`services/subprocessor_notices.py`, `docs/decisions.md` §321). This is the
 operator's view of the same ledger, and a way to send without waiting a tick:
 
-    python scripts/subprocessor_notices.py list    # entries + organisations still owed
+    python scripts/subprocessor_notices.py list    # owed organisations + partial deliveries
     python scripts/subprocessor_notices.py send    # send everything owed, now
 
 ``send`` is the sweep's own tick — idempotent, so running it beside the sweep
@@ -27,6 +27,7 @@ from app.database import control_session_factory  # noqa: E402
 from app.services.subprocessor_changelog import long_date  # noqa: E402
 from app.services.subprocessor_notices import (  # noqa: E402
     owed_notices,
+    partial_deliveries,
     run_notices_once,
 )
 
@@ -34,14 +35,23 @@ from app.services.subprocessor_notices import (  # noqa: E402
 async def _list() -> int:
     async with control_session_factory() as db:
         owed = await owed_notices(db, now=datetime.now(UTC))
+        partial = await partial_deliveries(db)
     if not owed:
         print("No published change-log entry needs notice.")
-        return 0
     for item in owed:
         effective = long_date(item.entry.effective_on) if item.entry.effective_on else "?"
         print(
             f"{item.entry.id}  effective {effective}  "
             f"{len(item.organization_ids)} organisation(s) not yet notified"
+        )
+    # A notice that went out is never re-sent, so an administrator the provider
+    # refused is only ever reachable by hand: list them for the operator (ids
+    # and counts — the ledger holds no address).
+    for row in partial:
+        print(
+            f"{row.entry_id}  organisation {row.organization_id}  sent "
+            f"{row.sent_at:%Y-%m-%d} to {row.recipients}, "
+            f"{row.failed_recipients} administrator(s) not reached"
         )
     return 0
 
@@ -52,6 +62,8 @@ async def _send() -> int:
     print(
         f"notified {result.organizations_notified} organisation(s) "
         f"({result.emails_sent} email(s)); late={result.late_notices}; "
+        f"administrators not reached={result.failed_recipients}; "
+        f"without an administrator={result.organizations_without_admin}; "
         f"failed={result.failures}"
     )
     return 1 if result.failures else 0
