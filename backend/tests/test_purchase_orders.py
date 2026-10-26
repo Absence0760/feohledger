@@ -1031,3 +1031,75 @@ def test_an_adapter_that_never_skips_reports_nothing_skipped():
     listing = asyncio.run(OnlyListPos({}).list_pos_report())
     assert [p.po_number for p in listing.pos] == ["P1"]
     assert listing.skipped == []
+
+
+# ---------------------------------------------------------------------------
+# sync-erp: the vendor link is entity-scoped and never a guess
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_erp_links_only_a_vendor_in_the_synced_entity(realdb, monkeypatch):
+    """Two subsidiaries each connected to their own ERP company can both hold
+    supplier id "v-9". The id map was built over the whole org, so the vendor
+    read last won and a PO synced into this entity could link to the other
+    subsidiary's vendor."""
+    from app.models.entity import Entity
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        default_entity = (
+            await s.execute(select(Entity).where(Entity.is_default.is_(True)))
+        ).scalar_one()
+        other = Entity(name="Sub B", slug="sub-b-vscope", organization_id=org_id)
+        s.add(other)
+        await s.flush()
+        ours = Vendor(
+            name="Ours", erp_vendor_id="v-9", organization_id=org_id, entity_id=default_entity.id
+        )
+        s.add(ours)
+        await s.flush()
+        # Created after ours, so it is the one a last-wins map would pick.
+        theirs = Vendor(
+            name="Theirs", erp_vendor_id="v-9", organization_id=org_id, entity_id=other.id
+        )
+        s.add(theirs)
+        await s.commit()
+        ours_id = ours.id
+
+    await _sync_with_payloads(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="ERP-SCOPED", vendor_erp_id="v-9", total=Decimal("10.00"))],
+    )
+    assert await _vendor_of(realdb, "ERP-SCOPED") == ours_id
+
+
+async def test_sync_erp_leaves_a_po_unlinked_when_its_erp_id_is_ambiguous(realdb, monkeypatch):
+    """Two vendors in scope hold the same ERP id: neither is linked, and the
+    name does not break the tie — the ERP named an id, not a name."""
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        s.add_all(
+            [
+                Vendor(name="Dup One", erp_vendor_id="v-dup", organization_id=org_id),
+                Vendor(name="Dup Two", erp_vendor_id="v-dup", organization_id=org_id),
+            ]
+        )
+        await s.commit()
+
+    await _sync_with_payloads(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(
+                po_number="ERP-AMBIG",
+                vendor_erp_id="v-dup",
+                vendor_name="Dup One",
+                total=Decimal("10.00"),
+            )
+        ],
+    )
+    assert await _vendor_of(realdb, "ERP-AMBIG") is None

@@ -386,16 +386,46 @@ async def sync_pos_from_erp(
     # companies, so another company's "56" is a different supplier.
     realm = connection_realm(erp_config)
     trust_legacy = legacy_links_trusted(erp_config, realm)
-    v_result = await db.execute(select(Vendor).where(Vendor.organization_id == org_id))
+    #
+    # Only vendors a PO synced into this entity may belong to: the entity's own
+    # and shared (unstamped) ones — the scope the PO upsert below uses. Over the
+    # whole org, two subsidiaries' vendors holding the same ERP id (each entity
+    # its own ERP company) collapsed to whichever was read last, and a PO in
+    # entity B could be linked to entity A's vendor. A key two vendors in scope
+    # still share is ambiguous and links neither: no link is honest, and the
+    # next sync fills it once it is not; a guess is never corrected (a vendor
+    # already on a row is never re-pointed).
+    v_result = await db.execute(
+        apply_entity_scope(
+            select(Vendor).where(Vendor.organization_id == org_id),
+            Vendor,
+            entity_id,
+            include_shared=True,
+        )
+    )
     vendors = v_result.scalars().all()
-    vendor_by_erp_id = {
-        v.erp_vendor_id: v.id
+
+    def _unique(pairs) -> tuple[dict, set]:
+        found: dict = {}
+        ambiguous: set = set()
+        for key, vendor_id in pairs:
+            if key in found and found[key] != vendor_id:
+                ambiguous.add(key)
+            found[key] = vendor_id
+        return {k: v for k, v in found.items() if k not in ambiguous}, ambiguous
+
+    vendor_by_erp_id, ambiguous_erp_ids = _unique(
+        (v.erp_vendor_id, v.id)
         for v in vendors
         if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
-    }
-    vendor_by_name = {v.name.lower(): v.id for v in vendors}
+    )
+    vendor_by_name, _ = _unique((v.name.lower(), v.id) for v in vendors)
 
     def resolve_vendor(erp_po) -> uuid.UUID | None:
+        if erp_po.vendor_erp_id in ambiguous_erp_ids:
+            # The ERP named its supplier and two vendors claim that id: the
+            # name cannot say which one it meant either.
+            return None
         if erp_po.vendor_erp_id and erp_po.vendor_erp_id in vendor_by_erp_id:
             return vendor_by_erp_id[erp_po.vendor_erp_id]
         return vendor_by_name.get(erp_po.vendor_name.lower()) if erp_po.vendor_name else None

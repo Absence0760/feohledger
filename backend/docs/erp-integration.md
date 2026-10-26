@@ -1441,7 +1441,13 @@ by the ERP's supplier id (`PoPayload.vendor_erp_id`, matched against the
 Sage Intacct's `vendor.id`, Merge.dev's `vendor`), falling back to the vendor
 name; an adapter that does not read the id uses the name alone. Linking by id
 is what keeps a PO on the right vendor after a rename on either side, and when
-two vendors share a name.
+two vendors share a name. Both maps are built over the vendors in the synced
+entity's scope (the entity plus shared, unstamped rows — the scope the PO upsert
+uses), never the whole org: two subsidiaries connected to different ERP
+companies can hold the same supplier id, and an org-wide map linked a PO to
+whichever was read last. An ERP id two vendors in scope both hold links
+neither — the PO stays unlinked rather than falling back to the name — and a
+name two vendors share links neither too.
 
 **A PO the adapter skips is not left trusted.** An adapter that cannot state a
 PO's total exactly (SYSPRO: a discount, a mixed-currency order, a currency it
