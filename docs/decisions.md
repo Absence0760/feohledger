@@ -15430,3 +15430,35 @@ Tests: `backend/tests/test_erp_blackbaud_adapter.py`
 `tests/test_purchase_orders.py::test_sync_erp_marks_a_blackbaud_po_that_lost_its_order_total`
 (the real adapter through `sync-erp`: synced at 100.00, marked when the total
 goes, cleared when it returns).
+
+**3. An org can see today's SKY call usage.** The `erp_call_quota` notice
+(§322) was the only place an org learned where it stood against the budget,
+and only at 80%, 100% or a refusal. `GET /api/organization/erp/oauth/status`,
+the connection status the ERP panel already reads, now carries `call_usage`
+for an adapter that has a `call_budget` (`ErpAdapter.call_budget()`, None by
+default; Blackbaud's is the one): `scope` (`org_share` on the platform key,
+`subscription` on the org's own), `used`, `limit`, `resets_at`, and
+`paused_reason` / `paused_until` while calls are refused. The panel renders it
+under the connection line in all six locales, with localized counts and times.
+
+- *The figure is the org's own.* On the platform key `used` is this org's calls
+  against its share; the key's total is not reported, since it is every
+  tenant's activity. On an org's own key it is every call on that key, against
+  the key's quota.
+- *It is a read only* (`CallBudget.usage`). `check` sends notices and is the
+  gate; a status page rendered every visit must do neither. A pause is the
+  key's cool-down, or a share or quota already used by our own count — the
+  same three reasons a push would be refused with.
+- *It fails open.* A Redis error, a missing subscription key or an adapter that
+  will not build gives `call_usage: null` and the panel shows nothing. The
+  figure is a courtesy over a courtesy brake; a status read that errored over
+  it would hide the connection state, which matters more.
+- *Rejected:* a separate usage endpoint. The status read is already the
+  panel's one call for "where does this connection stand", is admin-only, and
+  is where the expiry warning (§295) lives.
+
+Tests: `backend/tests/test_erp_oauth.py` (the share and the other tenant's
+calls kept out of it, a 429 cool-down and a used-up share as pauses, an own
+key against its quota, Redis down, a non-budgeted ERP, no key),
+`frontend/src/lib/types/erpConnection.test.ts` (`callUsageLines`, every
+sentence in every locale).

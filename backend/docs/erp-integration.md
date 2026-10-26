@@ -2511,8 +2511,13 @@ Request rules worth knowing:
   (`ErpCallBudgetExhausted` → a coded 429 with `Retry-After`, nothing synced);
   a status read is `unknown`; a PO sync is refused the same way. Org admins get an
   `erp_call_quota` notice once a day each at 80% of the share, when the share
-  is used, and when the subscription's quota is. Redis down → the budget fails
-  open and SKY's own 403 is the backstop. A heavy tenant should still store its
+  is used, and when the subscription's quota is. The connection status
+  (`GET /api/organization/erp/oauth/status` → `call_usage`, shown on the ERP
+  panel) carries today's count against the org's share — or, on its own key,
+  every call on that key against the key's quota — the reset, and any pause
+  with its reason and end. The platform key's total is never shown to a
+  tenant: it is every tenant's. Redis down → the budget fails
+  open, the status shows no usage, and SKY's own 403 is the backstop. A heavy tenant should still store its
   own `subscription_key`; whether Blackbaud sells a higher-volume product for a
   multi-tenant app is an operator question (`docs/followups.md`).
 - **Money** goes out through `dumps_exact_json` and is read back with
@@ -2828,7 +2833,7 @@ and calls `await self.access_token()`.
 | `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan | `200 {"authorize_url"}`; the page navigates the browser to it. `404` unknown provider, `409` no app configured, `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
 | `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>`. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant`, `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
 | `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
-| `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, connected_at, redirect_uri, providers: [{key, display_name, available, client_source}]}`. Never a token. |
+| `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
 Connect and disconnect write `organization.erp_connected` /
 `organization.erp_disconnected` (provider, client source, the sealed paths

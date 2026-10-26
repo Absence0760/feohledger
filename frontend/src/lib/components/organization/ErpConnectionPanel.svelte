@@ -53,6 +53,7 @@
 		buildErpPayload,
 		buildErpSecretUpdate,
 		buildErpTestPayload,
+		callUsageLines,
 		erpTestResultText,
 		byoAppRequired,
 		fieldApplies,
@@ -74,6 +75,7 @@
 		type OAuthReturn,
 		type StoredErpConfig
 	} from '#lib/types/erpConnection.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 
@@ -156,6 +158,26 @@
 	// Why it must be reconnected, or that it expires soon (decisions §295).
 	const attentionKey = $derived(provider ? oauthAttentionKey(provider.key, oauthStatus) : null);
 	const expiresSoon = $derived(attentionKey === 'org.erp.oauth.expiresSoon');
+	// Today's API calls on a shared-quota ERP (Blackbaud SKY, decisions §324):
+	// the count, its limit, and while calls are refused, until when. Nothing
+	// when the status carries none (another ERP, or the counts were unreadable).
+	const callUsage = $derived(
+		provider && connection !== 'not_connected' ? (oauthStatus?.call_usage ?? null) : null
+	);
+	const callUsageText = $derived(
+		provider
+			? callUsageLines(callUsage, providerLabel(provider), m, {
+					count: (n) => new Intl.NumberFormat(getActiveFormatLocale()).format(n),
+					time: (iso) =>
+						formatDate(iso, '—', {
+							month: 'short',
+							day: 'numeric',
+							hour: 'numeric',
+							minute: '2-digit'
+						})
+				})
+			: []
+	);
 
 	function setStatus(text: string, tone: 'success' | 'failure' | null) {
 		statusMessage = text;
@@ -649,6 +671,16 @@
 								})}
 							</p>
 						{/if}
+						{#if callUsageText.length}
+							<div class="call-usage" data-testid="erp-call-usage">
+								<p class="oauth-state">{callUsageText[0]}</p>
+								{#if callUsageText[1]}
+									<p class="oauth-state failure-text" data-testid="erp-call-usage-paused">
+										{callUsageText[1]}
+									</p>
+								{/if}
+							</div>
+						{/if}
 						{#if oauthStatusFailed}
 							<p class="oauth-state failure-text">{m('org.erp.oauth.statusFailed')}</p>
 						{/if}
@@ -913,6 +945,12 @@
 		margin: 0;
 		font-size: 0.85rem;
 		color: var(--text-muted);
+	}
+
+	.call-usage {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
 	}
 
 	.oauth-state.connected {

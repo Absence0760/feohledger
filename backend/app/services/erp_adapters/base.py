@@ -6,6 +6,10 @@ import enum
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.erp_call_budget import CallBudget
 
 
 class ErpInvoiceStatus(enum.StrEnum):
@@ -762,6 +766,14 @@ class ErpAdapter:
     async def void_invoice(self, erp_document_id: str) -> bool:
         """Request cancellation of a posted invoice."""
         raise NotImplementedError
+
+    def call_budget(self) -> CallBudget | None:
+        """The shared-quota budget this connection's calls are counted
+        against (``services/erp_call_budget``, decisions §322), or None for an
+        ERP whose API quota is not shared across tenants. Read by the
+        connection status endpoint to show the org its usage (§324).
+        """
+        return None
 
     async def list_pos(self) -> list[PoPayload]:
         """Pull purchase orders from the ERP.

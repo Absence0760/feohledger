@@ -99,6 +99,32 @@ class BudgetRefusal:
         return {"reason": self.reason.value, "retry_after": self.retry_after.isoformat()}
 
 
+class UsageScope(enum.StrEnum):
+    """Which limit :class:`CallUsage` measures ``used`` against."""
+
+    #: This org's daily share of the shared platform key
+    #: (``FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET``): ``used`` is the org's
+    #: own calls. The key's total is never reported — it is every tenant's.
+    org_share = "org_share"
+    #: The org's own subscription key: ``used`` is every call on that key,
+    #: against its daily quota (``FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA``).
+    subscription = "subscription"
+
+
+@dataclass(frozen=True)
+class CallUsage:
+    """Today's (UTC) calls, as the org may see them (decisions §324)."""
+
+    scope: UsageScope
+    used: int
+    #: None when no limit applies to this scope (a share of 0, or a quota of 0).
+    limit: int | None
+    resets_at: datetime
+    #: Set while the org's calls are refused: a cool-down on the key from
+    #: SKY's 429 / quota 403, or a share or quota used up by our own count.
+    paused: BudgetRefusal | None
+
+
 def next_reset(now: datetime) -> datetime:
     """The next 00:00 UTC, when SKY's daily quota resets."""
     day = now.astimezone(UTC).date() + timedelta(days=1)
@@ -201,6 +227,36 @@ class CallBudget:
             await self._notice(day, QuotaNotice.tenant_budget, used=used, moment=moment)
             return BudgetRefusal(BudgetReason.tenant_budget, reset)
         return None
+
+    async def usage(self, *, now: datetime | None = None) -> CallUsage | None:
+        """Today's usage for this org, or None when Redis cannot say.
+
+        A read only: unlike :meth:`check` it sends no notice and reserves
+        nothing, so a settings page can call it as often as it renders. A
+        Redis error is None (show nothing), never an error: the figure is a
+        courtesy, as the budget itself is.
+        """
+        moment = now or datetime.now(UTC)
+        day = moment.strftime("%Y%m%d")
+        try:
+            r = await get_redis()
+            cooldown = await r.get(self._cooldown_key())
+            total = int(await r.get(self._total_key(day)) or 0)
+            used = int(await r.get(self._org_key(day)) or 0)
+        except Exception as exc:  # noqa: BLE001 — fail open: no figure
+            logger.warning("[erp-call-budget] usage unread: %s", exc.__class__.__name__)
+            return None
+        reset = next_reset(moment)
+        quota = self.daily_quota if self.daily_quota > 0 else None
+        paused = _parse_cooldown(cooldown, moment) if cooldown else None
+        if paused is None and quota is not None and total >= quota:
+            paused = BudgetRefusal(BudgetReason.subscription_quota, reset)
+        if self.shared:
+            limit = self._tenant_limit
+            if paused is None and limit is not None and used >= limit:
+                paused = BudgetRefusal(BudgetReason.tenant_budget, reset)
+            return CallUsage(UsageScope.org_share, used, limit, reset, paused)
+        return CallUsage(UsageScope.subscription, total, quota, reset, paused)
 
     # -- the counter --------------------------------------------------------------
 
