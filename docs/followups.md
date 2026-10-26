@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-26 — the branch review's skipped-PO wiring for NetSuite, Business Central, Sage (ZA) and Intacct (decisions §325, later in PR #670) opened one (c) entry, their PO listings still reading a failed or capped read as complete, taking the file from 152 → 153. Before that, 2026-10-26 — showing the "re-check now matches" note on `/exceptions` and the mobile exception detail (later in PR #670) closed its (c) entry, taking the file from 153 → 152. Before that, 2026-10-26 — letting a failed received-goods read fail `/api/analytics/cfo` instead of reporting a zero GR/IR leg (later in PR #670) closed its (c) entry, taking the file from 154 → 153. Before that, 2026-10-26 — withholding a marked PO's stale total on every surface and leaving it out of budgets and accruals (decisions §323, later in PR #670) closed the (c) entry for it and its review opened one, the received-goods accrual swallowing every error into zeros, keeping the file at 153. Before that, 2026-10-26 — wiring Blackbaud FE NXT into the skipped-PO report (decisions §324) closed its (c) entry, taking the file from 155 → 154. Before that, 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-26 — the PR #670 branch-wide money-path review opened five (c) entries (old Merge.dev PO rows, the re-match's scope, no exit for a never-priceable PO, PO lines never refreshed, the matcher ignoring PO status), taking the file from 153 → 158. Before that, 2026-10-26 — the branch review's skipped-PO wiring for NetSuite, Business Central, Sage (ZA) and Intacct (decisions §325, later in PR #670) opened one (c) entry, their PO listings still reading a failed or capped read as complete, taking the file from 152 → 153. Before that, 2026-10-26 — showing the "re-check now matches" note on `/exceptions` and the mobile exception detail (later in PR #670) closed its (c) entry, taking the file from 153 → 152. Before that, 2026-10-26 — letting a failed received-goods read fail `/api/analytics/cfo` instead of reporting a zero GR/IR leg (later in PR #670) closed its (c) entry, taking the file from 154 → 153. Before that, 2026-10-26 — withholding a marked PO's stale total on every surface and leaving it out of budgets and accruals (decisions §323, later in PR #670) closed the (c) entry for it and its review opened one, the received-goods accrual swallowing every error into zeros, keeping the file at 153. Before that, 2026-10-26 — wiring Blackbaud FE NXT into the skipped-PO report (decisions §324) closed its (c) entry, taking the file from 155 → 154. Before that, 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**153 open: 129 (c) · 12 (a) · 12 (b)** — re-derived from the file, never carried
+**158 open: 134 (c) · 12 (a) · 12 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -996,6 +996,60 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by the PR #670 money-path review (2026-10-26, decisions §323)
 
+- [ ] **(c) Merge.dev POs synced before the `purchase_order_number` key are
+      orphaned, and their totals are still summed.** Before PR #670 a Merge PO
+      was stored under its Merge UUID, and every unnumbered one under one
+      shared `"UNKNOWN"` row. The next sync creates a second row under the real
+      number and never refreshes, marks or closes the UUID row, so `/cfo`
+      open-PO accruals and the by-entity rollup count the order twice (PO-0042
+      at 10,000.00 reads 20,000.00) and the merged `"UNKNOWN"` row stays open.
+      **Durable fix:** carry Merge's record `id` on `PoPayload`; in the sync,
+      when no row exists for the number but one is keyed by that id, re-key it
+      (with an audit row) instead of creating a new one; mark or close the
+      `"UNKNOWN"` row with an audit row; add a repair note to
+      `backend/docs/erp-integration.md`, as §284 did.
+      **Trigger:** before the first tenant that synced Merge.dev POs before
+      PR #670 runs a PO sync on it, or before any Merge.dev customer.
+- [ ] **(c) The PO sync re-matches every invoice citing the number, across
+      entities and terminal statuses.** `refresh_invoices_citing_pos`
+      (`invoice_warnings.py`) is not scoped to the entity being synced, so an
+      invoice in entity B gets a "PO … changed in SYSPRO … now matches" note
+      when only entity A's PO changed, and `paid` / `done` invoices get their
+      warnings recomputed and can gain new blocking rows.
+      **Durable fix:** scope the sync's re-match to the synced entity plus
+      unstamped rows (the `_sync_target` rule), and skip terminal statuses.
+      **Trigger:** the next change to the PO sync's re-match, or the first
+      multi-entity tenant on a PO-syncing ERP.
+- [ ] **(c) A PO the ERP can never price has no documented way out.** A SYSPRO
+      PO with a line discount, say, stays marked unverifiable for good, and
+      `po_mismatch` has no fingerprint suppression, so the next refresh after
+      a person resolves the hold (Send to ERP, approve-with-corrections)
+      raises it again.
+      **Durable fix:** decide the exit (a person-recorded "verified total" on
+      the PO, audited, or a per-row suppression a person sets) and document it
+      in `backend/docs/po-matching.md`.
+      **Trigger:** the first customer report of a hold that keeps coming back,
+      or the next change to the unverifiable-PO rules.
+- [ ] **(c) The PO sync refreshes an existing PO's total but never its lines.**
+      Predates PR #670 (`api/purchase_orders.py` sync upsert). The 3-way
+      receipt-value check is `po_total × gr_qty / po_qty_total`. If PO-1 (10
+      units × 10 = 100) is amended in the ERP to 20 units × 10 = 200, the stored
+      lines still say 10 units, so a 10-unit receipt values at 200 and a 200
+      invoice passes "billed beyond receipt" with half the goods delivered. The
+      GR/IR accrual is overstated the same way.
+      **Durable fix:** refresh `po_line_items` from the payload's lines when the
+      adapter sends them (replace them, with an audit row), and re-match.
+      **Trigger:** the next change to the PO sync upsert, or before a customer
+      relies on 3-way match against amended ERP POs.
+- [ ] **(c) The PO matcher ignores the PO's status.** Predates PR #670
+      (`services/po_matching.py`). A `cancelled` or `closed` PO still matches
+      and can pass the amount control, although accruals and budgets already
+      treat those statuses as dead (`DEAD_PO_STATUSES`).
+      **Durable fix:** have the matcher refuse a PO in `DEAD_PO_STATUSES` with
+      its own issue code and hold, like an unverifiable one, then re-match on a
+      status change in the sync.
+      **Trigger:** the next change to the matcher, or the first invoice paid
+      against a cancelled PO.
 - [ ] **(c) A failed or capped PO listing still reads as a complete one on four
       adapters, which hides the skips it would have reported.** NetSuite and
       Business Central end a failed read with what they have read so far and
@@ -1011,18 +1065,27 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to any of those four adapters' PO listing, or
       the first customer report of a stale PO total on one of them.
 - [ ] **(c) ⚠️ CISO REVIEW — an ERP-side PO increase can still lift a hold at
-      the invoice's next FeohLedger edit.** The product owner ruled that the
+      the invoice's next FeohLedger refresh.** The product owner ruled that the
       sync's own re-match is hold-only (decisions §323, amended, pending CISO
-      review). Refreshes a FeohLedger action triggers kept their pre-§323
-      auto-close (`invoice_warnings._close_cleared_po_exceptions`), so after the
-      ERP raises a total, the next invoice save / receipt re-match still closes
-      the `po_mismatch` under that close's past-approval and segregation
-      limits — none of which see who edited the PO in the ERP.
-      **Durable fix (if the review wants it):** record on the PO when its total
-      last changed by sync (or keep the `po_rematch_clears` note as the marker)
-      and have `_close_cleared_po_exceptions` refuse to close a `po_mismatch`
-      whose clearing depends on a total the ERP changed after the row was
-      raised; or accept the residual and record that in decisions §323.
+      review). Every other refresh kept its pre-§323 auto-close
+      (`invoice_warnings._close_cleared_po_exceptions`). So after the ERP raises
+      a total, the next refresh that passes org settings closes the
+      `po_mismatch` with no named actor: an invoice save, approve-with-
+      corrections (`services/review.py`), **Send to ERP / `/complete`**
+      (`api/workflow.py`), re-running extraction, CSV import, a goods receipt or
+      QMS sync on the PO, or the missing-PO agent's apply step. Its limits
+      (past-approval, segregation, hand-recorded receipts) are about a
+      different PO or FeohLedger-side evidence; a same-PO row on an approved
+      invoice still closes, and none of them see who edited the PO in the ERP.
+      Example: INV-9 is 1,200.00 against PO-9 at 1,000.00, held. PO-9 is raised
+      to 1,200.00 in the ERP and synced; a clerk clicks Send to ERP; the hold
+      closes and the next run pays 1,200.00.
+      **Durable fix (if the review wants it):** one guard in
+      `_close_cleared_po_exceptions`: skip a row whose `erp_report.kind` is
+      `po_rematch_clears`, so only a person clears it. That covers the case the
+      sync already saw; a row whose clearing total changed in the ERP between
+      syncs would also need the PO to record when the sync last changed its
+      total. Or accept the residual and record that in decisions §323.
       **Trigger:** the CISO / Security Analyst review §323 asks for.
 
 ### Surfaced by the procurement bug hunt (2026-10-05, PR #498)
@@ -2511,7 +2574,9 @@ as oversights.
       convention of `TrnValue` (the paid rule compares `abs(sum)` with
       `abs(OrigInvValue)`, so +150 and a −250 refund would read as 100 paid)
       and whether `TrnValue` is in the invoice's currency or local (if local, a
-      foreign invoice never reads `paid` — closed, but wrong); whether
+      foreign invoice never reads `paid` — closed, but wrong); whether the
+      `ApInvoicePay` read (`return_rows=1000`) can truncate, which it does not
+      check today; whether
       `GetLogonProfile` / `LocalCurrencyCode` is served on the REST host as
       the syspro-ruby client reads it; `MForeignPrice`
       being the PO-currency price, the currency of a foreign PO's
