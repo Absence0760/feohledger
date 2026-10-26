@@ -72,6 +72,10 @@ const JUDGED_NOT_MONEY: Record<string, Record<string, string>> = {
 		// Pagination row count of the whole statement set, not money.
 		'BankStatementListResponse.total': 'pagination row count'
 	},
+	'lib/types/erpConnection.ts': {
+		// Blackbaud SKY's daily API-call allowance (decisions §322 / §324).
+		'ErpCallUsage.limit': 'an ERP API call count, not money'
+	},
 	'lib/types/accessReview.ts': {
 		'AccessReviewResponse.total': 'users reviewed — a head count, not money'
 	},
