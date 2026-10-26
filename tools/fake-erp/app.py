@@ -1366,6 +1366,9 @@ SYSPRO_PO_HEADERS: list[dict] = [
     # A merchandise line, a miscellaneous charge (value, no qty x price) and a
     # comment line.
     {"PurchaseOrder": "PO-SYS-504", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+    # A EUR order with one line priced only in local MPrice: it has no EUR
+    # total, so the adapter skips it rather than summing EUR and ZAR prices.
+    {"PurchaseOrder": "PO-SYS-505", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
 ]
 SYSPRO_PO_DETAILS: list[dict] = [
     {"PurchaseOrder": "PO-SYS-501", "LineType": "1", "MOrderQty": "10.000", "MPrice": "100.00"},
@@ -1387,6 +1390,20 @@ SYSPRO_PO_DETAILS: list[dict] = [
         "NMscChargeValue": "45.50",
     },
     {"PurchaseOrder": "PO-SYS-504", "LineType": "6", "MOrderQty": "0.000", "MPrice": "0.00"},
+    {
+        "PurchaseOrder": "PO-SYS-505",
+        "LineType": "1",
+        "MOrderQty": "2.000",
+        "MPrice": "180.00",
+        "MForeignPrice": "10.00",
+    },
+    {
+        "PurchaseOrder": "PO-SYS-505",
+        "LineType": "1",
+        "MOrderQty": "1.000",
+        "MPrice": "50.00",
+        "MForeignPrice": "0.00",
+    },
 ]
 
 
@@ -1415,6 +1432,25 @@ async def syspro_logon(
 async def syspro_logoff(UserId: str = "") -> Response:
     _syspro_state()["sessions"].discard(UserId)
     return _syspro_text("0")
+
+
+#: The fake company's local currency (SYSPRO Company Setup; fixed once the
+#: company exists). PO-SYS-501 / 502 / 504 are in it, PO-SYS-503 / 505 are not.
+SYSPRO_LOCAL_CURRENCY = "ZAR"
+
+
+@syspro.get("/GetLogonProfile")
+async def syspro_logon_profile(UserId: str = "") -> Response:
+    """The e.net call describing the session's company. Element names as the
+    open-source client wildland/syspro-ruby reads them
+    (``lib/syspro/get_logon_profile.rb``), trimmed to the company fields."""
+    if UserId not in _syspro_state()["sessions"]:
+        return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
+    root = ET.Element("LogonProfile")
+    ET.SubElement(root, "CompanyName").text = "Fake SYSPRO Company"
+    ET.SubElement(root, "LocalCurrencyCode").text = SYSPRO_LOCAL_CURRENCY
+    ET.SubElement(root, "CurrencyDescription").text = "South African Rand"
+    return _syspro_text(ET.tostring(root, encoding="unicode"))
 
 
 @syspro.get("/__sessions")

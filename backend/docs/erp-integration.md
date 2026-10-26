@@ -1910,11 +1910,20 @@ query-string parameters, which is how the WCF REST host takes them:
   sync answers 502 and syncs nothing) — it used to return the first 1,000
   POs, oldest first, and never the newest.
 - **A PO total is in the PO's currency, or the PO is skipped**
-  (`syspro.po_total`). A merchandise line is `MOrderQty × price`, the price
-  being `MForeignPrice` when SYSPRO filled one (a foreign-currency order; the
-  local `MPrice` labelled with the header `Currency` was the old defect), else
-  `MPrice`. A freight / misc-charge line (`LineType` 4 / 5) adds its
-  `NMscChargeValue`; a comment line (6) adds nothing. A PO with a line
+  (`syspro.po_total`). Whether a PO is foreign is decided **once per PO**,
+  from its header `Currency` against the company's local currency
+  (`GetLogonProfile`'s `LocalCurrencyCode`, read in the listing's session;
+  element name per wildland/syspro-ruby `lib/syspro/get_logon_profile.rb`) —
+  never from the lines, which is how a EUR order with one line priced only in
+  local `MPrice` came back as `2 × 10.00 EUR + 1 × 50.00 ZAR = 70.00 EUR`.
+  A merchandise line is `MOrderQty × price`: on a foreign PO the price is
+  `MForeignPrice`, and a line with no foreign price but a non-zero `MPrice`
+  makes the PO unpriceable; on a local PO it is `MPrice`, and a differing
+  non-zero `MForeignPrice` contradicts the header and makes it unpriceable. A
+  PO with no header `Currency` is local and synced unlabelled. When the local
+  currency cannot be read, every PO **with** a currency label is skipped
+  rather than guessed. A freight / misc-charge line (`LineType` 4 / 5) adds
+  its `NMscChargeValue`; a comment line (6) adds nothing. A PO with a line
   discount, a price unit of measure other than the order's, a charge on a
   foreign order, or a line with no price is skipped (logged as a count) until a
   sandbox confirms the arithmetic — never synced at a total the PO match

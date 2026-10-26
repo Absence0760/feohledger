@@ -214,7 +214,14 @@ body starting `ERROR`, as SYSPRO's are.
   1250.00 open, `PO-SYS-502` 980.50 complete, `PO-SYS-503` a USD order whose
   lines carry `MForeignPrice` 100.00 beside the local `MPrice` → 400.00 USD,
   `PO-SYS-504` 3 × 20.00 plus a 45.50 misc-charge line and a comment line →
-  105.50), the posted `ApInvoice` rows and their `ApInvoicePay` rows.
+  105.50, `PO-SYS-505` a EUR order with one line priced only in local
+  `MPrice` — no EUR total, so the adapter skips it), the posted `ApInvoice`
+  rows and their `ApInvoicePay` rows.
+- `GetLogonProfile?UserId=` — the session's company profile; its
+  `LocalCurrencyCode` (`ZAR`) is what the adapter compares a PO header's
+  `Currency` with to decide whether the PO is foreign. Element names follow
+  the open-source client wildland/syspro-ruby
+  (`lib/syspro/get_logon_profile.rb`).
   `EQ` / `NE` / `GT` / `GE` / `LT` / `LE` expressions; rows come back sorted
   by the `OrderBy` column and cut at `ReturnRows`, as COMFND's are — so a
   caller has to page with a `GT` cursor.
