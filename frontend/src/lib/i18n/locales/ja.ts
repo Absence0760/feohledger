@@ -1795,6 +1795,8 @@ export const messages = {
 		'{n, plural, other {⚠ # 件の予算が予算額を超過しています。}}',
 	'cfo.budgets.excluded':
 		'不完全: {n, plural, other {# 件の紐づく購買依頼・発注・請求書}}が予算とは異なる通貨で計上されているため除外されています。下のコミット済みと実績は下限値であり、全体像ではありません。通貨を揃えるか、各予算の画面で確認してください。',
+	'cfo.budgets.unverifiablePos':
+		'不完全: 前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の紐づく発注}}をコミット済みから除外しています。下のコミット済みは下限値です。ERP で金額が確定したら発注を再同期してください。',
 	'cfo.budgets.empty': 'まだ予算が登録されていません。',
 	'cfo.budgets.loadFailed': '予算対実績の読み込みに失敗しました。',
 	'cfo.forecastVariance.title': '予実比較',
@@ -1855,6 +1857,8 @@ export const messages = {
 	'cfoMetrics.accruals.total': '未払費用合計',
 	'cfoMetrics.accruals.noCurrency':
 		'通貨が記録されていない発注は、記号なしの別行に表示されます。通貨ごとに個別に相殺し、各行を合算することはありません。',
+	'cfoMetrics.accruals.unverifiablePos':
+		'前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の発注}}を未決済発注と受領済み品目から除外しています。この見越計上は下限値です。',
 	'cfoMetrics.concentration.title': '仕入先集中度',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor}が支出の{pct}%を占めています — 集中リスク。',
 	'cfoMetrics.concentration.top10': '上位10社',
@@ -2497,6 +2501,8 @@ export const messages = {
 	'budgets.modal.detail.allocated': '割当',
 	'budgets.modal.detail.committed': 'コミット済み',
 	'budgets.modal.detail.actual': '実績',
+	'budgets.modal.unverifiablePos':
+		'前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の紐づく発注}}をコミット済みから除外しています。コミット済みは下限値で、残額は実際より多く見えている可能性があります。',
 	'budgets.modal.detail.remaining': '残り',
 	'budgets.modal.loadingSpend': '支出を読み込み中…',
 	'budgets.modal.field.name': '名前',
@@ -2621,6 +2627,14 @@ export const messages = {
 	'purchaseOrders.modal.amount': '金額',
 	'purchaseOrders.modal.invoiceStatus': 'ステータス',
 	'purchaseOrders.modal.noLinkedInvoices': 'この発注書を参照している請求書はありません。',
+	'purchaseOrders.total.unverifiable': '確認できません',
+	'purchaseOrders.modal.unverifiableNote':
+		'前回の同期で ERP がこの発注の金額を確定できませんでした（{reason}）。ERP が保証しなくなったため、合計と明細の金額は表示しません。この発注を参照する請求書は、同期で金額が確定するまで保留されます。',
+	'purchaseOrders.unverifiableReason.unpriceable': '合計を正確に算出できません（値引き、価格単位、価格の欠落など）',
+	'purchaseOrders.unverifiableReason.linesUnread': '明細をすべて読み取れませんでした',
+	'purchaseOrders.unverifiableReason.noLines': '明細がありませんでした',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown': '通貨を会社の自国通貨と対応付けられませんでした',
+	'purchaseOrders.unverifiableReason.unknown': '理由は記録されていません',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': '入荷',
@@ -2991,6 +3005,8 @@ export const messages = {
 		'未払いには、{currency} への為替レートが未確定の未決済請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
 	'byEntity.unconvertedSpend':
 		'支出には、{currency} への為替レートが未確定の請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
+	'byEntity.openPoUnverifiable':
+		'前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の未決済発注}}を未決済発注から除外しています。',
 	'byEntity.openPoNoCurrency':
 		'通貨が記録されていない発注があります。その未処理額は記号なしの別行に表示され、他の通貨の額に加算されることはありません。',
 

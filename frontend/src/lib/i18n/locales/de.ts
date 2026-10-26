@@ -1835,6 +1835,8 @@ export const messages = {
 		'{n, plural, one {⚠ # Budget überschreitet seine Zuweisung.} other {⚠ # Budgets überschreiten ihre Zuweisung.}}',
 	'cfo.budgets.excluded':
 		'Unvollständig: {n, plural, one {# verknüpfte Anforderung, Bestellung oder Rechnung lautet} other {# verknüpfte Anforderungen, Bestellungen oder Rechnungen lauten}} auf eine andere Währung als das Budget und wurden ausgeschlossen — gebunden und Ist unten sind eine Untergrenze, nicht das vollständige Bild. Stellen Sie die Währung um oder lesen Sie die Werte direkt am Budget.',
+	'cfo.budgets.unverifiablePos':
+		'Unvollständig: {n, plural, one {# verknüpfte Bestellung ist} other {# verknüpfte Bestellungen sind}} nicht im gebundenen Betrag enthalten, weil das ERP {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen konnte — gebunden unten ist eine Untergrenze. Synchronisieren Sie die Bestellungen erneut, sobald das ERP sie bewerten kann.',
 	'cfo.budgets.empty': 'Es wurden noch keine Budgets angelegt.',
 	'cfo.budgets.loadFailed': 'Budget vs. Ist konnte nicht geladen werden.',
 	'cfo.forecastVariance.title': 'Plan gegen Ist',
@@ -1897,6 +1899,8 @@ export const messages = {
 	'cfoMetrics.accruals.total': 'Gesamtabgrenzung',
 	'cfoMetrics.accruals.noCurrency':
 		'Bestellungen ohne erfasste Währung stehen in einer eigenen Zeile ohne Währungssymbol. Jede Währung wird für sich saldiert; die Zeilen werden nie addiert.',
+	'cfoMetrics.accruals.unverifiablePos':
+		'{n, plural, one {# Bestellung ist} other {# Bestellungen sind}} nicht in offenen Bestellungen und erhaltenen Waren enthalten, weil das ERP {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen konnte — diese Abgrenzungen sind eine Untergrenze.',
 	'cfoMetrics.concentration.title': 'Lieferantenkonzentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} macht {pct}% der Ausgaben aus — Konzentrationsrisiko.',
 	'cfoMetrics.concentration.top10': 'Top 10 Lieferanten',
@@ -2546,6 +2550,8 @@ export const messages = {
 	'budgets.modal.detail.allocated': 'Zugewiesen',
 	'budgets.modal.detail.committed': 'Gebunden',
 	'budgets.modal.detail.actual': 'Tatsächlich',
+	'budgets.modal.unverifiablePos':
+		'{n, plural, one {# verknüpfte Bestellung ist} other {# verknüpfte Bestellungen sind}} nicht im gebundenen Betrag enthalten: Das ERP konnte {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen, daher ist gebunden eine Untergrenze und verbleibend womöglich zu hoch.',
 	'budgets.modal.detail.remaining': 'Verbleibend',
 	'budgets.modal.loadingSpend': 'Ausgaben werden geladen…',
 	'budgets.modal.field.name': 'Name',
@@ -2671,6 +2677,17 @@ export const messages = {
 	'purchaseOrders.modal.amount': 'Betrag',
 	'purchaseOrders.modal.invoiceStatus': 'Status',
 	'purchaseOrders.modal.noLinkedInvoices': 'Keine Rechnungen verweisen auf diese Bestellung.',
+	'purchaseOrders.total.unverifiable': 'Nicht bestätigt',
+	'purchaseOrders.modal.unverifiableNote':
+		'Das ERP konnte diese Bestellung bei der letzten Synchronisierung nicht bewerten: {reason}. Summe und Positionsbeträge werden ausgeblendet, weil das ERP sie nicht mehr bestätigt; Rechnungen dazu werden zurückgehalten, bis eine Synchronisierung sie wieder bewertet.',
+	'purchaseOrders.unverifiableReason.unpriceable':
+		'ihre Summe lässt sich nicht exakt ermitteln (etwa wegen eines Rabatts, einer Preiseinheit oder eines fehlenden Preises)',
+	'purchaseOrders.unverifiableReason.linesUnread':
+		'ihre Positionen konnten nicht vollständig gelesen werden',
+	'purchaseOrders.unverifiableReason.noLines': 'sie kam ohne Positionen zurück',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
+		'ihre Währung ließ sich nicht der Hauswährung des Unternehmens zuordnen',
+	'purchaseOrders.unverifiableReason.unknown': 'der Grund wurde nicht erfasst',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': 'Wareneingänge',
@@ -3047,6 +3064,8 @@ export const messages = {
 		'Ausstehend enthält {n, plural, one {# offene Rechnung} other {# offene Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
 	'byEntity.unconvertedSpend':
 		'Ausgaben enthalten {n, plural, one {# Rechnung} other {# Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
+	'byEntity.openPoUnverifiable':
+		'{n, plural, one {# offene Bestellung ist} other {# offene Bestellungen sind}} nicht in „Offene Bestellungen“ enthalten, weil das ERP {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen konnte.',
 	'byEntity.openPoNoCurrency':
 		'Für einige Bestellungen ist keine Währung erfasst; ihre offenen Beträge stehen in einer eigenen Zeile ohne Währungssymbol und werden nie zu einer anderen Währung addiert.',
 

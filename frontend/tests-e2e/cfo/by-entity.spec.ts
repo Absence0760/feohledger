@@ -99,7 +99,9 @@ test.describe('/cfo By-entity section', () => {
 			invoice_count: 2,
 			open_exceptions: 0,
 			open_po_amount: po,
-			open_po_by_currency: openPos
+			open_po_by_currency: openPos,
+			// One open PO left out for a total the ERP could not confirm (§323).
+			open_po_unverifiable_count: 1
 		});
 		const payload = {
 			period_days: 365,
@@ -143,5 +145,9 @@ test.describe('/cfo By-entity section', () => {
 		await expect(section.getByTestId('unconverted-spend')).toContainText('face value');
 		await expect(section.getByTestId('unconverted-outstanding')).toHaveCount(0);
 		await expect(section.getByTestId('open-po-no-currency')).toBeVisible();
+		// The excluded PO is counted beside the column, not silently dropped.
+		await expect(section.getByTestId('open-po-unverifiable')).toContainText(
+			'1 open purchase order is left out of Open POs'
+		);
 	});
 });

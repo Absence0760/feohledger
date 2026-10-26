@@ -140,6 +140,9 @@ export const messages = {
 	'portal.po.col.total': 'Gesamt',
 	'portal.po.col.status': 'Status',
 	'portal.po.createInvoice': 'Rechnung erstellen',
+	'portal.po.totalUnverifiable': 'Wird bestätigt',
+	'portal.po.totalUnverifiableNote':
+		'Summen mit „Wird bestätigt“ prüft Ihr Kunde gerade erneut, daher kann aus diesen Bestellungen hier keine Rechnung erstellt werden. Reichen Sie dafür stattdessen Ihre eigene Rechnung ein.',
 	'portal.po.creating': 'Wird erstellt…',
 	'portal.po.loadMore': 'Mehr laden ({shown} von {total})',
 	'portal.po.showingAll':

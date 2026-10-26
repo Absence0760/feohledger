@@ -1982,6 +1982,8 @@ export const en = {
 		'{n, plural, one {⚠ # budget is over its allocation.} other {⚠ # budgets are over their allocation.}}',
 	'cfo.budgets.excluded':
 		'Partial: {n, plural, one {# linked requisition, PO or invoice is} other {# linked requisitions, POs or invoices are}} denominated in another currency than the budget and excluded — committed and actual below are a floor, not the full picture. Re-denominate them, or read them on the budget itself.',
+	'cfo.budgets.unverifiablePos':
+		'Partial: {n, plural, one {# linked purchase order is} other {# linked purchase orders are}} left out of committed because the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync — committed below is a floor. Re-sync purchase orders once the ERP can price them.',
 	'cfo.budgets.empty': 'No budgets have been set up yet.',
 	'cfo.budgets.loadFailed': 'Failed to load budget vs actual.',
 	// Forecast vs actual (`POST /api/analytics/forecast_variance`). The forecast
@@ -2046,6 +2048,8 @@ export const en = {
 	'cfoMetrics.accruals.total': 'Total accrual',
 	'cfoMetrics.accruals.noCurrency':
 		'Purchase orders with no recorded currency are shown on their own line, without a symbol. Each currency is netted on its own; the lines are never added together.',
+	'cfoMetrics.accruals.unverifiablePos':
+		'{n, plural, one {# purchase order is} other {# purchase orders are}} left out of open POs and received goods because the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync — these accruals are a floor.',
 	'cfoMetrics.concentration.title': 'Supplier concentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} accounts for {pct}% of spend — concentration risk.',
 	'cfoMetrics.concentration.top10': 'Top 10 vendors',
@@ -2710,6 +2714,8 @@ export const en = {
 	'budgets.modal.detail.allocated': 'Allocated',
 	'budgets.modal.detail.committed': 'Committed',
 	'budgets.modal.detail.actual': 'Actual',
+	'budgets.modal.unverifiablePos':
+		'{n, plural, one {# linked purchase order is} other {# linked purchase orders are}} left out of committed: the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync, so committed is a floor and remaining may be overstated.',
 	'budgets.modal.detail.remaining': 'Remaining',
 	'budgets.modal.loadingSpend': 'Loading spend…',
 	'budgets.modal.field.name': 'Name',
@@ -2838,6 +2844,16 @@ export const en = {
 	'purchaseOrders.modal.amount': 'Amount',
 	'purchaseOrders.modal.invoiceStatus': 'Status',
 	'purchaseOrders.modal.noLinkedInvoices': 'No invoices reference this PO.',
+	'purchaseOrders.total.unverifiable': 'Not verifiable',
+	'purchaseOrders.modal.unverifiableNote':
+		'The ERP could not price this PO at its last sync: {reason}. Its total and line amounts are hidden because the ERP no longer vouches for them, and invoices citing it are held until a sync prices it again.',
+	'purchaseOrders.unverifiableReason.unpriceable':
+		'its total cannot be worked out exactly (for example a discount, a price unit of measure or a missing price)',
+	'purchaseOrders.unverifiableReason.linesUnread': 'its lines could not be read in full',
+	'purchaseOrders.unverifiableReason.noLines': 'it came back with no lines',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
+		'its currency could not be placed against the company\'s own',
+	'purchaseOrders.unverifiableReason.unknown': 'the reason was not recorded',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': 'Goods Receipts',
@@ -3222,6 +3238,8 @@ export const en = {
 		'Outstanding includes {n, plural, one {# open invoice} other {# open invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
 	'byEntity.unconvertedSpend':
 		'Spend includes {n, plural, one {# invoice} other {# invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
+	'byEntity.openPoUnverifiable':
+		'{n, plural, one {# open purchase order is} other {# open purchase orders are}} left out of Open POs because the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync.',
 	'byEntity.openPoNoCurrency':
 		'Some purchase orders record no currency; their Open POs are shown on their own line, without a symbol, and never added to another currency\'s.',
 

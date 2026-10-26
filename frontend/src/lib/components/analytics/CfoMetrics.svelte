@@ -224,6 +224,14 @@
 			{#if accrualsHaveUnlabelledPos}
 				<p class="cfm-note" data-testid="accruals-no-currency">{m('cfoMetrics.accruals.noCurrency')}</p>
 			{/if}
+			<!-- POs whose total the ERP could not confirm at its last sync are
+			     left out of the open-PO and received legs (decisions §323) —
+			     counted here so a floor never reads as the whole book. -->
+			{#if data.accruals.unverifiable_po_count > 0}
+				<p class="cfm-skipped" role="alert" data-testid="accruals-unverifiable-pos">
+					{m('cfoMetrics.accruals.unverifiablePos', { n: data.accruals.unverifiable_po_count })}
+				</p>
+			{/if}
 		</div>
 
 		<div class="cfm-subsection">

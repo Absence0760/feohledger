@@ -518,6 +518,13 @@
 					{m('cfo.budgets.excluded', { n: budgetRollup.excluded_row_count })}
 				</p>
 			{/if}
+			<!-- Same floor, different cause: a linked PO whose total the ERP
+			     could not confirm is left out of committed (decisions §323). -->
+			{#if budgetRollup.unverifiable_po_count > 0}
+				<p class="cf-skipped" role="alert" data-testid="budget-rollup-unverifiable">
+					{m('cfo.budgets.unverifiablePos', { n: budgetRollup.unverifiable_po_count })}
+				</p>
+			{/if}
 			{#if budgetRollup.insufficient_data}
 				<p class="empty">{m('cfo.budgets.empty')}</p>
 			{:else}
