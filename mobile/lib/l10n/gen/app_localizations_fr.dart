@@ -2104,6 +2104,24 @@ class AppLocalizationsFr extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Description';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'Le bon de commande $po a changé dans $erp le $date et une nouvelle vérification concorde désormais. Examinez-le pour lever le blocage.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'Le bon de commande $po a changé dans $erp et une nouvelle vérification concorde désormais. Examinez-le pour lever le blocage.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'Le bon de commande a changé dans $erp et une nouvelle vérification concorde désormais. Examinez-le pour lever le blocage.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'votre ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Facture';
 
   @override

@@ -117,6 +117,15 @@ class ApException {
   final DateTime? dueAt;
   final double? timeToResolutionHours;
 
+  /// The ERP's product name for [poRematch] (`erp_name`), or null when the
+  /// adapter has none — the screen then says "your ERP" itself.
+  final String? erpName;
+
+  /// Set when an ERP PO sync's re-check no longer finds this hold (decisions
+  /// §323, amended): the sync never clears a hold, so this is what tells the
+  /// reviewer the PO changed and they may now clear it.
+  final PoRematchClears? poRematch;
+
   ApException({
     required this.id,
     this.invoiceId,
@@ -141,6 +150,8 @@ class ApException {
     this.resolvedAt,
     this.dueAt,
     this.timeToResolutionHours,
+    this.erpName,
+    this.poRematch,
   });
 
   static DateTime? _parseDate(Object? raw) {
@@ -180,6 +191,37 @@ class ApException {
       dueAt: _parseDate(json['due_at']),
       timeToResolutionHours:
           (json['time_to_resolution_hours'] as num?)?.toDouble(),
+      erpName: json['erp_name'] as String?,
+      poRematch: PoRematchClears.fromErpReport(json['erp_report']),
+    );
+  }
+}
+
+/// `erp_report` with `kind == "po_rematch_clears"` (backend
+/// `invoice_warnings.ERP_REPORT_PO_REMATCH_CLEARS`): the PO number the
+/// re-check matched and the UTC day it was seen. Either may be absent.
+class PoRematchClears {
+  static const kind = 'po_rematch_clears';
+
+  final String? poNumber;
+
+  /// A calendar day, not an instant — render it without a time-zone shift.
+  final DateTime? observedOn;
+
+  const PoRematchClears({this.poNumber, this.observedOn});
+
+  static final _isoDay = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+
+  /// Null for any other report, or none.
+  static PoRematchClears? fromErpReport(Object? raw) {
+    if (raw is! Map || raw['kind'] != kind) return null;
+    final po = raw['po_number'];
+    final day = raw['observed_on'];
+    return PoRematchClears(
+      poNumber: po is String && po.trim().isNotEmpty ? po.trim() : null,
+      observedOn: day is String && _isoDay.hasMatch(day)
+          ? DateTime.tryParse(day)
+          : null,
     );
   }
 }

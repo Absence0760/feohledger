@@ -1965,6 +1965,24 @@ class AppLocalizationsJa extends AppLocalizations {
   String get exceptionDetailSectionDescription => '説明';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return '発注書 $po は $date に $erp で変更され、再照合で一致するようになりました。確認して保留を解除してください。';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return '発注書 $po は $erp で変更され、再照合で一致するようになりました。確認して保留を解除してください。';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return '発注書が $erp で変更され、再照合で一致するようになりました。確認して保留を解除してください。';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'お使いの ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => '請求書';
 
   @override

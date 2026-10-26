@@ -110,6 +110,14 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
               ),
             const SizedBox(height: 16),
           ],
+          if (poRematchText(l, exc) case final note?) ...[
+            Text(
+              note,
+              key: const Key('exception-rematch-note'),
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+          ],
           _invoicePanel(l, exc),
           const SizedBox(height: 16),
           _slaPanel(l, exc),
@@ -472,4 +480,19 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
     A11y.announce(context, msg);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
+}
+
+/// The line that says an ERP PO sync's re-check no longer finds this hold
+/// (decisions §323, amended), or null on any other row. The sync never clears
+/// a hold, so this is the reason a reviewer may now. A missing PO number or
+/// day is left out, never invented.
+String? poRematchText(AppLocalizations l, ApException exc) {
+  final note = exc.poRematch;
+  if (note == null) return null;
+  final erp = exc.erpName ?? l.exceptionDetailYourErp;
+  final po = note.poNumber;
+  final day = note.observedOn;
+  if (po == null) return l.exceptionDetailPoRematchNoPo(erp);
+  if (day == null) return l.exceptionDetailPoRematchNoDate(po, erp);
+  return l.exceptionDetailPoRematch(po, erp, formatDate(day));
 }

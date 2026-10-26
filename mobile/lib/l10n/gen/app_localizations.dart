@@ -3344,6 +3344,30 @@ abstract class AppLocalizations {
   /// **'Description'**
   String get exceptionDetailSectionDescription;
 
+  /// An ERP PO sync re-check no longer finds this hold (decisions §323); the sync never clears it, so a person may now.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {po} changed in {erp} on {date}, and a re-check now matches. Review it to clear the hold.'**
+  String exceptionDetailPoRematch(String po, String erp, String date);
+
+  /// No description provided for @exceptionDetailPoRematchNoDate.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {po} changed in {erp}, and a re-check now matches. Review it to clear the hold.'**
+  String exceptionDetailPoRematchNoDate(String po, String erp);
+
+  /// No description provided for @exceptionDetailPoRematchNoPo.
+  ///
+  /// In en, this message translates to:
+  /// **'The purchase order changed in {erp}, and a re-check now matches. Review it to clear the hold.'**
+  String exceptionDetailPoRematchNoPo(String erp);
+
+  /// No description provided for @exceptionDetailYourErp.
+  ///
+  /// In en, this message translates to:
+  /// **'your ERP'**
+  String get exceptionDetailYourErp;
+
   /// No description provided for @exceptionDetailSectionInvoice.
   ///
   /// In en, this message translates to:

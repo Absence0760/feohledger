@@ -2103,6 +2103,24 @@ class AppLocalizationsPt extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Descrição';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'O PC $po mudou no $erp em $date e uma nova verificação agora confere. Revise para liberar a retenção.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'O PC $po mudou no $erp e uma nova verificação agora confere. Revise para liberar a retenção.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'O pedido de compra mudou no $erp e uma nova verificação agora confere. Revise para liberar a retenção.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'seu ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Fatura';
 
   @override
@@ -5236,6 +5254,24 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get exceptionDetailSectionDescription => 'Descrição';
+
+  @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'O PC $po mudou no $erp em $date e uma nova verificação agora confere. Revise para liberar a retenção.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'O PC $po mudou no $erp e uma nova verificação agora confere. Revise para liberar a retenção.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'O pedido de compra mudou no $erp e uma nova verificação agora confere. Revise para liberar a retenção.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'seu ERP';
 
   @override
   String get exceptionDetailSectionInvoice => 'Fatura';

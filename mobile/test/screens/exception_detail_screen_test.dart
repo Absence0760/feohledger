@@ -34,6 +34,8 @@ Map<String, dynamic> _detailJson({
   // amount, because the figure IS that invoice's amount. `null` models the
   // no-invoice-joined case the endpoint also produces.
   Object? currency = 'USD',
+  Map<String, dynamic>? erpReport,
+  String? erpName,
 }) =>
     {
       'id': '1',
@@ -52,6 +54,8 @@ Map<String, dynamic> _detailJson({
       'is_overdue': false,
       'due_at': dueAt,
       'created_at': '2026-01-01T12:00:00',
+      'erp_report': ?erpReport,
+      'erp_name': ?erpName,
     };
 
 Map<String, dynamic> _me(List<String> roles) => {
@@ -128,6 +132,57 @@ void main() {
     expect(find.widgetWithText(OutlinedButton, 'Dismiss'), findsOneWidget);
     // Unassigned by default.
     expect(find.text('Unassigned'), findsOneWidget);
+  });
+
+  testWidgets('a hold the ERP PO sync re-check no longer finds says so',
+      (tester) async {
+    setTallSurface(tester);
+    ApiClient().debugConfigure(
+      client: MockClient(
+        (req) async => _json(
+          _detailJson(
+            erpName: 'NetSuite',
+            erpReport: {
+              'kind': 'po_rematch_clears',
+              'erp_type': 'netsuite',
+              'po_number': 'PO-7',
+              'observed_on': '2026-10-26',
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _host(const ExceptionDetailScreen(exceptionId: '1')),
+    );
+    await _pumpUntil(tester, find.byKey(const Key('exception-rematch-note')));
+
+    expect(
+      find.text(
+        'PO PO-7 changed in NetSuite on Oct 26, 2026, and a re-check now '
+        'matches. Review it to clear the hold.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('any other row shows no re-check note', (tester) async {
+    setTallSurface(tester);
+    ApiClient().debugConfigure(
+      client: MockClient(
+        (req) async => _json(
+          _detailJson(erpReport: {'kind': 'paid_not_recorded'}),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _host(const ExceptionDetailScreen(exceptionId: '1')),
+    );
+    await _pumpUntil(tester, find.text('PO Mismatch'));
+
+    expect(find.byKey(const Key('exception-rematch-note')), findsNothing);
   });
 
   testWidgets('a coded composite description lists its localized findings',

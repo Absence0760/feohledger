@@ -38,4 +38,35 @@ void main() {
       expect(ApException.fromJson(_json(true)).amount, isNull);
     });
   });
+
+  group('PoRematchClears reads only its own report', () {
+    test('the PO number and calendar day come through', () {
+      final r = PoRematchClears.fromErpReport({
+        'kind': 'po_rematch_clears',
+        'po_number': ' PO-7 ',
+        'observed_on': '2026-10-26',
+      })!;
+      expect(r.poNumber, 'PO-7');
+      expect(r.observedOn, DateTime(2026, 10, 26));
+    });
+
+    test('a missing or malformed field stays missing', () {
+      final r = PoRematchClears.fromErpReport({
+        'kind': 'po_rematch_clears',
+        'po_number': '',
+        'observed_on': '2026-10-26T00:00:00Z',
+      })!;
+      expect(r.poNumber, isNull);
+      expect(r.observedOn, isNull);
+    });
+
+    test('another kind, or no report, is null', () {
+      expect(
+        PoRematchClears.fromErpReport({'kind': 'paid_not_recorded'}),
+        isNull,
+      );
+      expect(PoRematchClears.fromErpReport(null), isNull);
+      expect(PoRematchClears.fromErpReport('po_rematch_clears'), isNull);
+    });
+  });
 }

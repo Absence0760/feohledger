@@ -2103,6 +2103,24 @@ class AppLocalizationsEs extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Descripción';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'La OC $po cambió en $erp el $date y una nueva comprobación ya coincide. Revísela para liberar la retención.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'La OC $po cambió en $erp y una nueva comprobación ya coincide. Revísela para liberar la retención.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'La orden de compra cambió en $erp y una nueva comprobación ya coincide. Revísela para liberar la retención.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'su ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Factura';
 
   @override

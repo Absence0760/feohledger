@@ -2097,6 +2097,24 @@ class AppLocalizationsDe extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Beschreibung';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'Bestellung $po wurde am $date in $erp geändert; eine erneute Prüfung stimmt jetzt überein. Prüfen Sie sie, um die Sperre aufzuheben.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'Bestellung $po wurde in $erp geändert; eine erneute Prüfung stimmt jetzt überein. Prüfen Sie sie, um die Sperre aufzuheben.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'Die Bestellung wurde in $erp geändert; eine erneute Prüfung stimmt jetzt überein. Prüfen Sie sie, um die Sperre aufzuheben.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'Ihrem ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Rechnung';
 
   @override

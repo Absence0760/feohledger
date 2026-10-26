@@ -1243,6 +1243,29 @@
   "exceptionDetailNotFound": "Exception not found",
   "exceptionDetailOverdue": "Overdue",
   "exceptionDetailSectionDescription": "Description",
+  "exceptionDetailPoRematch": "PO {po} changed in {erp} on {date}, and a re-check now matches. Review it to clear the hold.",
+  "@exceptionDetailPoRematch": {
+    "description": "An ERP PO sync re-check no longer finds this hold (decisions §323); the sync never clears it, so a person may now.",
+    "placeholders": {
+      "po": { "type": "String" },
+      "erp": { "type": "String" },
+      "date": { "type": "String" }
+    }
+  },
+  "exceptionDetailPoRematchNoDate": "PO {po} changed in {erp}, and a re-check now matches. Review it to clear the hold.",
+  "@exceptionDetailPoRematchNoDate": {
+    "placeholders": {
+      "po": { "type": "String" },
+      "erp": { "type": "String" }
+    }
+  },
+  "exceptionDetailPoRematchNoPo": "The purchase order changed in {erp}, and a re-check now matches. Review it to clear the hold.",
+  "@exceptionDetailPoRematchNoPo": {
+    "placeholders": {
+      "erp": { "type": "String" }
+    }
+  },
+  "exceptionDetailYourErp": "your ERP",
   "exceptionDetailSectionInvoice": "Invoice",
   "exceptionDetailNoLinkedInvoice": "No linked invoice",
   "exceptionDetailFieldNumber": "Number",

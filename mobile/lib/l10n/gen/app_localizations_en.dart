@@ -2083,6 +2083,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Description';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'PO $po changed in $erp on $date, and a re-check now matches. Review it to clear the hold.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'PO $po changed in $erp, and a re-check now matches. Review it to clear the hold.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'The purchase order changed in $erp, and a re-check now matches. Review it to clear the hold.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'your ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Invoice';
 
   @override
