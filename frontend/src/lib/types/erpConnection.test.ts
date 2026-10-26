@@ -5,6 +5,7 @@ import {
 	buildErpSecretUpdate,
 	buildErpTestPayload,
 	byoAppRequired,
+	fieldApplies,
 	groupProviders,
 	initialValues,
 	missingRequired,
@@ -561,5 +562,75 @@ describe('erpTestResultText', () => {
 		['an unknown adapter with no key', { success: false, code: 'unknown_adapter', message: 'server says' }]
 	])('falls back to the server sentence for %s', (_label, result) => {
 		expect(erpTestResultText(result, qbo, label, t)).toBe('server says');
+	});
+});
+
+/** NetSuite as the catalogue now serves it: a sign-in method, then each
+ *  method's own credentials (`catalog.py`, issue #653). */
+const OAUTH2 = { field: 'auth_method', values: ['oauth2_m2m'] };
+const TBA = { field: 'auth_method', values: ['tba'] };
+const netsuiteTwoMethods: ErpProvider = {
+	...netsuite,
+	fields: [
+		{ name: 'account_id', label_key: 'org.erp.accountId', secret: false, required: true },
+		{
+			name: 'auth_method',
+			label_key: 'org.erp.field.auth_method',
+			secret: false,
+			required: true,
+			options: ['oauth2_m2m', 'tba'],
+			stored_default: 'tba'
+		},
+		{ name: 'client_id', label_key: 'org.erp.clientId', secret: false, required: true, show_when: OAUTH2 },
+		{
+			name: 'private_key',
+			label_key: 'org.erp.field.private_key',
+			secret: true,
+			required: true,
+			show_when: OAUTH2
+		},
+		{ name: 'consumer_key', label_key: 'org.erp.consumerKey', secret: false, required: true, show_when: TBA },
+		{
+			name: 'consumer_secret',
+			label_key: 'org.erp.consumerSecret',
+			secret: true,
+			required: true,
+			show_when: TBA
+		}
+	]
+};
+
+describe('NetSuite sign-in method (show_when / stored_default)', () => {
+	it('starts a new connection on OAuth 2.0, the first option', () => {
+		expect(initialValues(netsuiteTwoMethods, undefined).auth_method).toBe('oauth2_m2m');
+	});
+
+	it('reads a saved connection with no method as TBA, as the adapter does', () => {
+		// Showing the first option here would switch a working tenant on save.
+		expect(initialValues(netsuiteTwoMethods, storedNetsuite).auth_method).toBe('tba');
+		const saved = { ...storedNetsuite, auth_method: 'oauth2_m2m' };
+		expect(initialValues(netsuiteTwoMethods, saved).auth_method).toBe('oauth2_m2m');
+	});
+
+	it('applies only the chosen method’s fields', () => {
+		const shown = (method: string) =>
+			netsuiteTwoMethods.fields
+				.filter((f) => fieldApplies(f, { auth_method: method }))
+				.map((f) => f.name);
+		expect(shown('oauth2_m2m')).toEqual(['account_id', 'auth_method', 'client_id', 'private_key']);
+		expect(shown('tba')).toEqual(['account_id', 'auth_method', 'consumer_key', 'consumer_secret']);
+	});
+
+	it('never requires the other method’s credentials', () => {
+		const values = { account_id: '123', auth_method: 'oauth2_m2m', client_id: '', private_key: '' };
+		expect(missingRequired(netsuiteTwoMethods, values, undefined, []).map((f) => f.name)).toEqual([
+			'client_id',
+			'private_key'
+		]);
+	});
+
+	it('labels both methods', () => {
+		expect(optionLabelKey('oauth2_m2m')).toBe('org.erp.option.oauth2_m2m');
+		expect(optionLabelKey('tba')).toBe('org.erp.option.tba');
 	});
 });
