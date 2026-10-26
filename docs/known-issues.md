@@ -5,8 +5,9 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Eight entries are open**: the run builder reading a missing invoice currency
-as USD (found 2026-10-21, at the top), the app rendering nothing when browser
+**Nine entries are open**: Merge.dev's vendor listing calling an endpoint
+Merge does not publish (found 2026-10-26, at the top), the run builder reading
+a missing invoice currency as USD (found 2026-10-21), the app rendering nothing when browser
 storage is blocked (found 2026-10-20), the remove-tenant backup deletion the
 VM's IAM role refuses (found 2026-10-18),
 the expense-report Attach dead end found while
@@ -27,7 +28,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Nineteen of the twenty-seven `##`
+refuses to start against a stale database. Nineteen of the twenty-eight `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included,
 and later "seventeen of the twenty-four" while nineteen were struck.)
@@ -52,6 +53,40 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## Merge.dev's vendor listing calls an endpoint Merge does not publish
+
+**Found 2026-10-26** while fixing issue #652 (POs linked to their vendor by
+ERP id); diagnosed against Merge's published Accounting OpenAPI
+(`docs.merge.dev/openapi/accounting.json`), not against a live linked account.
+`MergeDevAdapter.list_vendors` reads `GET /vendors` and maps a "Vendor" model
+(`phone_number`, `addresses[].line1`, `payment_term`). Merge's Accounting API
+has no `/vendors` path and no Vendor model: suppliers are `Contact`s, listed at
+`GET /contacts?is_supplier=true`, with `phone_numbers[]` (`number`),
+`addresses[]` (`street_1` / `street_2`), a `status` of `ACTIVE` / `ARCHIVED`,
+and no payment term. The fake ERP serves `/vendors` in the adapter's shape, so
+every unit test and `tests-e2e/erp/merge-dev.spec.ts` pass against a contract
+Merge never offered.
+
+**Blast radius:** a live Merge connection's vendor sync fails (Merge answers the
+unknown path with an error, which `list_vendors` raises as
+`ErpListingIncomplete`, so `POST /api/vendors/sync-erp` answers 502 and changes
+nothing). With no vendor carrying a Merge id, every invoice push is refused
+`vendor_not_linked` and every PO falls back to linking by name, although
+`list_pos` now reads the vendor's Merge id (#652). Nothing is written wrongly;
+the Merge path just cannot be used. Merge is Scale-only, and no tenant is known
+to run it.
+
+**Recommended fix:** list `contacts` with `is_supplier=true` and
+`expand=addresses,phone_numbers`; map `phone_numbers[0].number`, `street_1` /
+`street_2`, and `ARCHIVED` to `active=False`; drop the payment-term mapping
+(Contact has none). Reshape the fake's Merge vendor fixtures to Contacts at
+`/contacts` (keeping the `merge-vendor-70x` ids the PO fixtures name), and
+update `tests/test_erp_vendor_sync_adapter.py` and the merge-dev e2e spec, whose
+payment-terms assertions go with the field. The Contact `id` stays the
+`erp_vendor_id`, so nothing already linked moves. Not done in the #652 change
+because it rewrites the vendor contract the e2e spec asserts, which needs a run
+against the full stack.
 
 ## The run builder reads a missing invoice currency as USD
 

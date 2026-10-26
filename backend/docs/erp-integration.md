@@ -1422,13 +1422,20 @@ to a different company also writes `organization.erp_realm_changed`.
 `po_number` as text), so they need no realm. A synced PO is linked to its vendor
 by the ERP's supplier id (`PoPayload.vendor_erp_id`, matched against the
 `erp_vendor_id` the vendor sync stamps — Xero's `ContactID`, QuickBooks'
-`VendorRef`), falling back to the vendor name; an adapter that does not read
-the id uses the name alone. **Run the vendor sync before the PO sync** on a new
+`VendorRef`, Business Central's `vendorId`, Sage Accounting SA's `SupplierId`,
+Sage Intacct's `vendor.id`, Merge.dev's `vendor`), falling back to the vendor
+name; an adapter that does not read the id uses the name alone. Linking by id
+is what keeps a PO on the right vendor after a rename on either side, and when
+two vendors share a name. **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
 missing link once the vendor exists. It never re-points a PO that already has
 a vendor. The QuickBooks PO sync also no
 longer reads the chart to resolve PO-line accounts: nothing persists or reads a
-PO line's GL account, so lines carry none — never the `AccountRef` name.
+PO line's GL account, so lines carry none — never the `AccountRef` name. Merge.dev's
+lines carry none for the same reason: a Merge PO line's `account` is a Merge
+Account id, which stored as a GL code would name no chart row. Merge's PO number
+is read from `purchase_order_number`, and its `BILLED` / `DELETED` statuses map to
+closed / cancelled, as Xero's do.
 
 **Repairing a chart synced before §284.** On a QuickBooks Online tenant, every
 invoice push is refused after migration 0115, with `account_not_linked` for the

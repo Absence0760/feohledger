@@ -2008,8 +2008,8 @@ stay open.
       against live Xero or NetSuite POs, or the next change to the PO status
       vocabulary.
 - [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
-      Only Xero and QuickBooks fill `PoPayload.vendor_erp_id`. NetSuite,
-      Business Central, Merge.dev, Sage Intacct, Sage Accounting ZA, SYSPRO
+      Xero, QuickBooks, Business Central, Merge.dev, Sage Intacct and Sage
+      Accounting ZA fill `PoPayload.vendor_erp_id` (#652). NetSuite, SYSPRO
       and Blackbaud FE NXT fall back to `vendor_name`, which a rename on
       either side breaks, and which picks the wrong row when two vendors share
       a name. **Durable fix:** read each ERP's supplier id on the PO (the same
