@@ -147,11 +147,18 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # One group, `patterns: ["*"]`, NOT `update-types: [minor, patch]`. A
+    # digest-only refresh (same tag, new sha256) carries no semver update type,
+    # so the old filter let it fall out of the group and Dependabot opened one
+    # PR per directory — #662 (backend) and #665 (deploy) for the same redis
+    # digest. Each half alone fails test_production_runs_the_images_ci_tests,
+    # which is right: prod must run the digest CI tested. Grouping on `*` keeps
+    # both directories in one PR; the `ignore:` list below still holds back the
+    # majors that need planning (the same fix the backend pip group needed).
     groups:
-      compose-minor-patch:
-        update-types:
-          - minor
-          - patch
+      compose-images:
+        patterns:
+          - "*"
     ignore:
       - dependency-name: postgres
         update-types: ["version-update:semver-major"]
