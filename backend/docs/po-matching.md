@@ -199,7 +199,13 @@ payment-blocking** and records why it now reads as clearable in the row's
 ```
 
 PII-free (the ERP type, the PO number matched, the UTC day). `GET
-/api/exceptions` returns it with the rest of the row. A person clears the hold
+/api/exceptions` returns it with the rest of the row, and both clients say it in
+one line: on web, under the row's description on `/exceptions` and in its
+resolve dialog (`lib/types/erpReport.poRematchNote`); on mobile, on the
+exception detail screen (`PoRematchClears`, `poRematchText`). It reads "PO
+{po} changed in {erp} on {date}, and a re-check now matches. Review it to
+clear the hold." A missing PO number or day is left out, never invented.
+A person clears the hold
 through the queue (`exception_lifecycle.record_decision`, with its segregation
 refusal). Any later refresh that finds the finding again — a sync lowering the
 total back, an invoice edit — removes the note from the still-open row.
