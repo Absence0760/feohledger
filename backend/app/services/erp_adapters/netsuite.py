@@ -840,18 +840,35 @@ async def _dispatch(
     return await client.get(url, headers=headers)
 
 
+#: RFC 6749 §5.2's token-endpoint error codes (RFC 7523's JWT-assertion grant
+#: reuses them). Anything else logs as ``unknown``.
+_OAUTH_ERROR_CODES: dict[str, str] = {
+    code: code
+    for code in (
+        "invalid_request",
+        "invalid_client",
+        "invalid_grant",
+        "unauthorized_client",
+        "unsupported_grant_type",
+        "invalid_scope",
+        "server_error",
+        "temporarily_unavailable",
+    )
+}
+
+
 def _oauth_error_code(resp: httpx.Response) -> str:
     """The OAuth ``error`` code of a refused token request (``invalid_client``,
-    ``invalid_grant``), for the log. Only a short known-shape code is returned:
-    the body is the provider's, so nothing else from it is echoed."""
+    ``invalid_grant``), for the log. Only a standard code is returned: the body
+    is the provider's, so nothing from it is echoed."""
     try:
         body = resp.json()
     except ValueError:
         return "unparseable"
     code = body.get("error") if isinstance(body, dict) else None
-    if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,64}", code):
-        return code
-    return "unknown"
+    # Looked up, never echoed: the logged string is always one of our own
+    # literals, so nothing from the provider's body reaches the log.
+    return _OAUTH_ERROR_CODES.get(code, "unknown") if isinstance(code, str) else "unknown"
 
 
 def _netsuite_bill_status(record: dict) -> str:

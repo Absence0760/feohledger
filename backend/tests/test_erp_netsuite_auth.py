@@ -384,6 +384,25 @@ def test_a_refused_assertion_fails_the_push_without_reaching_the_record_api(
     assert "PRIVATE KEY" not in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("body", "logged"),
+    [
+        ({"error": "invalid_grant"}, "invalid_grant"),
+        # Not a standard code: logged as `unknown`, never echoed.
+        ({"error": "eyJhbGciOiJQUzI1NiJ9.secret"}, "unknown"),
+        ({"error": "made_up_code"}, "unknown"),
+        ({"error": 401}, "unknown"),
+        (["invalid_client"], "unknown"),
+    ],
+)
+def test_only_a_standard_oauth_error_code_reaches_the_log(body, logged):
+    assert netsuite._oauth_error_code(httpx.Response(400, json=body)) == logged
+
+
+def test_an_unparseable_token_refusal_logs_as_such():
+    assert netsuite._oauth_error_code(httpx.Response(400, content=b"<html>")) == "unparseable"
+
+
 def test_an_assertion_for_another_endpoint_is_refused(rsa_key):
     fake = _FakeNetSuite(_public_pem(rsa_key))
     assertion = NetSuiteAdapter(_config(_pem(rsa_key)))._client_assertion()
