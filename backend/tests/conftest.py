@@ -40,8 +40,9 @@ class _FakeSortedSet:
 
 
 class _FakePipeline:
-    def __init__(self, sset: _FakeSortedSet) -> None:
+    def __init__(self, sset: _FakeSortedSet, kv: dict[str, str] | None = None) -> None:
         self._sset = sset
+        self._kv = kv if kv is not None else {}
         self._calls: list = []
 
     async def __aenter__(self):
@@ -59,6 +60,9 @@ class _FakePipeline:
     def zcard(self, key) -> None:
         self._calls.append(("zcard", key))
 
+    def incr(self, key) -> None:
+        self._calls.append(("incr", key))
+
     def expire(self, key, ttl) -> None:
         self._calls.append(("expire", key, ttl))
 
@@ -74,6 +78,10 @@ class _FakePipeline:
                 results.append(None)
             elif op == "zcard":
                 results.append(self._sset.zcard(call[1]))
+            elif op == "incr":
+                value = int(self._kv.get(call[1]) or 0) + 1
+                self._kv[call[1]] = str(value)
+                results.append(value)
             elif op == "expire":
                 results.append(True)
         return results
@@ -88,7 +96,7 @@ class _FakeRedis:
         self._kv: dict[str, str] = {}
 
     def pipeline(self, transaction: bool = True):  # noqa: ARG002
-        return _FakePipeline(self.sset)
+        return _FakePipeline(self.sset, self._kv)
 
     async def zrange(self, key, start, stop, withscores=False):
         return self.sset.zrange(key, start, stop, withscores=withscores)

@@ -211,10 +211,15 @@ class CallBudget:
         day = moment.strftime("%Y%m%d")
         try:
             r = await get_redis()
-            await r.incr(self._total_key(day))
-            await r.expire(self._total_key(day), _DAY_TTL_SECONDS)
-            used = int(await r.incr(self._org_key(day)))
-            await r.expire(self._org_key(day), _DAY_TTL_SECONDS)
+            # One MULTI/EXEC: a crash between an INCR and its EXPIRE would
+            # otherwise leave a day's counter that never expires.
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.incr(self._total_key(day))
+                pipe.expire(self._total_key(day), _DAY_TTL_SECONDS)
+                pipe.incr(self._org_key(day))
+                pipe.expire(self._org_key(day), _DAY_TTL_SECONDS)
+                _, _, org_count, _ = await pipe.execute()
+            used = int(org_count)
         except Exception as exc:  # noqa: BLE001 — fail open
             logger.warning("[erp-call-budget] count skipped: %s", exc.__class__.__name__)
             return
