@@ -320,6 +320,13 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   (failed) with no record.
   `GET /accountspayable/v1/invoices/{id}` returns `status` / `amount` / `balance`.
 - `POST /blackbaud/__set-status` — test hook `{"invoice_id", "status", "balance"}`.
+- `POST /blackbaud/__throttle` — test hook `{"status": 429|403, "retry_after": <s>,
+  "count": <n>}`: the next `n` SKY calls answer SKY's rate-limit 429 or
+  quota 403, with `Retry-After`. Drives the adapter's call budget locally
+  (`services/erp_call_budget.py`, decisions §322): after one quota 403 every
+  tenant on the platform key is refused before its first call until
+  `Retry-After`, and the org's admins get one `erp_call_quota` notice.
+  `count: 0` clears it; so does `POST /__reset`.
 - `POST /blackbaud/__seed-invoices` — test hook `{"rows": [{"vendor_id",
   "invoice_number", "invoice_date", "description"?, "status"?}]}`: invoices
   keyed by hand in FE NXT (e.g. 600 rows a common `search_text` matches).

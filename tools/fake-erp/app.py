@@ -253,14 +253,15 @@ STATE: dict[str, Any] = _fresh_state()
 class ProviderError(Exception):
     """Raise anywhere to return a provider-shaped JSON error body."""
 
-    def __init__(self, status_code: int, body: dict):
+    def __init__(self, status_code: int, body: dict, headers: dict[str, str] | None = None):
         self.status_code = status_code
         self.body = body
+        self.headers = headers
 
 
 @app.exception_handler(ProviderError)
 async def _provider_error_handler(_request: Request, exc: ProviderError) -> JSONResponse:
-    return JSONResponse(exc.body, status_code=exc.status_code)
+    return JSONResponse(exc.body, status_code=exc.status_code, headers=exc.headers)
 
 
 # ---------------------------------------------------------------------------
@@ -2409,6 +2410,17 @@ def _blackbaud_state() -> dict[str, Any]:
 
 
 def _require_blackbaud_auth(request: Request) -> None:
+    throttle = _blackbaud_state().get("throttle")
+    if throttle and throttle["remaining"] > 0:
+        # SKY's two refusals: 429 (rate limit) and 403 + Retry-After (quota),
+        # each with Retry-After (the adapter's call budget honours both).
+        throttle["remaining"] -= 1
+        raise ProviderError(
+            throttle["status"],
+            {"statusCode": throttle["status"], "message": "Rate limit is exceeded."
+             if throttle["status"] == 429 else "Out of call volume quota."},
+            headers={"Retry-After": str(throttle["retry_after"])},
+        )
     if not request.headers.get("bb-api-subscription-key", "").strip():
         raise ProviderError(
             401, {"statusCode": 401, "message": "Access denied due to missing subscription key."}
@@ -2631,6 +2643,22 @@ async def blackbaud_get_invoice(request: Request, invoice_id: int) -> Response:
     if invoice is None:
         raise ProviderError(404, {"Error": "The specified record could not be found."})
     return _blackbaud_json(invoice)
+
+
+@blackbaud.post("/__throttle")
+async def blackbaud_throttle(body: dict) -> dict:
+    """Test hook: the next ``count`` SKY calls answer ``status`` (429 for the
+    rate limit, 403 for the daily quota) with ``Retry-After: retry_after``.
+    {"status": 403, "retry_after": 3600, "count": 1}; count 0 clears it."""
+    status = int(body.get("status", 429))
+    if status not in (429, 403):
+        raise ProviderError(400, {"detail": "status must be 429 or 403"})
+    _blackbaud_state()["throttle"] = {
+        "status": status,
+        "retry_after": max(1, int(body.get("retry_after", 1))),
+        "remaining": max(0, int(body.get("count", 1))),
+    }
+    return {"status": "ok"}
 
 
 @blackbaud.post("/__set-status")
