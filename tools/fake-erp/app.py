@@ -2219,6 +2219,7 @@ app.include_router(sageza)
 # State lives under STATE["blackbaud"], created on first use (reset-safe).
 
 import json
+from datetime import date, timedelta
 
 blackbaud = APIRouter(prefix="/blackbaud")
 
@@ -2230,6 +2231,13 @@ BLACKBAUD_VENDOR_FIXTURES: list[dict] = [
      "vendor_status": "Active", "payment_defaults": {"payment_terms": "Net 30"}},
     {"vendor_id": 137, "vendor_name": "Fake Blackbaud Vendor B", "ui_defined_id": "BBV-B",
      "vendor_status": "Active"},
+    # `VendorStatus` is Active / Inactive / OnHold. An Inactive vendor takes no
+    # invoice (the create answers 400); an OnHold one does, and FE NXT holds
+    # its payments instead.
+    {"vendor_id": 138, "vendor_name": "Fake Blackbaud Vendor Inactive", "ui_defined_id": "BBV-I",
+     "vendor_status": "Inactive"},
+    {"vendor_id": 139, "vendor_name": "Fake Blackbaud Vendor On Hold", "ui_defined_id": "BBV-H",
+     "vendor_status": "OnHold"},
 ]
 BLACKBAUD_ACCOUNT_FIXTURES: list[dict] = [
     {"account_id": 1, "account_number": "01-5000-00", "description": "Fake Program Supplies",
@@ -2238,7 +2246,57 @@ BLACKBAUD_ACCOUNT_FIXTURES: list[dict] = [
      "class": "Unrestricted Net Assets", "prevent_data_entry": False},
     {"account_id": 3, "account_number": "01-2000-00", "description": "Fake Accounts Payable",
      "class": "Unrestricted Net Assets", "prevent_data_entry": False},
+    # Posting to this account queues a job that ends at status 7 (failed):
+    # validation FE NXT runs in the background job rather than on the create.
+    {"account_id": 4, "account_number": "01-5900-00",
+     "description": "Fake Grant Expense (fails in the job)",
+     "class": "Temporarily Restricted Net Assets", "prevent_data_entry": False},
 ]
+BLACKBAUD_JOB_FAILING_ACCOUNT = "01-5900-00"
+
+
+def _blackbaud_fiscal_years() -> list[dict]:
+    """ListFiscalYears (`ApiCollection[FiscalYear]`): calendar years 2024-2030.
+
+    FY 2024 is `Closed`; in FY 2025 periods 1-3 (Jan-Mar) are `closed`;
+    everything else is open, so a current-dated invoice posts.
+    """
+    years = []
+    for n, year in enumerate(range(2024, 2031), start=1):
+        periods = []
+        for month in range(1, 13):
+            end_day = (date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1)).day
+            periods.append({
+                "fiscal_period_id": n * 100 + month,
+                "start_date": f"{year}-{month:02d}-01T00:00:00",
+                "end_date": f"{year}-{month:02d}-{end_day:02d}T00:00:00",
+                "sequence": month,
+                "closed": year == 2024 or (year == 2025 and month <= 3),
+            })
+        years.append({
+            "fiscal_year_id": n,
+            "year": str(year),
+            "description": f"FY {year}",
+            "start_date": f"{year}-01-01T00:00:00",
+            "end_date": f"{year}-12-31T00:00:00",
+            "status": "Closed" if year == 2024 else "Open",
+            "fiscal_periods": periods,
+        })
+    return years
+
+
+def _blackbaud_period_closed(post_date: str) -> bool:
+    day = date.fromisoformat(str(post_date)[:10])
+    for year in _blackbaud_fiscal_years():
+        if not year["start_date"][:10] <= day.isoformat() <= year["end_date"][:10]:
+            continue
+        if year["status"] in ("Closed", "Purged"):
+            return True
+        return any(
+            p["closed"] and p["start_date"][:10] <= day.isoformat() <= p["end_date"][:10]
+            for p in year["fiscal_periods"]
+        )
+    return False
 BLACKBAUD_PO_FIXTURES: list[dict] = [
     {"purchase_order_id": 501, "order_number": 1001, "vendor_id": 136,
      "vendor_name": "Fake Blackbaud Vendor A", "type": "Regular", "order_total": 1250.00,
@@ -2246,6 +2304,10 @@ BLACKBAUD_PO_FIXTURES: list[dict] = [
     {"purchase_order_id": 502, "order_number": 1002, "vendor_id": 137,
      "vendor_name": "Fake Blackbaud Vendor B", "type": "Regular", "order_total": 980.50,
      "order_status": "ClosedOrder"},
+    # `order_total` absent: a summary row with no figure to match against.
+    {"purchase_order_id": 503, "order_number": 1003, "vendor_id": 136,
+     "vendor_name": "Fake Blackbaud Vendor A", "type": "Regular",
+     "order_status": "OpenPurchaseOrder"},
 ]
 
 
@@ -2308,6 +2370,44 @@ async def blackbaud_vendors(request: Request) -> dict:
     return _blackbaud_page(request, BLACKBAUD_VENDOR_FIXTURES)
 
 
+@blackbaud.get("/accountspayable/v1/vendors/{vendor_id}")
+async def blackbaud_vendor(request: Request, vendor_id: int) -> dict:
+    """GetVendor (`VendorDetail`, which carries `vendor_status`)."""
+    _require_blackbaud_auth(request)
+    for vendor in BLACKBAUD_VENDOR_FIXTURES:
+        if vendor["vendor_id"] == vendor_id:
+            return copy.deepcopy(vendor)
+    raise ProviderError(404, {"Error": "The specified record could not be found."})
+
+
+@blackbaud.get("/generalledger/v1/fiscalyears")
+async def blackbaud_fiscal_years(request: Request) -> dict:
+    _require_blackbaud_auth(request)
+    years = _blackbaud_fiscal_years()
+    return {"count": len(years), "value": years}
+
+
+@blackbaud.post("/__seed-invoices")
+async def blackbaud_seed_invoices(body: dict) -> dict:
+    """Test hook: {"rows": [{"vendor_id", "invoice_number", "invoice_date",
+    "description"?, "status"?}, ...]} — invoices keyed by hand in FE NXT."""
+    state = _blackbaud_state()
+    for row in body.get("rows") or []:
+        state["next_invoice"] += 1
+        state["invoices"][state["next_invoice"]] = {
+            "invoice_id": state["next_invoice"],
+            "vendor_id": row["vendor_id"],
+            "invoice_number": row.get("invoice_number"),
+            "invoice_date": row.get("invoice_date"),
+            "description": row.get("description"),
+            "amount": str(row.get("amount", "1.00")),
+            "balance": str(row.get("amount", "1.00")),
+            "status": row.get("status") or "Approved",
+            "post_status": "Posted",
+        }
+    return {"status": "ok", "count": len(body.get("rows") or [])}
+
+
 @blackbaud.get("/accountspayable/v1/purchaseorders")
 async def blackbaud_purchase_orders(request: Request) -> dict:
     _require_blackbaud_auth(request)
@@ -2323,14 +2423,29 @@ async def blackbaud_accounts(request: Request) -> dict:
 @blackbaud.get("/accountspayable/v1/invoices")
 async def blackbaud_list_invoices(request: Request) -> dict:
     _require_blackbaud_auth(request)
+    # `search_text` "Can match vendor_name, invoice_number, description, or
+    # purchase_order_number"; `from_date` / `to_date` keep invoices dated
+    # after / before a date — read strictly (exclusive), the narrower reading.
     needle = (request.query_params.get("search_text") or "").lower()
-    rows = [
-        r
-        for r in _blackbaud_state()["invoices"].values()
-        if not needle
-        or needle in str(r.get("invoice_number", "")).lower()
-        or needle in str(r.get("description", "")).lower()
-    ]
+    after = request.query_params.get("from_date")
+    before = request.query_params.get("to_date")
+    vendor_names = {v["vendor_id"]: v["vendor_name"] for v in BLACKBAUD_VENDOR_FIXTURES}
+    rows = []
+    for r in _blackbaud_state()["invoices"].values():
+        haystack = (
+            r.get("invoice_number"),
+            r.get("description"),
+            r.get("purchase_order_number"),
+            vendor_names.get(r.get("vendor_id")),
+        )
+        if needle and not any(needle in str(h or "").lower() for h in haystack):
+            continue
+        day = str(r.get("invoice_date") or "")[:10]
+        if after and not day > after[:10]:
+            continue
+        if before and not day < before[:10]:
+            continue
+        rows.append(r)
     return _blackbaud_page(request, rows)
 
 
@@ -2346,8 +2461,15 @@ async def blackbaud_create_invoice(request: Request) -> dict:
                   "payment_details", "post_date"):
         if field not in body:
             raise _blackbaud_invalid(f"{field} is required.")
-    if body["vendor_id"] not in {v["vendor_id"] for v in BLACKBAUD_VENDOR_FIXTURES}:
+    vendor = next(
+        (v for v in BLACKBAUD_VENDOR_FIXTURES if v["vendor_id"] == body["vendor_id"]), None
+    )
+    if vendor is None:
         raise _blackbaud_invalid("The vendor could not be found.")
+    if vendor["vendor_status"] == "Inactive":
+        raise _blackbaud_invalid("The vendor is inactive.")
+    if _blackbaud_period_closed(body["post_date"]):
+        raise _blackbaud_invalid("The post date is in a closed fiscal period.")
     known = {a["account_number"] for a in BLACKBAUD_ACCOUNT_FIXTURES}
     debits = credits = Decimal(0)
     for dist in body["distributions"]:
@@ -2368,12 +2490,18 @@ async def blackbaud_create_invoice(request: Request) -> dict:
     if debits != credits or credits != Decimal(str(body["amount"])):
         raise _blackbaud_invalid("Distributions must balance to the invoice amount.")
     state = _blackbaud_state()
+    if any(d["account_number"] == BLACKBAUD_JOB_FAILING_ACCOUNT for d in body["distributions"]):
+        # Accepted, queued, and the job fails without creating an invoice.
+        state["next_job"] += 1
+        state["jobs"][state["next_job"]] = None
+        return {"process_id": state["next_job"]}
     state["next_invoice"] += 1
     invoice_id = state["next_invoice"]
     state["invoices"][invoice_id] = {
         "invoice_id": invoice_id,
         "vendor_id": body["vendor_id"],
         "invoice_number": body.get("invoice_number"),
+        "invoice_date": body.get("invoice_date"),
         "description": body.get("description"),
         "amount": str(body["amount"]),
         "balance": str(body["amount"]),
@@ -2388,8 +2516,11 @@ async def blackbaud_create_invoice(request: Request) -> dict:
 @blackbaud.get("/accountspayable/v1/backgroundProcess/{process_id}/status")
 async def blackbaud_job_status(request: Request, process_id: int) -> dict:
     _require_blackbaud_auth(request)
-    if process_id not in _blackbaud_state()["jobs"]:
+    jobs = _blackbaud_state()["jobs"]
+    if process_id not in jobs:
         raise ProviderError(404, {"Error": "The specified record could not be found."})
+    if jobs[process_id] is None:
+        return {"status": 7, "status_message": "Job failed", "process_id": process_id}
     return {"status": 5, "status_message": "Completed", "process_id": process_id}
 
 

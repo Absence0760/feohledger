@@ -49,6 +49,11 @@ import {
  *   3. Fail closed — an unlinked vendor is refused before anything is posted,
  *      and so is any send while the org has not stated the FE NXT ledger's
  *      currency (the API reports none) or the invoice is in another one.
+ *   3b. FE NXT's own state (#651) — an Inactive / OnHold vendor syncs as no
+ *      payee; a post date in a closed fiscal period is refused
+ *      `period_closed` before the create; a background job that fails is a
+ *      coded `job_failed`, not a retry loop; and an invoice number with more
+ *      than 500 search hits still posts (the lookup narrows to its date).
  *   4. Token lifecycle — a stored token inside the refresh margin is refreshed
  *      and the rotated refresh token persisted; a consent revoked at the
  *      provider turns the connection to `needs_reconnect`, and reconnecting
@@ -232,6 +237,102 @@ test.describe('/erp blackbaud_fe_nxt adapter against fake-erp', () => {
 		// Stated, and the invoice is in another one: never booked as if it matched.
 		await setLedgerConfig(page, 'USD');
 		expect(await send('EUR')).toBe('Blackbaud FE NXT post refused: currency_mismatch');
+	});
+
+	/** Send an approved invoice and return the `invoice.erp_failed` message. */
+	async function sendExpectingRefusal(
+		page: Page,
+		opts: { glAccount?: string; invoiceDate?: string }
+	): Promise<string> {
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-BB-REFUSE',
+			invoiceDate: opts.invoiceDate ?? '2026-10-01',
+			dueDate: '2026-10-31',
+			currency: 'USD',
+			vendor: SUPPLIER,
+			glAccount: opts.glAccount ?? '01-5000-00'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			return await erpFailureFromAudit(page, inv.id);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	}
+
+	test('Inactive and OnHold FE NXT vendors sync as no payee; Active ones do', async ({
+		page
+	}) => {
+		// Before the fix every vendor synced active: the Inactive one got a
+		// payee (its push then died as an uncoded `HTTP 400 (invalid_request)`)
+		// and the OnHold one could be paid from FeohLedger around FE NXT's hold.
+		await syncErpVendors(page);
+		const list = await page.request.get(
+			`${API_BASE}/api/vendors?search=Fake%20Blackbaud%20Vendor&page_size=50`,
+			{ headers: await authedTenantHeaders(page) }
+		);
+		expect(list.status()).toBe(200);
+		const { items } = (await list.json()) as {
+			items: { name: string; erp_vendor_id: string | null }[];
+		};
+		const synced = (name: string) =>
+			items.some((v) => v.name === name && v.erp_vendor_id !== null);
+		expect(synced(SUPPLIER)).toBe(true);
+		expect(synced('Fake Blackbaud Vendor Inactive')).toBe(false);
+		expect(synced('Fake Blackbaud Vendor On Hold')).toBe(false);
+	});
+
+	test('a post date in a closed fiscal period is refused before the create', async ({ page }) => {
+		// fake-erp's FY 2025 has Jan-Mar closed; FE NXT itself refuses with an
+		// uncoded 400, which is what this used to surface as.
+		await setLedgerConfig(page, 'USD');
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		expect(await sendExpectingRefusal(page, { invoiceDate: '2025-02-15' })).toBe(
+			'Blackbaud FE NXT post refused: period_closed'
+		);
+	});
+
+	test('a background job that fails is a coded refusal, not a retry loop', async ({ page }) => {
+		// fake-erp ends the job at status 7 for this account.
+		await setLedgerConfig(page, 'USD');
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		expect(await sendExpectingRefusal(page, { glAccount: '01-5900-00' })).toBe(
+			'Blackbaud FE NXT post refused: job_failed'
+		);
+	});
+
+	test('a busy invoice number (over 500 search hits) still posts', async ({ page, request }) => {
+		// `search_text` also matches description, vendor name and PO number, so
+		// a common number can match more than a page. The lookup used to give
+		// up past 500 rows as "truncated", retryably, on every push.
+		await setLedgerConfig(page, 'USD');
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const number = `E2E-BB-BUSY-${Date.now()}`;
+		const rows = Array.from({ length: 600 }, (_, i) => ({
+			vendor_id: 137,
+			invoice_number: `OTHER-${i}`,
+			description: `re ${number}`,
+			invoice_date: '2026-03-01'
+		}));
+		const seeded = await request.post(`${BB}/__seed-invoices`, { data: { rows } });
+		expect(seeded.ok(), await seeded.text()).toBe(true);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-BB-BUSY',
+			invoiceNumber: number,
+			invoiceDate: '2026-10-01',
+			dueDate: '2026-10-31',
+			currency: 'USD',
+			vendor: SUPPLIER,
+			glAccount: '01-5000-00'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
 	});
 
 	test('an expiring token is refreshed; a revoked consent asks for reconnect', async ({
