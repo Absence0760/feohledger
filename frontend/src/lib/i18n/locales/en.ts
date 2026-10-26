@@ -227,6 +227,7 @@ export const en = {
 	'profile.notifications.event.cashShortfallProjected': 'Projected cash shortfall',
 	'profile.notifications.event.aiInvoiceUsage': 'AI-read invoice usage',
 	'profile.notifications.event.erpConnectionExpiring': "ERP connection needs reconnecting",
+	'profile.notifications.event.erpCallQuota': "ERP API allowance used",
 	'profile.notifications.inAppFor': 'In-app notifications for {event}',
 	'profile.notifications.emailFor': 'Email notifications for {event}',
 
@@ -5191,6 +5192,9 @@ export const en = {
 	'erpRefusal.amountNotPositive': "{provider} takes only invoices for more than zero. Correct the amount, or record a credit memo instead.",
 	'erpRefusal.jobUnconfirmed': "{provider} accepted the invoice but hasn't confirmed it was created. Retry to check again — it won't be sent twice.",
 	'erpRefusal.jobFailed': "{provider} accepted the invoice, but its background job failed and created nothing. Check the vendor, accounts, transaction codes and posting period in {provider}, then retry.",
+	'erpRefusal.callBudgetTenant': "This workspace has used its share of today's {provider} API calls, so FeohLedger made no call. The allowance resets at midnight UTC — retry then.",
+	'erpRefusal.callBudgetQuota': "{provider} has paused API calls for the subscription FeohLedger uses (its daily quota is used), so FeohLedger made no call. It resets at midnight UTC — retry then.",
+	'erpRefusal.callBudgetRateLimited': "{provider} asked FeohLedger to slow down, so no call was made. Retry in a minute.",
 	'erpRefusal.credentialsUnavailable': "The ERP credentials couldn't be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.",
 	'erpRefusal.periodClosed': "{provider} refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in {provider}, then retry.",
 	'erpRefusal.vendorInactive': "{provider} refused this bill because its vendor is inactive or deleted there. Make the vendor active in {provider}, then retry.",

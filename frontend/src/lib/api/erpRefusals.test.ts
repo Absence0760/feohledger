@@ -55,7 +55,8 @@ describe('the registry pins the backend', () => {
 					accounts: ['6100'],
 					intuit_code: '6000',
 					exception_type: 'duplicate',
-					claim: 'payment'
+					claim: 'payment',
+					reason: 'tenant_budget'
 				};
 				const text = erpRefusalText({ code, params }, t);
 				expect(text, `${locale} ${code}`).toBeTruthy();
@@ -66,6 +67,25 @@ describe('the registry pins the backend', () => {
 });
 
 describe('erpRefusalText', () => {
+	it('says whose API allowance stopped the call, per reason (§322)', () => {
+		const say = (reason: unknown) =>
+			erpRefusalText(
+				{
+					code: 'erp_call_budget_exhausted',
+					params: { provider: 'Blackbaud FE NXT', reason, retry_after: '2026-10-27T00:00:00+00:00' }
+				},
+				enT
+			);
+		expect(say('tenant_budget')).toBe(
+			"This workspace has used its share of today's Blackbaud FE NXT API calls, so FeohLedger made no call. The allowance resets at midnight UTC — retry then."
+		);
+		expect(say('subscription_quota')).toContain('its daily quota is used');
+		expect(say('rate_limited')).toContain('Retry in a minute');
+		// A reason this build does not know: the server's sentence instead.
+		expect(say('from_a_newer_backend')).toBeNull();
+		expect(say(undefined)).toBeNull();
+	});
+
 	it('tells the user what to do about an unlinked vendor', () => {
 		expect(
 			erpRefusalText(

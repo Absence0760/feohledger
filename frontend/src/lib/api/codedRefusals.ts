@@ -53,6 +53,7 @@ import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRef
 import { authRefusalText } from '#lib/api/authRefusals.ts';
 import { ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
 import {
+	ERP_CALL_BUDGET_EXHAUSTED,
 	EXCEPTION_BLOCKS_ERP_EXPORT,
 	PAYMENT_BLOCKS_ERP_EXPORT,
 	erpRefusalText
@@ -393,6 +394,10 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/refusals.py::refuse_due_before_invoice_date` — create / edit.
 	invoice_due_before_date: fixed('refusal.invoiceDueBeforeDate'),
 	erp_not_connected: fixed('erpRefusal.notConnected'),
+	// ...or whose call the ERP's shared API quota refused before it was made
+	// (a 429, decisions §322): the push refusal's own sentence.
+	[ERP_CALL_BUDGET_EXHAUSTED]: (p, t) =>
+		erpRefusalText({ code: ERP_CALL_BUDGET_EXHAUSTED, params: p }, t),
 	erp_listing_incomplete: (p, t) => {
 		const provider = str(p, 'provider');
 		if (provider === null) return null;

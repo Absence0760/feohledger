@@ -201,6 +201,7 @@ export const messages = {
 	'profile.notifications.event.cashShortfallProjected': '資金不足の予測',
 	'profile.notifications.event.aiInvoiceUsage': 'AI読み取り請求書の利用状況',
 	'profile.notifications.event.erpConnectionExpiring': "ERP 接続の再接続が必要",
+	'profile.notifications.event.erpCallQuota': "ERP API の利用枠を使い切りました",
 	'profile.notifications.inAppFor': '「{event}」のアプリ内通知',
 	'profile.notifications.emailFor': '「{event}」のメール通知',
 
@@ -4920,6 +4921,9 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "{provider} は金額が 0 より大きい請求書のみ受け付けます。金額を修正するか、代わりにクレジットメモを登録してください。",
 	'erpRefusal.jobUnconfirmed': "{provider} は請求書を受け付けましたが、作成されたことをまだ確認できていません。再試行して確認してください（二重に送信されることはありません）。",
 	'erpRefusal.jobFailed': "{provider} は請求書を受け付けましたが、バックグラウンドジョブが失敗し、何も作成されませんでした。{provider} で仕入先、勘定科目、取引コード、転記期間を確認してから再試行してください。",
+	'erpRefusal.callBudgetTenant': "このワークスペースは本日の {provider} API 呼び出しの割り当てを使い切ったため、FeohLedger は呼び出しを行いませんでした。割り当ては UTC の午前 0 時にリセットされます。その後に再試行してください。",
+	'erpRefusal.callBudgetQuota': "{provider} は FeohLedger が使用するサブスクリプションの API 呼び出しを一時停止しました（1 日のクォータを使い切りました）。そのため FeohLedger は呼び出しを行いませんでした。UTC の午前 0 時にリセットされます。その後に再試行してください。",
+	'erpRefusal.callBudgetRateLimited': "{provider} から呼び出しを減らすよう求められたため、呼び出しは行われませんでした。1 分後に再試行してください。",
 	'erpRefusal.credentialsUnavailable': "現在 ERP の認証情報を開けませんでした。数分後に再試行してください。失敗が続く場合は管理者に連絡してください。",
 	'erpRefusal.periodClosed': "請求の日付が締め済みの期間（帳簿の締め）に含まれるため、{provider} がこの請求を拒否しました。請求書の日付を変更するか、{provider} で期間を再オープンしてから再試行してください。",
 	'erpRefusal.vendorInactive': "仕入先が無効または削除済みのため、{provider} がこの請求を拒否しました。{provider} で仕入先を有効にしてから再試行してください。",

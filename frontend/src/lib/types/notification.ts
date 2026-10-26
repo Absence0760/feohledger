@@ -24,7 +24,8 @@ export type NotificationEventType =
 	| 'chat_message'
 	| 'cash_shortfall_projected'
 	| 'ai_invoice_usage'
-	| 'erp_connection_expiring';
+	| 'erp_connection_expiring'
+	| 'erp_call_quota';
 
 export interface Notification {
 	id: string;
@@ -104,7 +105,8 @@ export const EVENT_LABELS: Record<NotificationEventType, string> = {
 	chat_message: 'New supplier chat message',
 	cash_shortfall_projected: 'Projected cash shortfall',
 	ai_invoice_usage: 'AI-read invoice usage',
-	erp_connection_expiring: 'ERP connection needs reconnecting'
+	erp_connection_expiring: 'ERP connection needs reconnecting',
+	erp_call_quota: 'ERP API allowance used'
 };
 
 /**
@@ -122,7 +124,8 @@ export const EVENT_LABEL_KEYS: Record<NotificationEventType, MessageKey> = {
 	chat_message: 'profile.notifications.event.chatMessage',
 	cash_shortfall_projected: 'profile.notifications.event.cashShortfallProjected',
 	ai_invoice_usage: 'profile.notifications.event.aiInvoiceUsage',
-	erp_connection_expiring: 'profile.notifications.event.erpConnectionExpiring'
+	erp_connection_expiring: 'profile.notifications.event.erpConnectionExpiring',
+	erp_call_quota: 'profile.notifications.event.erpCallQuota'
 };
 
 /**
@@ -140,5 +143,6 @@ export const EVENT_ORDER: NotificationEventType[] = [
 	'chat_message',
 	'cash_shortfall_projected',
 	'ai_invoice_usage',
-	'erp_connection_expiring'
+	'erp_connection_expiring',
+	'erp_call_quota'
 ];

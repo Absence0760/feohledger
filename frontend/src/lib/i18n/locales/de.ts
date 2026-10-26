@@ -198,6 +198,7 @@ export const messages = {
 	'profile.notifications.event.cashShortfallProjected': 'Prognostizierte Liquiditätslücke',
 	'profile.notifications.event.aiInvoiceUsage': 'Nutzung KI-gelesener Rechnungen',
 	'profile.notifications.event.erpConnectionExpiring': "ERP-Verbindung muss erneuert werden",
+	'profile.notifications.event.erpCallQuota': "ERP-API-Kontingent verbraucht",
 	'profile.notifications.inAppFor': 'In-App-Benachrichtigungen für „{event}“',
 	'profile.notifications.emailFor': 'E-Mail-Benachrichtigungen für „{event}“',
 
@@ -5008,6 +5009,9 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "{provider} nimmt nur Rechnungen über einen Betrag größer als null an. Korrigieren Sie den Betrag oder erfassen Sie stattdessen eine Gutschrift.",
 	'erpRefusal.jobUnconfirmed': "{provider} hat die Rechnung angenommen, aber noch nicht bestätigt, dass sie angelegt wurde. Versuchen Sie es erneut, um nachzusehen – sie wird nicht doppelt gesendet.",
 	'erpRefusal.jobFailed': "{provider} hat die Rechnung angenommen, aber der Hintergrundauftrag ist fehlgeschlagen und hat nichts angelegt. Prüfen Sie Lieferant, Konten, Transaktionscodes und Buchungszeitraum in {provider}, und versuchen Sie es dann erneut.",
+	'erpRefusal.callBudgetTenant': "Dieser Arbeitsbereich hat seinen Anteil an den heutigen {provider}-API-Aufrufen verbraucht, daher hat FeohLedger keinen Aufruf gesendet. Das Kontingent wird um Mitternacht UTC zurückgesetzt – versuchen Sie es dann erneut.",
+	'erpRefusal.callBudgetQuota': "{provider} hat die API-Aufrufe für das von FeohLedger genutzte Abonnement pausiert (das Tageskontingent ist verbraucht), daher hat FeohLedger keinen Aufruf gesendet. Es wird um Mitternacht UTC zurückgesetzt – versuchen Sie es dann erneut.",
+	'erpRefusal.callBudgetRateLimited': "{provider} hat FeohLedger gebeten, langsamer zu werden, daher wurde kein Aufruf gesendet. Versuchen Sie es in einer Minute erneut.",
 	'erpRefusal.credentialsUnavailable': "Die ERP-Zugangsdaten konnten gerade nicht geöffnet werden. Versuchen Sie es in einigen Minuten erneut; wenn es weiterhin fehlschlägt, wenden Sie sich an einen Administrator.",
 	'erpRefusal.periodClosed': "{provider} hat diese Rechnung abgelehnt, weil ihr Datum in einem abgeschlossenen Zeitraum liegt (die Bücher sind geschlossen). Ändern Sie das Rechnungsdatum oder öffnen Sie den Zeitraum in {provider} wieder, und versuchen Sie es dann erneut.",
 	'erpRefusal.vendorInactive': "{provider} hat diese Rechnung abgelehnt, weil der Lieferant dort inaktiv oder gelöscht ist. Aktivieren Sie den Lieferanten in {provider}, und versuchen Sie es dann erneut.",

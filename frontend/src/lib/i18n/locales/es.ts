@@ -199,6 +199,7 @@ export const messages = {
 	'profile.notifications.event.cashShortfallProjected': 'Déficit de tesorería previsto',
 	'profile.notifications.event.aiInvoiceUsage': 'Uso de facturas leídas por IA',
 	'profile.notifications.event.erpConnectionExpiring': "La conexión con el ERP debe renovarse",
+	'profile.notifications.event.erpCallQuota': "Cupo de API del ERP agotado",
 	'profile.notifications.inAppFor': 'Notificaciones en la aplicación para «{event}»',
 	'profile.notifications.emailFor': 'Notificaciones por correo electrónico para «{event}»',
 
@@ -5001,6 +5002,9 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "{provider} solo admite facturas por un importe superior a cero. Corrija el importe o registre una nota de crédito.",
 	'erpRefusal.jobUnconfirmed': "{provider} aceptó la factura, pero no ha confirmado que se haya creado. Vuelva a intentarlo para comprobarlo; no se enviará dos veces.",
 	'erpRefusal.jobFailed': "{provider} aceptó la factura, pero su tarea en segundo plano falló y no creó nada. Revise el proveedor, las cuentas, los códigos de transacción y el período contable en {provider} y vuelva a intentarlo.",
+	'erpRefusal.callBudgetTenant': "Este espacio de trabajo ha usado su parte de las llamadas a la API de {provider} de hoy, así que FeohLedger no hizo ninguna llamada. El cupo se restablece a medianoche UTC; vuelva a intentarlo entonces.",
+	'erpRefusal.callBudgetQuota': "{provider} ha pausado las llamadas a la API de la suscripción que usa FeohLedger (su cuota diaria está agotada), así que FeohLedger no hizo ninguna llamada. Se restablece a medianoche UTC; vuelva a intentarlo entonces.",
+	'erpRefusal.callBudgetRateLimited': "{provider} pidió a FeohLedger que redujera el ritmo, así que no se hizo ninguna llamada. Vuelva a intentarlo en un minuto.",
 	'erpRefusal.credentialsUnavailable': "No se pudieron abrir las credenciales del ERP en este momento. Vuelva a intentarlo en unos minutos; si sigue fallando, avise a un administrador.",
 	'erpRefusal.periodClosed': "{provider} rechazó esta factura porque su fecha está en un período cerrado (los libros están cerrados). Cambie la fecha de la factura o vuelva a abrir el período en {provider} y vuelva a intentarlo.",
 	'erpRefusal.vendorInactive': "{provider} rechazó esta factura porque su proveedor está inactivo o eliminado allí. Active el proveedor en {provider} y vuelva a intentarlo.",

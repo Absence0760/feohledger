@@ -201,6 +201,7 @@ export const messages = {
 	'profile.notifications.event.cashShortfallProjected': 'Déficit de caixa previsto',
 	'profile.notifications.event.aiInvoiceUsage': 'Uso de notas lidas por IA',
 	'profile.notifications.event.erpConnectionExpiring': "A conexão com o ERP precisa ser refeita",
+	'profile.notifications.event.erpCallQuota': "Cota de API do ERP esgotada",
 	'profile.notifications.inAppFor': 'Notificações no aplicativo para “{event}”',
 	'profile.notifications.emailFor': 'Notificações por e-mail para “{event}”',
 
@@ -5002,6 +5003,9 @@ export const messages = {
 	'erpRefusal.amountNotPositive': "O {provider} aceita apenas faturas com valor acima de zero. Corrija o valor ou registre uma nota de crédito.",
 	'erpRefusal.jobUnconfirmed': "O {provider} aceitou a fatura, mas não confirmou que ela foi criada. Tente novamente para verificar; ela não será enviada duas vezes.",
 	'erpRefusal.jobFailed': "O {provider} aceitou a fatura, mas a tarefa em segundo plano falhou e não criou nada. Verifique o fornecedor, as contas, os códigos de transação e o período contábil no {provider} e tente novamente.",
+	'erpRefusal.callBudgetTenant': "Este espaço de trabalho usou sua parte das chamadas à API do {provider} de hoje, então o FeohLedger não fez nenhuma chamada. A cota é redefinida à meia-noite UTC; tente novamente depois disso.",
+	'erpRefusal.callBudgetQuota': "O {provider} pausou as chamadas à API da assinatura que o FeohLedger usa (a cota diária foi esgotada), então o FeohLedger não fez nenhuma chamada. Ela é redefinida à meia-noite UTC; tente novamente depois disso.",
+	'erpRefusal.callBudgetRateLimited': "O {provider} pediu ao FeohLedger que reduzisse o ritmo, então nenhuma chamada foi feita. Tente novamente em um minuto.",
 	'erpRefusal.credentialsUnavailable': "Não foi possível abrir as credenciais do ERP agora. Tente novamente em alguns minutos; se continuar falhando, avise um administrador.",
 	'erpRefusal.periodClosed': "O {provider} recusou esta conta porque a data dela está em um período fechado (os livros estão fechados). Altere a data da fatura ou reabra o período no {provider} e tente novamente.",
 	'erpRefusal.vendorInactive': "O {provider} recusou esta conta porque o fornecedor está inativo ou excluído lá. Ative o fornecedor no {provider} e tente novamente.",
