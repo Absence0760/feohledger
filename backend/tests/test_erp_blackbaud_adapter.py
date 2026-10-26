@@ -1060,10 +1060,13 @@ def test_list_pos_maps_status_and_never_labels_currency():
         {"order_number": 15, "order_total": 10, "type": "Template"},
     ]
     pos = _run(fake, lambda: BlackbaudFeNxtAdapter(CONFIG).list_pos())
+    # A deleted order comes through cancelled, so a row an earlier sync stored
+    # stops counting as an open commitment.
     assert [(p.po_number, p.status) for p in pos] == [
         ("11", "open"),
         ("12", "closed"),
         ("13", "cancelled"),
+        ("14", "cancelled"),
     ]
     assert pos[0].total == Decimal("1250.5") and all(p.currency is None for p in pos)
 

@@ -464,10 +464,13 @@ def map_invoice_status(record: dict) -> ErpInvoiceStatus:
     return _STATUS_MAP.get(str(record.get("status") or "").lower(), ErpInvoiceStatus.unknown)
 
 
-#: ``PurchaseOrderStatus`` → our PO status. ``DeletedOrder`` is skipped.
+#: ``PurchaseOrderStatus`` → our PO status. A ``DeletedOrder`` with a total is
+#: ``cancelled``, so a row an earlier sync stored stops counting as an open
+#: commitment; one without a total is dropped (``list_pos_report``).
 _PO_STATUS_MAP: dict[str, str] = {
     "CanceledOrder": "cancelled",
     "UnprintedCancellationNotice": "cancelled",
+    "DeletedOrder": "cancelled",
     "ClosedOrder": "closed",
 }
 
@@ -1021,8 +1024,10 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
     async def list_pos_report(self) -> PoListing:
         """FE NXT purchase orders, and the ones left out for want of a total.
 
-        Templates and deleted orders are dropped silently: neither is a PO the
-        match may use, and neither ever had a total we should keep trusting.
+        Templates are dropped silently. A deleted order comes through as
+        ``cancelled`` when it carries a total, so a row an earlier sync stored
+        stops counting as an open commitment (accruals, budgets); without one
+        it is dropped, never marked.
         A PO with no usable ``order_total`` is skipped, not synced at 0 (a
         zero-value order would match nothing honestly), and named in
         ``skipped`` as ``unpriceable``, so a total an earlier sync stored for it
@@ -1044,11 +1049,14 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
         for raw in rows:
             number = raw.get("order_number")
             status = str(raw.get("order_status") or "")
-            if number is None or status == "DeletedOrder" or raw.get("type") == "Template":
+            if number is None or raw.get("type") == "Template":
                 continue
             total = _decimal_or_none(raw.get("order_total"))
             if total is None:
-                skipped.append(SkippedPo(str(number), PoSkipReason.unpriceable))
+                # A deleted order is not one the ERP stopped pricing: marking it
+                # would hold invoices over a PO that no longer exists (§324).
+                if status != "DeletedOrder":
+                    skipped.append(SkippedPo(str(number), PoSkipReason.unpriceable))
                 continue
             vendor_id = raw.get("vendor_id")
             if isinstance(vendor_id, bool):
