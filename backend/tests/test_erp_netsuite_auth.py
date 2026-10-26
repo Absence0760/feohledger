@@ -115,6 +115,13 @@ class _FakeNetSuite:
         self.api_calls: list[httpx.Request] = []
         #: Answer the next N API calls 401 whatever the token (an early expiry).
         self.reject_next = 0
+        #: Answer the next N vendorBill POSTs 401 (creating nothing), whatever
+        #: the token: a token revoked between the lookup and the create.
+        self.reject_next_create = 0
+        #: Status of a vendorBill POST that creates the bill.
+        self.create_status = 204
+        #: vendorBill POSTs NetSuite answered by creating a bill.
+        self.creates = 0
         self.bill_total = Decimal("100.00")
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -138,16 +145,22 @@ class _FakeNetSuite:
             )
         self.api_calls.append(request)
         auth = request.headers.get("authorization", "")
+        path = request.url.path.removeprefix("/netsuite/services/rest/record/v1")
+        if request.method == "POST" and path == "/vendorBill" and self.reject_next_create > 0:
+            self.reject_next_create -= 1
+            return httpx.Response(401, json={"title": "Unauthorized"})
         if self.reject_next > 0 or auth.removeprefix("Bearer ") not in self.tokens:
             self.reject_next = max(self.reject_next - 1, 0)
             return httpx.Response(401, json={"title": "Unauthorized"})
-        path = request.url.path.removeprefix("/netsuite/services/rest/record/v1")
         if request.method == "GET" and path == "/vendor":
             return httpx.Response(200, json={"items": [], "hasMore": False})
         if request.method == "GET" and path == "/vendorBill":
             return httpx.Response(200, json={"items": []})
         if request.method == "POST" and path == "/vendorBill":
-            return httpx.Response(204, headers={"Location": f"{API_BASE}/vendorBill/1001"})
+            self.creates += 1
+            return httpx.Response(
+                self.create_status, headers={"Location": f"{API_BASE}/vendorBill/1001"}
+            )
         if request.method == "GET" and path == "/vendorBill/1001":
             return httpx.Response(200, content=f'{{"total": {self.bill_total}}}'.encode())
         raise AssertionError(f"unexpected {request.method} {request.url}")
@@ -296,6 +309,30 @@ def test_a_401_mints_a_new_token_and_retries_once(rsa_key, fake_netsuite):
     before = len(fake_netsuite.api_calls)
     assert _run(adapter.test_connection()) is False
     assert len(fake_netsuite.api_calls) - before == 2
+
+
+def test_a_401_on_the_bill_create_retries_once_and_creates_exactly_one_bill(rsa_key, fake_netsuite):
+    """The money-path case of the 401 retry: the vendorBill POST itself is
+    refused 401 (a token revoked between the lookup and the create), the retry
+    with a fresh token is answered 201. A 401 means NetSuite created nothing,
+    so exactly one bill exists afterwards — never two."""
+    fake_netsuite.reject_next_create = 1
+    fake_netsuite.create_status = 201
+
+    result = _run(NetSuiteAdapter(_config(_pem(rsa_key))).post_invoice(_payload()))
+
+    assert result.success, result.message
+    assert result.erp_document_id == "1001"
+    posts = [
+        c
+        for c in fake_netsuite.api_calls
+        if c.method == "POST" and c.url.path.endswith("/vendorBill")
+    ]
+    assert len(posts) == 2  # the refused attempt and the retry
+    assert fake_netsuite.creates == 1
+    # The retry carried a freshly minted token, not the one refused.
+    assert posts[0].headers["authorization"] == "Bearer bearer-1"
+    assert posts[1].headers["authorization"] == "Bearer bearer-2"
 
 
 def test_key_loading_and_signing_never_run_on_the_event_loop(rsa_key, fake_netsuite, monkeypatch):
