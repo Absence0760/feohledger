@@ -137,7 +137,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_EMAIL_INTAKE_SIGNING_SECRET` | (empty)                                                      | HMAC-SHA256 signing secret for the email-intake webhook body. Boot refuses if `FEOH_EMAIL_INTAKE_DOMAIN` is set and this is empty (unless `FEOH_DEBUG=true`). |
 | `FEOH_ERP_MODE`         | `local`                                                                  | `local` or `lambda` for ERP push dispatch |
 | `FEOH_ERP_MERGE_API_BASE` | `https://api.merge.dev/api/accounting/v1`                              | Merge.dev API base. Operator-controlled (process-level, TRUSTED — bypasses the admin-config SSRF guard). `backend/.env.development` points it at the local fake-erp (`http://localhost:12112/merge/api/accounting/v1`). |
-| `FEOH_ERP_NETSUITE_API_BASE` | (empty)                                                              | NetSuite SuiteTalk REST base override. Empty → the per-account URL derived from `account_id`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/netsuite/services/rest/record/v1`. |
+| `FEOH_ERP_NETSUITE_API_BASE` | (empty)                                                              | NetSuite SuiteTalk REST base override. Empty → the per-account URL derived from `account_id`; set → used verbatim (operator-trusted), and SuiteQL and the OAuth 2.0 token endpoint (`…/services/rest/auth/oauth2/v1/token`) follow it, so an `oauth2_m2m` connection signs in to the same fake. Dev value: `http://localhost:12112/netsuite/services/rest/record/v1`. |
 | `FEOH_ERP_D365_API_BASE` | (empty)                                                                  | Dynamics 365 BC OData base override. Empty → the admin-config `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/d365`. |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty)                                                                 | D365 OAuth token endpoint override. Empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value: `http://localhost:12112/d365/oauth2/token`. |
 | `FEOH_ERP_INTACCT_API_BASE` | (empty) | Sage Intacct REST base override (token at `<base>/oauth2/token`). Empty → the real `https://api.intacct.com/ia/api/v1`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/intacct/ia/api/v1`. |
@@ -168,6 +168,8 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_ERP_CONNECTION_HEALTH_INTERVAL_SECONDS` | `86400` | How often the connection-health sweep runs. |
 | `FEOH_ERP_CONNECTION_KEEPALIVE_DAYS` | `45` | A refresh token with fewer days left than this is refreshed by the sweep (Intuit rolls the lifetime forward on a refresh, up to its hard cap). |
 | `FEOH_ERP_CONNECTION_EXPIRY_NOTICE_DAYS` | `[30, 7, 1]` | Lead times (days before the reported refresh-token expiry) at which admins are told; each is sent once per expiry. JSON list in the environment. The settings panel offers Reconnect from the first. |
+| `FEOH_SUBPROCESSOR_NOTICES_ENABLED` | `false` | The sub-processor change-notice sweep (`subprocessor-notices`, decisions §321, issue #427): emails every `notice=True` entry of `services/subprocessor_changelog.py` to each organisation's active admins, once per organisation, ledgered in `subprocessor_notices`. Off by default like every sweep that emails; **must be on in production** — the published DPA § 8 says the notice is emailed, and `deploy/decrypt-env.sh` warns while it is off. |
+| `FEOH_SUBPROCESSOR_NOTICES_INTERVAL_SECONDS` | `3600` | How often the notice sweep looks for an owed notice. |
 | `FEOH_AUDIT_MODE`       | `local`                                                                  | `local` or `lambda` for audit log writes |
 | `FEOH_SQS_EXTRACTION_QUEUE_URL` | (empty)                                                          | Required when `FEOH_EXTRACTION_MODE=lambda` |
 | `FEOH_SQS_ERP_QUEUE_URL` | (empty)                                                                 | Required when `FEOH_ERP_MODE=lambda` |
@@ -277,7 +279,7 @@ always `backend/app/config.py`.
 | `FEOH_COMMERCE_SYNC_ENABLED` | `false` | The commerce push retry sweep (`services/commerce_sync`, sweep `commerce-sync`). Off by default: a receipt's push runs post-commit on its own, and an admin can retry by hand. Flip on in deployed envs once a tenant connects a platform. Adjusts shelf stock only — never moves money |
 | `FEOH_COMMERCE_SYNC_INTERVAL_SECONDS` | `300` | Its tick |
 | `FEOH_COMMERCE_SYNC_MAX_ATTEMPTS` | `8` | Attempts before the sweep stops retrying a retryable failure (backoff 1, 2, 4 … min, capped at 6 h); a manual retry still works |
-| `FEOH_ERP_NETSUITE_API_BASE` | (empty) | NetSuite REST base override — empty derives the per-account URL from `account_id`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
+| `FEOH_ERP_NETSUITE_API_BASE` | (empty) | NetSuite REST base override — empty derives the per-account URL from `account_id`; set → used verbatim (operator-trusted), SuiteQL and the OAuth 2.0 token endpoint following it. Dev value targets fake-erp |
 | `FEOH_ERP_D365_API_BASE` | (empty) | Dynamics 365 BC OData base override — empty → admin-config `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty) | D365 OAuth token URL override — empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value targets fake-erp |
 | `FEOH_ERP_INTACCT_API_BASE` | (empty) | Sage Intacct REST base override — empty → `https://api.intacct.com/ia/api/v1`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
@@ -306,6 +308,8 @@ always `backend/app/config.py`.
 | `FEOH_ERP_CONNECTION_HEALTH_INTERVAL_SECONDS` | `86400` | How often the connection-health sweep runs. |
 | `FEOH_ERP_CONNECTION_KEEPALIVE_DAYS` | `45` | A refresh token with fewer days left than this is refreshed by the sweep (Intuit rolls the lifetime forward on a refresh, up to its hard cap). |
 | `FEOH_ERP_CONNECTION_EXPIRY_NOTICE_DAYS` | `[30, 7, 1]` | Lead times (days before the reported refresh-token expiry) at which admins are told; each is sent once per expiry. JSON list in the environment. The settings panel offers Reconnect from the first. |
+| `FEOH_SUBPROCESSOR_NOTICES_ENABLED` | `false` | The sub-processor change-notice sweep (`subprocessor-notices`, decisions §321, issue #427): emails every `notice=True` entry of `services/subprocessor_changelog.py` to each organisation's active admins, once per organisation, ledgered in `subprocessor_notices`. Off by default like every sweep that emails; **must be on in production** — the published DPA § 8 says the notice is emailed, and `deploy/decrypt-env.sh` warns while it is off. |
+| `FEOH_SUBPROCESSOR_NOTICES_INTERVAL_SECONDS` | `3600` | How often the notice sweep looks for an owed notice. |
 | `FEOH_ANTHROPIC_API_KEY` | (empty) | Claude Vision for platform extraction |
 | `FEOH_EXTRACTION_MODEL` | `claude-sonnet-5-5` | AI model for extraction |
 | `FEOH_EXTRACTION_EFFORT` | `low` | `output_config.effort` for platform Claude extraction; empty omits it |

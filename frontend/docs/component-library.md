@@ -359,6 +359,10 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   stored comes from `GET /api/organization/credentials` (names only), and a save PATCHes the
   configuration then PUTs only typed or removed secrets to `/api/organization/credentials/erp`.
   Renders the admin-only hint / `PlanUpgradeNotice` itself; one always-mounted `role="status"` region
-  (`erp-status`) carries test, validation and OAuth results. Pure helpers (grouping, the configuration
-  and secret payloads, destination changes, OAuth return params) live in
+  (`erp-status`) carries test, validation and OAuth results. A catalogue field with `show_when`
+  (`{field, values}`) is shown and required only while that sibling choice holds one of the values
+  (`fieldApplies` — NetSuite's sign-in method picks OAuth 2.0 or TBA credentials), and
+  `stored_default` is what a SAVED block without the key means, shown instead of the first option so
+  opening an older connection never switches it on save. Pure helpers (grouping, the configuration
+  and secret payloads, destination changes, OAuth return params, `fieldApplies`) live in
   `#lib/types/erpConnection.ts` with a vitest.

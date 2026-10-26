@@ -55,6 +55,7 @@
 		buildErpTestPayload,
 		erpTestResultText,
 		byoAppRequired,
+		fieldApplies,
 		groupProviders,
 		initialValues,
 		missingRequired,
@@ -135,9 +136,15 @@
 		catalog?.providers.find((p) => p.key === selectedKey) ?? null
 	);
 	const isOAuth = $derived(provider?.auth === 'oauth');
-	/** The ERP's own fields, and (OAuth only) the bring-your-own-app pair. */
+	/** The ERP's own fields that apply to the current choice (NetSuite's
+	 *  sign-in method picks its credentials), and (OAuth only) the
+	 *  bring-your-own-app pair. */
 	const mainFields = $derived(
-		provider ? provider.fields.filter((f) => !isOAuth || !BYO_APP_FIELDS.includes(f.name)) : []
+		provider
+			? provider.fields.filter(
+					(f) => (!isOAuth || !BYO_APP_FIELDS.includes(f.name)) && fieldApplies(f, values)
+				)
+			: []
 	);
 	const byoFields = $derived(
 		provider && isOAuth ? provider.fields.filter((f) => BYO_APP_FIELDS.includes(f.name)) : []

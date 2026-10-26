@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**148 open: 127 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
+**149 open: 126 (c) · 11 (a) · 12 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -363,31 +363,25 @@ nobody re-reads outlives the thing it describes.
 
 ### The published legal set has loose ends
 
-- [ ] **No mechanism backs the 30-day sub-processor notice.** ([#427](https://github.com/Absence0760/feohledger/issues/427)) `/legal/sub-processors`
-      and the DPA both commit to 30 days' advance notice of a new sub-processor
-      and a right to object. The mechanism today is "this page is updated and a
-      dated change-log row is added" — there is no notification list, no
-      subscribe endpoint, and no email template that reaches a customer's DPO.
-      The commitment is contractual, so the gap is a promise we cannot currently
-      keep on the notification half.
-      **Durable fix:** a per-org notification (the admin contact already exists,
-      and `email_adapters` can send) fired from a changelog entry, so adding a
-      register row and notifying are one action rather than two. `~/github/threkir`'s
-      `docs/compliance/sub-processor-changelog.md` is the shape to copy for the
-      dated-entry half.
-      **The other half of #427 has landed:** `pnpm check:subprocessors`
-      (`scripts/check_subprocessor_registry.mjs`, CI's Frontend job — the
-      Compliance-drift workflow's summary points at it rather than running it
-      twice) now fails when a registered adapter is missing from
-      `docs/sub-processors.md` or a third-party processor it names never
-      reaches the published page. It reads both registration shapes — the
-      `@register_*_adapter` decorator and a module-level registry dict — and
-      reports any provider family whose registrations it cannot read at all, so
-      a family cannot again be silently invisible the way
-      `email_intake_adapters/` was. So the registers can no longer drift from
-      the code silently — what is still missing is telling customers when they
-      change.
-      **Trigger:** before adding or changing any sub-processor.
+- [ ] **The sub-processor notice has no privacy / DPO contact to reach.**
+      ([#427](https://github.com/Absence0760/feohledger/issues/427)) The notice
+      itself is built (decisions §321): a `notice=True` entry in
+      `backend/app/services/subprocessor_changelog.py` is published on
+      `/legal/sub-processors` § 10 and emailed to every active administrator of
+      every organisation, once, with a ledger row and an audit row. What it
+      cannot reach is a customer's DPO or privacy contact who is not an
+      administrator — the platform holds no such field, so `/legal/dpa` § 8
+      offers to copy the notice to another address *by hand* on request to
+      `privacy@`. That manual half is the part still resting on a mailbox.
+      **Durable fix:** an optional per-organisation privacy-notice address
+      (an audited writer like `PUT /api/organization/sso`, refused by the generic
+      `PATCH /api/organization`, a field on the organisation settings page),
+      added to the notice's recipients in `services/subprocessor_notices._admins`;
+      then drop the by-hand sentence from DPA § 8 and register § 9. Deciding
+      whether the contact is *instead of* or *as well as* the admins is the
+      contractual call counsel should make first.
+      **Trigger:** the first customer who asks for the notice at a non-admin
+      address, or before the DPA is countersigned by a customer with a DPO.
 
 ### Live Stripe billing has no subscription to invoice against
 
@@ -2003,14 +1997,6 @@ stay open.
       decisions.md. **Trigger:** before the first tenant matches invoices
       against live Xero or NetSuite POs, or the next change to the PO status
       vocabulary.
-- [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
-      Xero, QuickBooks, Business Central, Merge.dev, Sage Intacct, Sage
-      Accounting ZA, Blackbaud FE NXT and SYSPRO fill `PoPayload.vendor_erp_id`
-      (#652). NetSuite falls back to `vendor_name`, which a rename on
-      either side breaks, and which picks the wrong row when two vendors share
-      a name. **Durable fix:** read each ERP's supplier id on the PO (the same
-      id its `list_vendors` reports) into `vendor_erp_id`. **Trigger:** the
-      next change to that adapter's `list_pos`.
 
 ### Surfaced by Xero's Disconnect leaving the grant live (2026-10-20)
 
@@ -2511,7 +2497,38 @@ as oversights.
       **Trigger:** the first customer on each ERP, or sandbox access, whichever
       comes first.
 
+- [ ] **Verify NetSuite's OAuth 2.0 client-credentials sign-in against a real
+      account** ([#653](https://github.com/Absence0760/feohledger/issues/653)).
+      The grant is built from Oracle's documentation and proven against
+      fake-erp, whose token endpoint verifies the assertion's signature and
+      claims (`tools/fake-erp/netsuite_oauth2.py`). Unverified against Oracle:
+      that `rest_webservices` alone covers SuiteQL, the exact `aud` NetSuite
+      compares (its doc pages differ in the domain they show), the token
+      endpoint's real error bodies, and whether `expires_in` arrives as a
+      number or a string (both are read).
+      **Why blocked:** needs a NetSuite account with an integration record and
+      a mapped certificate — a design partner's sandbox or the SuiteCloud
+      Developer Network.
+      **Durable fix:** map a certificate, run test-connection, the three syncs,
+      a push and a void through `auth_method: oauth2_m2m`, then correct the
+      adapter and fake-erp together.
+      **Trigger:** before the first NetSuite customer, and in any case before a
+      customer must onboard on NetSuite 2027.1, where TBA is closed to new
+      integrations.
+
 ## (b) Operator steps on merged code
+
+- [ ] **Turn on the sub-processor notice sweep in production.** Built
+      (decisions §321): the published DPA now says every sub-processor change
+      that needs the 30-day notice is emailed to each customer's
+      administrators, and `FEOH_SUBPROCESSOR_NOTICES_ENABLED` (off by default)
+      is what sends it. Set `FEOH_SUBPROCESSOR_NOTICES_ENABLED: "true"` in
+      `infra-secrets/feohledger/prod.sops.yaml` (never in this repo), deploy,
+      and confirm `subprocessor-notices` is running on `GET /api/health/sweeps`;
+      `deploy/decrypt-env.sh` warns on every deploy until it is set. SES must
+      be out of its sandbox for the email to reach a customer.
+      **Trigger:** before the deploy that publishes the 2026-10-26 legal text,
+      and in any case before customer #1.
 
 - [ ] **Make the first recording of real QuickBooks payment shapes.** Built
       (decisions §318): `backend/tests/test_qbo_recorded_replay.py` replays

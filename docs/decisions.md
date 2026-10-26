@@ -15000,3 +15000,156 @@ deleted or part-paid — is not recorded when every blocker is cleared),
 `test_erp_paid_recorded_outside.py`, `test_erp_webhook_transitions.py`,
 `frontend/src/lib/types/erpReport.test.ts`,
 `frontend/tests-e2e/payments/erp-reported-payment.spec.ts`.
+
+## 320. NetSuite signs in with OAuth 2.0 client credentials, and a saved block without a method stays TBA (2026-10-26)
+
+**Context.** Oracle closes Token-Based Authentication to new REST integrations
+in NetSuite 2027.1 ("Use OAuth 2.0"). The adapter only spoke TBA, so a customer
+onboarding on 2027.1 could not create the integration record our setup asked
+for (issue #653).
+
+**Decision.** `settings.erp.auth_method` picks `oauth2_m2m` (the client-
+credentials grant: a JWT signed with the private key of a certificate mapped to
+the integration, exchanged for a 60-minute bearer) or `tba`. The private key is
+an `erp` secret sealed in `provider_credentials`, write-only like the others;
+the client id and certificate id are configuration.
+
+- **Absent means `tba`, in the adapter and in the form.** Every NetSuite block
+  saved before the choice existed is TBA. Making the key mandatory would have
+  needed a control-plane data migration for a value we already know; reading
+  absent as OAuth 2.0 would break every existing tenant. The form starts a NEW
+  connection on OAuth 2.0 (first option) but shows a saved block without the
+  key as TBA (`stored_default`), because showing the first option there would
+  switch a working tenant on its next save. Any other value is refused, never
+  guessed.
+- **Each method's fields apply only under it** (`show_when`), so the form never
+  requires a TBA token secret of an OAuth 2.0 connection or the reverse. That
+  is a generic catalogue attribute rather than a NetSuite branch in the panel.
+- **The bearer is cached in process, keyed by a hash of the credentials**, and
+  a 401 re-mints once. The grant has no refresh token, so the only alternative
+  is a token request per push (three calls each) against NetSuite's
+  concurrency limits; persisting the token would add a sealed secret with no
+  owner. Hashing the private key into the key means a rotated certificate can
+  never reuse the old one's token.
+- **The algorithm follows the key**: PS256 for RSA 3072/4096, ES256/384/512 by
+  curve — Oracle's certificate conditions, refused up front otherwise rather
+  than after a round trip NetSuite would refuse anyway. NetSuite does not take
+  RS256.
+- **A refused token request is returned as the failed call.** Every caller
+  already treats a non-200 as failure, so a push fails non-retryable on a 400
+  (`invalid_client`: no certificate mapped) without reaching the record API, and
+  the OAuth `error` code is logged — never the assertion or a token. A 200 with
+  no token raises instead, since as a response it would read as success.
+- **fake-erp verifies the assertion cryptographically**
+  (`tools/fake-erp/netsuite_oauth2.py`), unlike its TBA shape check: a header
+  shape check would have proved nothing about whether NetSuite accepts what we
+  sign. Certificates are mapped through a test hook with the public key only,
+  and survive `/__reset` so a parallel worker cannot unmap a running spec.
+
+**Not done: live verification.** Built from Oracle's documentation and proven
+against the fake's verifier; a real account is the remaining proof
+(`docs/followups.md` (a)).
+
+Tests: `backend/tests/test_erp_netsuite_auth.py`, `test_erp_catalog.py`,
+`frontend/src/lib/types/erpConnection.test.ts`,
+`frontend/tests-e2e/erp/netsuite.spec.ts`. Reference:
+`backend/docs/erp-integration.md` § NetSuite sign-in.
+
+## 321. A sub-processor change is one change-log entry; the notice is emailed from it (issue #427, 2026-10-26)
+
+**What happened.** `/legal/dpa` § 8 and `/legal/sub-processors` § 9 promise
+every customer at least 30 days' notice before a new sub-processor processes
+their data. Nothing backed it: § 10 was a hand-typed `<tr>`, the DPA defined the
+notice as "this page is updated — checking it is how you receive it", and the
+30 days were prose in three places and an assertion in none. An Art. 28(2)
+general authorisation resting on "check this page" is weak, and a register row
+added without anyone told was one forgotten step away.
+
+**The rule.** The change log is data — `app/services/subprocessor_changelog.py`
+— and both halves derive from one entry, so adding the row and giving the notice
+are the same action:
+
+- `scripts/gen_subprocessor_changelog.py` (`pnpm gen:subprocessor-changelog`,
+  `check:` in CI's Backend lint job) writes the module § 10 renders.
+- `services/subprocessor_notices.py` (sweep `subprocessor-notices`) emails each
+  `notice=True` entry to every active system-`admin` of every organisation that
+  existed on its publication date.
+
+The 30 days are enforced, not described: a `notice=True` entry must state
+`effective_on` at least `NOTICE_PERIOD_DAYS` after `published_on`, or carry an
+`urgent_reason` (the DPA's security/availability carve-out). `validate` refuses
+anything else and generation refuses to write past it, so the page cannot
+publish a short notice that does not say why. The sent notice is measured too:
+each ledger row stores the entry's effective date and `late` — sent with under
+30 days to run, which an urgent entry or a sweep left off would cause — and the
+tick reports `late_notices` on `/api/health/sweeps`.
+
+**Idempotent and on the record, with no lock held across I/O.** A
+control-plane `subprocessor_notices` row, UNIQUE (entry, organisation), moves
+through three short transactions: the **claim** is inserted `ON CONFLICT DO
+NOTHING` and committed before any email goes out, so a second replica or a
+re-run sends nothing; **`sent_at`**, the counts, the recipient user ids and
+`late` are committed once at least one admin's email reached the provider (if
+none did, the claim is deleted and the next tick retries); then the tenant's
+`privacy.subprocessor_notice_sent` audit row is written and **`audited_at`**
+stamped. A failed audit write is a tick failure and is retried alone every tick
+— it never re-sends the notice. (The first cut held the claim open across the
+sends and the tenant write, so a tenant that refused the audit row rolled the
+claim back and re-mailed every admin hourly; review caught it before merge.) A
+claim with no `sent_at` older than `CLAIM_TIMEOUT` (an hour) is a run that died
+mid-send and is re-taken: that is the one at-least-once path, and a duplicate
+notice is recoverable where a silent miss is not. The ledger has no foreign key
+and is exempt from tenant deletion: it is evidence a contractual notice was
+given, and should outlive the customer it was given to.
+
+**No retroactive notices.** `NOTICES_SINCE` (2026-10-26) is the day this
+shipped; `validate` refuses a `notice=True` entry published before it, which
+would otherwise be mailed to every organisation on the first tick for a change
+that already happened without notice. A late notice (an urgent entry, or a
+sweep that was off) says "Took effect" rather than claim a future date.
+
+**Why each choice.**
+
+- **Administrators, not a DPO field.** The platform holds no privacy contact
+  for an organisation; inventing one meant an endpoint, a settings field and a
+  contractual decision (instead of the admins, or as well?) that is counsel's,
+  not code's. The active admins are the contact the platform does hold, the
+  DPA now says exactly that, and it keeps — rather than drops — the existing
+  offer to copy the notice by hand to another address requested at `privacy@`.
+  The field is the (c) follow-up.
+- **Not a notification event.** `notify_event` is preference-gated; a user who
+  muted email would have opted their organisation out of a contractual notice.
+  The sweep sends through the email adapter directly, with no in-app row.
+- **English, unbranded.** The DPA is English-only by design (§174) and the
+  notice is given under it; a white-label child tenant is still notified by the
+  processor, which is the platform.
+- **Organisations created after publication are not told.** They signed up
+  against a register that already listed the change.
+- **Append-only, stable ids.** The ledger is keyed by entry id: renaming one
+  re-notifies everyone, deleting one leaves a sent notice the page no longer
+  shows. The id must start with its publication date; `validate` checks both
+  that and order.
+- **The sweep is off by default and required in production.** Every sweep that
+  emails is off locally (guard rail 7). Because the DPA now says the notice *is*
+  emailed, `deploy/prod.sops.yaml.example` sets it and `decrypt-env.sh` warns on
+  every deploy while it is off. Warn, not refuse: a deploy should not be blocked
+  on it, and the warning plus the (b) follow-up make it impossible to miss.
+
+**Historical rows.** All six existing rows are `notice=False`: the register's
+first publication; the move of the databases to RDS (same provider, same
+region, same data — no new party); and four systems the customer connects
+itself (§ 4), which are not sub-processors. None is ever emailed.
+
+**Rejected.** A subscribe endpoint / mailing list (a second recipient model to
+keep consistent with the admin set, and a list a customer has to know to join —
+the same weakness as "check the page"); notifying from the git diff of the page
+(no stable id to dedupe on, and nothing measures the 30 days).
+
+**Tests.** `backend/tests/test_subprocessor_changelog.py` (the rules, the
+generator's drift guard and its refusal), `test_subprocessor_notices.py` (only
+active admins, once per entry, roll back when nobody is reached, one failed
+address does not stop the rest, `late`, organisations created after
+publication, the CLI), `test_migration_0122_subprocessor_notices.py`,
+`test_deploy_decrypt_env.py` (the warning),
+`frontend/src/lib/legal/subprocessorChangelog.test.ts` (the email's objection
+address is `CONTACT.privacy`).

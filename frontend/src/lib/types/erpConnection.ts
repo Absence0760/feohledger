@@ -39,6 +39,18 @@ export interface ErpProviderField {
 	 * `environment` is one, QuickBooks' (two Intuit hosts) is not.
 	 */
 	destination?: boolean;
+	/**
+	 * The field applies only while another field of this provider holds one
+	 * of `values` (NetSuite's OAuth 2.0 vs TBA credentials): hidden, and not
+	 * required, otherwise. See `fieldApplies`.
+	 */
+	show_when?: { field: string; values: string[] };
+	/**
+	 * What a SAVED configuration without this key means — the adapter's own
+	 * reading of the absent key. Shown instead of the first option, so a form
+	 * opened on an older connection does not silently switch it on save.
+	 */
+	stored_default?: string;
 }
 
 export interface ErpProvider {
@@ -113,7 +125,9 @@ const OPTION_LABEL_KEYS: Record<string, MessageKey> = {
 	DRAFT: 'org.erp.option.DRAFT',
 	Pending: 'org.erp.option.Pending',
 	Approved: 'org.erp.option.Approved',
-	other: 'org.erp.option.other'
+	other: 'org.erp.option.other',
+	oauth2_m2m: 'org.erp.option.oauth2_m2m',
+	tba: 'org.erp.option.tba'
 };
 
 export function optionLabelKey(option: string): MessageKey | null {
@@ -171,9 +185,17 @@ export function initialValues(
 		const raw = sameProvider ? stored?.[f.name] : undefined;
 		const value = typeof raw === 'string' ? raw : '';
 		values[f.name] = f.secret ? '' : value;
+		if (!f.secret && !values[f.name] && sameProvider && f.stored_default) {
+			values[f.name] = f.stored_default;
+		}
 		if (!f.secret && !values[f.name] && f.options?.length) values[f.name] = f.options[0];
 	}
 	return values;
+}
+
+/** Does `f` apply to what the form currently says (its `show_when`)? */
+export function fieldApplies(f: ErpProviderField, values: Record<string, string>): boolean {
+	return !f.show_when || f.show_when.values.includes(values[f.show_when.field] ?? '');
 }
 
 /**
@@ -303,7 +325,8 @@ export function byoAppRequired(provider: ErpProvider, status: ErpOAuthStatus | n
  * Required fields still empty. A required secret that is already stored counts
  * as filled, since leaving it blank keeps it, unless the admin chose to remove
  * it (`clear[name]`). With `requireByoApp` the optional client id + secret
- * pair counts as required: there is no other app to connect through.
+ * pair counts as required: there is no other app to connect through. A field
+ * that does not apply to the current choice (`fieldApplies`) is never missing.
  */
 export function missingRequired(
 	provider: ErpProvider,
@@ -315,6 +338,7 @@ export function missingRequired(
 	const clear = opts.clear ?? {};
 	return provider.fields.filter(
 		(f) =>
+			fieldApplies(f, values) &&
 			(f.required || (opts.requireByoApp === true && BYO_APP_FIELDS.includes(f.name))) &&
 			!(values[f.name] ?? '').trim() &&
 			!(secretIsSaved(provider, f, stored, storedNames, values) && clear[f.name] !== true)
