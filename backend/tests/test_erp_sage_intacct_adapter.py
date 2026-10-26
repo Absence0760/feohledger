@@ -26,6 +26,8 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     LineItemPayload,
     ListingGap,
+    PoSkipReason,
+    SkippedPo,
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
@@ -478,6 +480,27 @@ def test_list_pos_maps_total_exactly_and_state():
     ]
 
 
+def test_a_po_with_no_total_is_reported_skipped_never_synced_at_zero():
+    """It used to sync at 0, which every invoice against it then over-billed,
+    and a total an earlier sync stored for the number stayed trusted. It is now
+    left out and named, so the sync marks that total unverifiable (§323)."""
+    fake = FakeIntacct()
+    fake.query_rows["purchasing/document::Purchase Order"] = [
+        [
+            {"documentNumber": "PO-1", "txnTotal": "10.00"},
+            {"documentNumber": "PO-NO-TOTAL", "txnTotal": None},
+            {"documentNumber": "PO-BAD", "txnTotal": "n/a"},
+            {"documentNumber": None, "txnTotal": "5.00"},
+        ]
+    ]
+    listing = _run(fake, lambda: SageIntacctAdapter(CONFIG).list_pos_report())
+    assert [p.po_number for p in listing.pos] == ["PO-1"]
+    assert listing.skipped == [
+        SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable),
+        SkippedPo("PO-BAD", PoSkipReason.unpriceable),
+    ]
+
+
 def test_list_pos_carries_the_vendor_id_list_vendors_reports():
     """A PO names its vendor by the ``id`` ``list_vendors`` stamps as
     ``erp_vendor_id``, so the sync links it by id: a vendor renamed since the PO
@@ -493,9 +516,18 @@ def test_list_pos_carries_the_vendor_id_list_vendors_reports():
     ]
     fake.query_rows["purchasing/document::Purchase Order"] = [
         [
-            {"documentNumber": "PO-1", "vendor": {"id": "V-ACME-2", "name": "Acme"}},
-            {"documentNumber": "PO-2", "vendor.id": "V-BOLT", "vendor.name": "Bolt Old"},
-            {"documentNumber": "PO-3", "vendor": {"name": "Acme"}},
+            {
+                "documentNumber": "PO-1",
+                "vendor": {"id": "V-ACME-2", "name": "Acme"},
+                "txnTotal": "1",
+            },
+            {
+                "documentNumber": "PO-2",
+                "vendor.id": "V-BOLT",
+                "vendor.name": "Bolt Old",
+                "txnTotal": "1",
+            },
+            {"documentNumber": "PO-3", "vendor": {"name": "Acme"}, "txnTotal": "1"},
         ]
     ]
     adapter = SageIntacctAdapter(CONFIG)

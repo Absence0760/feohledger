@@ -1499,9 +1499,13 @@ the purchase-orders page says so in a warning toast and in place of the figure.
 The supplier portal shows no figure for such a PO and refuses to flip it into an
 invoice (409); budgets and the CFO accruals leave it out and count it
 (`po-matching.md` § A PO total the ERP no longer vouches for).
-Blackbaud FE NXT reports the same way: a PO with no usable `order_total` is
-`unpriceable`. Adapters that do not override `list_pos_report` report nothing
-skipped.
+Blackbaud FE NXT, NetSuite, Business Central, Sage Accounting (ZA) and Sage
+Intacct report the same way: a numbered PO with no usable total (`order_total`,
+`foreigntotal`, `totalAmountIncludingTax`, `Total`, `txnTotal`) is
+`unpriceable`. Intacct used to sync such a PO at 0. A PO with no number is
+dropped without a report, since there is no row to mark. Merge.dev, Xero and
+QuickBooks Online do not override `list_pos_report` and report nothing skipped
+(decisions §325).
 
 **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that

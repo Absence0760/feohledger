@@ -22,7 +22,10 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     ListingGap,
     PoLinePayload,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_failure_message,
     erp_http_failure,
@@ -532,17 +535,25 @@ class BusinessCentralAdapter(ErpAdapter):
         return out
 
     async def list_pos(self) -> list[PoPayload]:
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
         """Pull purchase orders via ``purchaseOrders?$expand=purchaseOrderLines``.
 
-        One request per page, lines included. A PO with no number or no stated
-        total is skipped, never synced at 0.
+        One request per page, lines included. A PO with no number is dropped.
+        One with a number but no stated total is skipped, never synced at 0,
+        and named in ``skipped`` as ``unpriceable``, so a total an earlier sync
+        stored for it stops being matched against (decisions §323).
         """
-        out: list[PoPayload] = []
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
         for raw in await self._list_collection("purchaseOrders?$expand=purchaseOrderLines"):
             po = _bc_po_to_payload(raw)
             if po is not None:
-                out.append(po)
-        return out
+                pos.append(po)
+            elif raw.get("number"):
+                skipped.append(SkippedPo(str(raw["number"]), PoSkipReason.unpriceable))
+        return PoListing(pos=pos, skipped=skipped)
 
     async def test_connection(self) -> bool:
         try:

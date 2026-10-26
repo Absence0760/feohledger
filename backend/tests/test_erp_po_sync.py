@@ -29,6 +29,7 @@ import app.services.erp_adapters.dynamics_365_bc  # noqa: F401, E402
 import app.services.erp_adapters.merge_dev  # noqa: F401, E402
 import app.services.erp_adapters.mock_adapter  # noqa: F401, E402
 import app.services.erp_adapters.netsuite  # noqa: F401, E402
+from app.services.erp_adapters.base import PoSkipReason, SkippedPo  # noqa: E402
 
 
 def _run(coro):
@@ -181,9 +182,12 @@ def test_bc_list_pos_maps_orders_and_lines(monkeypatch):
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_make_mock_response(200, {"access_token": "tok"}))
         client.get = AsyncMock(return_value=_raw_json_response(200, text))
-        pos = _run(_bc_adapter(monkeypatch).list_pos())
+        listing = _run(_bc_adapter(monkeypatch).list_pos_report())
+    pos = listing.pos
 
     assert [p.po_number for p in pos] == ["PO-1", "PO-2"]
+    # Named, so a total synced for it earlier is no longer trusted (§323).
+    assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
     first, second = pos
     assert first.total == Decimal("99999999999999.99")
     assert first.vendor_name == "Acme"
@@ -315,8 +319,12 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_raw_json_response(200, text))
-        pos = _run(_netsuite_adapter().list_pos())
+        listing = _run(_netsuite_adapter().list_pos_report())
+    pos = listing.pos
 
+    # A numbered PO with no total is named, so a total synced for it earlier
+    # stops being matched against (decisions §323); one with no number is not.
+    assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
     assert [(p.po_number, p.status) for p in pos] == [
         ("PO-501", "open"),
         ("PO-502", "closed"),

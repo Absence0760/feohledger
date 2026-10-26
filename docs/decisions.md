@@ -15512,3 +15512,29 @@ calls kept out of it, a 429 cool-down and a used-up share as pauses, an own
 key against its quota, Redis down, a non-budgeted ERP, no key),
 `frontend/src/lib/types/erpConnection.test.ts` (`callUsageLines`, every
 sentence in every locale).
+
+## 325. Every adapter that drops a numbered PO for want of a total reports it (PR #670 review, 2026-10-26)
+
+**Context.** §323 made `list_pos_report` the way an adapter says "I have this
+PO and cannot state its total", so the sync stops matching against a total
+stored for it earlier. SYSPRO and Blackbaud FE NXT (§324) overrode it. The
+PR's review found three more adapters that silently skipped a numbered PO with
+no usable total (NetSuite `foreigntotal`, Business Central
+`totalAmountIncludingTax`, Sage Accounting (ZA) `Total`), and one that synced
+it at 0 (Sage Intacct `txnTotal`). Those had exactly the gap §323 closed: the
+earlier total stayed trusted, and for Intacct every invoice against the PO read
+as over-billed.
+
+**Decision.** All four override `list_pos_report` and name such a PO
+`unpriceable`; `list_pos` returns the report's `pos`. A PO with no number is
+still dropped unreported, because no stored row can be found for it. The four
+PO listings still degrade on a failed read, as §284 kept for POs: NetSuite and
+Business Central return what they had read (and stop at their page cap), the
+two Sage adapters an empty list. Unlike Blackbaud's, they do not raise
+`ErpListingIncomplete`, so a failed or capped read hides the skips in the part
+it did not read. That gap is a `docs/followups.md` (c) entry.
+
+**Tests.** `test_erp_po_sync.py` (NetSuite and Business Central),
+`test_erp_sage_accounting_za_adapter.py::test_a_po_with_no_total_is_reported_skipped`,
+`test_erp_sage_intacct_adapter.py::test_a_po_with_no_total_is_reported_skipped_never_synced_at_zero`.
+

@@ -26,6 +26,8 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     LineItemPayload,
     ListingGap,
+    PoSkipReason,
+    SkippedPo,
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
@@ -731,6 +733,27 @@ def test_list_pos_carries_the_supplier_id_list_vendors_reports():
     by_number = {p.po_number: p.vendor_erp_id for p in _run(fake, adapter.list_pos)}
     assert by_number == {"PO-1": "22", "PO-2": "23", "PO-3": None, "PO-4": None}
     assert {"22", "23"} <= vendor_ids
+
+
+def test_a_po_with_no_total_is_reported_skipped():
+    """Left out, never synced at 0, and named so a total an earlier sync stored
+    for the number is marked unverifiable (decisions §323)."""
+    fake = FakeSage()
+    orders = [
+        {"DocumentNumber": "PO-1", "Total": 10},
+        {"DocumentNumber": "PO-NO-TOTAL", "Total": None},
+        {"Total": 5},
+    ]
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/PurchaseOrder/Get"):
+            return fake._paged(orders)
+        return _orig(request)
+
+    fake.handler = handler
+    listing = _run(fake, SageAccountingZaAdapter(CONFIG).list_pos_report)
+    assert [p.po_number for p in listing.pos] == ["PO-1"]
+    assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
 
 
 def test_list_paging_walks_skip_until_the_total():

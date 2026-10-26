@@ -43,7 +43,10 @@ from app.services.erp_adapters.base import (
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -765,19 +768,27 @@ class NetSuiteAdapter(ErpAdapter):
         return out
 
     async def list_pos(self) -> list[PoPayload]:
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
         """Pull purchase orders through SuiteQL (``_PO_QUERY``), headers only.
 
         The PO sync stores the header (number, vendor, total, status, currency,
         expected date); it does not persist ERP lines, so no line query is
-        made. A PO with no number or no stated total is skipped, never synced
-        at 0.
+        made. A PO with no number is dropped. One with a number but no usable
+        total is skipped, never synced at 0, and named in ``skipped`` as
+        ``unpriceable``, so a total an earlier sync stored for it stops being
+        matched against (decisions §323).
         """
-        out: list[PoPayload] = []
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
         for raw in await self._suiteql(_PO_QUERY):
             po = _netsuite_po_to_payload(raw)
             if po is not None:
-                out.append(po)
-        return out
+                pos.append(po)
+            elif raw.get("tranid"):
+                skipped.append(SkippedPo(str(raw["tranid"]), PoSkipReason.unpriceable))
+        return PoListing(pos=pos, skipped=skipped)
 
     async def test_connection(self) -> bool:
         try:

@@ -59,7 +59,10 @@ from app.services.erp_adapters.base import (
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -428,6 +431,15 @@ class SageIntacctAdapter(ErpAdapter):
         return accounts
 
     async def list_pos(self) -> list[PoPayload]:
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
+        """Purchasing documents of ``po_document_type``. A document with no
+        number is dropped. One with a number but no usable ``txnTotal`` is
+        skipped and named in ``skipped`` as ``unpriceable``: it used to sync
+        at 0, which every invoice against it then over-billed, and a total an
+        earlier sync stored for it must stop being matched against (decisions
+        §323)."""
         doc_type = self.config.get("po_document_type") or "Purchase Order"
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -439,11 +451,16 @@ class SageIntacctAdapter(ErpAdapter):
                     _PO_FIELDS,
                 )
         except Exception:
-            return []
-        pos = []
+            return PoListing(pos=[])
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
         for raw in rows or []:
             number = raw.get("documentNumber")
             if not number:
+                continue
+            total = _decimal_or_none(raw.get("txnTotal"))
+            if total is None:
+                skipped.append(SkippedPo(str(number), PoSkipReason.unpriceable))
                 continue
             vendor_name = _field(raw, "vendor", "name")
             vendor_id = _field(raw, "vendor", "id")
@@ -453,12 +470,12 @@ class SageIntacctAdapter(ErpAdapter):
                     po_number=str(number),
                     vendor_name=str(vendor_name) if vendor_name else None,
                     vendor_erp_id=str(vendor_id) if vendor_id else None,
-                    total=_decimal_or_none(raw.get("txnTotal")) or Decimal("0"),
+                    total=total,
                     status=_po_status(raw.get("state")),
                     currency=str(currency) if currency else None,
                 )
             )
-        return pos
+        return PoListing(pos=pos, skipped=skipped)
 
     async def test_connection(self) -> bool:
         try:
