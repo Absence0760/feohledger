@@ -311,10 +311,27 @@ class MergeDevAdapter(ErpAdapter):
         return items
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Every vendor via Merge's unified ``/vendors``, or
-        :class:`ErpListingIncomplete` — never the pages read before a failure."""
-        records = await self._list_complete("vendors", {"page_size": "100", "expand": "addresses"})
-        return [v for v in map(_merge_vendor_to_payload, records) if v is not None]
+        """Every supplier via Merge's unified ``/contacts?is_supplier=true``, or
+        :class:`ErpListingIncomplete` — never the pages read before a failure.
+
+        Merge's Accounting API has no ``/vendors`` path and no Vendor model: a
+        supplier is a ``Contact`` with ``is_supplier`` true (Merge Accounting
+        OpenAPI, https://docs.merge.dev/openapi/accounting.json, ``GET
+        /accounting/v1/contacts``; https://docs.merge.dev/accounting/contacts/).
+        A Contact's ``id`` is what a PurchaseOrder's ``vendor`` and an
+        Invoice's ``contact`` carry, so it is the ``erp_vendor_id`` the PO sync
+        links by and the bill push posts. ``addresses`` and ``phone_numbers``
+        are expanded so they arrive as objects, not bare ids.
+        """
+        records = await self._list_complete(
+            "contacts",
+            {
+                "page_size": "100",
+                "is_supplier": "true",
+                "expand": "addresses,phone_numbers",
+            },
+        )
+        return [v for v in map(_merge_contact_to_payload, records) if v is not None]
 
     async def test_connection(self) -> bool:
         try:
@@ -437,25 +454,35 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
     )
 
 
-def _merge_vendor_to_payload(raw: dict) -> VendorPayload | None:
-    """Map a Merge.dev unified Vendor record to our normalized VendorPayload,
-    or None for a record with no Merge ``id``.
+def _merge_contact_to_payload(raw: dict) -> VendorPayload | None:
+    """Map a Merge.dev supplier ``Contact`` to our normalized VendorPayload,
+    or None for a record with no Merge ``id`` or one Merge says is not a
+    supplier.
 
     ``erp_vendor_id`` is the Merge ``id`` and nothing else: it is what
-    ``post_invoice`` posts as the bill's ``contact``. ``remote_id`` is the
-    underlying ERP's own id (a different kind of key Merge would refuse as a
-    contact), and a name is no key at all — two same-named vendors would each
-    relink one row past the sync's ambiguous-name guard (docs/decisions.md
-    §284). A record with no id is skipped, as NetSuite's mapping does.
+    ``post_invoice`` posts as the bill's ``contact`` and what a PO's ``vendor``
+    names. ``remote_id`` is the underlying ERP's own id (a different kind of
+    key Merge would refuse as a contact), and a name is no key at all — two
+    same-named vendors would each relink one row past the sync's
+    ambiguous-name guard (docs/decisions.md §284). A record with no id is
+    skipped, as NetSuite's mapping does.
 
-    Follows Merge's Accounting API Vendor model: `name`, `email_address`,
-    `phone_number`, an `addresses` list (first entry used, if any), and a
-    `payment_term` reference (object with a `name` like "Net 30", or a bare
-    string on some ERPs). Anything absent maps to None — `sync_vendors_from_erp`
-    never nulls out an existing local value for a missing field.
+    Follows Merge's Accounting ``Contact`` model: ``name``, ``email_address``,
+    ``tax_number``, ``phone_numbers[]`` (``number``), ``addresses[]``
+    (``street_1`` / ``street_2`` / ``city`` / ``state`` / ``zip_code`` /
+    ``country``; first entry used), and ``status`` ``ACTIVE`` / ``ARCHIVED``.
+    A Contact carries **no payment term**, so ``payment_terms`` is always None
+    — never a default — and ``sync_vendors_from_erp`` keeps whatever terms the
+    local vendor already has. An ``ARCHIVED`` contact, or one Merge reports as
+    deleted in the ERP (``remote_was_deleted``), is emitted ``active=False``:
+    the ERP will not take a bill against it.
     """
     vendor_id = raw.get("id")
     if not vendor_id:
+        return None
+    # The listing asks for suppliers only; a record that says otherwise is a
+    # customer and never a payee.
+    if raw.get("is_supplier") is False:
         return None
     name = raw.get("name") or str(vendor_id)
 
@@ -464,28 +491,33 @@ def _merge_vendor_to_payload(raw: dict) -> VendorPayload | None:
     if isinstance(addresses, list) and addresses and isinstance(addresses[0], dict):
         first = addresses[0]
         parts = [
-            first.get("line1"),
-            first.get("line2"),
+            first.get("street_1"),
+            first.get("street_2"),
             first.get("city"),
-            first.get("state"),
-            first.get("zip_code") or first.get("postal_code"),
+            first.get("state") if isinstance(first.get("state"), str) else None,
+            first.get("zip_code"),
             first.get("country"),
         ]
         address = ", ".join(p for p in parts if p) or None
 
-    payment_terms: str | None = None
-    pt = raw.get("payment_term")
-    if isinstance(pt, dict):
-        payment_terms = pt.get("name")
-    elif isinstance(pt, str):
-        payment_terms = pt
+    phone: str | None = None
+    phones = raw.get("phone_numbers")
+    if isinstance(phones, list):
+        phone = next(
+            (p["number"] for p in phones if isinstance(p, dict) and p.get("number")),
+            None,
+        )
+
+    status = (raw.get("status") or "").upper()
+    active = status != "ARCHIVED" and raw.get("remote_was_deleted") is not True
 
     return VendorPayload(
         erp_vendor_id=str(vendor_id),
         name=name,
-        email=raw.get("email_address") or raw.get("email"),
-        phone=raw.get("phone_number") or raw.get("phone"),
+        email=raw.get("email_address") or None,
+        phone=phone,
         address=address,
-        tax_id=raw.get("tax_number") or raw.get("tax_id"),
-        payment_terms=payment_terms,
+        tax_id=raw.get("tax_number") or None,
+        payment_terms=None,
+        active=active,
     )
