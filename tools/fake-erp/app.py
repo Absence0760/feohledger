@@ -443,68 +443,104 @@ MERGE_ACCOUNT_FIXTURES: list[dict] = [
     },
 ]
 
-MERGE_VENDOR_FIXTURES: list[dict] = [
+# Merge has no Vendor model and no `/vendors` path: a supplier is a `Contact`
+# with `is_supplier` true, listed at `GET /contacts?is_supplier=true`, and a
+# Contact carries NO payment term (Merge Accounting OpenAPI,
+# https://docs.merge.dev/openapi/accounting.json; https://docs.merge.dev/accounting/contacts/).
+# The `merge-vendor-70x` ids are kept because the PO fixtures above name them
+# as `vendor`, exactly as a Merge PurchaseOrder names a Contact id.
+MERGE_CONTACT_FIXTURES: list[dict] = [
     {
         "id": "merge-vendor-701",
         "remote_id": "fake-remote-vendor-701",
         "name": "Fake Merge Vendor Co",
+        "is_supplier": True,
+        "is_customer": False,
         "email_address": "ap@fakemergevendor.example",
-        "phone_number": "+1-555-0170",
+        "tax_number": "71-1234567",
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [{"number": "+1-555-0170", "type": "Work"}],
         "addresses": [
             {
-                "line1": "701 Fake Merge Ave",
-                "line2": None,
+                "type": "BILLING",
+                "street_1": "701 Fake Merge Ave",
+                "street_2": None,
                 "city": "Faketown",
                 "state": "CA",
                 "zip_code": "94107",
                 "country": "US",
             }
         ],
-        "tax_number": "71-1234567",
-        "payment_term": {"name": "Net 30"},
+        "remote_was_deleted": False,
     },
     {
         "id": "merge-vendor-702",
         "remote_id": "fake-remote-vendor-702",
         "name": "Fake Merge Supply Co",
+        "is_supplier": True,
+        "is_customer": False,
         "email_address": "billing@fakemergesupply.example",
-        "phone_number": "+1-555-0172",
+        "tax_number": "72-2345678",
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [{"number": "+1-555-0172", "type": "Work"}],
         "addresses": [
             {
-                "line1": "702 Fake Supply Rd",
-                "line2": None,
+                "type": "BILLING",
+                "street_1": "702 Fake Supply Rd",
+                "street_2": None,
                 "city": "Faketown",
                 "state": "CA",
                 "zip_code": "94108",
                 "country": "US",
             }
         ],
-        "tax_number": "72-2345678",
-        "payment_term": {"name": "Net 45"},
+        "remote_was_deleted": False,
     },
     {
         "id": "merge-vendor-703",
         "remote_id": "fake-remote-vendor-703",
         "name": "Fake Merge Services Co",
+        "is_supplier": True,
+        "is_customer": False,
         "email_address": "invoices@fakemergeservices.example",
-        "phone_number": "+1-555-0173",
+        "tax_number": "73-3456789",
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [{"number": "+1-555-0173", "type": "Work"}],
         "addresses": [
             {
-                "line1": "703 Fake Services Blvd",
-                "line2": None,
+                "type": "BILLING",
+                "street_1": "703 Fake Services Blvd",
+                "street_2": None,
                 "city": "Faketown",
                 "state": "CA",
                 "zip_code": "94109",
                 "country": "US",
             }
         ],
-        "tax_number": "73-3456789",
-        # Some ERPs surface payment_term as a bare string rather than an
-        # {"name": ...} object — the adapter's _merge_vendor_to_payload
-        # handles both; this fixture exercises the string branch.
-        "payment_term": "Net 60",
+        "remote_was_deleted": False,
+    },
+    # A CUSTOMER, not a supplier: served only when the request does not filter
+    # on `is_supplier=true`, so an adapter that forgets the filter imports a
+    # payee that is not one and the e2e spec's vendor count fails.
+    {
+        "id": "merge-customer-801",
+        "remote_id": "fake-remote-customer-801",
+        "name": "Fake Merge Customer Co",
+        "is_supplier": False,
+        "is_customer": True,
+        "email_address": "buyer@fakemergecustomer.example",
+        "tax_number": None,
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [],
+        "addresses": [],
+        "remote_was_deleted": False,
     },
 ]
+
 
 MERGE_401 = {"detail": "Authentication credentials were not provided."}
 
@@ -564,9 +600,9 @@ async def merge_create_invoice(request: Request) -> JSONResponse:
     # Like real Merge, the vendor (`contact`) and each line's `account` are
     # Merge object ids. A name or a GL code in either is a 400, not a bill
     # filed against nothing.
-    merge_vendor_ids = {v["id"] for v in MERGE_VENDOR_FIXTURES}
+    merge_contact_ids = {c["id"] for c in MERGE_CONTACT_FIXTURES}
     merge_account_ids = {a["id"] for a in MERGE_ACCOUNT_FIXTURES}
-    if model.get("contact") not in merge_vendor_ids:
+    if model.get("contact") not in merge_contact_ids:
         raise ProviderError(400, {"model": {"contact": ["Unknown contact id."]}})
     for line in model.get("line_items") or []:
         account = line.get("account")
@@ -621,10 +657,30 @@ async def merge_list_accounts(request: Request, cursor: str | None = None) -> di
     return _merge_paginate(MERGE_ACCOUNT_FIXTURES, cursor, "account-cursor-page-2")
 
 
-@merge.get("/vendors")
-async def merge_list_vendors(request: Request, cursor: str | None = None) -> dict:
+@merge.get("/contacts")
+async def merge_list_contacts(
+    request: Request,
+    cursor: str | None = None,
+    is_supplier: str | None = None,
+    expand: str | None = None,
+) -> dict:
+    """Merge's ``GET /contacts``. ``is_supplier=true`` keeps suppliers only;
+    ``addresses`` / ``phone_numbers`` come back as objects only when named in
+    ``expand``, else as bare ids, as Merge returns an unexpanded relation.
+    There is deliberately no ``/vendors`` route: Merge has none, so a request
+    for it is this app's 404, as it is Merge's."""
     _require_merge_auth(request)
-    return _merge_paginate(MERGE_VENDOR_FIXTURES, cursor, "vendor-cursor-page-2")
+    contacts = MERGE_CONTACT_FIXTURES
+    if is_supplier is not None:
+        want = is_supplier.strip().lower() == "true"
+        contacts = [c for c in contacts if c["is_supplier"] is want]
+    expanded = set((expand or "").split(","))
+    body = _merge_paginate(contacts, cursor, "contact-cursor-page-2")
+    for rec in body["results"]:
+        for rel in ("addresses", "phone_numbers"):
+            if rel not in expanded:
+                rec[rel] = [f"{rec['id']}-{rel}-{i}" for i, _ in enumerate(rec[rel])]
+    return body
 
 
 app.include_router(merge)
