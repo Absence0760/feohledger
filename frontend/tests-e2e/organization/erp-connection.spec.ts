@@ -142,7 +142,9 @@ test.describe('/organization ERP connection', () => {
 			// A new NetSuite connection starts on OAuth 2.0 (TBA is closed to new
 			// integrations from 2027.1, decisions §320); this walk exercises TBA's
 			// two stored secrets, so it picks that method first.
-			const authMethod = card.getByLabel('Sign-in method (optional)', { exact: true });
+			// By name: the select sits inside its label, so its accessible name
+			// carries the chosen option's text too.
+			const authMethod = card.locator('select[name="auth_method"]');
 			await expect(authMethod).toHaveValue('oauth2_m2m');
 			await authMethod.selectOption('tba');
 			await expect(card.getByLabel('Account ID', { exact: true })).toBeVisible();
