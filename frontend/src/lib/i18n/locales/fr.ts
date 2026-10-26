@@ -602,6 +602,7 @@ export const messages = {
 	'invoices.warning.poAmountVariance': 'Écart de montant {variancePct} par rapport à la commande {poNumber} (facture {invoiceAmount} contre commande {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Écart de montant {variancePct} par rapport à la commande {poNumber}, qui n’indique aucune devise (facture {invoiceAmount} contre commande {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'La facture est en {invoiceCurrency} mais la commande {poNumber} est en {poCurrency} — les montants n’ont pas été comparés',
+	'invoices.warning.poTotalUnverifiable': 'Le total de la commande {poNumber} n’a pas pu être confirmé par l’ERP lors de la dernière synchronisation — les montants n’ont pas été comparés',
 	'invoices.warning.poPartialReceipt': 'Correspondance 3 voies partielle — correspondance {matchType} avec la commande {poNumber}, mais seule une partie de la quantité commandée a été reçue',
 	'invoices.warning.poOverReceipt': 'Sur-réception : {receivedQuantity} reçues contre {orderedQuantity} commandées (+{excessQuantity}) sur la commande {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Plus de marchandises reçues que commandées sur la commande {poNumber}',
@@ -630,6 +631,7 @@ export const messages = {
 	'invoices.warning.glCodeStalePrior': 'Le compte général « {code} » mis en cache pour ce fournisseur n’est plus dans le plan comptable actif.',
 	'invoices.poMatch.issue.poNotFound': 'Commande {poNumber} introuvable',
 	'invoices.poMatch.issue.currencyMismatch': 'Devises différentes : facture en {invoiceCurrency}, commande en {poCurrency} — montants non comparés',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'Total de la commande non confirmé par l’ERP lors de la dernière synchronisation — montants non comparés',
 	'invoices.poMatch.issue.amountMismatch': 'Écart de montant : facture {invoiceAmount} contre commande {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Écart de montant : facture {invoiceAmount} contre commande {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Écart de montant : facture {invoiceAmount} contre commande {poTotal} ({variancePct})',
@@ -2645,6 +2647,8 @@ export const messages = {
 	'purchaseOrders.toast.loadListFailed': 'Échec du chargement des bons de commande',
 	'purchaseOrders.toast.loadFailed': 'Échec du chargement du bon de commande',
 	'purchaseOrders.toast.syncFailed': 'Échec de la synchronisation ERP',
+	'purchaseOrders.toast.unverifiable':
+		'L’ERP n’a pas pu confirmer le total de {n, plural, one {# commande existante} other {# commandes existantes}} — les factures qui {n, plural, one {la citent sont retenues} other {les citent sont retenues}} jusqu’à ce qu’une synchronisation le confirme',
 	'purchaseOrders.loadMore': 'Charger plus ({shown} sur {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Affichage du # bon de commande} other {Affichage des # bons de commande}}',

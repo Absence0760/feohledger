@@ -142,6 +142,9 @@ async def list_purchase_orders(
                 # The PO's own code — `null` when no source recorded one, and the
                 # client renders the figure bare rather than borrowing the org's.
                 "currency": po.currency,
+                # Set when the ERP's last sync could not price this PO: `total`
+                # is a figure the ERP no longer vouches for (decisions §323).
+                "total_unverifiable_reason": po.total_unverifiable_reason,
                 "status": po.status,
                 "line_items": [_line_item_dict(li) for li in po.line_items],
                 "created_at": po.created_at.isoformat() if po.created_at else "",
@@ -315,6 +318,7 @@ async def get_purchase_order(
         "total": json_money(po.total),
         # Labels `total` AND every line figure — lines carry no code of their own.
         "currency": po.currency,
+        "total_unverifiable_reason": po.total_unverifiable_reason,  # decisions §323
         "status": po.status,
         "line_items": [
             {
@@ -332,6 +336,31 @@ async def get_purchase_order(
         "linked_invoices": linked_invoices,
         "created_at": po.created_at.isoformat() if po.created_at else "",
     }
+
+
+async def _sync_target(
+    db: AsyncSession, po_number: str, org_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> PurchaseOrder | None:
+    """The one existing row an ERP PO sync refreshes for ``po_number``.
+
+    Scoped to the entity being synced into plus unstamped rows, own-entity
+    first, oldest first — see the upsert in :func:`sync_pos_from_erp` for why.
+    The decisions §323 mark targets this same row, so mark and clear agree.
+    """
+    result = await db.execute(
+        apply_entity_scope(
+            select(PurchaseOrder).where(
+                PurchaseOrder.po_number == po_number,
+                PurchaseOrder.organization_id == org_id,
+            ),
+            PurchaseOrder,
+            entity_id,
+            include_shared=True,
+        )
+        .order_by(PurchaseOrder.entity_id.is_(None), PurchaseOrder.created_at)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 @router.post("/sync-erp")
@@ -370,11 +399,14 @@ async def sync_pos_from_erp(
         ) from exc
 
     try:
-        erp_pos = await adapter.list_pos()
+        # The POs AND the ones the adapter deliberately left out (decisions
+        # §323). An adapter that never skips one reports nothing skipped.
+        listing = await adapter.list_pos_report()
     except Exception as exc:
         logger.exception("ERP list_pos failed for org %s", org_id)
 
         raise erp_pull_failure(exc) from exc
+    erp_pos = listing.pos
 
     # Vendor lookup maps for linking POs to existing vendor rows: the ERP's own
     # supplier id first (what the vendor sync stamps), then the name. An id link
@@ -383,16 +415,46 @@ async def sync_pos_from_erp(
     # companies, so another company's "56" is a different supplier.
     realm = connection_realm(erp_config)
     trust_legacy = legacy_links_trusted(erp_config, realm)
-    v_result = await db.execute(select(Vendor).where(Vendor.organization_id == org_id))
+    #
+    # Only vendors a PO synced into this entity may belong to: the entity's own
+    # and shared (unstamped) ones — the scope the PO upsert below uses. Over the
+    # whole org, two subsidiaries' vendors holding the same ERP id (each entity
+    # its own ERP company) collapsed to whichever was read last, and a PO in
+    # entity B could be linked to entity A's vendor. A key two vendors in scope
+    # still share is ambiguous and links neither: no link is honest, and the
+    # next sync fills it once it is not; a guess is never corrected (a vendor
+    # already on a row is never re-pointed).
+    v_result = await db.execute(
+        apply_entity_scope(
+            select(Vendor).where(Vendor.organization_id == org_id),
+            Vendor,
+            entity_id,
+            include_shared=True,
+        )
+    )
     vendors = v_result.scalars().all()
-    vendor_by_erp_id = {
-        v.erp_vendor_id: v.id
+
+    def _unique(pairs) -> tuple[dict, set]:
+        found: dict = {}
+        ambiguous: set = set()
+        for key, vendor_id in pairs:
+            if key in found and found[key] != vendor_id:
+                ambiguous.add(key)
+            found[key] = vendor_id
+        return {k: v for k, v in found.items() if k not in ambiguous}, ambiguous
+
+    vendor_by_erp_id, ambiguous_erp_ids = _unique(
+        (v.erp_vendor_id, v.id)
         for v in vendors
         if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
-    }
-    vendor_by_name = {v.name.lower(): v.id for v in vendors}
+    )
+    vendor_by_name, _ = _unique((v.name.lower(), v.id) for v in vendors)
 
     def resolve_vendor(erp_po) -> uuid.UUID | None:
+        if erp_po.vendor_erp_id in ambiguous_erp_ids:
+            # The ERP named its supplier and two vendors claim that id: the
+            # name cannot say which one it meant either.
+            return None
         if erp_po.vendor_erp_id and erp_po.vendor_erp_id in vendor_by_erp_id:
             return vendor_by_erp_id[erp_po.vendor_erp_id]
         return vendor_by_name.get(erp_po.vendor_name.lower()) if erp_po.vendor_name else None
@@ -400,6 +462,10 @@ async def sync_pos_from_erp(
     created = 0
     skipped = 0
     updated = 0
+    # PO numbers whose verifiable / unverifiable state this sync changed: the
+    # invoices citing them are re-matched below so a hold lands (or lifts) now,
+    # not at the invoice's next edit.
+    rematch: set[str] = set()
     for erp_po in erp_pos:
         # The upsert key is (po_number, org) SCOPED TO THE ENTITY BEING SYNCED
         # INTO — the second unscoped `po_number` match in this file. `po_number`
@@ -415,20 +481,7 @@ async def sync_pos_from_erp(
         # number. `limit(1)`, own-entity first, keeps the pick deterministic
         # and replaces a latent `MultipleResultsFound` (a 500 mid-sync) that
         # two same-numbered POs in one org could already trigger.
-        existing = await db.execute(
-            apply_entity_scope(
-                select(PurchaseOrder).where(
-                    PurchaseOrder.po_number == erp_po.po_number,
-                    PurchaseOrder.organization_id == org_id,
-                ),
-                PurchaseOrder,
-                entity_id,
-                include_shared=True,
-            )
-            .order_by(PurchaseOrder.entity_id.is_(None), PurchaseOrder.created_at)
-            .limit(1)
-        )
-        existing_po = existing.scalar_one_or_none()
+        existing_po = await _sync_target(db, erp_po.po_number, org_id, entity_id)
         erp_currency = po_currency_code(erp_po.currency)
         if existing_po is not None:
             # Refresh the ERP-owned fields on an already-known PO. total and
@@ -446,6 +499,13 @@ async def sync_pos_from_erp(
             changed = False
             if existing_po.total != erp_po.total:
                 existing_po.total = erp_po.total
+                rematch.add(existing_po.po_number)
+                changed = True
+            # The ERP priced it again: the total just written is one it vouches
+            # for, so a mark an earlier sync left (§323) comes off.
+            if existing_po.total_unverifiable_reason is not None:
+                existing_po.total_unverifiable_reason = None
+                rematch.add(existing_po.po_number)
                 changed = True
             if existing_po.status != erp_po.status:
                 existing_po.status = erp_po.status
@@ -513,6 +573,40 @@ async def sync_pos_from_erp(
 
         created += 1
 
+    # POs the ERP has but the adapter could not price exactly (decisions §323).
+    # Nothing is created for them; an EXISTING row with the number keeps the
+    # total an earlier sync stored, which the ERP no longer vouches for, so it
+    # is marked and `po_matching` refuses to compare an invoice against it.
+    # The row marked is exactly the row the upsert above refreshes for that
+    # number (`_sync_target`), so a later sync that prices the PO clears the
+    # same mark it set — marking a wider set would leave marks no sync clears.
+    unverifiable = 0
+    reasons = {s.po_number: str(s.reason) for s in listing.skipped}
+    for po_number, reason in reasons.items():
+        po = await _sync_target(db, po_number, org_id, entity_id)
+        if po is None:
+            continue
+        unverifiable += 1
+        if po.total_unverifiable_reason != reason:
+            po.total_unverifiable_reason = reason
+            rematch.add(po_number)
+
+    if rematch:
+        from app.services.invoice_warnings import refresh_invoices_citing_pos
+
+        await db.flush()
+        # Not best-effort: the mark exists to RAISE a hold, and the payment gate
+        # reads only open exceptions. A mark written without its hold would
+        # leave an approved invoice payable against the stale total, so a
+        # failed re-match fails the sync and the whole transaction rolls back.
+        await refresh_invoices_citing_pos(
+            db,
+            org_id,
+            rematch,
+            org_settings=org.settings,
+            caller="erp_po_sync",
+        )
+
     # One PII-free summary row per sync (same shape as the GL chart sync): the
     # trail records that POs — the 3-way-match reference the money path checks
     # invoices against — were created/amended in bulk, by whom, from where.
@@ -528,16 +622,28 @@ async def sync_pos_from_erp(
             "created": created,
             "updated": updated,
             "skipped": skipped,
+            "not_priced": len(reasons),
+            "unverifiable": unverifiable,
             "adapter": adapter.erp_type,
             "entity_id": str(entity_id) if entity_id else None,
         },
     )
     await db.commit()
+    message = f"Synced {created} new POs, updated {updated}, {skipped} already exist"
+    if unverifiable:
+        message += (
+            f"; {unverifiable} existing PO(s) could not be priced exactly by the ERP and "
+            "will not be matched against until they can"
+        )
     return {
         "success": True,
-        "message": (f"Synced {created} new POs, updated {updated}, {skipped} already exist"),
+        "message": message,
         "created": created,
         "updated": updated,
         "skipped": skipped,
+        # POs the ERP has but the adapter could not price exactly (not synced),
+        # and how many existing rows that left unverifiable (decisions §323).
+        "not_priced": len(reasons),
+        "unverifiable": unverifiable,
         "adapter": adapter.erp_type,
     }

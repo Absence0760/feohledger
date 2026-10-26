@@ -71,6 +71,16 @@ def _comfnd_rows(rows: list[dict]) -> str:
     return f"<COMFND><HeaderDetails/>{body}<RowsReturned>{len(rows)}</RowsReturned></COMFND>"
 
 
+def _logon_profile(local_currency: str) -> str:
+    """A GetLogonProfile answer, in the element names wildland/syspro-ruby reads
+    (``lib/syspro/get_logon_profile.rb``)."""
+    return (
+        "<LogonProfile><CompanyName>EDU1 Pty Ltd</CompanyName>"
+        f"<LocalCurrencyCode>{local_currency}</LocalCurrencyCode>"
+        "<CurrencyDescription>Local</CurrencyDescription></LogonProfile>"
+    )
+
+
 class FakeSyspro:
     """Routes by REST method, records requests, tracks open sessions."""
 
@@ -86,6 +96,8 @@ class FakeSyspro:
         self.post_body = "<PostApInvoice><Item><Journal>42</Journal></Item></PostApInvoice>"
         self.post_raises: Exception | None = None
         self.open_sessions: set[str] = set()
+        # GetLogonProfile: the company's local currency (Company Setup).
+        self.profile_body: str = _logon_profile("ZAR")
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -98,6 +110,8 @@ class FakeSyspro:
         if path.endswith("/Logoff"):
             self.open_sessions.discard(params["UserId"])
             return httpx.Response(200, text="0")
+        if path.endswith("/GetLogonProfile"):
+            return httpx.Response(200, text=self.profile_body)
         if path.endswith("/Query/Query"):
             if self.query_status != 200:
                 return httpx.Response(self.query_status, text="")
@@ -638,6 +652,20 @@ PAID_ROW = {"OrigInvValue": "100.00", "MthInvBal1": "0.00"}
         # An adjustment / credit applied zeroes the balance but is no payment.
         ([{"TrnType": "A", "TrnValue": "100.00"}], ErpInvoiceStatus.settled_no_payment),
         ([{"TrnType": "P", "TrnValue": "0"}], ErpInvoiceStatus.settled_no_payment),
+        # Split across two payments that cover the invoice: paid.
+        (
+            [{"TrnType": "P", "TrnValue": "40.00"}, {"TrnType": "P", "TrnValue": "60.00"}],
+            ErpInvoiceStatus.paid,
+        ),
+        # SYSPRO may sign a payment negative (it reduces the balance).
+        ([{"TrnType": "P", "TrnValue": "-100.00"}], ErpInvoiceStatus.paid),
+        # 40 cash + 60 credit applied: only 40 left the customer — not paid.
+        (
+            [{"TrnType": "P", "TrnValue": "40.00"}, {"TrnType": "C", "TrnValue": "60.00"}],
+            ErpInvoiceStatus.settled_no_payment,
+        ),
+        # A single 0.01 payment beside a write-off is not a payment of 100.
+        ([{"TrnType": "P", "TrnValue": "0.01"}], ErpInvoiceStatus.settled_no_payment),
         ([], ErpInvoiceStatus.settled_no_payment),
         (None, ErpInvoiceStatus.settled_no_payment),
     ],
@@ -910,16 +938,29 @@ def test_a_po_with_more_lines_than_a_page_is_skipped_not_partial(monkeypatch, ca
 
 # S8: a PO's total in its own currency, or no PO at all.
 @pytest.mark.parametrize(
-    "lines, expected",
+    "lines, foreign, expected",
     [
         # A foreign PO: MForeignPrice is the price in the header currency.
         (
             [{"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"}],
+            True,
             Decimal("20.00"),
         ),
         # A local PO: no foreign price, or the same one.
-        ([{"MOrderQty": "2", "MPrice": "5.00", "MForeignPrice": "0"}], Decimal("10.00")),
-        ([{"MOrderQty": "2", "MPrice": "5.00", "MForeignPrice": "5.00"}], Decimal("10.00")),
+        ([{"MOrderQty": "2", "MPrice": "5.00", "MForeignPrice": "0"}], False, Decimal("10.00")),
+        ([{"MOrderQty": "2", "MPrice": "5.00", "MForeignPrice": "5.00"}], False, Decimal("10.00")),
+        # A local PO whose line carries a different foreign price contradicts
+        # its header: not priced, rather than picking a column.
+        ([{"MOrderQty": "1", "MPrice": "18", "MForeignPrice": "1"}], False, None),
+        # A free line on a foreign PO (no price in either column) adds nothing.
+        (
+            [
+                {"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+                {"MOrderQty": "1", "MPrice": "0", "MForeignPrice": ""},
+            ],
+            True,
+            Decimal("20.00"),
+        ),
         # A misc charge carries its value with no qty x price; a comment none.
         (
             [
@@ -927,6 +968,7 @@ def test_a_po_with_more_lines_than_a_page_is_skipped_not_partial(monkeypatch, ca
                 {"LineType": "5", "MOrderQty": "0", "MPrice": "0", "NMscChargeValue": "7.50"},
                 {"LineType": "6", "MOrderQty": "", "MPrice": ""},
             ],
+            False,
             Decimal("17.50"),
         ),
         # A charge on a foreign PO: which currency it is in is not known.
@@ -935,27 +977,120 @@ def test_a_po_with_more_lines_than_a_page_is_skipped_not_partial(monkeypatch, ca
                 {"LineType": "1", "MOrderQty": "1", "MPrice": "18", "MForeignPrice": "1"},
                 {"LineType": "5", "NMscChargeValue": "7.50"},
             ],
+            True,
             None,
         ),
         # Discounts and a price unit of measure: not priced until confirmed.
-        ([{"MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5.00"}], None),
-        ([{"MOrderQty": "1", "MPrice": "10", "MDiscValue": "1.00"}], None),
-        ([{"MOrderQty": "12", "MPrice": "10", "MOrderUom": "EA", "MPriceUom": "BOX"}], None),
+        ([{"MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5.00"}], False, None),
+        ([{"MOrderQty": "1", "MPrice": "10", "MDiscValue": "1.00"}], False, None),
+        (
+            [{"MOrderQty": "12", "MPrice": "10", "MOrderUom": "EA", "MPriceUom": "BOX"}],
+            False,
+            None,
+        ),
         (
             [{"MOrderQty": "12", "MPrice": "10", "MOrderUom": "EA", "MPriceUom": "EA"}],
+            False,
             Decimal("120"),
         ),
         # A line with no price is not read as zero.
-        ([{"MOrderQty": "1", "MPrice": ""}], None),
+        ([{"MOrderQty": "1", "MPrice": ""}], False, None),
     ],
 )
-def test_po_total(lines, expected):
-    assert po_total(lines) == expected
+def test_po_total(lines, foreign, expected):
+    assert po_total(lines, foreign=foreign) == expected
+
+
+def test_a_foreign_po_never_sums_local_and_foreign_prices():
+    """A EUR PO in a ZAR company: line A is 2 x MForeignPrice 10.00 (MPrice
+    180.00), line B 1 x MPrice 50.00 with no foreign price. B's 50.00 is ZAR,
+    so there is no EUR total to state — it used to come back as 70.00 EUR."""
+    lines = [
+        {"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+        {"MOrderQty": "1", "MPrice": "50.00", "MForeignPrice": "0"},
+    ]
+    assert po_total(lines, foreign=True) is None
+
+
+def test_a_foreign_po_with_no_foreign_price_on_any_line_is_not_priced():
+    """Every line priced only in MPrice: the old line-driven detection read
+    this as a local PO and labelled the ZAR sum with the header's EUR."""
+    lines = [
+        {"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "0"},
+        {"MOrderQty": "1", "MPrice": "50.00"},
+    ]
+    assert po_total(lines, foreign=True) is None
+
+
+def _eur_po_fake() -> FakeSyspro:
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = [
+        {"PurchaseOrder": "P1", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
+        {"PurchaseOrder": "P2", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
+        {"PurchaseOrder": "P3", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "P4", "Supplier": "0000001", "OrderStatus": "4", "Currency": ""},
+    ]
+    fake.query_tables["PorMasterDetail"] = [
+        # The mixed EUR PO from the review: never 70.00 EUR.
+        {"PurchaseOrder": "P1", "MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+        {"PurchaseOrder": "P1", "MOrderQty": "1", "MPrice": "50.00", "MForeignPrice": "0"},
+        {"PurchaseOrder": "P2", "MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+        {"PurchaseOrder": "P3", "MOrderQty": "3", "MPrice": "5.00"},
+        {"PurchaseOrder": "P4", "MOrderQty": "1", "MPrice": "7.00"},
+    ]
+    return fake
+
+
+def test_list_pos_decides_foreign_from_the_header_against_the_local_currency():
+    fake = _eur_po_fake()
+    pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert [(p.po_number, p.total, p.currency) for p in pos] == [
+        ("P2", Decimal("20.00"), "EUR"),
+        ("P3", Decimal("15.00"), "ZAR"),
+        ("P4", Decimal("7.00"), None),
+    ]
+    # The local currency is read in the listing's own session.
+    assert fake.calls().count("Logon") == 1 and "GetLogonProfile" in fake.calls()
+    assert fake.of("/GetLogonProfile")[0].url.params["UserId"] == SESSION
+    assert fake.open_sessions == set()
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        "<LogonProfile><CompanyName>X</CompanyName></LogonProfile>",
+        "<LogonProfile><LocalCurrencyCode></LocalCurrencyCode></LogonProfile>",
+    ],
+)
+def test_a_profile_stating_no_local_currency_skips_every_labelled_po(profile):
+    """No local currency, no way to tell which price column a labelled PO's
+    currency is: those POs are skipped, never guessed. An unlabelled PO is
+    priced in MPrice and synced with no currency, as before."""
+    fake = _eur_po_fake()
+    fake.profile_body = profile
+    pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert [(p.po_number, p.total, p.currency) for p in pos] == [("P4", Decimal("7.00"), None)]
+    assert fake.open_sessions == set()
+
+
+@pytest.mark.parametrize("profile", ["ERROR: function not available", "not xml at all"])
+def test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping(profile):
+    """A failed READ says nothing about the company's currency. Skipping would
+    report every labelled PO unpriceable, and the sync would mark each one and
+    hold every invoice citing it over a transient outage (§323): the listing
+    fails and the sync changes nothing."""
+    fake = _eur_po_fake()
+    fake.profile_body = profile
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert exc.value.gap is ListingGap.fetch_failed
+    assert fake.open_sessions == set()
 
 
 def test_list_pos_skips_a_po_it_cannot_price():
     fake = FakeSyspro()
     fake.query_tables["PorMasterHdr"] = _headers(2)
+    fake.query_tables["PorMasterHdr"][1]["Currency"] = "USD"
     fake.query_tables["PorMasterDetail"] = [
         {"PurchaseOrder": "P000000", "MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5"},
         {"PurchaseOrder": "P000001", "MOrderQty": "1", "MPrice": "18", "MForeignPrice": "1"},
@@ -1025,3 +1160,41 @@ def test_xml_illegal_characters_are_dropped_and_nothing_else():
 
     dirty = "a\x00b\x08c\x09d\x0ae\x0bf\x0dg\x1fh\ufffei\uffffj\x7fk\u00e9"
     assert _clean(dirty) == "abc\x09d\x0aef\x0dghij\x7fk\u00e9"
+
+
+def test_list_pos_report_names_every_po_it_skips_and_why(monkeypatch):
+    """§323: the sync can only stop trusting an earlier total if the adapter
+    says which POs it left out. Each skip carries its coded reason."""
+    from app.services.erp_adapters.base import PoSkipReason
+
+    monkeypatch.setattr("app.services.erp_adapters.syspro._PO_DETAIL_PAGE", 2)
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = [
+        {"PurchaseOrder": "A", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "B", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "C", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
+        {"PurchaseOrder": "D", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "E", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+    ]
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "C", "MOrderQty": "1", "MPrice": "50", "MForeignPrice": "0"},
+        {"PurchaseOrder": "D", "MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5"},
+        {"PurchaseOrder": "E", "MOrderQty": "2", "MPrice": "3"},
+    ]
+    report = _run(fake, SysproAdapter(CONFIG).list_pos_report)
+    assert [(p.po_number, p.total) for p in report.pos] == [("E", Decimal("6"))]
+    assert [(s.po_number, s.reason) for s in report.skipped] == [
+        ("A", PoSkipReason.lines_unread),
+        ("B", PoSkipReason.no_lines),
+        ("C", PoSkipReason.unpriceable),
+        ("D", PoSkipReason.unpriceable),
+    ]
+
+    fake.profile_body = "<LogonProfile><CompanyName>X</CompanyName></LogonProfile>"
+    report = _run(fake, SysproAdapter(CONFIG).list_pos_report)
+    assert ("C", PoSkipReason.local_currency_unknown) in [
+        (s.po_number, s.reason) for s in report.skipped
+    ]

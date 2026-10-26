@@ -232,5 +232,9 @@ test.describe('/erp syspro adapter against fake-erp', () => {
 		const charged = pos.find((p) => p.po_number === 'PO-SYS-504');
 		expect(charged, 'PO-SYS-504 synced').toBeTruthy();
 		expect(String(charged!.total)).toMatch(/^105\.50*$/);
+		// A EUR order (the company is ZAR, per GetLogonProfile) with one line
+		// priced only in local MPrice has no EUR total: skipped, never summed
+		// to a mixed-currency 70.00 EUR.
+		expect(pos.find((p) => p.po_number === 'PO-SYS-505')).toBeUndefined();
 	});
 });

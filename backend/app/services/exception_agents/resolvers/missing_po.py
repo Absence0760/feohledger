@@ -163,6 +163,9 @@ async def _candidate_pos(
                 select(PurchaseOrder).where(
                     PurchaseOrder.vendor_id == vendor_id,
                     PurchaseOrder.status == "open",
+                    # A total the ERP no longer vouches for cannot be the
+                    # evidence an invoice is linked on (decisions §323).
+                    PurchaseOrder.total_unverifiable_reason.is_(None),
                 )
             )
         )

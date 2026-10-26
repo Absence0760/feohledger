@@ -12,6 +12,8 @@ Wire shape (SYSPRO 8 e.net REST, all ``GET`` with query-string parameters):
     {base}/Query/Query?UserId=<session>&BusinessObject=COMFND&XmlIn=<xml>
     {base}/Transaction/Post?UserId=<session>&BusinessObject=APSTIN
         &XmlParameters=<xml>&XmlIn=<xml>
+    {base}/GetLogonProfile?UserId=<session>
+        → XML describing the session's company, incl. ``LocalCurrencyCode``
     {base}/Logoff?UserId=<session>
 
 where ``{base}`` is ``http(s)://<host>:<rest port>/SYSPROWCFService/Rest``.
@@ -24,7 +26,7 @@ References (checked 2026-10):
   https://help.syspro.com/syspro-8-2025/g_programs/aps/apspin/apspin.htm
 * Logon / Query / Transaction REST calls and the COMFND query document, as
   used by the open-source client https://github.com/wildland/syspro-ruby
-  (``lib/syspro/logon.rb``, ``api_operations/*.rb``,
+  (``lib/syspro/logon.rb``, ``lib/syspro/get_logon_profile.rb``, ``api_operations/*.rb``,
   ``business_objects/schemas/comfnd.xml.erb``).
 
 **SYSPRO does not publish its business-object schemas on the web** — they ship
@@ -91,7 +93,10 @@ from app.services.erp_adapters.base import (
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -130,7 +135,8 @@ _COMMENT_LINE_TYPE = "6"
 
 #: ``ApInvoicePay.TrnType`` codes that are a payment (money paid to the
 #: supplier), as opposed to an adjustment, a discount or a credit applied. Only
-#: one of these makes a zero balance ``paid`` (decisions §303). SYSPRO does not
+#: these, covering the whole invoice value, make a zero balance ``paid``
+#: (:func:`map_invoice_status`, decisions §303). SYSPRO does not
 #: publish the code list: ``P`` is unconfirmed until a sandbox shows it
 #: (docs/followups.md), and an unrecognised code reads as no payment, so the
 #: failure mode is ``settled_no_payment``, never a payment nobody made.
@@ -459,19 +465,25 @@ def map_invoice_status(
     """Open / partly settled / settled / paid, from the balance against the
     original value and the ``ApInvoicePay`` rows recorded against the invoice.
 
-    ``paid`` only on a zero balance of a non-zero invoice WITH a payment row
-    (:data:`_PAYMENT_TRN_TYPES`) — the ``ApInvoice`` row states only a balance,
-    which a credit note or a write-off zeroes as readily as a cheque. A zero
-    balance with no payment to see is ``settled_no_payment``, for a person to
-    judge (docs/decisions.md §303). ``payments`` None means they were not (or
-    could not be) read, which is the same as seeing none.
+    ``paid`` only on a zero balance of a non-zero invoice whose payment rows
+    (:data:`_PAYMENT_TRN_TYPES`) account for the WHOLE original value — the
+    absolute sum of their ``TrnValue`` equal to ``abs(OrigInvValue)``. The
+    ``ApInvoice`` row states only a balance, which a credit note or a
+    write-off zeroes as readily as a cheque, and one payment row proves only
+    that some money left: an invoice settled 40 by cheque and 60 by a credit
+    note, or closed by a 0.01 payment and a write-off, is not paid. A zero
+    balance whose payments do not cover it is ``settled_no_payment``, for a
+    person to judge (docs/decisions.md §303). ``payments`` None means they were
+    not (or could not be) read, which is the same as seeing none.
     """
     original = _decimal(row.get("OrigInvValue"))
     balance = _decimal(row.get("MthInvBal1"))
     if original is None or balance is None:
         return ErpInvoiceStatus.unknown
     if balance == 0:
-        if original != 0 and any(_is_payment(p) for p in payments or []):
+        paid = [p for p in payments or [] if _is_payment(p)]
+        paid_total = sum((_decimal(p.get("TrnValue")) for p in paid), Decimal("0"))
+        if original != 0 and paid and abs(paid_total) == abs(original):
             return ErpInvoiceStatus.paid
         return ErpInvoiceStatus.settled_no_payment
     if abs(balance) < abs(original):
@@ -543,16 +555,24 @@ def _nonzero(raw: str | None) -> bool:
     return value is not None and value != 0
 
 
-def po_total(lines: list[dict[str, str]]) -> Decimal | None:
+def po_total(lines: list[dict[str, str]], *, foreign: bool) -> Decimal | None:
     """A PO's total in its own currency (the header ``Currency``), or None
     when it cannot be computed exactly — and then the PO is not synced, since
     a PO match against an understated or mislabelled total is worse than no
     PO at all.
 
-    * A merchandise line is ``MOrderQty x price``, the price in the PO's
-      currency: ``MForeignPrice`` when SYSPRO filled one, else ``MPrice``
-      (``MPrice`` is the local-currency price; on a local PO the two agree or
-      ``MForeignPrice`` is zero).
+    ``foreign`` is decided ONCE per PO, by the caller, from the header
+    ``Currency`` against the company's local currency (:func:`po_is_foreign`),
+    never from the lines: SYSPRO fills ``MForeignPrice`` line by line, and a
+    foreign PO with one line priced only in ``MPrice`` used to be summed as
+    ``foreign x qty + local x qty`` and labelled with the header currency.
+
+    * A merchandise line is ``MOrderQty x price``. On a foreign PO the price
+      is ``MForeignPrice``, the price in the PO's currency; a line with no
+      foreign price but a non-zero ``MPrice`` (the local-currency price) has
+      no price in the PO's currency, so the PO is not priced. On a local PO
+      the price is ``MPrice``, and a non-zero ``MForeignPrice`` that differs
+      from it contradicts the header, so the PO is not priced either.
     * A freight / miscellaneous-charge line (``LineType`` 4 / 5) is its
       ``NMscChargeValue``. On a foreign-currency PO it is not known which
       currency that value is in, so the PO is not priced.
@@ -562,12 +582,6 @@ def po_total(lines: list[dict[str, str]]) -> Decimal | None:
       the arithmetic in ways SYSPRO does not document, so such a PO is not
       priced either until a sandbox confirms the formula (docs/followups.md).
     """
-    foreign = any(
-        _nonzero(line.get("MForeignPrice"))
-        and _decimal(line.get("MForeignPrice")) != _decimal(line.get("MPrice"))
-        for line in lines
-        if line.get("LineType", "").strip() not in _CHARGE_LINE_TYPES
-    )
     total = Decimal("0")
     for line in lines:
         line_type = line.get("LineType", "").strip()
@@ -588,12 +602,79 @@ def po_total(lines: list[dict[str, str]]) -> Decimal | None:
         if order_uom and price_uom and order_uom != price_uom:
             return None
         qty = _decimal(line.get("MOrderQty"))
+        local_price = _decimal(line.get("MPrice"))
         foreign_price = _decimal(line.get("MForeignPrice"))
-        price = foreign_price if foreign_price else _decimal(line.get("MPrice"))
+        if foreign:
+            if not foreign_price:
+                # No price in the PO's currency. A zero local price too is a
+                # free line; any other local price is in another currency.
+                if local_price is None or local_price != 0:
+                    return None
+                foreign_price = Decimal("0")
+            price = foreign_price
+        else:
+            if foreign_price and foreign_price != local_price:
+                return None
+            price = local_price
         if qty is None or price is None:
             return None
         total += qty * price
     return total
+
+
+def po_is_foreign(header_currency: str | None, local_currency: str | None) -> bool | None:
+    """Whether a PO is priced in a currency other than the company's local one.
+
+    A PO with no header ``Currency`` is read as local: it carries no label (the
+    payload's ``currency`` is None) and its prices are ``MPrice``. A labelled
+    PO is foreign when its code differs from the local currency, and None when
+    the local currency could not be read — the caller must then skip the PO,
+    never guess which side of the line it is on.
+    """
+    code = (header_currency or "").strip().upper()
+    if not code:
+        return False
+    if local_currency is None:
+        return None
+    return code != local_currency
+
+
+#: A SYSPRO currency code: up to three characters (SYSPRO's own codes are not
+#: necessarily ISO 4217, e.g. ``$``).
+_CURRENCY_CODE_RE = re.compile(r"[A-Z0-9$]{1,3}")
+
+
+class LogonProfileUnreadable(ValueError):
+    """``GetLogonProfile`` answered with an error or something that is not its
+    XML: the read failed, which says nothing about the company's currency."""
+
+
+def parse_local_currency(body: str) -> str | None:
+    """The ``LocalCurrencyCode`` of a ``GetLogonProfile`` answer.
+
+    ``GetLogonProfile`` is the e.net call that describes the logged-on session
+    and company; its XML carries ``LocalCurrencyCode`` (as read by the
+    open-source client wildland/syspro-ruby, ``lib/syspro/get_logon_profile.rb``).
+    That is the company's local currency from Company Setup, which SYSPRO does
+    not allow to change once the company exists.
+
+    Two different failures, kept apart on purpose: an error text or an
+    unreadable answer raises :class:`LogonProfileUnreadable` (a failed READ —
+    the sync must not act on it, decisions §323); a readable profile with no
+    usable code returns None (a fact about this install, so every PO with a
+    currency label is skipped as ``local_currency_unknown``).
+    """
+    text = _unwrap(body)
+    if not text or _is_error_text(text):
+        raise LogonProfileUnreadable("GetLogonProfile answered with an error")
+    root = _parse(text)
+    if root is None or _has_error_element(root):
+        raise LogonProfileUnreadable("GetLogonProfile answer is not a readable profile")
+    for el in root.iter():
+        if isinstance(el.tag, str) and local_name(el) == "LocalCurrencyCode":
+            code = (el.text or "").strip().upper()
+            return code if _CURRENCY_CODE_RE.fullmatch(code) else None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1029,6 +1110,9 @@ class SysproAdapter(ErpAdapter):
             cursor = last
 
     async def list_pos(self) -> list[PoPayload]:
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
         """PO headers, totals computed from their lines (:func:`po_total`),
         each linked to its supplier by ``PorMasterHdr.Supplier`` — the id
         :meth:`list_vendors` reports — with the supplier's name as fallback.
@@ -1037,7 +1121,15 @@ class SysproAdapter(ErpAdapter):
         gets :class:`ErpListingIncomplete`. A PO with no lines, with lines that
         could not be read whole, or with a total that cannot be computed
         exactly is skipped rather than synced with a total that would mislead
-        the PO match.
+        the PO match — and named in ``skipped`` with its reason, so the sync
+        can stop trusting a total an earlier sync stored for it (§323).
+
+        Whether a PO is foreign is decided from its header ``Currency``
+        against the company's local currency (``GetLogonProfile``'s
+        ``LocalCurrencyCode``, same session). When the profile states no
+        usable code, a PO with a currency label is skipped: which price column
+        is in that currency would be a guess. When the profile cannot be read
+        at all, the listing raises :class:`ErpListingIncomplete` instead.
         """
         base = await self._rest_base()
         async with httpx.AsyncClient(timeout=30) as client:
@@ -1053,17 +1145,28 @@ class SysproAdapter(ErpAdapter):
                 suppliers = await self._walk(
                     client, base, session, "ApSupplier", ["Supplier", "SupplierName"]
                 )
+                local_currency = await self._local_currency(client, base, session)
         names = {r["Supplier"]: r.get("SupplierName") for r in suppliers if r.get("Supplier")}
 
         pos = []
-        unpriced = 0
+        skipped: list[SkippedPo] = []
         for row in headers:
             po_number = row.get("PurchaseOrder")
-            if not po_number or po_number not in lines or po_number in unread:
+            if not po_number:
                 continue
-            total = po_total(lines[po_number])
+            if po_number in unread:
+                skipped.append(SkippedPo(po_number, PoSkipReason.lines_unread))
+                continue
+            if po_number not in lines:
+                skipped.append(SkippedPo(po_number, PoSkipReason.no_lines))
+                continue
+            foreign = po_is_foreign(row.get("Currency"), local_currency)
+            if foreign is None:
+                skipped.append(SkippedPo(po_number, PoSkipReason.local_currency_unknown))
+                continue
+            total = po_total(lines[po_number], foreign=foreign)
             if total is None:
-                unpriced += 1
+                skipped.append(SkippedPo(po_number, PoSkipReason.unpriceable))
                 continue
             supplier = row.get("Supplier") or None
             pos.append(
@@ -1076,14 +1179,43 @@ class SysproAdapter(ErpAdapter):
                     currency=row.get("Currency") or None,
                 )
             )
-        if unpriced or unread:
+        if skipped:
+            counts = {reason: 0 for reason in PoSkipReason}
+            for skip in skipped:
+                counts[skip.reason] += 1
             logger.warning(
                 "SYSPRO PO sync skipped %d purchase order(s) whose total cannot be computed "
-                "exactly and %d whose lines exceed one page",
-                unpriced,
-                len(unread),
+                "exactly, %d whose lines exceed one page, %d with no lines and %d labelled "
+                "with a currency that cannot be placed (local currency unreadable)",
+                counts[PoSkipReason.unpriceable],
+                counts[PoSkipReason.lines_unread],
+                counts[PoSkipReason.no_lines],
+                counts[PoSkipReason.local_currency_unknown],
             )
-        return pos
+        return PoListing(pos=pos, skipped=skipped)
+
+    async def _local_currency(
+        self, client: httpx.AsyncClient, base: str, session: str
+    ) -> str | None:
+        """The company's local currency code, from ``GetLogonProfile``; None
+        when the profile states none (the caller then skips every labelled PO).
+
+        A failed read — non-200, an error text, an unreadable answer — raises
+        :class:`ErpListingIncomplete` and the sync changes nothing: skipping
+        would report every labelled PO as unpriceable, and the sync would mark
+        each one and hold every invoice citing it over a transient outage.
+        """
+        resp = await self._get(
+            client, f"{base}/GetLogonProfile", {"UserId": session}, "logon profile"
+        )
+        if resp.status_code != 200:
+            raise ErpListingIncomplete(PROVIDER, "GetLogonProfile", ListingGap.fetch_failed)
+        try:
+            return parse_local_currency(resp.text)
+        except LogonProfileUnreadable:
+            raise ErpListingIncomplete(
+                PROVIDER, "GetLogonProfile", ListingGap.fetch_failed
+            ) from None
 
     async def test_connection(self) -> bool:
         try:

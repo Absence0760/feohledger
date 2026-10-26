@@ -599,6 +599,7 @@ export const messages = {
 	'invoices.warning.poAmountVariance': 'Betragsabweichung {variancePct} gegenüber Bestellung {poNumber} (Rechnung {invoiceAmount}, Bestellung {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Betragsabweichung {variancePct} gegenüber Bestellung {poNumber}, für die keine Währung erfasst ist (Rechnung {invoiceAmount}, Bestellung {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'Die Rechnung lautet auf {invoiceCurrency}, Bestellung {poNumber} jedoch auf {poCurrency} — die Beträge wurden nicht verglichen',
+	'invoices.warning.poTotalUnverifiable': 'Die Summe der Bestellung {poNumber} konnte bei der letzten Synchronisierung nicht vom ERP bestätigt werden — die Beträge wurden nicht verglichen',
 	'invoices.warning.poPartialReceipt': 'Teilweiser 3-Wege-Abgleich — {matchType}-Abgleich gegen Bestellung {poNumber}, es wurde jedoch nur ein Teil der bestellten Menge geliefert',
 	'invoices.warning.poOverReceipt': 'Überlieferung: {receivedQuantity} geliefert gegenüber {orderedQuantity} bestellt (+{excessQuantity}) bei Bestellung {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Es wurden mehr Waren geliefert als bei Bestellung {poNumber} bestellt',
@@ -627,6 +628,7 @@ export const messages = {
 	'invoices.warning.glCodeStalePrior': 'Das zwischengespeicherte Sachkonto „{code}“ des Lieferanten ist nicht mehr im aktiven Kontenplan.',
 	'invoices.poMatch.issue.poNotFound': 'Bestellung {poNumber} nicht gefunden',
 	'invoices.poMatch.issue.currencyMismatch': 'Währungsabweichung: Rechnung in {invoiceCurrency}, Bestellung in {poCurrency} — Beträge nicht verglichen',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'Bestellsumme bei der letzten Synchronisierung nicht vom ERP bestätigt — Beträge nicht verglichen',
 	'invoices.poMatch.issue.amountMismatch': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
@@ -2645,6 +2647,8 @@ export const messages = {
 	'purchaseOrders.toast.loadListFailed': 'Bestellungen konnten nicht geladen werden',
 	'purchaseOrders.toast.loadFailed': 'Bestellung konnte nicht geladen werden',
 	'purchaseOrders.toast.syncFailed': 'ERP-Synchronisierung fehlgeschlagen',
+	'purchaseOrders.toast.unverifiable':
+		'Das ERP konnte die Summe {n, plural, one {# bestehenden Bestellung} other {von # bestehenden Bestellungen}} nicht bestätigen — Rechnungen dazu werden zurückgehalten, bis eine Synchronisierung sie bestätigt',
 	'purchaseOrders.loadMore': 'Mehr laden ({shown} von {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Alle # Bestellung werden angezeigt} other {Alle # Bestellungen werden angezeigt}}',

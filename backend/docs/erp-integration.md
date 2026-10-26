@@ -99,6 +99,18 @@ class ErpAdapter:
         """
         ...
 
+    async def list_pos_report(self) -> PoListing:
+        """What the PO sync calls: `PoListing(pos, skipped)`.
+
+        The default wraps `list_pos` and reports nothing skipped, so
+        an adapter that never leaves a PO out needs no change. An
+        adapter that DOES skip a PO because it cannot state its
+        total exactly overrides this, names each one as
+        `SkippedPo(po_number, PoSkipReason)` and keeps `list_pos`
+        returning `.pos` (decisions §323). SYSPRO does.
+        """
+        ...
+
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """Pull the chart of accounts for `POST /api/gl-accounts/sync-erp`.
 
@@ -1460,7 +1472,35 @@ by the ERP's supplier id (`PoPayload.vendor_erp_id`, matched against the
 Sage Intacct's `vendor.id`, Merge.dev's `vendor`), falling back to the vendor
 name; an adapter that does not read the id uses the name alone. Linking by id
 is what keeps a PO on the right vendor after a rename on either side, and when
-two vendors share a name. **Run the vendor sync before the PO sync** on a new
+two vendors share a name. Both maps are built over the vendors in the synced
+entity's scope (the entity plus shared, unstamped rows — the scope the PO upsert
+uses), never the whole org: two subsidiaries connected to different ERP
+companies can hold the same supplier id, and an org-wide map linked a PO to
+whichever was read last. An ERP id two vendors in scope both hold links
+neither — the PO stays unlinked rather than falling back to the name — and a
+name two vendors share links neither too.
+
+**A PO the adapter skips is not left trusted.** An adapter that cannot state a
+PO's total exactly (SYSPRO: a discount, a mixed-currency order, a currency it
+cannot place) leaves it out and names it in `list_pos_report().skipped`. The sync
+creates nothing for it, but stamps `purchase_orders.total_unverifiable_reason`
+(the `PoSkipReason`) on the existing row the upsert would refresh for that
+number (`purchase_orders._sync_target`: this entity first, else an unstamped
+row), so the PO match stops comparing invoices against the total an earlier
+sync stored (`po-matching.md` § A PO total the ERP no longer vouches for). The
+next sync that prices the PO clears the mark on that same row. Invoices citing a
+PO whose mark or total changed are re-matched in the same transaction, and
+**not** best-effort: the mark exists to raise a hold, so a failed re-match
+fails the sync and rolls the mark back rather than commit a mark with no hold.
+The response carries `not_priced` (POs the ERP has that were not synced) and
+`unverifiable` (existing rows now marked); the PO list and detail return
+`total_unverifiable_reason`, and the purchase-orders page says so in a warning
+toast. The supplier portal refuses to flip such a PO into an invoice (409).
+Adapters that do not override `list_pos_report` report nothing skipped.
+**Blackbaud FE NXT still skips a PO with no order total silently**: its wiring
+is tracked in `docs/followups.md`.
+
+**Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
 missing link once the vendor exists. It never re-points a PO that already has
 a vendor. The QuickBooks PO sync also no
@@ -1932,7 +1972,7 @@ query-string parameters, which is how the WCF REST host takes them:
 | Operation | Business object |
 |---|---|
 | `post_invoice` | refuse without `vendor_erp_id` / a GL account ERP id → `COMFND` on `ApInvoice` by (`Supplier`, `Invoice`) → `Transaction/Post` `APSTIN` |
-| `get_invoice_status` | `COMFND` on `ApInvoice` — below `OrigInvValue` ⇒ partially paid, else open; `MthInvBal1` 0 ⇒ a second `COMFND` on `ApInvoicePay` by the same key: `paid` only with a payment row (`TrnType` `P`, non-zero `TrnValue`), else `settled_no_payment` (decisions §303) |
+| `get_invoice_status` | `COMFND` on `ApInvoice` — below `OrigInvValue` ⇒ partially paid, else open; `MthInvBal1` 0 ⇒ a second `COMFND` on `ApInvoicePay` by the same key: `paid` only when the payment rows (`TrnType` `P`) sum, in absolute value, to `abs(OrigInvValue)` — a 40 cheque + 60 credit, or a 0.01 payment beside a write-off, is `settled_no_payment` (decisions §303) |
 | `void_invoice` | never (`False`) — reversing a posted AP invoice is an adjustment / credit in an open period, an accountant's call, and the adapter deletes nothing |
 | `list_vendors` / `list_gl_accounts` | `COMFND` on `ApSupplier` / `GenMaster` (`AccountType` A/L/C/R/E → asset/liability/equity/revenue/expense). A supplier with `OnHold = Y`, and a ledger code with `AccOnHldFlag = Y` or `ControlAccFlag = Y`, is emitted `active=False`: APSTIN refuses all three on a manual AP distribution |
 | `list_pos` | `PorMasterHdr`, `PorMasterDetail` and `ApSupplier` in one session, each read whole by a keyset walk (below); `vendor_erp_id` = `PorMasterHdr.Supplier`, the id `list_vendors` reports; `CancelledFlag = Y` or `OrderStatus *` ⇒ cancelled, `9` ⇒ closed |
@@ -1947,15 +1987,30 @@ query-string parameters, which is how the WCF REST host takes them:
   sync answers 502 and syncs nothing) — it used to return the first 1,000
   POs, oldest first, and never the newest.
 - **A PO total is in the PO's currency, or the PO is skipped**
-  (`syspro.po_total`). A merchandise line is `MOrderQty × price`, the price
-  being `MForeignPrice` when SYSPRO filled one (a foreign-currency order; the
-  local `MPrice` labelled with the header `Currency` was the old defect), else
-  `MPrice`. A freight / misc-charge line (`LineType` 4 / 5) adds its
-  `NMscChargeValue`; a comment line (6) adds nothing. A PO with a line
+  (`syspro.po_total`). Whether a PO is foreign is decided **once per PO**,
+  from its header `Currency` against the company's local currency
+  (`GetLogonProfile`'s `LocalCurrencyCode`, read in the listing's session;
+  element name per wildland/syspro-ruby `lib/syspro/get_logon_profile.rb`) —
+  never from the lines, which is how a EUR order with one line priced only in
+  local `MPrice` came back as `2 × 10.00 EUR + 1 × 50.00 ZAR = 70.00 EUR`.
+  A merchandise line is `MOrderQty × price`: on a foreign PO the price is
+  `MForeignPrice`, and a line with no foreign price but a non-zero `MPrice`
+  makes the PO unpriceable; on a local PO it is `MPrice`, and a differing
+  non-zero `MForeignPrice` contradicts the header and makes it unpriceable. A
+  PO with no header `Currency` is local and synced unlabelled. When the local
+  currency cannot be read, every PO **with** a currency label is skipped
+  rather than guessed — but only when `GetLogonProfile` answers with a profile
+  that states no usable code. A failed read (non-200, `ERROR` text, an
+  unreadable answer) raises `ErpListingIncomplete` and the sync changes
+  nothing: skipping would mark every labelled PO and hold every invoice citing
+  one over a transient outage. A freight / misc-charge line (`LineType` 4 / 5) adds
+  its `NMscChargeValue`; a comment line (6) adds nothing. A PO with a line
   discount, a price unit of measure other than the order's, a charge on a
   foreign order, or a line with no price is skipped (logged as a count) until a
   sandbox confirms the arithmetic — never synced at a total the PO match
-  would trust.
+  would trust. Every skipped PO (no lines, lines past one page, unpriceable,
+  local currency unknown) is reported by `list_pos_report`, so an existing
+  row with that number is marked unverifiable (decisions §323).
 
 - **`erp_document_id` is `<supplier>|<invoice>`** — SYSPRO keys an AP invoice
   by that pair, not by a surrogate id.

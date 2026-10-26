@@ -2262,10 +2262,13 @@
 										<span class="po-match-label">{m('invoices.modal.poMatch.poNumber')}</span>
 										<span class="po-match-value mono">{pm.po_number}</span>
 									</div>
-									{#if pm.po_total !== null}
+									{#if pm.po_total !== null && !pm.po_total_unverifiable_reason}
 										<!-- The PO's OWN currency, not the invoice's: the two can
 										     differ, and that difference is what the currency guard
-										     flags. Bare when the PO records none (decisions §197). -->
+										     flags. Bare when the PO records none (decisions §197).
+										     Hidden when the ERP's last sync could not confirm the
+										     total: the figure on record is not the PO's any more,
+										     and the issue line says so (decisions §323). -->
 										<div>
 											<span class="po-match-label">{m('invoices.modal.poMatch.poTotal')}</span>
 											<span class="po-match-value mono" data-testid="po-match-total">{formatMoney(pm.po_total, { currency: pm.po_currency ?? null })}</span>

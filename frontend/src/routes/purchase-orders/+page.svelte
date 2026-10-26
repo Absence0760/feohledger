@@ -295,8 +295,17 @@
 	async function syncFromErp() {
 		syncing = true;
 		try {
-			const result = await api.post<{ message: string }>('/api/purchase-orders/sync-erp', {});
-			toast(result.message, 'success');
+			const result = await api.post<{ message: string; unverifiable?: number }>(
+				'/api/purchase-orders/sync-erp',
+				{}
+			);
+			// POs the ERP still has but could not price exactly are no longer
+			// matched against (decisions §323) — say so, not just "synced".
+			if (result.unverifiable) {
+				toast(m('purchaseOrders.toast.unverifiable', { n: result.unverifiable }), 'warning');
+			} else {
+				toast(result.message, 'success');
+			}
 			// A sync imports POs, so the tallies moved too.
 			await Promise.all([loadPos({ search, status: statusFilter }), fetchCounts({ search })]);
 		} catch (err) {

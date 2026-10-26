@@ -1769,6 +1769,14 @@
       }
     }
   },
+  "invoiceWarningPoTotalUnverifiable": "The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared",
+  "@invoiceWarningPoTotalUnverifiable": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningPoPartialReceipt": "Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received",
   "@invoiceWarningPoPartialReceipt": {
     "placeholders": {
@@ -2095,6 +2103,7 @@
       }
     }
   },
+  "invoicePoMatchIssuePoTotalUnverifiable": "PO total not confirmed by the ERP on its last sync — amounts not compared",
   "invoicePoMatchIssueAmountMismatch": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
   "@invoicePoMatchIssueAmountMismatch": {
     "placeholders": {

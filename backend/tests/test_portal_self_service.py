@@ -782,3 +782,41 @@ async def test_portal_bank_change_validates_the_wire_routing_number_too(realdb):
     assert resp.status_code == 400, resp.text
     assert "wire_routing_number" in resp.text
     assert "987654321098" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_po_flip_refuses_a_po_whose_total_the_erp_no_longer_vouches_for(realdb):
+    """The flip bills `po.total`. A PO the ERP's last sync could not price
+    (decisions §323) carries a figure nobody vouches for, so no invoice is
+    minted at it — the supplier submits their own instead."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+
+    po_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            PurchaseOrder(
+                id=po_id,
+                po_number="PO-FLIP-UNV",
+                vendor_id=vendor_id,
+                total=Decimal("100.00"),
+                currency="USD",
+                status="open",
+                total_unverifiable_reason="unpriceable",
+                organization_id=org_id,
+            )
+        )
+        await s.commit()
+
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        resp = await client.post(f"/api/portal/purchase-orders/{po_id}/flip")
+    assert resp.status_code == 409, resp.text
+
+    async with mk() as s:
+        count = (
+            await s.execute(
+                select(func.count()).select_from(Invoice).where(Invoice.po_number == "PO-FLIP-UNV")
+            )
+        ).scalar_one()
+    assert count == 0
