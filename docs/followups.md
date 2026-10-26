@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**149 open: 128 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
+**148 open: 127 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1544,10 +1544,6 @@ scope (§260) — do not fold them into any of these.
       /v3/company/{realmId}/companyinfo/{realmId}`), as Xero and Sage already
       resolve theirs. **Trigger:** with the OAuth login-CSRF binding above, or
       before the platform Intuit app goes live.
-- [ ] **(c) SYSPRO's `void_invoice` docstring claims the same stance as
-      Business Central and NetSuite**, which now delete drafts while SYSPRO
-      deletes nothing. **Durable fix:** say SYSPRO never voids. **Trigger:**
-      the next edit to `syspro.py`.
 
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
@@ -2009,8 +2005,8 @@ stay open.
       vocabulary.
 - [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
       Xero, QuickBooks, Business Central, Merge.dev, Sage Intacct, Sage
-      Accounting ZA and Blackbaud FE NXT fill `PoPayload.vendor_erp_id` (#652).
-      NetSuite and SYSPRO fall back to `vendor_name`, which a rename on
+      Accounting ZA, Blackbaud FE NXT and SYSPRO fill `PoPayload.vendor_erp_id`
+      (#652). NetSuite falls back to `vendor_name`, which a rename on
       either side breaks, and which picks the wrong row when two vendors share
       a name. **Durable fix:** read each ERP's supplier id on the PO (the same
       id its `list_vendors` reports) into `vendor_erp_id`. **Trigger:** the
@@ -2470,8 +2466,31 @@ as oversights.
 - [ ] **Verify the SYSPRO, Sage Intacct, Sage SA and Blackbaud adapters
       against a live system.** Each was built from published docs and tested
       against fake-erp only (decisions §269). Unverified:
-      **SYSPRO:** the APSTIN / COMFND schemas and the `ApInvoice` /
-      `PorMasterHdr` / `PorMasterDetail` column names.
+      **SYSPRO** (issue #650's sandbox list; column names are corroborated by a
+      third-party schema dump): the APSTIN element names
+      (copy `APSTIN.XSD` / `APSTINDOC.XSD` / `COMFND.XSD` and an e.net
+      Diagnostics sample into `tools/fake-erp/fixtures/syspro/`); the exact
+      APSTIN and Logon error wording `classify_apstin_error` /
+      `classify_logon_error` match on (duplicate, supplier / ledger on hold,
+      control account, closed period, session expired, licence busy); whether
+      COMFND takes the `GT` condition the PO walk pages with; the
+      `ApInvoicePay.TrnType` code for a payment (assumed `P`); `MForeignPrice`
+      being the PO-currency price, the currency of a foreign PO's
+      `NMscChargeValue`, and the line-discount and price-UOM arithmetic (POs
+      with any of those are skipped today, never synced at a guessed total).
+      Still open and higher risk: **tax** — APSTIN sends no tax code and
+      distributes the gross, so an exclusive-tax supplier may post at 115 %
+      or be refused; **success detection** — a post with no error element is
+      read as posted, so a read-back of `ApInvoice` requiring `OrigInvValue ==
+      amount` (`posted_total_unconfirmed` when it fails) is the durable fix,
+      once **`OrigInvValue`'s currency and tax basis** are known (the
+      idempotency compare depends on them too); the `ApInvoice.Invoice` width
+      (a `doc_number_too_long` preflight); the GET query-string length for a
+      long bill; `posting_period` / `IgnoreWarnings` behaviour for a closed or
+      future period; `ApInvoice.InvoiceStatus` for reversed invoices;
+      whether `GenMaster.Company` scopes a COMFND read; the e.net licence a
+      logon takes (and a `runtime_product_code` for ISV Managed Run Time);
+      and the TLS binding a customer has to publish.
       **Intacct:** bill `state` values, the purchasing-document query name,
       `txnTotal`, and whether REST can reverse a paid bill.
       **Sage SA:** the `SupplierInvoice/Save` body, `DocumentNumber` and

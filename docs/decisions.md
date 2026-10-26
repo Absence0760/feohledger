@@ -13429,6 +13429,14 @@ test found, which is tracked in `docs/followups.md`) starts from honest answers.
 No caller under `app/` reads `get_invoice_status` today, so nothing changes at
 runtime.
 
+*Update 2026-10-26 (issue #650 S4):* the SYSPRO row was wrong about SYSPRO —
+it does record payments against an invoice, in `ApInvoicePay`. SYSPRO now
+returns `paid` when the balance is zero, the invoice is non-zero, and an
+`ApInvoicePay` row by (`Supplier`, `Invoice`) is a payment (`TrnType` `P`,
+non-zero `TrnValue`); otherwise `settled_no_payment`, as before. The payment
+code is unconfirmed until a sandbox shows it, and an unrecognised code reads as
+no payment, so the failure mode stays `settled_no_payment`.
+
 Guards: `tests/test_erp_{quickbooks_online,xero,sage_accounting_za,syspro,sage_intacct,blackbaud}_adapter.py`.
 
 ## 304. Approval sends to the ERP when the workflow says so, and a refusal leaves the invoice approved (2026-10-20)

@@ -1889,10 +1889,30 @@ query-string parameters, which is how the WCF REST host takes them:
 | Operation | Business object |
 |---|---|
 | `post_invoice` | refuse without `vendor_erp_id` / a GL account ERP id → `COMFND` on `ApInvoice` by (`Supplier`, `Invoice`) → `Transaction/Post` `APSTIN` |
-| `get_invoice_status` | `COMFND` on `ApInvoice` — `MthInvBal1` 0 ⇒ `settled_no_payment` (no paid status to read, decisions §303), below `OrigInvValue` ⇒ partially paid, else open |
-| `void_invoice` | not automated (`False`) — reversing a posted AP invoice is an adjustment / credit in an open period, an accountant's call |
-| `list_vendors` / `list_gl_accounts` | `COMFND` on `ApSupplier` / `GenMaster` (`AccountType` A/L/C/R/E → asset/liability/equity/revenue/expense) |
-| `list_pos` | `COMFND` on `PorMasterHdr` + `PorMasterDetail` (total = Σ qty × price) + `ApSupplier` for names, one session; a PO with no lines returned is skipped, never synced at 0 |
+| `get_invoice_status` | `COMFND` on `ApInvoice` — below `OrigInvValue` ⇒ partially paid, else open; `MthInvBal1` 0 ⇒ a second `COMFND` on `ApInvoicePay` by the same key: `paid` only with a payment row (`TrnType` `P`, non-zero `TrnValue`), else `settled_no_payment` (decisions §303) |
+| `void_invoice` | never (`False`) — reversing a posted AP invoice is an adjustment / credit in an open period, an accountant's call, and the adapter deletes nothing |
+| `list_vendors` / `list_gl_accounts` | `COMFND` on `ApSupplier` / `GenMaster` (`AccountType` A/L/C/R/E → asset/liability/equity/revenue/expense). A supplier with `OnHold = Y`, and a ledger code with `AccOnHldFlag = Y` or `ControlAccFlag = Y`, is emitted `active=False`: APSTIN refuses all three on a manual AP distribution |
+| `list_pos` | `PorMasterHdr`, `PorMasterDetail` and `ApSupplier` in one session, each read whole by a keyset walk (below); `vendor_erp_id` = `PorMasterHdr.Supplier`, the id `list_vendors` reports; `CancelledFlag = Y` or `OrderStatus *` ⇒ cancelled, `9` ⇒ closed |
+
+- **POs are read whole or not at all.** COMFND returns the first `ReturnRows`
+  rows in `OrderBy` order and does not page, so the PO listing walks a keyset
+  cursor (`PurchaseOrder GT <last>`): headers and suppliers 1,000 a page up
+  to `SYNC_LISTING_MAX_ROWS`, lines 5,000 a page. A full page of lines can end
+  mid-PO, so that PO's lines are dropped and re-read from the next page; a PO
+  with more lines than one page is skipped. A failed page, a walk past the
+  bound or a host that ignores the cursor raises `ErpListingIncomplete` (the
+  sync answers 502 and syncs nothing) — it used to return the first 1,000
+  POs, oldest first, and never the newest.
+- **A PO total is in the PO's currency, or the PO is skipped**
+  (`syspro.po_total`). A merchandise line is `MOrderQty × price`, the price
+  being `MForeignPrice` when SYSPRO filled one (a foreign-currency order; the
+  local `MPrice` labelled with the header `Currency` was the old defect), else
+  `MPrice`. A freight / misc-charge line (`LineType` 4 / 5) adds its
+  `NMscChargeValue`; a comment line (6) adds nothing. A PO with a line
+  discount, a price unit of measure other than the order's, a charge on a
+  foreign order, or a line with no price is skipped (logged as a count) until a
+  sandbox confirms the arithmetic — never synced at a total the PO match
+  would trust.
 
 - **`erp_document_id` is `<supplier>|<invoice>`** — SYSPRO keys an AP invoice
   by that pair, not by a surrogate id.
@@ -1921,14 +1941,43 @@ query-string parameters, which is how the WCF REST host takes them:
   it can be connected.
 - **Failure messages** never echo the response: SYSPRO's error text quotes the
   submitted fields back. HTTP failures use `erp_failure_message("SYSPRO",
-  status)`; a business-object rejection is `SYSPRO post failed: invoice
-  rejected by APSTIN`.
+  status)`.
+- **APSTIN refusals are coded** (`classify_apstin_error`), matched on the
+  message's wording with every quoted value stripped first, so a supplier,
+  ledger code or invoice number cannot steer the match. Because the post asks
+  `ApplyIfEntireDocumentValid=Y`, a refused document posted nothing, so a
+  recognised refusal is non-retryable **and** `not_posted`:
+
+  | Stem | Code |
+  |---|---|
+  | invoice … already on file / exists | `duplicate_invoice_number` |
+  | supplier … on hold | `vendor_inactive` |
+  | ledger code / account … on hold, control account, not on file | `account_inactive` (`params.accounts` = our GL codes for the ledger codes the message quotes) |
+  | … period … | `period_closed` |
+
+  An expired session or a full e.net licence count is retryable (and
+  `not_posted`). Any other refusal is non-retryable but **not** `not_posted`
+  (`SYSPRO post failed: invoice rejected by APSTIN`), and an unreadable answer
+  stays retryable — the next attempt's idempotency lookup finds the invoice if
+  it did post. SYSPRO does not publish the exact strings; they are on the
+  sandbox list in `docs/followups.md`.
+- **`post_invoice` never raises past its config checks** (the https / SSRF
+  guard on `base_url`). A rejected operator / password / company — or a
+  missing credential — is `not_connected` (an administrator reconnects); every
+  e.net seat in use, or a company locked for the moment, is retryable and
+  `not_posted`; a non-200 logon is the shared HTTP failure; a transport error
+  is retryable, and `not_posted` unless it hit the post itself. The status read
+  and the syncs still raise `SysproError` for their callers.
 - **Schema provenance.** SYSPRO ships its business-object schemas with each
   install (`<SYSPRO>\Base\Schemas\APSTIN*.XSD`, `COMFND.XSD`) rather than
   publishing them. The `COMFND` document matches the published open-source
-  client (wildland/syspro-ruby); the APSTIN element names and the
-  `ApInvoice` / `PorMasterHdr` / `PorMasterDetail` column names follow SYSPRO's
-  field names but have not yet been checked against a live install — see
+  client (wildland/syspro-ruby). The column names the adapter reads
+  (`ApSupplier.OnHold`, `GenMaster.AccOnHldFlag` / `ControlAccFlag`,
+  `ApInvoicePay`, `PorMasterHdr.CancelledFlag`, `PorMasterDetail.LineType` /
+  `MForeignPrice` / `NMscChargeValue` / `MDisc*` / `MPriceUom`) are
+  corroborated by a third-party column dump of a SYSPRO 8 database (issue
+  #650); the APSTIN element names, the error wording and several code values
+  have not yet been checked against a live install — see
   `docs/followups.md`.
 
 Tests: `backend/tests/test_erp_syspro_adapter.py`. fake-erp surface:
