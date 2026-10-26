@@ -1018,6 +1018,8 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             headers = await self._headers()
             async with self._client(timeout=30, enforce=True) as client:
                 rows = (await self._pages(client, headers, f"{AP}/purchaseorders")).rows
+        except ErpCallBudgetExhausted:
+            raise  # the sync says why (a coded 429), never "no purchase orders"
         except Exception:
             return []
         pos = []

@@ -1324,3 +1324,14 @@ def test_a_notice_nobody_received_is_tried_again(monkeypatch, quota_notices):
     for _ in range(3):
         _post(FakeSky(), _org_config("org-a"))
     assert attempts == ["tenant_budget", "tenant_budget"]
+
+
+def test_a_po_sync_refused_by_the_budget_says_so_rather_than_finding_none(monkeypatch):
+    monkeypatch.setattr(settings, "erp_blackbaud_tenant_daily_call_budget", 1)
+    fake = FakeSky()
+    fake.collections["/accountspayable/v1/purchaseorders"] = [
+        {"order_number": i, "order_total": 1} for i in range(250)
+    ]
+    with pytest.raises(ErpCallBudgetExhausted):
+        _run(fake, BlackbaudFeNxtAdapter(_org_config("org-a")).list_pos)
+    assert len(fake.requests) == 1

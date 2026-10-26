@@ -605,6 +605,45 @@ async def test_call_erp_hands_each_earlier_attempts_invoice_date_to_the_next():
     assert ATTEMPT_INVOICE_DATES_KEY not in inst.state_data
 
 
+@pytest.mark.asyncio
+async def test_an_attempt_that_left_nothing_gives_its_date_slot_back():
+    """Only an attempt that may have reached the ERP keeps its date. A refusal
+    made before any call (`not_posted`: a budget refusal, a pre-flight one)
+    names no bill, so editing the date and being refused again and again never
+    crowds out the date of a bill that may exist (decisions §322)."""
+    from datetime import date
+
+    from app.services.erp import (
+        ATTEMPT_INVOICE_DATES_KEY,
+        ErpPostFailedError,
+        ErpPostRefusedError,
+        _call_erp,
+    )
+    from app.services.erp_adapters.base import ErpPostResult, erp_preflight_refusal
+
+    results = [
+        ErpPostResult(success=False, message="timed out"),
+        *[erp_preflight_refusal("X", "erp_call_budget_exhausted") for _ in range(7)],
+    ]
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            return results.pop(0)
+
+    invoice = _invoice()
+    invoice.invoice_date, invoice.due_date = date(2026, 1, 1), date(2026, 3, 31)
+    inst = _instance(state_data={"erp_retries": 0})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostFailedError):
+            await _call_erp(_line_items_db([]), invoice, {"type": "x"}, instance=inst)
+        for day in range(2, 9):
+            invoice.invoice_date = date(2026, 1, day)
+            with pytest.raises(ErpPostRefusedError):
+                await _call_erp(_line_items_db([]), invoice, {"type": "x"}, instance=inst)
+
+    assert inst.state_data[ATTEMPT_INVOICE_DATES_KEY] == ["2026-01-01"]
+
+
 # ---------------------------------------------------------------------------
 # _call_erp — line items reach the adapter payload.
 # ---------------------------------------------------------------------------
