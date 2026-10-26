@@ -98,6 +98,10 @@ CONTROL_TABLES: frozenset[str] = frozenset(
         # workspace_closure.py). It outlives the tenant it describes, so it
         # cannot live in that tenant's DB. Control-plane only.
         "workspace_closures",
+        # The ledger of sub-processor change notices sent to each organisation
+        # (see app/models/subprocessor_notice.py). Keyed by org id, outlives a
+        # closed workspace on purpose. Control-plane only.
+        "subprocessor_notices",
     }
 )
 

@@ -79,6 +79,7 @@ SWEEP_BILLING_AI_OVERAGE = "billing-ai-overage"
 SWEEP_COMMERCE_SYNC = "commerce-sync"
 SWEEP_ERP_STATUS_SYNC = "erp-status-sync"
 SWEEP_ERP_CONNECTION_HEALTH = "erp-connection-health"
+SWEEP_SUBPROCESSOR_NOTICES = "subprocessor-notices"
 
 #: Every sweep name → the ``Settings`` attribute that gates it. The mapping is
 #: what lets the health endpoint distinguish "operator turned this off" from
@@ -102,6 +103,7 @@ SWEEP_ENABLED_FLAGS: dict[str, str] = {
     SWEEP_COMMERCE_SYNC: "commerce_sync_enabled",
     SWEEP_ERP_STATUS_SYNC: "erp_status_sync_enabled",
     SWEEP_ERP_CONNECTION_HEALTH: "erp_connection_health_enabled",
+    SWEEP_SUBPROCESSOR_NOTICES: "subprocessor_notices_enabled",
 }
 
 ALL_SWEEPS: tuple[str, ...] = tuple(SWEEP_ENABLED_FLAGS)
