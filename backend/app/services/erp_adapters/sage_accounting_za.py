@@ -723,7 +723,12 @@ class SageAccountingZaAdapter(ErpAdapter):
     async def list_pos(self) -> list[PoPayload]:
         """Purchase orders. ``currency`` stays None: the API reports a currency
         only as a numeric id, never an ISO code, and a default would be a label
-        nobody gave the figure (decisions §197)."""
+        nobody gave the figure (decisions §197).
+
+        ``vendor_erp_id`` is ``SupplierId`` — the supplier ``ID`` that
+        ``list_vendors`` reports as ``erp_vendor_id`` — so the sync links the PO
+        by id, not by ``SupplierName``, which a rename breaks and two suppliers
+        can share."""
         try:
             rows = await self._list("PurchaseOrder")
         except Exception:
@@ -735,10 +740,12 @@ class SageAccountingZaAdapter(ErpAdapter):
             if not number or total is None:
                 continue
             delivery = str(row.get("DeliveryDate") or "")[:10]
+            supplier_id = _int_id(row.get("SupplierId"))
             pos.append(
                 PoPayload(
                     po_number=str(number),
                     vendor_name=row.get("SupplierName") or None,
+                    vendor_erp_id=str(supplier_id) if supplier_id is not None else None,
                     total=total,
                     status=_po_status(row.get("Status")),
                     expected_delivery_date=_iso_date(delivery),

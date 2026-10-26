@@ -2038,6 +2038,9 @@ SAGEZA_POS: list[dict] = [
     {
         "ID": 501,
         "DocumentNumber": "PO-SAGEZA-501",
+        # Supplier A's ID: the id the vendor sync stamps, which the PO sync
+        # links by before the name.
+        "SupplierId": 101,
         "SupplierName": "Fake Sage ZA Supplier A",
         "Total": 1150.0,
         "Status": "Unprocessed",
