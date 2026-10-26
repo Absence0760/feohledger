@@ -93,7 +93,10 @@ from app.services.erp_adapters.base import (
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -1097,6 +1100,9 @@ class SysproAdapter(ErpAdapter):
             cursor = last
 
     async def list_pos(self) -> list[PoPayload]:
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
         """PO headers, totals computed from their lines (:func:`po_total`),
         each linked to its supplier by ``PorMasterHdr.Supplier`` — the id
         :meth:`list_vendors` reports — with the supplier's name as fallback.
@@ -1105,7 +1111,8 @@ class SysproAdapter(ErpAdapter):
         gets :class:`ErpListingIncomplete`. A PO with no lines, with lines that
         could not be read whole, or with a total that cannot be computed
         exactly is skipped rather than synced with a total that would mislead
-        the PO match.
+        the PO match — and named in ``skipped`` with its reason, so the sync
+        can stop trusting a total an earlier sync stored for it (§323).
 
         Whether a PO is foreign is decided from its header ``Currency``
         against the company's local currency (``GetLogonProfile``'s
@@ -1131,19 +1138,24 @@ class SysproAdapter(ErpAdapter):
         names = {r["Supplier"]: r.get("SupplierName") for r in suppliers if r.get("Supplier")}
 
         pos = []
-        unpriced = 0
-        unplaced = 0
+        skipped: list[SkippedPo] = []
         for row in headers:
             po_number = row.get("PurchaseOrder")
-            if not po_number or po_number not in lines or po_number in unread:
+            if not po_number:
+                continue
+            if po_number in unread:
+                skipped.append(SkippedPo(po_number, PoSkipReason.lines_unread))
+                continue
+            if po_number not in lines:
+                skipped.append(SkippedPo(po_number, PoSkipReason.no_lines))
                 continue
             foreign = po_is_foreign(row.get("Currency"), local_currency)
             if foreign is None:
-                unplaced += 1
+                skipped.append(SkippedPo(po_number, PoSkipReason.local_currency_unknown))
                 continue
             total = po_total(lines[po_number], foreign=foreign)
             if total is None:
-                unpriced += 1
+                skipped.append(SkippedPo(po_number, PoSkipReason.unpriceable))
                 continue
             supplier = row.get("Supplier") or None
             pos.append(
@@ -1156,16 +1168,20 @@ class SysproAdapter(ErpAdapter):
                     currency=row.get("Currency") or None,
                 )
             )
-        if unpriced or unread or unplaced:
+        if skipped:
+            counts = {reason: 0 for reason in PoSkipReason}
+            for skip in skipped:
+                counts[skip.reason] += 1
             logger.warning(
                 "SYSPRO PO sync skipped %d purchase order(s) whose total cannot be computed "
-                "exactly, %d whose lines exceed one page and %d labelled with a currency "
-                "that cannot be placed (local currency unreadable)",
-                unpriced,
-                len(unread),
-                unplaced,
+                "exactly, %d whose lines exceed one page, %d with no lines and %d labelled "
+                "with a currency that cannot be placed (local currency unreadable)",
+                counts[PoSkipReason.unpriceable],
+                counts[PoSkipReason.lines_unread],
+                counts[PoSkipReason.no_lines],
+                counts[PoSkipReason.local_currency_unknown],
             )
-        return pos
+        return PoListing(pos=pos, skipped=skipped)
 
     async def _local_currency(
         self, client: httpx.AsyncClient, base: str, session: str

@@ -265,6 +265,8 @@ async def _candidate_pos(
                 select(PurchaseOrder).where(
                     PurchaseOrder.vendor_id == vendor_id,
                     PurchaseOrder.status == "open",
+                    # Never sum a total the ERP no longer vouches for (§323).
+                    PurchaseOrder.total_unverifiable_reason.is_(None),
                 )
             )
         )

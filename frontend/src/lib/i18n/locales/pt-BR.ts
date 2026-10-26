@@ -602,6 +602,7 @@ export const messages = {
 	'invoices.warning.poAmountVariance': 'Variação de valor {variancePct} em relação ao pedido {poNumber} (nota {invoiceAmount} contra pedido {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Variação de valor {variancePct} em relação ao pedido {poNumber}, que não registra moeda (nota {invoiceAmount} contra pedido {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'A nota está em {invoiceCurrency}, mas o pedido {poNumber} está em {poCurrency} — os valores não foram comparados',
+	'invoices.warning.poTotalUnverifiable': 'O total do pedido {poNumber} não pôde ser confirmado pelo ERP na última sincronização — os valores não foram comparados',
 	'invoices.warning.poPartialReceipt': 'Correspondência parcial de 3 vias — correspondência {matchType} com o pedido {poNumber}, mas apenas parte da quantidade pedida foi recebida',
 	'invoices.warning.poOverReceipt': 'Recebimento em excesso: {receivedQuantity} recebidas contra {orderedQuantity} pedidas (+{excessQuantity}) no pedido {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Foram recebidas mais mercadorias do que as pedidas no pedido {poNumber}',
@@ -630,6 +631,7 @@ export const messages = {
 	'invoices.warning.glCodeStalePrior': 'A conta contábil “{code}” em cache para o fornecedor não está mais no plano de contas ativo.',
 	'invoices.poMatch.issue.poNotFound': 'Pedido {poNumber} não encontrado',
 	'invoices.poMatch.issue.currencyMismatch': 'Divergência de moeda: nota em {invoiceCurrency}, pedido em {poCurrency} — valores não comparados',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'Total do pedido não confirmado pelo ERP na última sincronização — valores não comparados',
 	'invoices.poMatch.issue.amountMismatch': 'Divergência de valor: nota {invoiceAmount} contra pedido {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Divergência de valor: nota {invoiceAmount} contra pedido {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Divergência de valor: nota {invoiceAmount} contra pedido {poTotal} ({variancePct})',
@@ -2644,6 +2646,8 @@ export const messages = {
 	'purchaseOrders.toast.loadListFailed': 'Falha ao carregar os pedidos de compra',
 	'purchaseOrders.toast.loadFailed': 'Falha ao carregar o pedido de compra',
 	'purchaseOrders.toast.syncFailed': 'Falha na sincronização com o ERP',
+	'purchaseOrders.toast.unverifiable':
+		'O ERP não conseguiu confirmar o total de {n, plural, one {# pedido existente} other {# pedidos existentes}} — as notas que {n, plural, one {o citam} other {os citam}} ficam retidas até que uma sincronização o confirme',
 	'purchaseOrders.loadMore': 'Carregar mais ({shown} de {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Exibindo # pedido de compra} other {Exibindo todos os # pedidos de compra}}',

@@ -1148,3 +1148,41 @@ def test_xml_illegal_characters_are_dropped_and_nothing_else():
 
     dirty = "a\x00b\x08c\x09d\x0ae\x0bf\x0dg\x1fh\ufffei\uffffj\x7fk\u00e9"
     assert _clean(dirty) == "abc\x09d\x0aef\x0dghij\x7fk\u00e9"
+
+
+def test_list_pos_report_names_every_po_it_skips_and_why(monkeypatch):
+    """§323: the sync can only stop trusting an earlier total if the adapter
+    says which POs it left out. Each skip carries its coded reason."""
+    from app.services.erp_adapters.base import PoSkipReason
+
+    monkeypatch.setattr("app.services.erp_adapters.syspro._PO_DETAIL_PAGE", 2)
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = [
+        {"PurchaseOrder": "A", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "B", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "C", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
+        {"PurchaseOrder": "D", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "E", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+    ]
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "C", "MOrderQty": "1", "MPrice": "50", "MForeignPrice": "0"},
+        {"PurchaseOrder": "D", "MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5"},
+        {"PurchaseOrder": "E", "MOrderQty": "2", "MPrice": "3"},
+    ]
+    report = _run(fake, SysproAdapter(CONFIG).list_pos_report)
+    assert [(p.po_number, p.total) for p in report.pos] == [("E", Decimal("6"))]
+    assert [(s.po_number, s.reason) for s in report.skipped] == [
+        ("A", PoSkipReason.lines_unread),
+        ("B", PoSkipReason.no_lines),
+        ("C", PoSkipReason.unpriceable),
+        ("D", PoSkipReason.unpriceable),
+    ]
+
+    fake.profile_body = "ERROR: unavailable"
+    report = _run(fake, SysproAdapter(CONFIG).list_pos_report)
+    assert ("C", PoSkipReason.local_currency_unknown) in [
+        (s.po_number, s.reason) for s in report.skipped
+    ]

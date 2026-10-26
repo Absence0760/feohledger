@@ -220,6 +220,7 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0119     | Control | `workspace_closures` | Creates `workspace_closures`, the control-plane record of a self-service workspace closure that outlives the deleted tenant; no foreign keys; no-op on a tenant DB (decisions §306). |
 | 0120     | Tenant  | `contracts`  | Adds `contracts.activated_at` timestamptz; backfills it from the first `contract.active` audit row, else from an `active`/`expired`/`terminated` status (decisions §306). |
 | 0122     | Control | `subprocessor_notices` | Creates `subprocessor_notices`, the ledger of sub-processor change notices sent per (change-log entry, organisation); UNIQUE pair, no foreign key; downgrade keeps it; no-op on a tenant DB (decisions §321). |
+| 0123     | Tenant  | `purchase_orders` | Adds `purchase_orders.total_unverifiable_reason` varchar(40) — set by the ERP PO sync when the ERP still has the PO but the adapter could not price it exactly; the PO match refuses to compare against the row while it is set. No backfill (decisions §323). |
 | 0121     | Tenant  | `exceptions` | Adds `exceptions.erp_report` jsonb — what the ERP reported, as data, on the reconciliation rows the ERP paths open (the payment it reported and could not be recorded, with the refusal code). No backfill (decisions §319). |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).

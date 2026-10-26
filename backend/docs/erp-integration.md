@@ -99,6 +99,18 @@ class ErpAdapter:
         """
         ...
 
+    async def list_pos_report(self) -> PoListing:
+        """What the PO sync calls: `PoListing(pos, skipped)`.
+
+        The default wraps `list_pos` and reports nothing skipped, so
+        an adapter that never leaves a PO out needs no change. An
+        adapter that DOES skip a PO because it cannot state its
+        total exactly overrides this, names each one as
+        `SkippedPo(po_number, PoSkipReason)` and keeps `list_pos`
+        returning `.pos` (decisions §323). SYSPRO does.
+        """
+        ...
+
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """Pull the chart of accounts for `POST /api/gl-accounts/sync-erp`.
 
@@ -1429,7 +1441,24 @@ by the ERP's supplier id (`PoPayload.vendor_erp_id`, matched against the
 Sage Intacct's `vendor.id`, Merge.dev's `vendor`), falling back to the vendor
 name; an adapter that does not read the id uses the name alone. Linking by id
 is what keeps a PO on the right vendor after a rename on either side, and when
-two vendors share a name. **Run the vendor sync before the PO sync** on a new
+two vendors share a name.
+
+**A PO the adapter skips is not left trusted.** An adapter that cannot state a
+PO's total exactly (SYSPRO: a discount, a mixed-currency order, a currency it
+cannot place) leaves it out and names it in `list_pos_report().skipped`. The sync
+creates nothing for it, but stamps `purchase_orders.total_unverifiable_reason`
+(the `PoSkipReason`) on every existing row with that number in the same scope,
+so the PO match stops comparing invoices against the total an earlier sync
+stored (`po-matching.md` § A PO total the ERP no longer vouches for). The next
+sync that prices the PO clears it. Invoices citing a PO whose mark or total
+changed are re-matched in the same request (best-effort, like the QMS sync).
+The response carries `not_priced` (POs the ERP has that were not synced) and
+`unverifiable` (existing rows now marked), and the purchase-orders page says so
+in a warning toast. Adapters that do not override `list_pos_report` report
+nothing skipped. **Blackbaud FE NXT still skips a PO with no order total
+silently**: its wiring is tracked in `docs/followups.md`.
+
+**Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
 missing link once the vendor exists. It never re-points a PO that already has
 a vendor. The QuickBooks PO sync also no
@@ -1927,7 +1956,9 @@ query-string parameters, which is how the WCF REST host takes them:
   discount, a price unit of measure other than the order's, a charge on a
   foreign order, or a line with no price is skipped (logged as a count) until a
   sandbox confirms the arithmetic — never synced at a total the PO match
-  would trust.
+  would trust. Every skipped PO (no lines, lines past one page, unpriceable,
+  local currency unknown) is reported by `list_pos_report`, so an existing
+  row with that number is marked unverifiable (decisions §323).
 
 - **`erp_document_id` is `<supplier>|<invoice>`** — SYSPRO keys an AP invoice
   by that pair, not by a surrogate id.

@@ -4381,6 +4381,12 @@ abstract class AppLocalizations {
     String poCurrency,
   );
 
+  /// No description provided for @invoiceWarningPoTotalUnverifiable.
+  ///
+  /// In en, this message translates to:
+  /// **'The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared'**
+  String invoiceWarningPoTotalUnverifiable(String poNumber);
+
   /// No description provided for @invoiceWarningPoPartialReceipt.
   ///
   /// In en, this message translates to:
@@ -4613,6 +4619,12 @@ abstract class AppLocalizations {
     String invoiceCurrency,
     String poCurrency,
   );
+
+  /// No description provided for @invoicePoMatchIssuePoTotalUnverifiable.
+  ///
+  /// In en, this message translates to:
+  /// **'PO total not confirmed by the ERP on its last sync — amounts not compared'**
+  String get invoicePoMatchIssuePoTotalUnverifiable;
 
   /// No description provided for @invoicePoMatchIssueAmountMismatch.
   ///

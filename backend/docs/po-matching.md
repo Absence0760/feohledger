@@ -146,6 +146,43 @@ Covered by `backend/tests/test_po_matching_algorithm.py` (the guard),
 `test_po_matching_critical_path.py::test_realdb_currency_guard_against_recorded_po_currencies`
 and the three agent test files.
 
+### A PO total the ERP no longer vouches for
+
+An ERP adapter leaves out a PO whose total it cannot state exactly (SYSPRO: a
+line discount, a mixed-currency order, a currency it cannot place against the
+company's; see `erp-integration.md`). Before decisions §323 that was silent: a
+PO synced earlier at 100.00 kept 100.00 after the ERP amended it into something
+the adapter could not price, and every invoice for 100.00 kept reading
+`matched` against it.
+
+The adapter now names each skipped PO (`ErpAdapter.list_pos_report`), and the
+PO sync stamps `purchase_orders.total_unverifiable_reason` (a `PoSkipReason`:
+`unpriceable`, `lines_unread`, `no_lines`, `local_currency_unknown`) on every
+existing row with that number in the synced entity's scope. While it is set:
+
+- the matcher **compares nothing**: `status = "mismatch"`,
+  `within_tolerance = false`, `amount_variance` / `amount_variance_pct` =
+  `null`, `MatchResult.po_total_unverifiable_reason` carries the reason, and the
+  one issue is `po_match.issue.po_total_unverifiable`. The 3-way receipt-value
+  leg is skipped too, since it would scale the same stale total;
+- `refresh_warnings` raises the `po_total_unverifiable` warning and a
+  payment-blocking `po_mismatch` exception at `warning` — the currency guard's
+  treatment, for the same reason: with no figure there is no way to show the
+  invoice is not over-billing (`blocking_finding_types` agrees);
+- the invoice modal hides the PO total (the stale figure is not the PO's) and
+  shows the issue instead;
+- `missing_po_v1` and `multi_po_split_v1` never take such a PO as a candidate.
+
+The sync re-matches the invoices citing a PO whose mark or total changed, so the
+hold lands at sync time. The next sync that prices the PO clears the mark and
+lifts the hold the same way (`_close_cleared_po_exceptions`).
+
+Covered by `test_po_matching_algorithm.py` (the two matcher cases),
+`test_po_matching_wiring.py` (the raise rule and the pure predicate agree),
+`test_purchase_orders.py::test_sync_erp_marks_an_already_synced_po_the_adapter_now_skips`
+(sync → mark → hold → re-price → clear, end to end) and
+`test_exception_agents_missing_po.py`.
+
 ### Cancelled receipts do not count as delivered goods
 
 The GR query excludes any receipt whose `status` is in

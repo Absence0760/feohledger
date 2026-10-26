@@ -695,6 +695,14 @@ def test_status_str_handles_simplenamespace_mock():
     "fields",
     [
         {"status": "no_po"},
+        # The PO's total is one its ERP no longer vouches for (decisions §323).
+        {
+            "status": "mismatch",
+            "currency_check": "same",
+            "po_total_unverifiable_reason": "unpriceable",
+            "amount_variance": None,
+            "amount_variance_pct": None,
+        },
         {
             "status": "mismatch",
             "currency_check": "different",

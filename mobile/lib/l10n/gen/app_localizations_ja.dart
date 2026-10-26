@@ -2643,6 +2643,11 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoTotalUnverifiable(String poNumber) {
+    return '発注 $poNumber の合計は前回の同期で ERP から確認できなかったため、金額を比較していません';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return '3 ウェイ照合が部分一致 — 発注 $poNumber に対する$matchType照合ですが、発注数量の一部のみ入荷しています';
   }
@@ -2846,6 +2851,10 @@ class AppLocalizationsJa extends AppLocalizations {
   ) {
     return '通貨の不一致: 請求は $invoiceCurrency、発注は $poCurrency — 金額は比較されていません';
   }
+
+  @override
+  String get invoicePoMatchIssuePoTotalUnverifiable =>
+      '発注の合計は前回の同期で ERP により確認されていません — 金額は比較されていません';
 
   @override
   String invoicePoMatchIssueAmountMismatch(

@@ -679,6 +679,7 @@ export const en = {
 	'invoices.warning.poAmountVariance': 'Amount variance {variancePct} vs PO {poNumber} (invoice {invoiceAmount} vs PO {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared',
+	'invoices.warning.poTotalUnverifiable': 'The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared',
 	'invoices.warning.poPartialReceipt': 'Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received',
 	'invoices.warning.poOverReceipt': 'Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity}) on PO {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'More goods received than ordered on PO {poNumber}',
@@ -707,6 +708,7 @@ export const en = {
 	'invoices.warning.glCodeStalePrior': 'Cached vendor GL code “{code}” is no longer in the active chart of accounts.',
 	'invoices.poMatch.issue.poNotFound': 'PO {poNumber} not found',
 	'invoices.poMatch.issue.currencyMismatch': 'Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'PO total not confirmed by the ERP on its last sync — amounts not compared',
 	'invoices.poMatch.issue.amountMismatch': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
@@ -2811,6 +2813,8 @@ export const en = {
 	'purchaseOrders.toast.loadListFailed': 'Failed to load purchase orders',
 	'purchaseOrders.toast.loadFailed': 'Failed to load PO',
 	'purchaseOrders.toast.syncFailed': 'ERP sync failed',
+	'purchaseOrders.toast.unverifiable':
+		'The ERP could not confirm the total of {n, plural, one {# existing PO} other {# existing POs}} — invoices citing {n, plural, one {it are} other {them are}} held until a sync confirms it',
 	'purchaseOrders.loadMore': 'Load more ({shown} of {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Showing all # PO} other {Showing all # POs}}',

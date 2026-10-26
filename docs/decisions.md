@@ -15160,3 +15160,57 @@ publication, the CLI), `test_migration_0122_subprocessor_notices.py`,
 `test_deploy_decrypt_env.py` (the warning),
 `frontend/src/lib/legal/subprocessorChangelog.test.ts` (the email's objection
 address is `CONTACT.privacy`).
+
+## 323. A PO the ERP adapter cannot price is reported, and an earlier total for it stops being matched against (PR #670 money review, migration 0123, 2026-10-26)
+
+**The problem.** Adapters skip a PO whose total they cannot state exactly:
+SYSPRO a PO with a line discount, a price unit of measure, a mixed-currency
+order or a currency it cannot place (§303's issue #650 work); Blackbaud FE NXT
+one with no `order_total`. Skipping is right for a PO the sync has never seen.
+For one it synced earlier it was silent: the row kept the old total, the sync
+said nothing, and the 3-way match kept passing invoices against a figure the
+ERP no longer stated. Nothing in the sync could tell "the ERP skipped this PO"
+from "this PO was never here".
+
+**The rule.** An adapter that skips a PO says so, and the sync stops trusting
+the row:
+
+- **Contract.** `ErpAdapter.list_pos_report() -> PoListing(pos, skipped)`, each
+  skip a `SkippedPo(po_number, PoSkipReason)` with a coded reason
+  (`unpriceable`, `lines_unread`, `no_lines`, `local_currency_unknown`). The
+  base default wraps `list_pos` and reports nothing skipped, so every adapter
+  that does not override it — and every test double that patches `list_pos` —
+  behaves exactly as before. It is additive on purpose: a second abstract method
+  would have broken adapters other sessions were editing. SYSPRO overrides it;
+  Blackbaud's wiring is a `docs/followups.md` entry.
+- **The mark.** The sync stamps `purchase_orders.total_unverifiable_reason` on
+  every existing row with a skipped number, in the scope the upsert uses (this
+  entity plus unstamped rows). It does not change `total`: there is no honest
+  figure to write, and erasing one would invent a zero. The next sync that
+  prices the PO clears the mark. The response reports `not_priced` and
+  `unverifiable`, and the purchase-orders page shows a warning toast.
+- **The match.** While the mark is set, `po_matching` compares nothing —
+  `mismatch`, no variance, issue `po_total_unverifiable` — and skips the
+  receipt-value leg. `refresh_warnings` raises a payment-blocking `po_mismatch`
+  at `warning`, the currency guard's treatment and for its reason: with no
+  trustworthy figure there is no way to show the invoice is not over-billing.
+  The missing-PO and multi-PO-split agents never take such a PO as a candidate.
+- **When it lands.** The sync re-matches the invoices citing every PO whose mark
+  or total it changed (best-effort, as the QMS sync does), so the hold appears
+  at sync time rather than at the invoice's next edit, and lifts the same way.
+
+**Considered and rejected.**
+
+- *Setting the PO to `cancelled` or deleting it.* Both are claims the ERP did
+  not make; an invoice against a deleted PO also reads `po_not_found`, which
+  sends the missing-PO agent looking for another PO to link.
+- *Zeroing `total`.* `NOT NULL` aside, a zero total is a figure, and the
+  matcher would compare against it.
+- *Holding only invoices still pre-approval.* The point of the mark is that
+  nothing pays against an unverified total, which is the payment gate's job.
+
+Guards: `tests/test_purchase_orders.py` (sync → mark → hold → re-price →
+clear, the entity scope, the base default), `test_po_matching_algorithm.py`,
+`test_po_matching_wiring.py`, `test_exception_agents_missing_po.py`,
+`test_erp_syspro_adapter.py::test_list_pos_report_names_every_po_it_skips_and_why`,
+`test_migration_0123_po_total_unverifiable.py`.

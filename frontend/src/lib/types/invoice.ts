@@ -314,6 +314,10 @@ export interface PoMatch {
 	 *  `different` means the amounts were not compared, `unknown` that they were
 	 *  compared at face value because the PO records no currency. */
 	currency_check?: 'same' | 'different' | 'unknown' | null;
+	/** Set when the PO's last ERP sync could not state its total exactly
+	 *  (`erp_adapters.base.PoSkipReason`): the amounts were not compared and
+	 *  `po_total` is a stale figure the modal does not show (decisions §323). */
+	po_total_unverifiable_reason?: string | null;
 	gr_id: string | null;
 	/** `null` when the invoice and the PO are in different currencies. */
 	amount_variance: MoneyAmount;

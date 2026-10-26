@@ -89,6 +89,7 @@ def _po(*, total: Decimal, vendor_id=None, line_items=None, currency: str | None
         currency=currency,
         vendor_id=vendor_id,
         line_items=line_items or [],
+        total_unverifiable_reason=None,
     )
 
 

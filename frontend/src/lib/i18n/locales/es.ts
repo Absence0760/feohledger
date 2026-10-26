@@ -600,6 +600,7 @@ export const messages = {
 	'invoices.warning.poAmountVariance': 'Variación de importe {variancePct} frente al pedido {poNumber} (factura {invoiceAmount} frente a pedido {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Variación de importe {variancePct} frente al pedido {poNumber}, que no registra ninguna moneda (factura {invoiceAmount} frente a pedido {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'La factura está en {invoiceCurrency}, pero el pedido {poNumber} está en {poCurrency}; los importes no se compararon',
+	'invoices.warning.poTotalUnverifiable': 'El total del pedido {poNumber} no se pudo confirmar en el ERP en la última sincronización; los importes no se compararon',
 	'invoices.warning.poPartialReceipt': 'Coincidencia parcial de 3 vías — coincidencia {matchType} con el pedido {poNumber}, pero solo se ha recibido parte de la cantidad pedida',
 	'invoices.warning.poOverReceipt': 'Exceso de recepción: {receivedQuantity} recibidas frente a {orderedQuantity} pedidas (+{excessQuantity}) en el pedido {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Se han recibido más mercancías de las pedidas en el pedido {poNumber}',
@@ -628,6 +629,7 @@ export const messages = {
 	'invoices.warning.glCodeStalePrior': 'La cuenta contable «{code}» guardada para el proveedor ya no está en el plan de cuentas activo.',
 	'invoices.poMatch.issue.poNotFound': 'No se encontró el pedido {poNumber}',
 	'invoices.poMatch.issue.currencyMismatch': 'Discrepancia de moneda: factura en {invoiceCurrency}, pedido en {poCurrency}; importes no comparados',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'Total del pedido no confirmado por el ERP en la última sincronización; importes no comparados',
 	'invoices.poMatch.issue.amountMismatch': 'Discrepancia de importe: factura {invoiceAmount} frente a pedido {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Discrepancia de importe: factura {invoiceAmount} frente a pedido {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Discrepancia de importe: factura {invoiceAmount} frente a pedido {poTotal} ({variancePct})',
@@ -2641,6 +2643,8 @@ export const messages = {
 	'purchaseOrders.toast.loadListFailed': 'Error al cargar las órdenes de compra',
 	'purchaseOrders.toast.loadFailed': 'Error al cargar la orden de compra',
 	'purchaseOrders.toast.syncFailed': 'Error en la sincronización del ERP',
+	'purchaseOrders.toast.unverifiable':
+		'El ERP no pudo confirmar el total de {n, plural, one {# pedido existente} other {# pedidos existentes}}; las facturas que {n, plural, one {lo citan} other {los citan}} quedan retenidas hasta que una sincronización lo confirme',
 	'purchaseOrders.loadMore': 'Cargar más ({shown} de {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Mostrando la # orden de compra} other {Mostrando las # órdenes de compra}}',

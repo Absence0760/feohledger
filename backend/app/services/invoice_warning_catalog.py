@@ -328,6 +328,16 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         "the amounts were not compared",
         {"invoiceCurrency": "text", "poNumber": "text", "poCurrency": "text"},
     ),
+    # The PO's last ERP sync could not state its total exactly, so the total on
+    # record is not compared against (decisions §323). No figure is printed:
+    # the stale one is precisely what must not be presented as the PO's.
+    WarningSpec(
+        "po_total_unverifiable",
+        "po_mismatch",
+        "The total of PO {poNumber} could not be confirmed from the ERP on its last sync — "
+        "the amounts were not compared",
+        {"poNumber": "text"},
+    ),
     WarningSpec(
         "po_partial_receipt",
         "po_mismatch",
@@ -602,6 +612,12 @@ PO_MATCH_ISSUE_SPECS: tuple[WarningSpec, ...] = (
         "Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} "
         "— amounts not compared",
         {"invoiceCurrency": "text", "poCurrency": "text"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "po_total_unverifiable",
+        PO_MATCH_ISSUE_TYPE,
+        "PO total not confirmed by the ERP on its last sync — amounts not compared",
+        {},
     ),
     # Both sides in one known currency — both figures are money in it.
     WarningSpec(

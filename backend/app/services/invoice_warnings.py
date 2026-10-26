@@ -1036,6 +1036,16 @@ async def _refresh_po_match(
         flag = warning("po_not_found", "error", poNumber=invoice.po_number)
         warnings.append(flag)
         await _raise("po_mismatch", "error", flag)
+    elif match.status == "mismatch" and match.po_total_unverifiable_reason:
+        # The PO's last ERP sync could not state its total exactly (decisions
+        # §323): the matcher compared nothing, because the total on the row is
+        # one the ERP no longer vouches for. Blocks like the currency guard —
+        # with no trustworthy figure there is no way to show the invoice is not
+        # over-billing — until a person checks the PO in the ERP or the next
+        # sync prices it again.
+        flag = warning("po_total_unverifiable", "warning", poNumber=match.po_number)
+        warnings.append(flag)
+        await _raise("po_mismatch", "warning", flag)
     elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
         # The currency guard tripped: the two are in different currencies, so
         # the matcher compared nothing and there is no variance to state. Same
@@ -1219,6 +1229,8 @@ def blocking_finding_types(match) -> set[str]:
     two against each other)."""
     found: set[str] = set()
     if match.status == "no_po":
+        found.add("po_mismatch")
+    elif match.status == "mismatch" and match.po_total_unverifiable_reason:
         found.add("po_mismatch")
     elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
         found.add("po_mismatch")

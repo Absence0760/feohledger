@@ -83,6 +83,13 @@ class PurchaseOrder(Base, EntityMixin, TimestampMixin):
     # GoodsReceipt.received_date to compute the data-enrichment on-time-delivery
     # vendor sub-score (migration 0060). NULL = no promised date → excluded.
     expected_delivery_date: Mapped[date | None] = mapped_column(Date)
+    # Set by the ERP PO sync when the ERP still has this PO but the adapter
+    # could not state its total exactly (an `erp_adapters.base.PoSkipReason`
+    # value): `total` is then a figure the ERP no longer vouches for, and
+    # `po_matching` refuses to compare an invoice against it. Cleared by the
+    # next sync that prices the PO. NULL = no such finding. Migration 0123;
+    # decisions §323.
+    total_unverifiable_reason: Mapped[str | None] = mapped_column(String(40))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True

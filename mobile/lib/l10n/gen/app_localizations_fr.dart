@@ -2829,6 +2829,11 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoTotalUnverifiable(String poNumber) {
+    return 'Le total de la commande $poNumber n’a pas pu être confirmé par l’ERP lors de la dernière synchronisation — les montants n’ont pas été comparés';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return 'Correspondance 3 voies partielle — correspondance $matchType avec la commande $poNumber, mais seule une partie de la quantité commandée a été reçue';
   }
@@ -3032,6 +3037,10 @@ class AppLocalizationsFr extends AppLocalizations {
   ) {
     return 'Devises différentes : facture en $invoiceCurrency, commande en $poCurrency — montants non comparés';
   }
+
+  @override
+  String get invoicePoMatchIssuePoTotalUnverifiable =>
+      'Total de la commande non confirmé par l’ERP lors de la dernière synchronisation — montants non comparés';
 
   @override
   String invoicePoMatchIssueAmountMismatch(

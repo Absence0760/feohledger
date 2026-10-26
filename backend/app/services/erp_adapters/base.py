@@ -540,6 +540,50 @@ class PoPayload:
     currency: str | None = None
 
 
+class PoSkipReason(enum.StrEnum):
+    """Why an adapter's PO listing left a purchase order out (``SkippedPo``).
+
+    Coded, never the ERP's own text. Every reason means the same thing to the
+    sync: the ERP has this PO, and the adapter could not state its total
+    exactly, so whatever total FeohLedger holds for that number may no longer
+    be the ERP's (decisions §323).
+    """
+
+    #: The total cannot be computed exactly from what the ERP returned (a
+    #: discount, a price unit of measure, a charge or price of unknown
+    #: currency, a missing price, no total field).
+    unpriceable = "unpriceable"
+    #: The PO's lines could not be read whole.
+    lines_unread = "lines_unread"
+    #: The ERP returned the header and no lines.
+    no_lines = "no_lines"
+    #: The PO is labelled with a currency the adapter cannot place against the
+    #: company's local currency, because that could not be read.
+    local_currency_unknown = "local_currency_unknown"
+
+
+@dataclass(frozen=True)
+class SkippedPo:
+    """A PO the ERP has and ``list_pos`` deliberately did not return."""
+
+    po_number: str
+    reason: PoSkipReason
+
+
+@dataclass
+class PoListing:
+    """``ErpAdapter.list_pos_report``: the POs, and the ones left out.
+
+    ``skipped`` is what lets the sync tell "the ERP no longer reports a usable
+    total for this PO" apart from "this PO was never here": without it a PO the
+    adapter starts skipping keeps the total an earlier sync stored, and the PO
+    match keeps trusting it.
+    """
+
+    pos: list[PoPayload]
+    skipped: list[SkippedPo] = field(default_factory=list)
+
+
 @dataclass
 class GLAccountPayload:
     """Normalized chart-of-accounts row returned by `ErpAdapter.list_gl_accounts`.
@@ -698,6 +742,19 @@ class ErpAdapter:
         override this.
         """
         return []
+
+    async def list_pos_report(self) -> PoListing:
+        """:meth:`list_pos` plus the POs it deliberately left out.
+
+        What the PO sync calls. The default wraps :meth:`list_pos` and reports
+        nothing skipped, so an adapter that never skips a PO needs no change.
+        An adapter that DOES leave a PO out because it cannot state its total
+        exactly overrides this and names each one (:class:`SkippedPo`), so the
+        sync can mark a total synced earlier as no longer verifiable instead of
+        leaving it for the PO match to trust (decisions §323). Such an adapter
+        keeps :meth:`list_pos` returning ``(await self.list_pos_report()).pos``.
+        """
+        return PoListing(pos=await self.list_pos())
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """Pull the WHOLE chart of accounts from the ERP, or raise.
