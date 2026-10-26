@@ -59,14 +59,20 @@ def _to_date(v) -> date | None:
             return None
 
 
-# Merge.dev's PO status enum → our internal vocabulary. Anything not
-# listed maps to "open" (the safest default — it shows up in the
-# matching pool but doesn't mark an unfamiliar PO as closed/cancelled
-# and exclude it).
+# Merge.dev's PO status enum → our internal vocabulary. Merge publishes
+# DRAFT / SUBMITTED / AUTHORIZED / BILLED / DELETED (an open enum: an
+# integration may pass another value through); BILLED and DELETED map as
+# Xero's same statuses do. Anything not listed maps to "open" (the safest
+# default — it shows up in the matching pool but doesn't mark an unfamiliar
+# PO as closed/cancelled and exclude it).
 _MERGE_PO_STATUS_MAP = {
     "OPEN": "open",
     "PENDING": "open",
     "DRAFT": "open",
+    "SUBMITTED": "open",
+    "AUTHORIZED": "open",
+    "BILLED": "closed",
+    "DELETED": "cancelled",
     "CLOSED": "closed",
     "FULFILLED": "closed",
     "CANCELLED": "cancelled",
@@ -379,7 +385,13 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
     raw_currency = raw.get("currency")
 
     return PoPayload(
-        po_number=raw.get("number") or raw.get("transaction_number") or raw.get("id") or "UNKNOWN",
+        # Merge's field is `purchase_order_number`; `number` and
+        # `transaction_number` are kept for records shaped the older way.
+        po_number=raw.get("purchase_order_number")
+        or raw.get("number")
+        or raw.get("transaction_number")
+        or raw.get("id")
+        or "UNKNOWN",
         vendor_name=vendor_name,
         vendor_erp_id=str(vendor_erp_id) if vendor_erp_id else None,
         total=total,

@@ -322,8 +322,8 @@ MERGE_PO_FIXTURES: list[dict] = [
     {
         "id": "merge-po-301",
         "remote_id": "fake-remote-po-301",
-        "number": "PO-FAKE-301",
-        "status": "OPEN",
+        "purchase_order_number": "PO-FAKE-301",
+        "status": "AUTHORIZED",
         "vendor": {"id": "merge-vendor-701", "name": "Fake Merge Vendor Co"},
         "total_amount": 1250.00,
         "currency": "USD",
@@ -349,8 +349,8 @@ MERGE_PO_FIXTURES: list[dict] = [
     {
         "id": "merge-po-302",
         "remote_id": "fake-remote-po-302",
-        "number": "PO-FAKE-302",
-        "status": "OPEN",
+        "purchase_order_number": "PO-FAKE-302",
+        "status": "AUTHORIZED",
         "vendor": {"id": "merge-vendor-702", "name": "Fake Merge Supply Co"},
         "total_amount": 980.50,
         "currency": "USD",
@@ -376,8 +376,8 @@ MERGE_PO_FIXTURES: list[dict] = [
     {
         "id": "merge-po-303",
         "remote_id": "fake-remote-po-303",
-        "number": "PO-FAKE-303",
-        "status": "OPEN",
+        "purchase_order_number": "PO-FAKE-303",
+        "status": "AUTHORIZED",
         "vendor": {"id": "merge-vendor-701", "name": "Fake Merge Vendor Co"},
         "total_amount": 4400.00,
         "currency": "USD",

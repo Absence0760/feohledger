@@ -550,6 +550,11 @@ def test_merge_dev_list_pos_status_mapping_uses_internal_vocab():
         "CANCELLED": "cancelled",
         "CANCELED": "cancelled",
         "VOIDED": "cancelled",
+        # Merge's published PurchaseOrderStatusEnum.
+        "SUBMITTED": "open",
+        "AUTHORIZED": "open",
+        "BILLED": "closed",
+        "DELETED": "cancelled",
         "something_weird": "open",  # default fallback
     }
 
@@ -560,6 +565,24 @@ def test_merge_dev_list_pos_status_mapping_uses_internal_vocab():
             client.get = AsyncMock(return_value=_make_mock_response(200, body))
             pos = _run(adapter.list_pos())
         assert pos[0].status == expected, f"{raw_status} should map to {expected}"
+
+
+def test_merge_dev_list_pos_reads_purchase_order_number():
+    """Merge's PO number field is ``purchase_order_number``. Read without it,
+    every PO fell through to its Merge ``id`` and was stored under a UUID no
+    invoice quotes, so nothing could ever match it."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [{"id": "9b0c-uuid", "purchase_order_number": "PO-7", "status": "AUTHORIZED"}],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        pos = _run(adapter.list_pos())
+    assert [(p.po_number, p.status) for p in pos] == [("PO-7", "open")]
 
 
 def test_merge_dev_list_pos_follows_pagination_cursor():
