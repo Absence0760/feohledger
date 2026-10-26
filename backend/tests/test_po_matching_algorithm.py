@@ -671,6 +671,10 @@ async def test_a_po_marked_unverifiable_is_never_matched_against():
     assert result.amount_variance_pct is None
     assert [i["code"] for i in result.issues] == ["po_match.issue.po_total_unverifiable"]
     assert result.to_json_dict()["details"]["po_total_unverifiable_reason"] == "unpriceable"
+    # The stale figure is not kept on the result either: `invoice.po_match`
+    # reaches every API reader of the invoice.
+    assert result.po_total is None
+    assert result.to_json_dict()["details"]["po_total"] is None
 
 
 @pytest.mark.asyncio

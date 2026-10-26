@@ -643,6 +643,36 @@ async def test_sync_erp_links_vendor_by_erp_id_before_name(realdb, monkeypatch):
     assert await _vendor_of(realdb, "ERP-NAME") == by_name_id
 
 
+async def test_sync_erp_never_name_links_a_po_onto_a_vendor_linked_to_another_id(
+    realdb, monkeypatch
+):
+    """Two suppliers share a name. Ours is linked to ERP id 77; the PO belongs
+    to id 56, not yet synced. Linking by name would match our Acme's invoices
+    against another supplier's order, so the PO stays unlinked until the vendor
+    sync brings 56 in."""
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        s.add(Vendor(name="Acme Twin Ltd", erp_vendor_id="77", organization_id=org_id))
+        await s.commit()
+
+    await _sync_with_payloads(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(
+                po_number="ERP-TWIN",
+                vendor_name="Acme Twin Ltd",
+                vendor_erp_id="56",
+                total=Decimal("300.00"),
+            )
+        ],
+    )
+
+    assert await _vendor_of(realdb, "ERP-TWIN") is None
+
+
 async def test_sync_erp_ignores_an_id_link_made_in_another_erp_company(realdb, monkeypatch):
     """QuickBooks reuses small ids across companies, so a vendor linked as "56"
     under the sandbox is not the production company's "56": the PO falls back
@@ -1411,6 +1441,36 @@ async def test_sync_erp_lowering_a_po_total_opens_a_blocking_hold(realdb, monkey
     resp = await _try_run(realdb, inv_id)
     assert resp.status_code == 409, resp.text
     assert "po_mismatch" in resp.json()["detail"]
+
+
+async def test_sync_erp_restating_a_po_currency_opens_a_blocking_hold(realdb, monkeypatch):
+    """The ERP restates a 1,000.00 USD PO as 1,000.00 EUR under an approved
+    1,000.00 USD invoice. The total did not move, but it is a different order:
+    the sync re-matches, the currency guard opens a hold, and the run refuses."""
+    from app.services.erp_adapters.base import PoPayload
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-CCY", total=Decimal("1000.00"), currency="USD")],
+    )
+    inv_id = await _seed_approved_po_invoice(
+        realdb, number="INV-CCY-1", po_number="PO-CCY", amount="1000.00"
+    )
+    assert await _po_mismatch_rows(realdb, inv_id) == []
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-CCY", total=Decimal("1000.00"), currency="EUR")],
+    )
+    assert [r.status for r in await _po_mismatch_rows(realdb, inv_id)] == ["open"]
+
+    # Refused. A currency mismatch also raises `fraud_flag`, which the refusal
+    # may name first; either way the invoice is held.
+    resp = await _try_run(realdb, inv_id)
+    assert resp.status_code == 409, resp.text
+    assert "INV-CCY-1" in resp.json()["detail"]
 
 
 async def test_sync_erp_raising_a_po_total_never_clears_the_hold(realdb, monkeypatch):

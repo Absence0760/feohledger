@@ -331,7 +331,10 @@ async def match_invoice_to_po(
         # earlier sync the ERP no longer vouches for. Comparing against it
         # would pass or fail the amount control on a number nobody stands
         # behind — the match refuses, like the currency guard below, and the
-        # warnings layer holds the invoice for a person.
+        # warnings layer holds the invoice for a person. Nor is the figure
+        # stored on `invoice.po_match`, which every API reader of the invoice
+        # gets: a display path sends null for it (§323).
+        result.po_total = None
         result.amount_variance = None
         result.amount_variance_pct = None
         result.within_tolerance = False

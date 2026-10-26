@@ -468,6 +468,13 @@ async def sync_pos_from_erp(
         if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
     )
     vendor_by_name, _ = _unique((v.name.lower(), v.id) for v in vendors)
+    # Vendors linked to an ERP id in this realm: a name match must not land on
+    # one of them when the PO names a different id (see `resolve_vendor`).
+    erp_linked = {
+        v.id
+        for v in vendors
+        if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
+    }
 
     def resolve_vendor(erp_po) -> uuid.UUID | None:
         if erp_po.vendor_erp_id in ambiguous_erp_ids:
@@ -476,7 +483,17 @@ async def sync_pos_from_erp(
             return None
         if erp_po.vendor_erp_id and erp_po.vendor_erp_id in vendor_by_erp_id:
             return vendor_by_erp_id[erp_po.vendor_erp_id]
-        return vendor_by_name.get(erp_po.vendor_name.lower()) if erp_po.vendor_name else None
+        if not erp_po.vendor_name:
+            return None
+        by_name = vendor_by_name.get(erp_po.vendor_name.lower())
+        # The ERP named a supplier id we have not linked. A same-named vendor
+        # already linked to ANOTHER id is a different supplier, so the PO stays
+        # unlinked (the next sync after the vendor sync fills it) rather than
+        # being matched against that vendor's invoices. A vendor with no ERP
+        # link yet may still be the one meant, as before.
+        if erp_po.vendor_erp_id and by_name in erp_linked:
+            return None
+        return by_name
 
     created = 0
     skipped = 0
@@ -544,6 +561,10 @@ async def sync_pos_from_erp(
             # silent re-denomination.
             if erp_currency is not None and existing_po.currency != erp_currency:
                 existing_po.currency = erp_currency
+                # The same figure in another currency is a different order: the
+                # invoices citing it are re-matched, so the currency guard holds
+                # them now rather than at their next edit.
+                rematch.add(existing_po.po_number)
                 changed = True
             # A PO first synced before its supplier was (the vendor sync not
             # yet run, or the supplier added since) gets linked now. Only a

@@ -162,8 +162,10 @@ existing row the sync would refresh for that number (own entity first, else an
 unstamped row — the row a later priced sync clears). While it is set:
 
 - the matcher **compares nothing**: `status = "mismatch"`,
-  `within_tolerance = false`, `amount_variance` / `amount_variance_pct` =
-  `null`, `MatchResult.po_total_unverifiable_reason` carries the reason, and the
+  `within_tolerance = false`, `po_total` / `amount_variance` /
+  `amount_variance_pct` = `null` (so the stale figure never reaches
+  `invoice.po_match`), `MatchResult.po_total_unverifiable_reason` carries the
+  reason, and the
   one issue is `po_match.issue.po_total_unverifiable`. The 3-way receipt-value
   leg is skipped too, since it would scale the same stale total;
 - `refresh_warnings` raises the `po_total_unverifiable` warning and a
@@ -176,7 +178,9 @@ unstamped row — the row a later priced sync clears). While it is set:
   and the split agent re-checks the mark under the lock at apply time;
 - the supplier portal refuses to flip it into an invoice (409).
 
-The sync re-matches the invoices citing a PO whose mark or total changed, in the
+The sync re-matches the invoices citing a PO whose mark, total or stated currency
+changed (the same figure in another currency is a different order, which the
+currency guard must hold), in the
 same transaction and not best-effort, so the hold lands at sync time or the sync
 fails and the mark is rolled back with it. The next sync that prices the PO
 clears the mark — but **not the hold**.
