@@ -1103,3 +1103,114 @@ async def test_sync_erp_leaves_a_po_unlinked_when_its_erp_id_is_ambiguous(realdb
         ],
     )
     assert await _vendor_of(realdb, "ERP-AMBIG") is None
+
+
+async def test_sync_erp_marks_and_clears_the_same_row_when_a_shared_twin_exists(
+    realdb, monkeypatch
+):
+    """An entity's own row and an unstamped (shared) row can carry one number.
+    The upsert refreshes only the own-entity row, so the mark goes on that row
+    alone — marking the shared twin too would leave a mark no sync clears and
+    hold its invoices for good."""
+    from app.models.entity import Entity
+    from app.services.erp_adapters.base import PoPayload, PoSkipReason, SkippedPo
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        default_entity = (
+            await s.execute(select(Entity).where(Entity.is_default.is_(True)))
+        ).scalar_one()
+        own = PurchaseOrder(
+            po_number="PO-TWIN",
+            total=Decimal("100.00"),
+            currency="USD",
+            organization_id=org_id,
+            entity_id=default_entity.id,
+        )
+        shared = PurchaseOrder(
+            po_number="PO-TWIN", total=Decimal("100.00"), currency="USD", organization_id=org_id
+        )
+        s.add_all([own, shared])
+        await s.commit()
+        own_id, shared_id = own.id, shared.id
+
+    async def _reasons() -> dict:
+        async with mk() as s:
+            rows = await s.execute(
+                select(PurchaseOrder.id, PurchaseOrder.total_unverifiable_reason).where(
+                    PurchaseOrder.po_number == "PO-TWIN"
+                )
+            )
+            return dict(rows.all())
+
+    body = await _sync_with_listing(
+        realdb, monkeypatch, [], [SkippedPo("PO-TWIN", PoSkipReason.unpriceable)]
+    )
+    assert body["unverifiable"] == 1
+    assert await _reasons() == {own_id: "unpriceable", shared_id: None}
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-TWIN", total=Decimal("100.00"), currency="USD")],
+    )
+    assert await _reasons() == {own_id: None, shared_id: None}
+
+
+async def test_sync_erp_rolls_back_the_mark_when_the_rematch_fails(realdb, monkeypatch):
+    """The mark exists to RAISE a hold, and the payment gate reads only open
+    exceptions: a mark committed without its hold would leave an approved
+    invoice payable against the stale total. A failed re-match fails the sync
+    and nothing is marked."""
+    from app.services import invoice_warnings
+    from app.services.erp_adapters.base import PoPayload, PoSkipReason, SkippedPo
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-RB", total=Decimal("100.00"), currency="USD")],
+    )
+    async with mk() as s:
+        s.add(
+            Invoice(
+                invoice_number="INV-RB-1",
+                vendor_name="Anyone",
+                amount=Decimal("100.00"),
+                currency="USD",
+                po_number="PO-RB",
+                status=InvoiceStatus.approved,
+                organization_id=org_id,
+            )
+        )
+        await s.commit()
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("refresh failed")
+
+    monkeypatch.setattr(invoice_warnings, "refresh_warnings", _boom)
+    from app.services.erp_adapters.base import PoListing
+    from app.services.erp_adapters.mock_adapter import MockAdapter
+
+    async def _report(self):
+        return PoListing(pos=[], skipped=[SkippedPo("PO-RB", PoSkipReason.unpriceable)])
+
+    monkeypatch.setattr(MockAdapter, "list_pos_report", _report)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        try:
+            resp = await c.post("/api/purchase-orders/sync-erp")
+        except RuntimeError:
+            resp = None
+    assert resp is None or resp.status_code >= 500
+
+    async with mk() as s:
+        reason = (
+            await s.execute(
+                select(PurchaseOrder.total_unverifiable_reason).where(
+                    PurchaseOrder.po_number == "PO-RB"
+                )
+            )
+        ).scalar_one()
+    assert reason is None

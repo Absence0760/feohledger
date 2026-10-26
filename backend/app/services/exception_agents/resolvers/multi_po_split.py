@@ -468,6 +468,10 @@ class MultiPOSplitResolver(ExceptionResolver):
             raise _NotApprovable(locked.status)
         if any(po.status != "open" for po in rows):
             raise _NotApprovable(locked.status)
+        # A PO sync between evaluate and apply may have marked one of the set
+        # unpriceable (decisions §323): its total is no longer evidence.
+        if any(po.total_unverifiable_reason for po in rows):
+            raise _NotApprovable(locked.status)
         # Every PO in the set must still be provably in the invoice's currency.
         if any(compare_currencies(locked.currency, po.currency) != CURRENCY_SAME for po in rows):
             raise _NotApprovable(locked.status)

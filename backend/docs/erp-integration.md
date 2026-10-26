@@ -1453,16 +1453,21 @@ name two vendors share links neither too.
 PO's total exactly (SYSPRO: a discount, a mixed-currency order, a currency it
 cannot place) leaves it out and names it in `list_pos_report().skipped`. The sync
 creates nothing for it, but stamps `purchase_orders.total_unverifiable_reason`
-(the `PoSkipReason`) on every existing row with that number in the same scope,
-so the PO match stops comparing invoices against the total an earlier sync
-stored (`po-matching.md` § A PO total the ERP no longer vouches for). The next
-sync that prices the PO clears it. Invoices citing a PO whose mark or total
-changed are re-matched in the same request (best-effort, like the QMS sync).
+(the `PoSkipReason`) on the existing row the upsert would refresh for that
+number (`purchase_orders._sync_target`: this entity first, else an unstamped
+row), so the PO match stops comparing invoices against the total an earlier
+sync stored (`po-matching.md` § A PO total the ERP no longer vouches for). The
+next sync that prices the PO clears the mark on that same row. Invoices citing a
+PO whose mark or total changed are re-matched in the same transaction, and
+**not** best-effort: the mark exists to raise a hold, so a failed re-match
+fails the sync and rolls the mark back rather than commit a mark with no hold.
 The response carries `not_priced` (POs the ERP has that were not synced) and
-`unverifiable` (existing rows now marked), and the purchase-orders page says so
-in a warning toast. Adapters that do not override `list_pos_report` report
-nothing skipped. **Blackbaud FE NXT still skips a PO with no order total
-silently**: its wiring is tracked in `docs/followups.md`.
+`unverifiable` (existing rows now marked); the PO list and detail return
+`total_unverifiable_reason`, and the purchase-orders page says so in a warning
+toast. The supplier portal refuses to flip such a PO into an invoice (409).
+Adapters that do not override `list_pos_report` report nothing skipped.
+**Blackbaud FE NXT still skips a PO with no order total silently**: its wiring
+is tracked in `docs/followups.md`.
 
 **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
@@ -1957,7 +1962,11 @@ query-string parameters, which is how the WCF REST host takes them:
   non-zero `MForeignPrice` contradicts the header and makes it unpriceable. A
   PO with no header `Currency` is local and synced unlabelled. When the local
   currency cannot be read, every PO **with** a currency label is skipped
-  rather than guessed. A freight / misc-charge line (`LineType` 4 / 5) adds
+  rather than guessed — but only when `GetLogonProfile` answers with a profile
+  that states no usable code. A failed read (non-200, `ERROR` text, an
+  unreadable answer) raises `ErpListingIncomplete` and the sync changes
+  nothing: skipping would mark every labelled PO and hold every invoice citing
+  one over a transient outage. A freight / misc-charge line (`LineType` 4 / 5) adds
   its `NMscChargeValue`; a comment line (6) adds nothing. A PO with a line
   discount, a price unit of measure other than the order's, a charge on a
   foreign order, or a line with no price is skipped (logged as a count) until a

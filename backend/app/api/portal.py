@@ -1059,6 +1059,16 @@ async def flip_purchase_order(
             message="Invoice already created from this PO.",
         )
 
+    # The flip bills `po.total`. When the ERP's last sync could not price this
+    # PO (decisions §323) that total is one nobody vouches for, and an invoice
+    # minted at it would be a payable at an unconfirmed figure.
+    if po.total_unverifiable_reason:
+        raise HTTPException(
+            status_code=409,
+            detail="This purchase order's total could not be confirmed. "
+            "Submit your invoice instead.",
+        )
+
     po_lines = (
         (await db.execute(select(POLineItem).where(POLineItem.po_id == po.id))).scalars().all()
     )

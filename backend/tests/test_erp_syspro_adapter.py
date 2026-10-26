@@ -1058,13 +1058,11 @@ def test_list_pos_decides_foreign_from_the_header_against_the_local_currency():
 @pytest.mark.parametrize(
     "profile",
     [
-        "ERROR: function not available",
         "<LogonProfile><CompanyName>X</CompanyName></LogonProfile>",
         "<LogonProfile><LocalCurrencyCode></LocalCurrencyCode></LogonProfile>",
-        "not xml at all",
     ],
 )
-def test_an_unreadable_local_currency_skips_every_labelled_po(profile):
+def test_a_profile_stating_no_local_currency_skips_every_labelled_po(profile):
     """No local currency, no way to tell which price column a labelled PO's
     currency is: those POs are skipped, never guessed. An unlabelled PO is
     priced in MPrice and synced with no currency, as before."""
@@ -1072,6 +1070,20 @@ def test_an_unreadable_local_currency_skips_every_labelled_po(profile):
     fake.profile_body = profile
     pos = _run(fake, SysproAdapter(CONFIG).list_pos)
     assert [(p.po_number, p.total, p.currency) for p in pos] == [("P4", Decimal("7.00"), None)]
+    assert fake.open_sessions == set()
+
+
+@pytest.mark.parametrize("profile", ["ERROR: function not available", "not xml at all"])
+def test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping(profile):
+    """A failed READ says nothing about the company's currency. Skipping would
+    report every labelled PO unpriceable, and the sync would mark each one and
+    hold every invoice citing it over a transient outage (§323): the listing
+    fails and the sync changes nothing."""
+    fake = _eur_po_fake()
+    fake.profile_body = profile
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert exc.value.gap is ListingGap.fetch_failed
     assert fake.open_sessions == set()
 
 
@@ -1181,7 +1193,7 @@ def test_list_pos_report_names_every_po_it_skips_and_why(monkeypatch):
         ("D", PoSkipReason.unpriceable),
     ]
 
-    fake.profile_body = "ERROR: unavailable"
+    fake.profile_body = "<LogonProfile><CompanyName>X</CompanyName></LogonProfile>"
     report = _run(fake, SysproAdapter(CONFIG).list_pos_report)
     assert ("C", PoSkipReason.local_currency_unknown) in [
         (s.po_number, s.reason) for s in report.skipped

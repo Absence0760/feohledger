@@ -142,6 +142,9 @@ async def list_purchase_orders(
                 # The PO's own code — `null` when no source recorded one, and the
                 # client renders the figure bare rather than borrowing the org's.
                 "currency": po.currency,
+                # Set when the ERP's last sync could not price this PO: `total`
+                # is a figure the ERP no longer vouches for (decisions §323).
+                "total_unverifiable_reason": po.total_unverifiable_reason,
                 "status": po.status,
                 "line_items": [_line_item_dict(li) for li in po.line_items],
                 "created_at": po.created_at.isoformat() if po.created_at else "",
@@ -315,6 +318,7 @@ async def get_purchase_order(
         "total": json_money(po.total),
         # Labels `total` AND every line figure — lines carry no code of their own.
         "currency": po.currency,
+        "total_unverifiable_reason": po.total_unverifiable_reason,  # decisions §323
         "status": po.status,
         "line_items": [
             {
@@ -332,6 +336,31 @@ async def get_purchase_order(
         "linked_invoices": linked_invoices,
         "created_at": po.created_at.isoformat() if po.created_at else "",
     }
+
+
+async def _sync_target(
+    db: AsyncSession, po_number: str, org_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> PurchaseOrder | None:
+    """The one existing row an ERP PO sync refreshes for ``po_number``.
+
+    Scoped to the entity being synced into plus unstamped rows, own-entity
+    first, oldest first — see the upsert in :func:`sync_pos_from_erp` for why.
+    The decisions §323 mark targets this same row, so mark and clear agree.
+    """
+    result = await db.execute(
+        apply_entity_scope(
+            select(PurchaseOrder).where(
+                PurchaseOrder.po_number == po_number,
+                PurchaseOrder.organization_id == org_id,
+            ),
+            PurchaseOrder,
+            entity_id,
+            include_shared=True,
+        )
+        .order_by(PurchaseOrder.entity_id.is_(None), PurchaseOrder.created_at)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 @router.post("/sync-erp")
@@ -452,20 +481,7 @@ async def sync_pos_from_erp(
         # number. `limit(1)`, own-entity first, keeps the pick deterministic
         # and replaces a latent `MultipleResultsFound` (a 500 mid-sync) that
         # two same-numbered POs in one org could already trigger.
-        existing = await db.execute(
-            apply_entity_scope(
-                select(PurchaseOrder).where(
-                    PurchaseOrder.po_number == erp_po.po_number,
-                    PurchaseOrder.organization_id == org_id,
-                ),
-                PurchaseOrder,
-                entity_id,
-                include_shared=True,
-            )
-            .order_by(PurchaseOrder.entity_id.is_(None), PurchaseOrder.created_at)
-            .limit(1)
-        )
-        existing_po = existing.scalar_one_or_none()
+        existing_po = await _sync_target(db, erp_po.po_number, org_id, entity_id)
         erp_currency = po_currency_code(erp_po.currency)
         if existing_po is not None:
             # Refresh the ERP-owned fields on an already-known PO. total and
@@ -561,40 +577,34 @@ async def sync_pos_from_erp(
     # Nothing is created for them; an EXISTING row with the number keeps the
     # total an earlier sync stored, which the ERP no longer vouches for, so it
     # is marked and `po_matching` refuses to compare an invoice against it.
-    # Same scope as the upsert above (this entity + unstamped rows): every row
-    # the sync could have refreshed, and only those.
+    # The row marked is exactly the row the upsert above refreshes for that
+    # number (`_sync_target`), so a later sync that prices the PO clears the
+    # same mark it set — marking a wider set would leave marks no sync clears.
     unverifiable = 0
     reasons = {s.po_number: str(s.reason) for s in listing.skipped}
-    if reasons:
-        stale = await db.execute(
-            apply_entity_scope(
-                select(PurchaseOrder).where(
-                    PurchaseOrder.po_number.in_(reasons),
-                    PurchaseOrder.organization_id == org_id,
-                ),
-                PurchaseOrder,
-                entity_id,
-                include_shared=True,
-            )
-        )
-        for po in stale.scalars().all():
-            unverifiable += 1
-            reason = reasons[po.po_number]
-            if po.total_unverifiable_reason != reason:
-                po.total_unverifiable_reason = reason
-                rematch.add(po.po_number)
+    for po_number, reason in reasons.items():
+        po = await _sync_target(db, po_number, org_id, entity_id)
+        if po is None:
+            continue
+        unverifiable += 1
+        if po.total_unverifiable_reason != reason:
+            po.total_unverifiable_reason = reason
+            rematch.add(po_number)
 
     if rematch:
         from app.services.invoice_warnings import refresh_invoices_citing_pos
 
         await db.flush()
+        # Not best-effort: the mark exists to RAISE a hold, and the payment gate
+        # reads only open exceptions. A mark written without its hold would
+        # leave an approved invoice payable against the stale total, so a
+        # failed re-match fails the sync and the whole transaction rolls back.
         await refresh_invoices_citing_pos(
             db,
             org_id,
             rematch,
             org_settings=org.settings,
             caller="erp_po_sync",
-            best_effort=True,
         )
 
     # One PII-free summary row per sync (same shape as the GL chart sync): the

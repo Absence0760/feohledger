@@ -15184,8 +15184,11 @@ the row:
   would have broken adapters other sessions were editing. SYSPRO overrides it;
   Blackbaud's wiring is a `docs/followups.md` entry.
 - **The mark.** The sync stamps `purchase_orders.total_unverifiable_reason` on
-  every existing row with a skipped number, in the scope the upsert uses (this
-  entity plus unstamped rows). It does not change `total`: there is no honest
+  the existing row the upsert would refresh for a skipped number
+  (`_sync_target`: this entity's row first, else an unstamped one). Marking
+  every row in scope was rejected in review: the upsert clears only that one
+  row, so a shared twin would stay marked, and its invoices held, for good. It
+  does not change `total`: there is no honest
   figure to write, and erasing one would invent a zero. The next sync that
   prices the PO clears the mark. The response reports `not_priced` and
   `unverifiable`, and the purchase-orders page shows a warning toast.
@@ -15196,8 +15199,30 @@ the row:
   trustworthy figure there is no way to show the invoice is not over-billing.
   The missing-PO and multi-PO-split agents never take such a PO as a candidate.
 - **When it lands.** The sync re-matches the invoices citing every PO whose mark
-  or total it changed (best-effort, as the QMS sync does), so the hold appears
-  at sync time rather than at the invoice's next edit, and lifts the same way.
+  or total it changed, in its own transaction and **not** best-effort, so the
+  hold appears at sync time rather than at the invoice's next edit, and lifts
+  the same way. The QMS sync's best-effort precedent does not carry over: a
+  receipt changes evidence, while this mark exists to raise a hold, and the
+  payment gate reads only open exceptions — a committed mark without its hold
+  would leave an approved invoice payable against the stale total. A failed
+  re-match fails the sync and rolls the mark back.
+- **A failed currency read is not a fact.** SYSPRO skips a currency-labelled PO
+  as `local_currency_unknown` only when `GetLogonProfile` answers with a profile
+  stating no usable code. A failed read (HTTP error, `ERROR`, unreadable) fails
+  the listing (`ErpListingIncomplete`): skipping would mark every labelled PO
+  and hold every invoice citing one over a transient outage, and some of those
+  holds (past approval, manual receipts) would outlive it.
+- **Elsewhere.** The supplier portal refuses to flip a marked PO (409); the PO
+  list and detail return the reason. Budget commitments and spend analytics
+  still sum the stale total — reporting, not payment; a `docs/followups.md`
+  entry.
+- **A note for the CISO / Security Analyst.** Re-matching on every ERP total
+  change means an ERP-side increase can now close an over-billing `po_mismatch`
+  at sync time instead of at the invoice's next edit. The guards are the ones
+  every re-match has (org settings, past-approval and segregation limits), but
+  nobody with ERP access is treated as an implicated actor the way a manual
+  receipt's recorder is (§267). Where one person can edit both the ERP PO and
+  the AP invoice, that is a segregation question for the customer's controls.
 
 **Considered and rejected.**
 
@@ -15210,7 +15235,11 @@ the row:
   nothing pays against an unverified total, which is the payment gate's job.
 
 Guards: `tests/test_purchase_orders.py` (sync → mark → hold → re-price →
-clear, the entity scope, the base default), `test_po_matching_algorithm.py`,
-`test_po_matching_wiring.py`, `test_exception_agents_missing_po.py`,
-`test_erp_syspro_adapter.py::test_list_pos_report_names_every_po_it_skips_and_why`,
+clear, the entity scope, mark and clear on the same row beside a shared twin,
+a failed re-match rolling the mark back, the base default),
+`test_po_matching_algorithm.py`, `test_po_matching_wiring.py`,
+`test_exception_agents_missing_po.py`,
+`test_portal_self_service.py::test_po_flip_refuses_a_po_whose_total_the_erp_no_longer_vouches_for`,
+`test_erp_syspro_adapter.py` (`test_list_pos_report_names_every_po_it_skips_and_why`,
+`test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping`),
 `test_migration_0123_po_total_unverifiable.py`.

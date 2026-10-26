@@ -7,10 +7,11 @@ discount, a mixed-currency order, a currency it cannot place; Blackbaud: no
 order total). The sync used to say nothing about it, so a PO synced earlier at
 a total the ERP has since made unpriceable kept that total, and the 3-way match
 kept comparing invoices against it. The adapter now reports what it skipped
-(``ErpAdapter.list_pos_report``), and the sync stamps the reason on every
-existing row with that number. While it is set the PO match refuses to compare
-amounts against the row (decisions §323); the next sync that prices the PO
-clears it.
+(``ErpAdapter.list_pos_report`` — SYSPRO does; Blackbaud's wiring is a
+``docs/followups.md`` entry), and the sync stamps the reason on the existing
+row it would refresh for that number. While it is set the PO match refuses to
+compare amounts against the row (decisions §323); the next sync that prices the
+PO clears it.
 
 Revision ID: 0123_po_total_unverifiable
 Revises: 0122_subprocessor_notices

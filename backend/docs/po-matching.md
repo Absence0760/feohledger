@@ -157,8 +157,9 @@ the adapter could not price, and every invoice for 100.00 kept reading
 
 The adapter now names each skipped PO (`ErpAdapter.list_pos_report`), and the
 PO sync stamps `purchase_orders.total_unverifiable_reason` (a `PoSkipReason`:
-`unpriceable`, `lines_unread`, `no_lines`, `local_currency_unknown`) on every
-existing row with that number in the synced entity's scope. While it is set:
+`unpriceable`, `lines_unread`, `no_lines`, `local_currency_unknown`) on the
+existing row the sync would refresh for that number (own entity first, else an
+unstamped row — the row a later priced sync clears). While it is set:
 
 - the matcher **compares nothing**: `status = "mismatch"`,
   `within_tolerance = false`, `amount_variance` / `amount_variance_pct` =
@@ -171,11 +172,19 @@ existing row with that number in the synced entity's scope. While it is set:
   invoice is not over-billing (`blocking_finding_types` agrees);
 - the invoice modal hides the PO total (the stale figure is not the PO's) and
   shows the issue instead;
-- `missing_po_v1` and `multi_po_split_v1` never take such a PO as a candidate.
+- `missing_po_v1` and `multi_po_split_v1` never take such a PO as a candidate,
+  and the split agent re-checks the mark under the lock at apply time;
+- the supplier portal refuses to flip it into an invoice (409).
 
-The sync re-matches the invoices citing a PO whose mark or total changed, so the
-hold lands at sync time. The next sync that prices the PO clears the mark and
-lifts the hold the same way (`_close_cleared_po_exceptions`).
+The sync re-matches the invoices citing a PO whose mark or total changed, in the
+same transaction and not best-effort, so the hold lands at sync time or the sync
+fails and the mark is rolled back with it. The next sync that prices the PO
+clears the mark and lifts the hold the same way (`_close_cleared_po_exceptions`,
+with the org's own settings, so its past-approval and segregation limits hold).
+
+Budget commitments and spend analytics still sum `purchase_orders.total`
+without regard to the mark — reporting, not a payment path; tracked in
+`docs/followups.md`.
 
 Covered by `test_po_matching_algorithm.py` (the two matcher cases),
 `test_po_matching_wiring.py` (the raise rule and the pure predicate agree),

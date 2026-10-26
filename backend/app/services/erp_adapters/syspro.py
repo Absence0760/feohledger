@@ -644,22 +644,32 @@ def po_is_foreign(header_currency: str | None, local_currency: str | None) -> bo
 _CURRENCY_CODE_RE = re.compile(r"[A-Z0-9$]{1,3}")
 
 
+class LogonProfileUnreadable(ValueError):
+    """``GetLogonProfile`` answered with an error or something that is not its
+    XML: the read failed, which says nothing about the company's currency."""
+
+
 def parse_local_currency(body: str) -> str | None:
-    """The ``LocalCurrencyCode`` of a ``GetLogonProfile`` answer, or None.
+    """The ``LocalCurrencyCode`` of a ``GetLogonProfile`` answer.
 
     ``GetLogonProfile`` is the e.net call that describes the logged-on session
     and company; its XML carries ``LocalCurrencyCode`` (as read by the
     open-source client wildland/syspro-ruby, ``lib/syspro/get_logon_profile.rb``).
     That is the company's local currency from Company Setup, which SYSPRO does
-    not allow to change once the company exists. An error, an unreadable
-    answer or a missing / malformed code is None.
+    not allow to change once the company exists.
+
+    Two different failures, kept apart on purpose: an error text or an
+    unreadable answer raises :class:`LogonProfileUnreadable` (a failed READ —
+    the sync must not act on it, decisions §323); a readable profile with no
+    usable code returns None (a fact about this install, so every PO with a
+    currency label is skipped as ``local_currency_unknown``).
     """
     text = _unwrap(body)
     if not text or _is_error_text(text):
-        return None
+        raise LogonProfileUnreadable("GetLogonProfile answered with an error")
     root = _parse(text)
     if root is None or _has_error_element(root):
-        return None
+        raise LogonProfileUnreadable("GetLogonProfile answer is not a readable profile")
     for el in root.iter():
         if isinstance(el.tag, str) and local_name(el) == "LocalCurrencyCode":
             code = (el.text or "").strip().upper()
@@ -1116,9 +1126,10 @@ class SysproAdapter(ErpAdapter):
 
         Whether a PO is foreign is decided from its header ``Currency``
         against the company's local currency (``GetLogonProfile``'s
-        ``LocalCurrencyCode``, same session). When that cannot be read, a PO
-        with a currency label is skipped: which price column is in that
-        currency would be a guess.
+        ``LocalCurrencyCode``, same session). When the profile states no
+        usable code, a PO with a currency label is skipped: which price column
+        is in that currency would be a guess. When the profile cannot be read
+        at all, the listing raises :class:`ErpListingIncomplete` instead.
         """
         base = await self._rest_base()
         async with httpx.AsyncClient(timeout=30) as client:
@@ -1186,14 +1197,25 @@ class SysproAdapter(ErpAdapter):
     async def _local_currency(
         self, client: httpx.AsyncClient, base: str, session: str
     ) -> str | None:
-        """The company's local currency code, from ``GetLogonProfile``, or None
-        when it cannot be read (the caller then skips every labelled PO)."""
+        """The company's local currency code, from ``GetLogonProfile``; None
+        when the profile states none (the caller then skips every labelled PO).
+
+        A failed read — non-200, an error text, an unreadable answer — raises
+        :class:`ErpListingIncomplete` and the sync changes nothing: skipping
+        would report every labelled PO as unpriceable, and the sync would mark
+        each one and hold every invoice citing it over a transient outage.
+        """
         resp = await self._get(
             client, f"{base}/GetLogonProfile", {"UserId": session}, "logon profile"
         )
         if resp.status_code != 200:
-            return None
-        return parse_local_currency(resp.text)
+            raise ErpListingIncomplete(PROVIDER, "GetLogonProfile", ListingGap.fetch_failed)
+        try:
+            return parse_local_currency(resp.text)
+        except LogonProfileUnreadable:
+            raise ErpListingIncomplete(
+                PROVIDER, "GetLogonProfile", ListingGap.fetch_failed
+            ) from None
 
     async def test_connection(self) -> bool:
         try:
