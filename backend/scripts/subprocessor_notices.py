@@ -33,7 +33,7 @@ from app.services.subprocessor_notices import (  # noqa: E402
 
 async def _list() -> int:
     async with control_session_factory() as db:
-        owed = await owed_notices(db, today=datetime.now(UTC).date())
+        owed = await owed_notices(db, now=datetime.now(UTC))
     if not owed:
         print("No published change-log entry needs notice.")
         return 0

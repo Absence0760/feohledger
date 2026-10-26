@@ -62,18 +62,19 @@ def outbox(monkeypatch):
     return box
 
 
-@pytest.fixture
-def _tenant_engine_on_loop(monkeypatch):
-    """The audit row's tenant engine on THIS test's loop (the dunning fixture)."""
+def _nullpool_engine(db_name: str):
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
 
     from app.database import _make_tenant_url
 
-    monkeypatch.setattr(
-        "app.database.get_tenant_engine",
-        lambda db_name: create_async_engine(_make_tenant_url(db_name), poolclass=NullPool),
-    )
+    return create_async_engine(_make_tenant_url(db_name), poolclass=NullPool)
+
+
+@pytest.fixture
+def _tenant_engine_on_loop(monkeypatch):
+    """The audit row's tenant engine on THIS test's loop (the dunning fixture)."""
+    monkeypatch.setattr("app.database.get_tenant_engine", _nullpool_engine)
 
 
 async def _ledger(realdb, entry_id: str) -> list[SubprocessorNotice]:
@@ -96,7 +97,9 @@ async def _ledger(realdb, entry_id: str) -> list[SubprocessorNotice]:
 
 def test_the_notice_says_what_changes_when_and_how_to_object():
     entry = _entry()
-    subject, body = sn.render_notice(entry, org_name="Acme Ltd", recipient_name="Dana")
+    subject, body = sn.render_notice(
+        entry, org_name="Acme Ltd", recipient_name="Dana", sent_on=TODAY
+    )
     assert "Acme Ltd" in subject
     assert entry.change in body
     assert OBJECTION_CONTACT in body
@@ -109,9 +112,18 @@ def test_the_notice_says_what_changes_when_and_how_to_object():
 
 def test_an_urgent_notice_states_its_reason():
     entry = _entry(days=5, urgent="Our current provider is shutting down.")
-    _, body = sn.render_notice(entry, org_name="Acme", recipient_name="Dana")
+    _, body = sn.render_notice(entry, org_name="Acme", recipient_name="Dana", sent_on=TODAY)
     assert "less than 30 days' notice" in body
     assert "shutting down" in body
+
+
+def test_a_notice_sent_after_the_change_does_not_claim_a_future_date():
+    entry = _entry(days=NOTICE_PERIOD_DAYS)
+    _, on_time = sn.render_notice(entry, org_name="A", recipient_name="D", sent_on=TODAY)
+    assert "Takes effect:" in on_time
+    _, after = sn.render_notice(entry, org_name="A", recipient_name="D", sent_on=entry.effective_on)
+    assert "Took effect:" in after
+    assert "Takes effect:" not in after
 
 
 def test_lateness_is_measured_against_the_effective_date():
@@ -149,6 +161,15 @@ async def test_only_active_admins_are_told_and_the_notice_is_recorded(
     assert row.organization_id == info.org_id
     assert (row.recipients, row.failed_recipients, row.late) == (1, 0, False)
     assert row.effective_on == entry.effective_on
+    assert row.sent_at is not None
+    assert row.recipient_user_ids == [str(info.users["admin"])]
+    assert row.audited_at is None  # the audit is its own step
+
+    async with realdb.control_sessionmaker()() as s:
+        assert await sn._write_audit(s, row.id, now=NOW) is True
+        assert await sn._write_audit(s, row.id, now=NOW) is False  # once
+    [row] = await _ledger(realdb, entry.id)
+    assert row.audited_at is not None
 
     async with realdb.sessionmaker("a")() as t:
         [audit] = (
@@ -245,6 +266,70 @@ async def test_one_unreachable_admin_does_not_stop_the_others(
 
 
 @pytest.mark.asyncio
+async def test_a_failed_audit_is_retried_without_sending_the_notice_again(
+    realdb, outbox, monkeypatch, _tenant_engine_on_loop
+):
+    entry = _entry()
+    ours = {realdb.info("a").org_id, realdb.info("b").org_id}
+
+    async def _broken(*args, **kwargs):
+        raise ConnectionError("tenant database unreachable")
+
+    monkeypatch.setattr(sn, "dispatch_audit", _broken)
+    async with realdb.control_sessionmaker()() as s:
+        first = await sn.run_notices_once(s, now=NOW, entries=(entry,))
+    assert first.failures >= 2  # one audit failure per organisation
+    rows = {r.organization_id: r for r in await _ledger(realdb, entry.id)}
+    assert ours <= set(rows)
+    assert all(rows[o].sent_at is not None and rows[o].audited_at is None for o in ours)
+    sent_before = len(outbox.sent)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(sn, "get_email_adapter", lambda: outbox)
+    monkeypatch.setattr(
+        "app.database.get_tenant_engine",
+        _nullpool_engine,
+    )
+    async with realdb.control_sessionmaker()() as s:
+        second = await sn.run_notices_once(s, now=NOW, entries=(entry,))
+    assert len(outbox.sent) == sent_before  # never re-sent
+    assert second.audits_written >= 2
+    rows = {r.organization_id: r for r in await _ledger(realdb, entry.id)}
+    assert all(rows[o].audited_at is not None for o in ours)
+
+
+@pytest.mark.asyncio
+async def test_a_claim_abandoned_mid_send_is_retaken_but_a_live_one_is_not(realdb, outbox):
+    entry = _entry()
+    org_id = realdb.info("a").org_id
+    async with realdb.control_sessionmaker()() as s:
+        s.add(
+            SubprocessorNotice(
+                entry_id=entry.id,
+                organization_id=org_id,
+                claimed_at=NOW - timedelta(minutes=5),
+                effective_on=entry.effective_on,
+                recipients=0,
+                failed_recipients=0,
+                late=False,
+            )
+        )
+        await s.commit()
+    async with realdb.control_sessionmaker()() as s:
+        # Another run is mid-send: leave it alone.
+        assert await sn.notify_organization(s, entry, org_id, now=NOW) is None
+        [owed] = await sn.owed_notices(s, now=NOW, entries=(entry,))
+        assert org_id not in owed.organization_ids
+        # An hour later that run has evidently died: the notice is still owed.
+        later = NOW + sn.CLAIM_TIMEOUT
+        [owed] = await sn.owed_notices(s, now=later, entries=(entry,))
+        assert org_id in owed.organization_ids
+        assert await sn.notify_organization(s, entry, org_id, now=later) == 1
+    [row] = await _ledger(realdb, entry.id)
+    assert row.sent_at is not None
+
+
+@pytest.mark.asyncio
 async def test_a_short_notice_is_recorded_as_late(realdb, outbox, _tenant_engine_on_loop):
     entry = _entry(days=7, urgent="Security: the current provider was breached.")
     async with realdb.control_sessionmaker()() as s:
@@ -272,7 +357,7 @@ async def test_an_organisation_created_after_publication_is_not_owed(realdb):
         await s.commit()
     try:
         async with realdb.control_sessionmaker()() as s:
-            [owed] = await sn.owed_notices(s, today=TODAY, entries=(entry,))
+            [owed] = await sn.owed_notices(s, now=NOW, entries=(entry,))
         assert before in owed.organization_ids
         assert after not in owed.organization_ids
     finally:
@@ -286,7 +371,7 @@ async def test_an_unpublished_or_plain_entry_is_never_sent(realdb, outbox):
     future = _entry(published=TODAY + timedelta(days=1))
     plain = ChangelogEntry(id=f"{TODAY.isoformat()}-plain", published_on=TODAY, change="x")
     async with realdb.control_sessionmaker()() as s:
-        assert await sn.owed_notices(s, today=TODAY, entries=(future, plain)) == []
+        assert await sn.owed_notices(s, now=NOW, entries=(future, plain)) == []
 
 
 @pytest.mark.asyncio
@@ -331,7 +416,7 @@ def test_the_cli_lists_and_sends_through_the_service(monkeypatch, capsys):
     entry = _entry()
     org = uuid.uuid4()
 
-    async def _owed(db, *, today):
+    async def _owed(db, *, now):
         return [sn.OwedNotice(entry=entry, organization_ids=[org])]
 
     async def _run(db):

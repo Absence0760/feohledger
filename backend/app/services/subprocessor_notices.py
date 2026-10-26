@@ -25,18 +25,23 @@ white-label.
 
 Idempotent and auditable
 ------------------------
-Each (entry, organisation) is claimed in ``subprocessor_notices`` (UNIQUE pair)
-*before* any email is sent, in the same transaction that later records the
-outcome, so two replicas cannot both notify one organisation and a re-run
-skips it. The organisation is counted notified when at least one administrator's
-email was handed to the provider; if none was, the claim rolls back and the
-next tick retries. A tenant audit row (``privacy.subprocessor_notice_sent``) is
-written before the control-plane commit and RAISES on failure (the
-``dunning_sweep`` rule): a notice is never recorded without its trail.
+Each (entry, organisation) moves through the ``subprocessor_notices`` ledger in
+short transactions, so no lock is ever held across an email send or a tenant
+round trip (the ``post_commit`` rule):
 
-Delivery is at-least-once, not exactly-once: a crash between the send and the
-commit re-sends on the next tick. A duplicate notice is recoverable; a missing
-one is the defect this exists to close.
+1. **Claim** — insert the UNIQUE pair ``ON CONFLICT DO NOTHING`` and commit. A
+   second replica or a re-run finds the row and sends nothing. A claim with no
+   ``sent_at`` older than :data:`CLAIM_TIMEOUT` belongs to a run that died
+   mid-send and is re-taken — the one path that can email an organisation twice
+   (at-least-once on a crash: a duplicate notice is recoverable, a missing one
+   is the defect this closes).
+2. **Send** — to each active administrator. If nobody could be emailed the claim
+   is deleted and the next tick retries; otherwise ``sent_at``, the counts, the
+   recipient user ids and ``late`` are committed, and the emails are never
+   re-sent from here on.
+3. **Audit** — the tenant's ``privacy.subprocessor_notice_sent`` row, then
+   ``audited_at``. A failed audit write counts as a tick failure and is retried
+   on its own every tick until it lands; it never re-sends the notice.
 
 The 30 days are measured, not assumed: each row stores the entry's effective
 date and ``late`` — true when the notice reached the organisation with fewer
@@ -55,7 +60,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -81,6 +86,8 @@ logger = logging.getLogger(__name__)
 
 ADMIN_ROLE = "admin"
 AUDIT_ACTION = "privacy.subprocessor_notice_sent"
+#: A claim this old with nothing sent belongs to a run that died mid-send.
+CLAIM_TIMEOUT = timedelta(hours=1)
 
 
 class NoNoticeDelivered(RuntimeError):
@@ -95,6 +102,7 @@ class NoticeResult:
     organizations_notified: int = 0
     emails_sent: int = 0
     late_notices: int = 0
+    audits_written: int = 0
     failures: int = 0
 
 
@@ -132,7 +140,9 @@ def dpa_url() -> str:
     return f"{settings.public_url.rstrip('/')}/legal/dpa#sub-processor-changes"
 
 
-def render_notice(entry: ChangelogEntry, *, org_name: str, recipient_name: str) -> tuple[str, str]:
+def render_notice(
+    entry: ChangelogEntry, *, org_name: str, recipient_name: str, sent_on: date
+) -> tuple[str, str]:
     """(subject, plaintext body) for one recipient. English by design — see
     the module docstring. Carries the org name and the change only; nothing
     about the recipient beyond the greeting name."""
@@ -149,7 +159,12 @@ def render_notice(entry: ChangelogEntry, *, org_name: str, recipient_name: str) 
         "",
         f"Change: {entry.change}",
         f"Published: {long_date(entry.published_on)}",
-        f"Takes effect: {effective}",
+        # A late notice (the sweep was off, or an urgent entry) can go out on
+        # or after the day the change took effect; say so rather than claim
+        # a future date.
+        f"Took effect: {effective}"
+        if entry.effective_on <= sent_on
+        else f"Takes effect: {effective}",
     ]
     if entry.urgent_reason:
         lines += [
@@ -166,8 +181,8 @@ def render_notice(entry: ChangelogEntry, *, org_name: str, recipient_name: str) 
         "and stating your grounds. What happens next is set out in the Data "
         f"Processing Addendum: {dpa_url()}",
         "",
-        "This is a contractual notice, not a product notification: it goes to every "
-        "administrator of your workspace and cannot be turned off in notification "
+        "This is a contractual notice, not a product notification: it goes to the active "
+        "administrators of your workspace and cannot be turned off in notification "
         "settings.",
     ]
     return subject, "\n".join(lines)
@@ -193,17 +208,24 @@ async def _admins(control_db: AsyncSession, org_id: uuid.UUID) -> list[_Recipien
     return [_Recipient(user_id=r[0], email=r[1], full_name=r[2]) for r in rows]
 
 
+def _stale_claim(now: datetime):
+    return (SubprocessorNotice.sent_at.is_(None)) & (
+        SubprocessorNotice.claimed_at < now - CLAIM_TIMEOUT
+    )
+
+
 async def owed_notices(
     control_db: AsyncSession,
     *,
-    today: date,
+    now: datetime,
     entries: tuple[ChangelogEntry, ...] = CHANGELOG,
 ) -> list[OwedNotice]:
-    """Every published notice entry with the organisations not yet told."""
+    """Every published notice entry with the organisations not yet told —
+    no ledger row, or only a claim abandoned mid-send."""
     owed: list[OwedNotice] = []
-    for entry in notice_entries(today, entries):
-        already = select(SubprocessorNotice.organization_id).where(
-            SubprocessorNotice.entry_id == entry.id
+    for entry in notice_entries(now.date(), entries):
+        settled = select(SubprocessorNotice.organization_id).where(
+            SubprocessorNotice.entry_id == entry.id, ~_stale_claim(now)
         )
         org_ids = (
             (
@@ -211,7 +233,7 @@ async def owed_notices(
                     select(Organization.id)
                     .where(
                         Organization.created_at < _published_cutoff(entry),
-                        Organization.id.not_in(already),
+                        Organization.id.not_in(settled),
                     )
                     .order_by(Organization.id)
                 )
@@ -223,44 +245,104 @@ async def owed_notices(
     return owed
 
 
-async def _record_audit(
-    *,
-    org: Organization,
-    entry: ChangelogEntry,
-    sent_on: date,
-    late: bool,
-    delivered: list[uuid.UUID],
-    failed: int,
-) -> None:
-    """The tenant's own trail of the notice. Raises — see the module docstring."""
+async def _claim(
+    control_db: AsyncSession, entry: ChangelogEntry, org_id: uuid.UUID, *, now: datetime
+) -> uuid.UUID | None:
+    claimed = (
+        await control_db.execute(
+            pg_insert(SubprocessorNotice)
+            .values(
+                id=uuid.uuid4(),
+                entry_id=entry.id,
+                organization_id=org_id,
+                claimed_at=now,
+                effective_on=entry.effective_on,
+                recipients=0,
+                failed_recipients=0,
+                late=False,
+            )
+            .on_conflict_do_nothing(constraint="uq_subprocessor_notices_entry_org")
+            .returning(SubprocessorNotice.id)
+        )
+    ).scalar_one_or_none()
+    if claimed is not None:
+        return claimed
+    # Re-take a claim whose run died before anything was recorded as sent. The
+    # WHERE re-checks staleness under the row lock, so two runs cannot both win.
+    return (
+        await control_db.execute(
+            update(SubprocessorNotice)
+            .where(
+                SubprocessorNotice.entry_id == entry.id,
+                SubprocessorNotice.organization_id == org_id,
+                _stale_claim(now),
+            )
+            .values(claimed_at=now)
+            .returning(SubprocessorNotice.id)
+        )
+    ).scalar_one_or_none()
+
+
+async def _write_audit(control_db: AsyncSession, notice_id: uuid.UUID, *, now: datetime) -> bool:
+    """Write the tenant audit row for a SENT notice, then stamp ``audited_at``.
+
+    Raises on failure (the ``dunning_sweep`` rule); the notice stays sent and
+    only the audit is retried. False when there is nothing to do (already
+    audited, or the organisation is gone with its tenant).
+    """
     # Resolved at call time: tests and `dispatch_engine_scope` swap it.
     from app.database import get_tenant_engine
 
-    assert entry.effective_on is not None
-    factory = async_sessionmaker(get_tenant_engine(org.db_name), expire_on_commit=False)
+    row = (
+        await control_db.execute(
+            select(SubprocessorNotice, Organization.db_name)
+            .join(Organization, Organization.id == SubprocessorNotice.organization_id)
+            .where(
+                SubprocessorNotice.id == notice_id,
+                SubprocessorNotice.sent_at.is_not(None),
+                SubprocessorNotice.audited_at.is_(None),
+            )
+        )
+    ).first()
+    if row is None:
+        await control_db.rollback()
+        return False
+    notice, db_name = row
+    entry = next((e for e in CHANGELOG if e.id == notice.entry_id), None)
+    sent_on = notice.sent_at.date()
+    details = {
+        "entry_id": notice.entry_id,
+        "effective_on": notice.effective_on.isoformat(),
+        "sent_on": sent_on.isoformat(),
+        "notice_days": (notice.effective_on - sent_on).days,
+        "late": notice.late,
+        # User ids, never addresses (PII-out-of-logs).
+        "recipient_user_ids": list(notice.recipient_user_ids or []),
+        "failed_recipients": notice.failed_recipients,
+    }
+    if entry is not None:
+        details["published_on"] = entry.published_on.isoformat()
+        details["urgent"] = bool(entry.urgent_reason)
+    organization_id = notice.organization_id
+    await control_db.rollback()
+    factory = async_sessionmaker(get_tenant_engine(db_name), expire_on_commit=False)
     async with factory() as tenant_db:
         await dispatch_audit(
             tenant_db,
-            correlation_id=uuid.uuid4(),
-            organization_id=org.id,
+            correlation_id=notice_id,
+            organization_id=organization_id,
             actor_id=None,  # the platform giving notice, no human actor
             action=AUDIT_ACTION,
             entity_type="organization",
-            entity_id=org.id,
-            details={
-                "entry_id": entry.id,
-                "published_on": entry.published_on.isoformat(),
-                "effective_on": entry.effective_on.isoformat(),
-                "sent_on": sent_on.isoformat(),
-                "notice_days": (entry.effective_on - sent_on).days,
-                "late": late,
-                "urgent": bool(entry.urgent_reason),
-                # User ids, never addresses (PII-out-of-logs).
-                "recipient_user_ids": [str(u) for u in delivered],
-                "failed_recipients": failed,
-            },
+            entity_id=organization_id,
+            details=details,
         )
         await tenant_db.commit()
+    await control_db.execute(
+        update(SubprocessorNotice).where(SubprocessorNotice.id == notice_id).values(audited_at=now)
+    )
+    await control_db.commit()
+    return True
 
 
 async def notify_organization(
@@ -270,80 +352,84 @@ async def notify_organization(
     *,
     now: datetime,
 ) -> int | None:
-    """Notify one organisation of one entry, exactly once.
+    """Notify one organisation of one entry, once (module docstring, steps 1-2).
 
-    Returns the number of administrators emailed, or ``None`` when another
-    run already claimed this (entry, organisation). Raises when nobody could be
-    told; the claim is rolled back so the next tick retries.
+    Returns the number of administrators emailed, or ``None`` when another run
+    holds or finished this (entry, organisation). Raises
+    :class:`NoNoticeDelivered` when nobody could be told — the claim is removed
+    so the next tick retries. Does not write the audit row; see
+    :func:`_write_audit`.
     """
     assert entry.effective_on is not None
-    sent_on = now.date()
-    late = is_late(entry, sent_on)
     try:
-        claimed = (
-            await control_db.execute(
-                pg_insert(SubprocessorNotice)
-                .values(
-                    id=uuid.uuid4(),
-                    entry_id=entry.id,
-                    organization_id=org_id,
-                    sent_at=now,
-                    effective_on=entry.effective_on,
-                    recipients=0,
-                    failed_recipients=0,
-                    late=late,
-                )
-                .on_conflict_do_nothing(constraint="uq_subprocessor_notices_entry_org")
-                .returning(SubprocessorNotice.id)
-            )
-        ).scalar_one_or_none()
-        if claimed is None:
+        claim_id = await _claim(control_db, entry, org_id, now=now)
+        if claim_id is None:
             await control_db.rollback()
             return None
-
         org = await control_db.get(Organization, org_id)
-        if org is None:  # deleted between the listing and the claim
-            await control_db.rollback()
-            return None
-        recipients = await _admins(control_db, org_id)
+        recipients = await _admins(control_db, org_id) if org is not None else []
         if not recipients:
+            # Not yet committed (or a re-take, released again): nothing to undo.
+            await control_db.rollback()
+            if org is None:
+                return None
             raise NoNoticeDelivered("organisation has no active administrator")
+        org_name = org.name
+        # The claim is durable before any email leaves; no lock is held while
+        # the provider is called.
+        await control_db.commit()
+    except BaseException:
+        await control_db.rollback()
+        raise
 
-        adapter = get_email_adapter()
-        delivered: list[uuid.UUID] = []
-        failed = 0
-        for person in recipients:
-            subject, body = render_notice(entry, org_name=org.name, recipient_name=person.full_name)
-            try:
-                await adapter.send(
-                    EmailMessage(
-                        to=person.email,
-                        subject=subject,
-                        body_text=body,
-                        links=(register_url(), dpa_url()),
-                        preheader="Advance notice of a sub-processor change, and how to object.",
-                    )
+    adapter = get_email_adapter()
+    sent_on = now.date()
+    delivered: list[uuid.UUID] = []
+    failed = 0
+    for person in recipients:
+        subject, body = render_notice(
+            entry, org_name=org_name, recipient_name=person.full_name, sent_on=sent_on
+        )
+        try:
+            await adapter.send(
+                EmailMessage(
+                    to=person.email,
+                    subject=subject,
+                    body_text=body,
+                    links=(register_url(), dpa_url()),
+                    preheader="Advance notice of a sub-processor change, and how to object.",
                 )
-                delivered.append(person.user_id)
-            except Exception as exc:  # noqa: BLE001 — one address must not stop the rest
-                failed += 1
-                logger.warning(
-                    "[subprocessor-notices] entry=%s org=%s user=%s send failed: %s",
-                    entry.id,
-                    org_id,
-                    person.user_id,
-                    exc.__class__.__name__,
-                )
+            )
+            delivered.append(person.user_id)
+        except Exception as exc:  # noqa: BLE001 — one address must not stop the rest
+            failed += 1
+            logger.warning(
+                "[subprocessor-notices] entry=%s org=%s user=%s send failed: %s",
+                entry.id,
+                org_id,
+                person.user_id,
+                exc.__class__.__name__,
+            )
+
+    try:
         if not delivered:
+            await control_db.execute(
+                delete(SubprocessorNotice).where(
+                    SubprocessorNotice.id == claim_id, SubprocessorNotice.sent_at.is_(None)
+                )
+            )
+            await control_db.commit()
             raise NoNoticeDelivered("no administrator's email could be sent")
-
         await control_db.execute(
             update(SubprocessorNotice)
-            .where(SubprocessorNotice.id == claimed)
-            .values(recipients=len(delivered), failed_recipients=failed)
-        )
-        await _record_audit(
-            org=org, entry=entry, sent_on=sent_on, late=late, delivered=delivered, failed=failed
+            .where(SubprocessorNotice.id == claim_id)
+            .values(
+                sent_at=now,
+                recipients=len(delivered),
+                failed_recipients=failed,
+                recipient_user_ids=[str(u) for u in delivered],
+                late=is_late(entry, sent_on),
+            )
         )
         await control_db.commit()
     except BaseException:
@@ -352,16 +438,57 @@ async def notify_organization(
     return len(delivered)
 
 
+async def _unaudited(control_db: AsyncSession) -> list[uuid.UUID]:
+    ids = (
+        (
+            await control_db.execute(
+                select(SubprocessorNotice.id)
+                .join(Organization, Organization.id == SubprocessorNotice.organization_id)
+                .where(
+                    SubprocessorNotice.sent_at.is_not(None),
+                    SubprocessorNotice.audited_at.is_(None),
+                )
+                .order_by(SubprocessorNotice.sent_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await control_db.rollback()
+    return list(ids)
+
+
+async def _audit(
+    control_db: AsyncSession, notice_id: uuid.UUID, *, now: datetime, result: NoticeResult
+) -> None:
+    try:
+        if await _write_audit(control_db, notice_id, now=now):
+            result.audits_written += 1
+    except Exception as exc:  # noqa: BLE001 — retried next tick, never re-sent
+        await control_db.rollback()
+        result.failures += 1
+        logger.warning(
+            "[subprocessor-notices] notice=%s audit write failed: %s",
+            notice_id,
+            exc.__class__.__name__,
+        )
+
+
 async def run_notices_once(
     control_db: AsyncSession,
     *,
     now: datetime | None = None,
     entries: tuple[ChangelogEntry, ...] = CHANGELOG,
 ) -> NoticeResult:
-    """Send every notice that is owed. One organisation's failure costs one."""
+    """Send every notice that is owed and write every audit row still missing.
+    One organisation's failure costs one."""
     now = now or datetime.now(UTC)
     result = NoticeResult()
-    owed = await owed_notices(control_db, today=now.date(), entries=entries)
+    # Notices that went out on an earlier tick whose audit row did not land.
+    for notice_id in await _unaudited(control_db):
+        await _audit(control_db, notice_id, now=now, result=result)
+
+    owed = await owed_notices(control_db, now=now, entries=entries)
     # End the read transaction before the per-organisation legs begin.
     await control_db.rollback()
     for item in owed:
@@ -385,6 +512,16 @@ async def run_notices_once(
             result.emails_sent += sent
             if is_late(item.entry, now.date()):
                 result.late_notices += 1
+            notice_id = (
+                await control_db.execute(
+                    select(SubprocessorNotice.id).where(
+                        SubprocessorNotice.entry_id == item.entry.id,
+                        SubprocessorNotice.organization_id == org_id,
+                    )
+                )
+            ).scalar_one()
+            await control_db.rollback()
+            await _audit(control_db, notice_id, now=now, result=result)
     return result
 
 

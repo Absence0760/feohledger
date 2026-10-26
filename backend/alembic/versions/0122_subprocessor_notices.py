@@ -7,8 +7,9 @@ sub-processor (issue #427). The change log is now data
 (`app/services/subprocessor_changelog.py`), and `services/subprocessor_notices`
 emails each organisation's administrators about every entry that needs notice.
 This table is the ledger of those notices: one row per (entry, organisation),
-claimed before the send, so an organisation is told once per entry and the date
-it was told is recorded (`docs/decisions.md` §320).
+claimed (and committed) before the send, so an organisation is told once per
+entry; ``sent_at`` / ``audited_at`` record when it was told and when its tenant
+audit row was written (`docs/decisions.md` §320).
 
 CONTROL PLANE ONLY: gated on ``organizations`` existing, so a no-op on every
 tenant DB (``migrate_all_tenants.py`` runs it there harmlessly). A fresh
@@ -58,10 +59,13 @@ def upgrade() -> None:
             id uuid NOT NULL,
             entry_id varchar(100) NOT NULL,
             organization_id uuid NOT NULL,
-            sent_at timestamptz NOT NULL DEFAULT now(),
+            claimed_at timestamptz NOT NULL DEFAULT now(),
+            sent_at timestamptz,
+            audited_at timestamptz,
             effective_on date NOT NULL,
             recipients integer NOT NULL,
             failed_recipients integer NOT NULL,
+            recipient_user_ids jsonb,
             late boolean NOT NULL,
             CONSTRAINT subprocessor_notices_pkey PRIMARY KEY (id),
             CONSTRAINT uq_subprocessor_notices_entry_org UNIQUE (entry_id, organization_id)

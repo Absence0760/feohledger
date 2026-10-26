@@ -15084,18 +15084,29 @@ each ledger row stores the entry's effective date and `late` — sent with under
 30 days to run, which an urgent entry or a sweep left off would cause — and the
 tick reports `late_notices` on `/api/health/sweeps`.
 
-**Idempotent and on the record.** A control-plane `subprocessor_notices` row,
-UNIQUE (entry, organisation), is inserted `ON CONFLICT DO NOTHING` *before* any
-email goes out, in the transaction that later records the counts; a second
-replica or a re-run finds the claim and sends nothing. The organisation counts
-as told when at least one admin's email reached the provider; if none did, the
-claim rolls back and the next tick retries. A `privacy.subprocessor_notice_sent`
-audit row lands in the tenant (recipient user ids, never addresses) and raises
-on failure, as the dunning sweep's does — a notice is never ledgered without
-its trail. Delivery is at-least-once: a crash between send and commit re-sends,
-which is recoverable; a silent miss is the defect this closes. The ledger has no
-foreign key and is exempt from tenant deletion: it is evidence a contractual
-notice was given, and should outlive the customer it was given to.
+**Idempotent and on the record, with no lock held across I/O.** A
+control-plane `subprocessor_notices` row, UNIQUE (entry, organisation), moves
+through three short transactions: the **claim** is inserted `ON CONFLICT DO
+NOTHING` and committed before any email goes out, so a second replica or a
+re-run sends nothing; **`sent_at`**, the counts, the recipient user ids and
+`late` are committed once at least one admin's email reached the provider (if
+none did, the claim is deleted and the next tick retries); then the tenant's
+`privacy.subprocessor_notice_sent` audit row is written and **`audited_at`**
+stamped. A failed audit write is a tick failure and is retried alone every tick
+— it never re-sends the notice. (The first cut held the claim open across the
+sends and the tenant write, so a tenant that refused the audit row rolled the
+claim back and re-mailed every admin hourly; review caught it before merge.) A
+claim with no `sent_at` older than `CLAIM_TIMEOUT` (an hour) is a run that died
+mid-send and is re-taken: that is the one at-least-once path, and a duplicate
+notice is recoverable where a silent miss is not. The ledger has no foreign key
+and is exempt from tenant deletion: it is evidence a contractual notice was
+given, and should outlive the customer it was given to.
+
+**No retroactive notices.** `NOTICES_SINCE` (2026-10-26) is the day this
+shipped; `validate` refuses a `notice=True` entry published before it, which
+would otherwise be mailed to every organisation on the first tick for a change
+that already happened without notice. A late notice (an urgent entry, or a
+sweep that was off) says "Took effect" rather than claim a future date.
 
 **Why each choice.**
 

@@ -57,6 +57,12 @@ NOTICE_PERIOD_DAYS = 30
 #: and the page cannot name different addresses.
 OBJECTION_CONTACT = "privacy@feohledger.com"
 
+#: The day the notice mechanism shipped. A ``notice=True`` entry published
+#: before it would be mailed to every organisation retroactively the first time
+#: the sweep runs, for a change that already happened without that notice —
+#: ``validate`` refuses one, so the historical rows stay ``notice=False``.
+NOTICES_SINCE = date(2026, 10, 26)
+
 _ID = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -171,6 +177,11 @@ def validate(entries: tuple[ChangelogEntry, ...] = CHANGELOG) -> list[str]:
                     f"{where}: effective_on / urgent_reason belong to a notice entry only"
                 )
             continue
+        if entry.published_on < NOTICES_SINCE:
+            problems.append(
+                f"{where}: a notice entry cannot be published before {NOTICES_SINCE}, "
+                "when the notice mechanism began — it would be mailed retroactively"
+            )
         if entry.effective_on is None:
             problems.append(f"{where}: a notice entry must state effective_on")
             continue

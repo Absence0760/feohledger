@@ -354,10 +354,12 @@
 			sub-processor begins processing your personal data, or before we replace an
 			existing one. Each such change is recorded as a dated entry in the change log at
 			<a href="/legal/sub-processors">/legal/sub-processors</a>, stating the date it
-			takes effect, and <strong>that entry is emailed to every active administrator of
+			takes effect, and <strong>that entry is emailed to the active administrators of
 			your organisation's account</strong>. The email is the notice; it is a contractual
 			notice rather than a product notification, so it cannot be switched off in
 			notification settings. We keep a record of when it was sent to your organisation.
+			A change made on shorter notice under item 4 below is notified the same way, and
+			the notice and the change log both state the reason.
 			It goes to your administrators because they are the contact the Service holds for
 			you — there is not yet a separate privacy contact to record. If another address
 			should also receive it, ask at

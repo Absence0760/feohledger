@@ -869,8 +869,8 @@
 
 	<p>
 		Each such change is recorded as a dated row in § 10 that states the date it
-		takes effect, and the same row is <strong>emailed to every active
-		administrator of every customer organisation</strong> that existed when it was
+		takes effect, and the same row is <strong>emailed to the active
+		administrators of each customer organisation</strong> that existed when it was
 		published. Recording the change and sending the notice are one step on our
 		side, not two: the row on this page and the email are produced from the same
 		entry, and we keep a record of when each organisation was sent it. The email

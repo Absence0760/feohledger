@@ -114,6 +114,14 @@ def test_notice_entries_are_only_the_published_notice_rows():
     assert len(notice_entries(date(2026, 12, 1), entries)) == 2
 
 
+def test_a_notice_entry_cannot_predate_the_mechanism():
+    # It would be mailed to every organisation retroactively on the first tick.
+    old = _notice(
+        id="2026-10-01-old", published_on=date(2026, 10, 1), effective_on=date(2026, 11, 1)
+    )
+    assert any("retroactively" in p for p in validate((old,)))
+
+
 def test_long_date_is_the_legal_pages_style():
     assert long_date(date(2026, 9, 5)) == "5 September 2026"
 

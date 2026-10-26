@@ -622,10 +622,13 @@ to them, not appointing someone to process it on our behalf. These belong in the
   - The `subprocessor-notices` sweep (`services/subprocessor_notices.py`,
     `FEOH_SUBPROCESSOR_NOTICES_ENABLED` — off by default, **on in production**)
     emails it to every active administrator of every organisation that existed
-    on `published_on`, once per organisation, recording the send in the
-    control-plane `subprocessor_notices` ledger and a
-    `privacy.subprocessor_notice_sent` audit row in the tenant. A notice that
-    went out with fewer than 30 days to run is recorded `late`.
+    on `published_on`, once per organisation: the (entry, organisation) pair
+    is claimed in the control-plane `subprocessor_notices` ledger before
+    sending, `sent_at` is stamped after, and a
+    `privacy.subprocessor_notice_sent` audit row is written in the tenant
+    (`audited_at`; retried alone if it fails, never re-sending). A notice that
+    went out with fewer than 30 days to run is recorded `late`. A `notice=True`
+    entry cannot be published before 2026-10-26, when this began.
     `python scripts/subprocessor_notices.py list` shows what is still owed;
     `send` sends it now.
 
