@@ -1217,6 +1217,11 @@ def _disconnected_adapter(exc: Exception):
         async def list_pos(self):
             raise exc
 
+        # The PO sync reads `list_pos_report` since decisions §323; this double
+        # is not an `ErpAdapter`, so it gets no base default wrapping `list_pos`.
+        async def list_pos_report(self):
+            raise exc
+
     return patch("app.services.erp_adapters.get_erp_adapter", return_value=_Adapter())
 
 
