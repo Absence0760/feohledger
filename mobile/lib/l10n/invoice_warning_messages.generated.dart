@@ -104,6 +104,7 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'poNumber': 'text',
     'poCurrency': 'text',
   },
+  'po_cancelled': {'poNumber': 'text'},
   'po_total_unverifiable': {'poNumber': 'text'},
   'po_partial_receipt': {'matchType': 'text', 'poNumber': 'text'},
   'po_over_receipt': {
@@ -193,6 +194,7 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'invoiceCurrency': 'text',
     'poCurrency': 'text',
   },
+  'po_match.issue.po_cancelled': {},
   'po_match.issue.po_total_unverifiable': {},
   'po_match.issue.amount_mismatch': {
     'invoiceAmount': 'money',
@@ -451,6 +453,11 @@ String? _localizeWarningCode(
         poNumber,
         poCurrency,
       );
+    // PO {poNumber} is cancelled — the invoice was not matched against it
+    case 'po_cancelled':
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      return l.invoiceWarningPoCancelled(poNumber);
     // The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared
     case 'po_total_unverifiable':
       final poNumber = _text(p['poNumber'], currency);
@@ -714,6 +721,9 @@ String? _localizeWarningCode(
       final poCurrency = _text(p['poCurrency'], currency);
       if (poCurrency == null) return null;
       return l.invoicePoMatchIssueCurrencyMismatch(invoiceCurrency, poCurrency);
+    // PO is cancelled — amounts not compared
+    case 'po_match.issue.po_cancelled':
+      return l.invoicePoMatchIssuePoCancelled;
     // PO total not confirmed by the ERP on its last sync — amounts not compared
     case 'po_match.issue.po_total_unverifiable':
       return l.invoicePoMatchIssuePoTotalUnverifiable;

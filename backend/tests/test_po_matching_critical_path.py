@@ -85,6 +85,7 @@ def _po(*, total: Decimal, vendor_id=None, line_items=None, currency: str | None
     return SimpleNamespace(
         id=uuid.uuid4(),
         po_number="PO-100",
+        status="open",
         total=total,
         currency=currency,
         vendor_id=vendor_id,

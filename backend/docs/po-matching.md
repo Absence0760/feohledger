@@ -146,6 +146,22 @@ Covered by `backend/tests/test_po_matching_algorithm.py` (the guard),
 `test_po_matching_critical_path.py::test_realdb_currency_guard_against_recorded_po_currencies`
 and the three agent test files.
 
+### A cancelled PO authorizes nothing
+
+A PO whose status is `cancelled` or `voided` (`procurement.CANCELLED_PO_STATUSES`)
+is never matched against. The matcher compares nothing (`status = "mismatch"`,
+`within_tolerance = false`, no variance, `MatchResult.po_cancelled = true`, one
+issue `po_match.issue.po_cancelled`), and `refresh_warnings` raises the
+`po_cancelled` warning with a payment-blocking `po_mismatch` at `warning`, so a
+person decides. The ERP PO sync re-matches the invoices citing a PO whose status
+moves into or out of cancelled, so the hold lands at sync time.
+
+`closed` is deliberately still matched. An ERP closes a PO once it is fully
+billed (NetSuite's "Fully Billed", for one), and the invoice being matched can
+itself be the bill that closed it, so refusing `closed` would hold the ordinary
+last invoice on every PO. Accruals and budgets still treat `closed` as dead
+(`DEAD_PO_STATUSES`), since they count what is still open (decisions §326).
+
 ### A PO total the ERP no longer vouches for
 
 An ERP adapter leaves out a PO whose total it cannot state exactly (SYSPRO: a

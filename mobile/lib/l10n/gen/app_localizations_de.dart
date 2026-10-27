@@ -2838,6 +2838,11 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'Bestellung $poNumber ist storniert — die Rechnung wurde nicht mit ihr abgeglichen';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'Die Summe der Bestellung $poNumber konnte bei der letzten Synchronisierung nicht vom ERP bestätigt werden — die Beträge wurden nicht verglichen';
   }
@@ -3046,6 +3051,10 @@ class AppLocalizationsDe extends AppLocalizations {
   ) {
     return 'Währungsabweichung: Rechnung in $invoiceCurrency, Bestellung in $poCurrency — Beträge nicht verglichen';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'Bestellung storniert — Beträge nicht verglichen';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>

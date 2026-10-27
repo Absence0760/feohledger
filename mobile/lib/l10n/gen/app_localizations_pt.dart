@@ -2837,6 +2837,11 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'O pedido $poNumber está cancelado — a fatura não foi conferida com ele';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'O total do pedido $poNumber não pôde ser confirmado pelo ERP na última sincronização — os valores não foram comparados';
   }
@@ -3045,6 +3050,10 @@ class AppLocalizationsPt extends AppLocalizations {
   ) {
     return 'Divergência de moeda: nota em $invoiceCurrency, pedido em $poCurrency — valores não comparados';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'Pedido cancelado — valores não comparados';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>
@@ -5990,6 +5999,11 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'O pedido $poNumber está cancelado — a fatura não foi conferida com ele';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'O total do pedido $poNumber não pôde ser confirmado pelo ERP na última sincronização — os valores não foram comparados';
   }
@@ -6198,6 +6212,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   ) {
     return 'Divergência de moeda: nota em $invoiceCurrency, pedido em $poCurrency — valores não comparados';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'Pedido cancelado — valores não comparados';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>

@@ -15538,3 +15538,29 @@ it did not read. That gap is a `docs/followups.md` (c) entry.
 `test_erp_sage_accounting_za_adapter.py::test_a_po_with_no_total_is_reported_skipped`,
 `test_erp_sage_intacct_adapter.py::test_a_po_with_no_total_is_reported_skipped_never_synced_at_zero`.
 
+## 326. The PO matcher refuses a cancelled PO, and still matches a closed one (PR #670 review, 2026-10-26)
+
+**Context.** The PR #670 money-path review found that `po_matching` ignored the
+PO's status: an invoice citing a `cancelled` order matched it and could pass the
+amount control, although accruals and budgets already counted that order as
+dead (`DEAD_PO_STATUSES`). It predates the PR.
+
+**Decision.** A PO in `CANCELLED_PO_STATUSES` (`cancelled`, `voided`) is never
+matched against: the matcher compares nothing and raises
+`po_match.issue.po_cancelled`, and `refresh_warnings` raises the `po_cancelled`
+warning with a payment-blocking `po_mismatch`, the currency guard's treatment.
+The ERP PO sync re-matches the invoices citing a PO whose status moves into or
+out of that set, so a cancellation holds its invoices at sync time (hold-only,
+as §323 amended).
+
+**`closed` is not refused.** An ERP closes a PO once it is fully billed, and
+the invoice being matched can be the bill that closed it (we push it; the ERP
+marks the PO fully billed; the next sync reads `closed`). Refusing `closed`
+would hold the ordinary last invoice on every PO. A closed PO stays a valid
+match; a second invoice against a fully billed PO is the over-billing and
+duplicate checks' job, not the status's.
+
+**Tests.** `test_po_matching_algorithm.py` (`test_a_cancelled_po_is_never_matched_against`,
+`test_a_closed_po_still_matches`) and
+`test_purchase_orders.py::test_sync_erp_cancelling_a_po_holds_the_invoice_citing_it`.
+

@@ -1071,6 +1071,12 @@ async def _refresh_po_match(
         flag = warning("po_not_found", "error", poNumber=invoice.po_number)
         warnings.append(flag)
         await _raise("po_mismatch", "error", flag)
+    elif match.status == "mismatch" and match.po_cancelled:
+        # The PO was called off: it authorizes nothing, so the invoice is held
+        # for a person whatever its amount (`procurement.CANCELLED_PO_STATUSES`).
+        flag = warning("po_cancelled", "warning", poNumber=match.po_number)
+        warnings.append(flag)
+        await _raise("po_mismatch", "warning", flag)
     elif match.status == "mismatch" and match.po_total_unverifiable_reason:
         # The PO's last ERP sync could not state its total exactly (decisions
         # §323): the matcher compared nothing, because the total on the row is
@@ -1265,6 +1271,8 @@ def blocking_finding_types(match) -> set[str]:
     two against each other)."""
     found: set[str] = set()
     if match.status == "no_po":
+        found.add("po_mismatch")
+    elif match.status == "mismatch" and match.po_cancelled:
         found.add("po_mismatch")
     elif match.status == "mismatch" and match.po_total_unverifiable_reason:
         found.add("po_mismatch")

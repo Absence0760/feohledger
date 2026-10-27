@@ -31,6 +31,13 @@ from app.models.base import Base, EntityMixin, TimestampMixin
 #: "open" means.
 DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
 
+#: The dead statuses the PO matcher refuses to match an invoice against
+#: (`services/po_matching`): an order that was called off authorizes nothing.
+#: `closed` is deliberately not one. An ERP closes a PO once it is fully billed
+#: (NetSuite's "Fully Billed", for one), which the invoice being matched can
+#: itself have caused, so refusing it would hold the ordinary last invoice.
+CANCELLED_PO_STATUSES: tuple[str, ...] = ("cancelled", "voided")
+
 
 def po_currency_code(value: object) -> str | None:
     """The ISO 4217 code a purchase order may record, or ``None``.

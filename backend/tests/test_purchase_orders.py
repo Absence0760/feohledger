@@ -1525,6 +1525,38 @@ async def test_sync_erp_rematch_skips_other_entities_and_paid_invoices(realdb, m
     assert await _po_mismatch_rows(realdb, ids["paid"]) == []
 
 
+async def test_sync_erp_cancelling_a_po_holds_the_invoice_citing_it(realdb, monkeypatch):
+    """The ERP cancels a PO an approved invoice matched exactly. The total did
+    not move, but a cancelled order authorizes nothing: the sync re-matches,
+    the invoice is held, and the run refuses it."""
+    from app.services.erp_adapters.base import PoPayload
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-CXL", total=Decimal("500.00"), currency="USD")],
+    )
+    inv_id = await _seed_approved_po_invoice(
+        realdb, number="INV-CXL-1", po_number="PO-CXL", amount="500.00"
+    )
+    assert await _po_mismatch_rows(realdb, inv_id) == []
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(
+                po_number="PO-CXL", total=Decimal("500.00"), currency="USD", status="cancelled"
+            )
+        ],
+    )
+    assert [r.status for r in await _po_mismatch_rows(realdb, inv_id)] == ["open"]
+
+    resp = await _try_run(realdb, inv_id)
+    assert resp.status_code == 409, resp.text
+    assert "po_mismatch" in resp.json()["detail"]
+
+
 async def test_sync_erp_raising_a_po_total_never_clears_the_hold(realdb, monkeypatch):
     """The over-billing hold is open; someone raises the PO total in the ERP to
     the invoiced amount and syncs. The re-match now MATCHES, but the hold stays

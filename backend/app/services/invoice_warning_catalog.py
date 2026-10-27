@@ -328,6 +328,14 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         "the amounts were not compared",
         {"invoiceCurrency": "text", "poNumber": "text", "poCurrency": "text"},
     ),
+    # The PO was cancelled (or voided): it authorizes nothing, so the invoice
+    # was not matched against it.
+    WarningSpec(
+        "po_cancelled",
+        "po_mismatch",
+        "PO {poNumber} is cancelled — the invoice was not matched against it",
+        {"poNumber": "text"},
+    ),
     # The PO's last ERP sync could not state its total exactly, so the total on
     # record is not compared against (decisions §323). No figure is printed:
     # the stale one is precisely what must not be presented as the PO's.
@@ -612,6 +620,12 @@ PO_MATCH_ISSUE_SPECS: tuple[WarningSpec, ...] = (
         "Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} "
         "— amounts not compared",
         {"invoiceCurrency": "text", "poCurrency": "text"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "po_cancelled",
+        PO_MATCH_ISSUE_TYPE,
+        "PO is cancelled — amounts not compared",
+        {},
     ),
     WarningSpec(
         PO_MATCH_ISSUE_PREFIX + "po_total_unverifiable",

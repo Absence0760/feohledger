@@ -2661,6 +2661,11 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return '発注 $poNumber は取り消されています — 請求書はこの発注と照合されていません';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return '発注 $poNumber の合計は前回の同期で ERP から確認できなかったため、金額を比較していません';
   }
@@ -2869,6 +2874,9 @@ class AppLocalizationsJa extends AppLocalizations {
   ) {
     return '通貨の不一致: 請求は $invoiceCurrency、発注は $poCurrency — 金額は比較されていません';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled => '発注は取り消されています — 金額は比較されていません';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>

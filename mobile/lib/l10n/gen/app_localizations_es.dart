@@ -2837,6 +2837,11 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'El pedido $poNumber está cancelado — la factura no se cotejó con él';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'El total del pedido $poNumber no se pudo confirmar en el ERP en la última sincronización; los importes no se compararon';
   }
@@ -3045,6 +3050,10 @@ class AppLocalizationsEs extends AppLocalizations {
   ) {
     return 'Discrepancia de moneda: factura en $invoiceCurrency, pedido en $poCurrency; importes no comparados';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'Pedido cancelado — importes no comparados';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>

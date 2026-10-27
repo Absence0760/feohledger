@@ -179,7 +179,8 @@ so a finding cannot be keyed under the wrong family by mistake. Both emit
 
 `MatchResult.issues` (persisted as `invoice.po_match.issues`) is a list of
 `po_match.issue.*` findings — `po_not_found`, `currency_mismatch`,
-`po_total_unverifiable` (the PO's last ERP sync could not price it, so nothing
+`po_cancelled` (the PO is cancelled or voided, so nothing was compared; its
+warning twin is `po_cancelled` — `decisions.md` §326), `po_total_unverifiable` (the PO's last ERP sync could not price it, so nothing
 was compared; its warning twin `po_total_unverifiable` prints no figure —
 `decisions.md` §323), the three
 `amount_mismatch*` variants (both currencies known; the PO's unknown, so its

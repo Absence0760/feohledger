@@ -2817,6 +2817,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'PO $poNumber is cancelled — the invoice was not matched against it';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'The total of PO $poNumber could not be confirmed from the ERP on its last sync — the amounts were not compared';
   }
@@ -3025,6 +3030,10 @@ class AppLocalizationsEn extends AppLocalizations {
   ) {
     return 'Currency mismatch: invoice in $invoiceCurrency, PO in $poCurrency — amounts not compared';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'PO is cancelled — amounts not compared';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>

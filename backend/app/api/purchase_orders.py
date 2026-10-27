@@ -22,6 +22,7 @@ from app.database import get_control_db
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.procurement import (
+    CANCELLED_PO_STATUSES,
     POLineItem,
     PurchaseOrder,
     po_currency_code,
@@ -545,6 +546,12 @@ async def sync_pos_from_erp(
                 rematch.add(existing_po.po_number)
                 changed = True
             if existing_po.status != erp_po.status:
+                # Into or out of cancelled changes whether the matcher accepts
+                # the PO at all, so the invoices citing it are re-matched.
+                if (existing_po.status in CANCELLED_PO_STATUSES) != (
+                    erp_po.status in CANCELLED_PO_STATUSES
+                ):
+                    rematch.add(existing_po.po_number)
                 existing_po.status = erp_po.status
                 changed = True
             if (
