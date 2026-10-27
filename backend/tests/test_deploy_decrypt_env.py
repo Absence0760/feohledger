@@ -74,6 +74,7 @@ def _dotenv(overrides: dict[str, str | None] | None = None) -> str:
     values: dict[str, str | None] = {
         **REQUIRED,
         "FEOH_EXTRACTION_PROVIDER": "mock",
+        "FEOH_SUBPROCESSOR_NOTICES_ENABLED": "true",
         **(overrides or {}),
     }
     lines = ["# ── Deploy-level ──"]
@@ -451,6 +452,24 @@ def test_an_unreadable_iam_flag_is_refused(deploy: Deploy, flag: str) -> None:
     result = deploy.run(_iam({"FEOH_DATABASE_IAM_AUTH": flag}))
     _assert_refused_and_kept(deploy, result)
     assert "not a boolean" in result.stderr
+
+
+@pytest.mark.parametrize("value", [None, "", "false", "0", "off"])
+def test_refuses_the_subprocessor_notice_sweep_off(deploy: Deploy, value: str | None) -> None:
+    """The DPA says sub-processor notices are emailed (decisions §321), and the app
+    refuses to boot a deployed env with the sweep off — so the file is refused
+    here, before compose would restart the API into that refusal."""
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_dotenv({"FEOH_SUBPROCESSOR_NOTICES_ENABLED": value}))
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_SUBPROCESSOR_NOTICES_ENABLED must be true" in result.stderr
+
+
+@pytest.mark.parametrize("value", ["true", "True", "1", "yes"])
+def test_accepts_the_subprocessor_notice_sweep_on(deploy: Deploy, value: str) -> None:
+    result = deploy.run(_dotenv({"FEOH_SUBPROCESSOR_NOTICES_ENABLED": value}))
+    assert result.returncode == 0, result.stderr
+    assert "FEOH_SUBPROCESSOR_NOTICES_ENABLED" not in result.stderr
 
 
 def test_deploy_sh_decrypts_only_through_decrypt_env() -> None:

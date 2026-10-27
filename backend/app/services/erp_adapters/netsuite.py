@@ -1,15 +1,35 @@
-"""Oracle NetSuite adapter — direct REST API integration with Token-Based Auth."""
+"""Oracle NetSuite adapter — direct REST API integration.
 
+Two sign-in methods, chosen by ``settings.erp.auth_method``:
+
+* ``oauth2_m2m`` — OAuth 2.0 client credentials (machine to machine): a JWT
+  assertion signed with the private key of the certificate the customer mapped
+  to the integration record, exchanged for a 60-minute bearer token. The only
+  method Oracle lets a NEW integration use from 2027.1.
+* ``tba`` — Token-Based Authentication (OAuth 1.0a), for integrations created
+  before that. A block with no ``auth_method`` is one of those (every NetSuite
+  configuration saved before OAuth 2.0 existed), so absent means ``tba``.
+"""
+
+import asyncio
+import base64
 import hashlib
 import hmac
+import logging
 import re
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlsplit
 
 import httpx
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from joserfc import jwt
+from joserfc.jwk import ECKey, RSAKey
 
 from app.config import settings
 from app.services.erp_adapters.base import (
@@ -23,7 +43,10 @@ from app.services.erp_adapters.base import (
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -32,6 +55,8 @@ from app.services.erp_adapters.base import (
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json, loads_exact_json
+
+logger = logging.getLogger(__name__)
 
 #: SuiteQL pages at 100 rows. The PO list stops after 10 pages; the chart and
 #: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it.
@@ -49,12 +74,16 @@ _VENDOR_QUERY = (
 #: Chart sync (see ``list_gl_accounts``). ``ORDER BY`` keeps offset paging stable.
 _ACCOUNT_QUERY = "SELECT id, acctnumber, fullname, accttype, isinactive FROM account ORDER BY id"
 
-#: Purchase-order sync. ``foreigntotal`` is the total in the order's own
-#: currency, and ``currency.symbol`` is that currency's ISO code. The date goes
-#: through ``TO_CHAR`` because SuiteQL otherwise renders dates in the user's
-#: date-format preference.
+#: Purchase-order sync. ``t.entity`` is the vendor's internal id — the same
+#: ``vendor.id`` that ``list_vendors`` reports as ``erp_vendor_id`` — so the PO
+#: links to its vendor by id; ``BUILTIN.DF(t.entity)`` is the vendor's display
+#: name, the sync's fallback only. ``foreigntotal`` is the total in the order's
+#: own currency, and ``currency.symbol`` is that currency's ISO code. The date
+#: goes through ``TO_CHAR`` because SuiteQL otherwise renders dates in the
+#: user's date-format preference.
 _PO_QUERY = (
-    "SELECT t.id, t.tranid, t.status, BUILTIN.DF(t.entity) AS vendorname, t.foreigntotal, "
+    "SELECT t.id, t.tranid, t.status, t.entity AS vendorid, "
+    "BUILTIN.DF(t.entity) AS vendorname, t.foreigntotal, "
     "c.symbol AS currency, TO_CHAR(t.duedate, 'YYYY-MM-DD') AS duedate "
     "FROM transaction t LEFT JOIN currency c ON c.id = t.currency "
     "WHERE t.type = 'PurchOrd' ORDER BY t.id"
@@ -67,23 +96,317 @@ _PO_QUERY = (
 _ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
+#: ``settings.erp.auth_method`` values. Absent means TBA (see the module doc).
+AUTH_TBA = "tba"
+AUTH_OAUTH2_M2M = "oauth2_m2m"
+AUTH_METHODS: tuple[str, ...] = (AUTH_OAUTH2_M2M, AUTH_TBA)
+
+#: The config keys each method needs. The secrets among them
+#: (``consumer_secret``, ``token_secret``, ``private_key``) are sealed in
+#: ``provider_credentials`` and merged in by the dispatcher.
+_REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
+    AUTH_TBA: ("consumer_key", "consumer_secret", "token_id", "token_secret"),
+    AUTH_OAUTH2_M2M: ("client_id", "certificate_id", "private_key"),
+}
+
+#: The OAuth 2.0 client-credentials grant
+#: (https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162755359851.html):
+#: a form POST of these to the account's token endpoint. The assertion is a JWT
+#: (https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162790605110.html)
+#: whose ``kid`` is the certificate id the mapping generated, ``iss`` the
+#: integration's client id, ``aud`` the token endpoint, and ``exp`` under 60
+#: minutes after ``iat``. REST records and SuiteQL are both ``rest_webservices``.
+_CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+_OAUTH2_SCOPE = "rest_webservices"
+_ASSERTION_LIFETIME_SECONDS = 300
+#: A token is used until this many seconds before NetSuite says it expires.
+_TOKEN_EXPIRY_MARGIN_SECONDS = 60
+#: NetSuite documents ``expires_in`` as always 3600; used when it is missing.
+_DEFAULT_TOKEN_LIFETIME_SECONDS = 3600
+
+#: The keys NetSuite accepts for the certificate
+#: (https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/subsect_162755332391.html):
+#: RSA of 3072 or 4096 bits, signed RSA-PSS (``PS256``), or EC on P-256 /
+#: P-384 / P-521 (``ES256`` / ``ES384`` / ``ES512``). RS256 is not accepted.
+_RSA_KEY_SIZES = frozenset({3072, 4096})
+_EC_CURVE_ALGORITHMS: dict[str, str] = {
+    "secp256r1": "ES256",
+    "secp384r1": "ES384",
+    "secp521r1": "ES512",
+}
+
+_PEM_BLOCK_RE = re.compile(r"-----BEGIN ([A-Z0-9 ]+)-----(.*?)-----END \1-----", re.DOTALL)
+
+#: Bearer tokens by connection (:meth:`NetSuiteAdapter._token_cache_key`):
+#: ``(access_token, time.monotonic() expiry)``. In-process only, never
+#: persisted or logged. The key hashes the private key in, so a rotated
+#: certificate never reuses a token minted with the old one.
+_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+
+
+def clear_oauth2_token_cache() -> None:
+    """Forget every cached bearer token."""
+    _TOKEN_CACHE.clear()
+
+
 class NetSuiteConfigError(ValueError):
     """``settings.erp`` has a bad NetSuite field. Names the key, never the value."""
+
+
+def _normalise_pem(raw: str) -> bytes | None:
+    """The first PEM block in ``raw``, re-wrapped at 64 columns.
+
+    The settings form takes the key in a one-line input, and a browser strips
+    the newlines out of a pasted value, so a PEM can arrive as
+    ``-----BEGIN PRIVATE KEY-----MIIE...-----END PRIVATE KEY-----``. The
+    base64 body's line breaks carry no meaning, so they are rebuilt.
+    """
+    match = _PEM_BLOCK_RE.search(raw)
+    if match is None:
+        return None
+    label = match.group(1).strip()
+    body = re.sub(r"\s+", "", match.group(2))
+    lines = "\n".join(body[i : i + 64] for i in range(0, len(body), 64))
+    return f"-----BEGIN {label}-----\n{lines}\n-----END {label}-----\n".encode()
+
+
+#: Parsed signing keys by ``sha256(PEM)``, least recently used first. Keyed on
+#: the digest, not the PEM: an ``lru_cache`` on the PEM argument would keep every
+#: tenant's plaintext private key alive as a dict key for the life of the
+#: process, beside the parsed key it was cached for.
+_SIGNING_KEYS: OrderedDict[str, tuple[RSAKey | ECKey, str]] = OrderedDict()
+_SIGNING_KEYS_MAX = 32
+_SIGNING_KEYS_LOCK = threading.Lock()  # callers run in worker threads
+
+
+def clear_signing_key_cache() -> None:
+    """Forget every parsed signing key."""
+    with _SIGNING_KEYS_LOCK:
+        _SIGNING_KEYS.clear()
+
+
+def _signing_key(private_key_pem: str) -> tuple[RSAKey | ECKey, str]:
+    """The JWK and JWS algorithm for the certificate's private key.
+
+    Loading an RSA key validates it, ~150 ms of CPU for 4096 bits, so a parsed
+    key is memoised under the PEM's SHA-256 (a refusal is not) and every caller
+    on the event loop reaches this through ``asyncio.to_thread``.
+    """
+    digest = hashlib.sha256(private_key_pem.encode()).hexdigest()
+    with _SIGNING_KEYS_LOCK:
+        hit = _SIGNING_KEYS.get(digest)
+        if hit is not None:
+            _SIGNING_KEYS.move_to_end(digest)
+            return hit
+    loaded = _load_signing_key(private_key_pem)
+    with _SIGNING_KEYS_LOCK:
+        _SIGNING_KEYS[digest] = loaded
+        _SIGNING_KEYS.move_to_end(digest)
+        while len(_SIGNING_KEYS) > _SIGNING_KEYS_MAX:
+            _SIGNING_KEYS.popitem(last=False)
+    return loaded
+
+
+def _load_signing_key(private_key_pem: str) -> tuple[RSAKey | ECKey, str]:
+    """Parse and check the key. Refuses, naming the key only, what NetSuite
+    would refuse anyway: an unparseable or passphrase-protected PEM, an RSA key
+    of the wrong size, a curve NetSuite does not accept, any other key type."""
+    unusable = NetSuiteConfigError("NetSuite config 'private_key' is not a usable private key")
+    pem = _normalise_pem(private_key_pem)
+    if pem is None:
+        raise unusable
+    try:
+        key = serialization.load_pem_private_key(pem, password=None)
+    except (ValueError, TypeError):
+        # TypeError: the PEM is encrypted. Neither message is re-raised: the
+        # error must never carry key material.
+        raise unusable from None
+    if isinstance(key, rsa.RSAPrivateKey):
+        if key.key_size not in _RSA_KEY_SIZES:
+            raise NetSuiteConfigError(
+                "NetSuite config 'private_key' must be an RSA key of 3072 or 4096 bits"
+            )
+        return RSAKey.import_key(key), "PS256"
+    if isinstance(key, ec.EllipticCurvePrivateKey):
+        alg = _EC_CURVE_ALGORITHMS.get(key.curve.name)
+        if alg is None:
+            raise NetSuiteConfigError(
+                "NetSuite config 'private_key' must be an EC key on P-256, P-384 or P-521"
+            )
+        return ECKey.import_key(key), alg
+    raise unusable
 
 
 @register_adapter("netsuite")
 class NetSuiteAdapter(ErpAdapter):
     """Direct integration with Oracle NetSuite REST API.
 
-    Required config:
-        account_id: NetSuite account ID (e.g. "1234567")
-        consumer_key: Integration consumer key
-        consumer_secret: Integration consumer secret
-        token_id: Token-based auth token ID
-        token_secret: Token-based auth token secret
+    Config:
+        account_id: NetSuite account ID (e.g. "1234567", "1234567_SB1")
+        auth_method: "oauth2_m2m" or "tba"; absent means "tba"
+
+        OAuth 2.0 client credentials (``oauth2_m2m``):
+            client_id: the integration record's client ID
+            certificate_id: the Certificate ID NetSuite generated when the
+                certificate was mapped to the integration (the JWT ``kid``)
+            private_key: that certificate's PEM private key (secret)
+
+        Token-Based Authentication (``tba``):
+            consumer_key / consumer_secret: the integration record's
+            token_id / token_secret: the access token's
     """
 
     erp_type = "netsuite"
+
+    def _auth_method(self) -> str:
+        """The configured sign-in method. Absent is TBA; anything else that is
+        not a known method is refused rather than guessed at."""
+        method = self.config.get("auth_method") or AUTH_TBA
+        if method not in AUTH_METHODS:
+            raise NetSuiteConfigError("NetSuite config 'auth_method' is invalid")
+        return method
+
+    async def _check_config(self) -> None:
+        """Raise :class:`NetSuiteConfigError` (naming the key) for a config no
+        request can succeed with: a bad ``account_id`` or ``auth_method``, a
+        missing credential, or a private key NetSuite would not accept. Makes
+        no request."""
+        self._account_id()
+        method = self._auth_method()
+        for key in _REQUIRED_KEYS[method]:
+            if not str(self.config.get(key) or "").strip():
+                raise NetSuiteConfigError(f"NetSuite config '{key}' is missing")
+        if method == AUTH_OAUTH2_M2M:
+            await asyncio.to_thread(_signing_key, str(self.config["private_key"]))
+
+    def _rest_root(self) -> str:
+        """``.../services/rest``: the record API, SuiteQL and the OAuth 2.0
+        token endpoint all sit under it."""
+        base = self._base_url()
+        if base.endswith("/record/v1"):
+            base = base[: -len("/record/v1")]
+        return base
+
+    def _token_url(self) -> str:
+        """The account's OAuth 2.0 token endpoint — also the assertion's
+        ``aud``. Follows ``FEOH_ERP_NETSUITE_API_BASE`` when the operator set
+        it, so the fake ERP gets the token request too, never real NetSuite."""
+        return f"{self._rest_root()}/auth/oauth2/v1/token"
+
+    def _token_cache_key(self) -> str:
+        material = "\x00".join(
+            str(self.config.get(k) or "")
+            for k in ("account_id", "client_id", "certificate_id", "private_key")
+        )
+        return f"{self._token_url()}\x00{hashlib.sha256(material.encode()).hexdigest()}"
+
+    def _client_assertion(self) -> str:
+        """The signed JWT the token request carries (Oracle's "request token
+        structure"): ``kid`` = certificate id, ``iss`` = client id, ``aud`` =
+        the token endpoint, five minutes of validity."""
+        key, alg = _signing_key(str(self.config["private_key"]))
+        now = int(time.time())
+        return jwt.encode(
+            {"alg": alg, "typ": "JWT", "kid": str(self.config["certificate_id"])},
+            {
+                "iss": str(self.config["client_id"]),
+                "scope": _OAUTH2_SCOPE,
+                "aud": self._token_url(),
+                "iat": now,
+                "exp": now + _ASSERTION_LIFETIME_SECONDS,
+            },
+            key,
+            algorithms=[alg],
+        )
+
+    async def _oauth2_token(self, client: httpx.AsyncClient) -> str | httpx.Response:
+        """A bearer token for this connection: the cached one while it has more
+        than a minute left, else a new one from the token endpoint.
+
+        The grant issues no refresh token, so a new assertion is the only way
+        to a new token. A refusal comes back as the token endpoint's own
+        response, which every caller already treats as a failed call; its
+        ``error`` code is logged, never the assertion or a token.
+        """
+        cache_key = self._token_cache_key()
+        cached = _TOKEN_CACHE.get(cache_key)
+        if cached is not None and cached[1] > time.monotonic():
+            return cached[0]
+        resp = await client.post(
+            self._token_url(),
+            data={
+                "grant_type": "client_credentials",
+                "client_assertion_type": _CLIENT_ASSERTION_TYPE,
+                # Parsing (first use) and signing are CPU work: off the loop.
+                "client_assertion": await asyncio.to_thread(self._client_assertion),
+            },
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "NetSuite OAuth 2.0 token request refused: HTTP %s (%s)",
+                resp.status_code,
+                _refusal_reason(resp),
+            )
+            return resp
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+        token = body.get("access_token") if isinstance(body, dict) else None
+        if not isinstance(token, str) or not token:
+            # A 200 without a token is not a refusal we can hand back: as a
+            # response it would read as the API call succeeding.
+            raise httpx.DecodingError("NetSuite token response carried no access_token")
+        try:
+            lifetime = int(body.get("expires_in") or _DEFAULT_TOKEN_LIFETIME_SECONDS)
+        except (TypeError, ValueError):
+            lifetime = _DEFAULT_TOKEN_LIFETIME_SECONDS
+        _TOKEN_CACHE[cache_key] = (
+            token,
+            time.monotonic() + max(lifetime - _TOKEN_EXPIRY_MARGIN_SECONDS, 0),
+        )
+        return token
+
+    async def _send(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
+        *,
+        content: str | bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """One authenticated NetSuite call, signed by the configured method.
+
+        Under OAuth 2.0 a 401 means the bearer expired or was revoked early:
+        the cached token is dropped and the call made once more with a new
+        one. A second 401 is the answer.
+        """
+        method = method.upper()
+        out = dict(headers or {})
+        if self._auth_method() == AUTH_TBA:
+            out["Authorization"] = self._auth_header(method, url)
+            return await _dispatch(client, method, url, content, out)
+        resp = await self._send_bearer(client, method, url, content, out)
+        if resp.status_code != 401:
+            return resp
+        _TOKEN_CACHE.pop(self._token_cache_key(), None)
+        return await self._send_bearer(client, method, url, content, out)
+
+    async def _send_bearer(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
+        content: str | bytes | None,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        token = await self._oauth2_token(client)
+        if isinstance(token, httpx.Response):
+            return token
+        return await _dispatch(
+            client, method, url, content, {**headers, "Authorization": f"Bearer {token}"}
+        )
 
     def _account_id(self) -> str:
         """The configured ``account_id``, validated before it reaches a URL or
@@ -100,7 +423,8 @@ class NetSuiteAdapter(ErpAdapter):
         # Trusted, so no SSRF guard. Empty (the default) = derive the real
         # per-account NetSuite URL from account_id. OAuth 1.0 signing below
         # always signs the URL actually used, so requests to the override
-        # carry a signature computed over the override URL.
+        # carry a signature computed over the override URL; the OAuth 2.0
+        # token endpoint (`_token_url`) follows the override as well.
         if settings.erp_netsuite_api_base:
             return settings.erp_netsuite_api_base.rstrip("/")
         account = self._account_id().replace("_", "-").lower()
@@ -120,28 +444,23 @@ class NetSuiteAdapter(ErpAdapter):
             "oauth_version": "1.0",
         }
 
-        # Build signature base string
-        param_str = "&".join(f"{quote(k)}={quote(v)}" for k, v in sorted(params.items()))
-        base_string = f"{method.upper()}&{quote(url, safe='')}&{quote(param_str, safe='')}"
-
+        base_string = _tba_base_string(method, url, params)
         signing_key = (
-            f"{quote(self.config['consumer_secret'])}&{quote(self.config['token_secret'])}"
+            f"{_oauth1_encode(self.config['consumer_secret'])}"
+            f"&{_oauth1_encode(self.config['token_secret'])}"
         )
         signature = hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha256).digest()
-
-        import base64
-
         sig_b64 = base64.b64encode(signature).decode()
 
         parts = [
             f'OAuth realm="{self._account_id()}"',
-            f'oauth_consumer_key="{params["oauth_consumer_key"]}"',
-            f'oauth_token="{params["oauth_token"]}"',
+            f'oauth_consumer_key="{_oauth1_encode(params["oauth_consumer_key"])}"',
+            f'oauth_token="{_oauth1_encode(params["oauth_token"])}"',
             f'oauth_nonce="{nonce}"',
             f'oauth_timestamp="{timestamp}"',
             'oauth_signature_method="HMAC-SHA256"',
             'oauth_version="1.0"',
-            f'oauth_signature="{quote(sig_b64)}"',
+            f'oauth_signature="{_oauth1_encode(sig_b64)}"',
         ]
         return ", ".join(parts)
 
@@ -159,9 +478,8 @@ class NetSuiteAdapter(ErpAdapter):
         """
         q = f'externalId IS "{external_id}"'
         url = f"{self._base_url()}/vendorBill?q={quote(q, safe='')}"
-        headers = {"Authorization": self._auth_header("GET", url)}
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers=headers)
+            resp = await self._send(client, "GET", url)
         if resp.status_code != 200:
             return resp.status_code, None
         items = resp.json().get("items", [])
@@ -180,7 +498,7 @@ class NetSuiteAdapter(ErpAdapter):
         if isinstance(expense_lines, str):
             return erp_preflight_refusal("NetSuite", expense_lines)
         try:
-            self._account_id()
+            await self._check_config()
         except NetSuiteConfigError as exc:
             # Retrying cannot fix the config, and the message names the key only.
             return ErpPostResult(success=False, message=str(exc), retryable=False)
@@ -221,13 +539,14 @@ class NetSuiteAdapter(ErpAdapter):
         # Synchronous on purpose: `Prefer: respond-async` turns the create into
         # a job (202, Location = the job), and the total check below needs the
         # record's own Location.
-        headers = {
-            "Authorization": self._auth_header("POST", url),
-            "Content-Type": "application/json",
-        }
-
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, content=dumps_exact_json(body), headers=headers)
+            resp = await self._send(
+                client,
+                "POST",
+                url,
+                content=dumps_exact_json(body),
+                headers={"Content-Type": "application/json"},
+            )
 
         if resp.status_code in (200, 201, 204):
             # NetSuite returns the record ID in the Location header
@@ -261,7 +580,7 @@ class NetSuiteAdapter(ErpAdapter):
         float."""
         url = f"{self._base_url()}/vendorBill/{quote(doc_id, safe='')}"
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers={"Authorization": self._auth_header("GET", url)})
+            resp = await self._send(client, "GET", url)
         if resp.status_code != 200:
             return None
         try:
@@ -327,12 +646,8 @@ class NetSuiteAdapter(ErpAdapter):
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         url = f"{self._base_url()}/vendorBill/{erp_document_id}"
-        headers = {
-            "Authorization": self._auth_header("GET", url),
-        }
-
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers=headers)
+            resp = await self._send(client, "GET", url)
 
         if resp.status_code != 200:
             return ErpInvoiceStatus.unknown
@@ -367,22 +682,17 @@ class NetSuiteAdapter(ErpAdapter):
         """
         url = f"{self._base_url()}/vendorBill/{quote(erp_document_id, safe='')}"
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers={"Authorization": self._auth_header("GET", url)})
+            resp = await self._send(client, "GET", url)
             if resp.status_code != 200:
                 return False
             if _netsuite_bill_status(resp.json()) != "pendingapproval":
                 return False
-            resp = await client.delete(
-                url, headers={"Authorization": self._auth_header("DELETE", url)}
-            )
+            resp = await self._send(client, "DELETE", url)
         return resp.status_code == 204
 
     def _suiteql_url(self) -> str:
         """SuiteQL lives beside the record API: ``.../services/rest/query/v1``."""
-        base = self._base_url()
-        if base.endswith("/record/v1"):
-            base = base[: -len("/record/v1")]
-        return f"{base}/query/v1/suiteql"
+        return f"{self._rest_root()}/query/v1/suiteql"
 
     async def _suiteql(self, query: str, *, complete: str | None = None) -> list[dict]:
         """Run one SuiteQL query, paged by ``offset`` + ``hasMore``.
@@ -409,13 +719,9 @@ class NetSuiteAdapter(ErpAdapter):
         async with httpx.AsyncClient(timeout=30) as client:
             for _ in range(max_pages):
                 url = f"{self._suiteql_url()}?limit={_PAGE_SIZE}&offset={offset}"
-                headers = {
-                    "Authorization": self._auth_header("POST", url),
-                    "Content-Type": "application/json",
-                    "Prefer": "transient",
-                }
+                headers = {"Content-Type": "application/json", "Prefer": "transient"}
                 try:
-                    resp = await client.post(url, content=body_text, headers=headers)
+                    resp = await self._send(client, "POST", url, content=body_text, headers=headers)
                 except httpx.HTTPError:
                     return incomplete(ListingGap.fetch_failed)
                 if resp.status_code != 200:
@@ -462,31 +768,117 @@ class NetSuiteAdapter(ErpAdapter):
         return out
 
     async def list_pos(self) -> list[PoPayload]:
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
         """Pull purchase orders through SuiteQL (``_PO_QUERY``), headers only.
 
         The PO sync stores the header (number, vendor, total, status, currency,
         expected date); it does not persist ERP lines, so no line query is
-        made. A PO with no number or no stated total is skipped, never synced
-        at 0.
+        made. A PO with no number is dropped. One with a number but no usable
+        total is skipped, never synced at 0, and named in ``skipped`` as
+        ``unpriceable``, so a total an earlier sync stored for it stops being
+        matched against (decisions §323).
         """
-        out: list[PoPayload] = []
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
         for raw in await self._suiteql(_PO_QUERY):
             po = _netsuite_po_to_payload(raw)
             if po is not None:
-                out.append(po)
-        return out
+                pos.append(po)
+            elif raw.get("tranid"):
+                skipped.append(SkippedPo(str(raw["tranid"]), PoSkipReason.unpriceable))
+        return PoListing(pos=pos, skipped=skipped)
 
     async def test_connection(self) -> bool:
         try:
+            # Checked first so a missing credential or an unusable key is a
+            # plain False, before any request (for OAuth 2.0 this call also
+            # proves the token exchange: the certificate mapping, client id
+            # and role).
+            await self._check_config()
             url = f"{self._base_url()}/vendor?limit=1"
-            headers = {
-                "Authorization": self._auth_header("GET", url),
-            }
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(url, headers=headers)
+                resp = await self._send(client, "GET", url)
             return resp.status_code == 200
         except Exception:
             return False
+
+
+def _oauth1_encode(value: str) -> str:
+    """RFC 5849 §3.6 percent-encoding: everything but the unreserved set
+    (ALPHA, DIGIT, ``-._~``) is encoded — ``/`` included, which ``quote``'s
+    default leaves alone (a base64 signature can carry one)."""
+    return quote(value, safe="~")
+
+
+def _tba_base_string(method: str, url: str, oauth_params: dict[str, str]) -> str:
+    """The OAuth 1.0a signature base string (RFC 5849 §3.4.1).
+
+    The base string URI is the URL WITHOUT its query (§3.4.1.2: scheme and host
+    lower-cased, a default port dropped); the query's parameters are signed as
+    request parameters instead, beside the ``oauth_*`` ones, each name and
+    value encoded, the pairs sorted, then encoded once more as a whole
+    (§3.4.1.3). Signing the query inside the URI — what this did before — makes
+    NetSuite compute a different signature for every request that carries one
+    (SuiteQL paging, the ``externalId`` lookup, the connection test), so each
+    of them was refused 401.
+    """
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    default_port = {"http": 80, "https": 443}.get(scheme)
+    netloc = host if parts.port in (None, default_port) else f"{host}:{parts.port}"
+    base_uri = f"{scheme}://{netloc}{parts.path or '/'}"
+    pairs = [*parse_qsl(parts.query, keep_blank_values=True), *oauth_params.items()]
+    normalised = "&".join(
+        f"{k}={v}" for k, v in sorted((_oauth1_encode(k), _oauth1_encode(v)) for k, v in pairs)
+    )
+    return "&".join((method.upper(), _oauth1_encode(base_uri), _oauth1_encode(normalised)))
+
+
+async def _dispatch(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    content: str | bytes | None,
+    headers: dict[str, str],
+) -> httpx.Response:
+    if method == "POST":
+        return await client.post(url, content=content, headers=headers)
+    if method == "DELETE":
+        return await client.delete(url, headers=headers)
+    return await client.get(url, headers=headers)
+
+
+def _refusal_reason(resp: httpx.Response) -> str:
+    """The OAuth ``error`` code of a refused token request (``invalid_client``,
+    ``invalid_grant``), for the log. Only one of RFC 6749 §5.2's token-endpoint
+    codes is returned (RFC 7523's JWT-assertion grant reuses them), and as our
+    own literal: nothing from the provider's body reaches the log."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return "unparseable"
+    match body.get("error") if isinstance(body, dict) else None:
+        case "invalid_request":
+            return "invalid_request"
+        case "invalid_client":
+            return "invalid_client"
+        case "invalid_grant":
+            return "invalid_grant"
+        case "unauthorized_client":
+            return "unauthorized_client"
+        case "unsupported_grant_type":
+            return "unsupported_grant_type"
+        case "invalid_scope":
+            return "invalid_scope"
+        case "server_error":
+            return "server_error"
+        case "temporarily_unavailable":
+            return "temporarily_unavailable"
+        case _:
+            return "unknown"
 
 
 def _netsuite_bill_status(record: dict) -> str:
@@ -559,9 +951,13 @@ def _netsuite_po_to_payload(raw: dict) -> PoPayload | None:
         except ValueError:
             expected = None
     currency = str(raw.get("currency") or "").strip().upper()
+    vendor_id = raw.get("vendorid")
     return PoPayload(
         po_number=str(number),
         vendor_name=raw.get("vendorname") or None,
+        # The vendor's internal id, the same string `_netsuite_vendor_to_payload`
+        # reports as `erp_vendor_id`, so the PO links by id, not by name.
+        vendor_erp_id=str(vendor_id) if vendor_id not in (None, "") else None,
         total=total,
         status=_NETSUITE_PO_STATUSES.get(str(raw.get("status") or "").strip().upper(), "open"),
         expected_delivery_date=expected,

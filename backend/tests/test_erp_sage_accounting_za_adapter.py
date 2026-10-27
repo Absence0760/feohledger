@@ -26,6 +26,8 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     LineItemPayload,
     ListingGap,
+    PoSkipReason,
+    SkippedPo,
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
@@ -167,6 +169,7 @@ class FakeSage:
                 [
                     {
                         "DocumentNumber": "PO0001",
+                        "SupplierId": 12,
                         "SupplierName": "Acme",
                         "Total": 1150.00,
                         "Status": "Unprocessed",
@@ -700,6 +703,57 @@ def test_list_vendors_gl_accounts_and_pos():
     ]
     assert pos[0].expected_delivery_date == date(2026, 11, 1)
     assert pos[1].expected_delivery_date is None
+    assert [p.vendor_erp_id for p in pos] == ["12", None]
+
+
+def test_list_pos_carries_the_supplier_id_list_vendors_reports():
+    """A PO names its supplier by the ``ID`` ``list_vendors`` stamps as
+    ``erp_vendor_id``, so the sync links it by id: a supplier renamed since the
+    PO was raised and a second supplier with the same name both resolve to the
+    right one. A missing or non-numeric id is no id."""
+    fake = FakeSage()
+    suppliers = [{"ID": 21, "Name": "Acme"}, {"ID": 22, "Name": "Acme"}, {"ID": 23, "Name": "Bolt"}]
+    orders = [
+        {"DocumentNumber": "PO-1", "SupplierId": 22, "SupplierName": "Acme", "Total": 1},
+        {"DocumentNumber": "PO-2", "SupplierId": 23, "SupplierName": "Bolt Old", "Total": 1},
+        {"DocumentNumber": "PO-3", "SupplierName": "Acme", "Total": 1},
+        {"DocumentNumber": "PO-4", "SupplierId": 0, "SupplierName": "Acme", "Total": 1},
+    ]
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/Supplier/Get"):
+            return fake._paged(suppliers)
+        if request.url.path.endswith("/PurchaseOrder/Get"):
+            return fake._paged(orders)
+        return _orig(request)
+
+    fake.handler = handler
+    adapter = SageAccountingZaAdapter(CONFIG)
+    vendor_ids = {v.erp_vendor_id for v in _run(fake, adapter.list_vendors)}
+    by_number = {p.po_number: p.vendor_erp_id for p in _run(fake, adapter.list_pos)}
+    assert by_number == {"PO-1": "22", "PO-2": "23", "PO-3": None, "PO-4": None}
+    assert {"22", "23"} <= vendor_ids
+
+
+def test_a_po_with_no_total_is_reported_skipped():
+    """Left out, never synced at 0, and named so a total an earlier sync stored
+    for the number is marked unverifiable (decisions §323)."""
+    fake = FakeSage()
+    orders = [
+        {"DocumentNumber": "PO-1", "Total": 10},
+        {"DocumentNumber": "PO-NO-TOTAL", "Total": None},
+        {"Total": 5},
+    ]
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/PurchaseOrder/Get"):
+            return fake._paged(orders)
+        return _orig(request)
+
+    fake.handler = handler
+    listing = _run(fake, SageAccountingZaAdapter(CONFIG).list_pos_report)
+    assert [p.po_number for p in listing.pos] == ["PO-1"]
+    assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
 
 
 def test_list_paging_walks_skip_until_the_total():

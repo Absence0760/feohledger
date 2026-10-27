@@ -199,6 +199,7 @@ export const messages = {
 	'profile.notifications.event.cashShortfallProjected': 'Déficit de tesorería previsto',
 	'profile.notifications.event.aiInvoiceUsage': 'Uso de facturas leídas por IA',
 	'profile.notifications.event.erpConnectionExpiring': "La conexión con el ERP debe renovarse",
+	'profile.notifications.event.erpCallQuota': "Cupo de API del ERP agotado",
 	'profile.notifications.inAppFor': 'Notificaciones en la aplicación para «{event}»',
 	'profile.notifications.emailFor': 'Notificaciones por correo electrónico para «{event}»',
 
@@ -600,6 +601,8 @@ export const messages = {
 	'invoices.warning.poAmountVariance': 'Variación de importe {variancePct} frente al pedido {poNumber} (factura {invoiceAmount} frente a pedido {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Variación de importe {variancePct} frente al pedido {poNumber}, que no registra ninguna moneda (factura {invoiceAmount} frente a pedido {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'La factura está en {invoiceCurrency}, pero el pedido {poNumber} está en {poCurrency}; los importes no se compararon',
+	'invoices.warning.poCancelled': 'El pedido {poNumber} está cancelado — la factura no se cotejó con él',
+	'invoices.warning.poTotalUnverifiable': 'El total del pedido {poNumber} no se pudo confirmar en el ERP en la última sincronización; los importes no se compararon',
 	'invoices.warning.poPartialReceipt': 'Coincidencia parcial de 3 vías — coincidencia {matchType} con el pedido {poNumber}, pero solo se ha recibido parte de la cantidad pedida',
 	'invoices.warning.poOverReceipt': 'Exceso de recepción: {receivedQuantity} recibidas frente a {orderedQuantity} pedidas (+{excessQuantity}) en el pedido {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Se han recibido más mercancías de las pedidas en el pedido {poNumber}',
@@ -628,6 +631,8 @@ export const messages = {
 	'invoices.warning.glCodeStalePrior': 'La cuenta contable «{code}» guardada para el proveedor ya no está en el plan de cuentas activo.',
 	'invoices.poMatch.issue.poNotFound': 'No se encontró el pedido {poNumber}',
 	'invoices.poMatch.issue.currencyMismatch': 'Discrepancia de moneda: factura en {invoiceCurrency}, pedido en {poCurrency}; importes no comparados',
+	'invoices.poMatch.issue.poCancelled': 'Pedido cancelado — importes no comparados',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'Total del pedido no confirmado por el ERP en la última sincronización; importes no comparados',
 	'invoices.poMatch.issue.amountMismatch': 'Discrepancia de importe: factura {invoiceAmount} frente a pedido {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Discrepancia de importe: factura {invoiceAmount} frente a pedido {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Discrepancia de importe: factura {invoiceAmount} frente a pedido {poTotal} ({variancePct})',
@@ -1292,6 +1297,9 @@ export const messages = {
 	'exceptions.toast.loadFailed': 'No se pudieron cargar las excepciones',
 	'exceptions.toast.noteRequired': 'La nota de resolución es obligatoria',
 	'exceptions.toast.actionFailed': 'La acción falló',
+	'exceptions.poRematch.note': "La OC {po} cambió en {erp} el {date} y una nueva comprobación ya coincide. Revísela para liberar la retención.",
+	'exceptions.poRematch.noteNoDate': "La OC {po} cambió en {erp} y una nueva comprobación ya coincide. Revísela para liberar la retención.",
+	'exceptions.poRematch.noteNoPo': "La orden de compra cambió en {erp} y una nueva comprobación ya coincide. Revísela para liberar la retención.",
 	'exceptions.erpPayment.title': "Pago informado por {erp}",
 	'exceptions.erpPayment.intro': "Según el ERP, esta factura está pagada. Revise los datos y registre el pago: así se resuelve la excepción y la factura queda pagada. FeohLedger no envía dinero.",
 	'exceptions.erpPayment.record': "Registrar el pago del ERP",
@@ -1830,6 +1838,8 @@ export const messages = {
 		'{n, plural, one {⚠ # presupuesto supera su asignación.} other {⚠ # presupuestos superan su asignación.}}',
 	'cfo.budgets.excluded':
 		'Parcial: {n, plural, one {# solicitud, pedido o factura vinculada está} other {# solicitudes, pedidos o facturas vinculadas están}} denominada en una moneda distinta a la del presupuesto y quedó excluida: lo comprometido y lo real de abajo son un mínimo, no la imagen completa. Cambie su moneda o consúltelos en el propio presupuesto.',
+	'cfo.budgets.unverifiablePos':
+		'Parcial: {n, plural, one {# orden de compra vinculada queda} other {# órdenes de compra vinculadas quedan}} fuera de lo comprometido porque el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización: lo comprometido de abajo es un mínimo. Vuelva a sincronizar las órdenes cuando el ERP pueda valorarlas.',
 	'cfo.budgets.empty': 'Todavía no se ha creado ningún presupuesto.',
 	'cfo.budgets.loadFailed': 'No se pudo cargar presupuesto frente a real.',
 	'cfo.forecastVariance.title': 'Previsión frente a real',
@@ -1892,6 +1902,8 @@ export const messages = {
 	'cfoMetrics.accruals.total': 'Devengo total',
 	'cfoMetrics.accruals.noCurrency':
 		'Las órdenes de compra sin moneda registrada aparecen en una línea aparte, sin símbolo. Cada moneda se compensa por separado; las líneas nunca se suman.',
+	'cfoMetrics.accruals.unverifiablePos':
+		'{n, plural, one {# orden de compra queda} other {# órdenes de compra quedan}} fuera de las órdenes abiertas y los bienes recibidos porque el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización: estas provisiones son un mínimo.',
 	'cfoMetrics.concentration.title': 'Concentración de proveedores',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} representa el {pct}% del gasto — riesgo de concentración.',
 	'cfoMetrics.concentration.top10': 'Los 10 principales proveedores',
@@ -2540,6 +2552,8 @@ export const messages = {
 	'budgets.modal.detail.allocated': 'Asignado',
 	'budgets.modal.detail.committed': 'Comprometido',
 	'budgets.modal.detail.actual': 'Real',
+	'budgets.modal.unverifiablePos':
+		'{n, plural, one {# orden de compra vinculada queda} other {# órdenes de compra vinculadas quedan}} fuera de lo comprometido: el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización, así que lo comprometido es un mínimo y lo restante puede estar sobrestimado.',
 	'budgets.modal.detail.remaining': 'Restante',
 	'budgets.modal.loadingSpend': 'Cargando gasto…',
 	'budgets.modal.field.name': 'Nombre',
@@ -2641,6 +2655,8 @@ export const messages = {
 	'purchaseOrders.toast.loadListFailed': 'Error al cargar las órdenes de compra',
 	'purchaseOrders.toast.loadFailed': 'Error al cargar la orden de compra',
 	'purchaseOrders.toast.syncFailed': 'Error en la sincronización del ERP',
+	'purchaseOrders.toast.unverifiable':
+		'El ERP no pudo confirmar el total de {n, plural, one {# pedido existente} other {# pedidos existentes}}; las facturas que {n, plural, one {lo citan} other {los citan}} quedan retenidas hasta que una sincronización lo confirme',
 	'purchaseOrders.loadMore': 'Cargar más ({shown} de {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Mostrando la # orden de compra} other {Mostrando las # órdenes de compra}}',
@@ -2663,6 +2679,17 @@ export const messages = {
 	'purchaseOrders.modal.amount': 'Importe',
 	'purchaseOrders.modal.invoiceStatus': 'Estado',
 	'purchaseOrders.modal.noLinkedInvoices': 'Ninguna factura hace referencia a esta orden de compra.',
+	'purchaseOrders.total.unverifiable': 'No verificable',
+	'purchaseOrders.modal.unverifiableNote':
+		'El ERP no pudo valorar esta orden de compra en su última sincronización: {reason}. Su total y los importes de línea se ocultan porque el ERP ya no los respalda, y las facturas que la citan quedan retenidas hasta que una sincronización vuelva a valorarla.',
+	'purchaseOrders.unverifiableReason.unpriceable':
+		'su total no se puede calcular con exactitud (por ejemplo, un descuento, una unidad de precio o un precio que falta)',
+	'purchaseOrders.unverifiableReason.linesUnread': 'sus líneas no se pudieron leer completas',
+	'purchaseOrders.unverifiableReason.noLines': 'llegó sin líneas',
+	'purchaseOrders.unverifiableReason.linesChanged': 'sus líneas se modificaron en el ERP después de recibir mercancía contra ellas',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
+		'su moneda no se pudo situar frente a la moneda propia de la empresa',
+	'purchaseOrders.unverifiableReason.unknown': 'no se registró el motivo',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': 'Recepciones de mercancías',
@@ -3039,6 +3066,8 @@ export const messages = {
 		'Pendiente incluye a su valor nominal {n, plural, one {# factura abierta} other {# facturas abiertas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
 	'byEntity.unconvertedSpend':
 		'El gasto incluye a su valor nominal {n, plural, one {# factura} other {# facturas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
+	'byEntity.openPoUnverifiable':
+		'{n, plural, one {# orden de compra abierta queda} other {# órdenes de compra abiertas quedan}} fuera de Órdenes abiertas porque el ERP no pudo confirmar {n, plural, one {su total} other {sus totales}} en la última sincronización.',
 	'byEntity.openPoNoCurrency':
 		'Algunas órdenes de compra no registran moneda; sus importes abiertos aparecen en una línea aparte, sin símbolo, y nunca se suman a los de otra moneda.',
 
@@ -5000,6 +5029,10 @@ export const messages = {
 	'erpRefusal.dueDateMissing': "{provider} necesita la fecha de vencimiento. Añádala y vuelva a intentarlo.",
 	'erpRefusal.amountNotPositive': "{provider} solo admite facturas por un importe superior a cero. Corrija el importe o registre una nota de crédito.",
 	'erpRefusal.jobUnconfirmed': "{provider} aceptó la factura, pero no ha confirmado que se haya creado. Vuelva a intentarlo para comprobarlo; no se enviará dos veces.",
+	'erpRefusal.jobFailed': "{provider} aceptó la factura, pero su tarea en segundo plano falló y no creó nada. Revise el proveedor, las cuentas, los códigos de transacción y el período contable en {provider} y vuelva a intentarlo.",
+	'erpRefusal.callBudgetTenant': "Este espacio de trabajo ha usado su parte de las llamadas a la API de {provider} de hoy, así que FeohLedger no hizo ninguna llamada. El cupo se restablece a medianoche UTC; vuelva a intentarlo entonces.",
+	'erpRefusal.callBudgetQuota': "{provider} ha pausado las llamadas a la API de la suscripción que usa FeohLedger (su cuota diaria está agotada), así que FeohLedger no hizo ninguna llamada. Se restablece a medianoche UTC; vuelva a intentarlo entonces.",
+	'erpRefusal.callBudgetRateLimited': "{provider} pidió a FeohLedger que redujera el ritmo, así que no se hizo ninguna llamada. Vuelva a intentarlo en un minuto.",
 	'erpRefusal.credentialsUnavailable': "No se pudieron abrir las credenciales del ERP en este momento. Vuelva a intentarlo en unos minutos; si sigue fallando, avise a un administrador.",
 	'erpRefusal.periodClosed': "{provider} rechazó esta factura porque su fecha está en un período cerrado (los libros están cerrados). Cambie la fecha de la factura o vuelva a abrir el período en {provider} y vuelva a intentarlo.",
 	'erpRefusal.vendorInactive': "{provider} rechazó esta factura porque su proveedor está inactivo o eliminado allí. Active el proveedor en {provider} y vuelva a intentarlo.",

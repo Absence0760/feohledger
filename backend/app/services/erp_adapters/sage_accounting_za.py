@@ -95,7 +95,10 @@ from app.services.erp_adapters.base import (
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -721,31 +724,50 @@ class SageAccountingZaAdapter(ErpAdapter):
         return accounts
 
     async def list_pos(self) -> list[PoPayload]:
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
         """Purchase orders. ``currency`` stays None: the API reports a currency
         only as a numeric id, never an ISO code, and a default would be a label
-        nobody gave the figure (decisions §197)."""
+        nobody gave the figure (decisions §197).
+
+        ``vendor_erp_id`` is ``SupplierId`` — the supplier ``ID`` that
+        ``list_vendors`` reports as ``erp_vendor_id`` — so the sync links the PO
+        by id, not by ``SupplierName``, which a rename breaks and two suppliers
+        can share.
+
+        A PO with no number is dropped. One with a number but no usable
+        ``Total`` is skipped, never synced at 0, and named in ``skipped`` as
+        ``unpriceable``, so a total an earlier sync stored for it stops being
+        matched against (decisions §323)."""
         try:
             rows = await self._list("PurchaseOrder")
         except Exception:
-            return []
-        pos = []
+            return PoListing(pos=[])
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
         for row in rows or []:
             number = row.get("DocumentNumber")
+            if not number:
+                continue
             total = _decimal(row.get("Total"))
-            if not number or total is None:
+            if total is None:
+                skipped.append(SkippedPo(str(number), PoSkipReason.unpriceable))
                 continue
             delivery = str(row.get("DeliveryDate") or "")[:10]
+            supplier_id = _int_id(row.get("SupplierId"))
             pos.append(
                 PoPayload(
                     po_number=str(number),
                     vendor_name=row.get("SupplierName") or None,
+                    vendor_erp_id=str(supplier_id) if supplier_id is not None else None,
                     total=total,
                     status=_po_status(row.get("Status")),
                     expected_delivery_date=_iso_date(delivery),
                     currency=None,
                 )
             )
-        return pos
+        return PoListing(pos=pos, skipped=skipped)
 
     async def test_connection(self) -> bool:
         """``Company/Get`` answers and lists the configured company."""

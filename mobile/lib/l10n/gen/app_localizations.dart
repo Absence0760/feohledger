@@ -3344,6 +3344,30 @@ abstract class AppLocalizations {
   /// **'Description'**
   String get exceptionDetailSectionDescription;
 
+  /// An ERP PO sync re-check no longer finds this hold (decisions §323); the sync never clears it, so a person may now.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {po} changed in {erp} on {date}, and a re-check now matches. Review it to clear the hold.'**
+  String exceptionDetailPoRematch(String po, String erp, String date);
+
+  /// No description provided for @exceptionDetailPoRematchNoDate.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {po} changed in {erp}, and a re-check now matches. Review it to clear the hold.'**
+  String exceptionDetailPoRematchNoDate(String po, String erp);
+
+  /// No description provided for @exceptionDetailPoRematchNoPo.
+  ///
+  /// In en, this message translates to:
+  /// **'The purchase order changed in {erp}, and a re-check now matches. Review it to clear the hold.'**
+  String exceptionDetailPoRematchNoPo(String erp);
+
+  /// No description provided for @exceptionDetailYourErp.
+  ///
+  /// In en, this message translates to:
+  /// **'your ERP'**
+  String get exceptionDetailYourErp;
+
   /// No description provided for @exceptionDetailSectionInvoice.
   ///
   /// In en, this message translates to:
@@ -4381,6 +4405,18 @@ abstract class AppLocalizations {
     String poCurrency,
   );
 
+  /// No description provided for @invoiceWarningPoCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {poNumber} is cancelled — the invoice was not matched against it'**
+  String invoiceWarningPoCancelled(String poNumber);
+
+  /// No description provided for @invoiceWarningPoTotalUnverifiable.
+  ///
+  /// In en, this message translates to:
+  /// **'The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared'**
+  String invoiceWarningPoTotalUnverifiable(String poNumber);
+
   /// No description provided for @invoiceWarningPoPartialReceipt.
   ///
   /// In en, this message translates to:
@@ -4613,6 +4649,18 @@ abstract class AppLocalizations {
     String invoiceCurrency,
     String poCurrency,
   );
+
+  /// No description provided for @invoicePoMatchIssuePoCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'PO is cancelled — amounts not compared'**
+  String get invoicePoMatchIssuePoCancelled;
+
+  /// No description provided for @invoicePoMatchIssuePoTotalUnverifiable.
+  ///
+  /// In en, this message translates to:
+  /// **'PO total not confirmed by the ERP on its last sync — amounts not compared'**
+  String get invoicePoMatchIssuePoTotalUnverifiable;
 
   /// No description provided for @invoicePoMatchIssueAmountMismatch.
   ///

@@ -31,6 +31,13 @@ from app.models.base import Base, EntityMixin, TimestampMixin
 #: "open" means.
 DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
 
+#: The dead statuses the PO matcher refuses to match an invoice against
+#: (`services/po_matching`): an order that was called off authorizes nothing.
+#: `closed` is deliberately not one. An ERP closes a PO once it is fully billed
+#: (NetSuite's "Fully Billed", for one), which the invoice being matched can
+#: itself have caused, so refusing it would hold the ordinary last invoice.
+CANCELLED_PO_STATUSES: tuple[str, ...] = ("cancelled", "voided")
+
 
 def po_currency_code(value: object) -> str | None:
     """The ISO 4217 code a purchase order may record, or ``None``.
@@ -83,6 +90,13 @@ class PurchaseOrder(Base, EntityMixin, TimestampMixin):
     # GoodsReceipt.received_date to compute the data-enrichment on-time-delivery
     # vendor sub-score (migration 0060). NULL = no promised date → excluded.
     expected_delivery_date: Mapped[date | None] = mapped_column(Date)
+    # Set by the ERP PO sync when the ERP still has this PO but the adapter
+    # could not state its total exactly (an `erp_adapters.base.PoSkipReason`
+    # value): `total` is then a figure the ERP no longer vouches for, and
+    # `po_matching` refuses to compare an invoice against it. Cleared by the
+    # next sync that prices the PO. NULL = no such finding. Migration 0123;
+    # decisions §323.
+    total_unverifiable_reason: Mapped[str | None] = mapped_column(String(40))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True
@@ -91,6 +105,24 @@ class PurchaseOrder(Base, EntityMixin, TimestampMixin):
     line_items: Mapped[list["POLineItem"]] = relationship(
         back_populates="purchase_order", cascade="all, delete-orphan"
     )
+
+
+#: SQL predicate: this PO's stored figures are ones the ERP still vouches for.
+#: Every aggregate that sums `PurchaseOrder.total` (budget commitments, the
+#: open-PO and GR/IR accrual legs) filters on it and COUNTS what it leaves out,
+#: rather than summing a total the last sync could not confirm (decisions §323,
+#: and §35 for excluded-and-counted).
+PO_TOTAL_VOUCHED = PurchaseOrder.total_unverifiable_reason.is_(None)
+
+
+def po_vouched_money(po: PurchaseOrder, value: Decimal | None) -> Decimal | None:
+    """``value`` — the PO's total or one of its line figures — or ``None``.
+
+    ``None`` while ``total_unverifiable_reason`` is set: the figure came from a
+    sync the ERP has since stopped confirming, so no surface may present it as
+    the PO's (decisions §323). Display paths route every PO money field through
+    this; the reason itself travels beside it so the reader is told why."""
+    return None if po.total_unverifiable_reason else value
 
 
 class POLineItem(Base, TimestampMixin):

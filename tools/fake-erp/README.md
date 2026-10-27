@@ -9,16 +9,31 @@ surfaces:
 | Prefix | Emulates | Adapter |
 |---|---|---|
 | `/merge/api/accounting/v1` | Merge.dev unified accounting API | `merge_dev.py` |
-| `/netsuite/services/rest/record/v1` | NetSuite SuiteTalk REST (OAuth 1.0 TBA) | `netsuite.py` |
+| `/netsuite/services/rest/record/v1` | NetSuite SuiteTalk REST (OAuth 1.0 TBA, or an OAuth 2.0 bearer) | `netsuite.py` |
+| `/netsuite/services/rest/auth/oauth2/v1/token` | NetSuite OAuth 2.0 client credentials (M2M) | `netsuite.py` |
 | `/d365` | Dynamics 365 Business Central OData v4 | `dynamics_365_bc.py` |
 
 ## Auth (fails 401 in each provider's error shape)
 
 - **Merge**: any non-empty `Authorization: Bearer …` **and** a non-empty
   `X-Account-Token` header.
-- **NetSuite**: an `Authorization: OAuth …` header containing
-  `oauth_consumer_key`, `oauth_token` and `oauth_signature` params. The HMAC
-  signature is **not** verified — shape only.
+- **NetSuite**: either sign-in NetSuite accepts.
+  - TBA: an `Authorization: OAuth …` header containing `oauth_consumer_key`,
+    `oauth_token` and `oauth_signature` params. The HMAC signature is **not**
+    verified — shape only.
+  - OAuth 2.0 client credentials (M2M): `Authorization: Bearer <token>` from
+    `POST /netsuite/services/rest/auth/oauth2/v1/token`, unexpired. That
+    endpoint **does** verify the JWT client assertion as NetSuite documents it
+    (`netsuite_oauth2.py`: `typ`, `alg` PS256/384/512 or ES256/384/512 — not
+    RS256 — `kid`, the signature, `iss` = the mapped client id, `aud` = its own
+    URL, `scope`, `iat`/`exp` under 60 minutes) and answers `{access_token,
+    expires_in: 3600, token_type: "Bearer"}`, or a 400 `{error,
+    error_description}`. Map a certificate first, as an administrator does:
+    `POST /__netsuite/oauth2/certificates {"certificate_id", "client_id",
+    "public_key_pem"}` (the PUBLIC key or X.509 PEM only; RSA 3072/4096 or EC
+    P-256/P-384/P-521). Mappings survive `/__reset`; issued tokens do not.
+    `POST /__netsuite/oauth2/expire-tokens` makes every bearer 401;
+    `GET /__netsuite/oauth2/stats` returns `{minted}`.
 - **D365**: `POST /d365/oauth2/token` (also `/d365/oauth2/v2.0/token` and
   `/d365/{tenant}/oauth2/v2.0/token`) accepts any `client_credentials` form
   POST with non-empty `client_id`/`client_secret` and returns
@@ -57,9 +72,13 @@ surfaces:
 
 Purchase orders (`GET /merge/api/accounting/v1/purchase-orders`):
 
-1. `PO-FAKE-301` — vendor "Fake ERP Vendor A", total 1250.00 USD
-2. `PO-FAKE-302` — vendor "Fake ERP Vendor B", total 980.50 USD
-3. `PO-FAKE-303` — vendor "Fake ERP Vendor A", total 4400.00 USD
+1. `PO-FAKE-301` — vendor `merge-vendor-701` "Fake Merge Vendor Co", total 1250.00 USD
+2. `PO-FAKE-302` — vendor `merge-vendor-702` "Fake Merge Supply Co", total 980.50 USD
+3. `PO-FAKE-303` — vendor `merge-vendor-701` "Fake Merge Vendor Co", total 4400.00 USD
+
+As in Merge, a PO's `vendor` is the vendor's Merge id — the one the vendor
+sync stores, so the PO sync links by it — and a line's `account` is a Merge
+Account id (`merge-acct-6100` …), not an account number.
 
 GL accounts (`GET /merge/api/accounting/v1/accounts`):
 
@@ -67,13 +86,22 @@ GL accounts (`GET /merge/api/accounting/v1/accounts`):
 2. `6200` "Fake Software" (expense)
 3. `6300` "Fake Consulting" (expense)
 
-Vendors (`GET /merge/api/accounting/v1/vendors`):
+Suppliers (`GET /merge/api/accounting/v1/contacts?is_supplier=true`). Merge has
+no `/vendors` path and no Vendor model — a supplier is a `Contact` with
+`is_supplier` true, and a Contact has **no payment term** — so the fake serves
+none either and `/vendors` is a 404, as on Merge
+([OpenAPI](https://docs.merge.dev/openapi/accounting.json),
+[Contacts](https://docs.merge.dev/accounting/contacts/)). `addresses` and
+`phone_numbers` come back as objects only when named in `expand`, else as bare
+ids:
 
-1. "Fake Merge Vendor Co" — Net 30, tax id `71-1234567`
-2. "Fake Merge Supply Co" — Net 45, tax id `72-2345678`
-3. "Fake Merge Services Co" — Net 60 (`payment_term` as a bare string, not an
-   object — exercises that branch of `_merge_vendor_to_payload`), tax id
-   `73-3456789`
+1. `merge-vendor-701` "Fake Merge Vendor Co" — tax id `71-1234567`
+2. `merge-vendor-702` "Fake Merge Supply Co" — tax id `72-2345678`
+3. `merge-vendor-703` "Fake Merge Services Co" — tax id `73-3456789`
+
+plus `merge-customer-801` "Fake Merge Customer Co", a customer
+(`is_supplier: false`) served only to a request that does not filter on
+`is_supplier=true`, so an adapter that drops the filter fails the e2e count.
 
 ### References are enforced by id, as the real ERPs do
 
@@ -81,7 +109,7 @@ A bill naming its vendor or account by anything but a known id is a **400**, so
 the e2e suite proves the adapters post the ids the syncs stored
 (`backend/docs/erp-integration.md` § ERP references):
 
-- **Merge** `POST /invoices`: `contact` must be a fixture vendor id
+- **Merge** `POST /invoices`: `contact` must be a fixture contact id
   (`merge-vendor-701` …); a non-null line `account` must be a fixture account id
   (`merge-acct-6100` …).
 - **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`,
@@ -189,19 +217,40 @@ body starting `ERROR`, as SYSPRO's are.
   `GET /syspro/SYSPROWCFService/Rest/__sessions` reports how many are still
   open — the adapter should always leave it at 0.
 - `Query/Query?BusinessObject=COMFND` — tables `ApSupplier` (`0000001`,
-  `0000002`), `GenMaster` (`6100`, `6200` expense, `2000` liability),
-  `PorMasterHdr` / `PorMasterDetail` (`PO-SYS-501` 1250.00 open,
-  `PO-SYS-502` 980.50 complete) and the posted `ApInvoice` rows; `EQ`
-  expressions and `ReturnRows`.
-- `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier or
-  ledger code, a duplicate (supplier, invoice) and a distribution that does not
-  balance to `InvoiceAmount`.
+  `0000002`, and `0000003` with `OnHold=Y`), `GenMaster` (`6100`, `6200`
+  expense, `6300` expense with `AccOnHldFlag=Y`, `2000` creditors control with
+  `ControlAccFlag=Y`), `PorMasterHdr` / `PorMasterDetail` (`PO-SYS-501`
+  1250.00 open, `PO-SYS-502` 980.50 complete, `PO-SYS-503` a USD order whose
+  lines carry `MForeignPrice` 100.00 beside the local `MPrice` → 400.00 USD,
+  `PO-SYS-504` 3 × 20.00 plus a 45.50 misc-charge line and a comment line →
+  105.50, `PO-SYS-505` a EUR order with one line priced only in local
+  `MPrice` — no EUR total, so the adapter skips it), the posted `ApInvoice`
+  rows and their `ApInvoicePay` rows.
+- `GetLogonProfile?UserId=` — the session's company profile; its
+  `LocalCurrencyCode` (`ZAR`) is what the adapter compares a PO header's
+  `Currency` with to decide whether the PO is foreign. Element names follow
+  the open-source client wildland/syspro-ruby
+  (`lib/syspro/get_logon_profile.rb`).
+  `EQ` / `NE` / `GT` / `GE` / `LT` / `LE` expressions; rows come back sorted
+  by the `OrderBy` column and cut at `ReturnRows`, as COMFND's are — so a
+  caller has to page with a `GT` cursor.
+- `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier, a
+  supplier on hold (`Supplier '…' is on hold`), an unknown ledger code, one on
+  hold (`Ledger code '…' is on hold`), a control account (`… is a control
+  account and cannot be used`), a duplicate (supplier, invoice) and a
+  distribution that does not balance to `InvoiceAmount`. The wording is ours;
+  SYSPRO's is to be confirmed in a sandbox (docs/followups.md).
 - The `XmlIn` / `XmlParameters` documents are parsed with `defusedxml`, so a
   DTD or entity declaration is refused rather than expanded.
 - `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
   `{"supplier", "invoice", "balance"}`. `"0"` reads as settled with no
-  payment: SYSPRO's `ApInvoice` has no paid status, so the backend never reads
-  a zero balance as paid (docs/decisions.md §303).
+  payment: a zero balance with no `ApInvoicePay` payment row is never paid
+  (docs/decisions.md §303).
+- `POST /syspro/SYSPROWCFService/Rest/__pay` — test hook
+  `{"supplier", "invoice", "amount"?, "trn_type"?}`: records an `ApInvoicePay`
+  row (`TrnType` default `P`, a payment) and takes the amount (default: the
+  whole balance) off `MthInvBal1`. With `"trn_type": "A"` it is an adjustment
+  that zeroes the balance with no payment.
 ## Xero (`/xero/api.xro/2.0`)
 
 Backs `erp_adapters/xero.py`. Auth is shape-only: any non-empty
@@ -280,18 +329,38 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   in the SKY shape: the bearer plus `environment_id` `p-fake-env-1`,
   `legal_entity_id` and `refresh_token_expires_in` (the backend takes the
   environment from the token response — there is no lookup call).
-- `GET /accountspayable/v1/vendors` (`136`, `137`), `/purchaseorders`
-  (`1001` 1250.00 open, `1002` 980.50 closed), `GET /generalledger/v1/accounts`
-  (`01-5000-00`, `01-5100-00`, `01-2000-00`) — `{"count", "value"}` with
-  `limit` / `offset`.
-- `GET /accountspayable/v1/invoices?search_text=` — matches invoice number or
-  description. `POST /accountspayable/v1/invoices/process` → `{"process_id"}`;
-  rejects an unknown vendor or account, a split set not totalling 100%, and
-  distributions whose Debits and Credits don't both equal `amount`. The job is
-  complete at once: `backgroundProcess/{id}/status` → 5,
-  `backgroundProcess/{id}/result` → `{"record_id"}`.
+- `GET /accountspayable/v1/vendors` (`136`, `137` Active, `138` `Inactive`,
+  `139` `OnHold` — `vendor_status`), `GET /accountspayable/v1/vendors/{id}`
+  (the `VendorDetail`), `/purchaseorders` (`1001` 1250.00 open, `1002` 980.50
+  closed, `1003` with no `order_total`; each carries `vendor_id`),
+  `GET /generalledger/v1/accounts` (`01-5000-00`, `01-5100-00`, `01-2000-00`,
+  and `01-5900-00`, whose job fails) — `{"count", "value"}` with `limit` /
+  `offset` (limit capped at 500).
+- `GET /generalledger/v1/fiscalyears` — calendar years 2024–2030: FY 2024
+  `Closed`, Jan–Mar 2025 periods `closed`, everything else open.
+- `GET /accountspayable/v1/invoices?search_text=` — matches invoice number,
+  description, PO number or vendor name, as SKY documents; `from_date` /
+  `to_date` keep invoices dated strictly after / before (the narrower reading
+  of "after" / "before"). `POST /accountspayable/v1/invoices/process` →
+  `{"process_id"}`; rejects (400, `{"Error", "Details"}`) an unknown or
+  `Inactive` vendor, a `post_date` in a closed period or year, an unknown
+  account, a split set not totalling 100%, and distributions whose Debits and
+  Credits don't both equal `amount`. The job is complete at once:
+  `backgroundProcess/{id}/status` → 5, `backgroundProcess/{id}/result` →
+  `{"record_id"}` — except a create touching `01-5900-00`, whose job ends at 7
+  (failed) with no record.
   `GET /accountspayable/v1/invoices/{id}` returns `status` / `amount` / `balance`.
 - `POST /blackbaud/__set-status` — test hook `{"invoice_id", "status", "balance"}`.
+- `POST /blackbaud/__throttle` — test hook `{"status": 429|403, "retry_after": <s>,
+  "count": <n>}`: the next `n` SKY calls answer SKY's rate-limit 429 or
+  quota 403, with `Retry-After`. Drives the adapter's call budget locally
+  (`services/erp_call_budget.py`, decisions §322): after one quota 403 every
+  tenant on the platform key is refused before its first call until
+  `Retry-After`, and the org's admins get one `erp_call_quota` notice.
+  `count: 0` clears it; so does `POST /__reset`.
+- `POST /blackbaud/__seed-invoices` — test hook `{"rows": [{"vendor_id",
+  "invoice_number", "invoice_date", "description"?, "status"?}]}`: invoices
+  keyed by hand in FE NXT (e.g. 600 rows a common `search_text` matches).
 
 
 ## Business Central + NetSuite syncs and void
@@ -306,7 +375,8 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   A purchaseInvoice `Account` line must carry a posting account's `accountId`.
 - **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, `28`,
   and inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
-  (`PO-FAKE-NS-501` 2100.50 USD open, `PO-FAKE-NS-502` 640.00 GBP closed).
+  (`PO-FAKE-NS-501` 2100.50 USD open, vendor `25`; `PO-FAKE-NS-502` 640.00 GBP
+  closed, vendor `26` — each row's `vendorid` is the `t.entity` id).
   `DELETE /vendorBill/{id}` → 204 for a `pendingApproval` bill only
   (`/__set-status` with `"pendingApproval"`).
 

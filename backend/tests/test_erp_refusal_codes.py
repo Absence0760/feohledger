@@ -35,9 +35,11 @@ NOT_REFUSALS = {
     "LEGACY_REALM_KEY",
     "METHOD_DIRECT",
     "METHOD_MERGE_DEV",
+    "AUTH_TBA",  # NetSuite sign-in methods (`auth_method`)
+    "AUTH_OAUTH2_M2M",
 }
 
-_CONSTANT = re.compile(r'^([A-Z_]+) = "([a-z][a-z0-9_]*)"$', re.MULTILINE)
+_CONSTANT = re.compile(r'^([A-Z][A-Z0-9_]*) = "([a-z][a-z0-9_]*)"$', re.MULTILINE)
 
 
 def _constants() -> dict[str, str]:

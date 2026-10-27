@@ -36,11 +36,12 @@ import {
  *   3. GL-account sync — imports the fake chart (6100/6200/6300), also
  *      cursor-paginated.
  *   4. Vendor sync — the real `list_vendors()` (issue #256) against the
- *      fake's three fixed vendors, also cursor-paginated 2 + 1; asserts the
- *      full `_merge_vendor_to_payload` field mapping (name, email, phone,
- *      address, tax id, payment terms — including the bare-string
- *      `payment_term` shape one fixture exercises), not just that the sync
- *      call didn't error.
+ *      fake's three supplier Contacts at `/contacts?is_supplier=true` (Merge
+ *      has no `/vendors` path — the fake 404s it, as Merge does), also
+ *      cursor-paginated 2 + 1; asserts the full `_merge_contact_to_payload`
+ *      field mapping (name, email, phone, address, tax id) and that payment
+ *      terms are ABSENT — a Merge Contact carries none — and that the fake's
+ *      customer contact is not imported as a vendor.
  *   5. Full send — after the vendor sync stores the vendor's Merge id, an
  *      approved invoice posts through the async ERP dispatch with that id as
  *      its `contact` (the fake 400s an unknown one) and lands `done` with a
@@ -70,13 +71,15 @@ const FAKE_GL_ACCOUNTS = [
 	{ code: '6300', name: 'Fake Consulting' }
 ];
 
+// Merge's suppliers are Contacts, and a Contact has NO payment-term field
+// (https://docs.merge.dev/openapi/accounting.json), so a vendor the sync
+// creates from one has no payment terms — asserted absent below, not loosened.
 const FAKE_VENDORS = [
 	{
 		name: 'Fake Merge Vendor Co',
 		email: 'ap@fakemergevendor.example',
 		phone: '+1-555-0170',
 		taxId: '71-1234567',
-		paymentTerms: 'Net 30',
 		addressContains: '701 Fake Merge Ave'
 	},
 	{
@@ -84,7 +87,6 @@ const FAKE_VENDORS = [
 		email: 'billing@fakemergesupply.example',
 		phone: '+1-555-0172',
 		taxId: '72-2345678',
-		paymentTerms: 'Net 45',
 		addressContains: '702 Fake Supply Rd'
 	},
 	{
@@ -92,13 +94,13 @@ const FAKE_VENDORS = [
 		email: 'invoices@fakemergeservices.example',
 		phone: '+1-555-0173',
 		taxId: '73-3456789',
-		// This fixture's payment_term is a bare string on the fake, not an
-		// {"name": ...} object — proves _merge_vendor_to_payload's `elif
-		// isinstance(pt, str)` branch, not just the common dict shape.
-		paymentTerms: 'Net 60',
 		addressContains: '703 Fake Services Blvd'
 	}
 ];
+
+// A customer contact the fake serves only to a request that does not filter on
+// `is_supplier=true`. It must never become a vendor.
+const FAKE_CUSTOMER_NAME = 'Fake Merge Customer Co';
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
 // whole dict to the adapter, which reads api_key / account_token flat (the
@@ -149,11 +151,14 @@ test.describe('/erp merge_dev adapter against fake-erp', () => {
 	}) => {
 		const headers = await authedTenantHeaders(page);
 
-		// First sync: all three fixture POs end up present. POs already in
-		// the DB from a prior local run count as "skipped" — either way the
-		// fake's catalogue is fully imported, and because the fake serves it
-		// as 2 + 1 across two cursor pages, a count of 3 proves the adapter
-		// followed the `next` cursor.
+		// First sync: all three fixture POs end up present, each counted
+		// exactly once. POs already in the DB from a prior local run count as
+		// "skipped" — or "updated" when that run created them before the
+		// vendor sync (test 4) linked their supplier, which this sync now
+		// fills in by the vendor's Merge id. Either way the fake's catalogue
+		// is fully imported, and because the fake serves it as 2 + 1 across
+		// two cursor pages, a count of 3 proves the adapter followed the
+		// `next` cursor.
 		const first = await page.request.post(`${API_BASE}/api/purchase-orders/sync-erp`, {
 			headers
 		});
@@ -161,12 +166,13 @@ test.describe('/erp merge_dev adapter against fake-erp', () => {
 		const firstBody = (await first.json()) as {
 			success: boolean;
 			created: number;
+			updated: number;
 			skipped: number;
 			adapter: string;
 		};
 		expect(firstBody.success).toBe(true);
 		expect(firstBody.adapter).toBe('merge_dev');
-		expect(firstBody.created + firstBody.skipped).toBe(FAKE_POS.length);
+		expect(firstBody.created + firstBody.updated + firstBody.skipped).toBe(FAKE_POS.length);
 
 		// Second sync: everything exists → created=0 / skipped=3 (the dedupe
 		// guarantee — without it every sync click multiplies the catalogue).
@@ -263,10 +269,10 @@ test.describe('/erp merge_dev adapter against fake-erp', () => {
 		expect(secondBody.unchanged).toBe(FAKE_VENDORS.length);
 
 		// The synced vendors are listable with the REAL adapter's parsed
-		// fields intact — proves _merge_vendor_to_payload's mapping of
-		// Merge's unified Vendor shape (name / email_address / phone_number /
-		// addresses[0] / tax_number / payment_term), not just that the sync
-		// call didn't error.
+		// fields intact — proves _merge_contact_to_payload's mapping of
+		// Merge's Contact shape (name / email_address / phone_numbers[0] /
+		// addresses[0].street_1 / tax_number), not just that the sync call
+		// didn't error.
 		type VendorRow = {
 			name: string;
 			email: string | null;
@@ -292,10 +298,13 @@ test.describe('/erp merge_dev adapter against fake-erp', () => {
 			// still proves the real value round-tripped through the sync
 			// correctly, since a wrong/missing tax_id would mask differently.
 			expect(vendor!.tax_id).toBe(maskTaxId(fixture.taxId));
-			expect(vendor!.payment_terms).toBe(fixture.paymentTerms);
+			// A Merge Contact has no payment term, so none is invented.
+			expect(vendor!.payment_terms).toBeNull();
 			expect(vendor!.address).toContain(fixture.addressContains);
 			expect(vendor!.erp_vendor_id).toBeTruthy();
 		}
+		// The customer contact is not a supplier, so it is never a vendor.
+		expect(listBody.items.find((v) => v.name === FAKE_CUSTOMER_NAME)).toBeUndefined();
 	});
 
 	test('full send: approved invoice posts to the fake Merge.dev and completes', async ({

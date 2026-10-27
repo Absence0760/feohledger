@@ -146,6 +146,161 @@ Covered by `backend/tests/test_po_matching_algorithm.py` (the guard),
 `test_po_matching_critical_path.py::test_realdb_currency_guard_against_recorded_po_currencies`
 and the three agent test files.
 
+### The sync refreshes a PO's lines, never just its total
+
+The receipt-value check scales the PO total by received / ordered quantity, so
+a re-sync that moved the total and kept the old lines valued receipts wrongly:
+a PO amended from 10 × 10 to 20 × 10 kept 10 ordered units, and a 10-unit
+receipt was valued at the whole 200. When the adapter sends lines, the sync now
+brings the stored ones in line (`api/purchase_orders._refresh_po_lines`,
+decisions §327), comparing at the column scales so the ERP's `3` and the stored
+`3.0000` are the same line:
+
+- **No goods received against the lines:** they are replaced.
+- **Goods received against some:** a goods-receipt line points at its PO line
+  by id, so a received line is updated in place, paired with an ERP line of the
+  same SKU (else the same description); unreceived lines are replaced; new ERP
+  lines are added.
+- **A received line with nothing to pair with** (the ERP dropped it, or changed
+  its SKU and description): nothing is changed and the PO is marked
+  `lines_changed`, so the match refuses it and the invoice is held until a
+  person looks. A later sync whose lines pair again lifts the mark.
+
+A payload with no lines (NetSuite's headers-only sync) leaves the stored lines
+alone. A line refresh re-matches the invoices citing the PO, hold-only.
+
+### A cancelled PO authorizes nothing
+
+A PO whose status is `cancelled` or `voided` (`procurement.CANCELLED_PO_STATUSES`)
+is never matched against. The matcher compares nothing (`status = "mismatch"`,
+`within_tolerance = false`, no variance, `MatchResult.po_cancelled = true`, one
+issue `po_match.issue.po_cancelled`), and `refresh_warnings` raises the
+`po_cancelled` warning with a payment-blocking `po_mismatch` at `warning`, so a
+person decides. The ERP PO sync re-matches the invoices citing a PO whose status
+moves into or out of cancelled, so the hold lands at sync time.
+
+`closed` is deliberately still matched. An ERP closes a PO once it is fully
+billed (NetSuite's "Fully Billed", for one), and the invoice being matched can
+itself be the bill that closed it, so refusing `closed` would hold the ordinary
+last invoice on every PO. Accruals and budgets still treat `closed` as dead
+(`DEAD_PO_STATUSES`), since they count what is still open (decisions §326).
+
+### A PO total the ERP no longer vouches for
+
+An ERP adapter leaves out a PO whose total it cannot state exactly (SYSPRO: a
+line discount, a mixed-currency order, a currency it cannot place against the
+company's; see `erp-integration.md`). Before decisions §323 that was silent: a
+PO synced earlier at 100.00 kept 100.00 after the ERP amended it into something
+the adapter could not price, and every invoice for 100.00 kept reading
+`matched` against it.
+
+The adapter now names each skipped PO (`ErpAdapter.list_pos_report`), and the
+PO sync stamps `purchase_orders.total_unverifiable_reason` (a `PoSkipReason`:
+`unpriceable`, `lines_unread`, `no_lines`, `local_currency_unknown`) on the
+existing row the sync would refresh for that number (own entity first, else an
+unstamped row — the row a later priced sync clears). The sync stamps one reason
+of its own, `lines_changed`, described below. While it is set:
+
+- the matcher **compares nothing**: `status = "mismatch"`,
+  `within_tolerance = false`, `po_total` / `amount_variance` /
+  `amount_variance_pct` = `null` (so the stale figure never reaches
+  `invoice.po_match`), `MatchResult.po_total_unverifiable_reason` carries the
+  reason, and the
+  one issue is `po_match.issue.po_total_unverifiable`. The 3-way receipt-value
+  leg is skipped too, since it would scale the same stale total;
+- `refresh_warnings` raises the `po_total_unverifiable` warning and a
+  payment-blocking `po_mismatch` exception at `warning` — the currency guard's
+  treatment, for the same reason: with no figure there is no way to show the
+  invoice is not over-billing (`blocking_finding_types` agrees);
+- the invoice modal hides the PO total (the stale figure is not the PO's) and
+  shows the issue instead;
+- `missing_po_v1` and `multi_po_split_v1` never take such a PO as a candidate,
+  and the split agent re-checks the mark under the lock at apply time;
+- the supplier portal refuses to flip it into an invoice (409).
+
+The sync re-matches the invoices citing a PO whose mark, total or stated currency
+changed (the same figure in another currency is a different order, which the
+currency guard must hold). It re-matches the invoices that can match that row:
+the synced entity's and unstamped ones, or every entity's when the row itself is
+unstamped. `paid` and `done` invoices are left alone, since a hold on money
+already paid stops nothing. It runs in the
+same transaction and not best-effort, so the hold lands at sync time or the sync
+fails and the mark is rolled back with it. The next sync that prices the PO
+clears the mark — but **not the hold**.
+
+**A sync's re-match raises holds and never clears one** (decisions §323,
+amended 2026-10-26 — a product-owner call pending CISO review). That covers
+every re-match the PO sync runs, whether the ERP changed a total or re-priced a
+marked PO, and both PO-match types (`po_mismatch`, `quality_hold`). Whoever can
+edit a PO in the ERP is outside the invoice's implicated set (§267's receipt
+recorder has no ERP twin), so a sync that closed holds would let an ERP-side
+total increase release an over-billing hold at sync time with no FeohLedger
+sign-off. The sync passes `erp_po_sync` to `refresh_invoices_citing_pos`, and
+`invoice_warnings._reconcile_po_exceptions` then, instead of calling
+`_close_cleared_po_exceptions`, leaves a row it no longer finds **open and
+payment-blocking** and records why it now reads as clearable in the row's
+`erp_report`:
+
+```json
+{"kind": "po_rematch_clears", "erp_type": "syspro", "po_number": "PO-1001", "observed_on": "2026-10-26"}
+```
+
+PII-free (the ERP type, the PO number matched, the UTC day). `GET
+/api/exceptions` returns it with the rest of the row, and both clients say it in
+one line: on web, under the row's description on `/exceptions` and in its
+resolve dialog (`lib/types/erpReport.poRematchNote`); on mobile, on the
+exception detail screen (`PoRematchClears`, `poRematchText`). It reads "PO
+{po} changed in {erp} on {date}, and a re-check now matches. Review it to
+clear the hold." A missing PO number or day is left out, never invented.
+A person clears the hold
+through the queue (`exception_lifecycle.record_decision`, with its segregation
+refusal). Any later refresh that finds the finding again — a sync lowering the
+total back, an invoice edit — removes the note from the still-open row.
+
+Refreshes a FeohLedger action triggers (an invoice save, a receipt, the QMS
+sync) are unchanged: they keep the auto-close below, as they had before §323.
+So an ERP-side increase can still let the hold lift at the invoice's *next*
+FeohLedger edit, under that close's past-approval and segregation limits — the
+behaviour that predates §323, and part of the question left to the CISO
+review.
+
+Outside the match, no surface presents or sums the stale figure:
+
+- **Display.** The PO list and detail (`/api/purchase-orders`) send `total:
+  null` and `null` line `unit_price` / `total` (quantities stay — the receipt
+  form needs them) beside `total_unverifiable_reason`; `/purchase-orders`
+  renders "Not verifiable" in place of the figure and the catalogued reason in
+  the detail. The supplier portal's list and detail send the same `null`s and
+  `total_unverifiable: true` (never the internal code); its page shows "Being
+  confirmed" and disables the flip. One owner: `models/procurement.po_vouched_money`.
+- **Aggregates — excluded and counted** (decisions §35, the rule behind
+  `excluded_rebate_count` and the budgets' `excluded_row_count`). Budget
+  `committed` leaves a marked converted PO out and reports
+  `unverifiable_po_count` on `/spend`, `/check` and `/rollup`, apart from the
+  currency count because the remedy differs. `/analytics/cfo` leaves it out of
+  the open-PO and received (GR/IR) accrual legs and reports
+  `accruals.unverifiable_po_count` (distinct POs across both legs);
+  `/analytics/by-entity` leaves it out of open POs and reports
+  `open_po_unverifiable_count`. Each surface prints the count beside the figure
+  it qualifies. Filter: `models/procurement.PO_TOTAL_VOUCHED`.
+- **Not affected.** The public `/api/v1` API carries no PO figures (only an
+  invoice's `po_number`), and no CSV / PDF export includes a PO total or the
+  accruals. A contract-generated PO (`POST /api/contracts/{id}/create-po`)
+  and a requisition conversion create a fresh row, never a marked one.
+
+Covered by `test_po_matching_algorithm.py` (the two matcher cases),
+`test_po_matching_wiring.py` (the raise rule and the pure predicate agree),
+`test_purchase_orders.py::test_sync_erp_marks_an_already_synced_po_the_adapter_now_skips`
+(sync → mark → hold → re-price → the mark clears, the hold stays annotated, end
+to end), `test_sync_erp_lowering_a_po_total_opens_a_blocking_hold`,
+`test_sync_erp_raising_a_po_total_never_clears_the_hold` (the run stays
+refused), `test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before` and
+`test_exception_agents_missing_po.py`, and for the surfaces outside the match
+`test_purchase_orders.py::test_list_and_detail_withhold_the_money_of_a_po_whose_total_is_unverifiable`,
+`test_portal_self_service.py::test_portal_po_list_and_detail_withhold_a_total_the_erp_no_longer_vouches_for`,
+`test_budget_rollup.py::test_a_po_whose_total_is_unverifiable_is_left_out_of_committed_and_counted`
+and the two `*_unverifiable_po*` cases in `test_multicurrency_kpi_reporting.py`.
+
 ### Cancelled receipts do not count as delivered goods
 
 The GR query excludes any receipt whose `status` is in
@@ -480,6 +635,11 @@ callers. A receipt re-matches every invoice that cites its PO in the same
 transaction (`invoice_warnings.refresh_invoices_citing_pos`), so the hold lifts
 — or is raised — the moment the receipt lands. Nothing re-evaluates an
 untouched invoice on a schedule.
+
+**The ERP PO sync is the one refresh that never closes a row** — it may only
+raise. A row it no longer finds stays open, annotated
+`erp_report.kind = "po_rematch_clears"`, for a person to clear (§ A PO total
+the ERP no longer vouches for, above; decisions §323, amended).
 
 ### Quality-hold exceptions
 The 4-way leg routes inspection outcomes to a dedicated `quality_hold`

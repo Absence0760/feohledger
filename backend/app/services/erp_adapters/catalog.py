@@ -98,11 +98,20 @@ def _field(
     label_key: str | None = None,
     options: list[str] | None = None,
     destination: bool | None = None,
+    show_when: dict[str, Any] | None = None,
+    stored_default: str | None = None,
 ) -> dict[str, Any]:
     """One form field. ``label_key`` is a frontend i18n ``MessageKey``.
 
     ``destination`` defaults to membership of :data:`DESTINATION_KEYS`; pass it
     only to override that for this provider (see :func:`destination_keys`).
+
+    ``show_when`` (``{"field": name, "values": [...]}``) makes the field apply
+    only while another field of the same provider holds one of ``values``: the
+    form hides it, and does not require it, otherwise. ``stored_default`` is
+    what a SAVED block without this key means (the adapter's reading of the
+    absent key), which the form shows instead of the first option; a new
+    connection still starts on the first option.
     """
     out: dict[str, Any] = {
         "name": name,
@@ -120,6 +129,10 @@ def _field(
         out["help_key"] = help_key
     if options is not None:
         out["options"] = options
+    if show_when is not None:
+        out["show_when"] = show_when
+    if stored_default is not None:
+        out["stored_default"] = stored_default
     return out
 
 
@@ -142,6 +155,11 @@ SAGE_INTACCT_FIELDS: list[dict[str, Any]] = [
     _field("location_id", required=False, help_key="org.erp.help.intacctLocation"),
     _field("po_document_type", required=False, placeholder="Purchase Order"),
 ]
+
+#: NetSuite's two sign-in methods (``erp_adapters/netsuite.AUTH_METHODS``):
+#: each one's fields apply only while it is the chosen ``auth_method``.
+_NETSUITE_OAUTH2: dict[str, Any] = {"field": "auth_method", "values": ["oauth2_m2m"]}
+_NETSUITE_TBA: dict[str, Any] = {"field": "auth_method", "values": ["tba"]}
 
 #: Every direct ERP, in dropdown order within its region group.
 ERP_PROVIDERS: list[dict[str, Any]] = [
@@ -281,10 +299,34 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
         "auth": "credentials",
         "fields": [
             _field("account_id", placeholder="1234567"),
-            _field("consumer_key"),
-            _field("consumer_secret", secret=True),
-            _field("token_id"),
-            _field("token_secret", secret=True),
+            # OAuth 2.0 client credentials first: from NetSuite 2027.1 it is the
+            # only method a NEW integration record can use. A block saved
+            # before this choice existed is TBA (the adapter reads an absent
+            # key that way, and so does the form). Not a destination: either
+            # method signs in to the same account's hosts.
+            _field(
+                "auth_method",
+                options=["oauth2_m2m", "tba"],
+                stored_default="tba",
+                help_key="org.erp.help.netsuiteAuthMethod",
+            ),
+            _field("client_id", show_when=_NETSUITE_OAUTH2),
+            _field(
+                "certificate_id",
+                show_when=_NETSUITE_OAUTH2,
+                help_key="org.erp.help.netsuiteCertificateId",
+            ),
+            _field(
+                "private_key",
+                secret=True,
+                show_when=_NETSUITE_OAUTH2,
+                placeholder="-----BEGIN PRIVATE KEY-----",
+                help_key="org.erp.help.netsuitePrivateKey",
+            ),
+            _field("consumer_key", show_when=_NETSUITE_TBA),
+            _field("consumer_secret", secret=True, show_when=_NETSUITE_TBA),
+            _field("token_id", show_when=_NETSUITE_TBA),
+            _field("token_secret", secret=True, show_when=_NETSUITE_TBA),
         ],
         "docs_url": "https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4247337262.html",
     },
@@ -481,7 +523,9 @@ def same_connection(stored: Any, incoming: Any) -> bool:
 def secrets_to_drop(stored: Any, merged: Any) -> frozenset[str]:
     """The sealed ``erp`` secrets a save from ``stored`` to ``merged`` removes.
 
-    * Same ERP, same destination — none.
+    * Same ERP, same destination — the secrets of a sign-in method the save
+      switched away from (:func:`secrets_switched_off`): a NetSuite block moved
+      from TBA to OAuth 2.0 must not keep TBA's token secret sealed and unused.
     * Same ERP, new destination — every secret but the inbound webhook's HMAC
       key (:data:`EXTRA_SECRET_KEYS`), which verifies what the ERP sends US and
       is never sent anywhere. Without this, ``{"type": "syspro", "base_url":
@@ -502,10 +546,43 @@ def secrets_to_drop(stored: Any, merged: Any) -> frozenset[str]:
     if not isinstance(stored, dict) or not (stored.get("type") or stored.get("integration_method")):
         return frozenset()
     if same_connection(stored, merged):
-        return frozenset()
+        return secrets_switched_off(stored, merged)
     if same_erp(stored, merged):
         return SECRET_KEYS - EXTRA_SECRET_KEYS
     return SECRET_KEYS
+
+
+def secrets_switched_off(stored: Any, merged: Any) -> frozenset[str]:
+    """The provider's secret fields that applied to ``stored`` and no longer
+    apply to ``merged``, by their catalogue ``show_when``.
+
+    Only a field the save turned OFF: a secret stored for a method the block
+    was not yet on (the credentials endpoint takes secrets before or after the
+    configuration save) is left for the save that selects it. An absent
+    controlling key reads as its ``stored_default``, as the adapter reads it.
+    """
+    if not (isinstance(stored, dict) and isinstance(merged, dict)):
+        return frozenset()
+    entry = provider(catalog_key(stored))
+    if entry is None:
+        return frozenset()
+    by_name = {f["name"]: f for f in entry["fields"]}
+
+    def value(cfg: dict, name: str) -> Any:
+        current = cfg.get(name)
+        if current is None or (isinstance(current, str) and not current.strip()):
+            return by_name.get(name, {}).get("stored_default")
+        return current
+
+    off = {
+        f["name"]
+        for f in entry["fields"]
+        if f["secret"]
+        and (cond := f.get("show_when")) is not None
+        and value(stored, cond["field"]) in cond["values"]
+        and value(merged, cond["field"]) not in cond["values"]
+    }
+    return frozenset(off) & SECRET_KEYS
 
 
 def merge_erp_update(stored: Any, incoming: dict) -> dict:

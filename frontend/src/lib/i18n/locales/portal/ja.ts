@@ -150,6 +150,9 @@ export const messages = {
 	'portal.po.col.total': '合計',
 	'portal.po.col.status': 'ステータス',
 	'portal.po.createInvoice': '請求書を作成',
+	'portal.po.totalUnverifiable': '確認中',
+	'portal.po.totalUnverifiableNote':
+		'「確認中」の合計はお客様が再確認しているため、これらの発注からはここで請求書を作成できません。代わりにご自身の請求書を提出してください。',
 	'portal.po.creating': '作成しています…',
 	'portal.po.loadMore': 'さらに読み込む（{total}件中{shown}件）',
 	'portal.po.showingAll': '{total, plural, other {#件すべての発注書を表示中}}',

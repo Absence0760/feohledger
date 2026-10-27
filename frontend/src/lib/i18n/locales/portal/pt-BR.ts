@@ -153,6 +153,9 @@ export const messages = {
 	'portal.po.col.total': 'Total',
 	'portal.po.col.status': 'Status',
 	'portal.po.createInvoice': 'Criar fatura',
+	'portal.po.totalUnverifiable': 'Em confirmação',
+	'portal.po.totalUnverifiableNote':
+		'Seu cliente está conferindo de novo os totais marcados como “Em confirmação”, então não é possível criar uma fatura a partir desses pedidos aqui. Envie a sua própria fatura para eles.',
 	'portal.po.creating': 'Criando…',
 	'portal.po.loadMore': 'Carregar mais ({shown} de {total})',
 	'portal.po.showingAll':

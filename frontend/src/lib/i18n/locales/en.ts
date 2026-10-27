@@ -227,6 +227,7 @@ export const en = {
 	'profile.notifications.event.cashShortfallProjected': 'Projected cash shortfall',
 	'profile.notifications.event.aiInvoiceUsage': 'AI-read invoice usage',
 	'profile.notifications.event.erpConnectionExpiring': "ERP connection needs reconnecting",
+	'profile.notifications.event.erpCallQuota': "ERP API allowance used",
 	'profile.notifications.inAppFor': 'In-app notifications for {event}',
 	'profile.notifications.emailFor': 'Email notifications for {event}',
 
@@ -679,6 +680,8 @@ export const en = {
 	'invoices.warning.poAmountVariance': 'Amount variance {variancePct} vs PO {poNumber} (invoice {invoiceAmount} vs PO {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared',
+	'invoices.warning.poCancelled': 'PO {poNumber} is cancelled — the invoice was not matched against it',
+	'invoices.warning.poTotalUnverifiable': 'The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared',
 	'invoices.warning.poPartialReceipt': 'Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received',
 	'invoices.warning.poOverReceipt': 'Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity}) on PO {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'More goods received than ordered on PO {poNumber}',
@@ -707,6 +710,8 @@ export const en = {
 	'invoices.warning.glCodeStalePrior': 'Cached vendor GL code “{code}” is no longer in the active chart of accounts.',
 	'invoices.poMatch.issue.poNotFound': 'PO {poNumber} not found',
 	'invoices.poMatch.issue.currencyMismatch': 'Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared',
+	'invoices.poMatch.issue.poCancelled': 'PO is cancelled — amounts not compared',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'PO total not confirmed by the ERP on its last sync — amounts not compared',
 	'invoices.poMatch.issue.amountMismatch': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
@@ -1428,6 +1433,9 @@ export const en = {
 	'exceptions.toast.loadFailed': 'Failed to load exceptions',
 	'exceptions.toast.noteRequired': 'Resolution note is required',
 	'exceptions.toast.actionFailed': 'Action failed',
+	'exceptions.poRematch.note': "PO {po} changed in {erp} on {date}, and a re-check now matches. Review it to clear the hold.",
+	'exceptions.poRematch.noteNoDate': "PO {po} changed in {erp}, and a re-check now matches. Review it to clear the hold.",
+	'exceptions.poRematch.noteNoPo': "The purchase order changed in {erp}, and a re-check now matches. Review it to clear the hold.",
 	'exceptions.erpPayment.title': "Payment reported by {erp}",
 	'exceptions.erpPayment.intro': "The ERP reports this bill paid. Check the details, then record the payment: this resolves the exception and marks the invoice paid. FeohLedger sends no money.",
 	'exceptions.erpPayment.record': "Record the ERP's payment",
@@ -1979,6 +1987,8 @@ export const en = {
 		'{n, plural, one {⚠ # budget is over its allocation.} other {⚠ # budgets are over their allocation.}}',
 	'cfo.budgets.excluded':
 		'Partial: {n, plural, one {# linked requisition, PO or invoice is} other {# linked requisitions, POs or invoices are}} denominated in another currency than the budget and excluded — committed and actual below are a floor, not the full picture. Re-denominate them, or read them on the budget itself.',
+	'cfo.budgets.unverifiablePos':
+		'Partial: {n, plural, one {# linked purchase order is} other {# linked purchase orders are}} left out of committed because the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync — committed below is a floor. Re-sync purchase orders once the ERP can price them.',
 	'cfo.budgets.empty': 'No budgets have been set up yet.',
 	'cfo.budgets.loadFailed': 'Failed to load budget vs actual.',
 	// Forecast vs actual (`POST /api/analytics/forecast_variance`). The forecast
@@ -2043,6 +2053,8 @@ export const en = {
 	'cfoMetrics.accruals.total': 'Total accrual',
 	'cfoMetrics.accruals.noCurrency':
 		'Purchase orders with no recorded currency are shown on their own line, without a symbol. Each currency is netted on its own; the lines are never added together.',
+	'cfoMetrics.accruals.unverifiablePos':
+		'{n, plural, one {# purchase order is} other {# purchase orders are}} left out of open POs and received goods because the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync — these accruals are a floor.',
 	'cfoMetrics.concentration.title': 'Supplier concentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} accounts for {pct}% of spend — concentration risk.',
 	'cfoMetrics.concentration.top10': 'Top 10 vendors',
@@ -2707,6 +2719,8 @@ export const en = {
 	'budgets.modal.detail.allocated': 'Allocated',
 	'budgets.modal.detail.committed': 'Committed',
 	'budgets.modal.detail.actual': 'Actual',
+	'budgets.modal.unverifiablePos':
+		'{n, plural, one {# linked purchase order is} other {# linked purchase orders are}} left out of committed: the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync, so committed is a floor and remaining may be overstated.',
 	'budgets.modal.detail.remaining': 'Remaining',
 	'budgets.modal.loadingSpend': 'Loading spend…',
 	'budgets.modal.field.name': 'Name',
@@ -2811,6 +2825,8 @@ export const en = {
 	'purchaseOrders.toast.loadListFailed': 'Failed to load purchase orders',
 	'purchaseOrders.toast.loadFailed': 'Failed to load PO',
 	'purchaseOrders.toast.syncFailed': 'ERP sync failed',
+	'purchaseOrders.toast.unverifiable':
+		'The ERP could not confirm the total of {n, plural, one {# existing PO} other {# existing POs}} — invoices citing {n, plural, one {it are} other {them are}} held until a sync confirms it',
 	'purchaseOrders.loadMore': 'Load more ({shown} of {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Showing all # PO} other {Showing all # POs}}',
@@ -2833,6 +2849,17 @@ export const en = {
 	'purchaseOrders.modal.amount': 'Amount',
 	'purchaseOrders.modal.invoiceStatus': 'Status',
 	'purchaseOrders.modal.noLinkedInvoices': 'No invoices reference this PO.',
+	'purchaseOrders.total.unverifiable': 'Not verifiable',
+	'purchaseOrders.modal.unverifiableNote':
+		'The ERP could not price this PO at its last sync: {reason}. Its total and line amounts are hidden because the ERP no longer vouches for them, and invoices citing it are held until a sync prices it again.',
+	'purchaseOrders.unverifiableReason.unpriceable':
+		'its total cannot be worked out exactly (for example a discount, a price unit of measure or a missing price)',
+	'purchaseOrders.unverifiableReason.linesUnread': 'its lines could not be read in full',
+	'purchaseOrders.unverifiableReason.noLines': 'it came back with no lines',
+	'purchaseOrders.unverifiableReason.linesChanged': 'its lines were changed in the ERP after goods were received against them',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
+		'its currency could not be placed against the company\'s own',
+	'purchaseOrders.unverifiableReason.unknown': 'the reason was not recorded',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': 'Goods Receipts',
@@ -3217,6 +3244,8 @@ export const en = {
 		'Outstanding includes {n, plural, one {# open invoice} other {# open invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
 	'byEntity.unconvertedSpend':
 		'Spend includes {n, plural, one {# invoice} other {# invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
+	'byEntity.openPoUnverifiable':
+		'{n, plural, one {# open purchase order is} other {# open purchase orders are}} left out of Open POs because the ERP could not confirm {n, plural, one {its total} other {their totals}} at the last sync.',
 	'byEntity.openPoNoCurrency':
 		'Some purchase orders record no currency; their Open POs are shown on their own line, without a symbol, and never added to another currency\'s.',
 
@@ -5190,6 +5219,10 @@ export const en = {
 	'erpRefusal.dueDateMissing': "{provider} needs a due date. Add it, then retry.",
 	'erpRefusal.amountNotPositive': "{provider} takes only invoices for more than zero. Correct the amount, or record a credit memo instead.",
 	'erpRefusal.jobUnconfirmed': "{provider} accepted the invoice but hasn't confirmed it was created. Retry to check again — it won't be sent twice.",
+	'erpRefusal.jobFailed': "{provider} accepted the invoice, but its background job failed and created nothing. Check the vendor, accounts, transaction codes and posting period in {provider}, then retry.",
+	'erpRefusal.callBudgetTenant': "This workspace has used its share of today's {provider} API calls, so FeohLedger made no call. The allowance resets at midnight UTC — retry then.",
+	'erpRefusal.callBudgetQuota': "{provider} has paused API calls for the subscription FeohLedger uses (its daily quota is used), so FeohLedger made no call. It resets at midnight UTC — retry then.",
+	'erpRefusal.callBudgetRateLimited': "{provider} asked FeohLedger to slow down, so no call was made. Retry in a minute.",
 	'erpRefusal.credentialsUnavailable': "The ERP credentials couldn't be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.",
 	'erpRefusal.periodClosed': "{provider} refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in {provider}, then retry.",
 	'erpRefusal.vendorInactive': "{provider} refused this bill because its vendor is inactive or deleted there. Make the vendor active in {provider}, then retry.",

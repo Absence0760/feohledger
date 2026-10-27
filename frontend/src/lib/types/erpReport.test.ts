@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { erpPrefill, isErpPaidReport } from './erpReport.ts';
+import { erpPrefill, isErpPaidReport, isPoRematchClears, poRematchNote } from './erpReport.ts';
 
 describe('isErpPaidReport', () => {
 	it('is true only for a paid_not_recorded report', () => {
@@ -38,5 +38,34 @@ describe('erpPrefill', () => {
 
 	it('starts empty with no report at all', () => {
 		expect(erpPrefill(null, today)).toEqual({ method: '', reference: '', paidOn: today });
+	});
+});
+
+describe('poRematchNote', () => {
+	const t = (key: string, params?: Record<string, string | number>) =>
+		`${key}${params ? ' ' + JSON.stringify(params) : ''}`;
+	const date = (day: string) => `<${day}>`;
+
+	it('names the PO, the ERP and the localised day', () => {
+		const report = { kind: 'po_rematch_clears', po_number: 'PO-7', observed_on: '2026-10-26' };
+		expect(isPoRematchClears(report)).toBe(true);
+		expect(poRematchNote(report, 'NetSuite', t, date)).toBe(
+			'exceptions.poRematch.note {"po":"PO-7","erp":"NetSuite","date":"<2026-10-26>"}'
+		);
+	});
+
+	it('says what changed without inventing a missing PO number or day', () => {
+		expect(poRematchNote({ kind: 'po_rematch_clears', po_number: 'PO-7' }, 'X', t, date)).toBe(
+			'exceptions.poRematch.noteNoDate {"po":"PO-7","erp":"X"}'
+		);
+		expect(
+			poRematchNote({ kind: 'po_rematch_clears', po_number: ' ', observed_on: 'bad' }, 'X', t, date)
+		).toBe('exceptions.poRematch.noteNoPo {"erp":"X"}');
+	});
+
+	it('is null for any other report', () => {
+		expect(poRematchNote({ kind: 'paid_not_recorded' }, 'X', t, date)).toBeNull();
+		expect(poRematchNote(null, 'X', t, date)).toBeNull();
+		expect(isPoRematchClears(undefined)).toBe(false);
 	});
 });

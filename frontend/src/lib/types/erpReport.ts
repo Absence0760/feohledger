@@ -5,11 +5,17 @@
  *
  * Pure (no Svelte runtime, no `$app/*`), so vitest reaches it directly.
  */
+import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { PaymentMethod } from '#lib/types/payment.ts';
 import { EXTERNAL_PAYMENT_METHODS, localToday } from '#lib/types/paymentExecution.ts';
 
 /** `erp_report.kind` of a row whose ERP-reported payment could not be recorded. */
 export const ERP_REPORT_PAID_NOT_RECORDED = 'paid_not_recorded';
+
+/** `erp_report.kind` of an open PO-match hold an ERP PO sync's re-match no
+ *  longer finds (decisions §323, amended): the sync never clears a hold, so
+ *  this is what tells a reviewer the PO changed and the re-check now matches. */
+export const ERP_REPORT_PO_REMATCH_CLEARS = 'po_rematch_clears';
 
 /** The `erp_report` JSON on an exception row. Every field optional: the
  *  backend adds fields over time and an older row may lack one. */
@@ -23,6 +29,9 @@ export interface ErpReport {
 	paid_on?: string | null;
 	paid_on_reported?: boolean | null;
 	refusal_code?: string | null;
+	/** `po_rematch_clears`: the PO number matched, and the UTC day seen. */
+	po_number?: string | null;
+	observed_on?: string | null;
 }
 
 /** The payment-queue row's `erp_reported_payment` (`api/payments.py::
@@ -39,6 +48,36 @@ export interface QueueErpReportedPayment {
  *  not record? */
 export function isErpPaidReport(report: ErpReport | null | undefined): report is ErpReport {
 	return !!report && report.kind === ERP_REPORT_PAID_NOT_RECORDED;
+}
+
+/** Is this a hold whose PO changed in the ERP so that a re-check now matches? */
+export function isPoRematchClears(report: ErpReport | null | undefined): report is ErpReport {
+	return !!report && report.kind === ERP_REPORT_PO_REMATCH_CLEARS;
+}
+
+type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
+
+/**
+ * The one line the exceptions queue shows for a `po_rematch_clears` row, or
+ * `null` for any other report. `erp` is the ERP's name (or the reader's "your
+ * ERP"); `date` renders `observed_on` in the reader's locale. A row with no PO
+ * number or day still says what changed, without inventing either.
+ */
+export function poRematchNote(
+	report: ErpReport | null | undefined,
+	erp: string,
+	t: Translate,
+	date: (isoDay: string) => string
+): string | null {
+	if (!isPoRematchClears(report)) return null;
+	const po = (report.po_number ?? '').trim();
+	const day = (report.observed_on ?? '').slice(0, 10);
+	if (po && ISO_DATE.test(day)) {
+		return t('exceptions.poRematch.note', { po, erp, date: date(day) });
+	}
+	return po
+		? t('exceptions.poRematch.noteNoDate', { po, erp })
+		: t('exceptions.poRematch.noteNoPo', { erp });
 }
 
 /** What a "record this payment" form starts from. `method` is `''` when the ERP

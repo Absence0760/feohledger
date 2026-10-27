@@ -670,6 +670,10 @@ Response:
   total_accrual}` fields beside it stay the **naive sums across currencies**,
   kept for API back-compat like `total_spend` — a EUR purchase order added to a
   USD one is denominated in nothing (`docs/decisions.md` §197).
+- `accruals.unverifiable_po_count` — a COUNT of distinct POs left out of the
+  open-PO and received legs because their total is one the ERP no longer
+  vouches for (`purchase_orders.total_unverifiable_reason`, decisions §323).
+  Excluded and counted (§35); the card prints it beside the legs as a floor.
 - `accruals.{open_po_amount, received_amount, unposted_invoice_amount, total_accrual}`
   (`received_amount` values goods physically received but not yet
   invoiced — the GR/IR accrual leg. The 3-way match is fanned out per
@@ -682,7 +686,7 @@ Response:
   quantified lines but a booked receipt count as fully received;
   receipts with no PO link can't be priced and are excluded. Pure math
   in `analytics.value_received_goods`; SQL fan-out in
-  `api/analytics._received_amounts`, which returns the whole-book figure and the same valuation grouped by each PO's currency.)
+  `api/analytics._received_amounts`, which returns the whole-book figure and the same valuation grouped by each PO's currency. A failed read there fails the request, which `/cfo` shows as a load error; it is never reported as nothing received.)
 - `working_capital_impact_5_days` — `avg_daily_outflow × 5`
 - `supplier_concentration.{top_10_share_pct, top_50_share_pct, largest_vendor, largest_vendor_share_pct, flagged}` — `flagged=true` iff the largest vendor **reaches or** exceeds 25% (configurable; the boundary is inclusive on purpose — a risk flag that stays dark at exactly the configured limit is the wrong direction to be wrong in). **Every share is computed against the whole period's spend**, never a top-N subtotal: `compute_supplier_concentration` derives its denominator from the list it is handed and takes its own `[:10]`/`[:50]` cuts, so the caller must pass the full vendor set and slice only for display. Passing a pre-sliced top-50 made `total_spend` the top-50 subtotal, inflated `top_10_share_pct` / `largest_vendor_share_pct` (and with them `flagged`), and pinned `top_50_share_pct` at exactly `100.0` on any tenant with 50+ vendors. The same rule governs `/drill/spend_concentration`, whose `total_spend` and `share_pct` are computed before `?limit=` is applied — otherwise `limit` silently rebased both and the drill disagreed with the tile it was opened from. Excludes `rejected` invoices (never real spend) — the SAME population its drill-through and the `vendor_spend` export/scheduled report use, so clicking from the tile into either agrees with the number the CFO started from. Also the SAME reporting-currency rollup as the dashboard's `vendor_spend` (see above) — a vendor's multi-currency invoices are converted before summing, never naively added across currencies
 - `supplier_concentration.unconverted_count` — invoices folded into `total_spend`, and therefore into every share above and into `flagged`, at **face value** because no locked exchange rate bridged them into the reporting currency. A count, not money; `0` on a single-currency tenant. See § Per-vendor spend is one query below
@@ -1026,7 +1030,8 @@ returns a coherent one-row breakdown whose row equals the consolidated block.
 | `reporting_total_spend`, `reporting_outstanding_amount` | `reporting_currency` (the org's, same on every row). A foreign invoice with no locked rate is counted at **face value**, and the matching `*_unconverted_count` says how many. The consolidated spend figure is the same population and rollup as `/cfo`'s `reporting_spend`, so the two cannot disagree. |
 | `total_spend`, `outstanding_amount` | **Nothing** — naive `SUM`s across currencies, kept for API back-compat. Never render them. |
 | `open_po_amount` | **Nothing** — a naive `SUM` across the PO currencies, kept for back-compat. Never render it: `open_po_by_currency` is the figure. |
-| `open_po_by_currency[]` | Each `{currency, amount}` in its OWN `currency` — the PO's `purchase_orders.currency` (migration 0099). `currency: null` is the entry for POs that record none; it renders bare and is never merged into another. Ordered by code with that entry last, the same order `/cfo`'s `accruals.by_currency` uses, and the consolidated row equals the sum of the entity rows per currency. |
+| `open_po_by_currency[]` | Each `{currency, amount}` in its OWN `currency` — the PO's `purchase_orders.currency` (migration 0099). `currency: null` is the entry for POs that record none; it renders bare and is never merged into another. Ordered by code with that entry last, the same order `/cfo`'s `accruals.by_currency` uses, and the consolidated row equals the sum of the entity rows per currency. A PO marked `total_unverifiable_reason` is left out (decisions §323). |
+| `open_po_unverifiable_count` | A COUNT: open POs left out of `open_po_by_currency` because the ERP could not confirm their total at its last sync. The by-entity card prints the consolidated row's count under the table. |
 | `currency` (entity row) | Not a denomination: the entity's configured currency, `NULL` meaning "the org's reporting currency". It labels no figure. |
 
 The web surface is the `By entity` table on `/cfo`

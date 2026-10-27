@@ -144,6 +144,13 @@ CONTROL_TABLES_EXEMPT: dict[str, str] = {
         "by whom and with which proof, and the operator's queue for the backup "
         "leg the API cannot reach. It holds ids and the slug, no personal data."
     ),
+    "subprocessor_notices": (
+        "The record that this organisation was given the sub-processor change "
+        "notice the DPA promises (services/subprocessor_notices.py, decisions "
+        "§321). It is evidence of a contractual notice having been given, so it "
+        "outlives the customer it was given to. Ids, dates and counts only — no "
+        "address or name."
+    ),
 }
 
 

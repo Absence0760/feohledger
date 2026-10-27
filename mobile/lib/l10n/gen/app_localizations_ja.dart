@@ -1965,6 +1965,24 @@ class AppLocalizationsJa extends AppLocalizations {
   String get exceptionDetailSectionDescription => '説明';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return '発注書 $po は $date に $erp で変更され、再照合で一致するようになりました。確認して保留を解除してください。';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return '発注書 $po は $erp で変更され、再照合で一致するようになりました。確認して保留を解除してください。';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return '発注書が $erp で変更され、再照合で一致するようになりました。確認して保留を解除してください。';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'お使いの ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => '請求書';
 
   @override
@@ -2643,6 +2661,16 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return '発注 $poNumber は取り消されています — 請求書はこの発注と照合されていません';
+  }
+
+  @override
+  String invoiceWarningPoTotalUnverifiable(String poNumber) {
+    return '発注 $poNumber の合計は前回の同期で ERP から確認できなかったため、金額を比較していません';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return '3 ウェイ照合が部分一致 — 発注 $poNumber に対する$matchType照合ですが、発注数量の一部のみ入荷しています';
   }
@@ -2846,6 +2874,13 @@ class AppLocalizationsJa extends AppLocalizations {
   ) {
     return '通貨の不一致: 請求は $invoiceCurrency、発注は $poCurrency — 金額は比較されていません';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled => '発注は取り消されています — 金額は比較されていません';
+
+  @override
+  String get invoicePoMatchIssuePoTotalUnverifiable =>
+      '発注の合計は前回の同期で ERP により確認されていません — 金額は比較されていません';
 
   @override
   String invoicePoMatchIssueAmountMismatch(

@@ -89,6 +89,7 @@ transaction.
 | `chat_message` | supplier posts on the portal → every `ap_manager`; AP posts with @mentions → the mentioned AP users (poster excluded) | see below |
 | `ai_invoice_usage` | the org crosses 80% / 100% of its plan's monthly AI-read-invoice allowance, or its AI spending cap (`services/billing/ai_usage_notices.py`, checked after every billable read and by the `billing-ai-overage` sweep) | every org `admin` — once per threshold per UTC month, claimed under the org row lock (`billing.md` § Notices). `entity_type="billing"`, `entity_id` NULL |
 | `erp_connection_expiring` | the org's OAuth ERP connection (QuickBooks Online, Xero, …) is inside a refresh-token expiry lead (30 / 7 / 1 days by default), or the provider refused it and it needs reconnecting (`services/erp_connection_health.py`, sweep `erp-connection-health`, decisions §295) | every org `admin` — once per (reported expiry, lead), and once per lost connection; marker in `settings.erp.oauth`. `entity_type="organization"`, `entity_id` NULL |
+| `erp_call_quota` | the org passes 80% of its daily share of an ERP API quota several tenants share (Blackbaud's SKY platform key), uses all of it, or the provider says the subscription's quota is used (a 403 + `Retry-After`, or our own count of the key) — `services/erp_call_budget.py`, raised inline by the adapter's call, decisions §322 | every org `admin` (delivered by `erp_connection_health.notify_org_admins`) — once per notice per UTC day, claimed by a Redis SET NX and released when nobody could be told. `entity_type="organization"`, `entity_id` NULL |
 
 `ap_manager` recipients are resolved against the control plane via
 `notification_dispatch.resolve_role_user_ids(org_id, "ap_manager")`.
@@ -387,7 +388,8 @@ User-global, stored on the control-plane `users.notification_prefs` JSONB:
   "chat_message":             { "email": true, "in_app": true },
   "cash_shortfall_projected": { "email": true, "in_app": true },
   "ai_invoice_usage":         { "email": true, "in_app": true },
-  "erp_connection_expiring":  { "email": true, "in_app": true }
+  "erp_connection_expiring":  { "email": true, "in_app": true },
+  "erp_call_quota":           { "email": true, "in_app": true }
 }
 ```
 
@@ -465,6 +467,13 @@ sentence is where a code or credential sits. A sender that wants one sets
 reset link, token or credential must set one that names none of them. The
 sign-in-code, password-reset, user-invite, supplier-invite, portal-reset and
 signup welcome senders do. Unset, the client previews the body as it always did.
+
+**The subject is one line, whatever a sender interpolates.** Subjects carry names
+nobody validated for control characters — an organisation name, a vendor name.
+`EmailMessage` folds every control character and line/paragraph separator in
+`subject` to a space on construction (`email_adapters/base.header_line`), so a
+line break can neither inject a header nor make the SMTP adapter's `email`
+policy refuse the message. Guard: `tests/test_smtp_email_adapter.py`.
 
 ## Localized email
 
@@ -673,6 +682,19 @@ adds no reachability — it hands the custom-domain resolver and the subdomain
 resolver a conflicting claim on one hostname, and lets one tenant claim a name
 another tenant's slug owns (or takes at the next signup). The refusal echoes no
 hostname, matching the endpoint's existing PII-free posture.
+
+## Sub-processor change notices (contractual, not a notification event)
+
+`services/subprocessor_notices.py` emails the DPA's 30-day sub-processor change
+notice (decisions §321, issue #427). It is deliberately **outside** everything
+above: it is not a `NOTIFICATION_EVENT_TYPES` member, writes no in-app row and
+never goes through `notify_event`, because per-user preferences must not be able
+to switch off a notice the DPA promises. It calls `get_email_adapter()` directly,
+once per active system-`admin` of each organisation, in English (the language of
+the DPA, decisions §174), with no tenant brand (the platform is the processor
+giving notice). Idempotency is the control-plane `subprocessor_notices` ledger,
+not a preference or a Redis key. The source is a change-log entry, not an app
+event: see `docs/sub-processors.md` § Maintenance for how to add one.
 
 ## Configuration & local-first
 

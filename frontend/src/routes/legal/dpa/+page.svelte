@@ -352,14 +352,19 @@
 		<li>
 			We will give you at least <strong>30 days' notice</strong> before a new
 			sub-processor begins processing your personal data, or before we replace an
-			existing one. <strong>Notice is given by updating
-			<a href="/legal/sub-processors">/legal/sub-processors</a>, which carries a dated
-			change log</strong> — that page is the notice, and checking it is how you receive
-			it. There is no automatic mailing list yet; building one is committed work, and
-			until it exists you may ask at
-			<a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> to be told directly, and
-			we will do so manually. We would rather describe the mechanism we have than
-			promise one we do not.
+			existing one. Each such change is recorded as a dated entry in the change log at
+			<a href="/legal/sub-processors">/legal/sub-processors</a>, stating the date it
+			takes effect, and <strong>that entry is emailed to the active administrators of
+			your organisation's account</strong>. The email is the notice; it is a contractual
+			notice rather than a product notification, so it cannot be switched off in
+			notification settings. We keep a record of when it was sent to your organisation.
+			A change made on shorter notice under item 4 below is notified the same way, and
+			the notice and the change log both state the reason.
+			It goes to your administrators because they are the contact the Service holds for
+			you — there is not yet a separate privacy contact to record. If another address
+			should also receive it, ask at
+			<a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> and we will copy the notice
+			there by hand.
 		</li>
 		<li>
 			You may <strong>object</strong> on reasonable data-protection grounds within

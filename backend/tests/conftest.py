@@ -40,8 +40,9 @@ class _FakeSortedSet:
 
 
 class _FakePipeline:
-    def __init__(self, sset: _FakeSortedSet) -> None:
+    def __init__(self, sset: _FakeSortedSet, kv: dict[str, str] | None = None) -> None:
         self._sset = sset
+        self._kv = kv if kv is not None else {}
         self._calls: list = []
 
     async def __aenter__(self):
@@ -59,6 +60,9 @@ class _FakePipeline:
     def zcard(self, key) -> None:
         self._calls.append(("zcard", key))
 
+    def incr(self, key) -> None:
+        self._calls.append(("incr", key))
+
     def expire(self, key, ttl) -> None:
         self._calls.append(("expire", key, ttl))
 
@@ -74,6 +78,10 @@ class _FakePipeline:
                 results.append(None)
             elif op == "zcard":
                 results.append(self._sset.zcard(call[1]))
+            elif op == "incr":
+                value = int(self._kv.get(call[1]) or 0) + 1
+                self._kv[call[1]] = str(value)
+                results.append(value)
             elif op == "expire":
                 results.append(True)
         return results
@@ -88,7 +96,7 @@ class _FakeRedis:
         self._kv: dict[str, str] = {}
 
     def pipeline(self, transaction: bool = True):  # noqa: ARG002
-        return _FakePipeline(self.sset)
+        return _FakePipeline(self.sset, self._kv)
 
     async def zrange(self, key, start, stop, withscores=False):
         return self.sset.zrange(key, start, stop, withscores=withscores)
@@ -127,6 +135,15 @@ class _FakeRedis:
                 del self._kv[k]
                 count += 1
         return count
+
+    async def incr(self, key: str) -> int:
+        # The ERP call budget's counters (`services/erp_call_budget.py`).
+        value = int(self._kv.get(key) or 0) + 1
+        self._kv[key] = str(value)
+        return value
+
+    async def expire(self, key: str, ttl: int) -> bool:  # noqa: ARG002 - TTL not simulated
+        return key in self._kv
 
     async def getdel(self, key: str):
         # Password-reset token consumption (`services/password_reset.py`) is
@@ -177,6 +194,9 @@ def _autouse_fake_redis(monkeypatch):
     # the per-IP/per-account rate-limit buckets those routes also touch reset
     # between tests instead of accumulating for real across a whole suite run.
     monkeypatch.setattr("app.services.password_reset.get_redis", _get_redis)
+    # The ERP call budget counts every Blackbaud SKY call in Redis; stubbed so
+    # adapter tests count in memory, fresh per test.
+    monkeypatch.setattr("app.services.erp_call_budget.get_redis", _get_redis)
     return fake
 
 

@@ -30,8 +30,11 @@ Every key has a TTL — Redis is used as a transient store, not a database.
 | `sso:discovery:<sha256(url)>` | 1 day | Cached OIDC discovery document. |
 | `sso:jwks:<sha256(uri)>` | 1 day | Cached IdP JWKS for ID-token signature verification. |
 | `ratelimit:signup:<ip>` | sliding window | Self-service signup rate limiter (`FEOH_SIGNUP_RATE_LIMIT_PER_HOUR`). |
+| `erpcalls:<provider>:<key digest>:<YYYYMMDD>:total` / `…:org:<org_id>` | 2 days | ERP API calls made on one subscription key per UTC day, in all and per org — Blackbaud's shared SKY quota (`services/erp_call_budget.py`, decisions §322). The key is a SHA-256 digest of the subscription key, never the key. |
+| `erpcalls:<provider>:<key digest>:cooldown` | the provider's `Retry-After` | A 429 / quota 403 every tenant on that key waits out before its next call. |
+| `erpcalls:<provider>:<key digest>:<YYYYMMDD>:notice:<org_id>:<notice>` | 2 days | Claim (SET NX) that the org's admins got today's `erp_call_quota` notice; released when nobody could be told. |
 
-Code: `app/redis.py` (blocklist), `app/services/mfa.py` (email-OTP), `app/services/sso.py` (state, discovery, JWKS), `app/services/rate_limit.py` (signup).
+Code: `app/redis.py` (blocklist), `app/services/mfa.py` (email-OTP), `app/services/sso.py` (state, discovery, JWKS), `app/services/rate_limit.py` (signup), `app/services/erp_call_budget.py` (ERP call budget — fails OPEN on a Redis error, unlike auth). The table is the main keys, not every one: webhook dedup, OAuth refresh locks, MFA and password-reset state live here too (see each module).
 
 ## Operational impact
 

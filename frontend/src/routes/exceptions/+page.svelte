@@ -49,7 +49,12 @@
 		exceptionDescriptionTitle,
 		type ExceptionDescriptionText
 	} from '#lib/api/exceptionDescription.ts';
-	import { erpPrefill, isErpPaidReport, type ErpReport } from '#lib/types/erpReport.ts';
+	import {
+		erpPrefill,
+		isErpPaidReport,
+		poRematchNote,
+		type ErpReport
+	} from '#lib/types/erpReport.ts';
 	import type { PaymentMethod } from '#lib/types/payment.ts';
 	import { localToday } from '#lib/types/paymentExecution.ts';
 	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
@@ -642,6 +647,13 @@
 		return exc.erp_name ?? m('payments.recordOutside.yourErp');
 	}
 
+	/** A hold an ERP PO sync's re-check no longer finds stays open for a person
+	 *  (decisions §323, amended); this is the line that says why they may now
+	 *  clear it. Null on every other row. */
+	function rematchNote(exc: ExceptionItem): string | null {
+		return poRematchNote(exc.erp_report, erpName(exc), m, (day) => formatDate(day));
+	}
+
 	async function commitRecordErpPayment() {
 		const target = resolveTarget;
 		const reference = erpReference.trim();
@@ -1208,6 +1220,9 @@
 								<span class="type-detail" title={exceptionDescriptionTitle(desc)}>{desc.summary}</span>
 							{/if}
 						{/if}
+						{#if rematchNote(exc)}
+							<span class="type-detail rematch-note" title={rematchNote(exc)} data-testid="exception-rematch-note">{rematchNote(exc)}</span>
+						{/if}
 					</td>
 					<td>
 						<span
@@ -1304,6 +1319,11 @@
 					</ul>
 				{/if}
 			</div>
+		{/if}
+		{#if rematchNote(resolveTarget)}
+			<p class="modal-hint rematch-note" data-testid="exception-rematch-note-detail">
+				{rematchNote(resolveTarget)}
+			</p>
 		{/if}
 		{#if isErpPaidReport(resolveTarget.erp_report) && isOffered(resolveTarget.record_erp_payment_refusal)}
 			<!-- The payment the ERP reported, pre-filled, recorded in one step.

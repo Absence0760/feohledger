@@ -430,3 +430,76 @@ async def test_by_entity_open_pos_are_grouped_by_po_currency(realdb):
     default_row = next(r for r in body["entities"] if r["is_default"])
     assert default_row["open_po_by_currency"] == expected
     assert body["consolidated"]["open_po_amount"] == "8700.00"
+
+
+async def _seed_unverifiable_po(realdb) -> None:
+    """Beside the mixed-currency seed: an open USD PO the ERP's last sync could
+    not price (decisions §323), half received. Its 4000.00 total is a figure the
+    ERP no longer vouches for."""
+    from app.models.procurement import GoodsReceipt, GRLineItem, POLineItem, PurchaseOrder
+
+    org_id = realdb.info(TENANT).org_id
+    async with realdb.sessionmaker(TENANT)() as s:
+        ent = await _default_entity_id(s)
+        po = PurchaseOrder(
+            po_number="ACC-UNVERIFIABLE",
+            total=Decimal("4000.00"),
+            currency="USD",
+            status="open",
+            total_unverifiable_reason="unpriceable",
+            organization_id=org_id,
+            entity_id=ent,
+        )
+        s.add(po)
+        await s.flush()
+        s.add(POLineItem(po_id=po.id, description="Gadget", quantity=Decimal("10")))
+        gr = GoodsReceipt(
+            gr_number="ACC-GR-UNVERIFIABLE",
+            po_id=po.id,
+            status="received",
+            organization_id=org_id,
+            entity_id=ent,
+        )
+        s.add(gr)
+        await s.flush()
+        s.add(GRLineItem(gr_id=gr.id, description="Gadget", quantity_received=Decimal("5")))
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_cfo_accruals_leave_out_and_count_a_po_whose_total_is_unverifiable(realdb):
+    """A marked PO's stale total stays out of the open-PO leg AND the received
+    leg (which would value half of it), and the accruals say how many POs were
+    left out — once, though it is in both legs (decisions §323, §35)."""
+    await _seed_mixed_currency_pos(realdb)
+    await _seed_unverifiable_po(realdb)
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        accruals = (await c.get("/api/analytics/cfo")).json()["accruals"]
+
+    usd = next(r for r in accruals["by_currency"] if r["currency"] == "USD")
+    assert usd["open_po_amount"] == "5000.00"
+    assert usd["received_amount"] == "0.00"
+    assert accruals["open_po_amount"] == "8700.00"
+    assert accruals["received_amount"] == "1500.00"
+    assert accruals["unverifiable_po_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_by_entity_open_pos_leave_out_and_count_an_unverifiable_po(realdb):
+    """Each by-entity row drops the marked PO from its open-PO figures and
+    counts it, the consolidated row agreeing with the entity's."""
+    await _seed_mixed_currency_pos(realdb)
+    await _seed_unverifiable_po(realdb)
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        body = (await c.get("/api/analytics/by-entity")).json()
+
+    expected = [
+        {"currency": "EUR", "amount": "3000.00"},
+        {"currency": "USD", "amount": "5000.00"},
+        {"currency": None, "amount": "700.00"},
+    ]
+    default_row = next(r for r in body["entities"] if r["is_default"])
+    for row in (body["consolidated"], default_row):
+        assert row["open_po_by_currency"] == expected
+        assert row["open_po_amount"] == "8700.00"
+        assert row["open_po_unverifiable_count"] == 1

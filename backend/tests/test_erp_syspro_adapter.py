@@ -38,7 +38,9 @@ from app.services.erp_adapters.syspro import (
     _unwrap,
     build_apstin_document,
     build_comfnd_query,
+    classify_apstin_error,
     map_invoice_status,
+    po_total,
 )
 from app.utils.url_safety import UnsafeUrlError
 
@@ -69,6 +71,16 @@ def _comfnd_rows(rows: list[dict]) -> str:
     return f"<COMFND><HeaderDetails/>{body}<RowsReturned>{len(rows)}</RowsReturned></COMFND>"
 
 
+def _logon_profile(local_currency: str) -> str:
+    """A GetLogonProfile answer, in the element names wildland/syspro-ruby reads
+    (``lib/syspro/get_logon_profile.rb``)."""
+    return (
+        "<LogonProfile><CompanyName>EDU1 Pty Ltd</CompanyName>"
+        f"<LocalCurrencyCode>{local_currency}</LocalCurrencyCode>"
+        "<CurrencyDescription>Local</CurrencyDescription></LogonProfile>"
+    )
+
+
 class FakeSyspro:
     """Routes by REST method, records requests, tracks open sessions."""
 
@@ -78,10 +90,14 @@ class FakeSyspro:
         self.logon_status = 200
         self.query_tables: dict[str, list[dict]] = {}
         self.query_status = 200
+        self.failing_tables: set[str] = set()
+        self.ignore_gt = False
         self.post_status = 200
         self.post_body = "<PostApInvoice><Item><Journal>42</Journal></Item></PostApInvoice>"
         self.post_raises: Exception | None = None
         self.open_sessions: set[str] = set()
+        # GetLogonProfile: the company's local currency (Company Setup).
+        self.profile_body: str = _logon_profile("ZAR")
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -94,11 +110,25 @@ class FakeSyspro:
         if path.endswith("/Logoff"):
             self.open_sessions.discard(params["UserId"])
             return httpx.Response(200, text="0")
+        if path.endswith("/GetLogonProfile"):
+            return httpx.Response(200, text=self.profile_body)
         if path.endswith("/Query/Query"):
             if self.query_status != 200:
                 return httpx.Response(self.query_status, text="")
-            table = parse_secure(params["XmlIn"].encode()).findtext("TableName")
-            return httpx.Response(200, text=_comfnd_rows(self.query_tables.get(table, [])))
+            query = parse_secure(params["XmlIn"].encode())
+            table = query.findtext("TableName")
+            if table in self.failing_tables:
+                return httpx.Response(200, text="ERROR: table unavailable")
+            rows = self.query_tables.get(table, [])
+            # The keyset cursor (``GT``), as COMFND applies it, unless this
+            # fake plays a host that ignores it. EQ is left unapplied: most
+            # tests hand the fake exactly the rows the query should find.
+            for expr in query.findall("Where/Expression"):
+                if expr.findtext("Condition") == "GT" and not self.ignore_gt:
+                    column, value = expr.findtext("Column"), expr.findtext("Value")
+                    rows = [r for r in rows if str(r.get(column, "")) > value]
+            rows = rows[: int(query.findtext("ReturnRows"))]
+            return httpx.Response(200, text=_comfnd_rows(rows))
         if path.endswith("/Transaction/Post"):
             if self.post_raises is not None:
                 raise self.post_raises
@@ -336,18 +366,104 @@ def test_failed_lookup_is_not_read_as_a_miss():
         "ERROR: Supplier 12-3456789 at 17 Bank Street rejected",
         "<PostApInvoice><Item><ErrorDescription>Remit PO Box 9001 / GB29NWBK60161331926819 "
         "invalid</ErrorDescription></Item></PostApInvoice>",
-        "not xml at all 12-3456789",
     ],
 )
-def test_rejected_post_message_never_echoes_the_body(body):
+def test_unrecognised_refusal_is_final_but_not_known_unposted(body):
+    """A refusal no stem matches is SYSPRO's answer to the bill (no retry can
+    change it) — but nothing says what it was, so it is not ``not_posted``."""
     fake = FakeSyspro()
     fake.post_body = body
     result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
     assert not result.success
     assert result.message == "SYSPRO post failed: invoice rejected by APSTIN"
+    assert result.retryable is False
+    assert result.not_posted is False
+    assert result.refusal_code is None
     for token in PII:
         assert token not in result.message
     assert fake.open_sessions == set()
+
+
+def test_unreadable_post_answer_stays_retryable():
+    fake = FakeSyspro()
+    fake.post_body = "not xml at all 12-3456789"
+    result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success
+    assert result.message == "SYSPRO post failed: unreadable APSTIN response"
+    assert result.retryable is True and result.not_posted is False
+    assert fake.open_sessions == set()
+
+
+# S1: APSTIN's refusals are coded from their stem. ApplyIfEntireDocumentValid=Y
+# means a refused document posted nothing, so a coded refusal is not_posted.
+@pytest.mark.parametrize(
+    "body, code",
+    [
+        ("ERROR: Invoice 'INV-1' already on file", "duplicate_invoice_number"),
+        (
+            "<PostApInvoice><Item><ErrorDescription>Invoice number already exists against the "
+            "selected supplier</ErrorDescription></Item></PostApInvoice>",
+            "duplicate_invoice_number",
+        ),
+        ("ERROR: Supplier '0000001' is on hold", "vendor_inactive"),
+        ("ERROR: Ledger code '6100' is on hold", "account_inactive"),
+        ("ERROR: Ledger code '6100' is a control account and cannot be used", "account_inactive"),
+        ("ERROR: Ledger code not on file", "account_inactive"),
+        ("ERROR: Posting period is closed", "period_closed"),
+    ],
+)
+def test_recognised_refusal_is_coded_final_and_not_posted(body, code):
+    fake = FakeSyspro()
+    fake.post_body = body
+    result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success
+    assert result.refusal_code == code and result.refusal_provider == "SYSPRO"
+    assert result.message == f"SYSPRO post refused: {code}"
+    assert result.retryable is False
+    assert result.not_posted is True
+    assert fake.open_sessions == set()
+
+
+def test_account_refusal_names_our_code_for_the_quoted_ledger_only():
+    lines = [
+        LineItemPayload(
+            line_number=1, total=Decimal("70.00"), gl_account="Software", gl_account_erp_id="6200"
+        ),
+        LineItemPayload(line_number=2, total=Decimal("30.00")),
+    ]
+    fake = FakeSyspro()
+    fake.post_body = "ERROR: Ledger code '6200' is on hold"
+    result = _run(
+        fake,
+        lambda: SysproAdapter(CONFIG).post_invoice(_payload(line_items=lines, gl_account="Office")),
+    )
+    assert result.refusal_code == "account_inactive"
+    assert result.refusal_params == {"accounts": ["Software"]}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "ERROR: The supplied UserID is invalid, or your session has expired",
+        "ERROR: All e.net licences are in use",
+    ],
+)
+def test_expired_session_or_full_licence_count_is_retryable(body):
+    fake = FakeSyspro()
+    fake.post_body = body
+    result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is True
+    assert result.not_posted is True and result.refusal_code is None
+
+
+def test_a_quoted_value_cannot_steer_the_classification():
+    """The invoice number / supplier / ledger SYSPRO quotes back is stripped
+    before matching: a number reading "on hold" is not an on-hold supplier."""
+    assert classify_apstin_error(["Supplier 'S1' rejected invoice 'on hold period'"]) is None
+    assert (
+        classify_apstin_error(["Invoice 'supplier on hold' already on file"])
+        == "duplicate_invoice_number"
+    )
 
 
 def test_http_error_on_post_uses_the_shared_failure_message():
@@ -360,31 +476,90 @@ def test_http_error_on_post_uses_the_shared_failure_message():
 
 
 def test_transport_error_still_logs_off_and_never_leaks_the_url():
+    """S10: nothing raises out of post_invoice. A transport failure on the post
+    itself may have landed, so it is retryable and NOT known unposted."""
     fake = FakeSyspro()
     fake.post_raises = httpx.ConnectError(f"boom at {FAKE_BASE}/Logon?OperatorPassword={PASSWORD}")
-    with pytest.raises(SysproError) as exc:
-        _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
-    assert str(exc.value) == "SYSPRO post failed: ConnectError"
-    assert exc.value.__cause__ is None and exc.value.__suppress_context__
+    result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success
+    assert result.message == "SYSPRO post failed: ConnectError"
+    assert result.retryable is True and result.not_posted is False
     assert fake.calls()[-1] == "Logoff"
     assert fake.open_sessions == set()
 
 
-def test_rejected_logon_raises_without_credentials_and_makes_no_other_call():
+def test_transport_errors_are_pii_free_and_never_chained():
+    adapter = SysproAdapter(CONFIG)
+
+    async def boom():
+        def handler(request):
+            raise httpx.ConnectError(f"boom {request.url}")
+
+        async with _RealAsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await adapter._get(
+                client, f"{FAKE_BASE}/Logon", {"OperatorPassword": PASSWORD}, "logon"
+            )
+
+    with pytest.raises(SysproError) as exc:
+        asyncio.run(boom())
+    assert str(exc.value) == "SYSPRO logon failed: ConnectError" and exc.value.step == "logon"
+    assert exc.value.__cause__ is None and exc.value.__suppress_context__
+
+
+def test_rejected_credentials_are_a_coded_reconnect_not_an_exception():
+    """S10: a wrong password is `not_connected` (an admin reconnects), refused
+    before anything could post, and the logon text is never echoed."""
     fake = FakeSyspro()
     fake.logon_body = f"ERROR: Invalid password {PASSWORD}"
-    with pytest.raises(SysproError) as exc:
-        _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
-    assert str(exc.value) == "SYSPRO logon failed: credentials rejected"
+    result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
+    assert result.refusal_code == "not_connected"
+    assert result.retryable is False and result.not_posted is True
+    assert PASSWORD not in (result.message or "")
     assert fake.calls() == ["Logon"]
 
 
-def test_logon_http_failure_raises_with_status_only():
+@pytest.mark.parametrize(
+    "body",
+    [
+        "ERROR: Maximum number of e.net licences exceeded",
+        "ERROR: Company is locked by another process",
+    ],
+)
+def test_busy_logon_is_retryable_and_not_posted(body):
+    """S10: every e.net seat in use (3 workers against a 1-seat site), or a
+    company locked for the moment, is worth another attempt."""
     fake = FakeSyspro()
-    fake.logon_status = 401
+    fake.logon_body = body
+    result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.refusal_code is None
+    assert result.retryable is True and result.not_posted is True
+    assert fake.calls() == ["Logon"]
+
+
+def test_logon_http_failure_is_the_shared_http_failure_with_status_only():
+    fake = FakeSyspro()
+    fake.logon_status = 503
+    result = _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
+    assert result.message == erp_failure_message("SYSPRO", 503)
+    assert result.retryable is True and result.not_posted is True
+    assert PASSWORD not in result.message
+
+
+def test_missing_operator_password_is_not_connected():
+    fake = FakeSyspro()
+    adapter = SysproAdapter({k: v for k, v in CONFIG.items() if k != "operator_password"})
+    result = _run(fake, lambda: adapter.post_invoice(_payload()))
+    assert result.refusal_code == "not_connected" and result.not_posted is True
+    assert fake.requests == []
+
+
+def test_logon_refusal_still_raises_out_of_the_reads():
+    """Status reads and syncs keep raising: their callers handle an exception."""
+    fake = FakeSyspro()
+    fake.logon_body = "ERROR: Invalid operator"
     with pytest.raises(SysproError) as exc:
-        _run(fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload()))
-    assert "HTTP 401" in str(exc.value) and PASSWORD not in str(exc.value)
+        _run(fake, lambda: SysproAdapter(CONFIG).get_invoice_status("0000001|INV-1"))
+    assert str(exc.value) == "SYSPRO logon failed: credentials rejected"
 
 
 def test_httpx_request_log_lines_never_carry_the_query(caplog):
@@ -467,6 +642,80 @@ def test_invoice_status_mapping(row, expected):
     assert map_invoice_status(row) is expected
 
 
+PAID_ROW = {"OrigInvValue": "100.00", "MthInvBal1": "0.00"}
+
+
+@pytest.mark.parametrize(
+    "payments, expected",
+    [
+        ([{"TrnType": "P", "TrnValue": "100.00"}], ErpInvoiceStatus.paid),
+        # An adjustment / credit applied zeroes the balance but is no payment.
+        ([{"TrnType": "A", "TrnValue": "100.00"}], ErpInvoiceStatus.settled_no_payment),
+        ([{"TrnType": "P", "TrnValue": "0"}], ErpInvoiceStatus.settled_no_payment),
+        # Split across two payments that cover the invoice: paid.
+        (
+            [{"TrnType": "P", "TrnValue": "40.00"}, {"TrnType": "P", "TrnValue": "60.00"}],
+            ErpInvoiceStatus.paid,
+        ),
+        # SYSPRO may sign a payment negative (it reduces the balance).
+        ([{"TrnType": "P", "TrnValue": "-100.00"}], ErpInvoiceStatus.paid),
+        # 40 cash + 60 credit applied: only 40 left the customer — not paid.
+        (
+            [{"TrnType": "P", "TrnValue": "40.00"}, {"TrnType": "C", "TrnValue": "60.00"}],
+            ErpInvoiceStatus.settled_no_payment,
+        ),
+        # A single 0.01 payment beside a write-off is not a payment of 100.
+        ([{"TrnType": "P", "TrnValue": "0.01"}], ErpInvoiceStatus.settled_no_payment),
+        ([], ErpInvoiceStatus.settled_no_payment),
+        (None, ErpInvoiceStatus.settled_no_payment),
+    ],
+)
+def test_zero_balance_is_paid_only_with_a_recorded_payment(payments, expected):
+    """S4 (decisions §303): SYSPRO records payments against an invoice in
+    ApInvoicePay; only a payment row makes a zero balance `paid`."""
+    assert map_invoice_status(PAID_ROW, payments) is expected
+
+
+def test_a_payment_on_a_zero_value_invoice_is_not_paid():
+    zero = {"OrigInvValue": "0.00", "MthInvBal1": "0.00"}
+    assert map_invoice_status(zero, [{"TrnType": "P", "TrnValue": "1"}]) is (
+        ErpInvoiceStatus.settled_no_payment
+    )
+
+
+def test_get_invoice_status_reads_apinvoicepay_for_a_zero_balance():
+    fake = FakeSyspro()
+    fake.query_tables["ApInvoice"] = [{"Invoice": "INV-1", **PAID_ROW}]
+    fake.query_tables["ApInvoicePay"] = [{"Invoice": "INV-1", "TrnType": "P", "TrnValue": "100"}]
+    status = _run(fake, lambda: SysproAdapter(CONFIG).get_invoice_status("0000001|INV-1"))
+    assert status is ErpInvoiceStatus.paid
+    pay_query = _xml(fake.of("/Query/Query")[1], "XmlIn")
+    assert pay_query.findtext("TableName") == "ApInvoicePay"
+    assert [
+        (e.findtext("Column"), e.findtext("Value")) for e in pay_query.findall("Where/Expression")
+    ] == [("Supplier", "0000001"), ("Invoice", "INV-1")]
+    assert fake.calls().count("Logon") == 1 and fake.open_sessions == set()
+
+
+def test_failed_payment_read_keeps_settled_no_payment():
+    fake = FakeSyspro()
+    fake.query_tables["ApInvoice"] = [{"Invoice": "INV-1", **PAID_ROW}]
+    fake.failing_tables.add("ApInvoicePay")
+    status = _run(fake, lambda: SysproAdapter(CONFIG).get_invoice_status("0000001|INV-1"))
+    assert status is ErpInvoiceStatus.settled_no_payment
+    assert fake.open_sessions == set()
+
+
+def test_an_open_balance_does_not_read_payments():
+    fake = FakeSyspro()
+    fake.query_tables["ApInvoice"] = [
+        {"Invoice": "INV-1", "OrigInvValue": "100", "MthInvBal1": "40"}
+    ]
+    status = _run(fake, lambda: SysproAdapter(CONFIG).get_invoice_status("0000001|INV-1"))
+    assert status is ErpInvoiceStatus.partially_paid
+    assert fake.calls() == ["Logon", "Query/Query", "Logoff"]
+
+
 def test_get_invoice_status_queries_by_document_key():
     fake = FakeSyspro()
     fake.query_tables["ApInvoice"] = [{"Invoice": "INV|9", "OrigInvValue": "5", "MthInvBal1": "0"}]
@@ -497,22 +746,34 @@ def test_void_is_not_automated():
 def test_list_vendors_and_gl_accounts():
     fake = FakeSyspro()
     fake.query_tables["ApSupplier"] = [
-        {"Supplier": "0000001", "SupplierName": "Acme &amp; Sons"},
+        {"Supplier": "0000001", "SupplierName": "Acme &amp; Sons", "OnHold": "N"},
+        {"Supplier": "0000003", "SupplierName": "Held", "OnHold": "Y"},
         {"Supplier": "", "SupplierName": "blank code skipped"},
     ]
     fake.query_tables["GenMaster"] = [
         {"GlCode": "6100", "Description": "Supplies", "AccountType": "E"},
         {"GlCode": "3000", "Description": "Capital", "AccountType": "C"},
         {"GlCode": "9999", "Description": "Stat", "AccountType": "S"},
+        {"GlCode": "6300", "Description": "Held", "AccountType": "E", "AccOnHldFlag": "Y"},
+        {"GlCode": "2000", "Description": "Creditors", "AccountType": "L", "ControlAccFlag": "Y"},
     ]
     adapter = SysproAdapter(CONFIG)
     vendors = _run(fake, adapter.list_vendors)
-    assert [(v.erp_vendor_id, v.name) for v in vendors] == [("0000001", "Acme & Sons")]
+    # S2: an on-hold supplier is emitted inactive, not dropped and not active.
+    assert [(v.erp_vendor_id, v.name, v.active) for v in vendors] == [
+        ("0000001", "Acme & Sons", True),
+        ("0000003", "Held", False),
+    ]
+    vendor_query = _xml(fake.of("/Query/Query")[0], "XmlIn")
+    assert "OnHold" in [c.text for c in vendor_query.findall("Columns/Column")]
     accounts = _run(fake, adapter.list_gl_accounts)
-    assert [(a.erp_account_id, a.account_type) for a in accounts] == [
-        ("6100", "expense"),
-        ("3000", "equity"),
-        ("9999", None),
+    # S3: on-hold and control accounts are not codable on an AP distribution.
+    assert [(a.erp_account_id, a.account_type, a.active) for a in accounts] == [
+        ("6100", "expense", True),
+        ("3000", "equity", True),
+        ("9999", None, True),
+        ("6300", "expense", False),
+        ("2000", "liability", False),
     ]
     assert fake.open_sessions == set()
 
@@ -523,33 +784,326 @@ def test_list_pos_sums_lines_joins_names_and_skips_line_less_pos():
         {"PurchaseOrder": "P1", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
         {"PurchaseOrder": "P2", "Supplier": "0000002", "OrderStatus": "*", "Currency": ""},
         {"PurchaseOrder": "P3", "Supplier": "0000001", "OrderStatus": "9", "Currency": "ZAR"},
+        {
+            "PurchaseOrder": "P4",
+            "Supplier": "0000001",
+            "OrderStatus": "4",
+            "CancelledFlag": "Y",
+            "Currency": "ZAR",
+        },
     ]
     fake.query_tables["PorMasterDetail"] = [
         {"PurchaseOrder": "P1", "MOrderQty": "3", "MPrice": "0.10"},
         {"PurchaseOrder": "P1", "MOrderQty": "1", "MPrice": "0.20"},
         {"PurchaseOrder": "P2", "MOrderQty": "2", "MPrice": "5.00"},
+        {"PurchaseOrder": "P4", "MOrderQty": "1", "MPrice": "1.00"},
     ]
     fake.query_tables["ApSupplier"] = [{"Supplier": "0000001", "SupplierName": "Acme"}]
     pos = _run(fake, SysproAdapter(CONFIG).list_pos)
     assert [(p.po_number, p.vendor_name, p.total, p.status, p.currency) for p in pos] == [
         ("P1", "Acme", Decimal("0.50"), "open", "ZAR"),
         ("P2", None, Decimal("10.00"), "cancelled", None),
+        ("P4", "Acme", Decimal("1.00"), "cancelled", "ZAR"),
     ]
     assert fake.calls().count("Logon") == 1 and fake.open_sessions == set()
 
 
-def test_chart_and_vendor_listings_raise_on_failure_and_still_log_off():
+def test_list_pos_links_the_vendor_by_supplier_id():
+    """S5 / #652: the PO carries PorMasterHdr.Supplier — the id list_vendors
+    reports as erp_vendor_id — so a rename on either side keeps the link, and
+    a supplier with no name row still links."""
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = [
+        {"PurchaseOrder": "P1", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "P2", "Supplier": "0000002", "OrderStatus": "4", "Currency": "ZAR"},
+    ]
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": "P1", "MOrderQty": "1", "MPrice": "1.00"},
+        {"PurchaseOrder": "P2", "MOrderQty": "1", "MPrice": "2.00"},
+    ]
+    fake.query_tables["ApSupplier"] = [{"Supplier": "0000001", "SupplierName": "Acme"}]
+    adapter = SysproAdapter(CONFIG)
+    pos = _run(fake, adapter.list_pos)
+    assert [(p.po_number, p.vendor_erp_id, p.vendor_name) for p in pos] == [
+        ("P1", "0000001", "Acme"),
+        ("P2", "0000002", None),
+    ]
+    fake.query_tables["ApSupplier"] = [{"Supplier": "0000001", "SupplierName": "Acme"}]
+    vendor_ids = {v.erp_vendor_id for v in _run(fake, adapter.list_vendors)}
+    assert pos[0].vendor_erp_id in vendor_ids
+
+
+def test_chart_vendor_and_po_listings_raise_on_failure_and_still_log_off():
     """A failed listing is not an empty one: the chart and vendor syncs read
-    absence as evidence (§284). The PO list keeps degrading."""
+    absence as evidence (§284), and a PO sync answering a failed read with
+    "0 purchase orders" would say the ERP has none."""
     fake = FakeSyspro()
     fake.query_status = 500
     adapter = SysproAdapter(CONFIG)
-    for listing in (adapter.list_vendors, adapter.list_gl_accounts):
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts, adapter.list_pos):
         with pytest.raises(ErpListingIncomplete) as exc:
             _run(fake, listing)
         assert exc.value.gap is ListingGap.fetch_failed
-    assert _run(fake, adapter.list_pos) == []
     assert fake.open_sessions == set()
+
+
+def _headers(n: int) -> list[dict]:
+    return [
+        {"PurchaseOrder": f"P{i:06d}", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"}
+        for i in range(n)
+    ]
+
+
+def test_po_headers_are_paged_past_the_first_thousand():
+    """S6: COMFND returns the first ReturnRows rows by PurchaseOrder; a walk
+    with a GT cursor reads the newest POs too, instead of never syncing them."""
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = _headers(1500)
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": h["PurchaseOrder"], "MOrderQty": "1", "MPrice": "1"}
+        for h in fake.query_tables["PorMasterHdr"]
+    ]
+    pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert len(pos) == 1500 and pos[-1].po_number == "P001499"
+    header_queries = [
+        _xml(r, "XmlIn")
+        for r in fake.of("/Query/Query")
+        if _xml(r, "XmlIn").findtext("TableName") == "PorMasterHdr"
+    ]
+    assert len(header_queries) == 2
+    cursor = header_queries[1].find("Where/Expression")
+    assert (cursor.findtext("Column"), cursor.findtext("Condition"), cursor.findtext("Value")) == (
+        "PurchaseOrder",
+        "GT",
+        "P000999",
+    )
+    assert fake.open_sessions == set()
+
+
+def test_po_headers_past_the_sync_bound_raise_truncated():
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = _headers(SYNC_LISTING_MAX_ROWS + 1)
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert exc.value.gap is ListingGap.truncated
+    assert fake.open_sessions == set()
+
+
+def test_a_host_ignoring_the_cursor_fails_instead_of_looping():
+    fake = FakeSyspro()
+    fake.ignore_gt = True
+    fake.query_tables["PorMasterHdr"] = _headers(1000)
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert exc.value.gap is ListingGap.fetch_failed
+    assert fake.open_sessions == set()
+
+
+def test_a_po_cut_by_the_line_page_is_reread_whole(monkeypatch):
+    """S7: a full page of lines may end mid-PO. That PO's lines are dropped
+    and re-read from the next page, so its total is never a partial sum."""
+    monkeypatch.setattr("app.services.erp_adapters.syspro._PO_DETAIL_PAGE", 3)
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = _headers(3)
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": "P000000", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "P000000", "MOrderQty": "1", "MPrice": "2"},
+        {"PurchaseOrder": "P000001", "MOrderQty": "1", "MPrice": "10"},
+        {"PurchaseOrder": "P000001", "MOrderQty": "1", "MPrice": "20"},
+        {"PurchaseOrder": "P000002", "MOrderQty": "1", "MPrice": "100"},
+    ]
+    pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert [(p.po_number, p.total) for p in pos] == [
+        ("P000000", Decimal("3")),
+        ("P000001", Decimal("30")),
+        ("P000002", Decimal("100")),
+    ]
+
+
+def test_a_po_with_more_lines_than_a_page_is_skipped_not_partial(monkeypatch, caplog):
+    monkeypatch.setattr("app.services.erp_adapters.syspro._PO_DETAIL_PAGE", 2)
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = _headers(2)
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": "P000000", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "P000000", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "P000000", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "P000001", "MOrderQty": "1", "MPrice": "5"},
+    ]
+    with caplog.at_level(logging.WARNING):
+        pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert [(p.po_number, p.total) for p in pos] == [("P000001", Decimal("5"))]
+    assert "1 whose lines exceed one page" in caplog.text
+
+
+# S8: a PO's total in its own currency, or no PO at all.
+@pytest.mark.parametrize(
+    "lines, foreign, expected",
+    [
+        # A foreign PO: MForeignPrice is the price in the header currency.
+        (
+            [{"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"}],
+            True,
+            Decimal("20.00"),
+        ),
+        # A local PO: no foreign price, or the same one.
+        ([{"MOrderQty": "2", "MPrice": "5.00", "MForeignPrice": "0"}], False, Decimal("10.00")),
+        ([{"MOrderQty": "2", "MPrice": "5.00", "MForeignPrice": "5.00"}], False, Decimal("10.00")),
+        # A local PO whose line carries a different foreign price contradicts
+        # its header: not priced, rather than picking a column.
+        ([{"MOrderQty": "1", "MPrice": "18", "MForeignPrice": "1"}], False, None),
+        # A free line on a foreign PO (no price in either column) adds nothing.
+        (
+            [
+                {"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+                {"MOrderQty": "1", "MPrice": "0", "MForeignPrice": ""},
+            ],
+            True,
+            Decimal("20.00"),
+        ),
+        # A misc charge carries its value with no qty x price; a comment none.
+        (
+            [
+                {"LineType": "1", "MOrderQty": "2", "MPrice": "5.00"},
+                {"LineType": "5", "MOrderQty": "0", "MPrice": "0", "NMscChargeValue": "7.50"},
+                {"LineType": "6", "MOrderQty": "", "MPrice": ""},
+            ],
+            False,
+            Decimal("17.50"),
+        ),
+        # A charge on a foreign PO: which currency it is in is not known.
+        (
+            [
+                {"LineType": "1", "MOrderQty": "1", "MPrice": "18", "MForeignPrice": "1"},
+                {"LineType": "5", "NMscChargeValue": "7.50"},
+            ],
+            True,
+            None,
+        ),
+        # Discounts and a price unit of measure: not priced until confirmed.
+        ([{"MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5.00"}], False, None),
+        ([{"MOrderQty": "1", "MPrice": "10", "MDiscValue": "1.00"}], False, None),
+        (
+            [{"MOrderQty": "12", "MPrice": "10", "MOrderUom": "EA", "MPriceUom": "BOX"}],
+            False,
+            None,
+        ),
+        (
+            [{"MOrderQty": "12", "MPrice": "10", "MOrderUom": "EA", "MPriceUom": "EA"}],
+            False,
+            Decimal("120"),
+        ),
+        # A line with no price is not read as zero.
+        ([{"MOrderQty": "1", "MPrice": ""}], False, None),
+    ],
+)
+def test_po_total(lines, foreign, expected):
+    assert po_total(lines, foreign=foreign) == expected
+
+
+def test_a_foreign_po_never_sums_local_and_foreign_prices():
+    """A EUR PO in a ZAR company: line A is 2 x MForeignPrice 10.00 (MPrice
+    180.00), line B 1 x MPrice 50.00 with no foreign price. B's 50.00 is ZAR,
+    so there is no EUR total to state — it used to come back as 70.00 EUR."""
+    lines = [
+        {"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+        {"MOrderQty": "1", "MPrice": "50.00", "MForeignPrice": "0"},
+    ]
+    assert po_total(lines, foreign=True) is None
+
+
+def test_a_foreign_po_with_no_foreign_price_on_any_line_is_not_priced():
+    """Every line priced only in MPrice: the old line-driven detection read
+    this as a local PO and labelled the ZAR sum with the header's EUR."""
+    lines = [
+        {"MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "0"},
+        {"MOrderQty": "1", "MPrice": "50.00"},
+    ]
+    assert po_total(lines, foreign=True) is None
+
+
+def _eur_po_fake() -> FakeSyspro:
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = [
+        {"PurchaseOrder": "P1", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
+        {"PurchaseOrder": "P2", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
+        {"PurchaseOrder": "P3", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "P4", "Supplier": "0000001", "OrderStatus": "4", "Currency": ""},
+    ]
+    fake.query_tables["PorMasterDetail"] = [
+        # The mixed EUR PO from the review: never 70.00 EUR.
+        {"PurchaseOrder": "P1", "MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+        {"PurchaseOrder": "P1", "MOrderQty": "1", "MPrice": "50.00", "MForeignPrice": "0"},
+        {"PurchaseOrder": "P2", "MOrderQty": "2", "MPrice": "180.00", "MForeignPrice": "10.00"},
+        {"PurchaseOrder": "P3", "MOrderQty": "3", "MPrice": "5.00"},
+        {"PurchaseOrder": "P4", "MOrderQty": "1", "MPrice": "7.00"},
+    ]
+    return fake
+
+
+def test_list_pos_decides_foreign_from_the_header_against_the_local_currency():
+    fake = _eur_po_fake()
+    pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert [(p.po_number, p.total, p.currency) for p in pos] == [
+        ("P2", Decimal("20.00"), "EUR"),
+        ("P3", Decimal("15.00"), "ZAR"),
+        ("P4", Decimal("7.00"), None),
+    ]
+    # The local currency is read in the listing's own session.
+    assert fake.calls().count("Logon") == 1 and "GetLogonProfile" in fake.calls()
+    assert fake.of("/GetLogonProfile")[0].url.params["UserId"] == SESSION
+    assert fake.open_sessions == set()
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        "<LogonProfile><CompanyName>X</CompanyName></LogonProfile>",
+        "<LogonProfile><LocalCurrencyCode></LocalCurrencyCode></LogonProfile>",
+    ],
+)
+def test_a_profile_stating_no_local_currency_skips_every_labelled_po(profile):
+    """No local currency, no way to tell which price column a labelled PO's
+    currency is: those POs are skipped, never guessed. An unlabelled PO is
+    priced in MPrice and synced with no currency, as before."""
+    fake = _eur_po_fake()
+    fake.profile_body = profile
+    pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert [(p.po_number, p.total, p.currency) for p in pos] == [("P4", Decimal("7.00"), None)]
+    assert fake.open_sessions == set()
+
+
+@pytest.mark.parametrize("profile", ["ERROR: function not available", "not xml at all"])
+def test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping(profile):
+    """A failed READ says nothing about the company's currency. Skipping would
+    report every labelled PO unpriceable, and the sync would mark each one and
+    hold every invoice citing it over a transient outage (§323): the listing
+    fails and the sync changes nothing."""
+    fake = _eur_po_fake()
+    fake.profile_body = profile
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert exc.value.gap is ListingGap.fetch_failed
+    assert fake.open_sessions == set()
+
+
+def test_list_pos_skips_a_po_it_cannot_price():
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = _headers(2)
+    fake.query_tables["PorMasterHdr"][1]["Currency"] = "USD"
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": "P000000", "MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5"},
+        {"PurchaseOrder": "P000001", "MOrderQty": "1", "MPrice": "18", "MForeignPrice": "1"},
+    ]
+    pos = _run(fake, SysproAdapter(CONFIG).list_pos)
+    assert [(p.po_number, p.total) for p in pos] == [("P000001", Decimal("1"))]
+    detail_query = next(
+        _xml(r, "XmlIn")
+        for r in fake.of("/Query/Query")
+        if _xml(r, "XmlIn").findtext("TableName") == "PorMasterDetail"
+    )
+    columns = {c.text for c in detail_query.findall("Columns/Column")}
+    assert {"LineType", "MForeignPrice", "NMscChargeValue", "MDiscPct1", "MPriceUom"} <= columns
 
 
 def test_a_table_past_the_sync_bound_raises_truncated():
@@ -606,3 +1160,41 @@ def test_xml_illegal_characters_are_dropped_and_nothing_else():
 
     dirty = "a\x00b\x08c\x09d\x0ae\x0bf\x0dg\x1fh\ufffei\uffffj\x7fk\u00e9"
     assert _clean(dirty) == "abc\x09d\x0aef\x0dghij\x7fk\u00e9"
+
+
+def test_list_pos_report_names_every_po_it_skips_and_why(monkeypatch):
+    """§323: the sync can only stop trusting an earlier total if the adapter
+    says which POs it left out. Each skip carries its coded reason."""
+    from app.services.erp_adapters.base import PoSkipReason
+
+    monkeypatch.setattr("app.services.erp_adapters.syspro._PO_DETAIL_PAGE", 2)
+    fake = FakeSyspro()
+    fake.query_tables["PorMasterHdr"] = [
+        {"PurchaseOrder": "A", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "B", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "C", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
+        {"PurchaseOrder": "D", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+        {"PurchaseOrder": "E", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+    ]
+    fake.query_tables["PorMasterDetail"] = [
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "A", "MOrderQty": "1", "MPrice": "1"},
+        {"PurchaseOrder": "C", "MOrderQty": "1", "MPrice": "50", "MForeignPrice": "0"},
+        {"PurchaseOrder": "D", "MOrderQty": "1", "MPrice": "10", "MDiscPct1": "5"},
+        {"PurchaseOrder": "E", "MOrderQty": "2", "MPrice": "3"},
+    ]
+    report = _run(fake, SysproAdapter(CONFIG).list_pos_report)
+    assert [(p.po_number, p.total) for p in report.pos] == [("E", Decimal("6"))]
+    assert [(s.po_number, s.reason) for s in report.skipped] == [
+        ("A", PoSkipReason.lines_unread),
+        ("B", PoSkipReason.no_lines),
+        ("C", PoSkipReason.unpriceable),
+        ("D", PoSkipReason.unpriceable),
+    ]
+
+    fake.profile_body = "<LogonProfile><CompanyName>X</CompanyName></LogonProfile>"
+    report = _run(fake, SysproAdapter(CONFIG).list_pos_report)
+    assert ("C", PoSkipReason.local_currency_unknown) in [
+        (s.po_number, s.reason) for s in report.skipped
+    ]

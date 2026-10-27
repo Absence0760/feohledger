@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -38,6 +40,12 @@ class EmailMessage:
     so a sender opts in with fixed copy, and an email carrying a code, token,
     link or credential sets one that names none of them. Unset, no preheader is
     sent and the client previews the body as it always has.
+
+    ``subject`` is folded onto one line on construction (:func:`header_line`):
+    senders interpolate names nobody validated for control characters (an
+    organisation name, a vendor name), and a line break there is either a header
+    injection or — the SMTP adapter's ``email`` policy refuses it — an email that
+    never sends.
     """
 
     to: str
@@ -48,6 +56,25 @@ class EmailMessage:
     locale: str | None = None
     links: tuple[str, ...] = ()
     preheader: str | None = None
+
+    def __post_init__(self) -> None:
+        self.subject = header_line(self.subject)
+
+
+_BREAKING_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
+_SPACES = re.compile(r" {2,}")
+
+
+def header_line(value: str) -> str:
+    """``value`` with every control character and line/paragraph separator
+    (CR, LF, NEL, U+2028, …) replaced by a space, runs collapsed, ends trimmed.
+
+    The one rule for text bound for a single-line header. Pure.
+    """
+    folded = "".join(
+        " " if unicodedata.category(ch) in _BREAKING_CATEGORIES else ch for ch in value
+    )
+    return _SPACES.sub(" ", folded).strip()
 
 
 class EmailAdapter:

@@ -1,5 +1,6 @@
 """Merge.dev unified API adapter — one integration for all ERPs."""
 
+import logging
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -25,6 +26,8 @@ from app.services.erp_adapters.base import (
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
+
+logger = logging.getLogger(__name__)
 
 
 def _to_decimal(v) -> Decimal | None:
@@ -59,14 +62,20 @@ def _to_date(v) -> date | None:
             return None
 
 
-# Merge.dev's PO status enum → our internal vocabulary. Anything not
-# listed maps to "open" (the safest default — it shows up in the
-# matching pool but doesn't mark an unfamiliar PO as closed/cancelled
-# and exclude it).
+# Merge.dev's PO status enum → our internal vocabulary. Merge publishes
+# DRAFT / SUBMITTED / AUTHORIZED / BILLED / DELETED (an open enum: an
+# integration may pass another value through); BILLED and DELETED map as
+# Xero's same statuses do. Anything not listed maps to "open" (the safest
+# default — it shows up in the matching pool but doesn't mark an unfamiliar
+# PO as closed/cancelled and exclude it).
 _MERGE_PO_STATUS_MAP = {
     "OPEN": "open",
     "PENDING": "open",
     "DRAFT": "open",
+    "SUBMITTED": "open",
+    "AUTHORIZED": "open",
+    "BILLED": "closed",
+    "DELETED": "cancelled",
     "CLOSED": "closed",
     "FULFILLED": "closed",
     "CANCELLED": "cancelled",
@@ -113,6 +122,8 @@ class MergeDevAdapter(ErpAdapter):
     """
 
     erp_type = "merge_dev"
+    # Every PO with no number used to be filed under this one row (§328).
+    retired_po_numbers = ("UNKNOWN",)
 
     def _headers(self, *, idempotency_key: str | None = None) -> dict[str, str]:
         headers = {
@@ -237,6 +248,7 @@ class MergeDevAdapter(ErpAdapter):
         list comes back, capped at 1000 to bound memory.
         """
         items: list[PoPayload] = []
+        unnumbered = 0
         cursor: str | None = None
         params = {"page_size": "100", "expand": "vendor,line_items"}
 
@@ -258,12 +270,19 @@ class MergeDevAdapter(ErpAdapter):
 
                 body = resp.json() if resp.content else {}
                 for raw in body.get("results", []) or []:
-                    items.append(_merge_po_to_payload(raw))
+                    payload = _merge_po_to_payload(raw)
+                    if payload is None:
+                        unnumbered += 1
+                    else:
+                        items.append(payload)
 
                 cursor = body.get("next")
                 if not cursor:
                     break
 
+        if unnumbered:
+            # A count only: a PO record can carry vendor names and amounts.
+            logger.warning("Merge.dev PO sync skipped %d PO(s) with no number or id", unnumbered)
         return items
 
     async def _list_complete(self, path: str, params: dict[str, str]) -> list[dict]:
@@ -296,19 +315,50 @@ class MergeDevAdapter(ErpAdapter):
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """The whole chart via Merge's unified ``/accounts``, or
-        :class:`ErpListingIncomplete` — never the pages read before a failure."""
+        :class:`ErpListingIncomplete` — never the pages read before a failure.
+
+        A Merge Account's ``parent_account`` is the parent's Merge id (a uuid),
+        not a code (https://docs.merge.dev/openapi/accounting.json, ``Account``).
+        It is carried as ``parent_erp_account_id`` and resolved to the parent's
+        code within this pull; a parent outside the pull has no code here, so
+        ``parent_code`` stays None rather than holding the uuid. A null
+        ``parent_account`` may mean "top-level" or "not reported" depending on
+        the ERP behind Merge, so ``reports_parent`` stays False and the sync
+        never clears a parent on Merge's silence.
+        """
         items: list[GLAccountPayload] = []
         for raw in await self._list_complete("accounts", {"page_size": "100"}):
             payload = _merge_account_to_payload(raw)
             if payload is not None:
                 items.append(payload)
+        code_by_id = {p.erp_account_id: p.code for p in items}
+        for p in items:
+            if p.parent_erp_account_id:
+                p.parent_code = code_by_id.get(p.parent_erp_account_id)
         return items
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Every vendor via Merge's unified ``/vendors``, or
-        :class:`ErpListingIncomplete` — never the pages read before a failure."""
-        records = await self._list_complete("vendors", {"page_size": "100", "expand": "addresses"})
-        return [v for v in map(_merge_vendor_to_payload, records) if v is not None]
+        """Every supplier via Merge's unified ``/contacts?is_supplier=true``, or
+        :class:`ErpListingIncomplete` — never the pages read before a failure.
+
+        Merge's Accounting API has no ``/vendors`` path and no Vendor model: a
+        supplier is a ``Contact`` with ``is_supplier`` true (Merge Accounting
+        OpenAPI, https://docs.merge.dev/openapi/accounting.json, ``GET
+        /accounting/v1/contacts``; https://docs.merge.dev/accounting/contacts/).
+        A Contact's ``id`` is what a PurchaseOrder's ``vendor`` and an
+        Invoice's ``contact`` carry, so it is the ``erp_vendor_id`` the PO sync
+        links by and the bill push posts. ``addresses`` and ``phone_numbers``
+        are expanded so they arrive as objects, not bare ids.
+        """
+        records = await self._list_complete(
+            "contacts",
+            {
+                "page_size": "100",
+                "is_supplier": "true",
+                "expand": "addresses,phone_numbers",
+            },
+        )
+        return [v for v in map(_merge_contact_to_payload, records) if v is not None]
 
     async def test_connection(self) -> bool:
         try:
@@ -322,19 +372,46 @@ class MergeDevAdapter(ErpAdapter):
             return False
 
 
-def _merge_po_to_payload(raw: dict) -> PoPayload:
+def _merge_po_to_payload(raw: dict) -> PoPayload | None:
     """Map a Merge.dev PO record to our normalized PoPayload.
 
-    Merge's `vendor` field is either an expanded object (when
-    `expand=vendor` was passed) or a bare ID string. We only get a
-    name back in the expanded case — fall back to None otherwise so
-    the API endpoint can still create the PO row, just without a
-    vendor link.
+    Merge's `vendor` is the supplier's Merge object id: an expanded object
+    (when `expand=vendor` was passed) carrying it as `id`, or the bare id
+    string. That id is ``vendor_erp_id`` — the Merge ``id`` ``list_vendors``
+    reports as ``erp_vendor_id`` — so the sync links the PO by id, not by name,
+    which a rename breaks and two suppliers can share. The name is read only
+    from the expanded object.
+
+    A line's `account` is a Merge Account id (a UUID), not an account code, so
+    it is not ``gl_account``: stored as one it would be a code no chart row
+    has. Nothing persists or reads a PO line's GL account, so lines carry none
+    rather than costing the pull a chart read (the QuickBooks PO sync's rule).
+
+    A record with neither a number nor a Merge ``id`` maps to None and is
+    skipped. The sync upserts by ``po_number``, so a shared placeholder (this
+    used to be ``"UNKNOWN"``) would file every such PO into ONE row, each
+    overwriting the last one's vendor, total and lines — a PO nobody issued
+    for an amount nobody approved, matched against real invoices.
     """
+    po_number = (
+        # Merge's field is `purchase_order_number`; `number` and
+        # `transaction_number` are kept for records shaped the older way.
+        raw.get("purchase_order_number")
+        or raw.get("number")
+        or raw.get("transaction_number")
+        or raw.get("id")
+    )
+    if not po_number:
+        return None
+
     vendor = raw.get("vendor")
     vendor_name: str | None = None
+    vendor_erp_id: str | None = None
     if isinstance(vendor, dict):
         vendor_name = vendor.get("name") or vendor.get("contact_name")
+        vendor_erp_id = vendor.get("id") or None
+    elif isinstance(vendor, str):
+        vendor_erp_id = vendor or None
 
     raw_status = (raw.get("status") or "").upper()
     status = _MERGE_PO_STATUS_MAP.get(raw_status, "open")
@@ -349,7 +426,6 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
                 quantity=_to_decimal(li.get("quantity")),
                 unit_price=_to_decimal(li.get("unit_price")),
                 total=_to_decimal(li.get("total_line_amount")),
-                gl_account=(li.get("account") if isinstance(li.get("account"), str) else None),
             )
         )
 
@@ -369,14 +445,21 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
     # it and stores NULL for an absent or malformed code — never a default.
     raw_currency = raw.get("currency")
 
+    # The key a build before `purchase_order_number` stored this PO under
+    # (`number`, else `transaction_number`, else the record id), so the sync can
+    # re-key that row rather than create a second one beside it (§328).
+    legacy = raw.get("number") or raw.get("transaction_number") or raw.get("id")
+
     return PoPayload(
-        po_number=raw.get("number") or raw.get("transaction_number") or raw.get("id") or "UNKNOWN",
+        po_number=str(po_number),
         vendor_name=vendor_name,
+        vendor_erp_id=str(vendor_erp_id) if vendor_erp_id else None,
         total=total,
         status=status,
         expected_delivery_date=expected_delivery_date,
         line_items=line_items,
         currency=raw_currency if isinstance(raw_currency, str) else None,
+        legacy_po_numbers=(str(legacy),) if legacy and str(legacy) != str(po_number) else (),
     )
 
 
@@ -393,6 +476,11 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
     and its ``erp_account_id`` would otherwise have been its code.
     A record with neither a number nor a name is dropped too: nobody could
     pick it.
+
+    An ``INACTIVE`` account, or one Merge reports deleted in the ERP
+    (``remote_was_deleted``), is emitted ``active=False``: its id is still the
+    ERP's, so a row linked to it is not dead, but no bill line may post to it.
+    ``parent_code`` is resolved by ``list_gl_accounts`` within the pull.
     """
     merge_id = raw.get("id")
     number = raw.get("account_number") or raw.get("number")
@@ -409,31 +497,44 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
         name=str(name),
         account_type=account_type,
         erp_account_id=str(merge_id),
-        parent_code=(
+        parent_erp_account_id=(
             raw.get("parent_account") if isinstance(raw.get("parent_account"), str) else None
-        ),
+        )
+        or None,
+        active=(raw.get("status") or "").upper() != "INACTIVE"
+        and raw.get("remote_was_deleted") is not True,
     )
 
 
-def _merge_vendor_to_payload(raw: dict) -> VendorPayload | None:
-    """Map a Merge.dev unified Vendor record to our normalized VendorPayload,
-    or None for a record with no Merge ``id``.
+def _merge_contact_to_payload(raw: dict) -> VendorPayload | None:
+    """Map a Merge.dev supplier ``Contact`` to our normalized VendorPayload,
+    or None for a record with no Merge ``id`` or one Merge says is not a
+    supplier.
 
     ``erp_vendor_id`` is the Merge ``id`` and nothing else: it is what
-    ``post_invoice`` posts as the bill's ``contact``. ``remote_id`` is the
-    underlying ERP's own id (a different kind of key Merge would refuse as a
-    contact), and a name is no key at all — two same-named vendors would each
-    relink one row past the sync's ambiguous-name guard (docs/decisions.md
-    §284). A record with no id is skipped, as NetSuite's mapping does.
+    ``post_invoice`` posts as the bill's ``contact`` and what a PO's ``vendor``
+    names. ``remote_id`` is the underlying ERP's own id (a different kind of
+    key Merge would refuse as a contact), and a name is no key at all — two
+    same-named vendors would each relink one row past the sync's
+    ambiguous-name guard (docs/decisions.md §284). A record with no id is
+    skipped, as NetSuite's mapping does.
 
-    Follows Merge's Accounting API Vendor model: `name`, `email_address`,
-    `phone_number`, an `addresses` list (first entry used, if any), and a
-    `payment_term` reference (object with a `name` like "Net 30", or a bare
-    string on some ERPs). Anything absent maps to None — `sync_vendors_from_erp`
-    never nulls out an existing local value for a missing field.
+    Follows Merge's Accounting ``Contact`` model: ``name``, ``email_address``,
+    ``tax_number``, ``phone_numbers[]`` (``number``), ``addresses[]``
+    (``street_1`` / ``street_2`` / ``city`` / ``state`` / ``zip_code`` /
+    ``country``; first entry used), and ``status`` ``ACTIVE`` / ``ARCHIVED``.
+    A Contact carries **no payment term**, so ``payment_terms`` is always None
+    — never a default — and ``sync_vendors_from_erp`` keeps whatever terms the
+    local vendor already has. An ``ARCHIVED`` contact, or one Merge reports as
+    deleted in the ERP (``remote_was_deleted``), is emitted ``active=False``:
+    the ERP will not take a bill against it.
     """
     vendor_id = raw.get("id")
     if not vendor_id:
+        return None
+    # The listing asks for suppliers only; a record that says otherwise is a
+    # customer and never a payee.
+    if raw.get("is_supplier") is False:
         return None
     name = raw.get("name") or str(vendor_id)
 
@@ -442,28 +543,33 @@ def _merge_vendor_to_payload(raw: dict) -> VendorPayload | None:
     if isinstance(addresses, list) and addresses and isinstance(addresses[0], dict):
         first = addresses[0]
         parts = [
-            first.get("line1"),
-            first.get("line2"),
+            first.get("street_1"),
+            first.get("street_2"),
             first.get("city"),
-            first.get("state"),
-            first.get("zip_code") or first.get("postal_code"),
+            first.get("state") if isinstance(first.get("state"), str) else None,
+            first.get("zip_code"),
             first.get("country"),
         ]
         address = ", ".join(p for p in parts if p) or None
 
-    payment_terms: str | None = None
-    pt = raw.get("payment_term")
-    if isinstance(pt, dict):
-        payment_terms = pt.get("name")
-    elif isinstance(pt, str):
-        payment_terms = pt
+    phone: str | None = None
+    phones = raw.get("phone_numbers")
+    if isinstance(phones, list):
+        phone = next(
+            (p["number"] for p in phones if isinstance(p, dict) and p.get("number")),
+            None,
+        )
+
+    status = (raw.get("status") or "").upper()
+    active = status != "ARCHIVED" and raw.get("remote_was_deleted") is not True
 
     return VendorPayload(
         erp_vendor_id=str(vendor_id),
         name=name,
-        email=raw.get("email_address") or raw.get("email"),
-        phone=raw.get("phone_number") or raw.get("phone"),
+        email=raw.get("email_address") or None,
+        phone=phone,
         address=address,
-        tax_id=raw.get("tax_number") or raw.get("tax_id"),
-        payment_terms=payment_terms,
+        tax_id=raw.get("tax_number") or None,
+        payment_terms=None,
+        active=active,
     )

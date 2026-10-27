@@ -13429,6 +13429,21 @@ test found, which is tracked in `docs/followups.md`) starts from honest answers.
 No caller under `app/` reads `get_invoice_status` today, so nothing changes at
 runtime.
 
+*Update 2026-10-26 (issue #650 S4):* the SYSPRO row was wrong about SYSPRO —
+it does record payments against an invoice, in `ApInvoicePay`. SYSPRO now
+returns `paid` when the balance is zero, the invoice is non-zero, and an
+`ApInvoicePay` row by (`Supplier`, `Invoice`) is a payment (`TrnType` `P`,
+non-zero `TrnValue`); otherwise `settled_no_payment`, as before. The payment
+code is unconfirmed until a sandbox shows it, and an unrecognised code reads as
+no payment, so the failure mode stays `settled_no_payment`.
+
+*Update 2026-10-26 (PR #670 money review):* one payment row was not enough. It
+proves only that some money left, so an invoice settled 40 by cheque and 60 by
+a credit note, or closed by a 0.01 payment and a write-off, read `paid` for the
+whole 100. SYSPRO now returns `paid` only when the absolute sum of the payment
+rows' `TrnValue` equals `abs(OrigInvValue)`; any shortfall is
+`settled_no_payment`. Guard: `test_zero_balance_is_paid_only_with_a_recorded_payment`.
+
 Guards: `tests/test_erp_{quickbooks_online,xero,sage_accounting_za,syspro,sage_intacct,blackbaud}_adapter.py`.
 
 ## 304. Approval sends to the ERP when the workflow says so, and a refusal leaves the invoice approved (2026-10-20)
@@ -14992,3 +15007,620 @@ deleted or part-paid — is not recorded when every blocker is cleared),
 `test_erp_paid_recorded_outside.py`, `test_erp_webhook_transitions.py`,
 `frontend/src/lib/types/erpReport.test.ts`,
 `frontend/tests-e2e/payments/erp-reported-payment.spec.ts`.
+
+## 320. NetSuite signs in with OAuth 2.0 client credentials, and a saved block without a method stays TBA (2026-10-26)
+
+**Context.** Oracle closes Token-Based Authentication to new REST integrations
+in NetSuite 2027.1 ("Use OAuth 2.0"). The adapter only spoke TBA, so a customer
+onboarding on 2027.1 could not create the integration record our setup asked
+for (issue #653).
+
+**Decision.** `settings.erp.auth_method` picks `oauth2_m2m` (the client-
+credentials grant: a JWT signed with the private key of a certificate mapped to
+the integration, exchanged for a 60-minute bearer) or `tba`. The private key is
+an `erp` secret sealed in `provider_credentials`, write-only like the others;
+the client id and certificate id are configuration.
+
+- **Absent means `tba`, in the adapter and in the form.** Every NetSuite block
+  saved before the choice existed is TBA. Making the key mandatory would have
+  needed a control-plane data migration for a value we already know; reading
+  absent as OAuth 2.0 would break every existing tenant. The form starts a NEW
+  connection on OAuth 2.0 (first option) but shows a saved block without the
+  key as TBA (`stored_default`), because showing the first option there would
+  switch a working tenant on its next save. Any other value is refused, never
+  guessed.
+- **Each method's fields apply only under it** (`show_when`), so the form never
+  requires a TBA token secret of an OAuth 2.0 connection or the reverse. That
+  is a generic catalogue attribute rather than a NetSuite branch in the panel.
+- **The bearer is cached in process, keyed by a hash of the credentials**, and
+  a 401 re-mints once. The grant has no refresh token, so the only alternative
+  is a token request per push (three calls each) against NetSuite's
+  concurrency limits; persisting the token would add a sealed secret with no
+  owner. Hashing the private key into the key means a rotated certificate can
+  never reuse the old one's token.
+- **The algorithm follows the key**: PS256 for RSA 3072/4096, ES256/384/512 by
+  curve — Oracle's certificate conditions, refused up front otherwise rather
+  than after a round trip NetSuite would refuse anyway. NetSuite does not take
+  RS256.
+- **A refused token request is returned as the failed call.** Every caller
+  already treats a non-200 as failure, so a push fails non-retryable on a 400
+  (`invalid_client`: no certificate mapped) without reaching the record API, and
+  the OAuth `error` code is logged — never the assertion or a token. A 200 with
+  no token raises instead, since as a response it would read as success.
+- **fake-erp verifies the assertion cryptographically**
+  (`tools/fake-erp/netsuite_oauth2.py`), unlike its TBA shape check: a header
+  shape check would have proved nothing about whether NetSuite accepts what we
+  sign. Certificates are mapped through a test hook with the public key only,
+  and survive `/__reset` so a parallel worker cannot unmap a running spec.
+
+**Not done: live verification.** Built from Oracle's documentation and proven
+against the fake's verifier; a real account is the remaining proof
+(`docs/followups.md` (a)).
+
+Tests: `backend/tests/test_erp_netsuite_auth.py`, `test_erp_catalog.py`,
+`frontend/src/lib/types/erpConnection.test.ts`,
+`frontend/tests-e2e/erp/netsuite.spec.ts`. Reference:
+`backend/docs/erp-integration.md` § NetSuite sign-in.
+
+## 321. A sub-processor change is one change-log entry; the notice is emailed from it (issue #427, 2026-10-26)
+
+**What happened.** `/legal/dpa` § 8 and `/legal/sub-processors` § 9 promise
+every customer at least 30 days' notice before a new sub-processor processes
+their data. Nothing backed it: § 10 was a hand-typed `<tr>`, the DPA defined the
+notice as "this page is updated — checking it is how you receive it", and the
+30 days were prose in three places and an assertion in none. An Art. 28(2)
+general authorisation resting on "check this page" is weak, and a register row
+added without anyone told was one forgotten step away.
+
+**The rule.** The change log is data — `app/services/subprocessor_changelog.py`
+— and both halves derive from one entry, so adding the row and giving the notice
+are the same action:
+
+- `scripts/gen_subprocessor_changelog.py` (`pnpm gen:subprocessor-changelog`,
+  `check:` in CI's Backend lint job) writes the module § 10 renders.
+- `services/subprocessor_notices.py` (sweep `subprocessor-notices`) emails each
+  `notice=True` entry to every active system-`admin` of every organisation that
+  existed on its publication date.
+
+The 30 days are enforced, not described: a `notice=True` entry must state
+`effective_on` at least `NOTICE_PERIOD_DAYS` after `published_on`, or carry an
+`urgent_reason` (the DPA's security/availability carve-out). `validate` refuses
+anything else and generation refuses to write past it, so the page cannot
+publish a short notice that does not say why. The sent notice is measured too:
+each ledger row stores the entry's effective date and `late` — sent with under
+30 days to run, which an urgent entry or a sweep left off would cause — and the
+tick reports `late_notices` on `/api/health/sweeps`.
+
+**Idempotent and on the record, with no lock held across I/O.** A
+control-plane `subprocessor_notices` row, UNIQUE (entry, organisation), moves
+through three short transactions: the **claim** is inserted `ON CONFLICT DO
+NOTHING` and committed before any email goes out, so a second replica or a
+re-run sends nothing; **`sent_at`**, the counts, the recipient user ids and
+`late` are committed once at least one admin's email reached the provider (if
+none did, the claim is deleted and the next tick retries); then the tenant's
+`privacy.subprocessor_notice_sent` audit row is written and **`audited_at`**
+stamped. A failed audit write is a tick failure and is retried alone every tick
+— it never re-sends the notice. (The first cut held the claim open across the
+sends and the tenant write, so a tenant that refused the audit row rolled the
+claim back and re-mailed every admin hourly; review caught it before merge.) A
+claim with no `sent_at` older than `CLAIM_TIMEOUT` (an hour) is a run that died
+mid-send and is re-taken: that is the one at-least-once path, and a duplicate
+notice is recoverable where a silent miss is not. The ledger has no foreign key
+and is exempt from tenant deletion: it is evidence a contractual notice was
+given, and should outlive the customer it was given to.
+
+**No retroactive notices.** `NOTICES_SINCE` (2026-10-26) is the day this
+shipped; `validate` refuses a `notice=True` entry published before it, which
+would otherwise be mailed to every organisation on the first tick for a change
+that already happened without notice. A late notice (an urgent entry, or a
+sweep that was off) says "Took effect" rather than claim a future date.
+
+**Why each choice.**
+
+- **Administrators, not a DPO field.** The platform holds no privacy contact
+  for an organisation; inventing one meant an endpoint, a settings field and a
+  contractual decision (instead of the admins, or as well?) that is counsel's,
+  not code's. The active admins are the contact the platform does hold, the
+  DPA now says exactly that, and it keeps — rather than drops — the existing
+  offer to copy the notice by hand to another address requested at `privacy@`.
+  The field is the (c) follow-up.
+- **Not a notification event.** `notify_event` is preference-gated; a user who
+  muted email would have opted their organisation out of a contractual notice.
+  The sweep sends through the email adapter directly, with no in-app row.
+- **English, unbranded.** The DPA is English-only by design (§174) and the
+  notice is given under it; a white-label child tenant is still notified by the
+  processor, which is the platform.
+- **Organisations created after publication are not told.** They signed up
+  against a register that already listed the change.
+- **Append-only, stable ids.** The ledger is keyed by entry id: renaming one
+  re-notifies everyone, deleting one leaves a sent notice the page no longer
+  shows. The id must start with its publication date; `validate` checks both
+  that and order.
+- **The sweep is off by default and required in production.** Every sweep that
+  emails is off locally (guard rail 7). Because the DPA now says the notice *is*
+  emailed, `deploy/prod.sops.yaml.example` sets it and `decrypt-env.sh` warns on
+  every deploy while it is off. Warn, not refuse: a deploy should not be blocked
+  on it, and the warning plus the (b) follow-up make it impossible to miss.
+
+**Historical rows.** All six existing rows are `notice=False`: the register's
+first publication; the move of the databases to RDS (same provider, same
+region, same data — no new party); and four systems the customer connects
+itself (§ 4), which are not sub-processors. None is ever emailed.
+
+**Rejected.** A subscribe endpoint / mailing list (a second recipient model to
+keep consistent with the admin set, and a list a customer has to know to join —
+the same weakness as "check the page"); notifying from the git diff of the page
+(no stable id to dedupe on, and nothing measures the 30 days).
+
+**Tests.** `backend/tests/test_subprocessor_changelog.py` (the rules, the
+generator's drift guard and its refusal), `test_subprocessor_notices.py` (only
+active admins, once per entry, roll back when nobody is reached, one failed
+address does not stop the rest, `late`, organisations created after
+publication, the CLI), `test_migration_0122_subprocessor_notices.py`,
+`test_deploy_decrypt_env.py` (the warning),
+`frontend/src/lib/legal/subprocessorChangelog.test.ts` (the email's objection
+address is `CONTACT.privacy`).
+
+**Amended in review (2026-10-26): refuse, not warn.** "Warn, not refuse" left
+a deployment free to run with the contractual mechanism off, the one state the
+DPA cannot describe. `config.py` now refuses to boot a deployed environment with
+`FEOH_SUBPROCESSOR_NOTICES_ENABLED` off — the same shape as the `console` email
+refusal — and `decrypt-env.sh` refuses the file instead of warning, so a deploy
+stops before compose restarts the API into that refusal
+(`test_config_boot_guards.py`, `test_deploy_decrypt_env.py`). Local dev, tests
+and CI keep it off; the day-one rehearsal (production-shaped) turns it on.
+
+**Also amended in review.** An organisation with no active administrator raised
+the same error as one whose every email bounced, so it counted as a tick
+failure on every tick and held `/api/health/sweeps` red indefinitely; it is now
+`organizations_without_admin`, a counter that is not a failure, and the
+organisation stays owed (the undelivered case is a (c) follow-up). The audit row
+was appended once per attempt, so a control-plane stamp lost after the tenant
+commit appended a second row to the append-only trail next tick; it is now
+written only when the tenant holds no row with that action and `correlation_id`
+= the notice id, under an advisory lock, and synchronously in every audit mode
+— in `lambda` mode a row still in SQS is invisible to that check, the reason
+`dispatch_durable_auth_audit` writes synchronously too. Per-notice
+`failed_recipients` reach the operator as a tick counter and in
+`scripts/subprocessor_notices.py list`.
+
+## 322. Blackbaud: `OnHold` vendors are not payable, the shared SKY quota is budgeted per org, and the duplicate lookup searches every attempt's date (#651, 2026-10-26)
+
+Three Blackbaud FE NXT calls from the #651 audit, recorded together because
+all three are about what the adapter may assume about FE NXT's state.
+
+**1. An `OnHold` vendor syncs as inactive and is not paid from FeohLedger.**
+FE NXT's `VendorStatus` is `Active`, `Inactive` or `OnHold` (read from the
+live SKY definitions). `list_vendors` emits both `Inactive` and `OnHold` with
+`active=False` (`_UNPAYABLE_VENDOR_STATUSES`). The sync then creates no payee
+for one and marks a linked vendor inactive, so no payment run picks it up.
+`OnHold` still *takes an invoice* in FE NXT, but FE NXT holds its payments: a
+hold is how a nonprofit's finance office says "do not pay this supplier yet"
+(a dispute, missing paperwork, an audit). Paying the vendor from FeohLedger
+would go around that hold, because our payment never passes through FE NXT's
+payables. The vendor is still emitted, not dropped (§284: absence from a pull
+unlinks, and the vendor still exists). Lifting the hold in FE NXT does **not**
+reactivate the local vendor: re-enabling a payee is a person's call, and a sync
+that silently made one payable again would undo whatever the local team
+decided in the meantime. Rejected: treating `OnHold` as active because FE NXT
+accepts invoices for it. That reads "may be billed" as "may be paid", which
+are the two things the hold separates.
+
+**2. The SKY call quota is shared, so it is budgeted per org.**
+
+*What SKY does* (Blackbaud's "Rate limits and quotas" and "Throttling and
+retry patterns" pages, checked 2026-10-26): a per-second rate limit answered
+with **429**, and a daily call quota answered with **403**, both carrying
+`Retry-After`. The quota resets at **00:00 UTC**, and Blackbaud says to wait
+`Retry-After` rather than compute a reset. "Standard APIs" is 10 calls/s and
+25,000 calls/day **per subscription**. One platform subscription key
+(`FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY`) serves every tenant without its own,
+so one tenant's bulk send or vendor sync could spend the day for all of them.
+A quota 403 used to reach the admin only as a failed push.
+
+*What we do* (`services/erp_call_budget.py`):
+
+- Every SKY call goes through an httpx request hook that counts it in Redis,
+  per subscription key (a SHA-256 digest, never the key) and per org, per UTC
+  day. A response hook records a 429's or quota 403's `Retry-After` as a
+  cool-down for the **whole key**, so no tenant keeps calling into a refusal.
+- An org on the platform key may spend
+  `FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET` (default 2,500, a tenth of
+  Standard) a day, and no org may take a key past
+  `FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA` (default 25,000; set it to the key's
+  real tier). A tenant with its own `subscription_key` is held only to its
+  key's quota, since that bucket is its own.
+- **A push is never cut off half way.** It asks for its worst case before its
+  first call (`push_call_reserve`: the lookup pages, the fiscal years, the
+  create, the 400's vendor read and the job watch; more when it reads an
+  earlier job or searches extra dates) and then runs unenforced. A call
+  refused after the create would leave the job unconfirmed and the invoice
+  in doubt, which is worse than overshooting the share by one push. The
+  check and the spend are not atomic, so concurrent pushes can overshoot by up
+  to their number times the reserve, and a 401 token replay is one call more
+  than the reserve counts. SKY's own 403 and the shared cool-down are the
+  backstop.
+- The refusal is coded, `erp_call_budget_exhausted` with `reason`
+  (`tenant_budget`, `subscription_quota`, `rate_limited`) and `retry_after`,
+  and is made before any call (`not_posted`). An earlier attempt's job stays on
+  the result, so it is still read first next time. Only `rate_limited` is
+  retryable by `services/erp`'s seconds-long backoff; the other two fail the
+  invoice with the reason, and the operator retries after the reset.
+- A sync listing is refused call by call. The hook raises
+  `ErpCallBudgetExhausted` (never an `httpx.HTTPError`, which the push reads as
+  "outcome unknown"). The listing returns nothing (§284: never a partial pull),
+  and `erp_pull_failure` answers a coded **429** with `Retry-After`. A PO
+  sync too: `list_pos` otherwise reads any failure as "no POs", and a refusal
+  must say why.
+- A 403 *with* `Retry-After` is read as the quota, as SKY documents. A
+  permission 403 that happened to carry the header would pause the whole key
+  until it passes. That is accepted as the documented contract, not guessed
+  around from the body (never parsed: it can echo the payload).
+- The org's admins get an `erp_call_quota` notification (in-app + email,
+  preference-gated), once per UTC day each, at 80% of the share, when the
+  share is used, and when the subscription's quota is. It is claimed by a
+  Redis SET NX and released if nobody could be told, delivered through
+  `erp_connection_health.notify_org_admins`: the ERP connection's existing
+  notice path, under its own event type so the "needs reconnecting" label is
+  not stretched over a quota.
+
+*Why Redis, when it held mostly auth state.* The counts last a day, must be
+shared by every worker, the dispatch task and the Lambda path, and are
+incremented on every HTTP call. That is the `services/rate_limit` shape, not a
+JSONB write under the org row lock per request. Losing them (a Redis restart)
+costs at most a day's count. **It fails open**: a Redis error lets the call go
+ahead uncounted. This is a courtesy brake on a quota SKY enforces itself, and
+its 403 stays the backstop, so failing closed would only turn a Redis blip into
+"no Blackbaud posts". (Auth fails closed on Redis; that asymmetry is
+deliberate.)
+
+*Rejected.* Sleeping on `Retry-After` inside the push: a worker held for up to
+a day, with the transaction discipline of `services/erp` built around seconds.
+An automatic re-send at the reset: worth having, but it is a re-dispatch sweep
+over `failed` invoices with its own idempotency story, so it is a follow-up.
+A share computed from the number of connected tenants (quota ÷ n): it moves as
+tenants connect, and one busy tenant could still never use what quiet ones
+leave.
+
+**3. The narrowed duplicate lookup searches every date an attempt was sent
+with.** When the unnarrowed `search_text` page (500 rows) is full, the lookup
+narrows with `from_date` / `to_date` to a day either side of the invoice date.
+It narrowed on the **current** date. If the date was edited between an
+attempt whose outcome is unknown and the retry, our own marked bill sat outside
+the window and the retry posted a second bill. `services/erp._call_erp` now
+records each attempt's invoice date on the workflow instance
+(`erp_attempt_invoice_dates`, before the call, cleared by a success). It hands the earlier ones over as
+`InvoicePayload.prior_invoice_dates`, and the adapter narrows on each.
+
+Only an attempt that may have reached the ERP keeps its date. One that
+states it left nothing (`not_posted`: a budget or pre-flight refusal) gives its
+slot back, and the list is never trimmed. A first version kept the five newest,
+so a run of date edits, each refused all day by the budget, could push out the
+date of the one bill that may exist: the hole this closes, reopened.
+
+*Trade-off kept.* A **hand-keyed** duplicate (no marker of ours) dated outside
+every window we search, for a number busy enough to fill the first 500 hits,
+is not seen. Nothing ties it to a date we know, and walking every page of a
+busy number on every post is the quota problem above. A marked bill of ours is
+always found, since every date it can carry is searched. The duplicate keyed
+by hand is still caught when the number is not busy, which is the usual case,
+and FeohLedger's own duplicate warnings run before approval.
+
+**Tests.** `backend/tests/test_erp_blackbaud_adapter.py`: the cool-down shared
+across tenants, a 429 retryable and a quota 403 not, the per-org share and the
+key quota, the own-key exemption, the 80% warning once, a notice nobody got
+retried, the pending job kept on a refusal, a sync refused page by page and
+its coded 429, a status read under a cool-down, Redis down, `Retry-After`
+parsing, and the date-edit retry finding the first bill.
+`test_erp_push_flow.py` (dates recorded and handed back),
+`test_notification_templates.py`, `frontend/src/lib/api/erpRefusals.test.ts`.
+fake-erp's `POST /blackbaud/__throttle` reproduces SKY's 429 / 403 locally.
+
+## 323. A PO the ERP adapter cannot price is reported, and an earlier total for it stops being matched against (PR #670 money review, migration 0123, 2026-10-26)
+
+**The problem.** Adapters skip a PO whose total they cannot state exactly:
+SYSPRO a PO with a line discount, a price unit of measure, a mixed-currency
+order or a currency it cannot place (§303's issue #650 work); Blackbaud FE NXT
+one with no `order_total`. Skipping is right for a PO the sync has never seen.
+For one it synced earlier it was silent: the row kept the old total, the sync
+said nothing, and the 3-way match kept passing invoices against a figure the
+ERP no longer stated. Nothing in the sync could tell "the ERP skipped this PO"
+from "this PO was never here".
+
+**The rule.** An adapter that skips a PO says so, and the sync stops trusting
+the row:
+
+- **Contract.** `ErpAdapter.list_pos_report() -> PoListing(pos, skipped)`, each
+  skip a `SkippedPo(po_number, PoSkipReason)` with a coded reason
+  (`unpriceable`, `lines_unread`, `no_lines`, `local_currency_unknown`). The
+  base default wraps `list_pos` and reports nothing skipped, so every adapter
+  that does not override it — and every test double that patches `list_pos` —
+  behaves exactly as before. It is additive on purpose: a second abstract method
+  would have broken adapters other sessions were editing. SYSPRO overrides it;
+  Blackbaud's wiring is a `docs/followups.md` entry.
+- **The mark.** The sync stamps `purchase_orders.total_unverifiable_reason` on
+  the existing row the upsert would refresh for a skipped number
+  (`_sync_target`: this entity's row first, else an unstamped one). Marking
+  every row in scope was rejected in review: the upsert clears only that one
+  row, so a shared twin would stay marked, and its invoices held, for good. It
+  does not change `total`: there is no honest
+  figure to write, and erasing one would invent a zero. The next sync that
+  prices the PO clears the mark. The response reports `not_priced` and
+  `unverifiable`, and the purchase-orders page shows a warning toast.
+- **The match.** While the mark is set, `po_matching` compares nothing —
+  `mismatch`, no variance, issue `po_total_unverifiable` — and skips the
+  receipt-value leg. `refresh_warnings` raises a payment-blocking `po_mismatch`
+  at `warning`, the currency guard's treatment and for its reason: with no
+  trustworthy figure there is no way to show the invoice is not over-billing.
+  The missing-PO and multi-PO-split agents never take such a PO as a candidate.
+- **When it lands.** The sync re-matches the invoices citing every PO whose mark
+  or total it changed, in its own transaction and **not** best-effort, so the
+  hold appears at sync time rather than at the invoice's next edit, and lifts
+  the same way. The QMS sync's best-effort precedent does not carry over: a
+  receipt changes evidence, while this mark exists to raise a hold, and the
+  payment gate reads only open exceptions — a committed mark without its hold
+  would leave an approved invoice payable against the stale total. A failed
+  re-match fails the sync and rolls the mark back.
+- **A failed currency read is not a fact.** SYSPRO skips a currency-labelled PO
+  as `local_currency_unknown` only when `GetLogonProfile` answers with a profile
+  stating no usable code. A failed read (HTTP error, `ERROR`, unreadable) fails
+  the listing (`ErpListingIncomplete`): skipping would mark every labelled PO
+  and hold every invoice citing one over a transient outage, and some of those
+  holds (past approval, manual receipts) would outlive it.
+- **Elsewhere.** The supplier portal refuses to flip a marked PO (409); the PO
+  list and detail return the reason. Budget commitments and spend analytics
+  still sum the stale total — reporting, not payment; a `docs/followups.md`
+  entry.
+- **A note for the CISO / Security Analyst.** Re-matching on every ERP total
+  change means an ERP-side increase can now close an over-billing `po_mismatch`
+  at sync time instead of at the invoice's next edit. The guards are the ones
+  every re-match has (org settings, past-approval and segregation limits), but
+  nobody with ERP access is treated as an implicated actor the way a manual
+  receipt's recorder is (§267). Where one person can edit both the ERP PO and
+  the AP invoice, that is a segregation question for the customer's controls.
+
+**Considered and rejected.**
+
+- *Setting the PO to `cancelled` or deleting it.* Both are claims the ERP did
+  not make; an invoice against a deleted PO also reads `po_not_found`, which
+  sends the missing-PO agent looking for another PO to link.
+- *Zeroing `total`.* `NOT NULL` aside, a zero total is a figure, and the
+  matcher would compare against it.
+- *Holding only invoices still pre-approval.* The point of the mark is that
+  nothing pays against an unverified total, which is the payment gate's job.
+
+Guards: `tests/test_purchase_orders.py` (sync → mark → hold → re-price →
+clear, the entity scope, mark and clear on the same row beside a shared twin,
+a failed re-match rolling the mark back, the base default),
+`test_po_matching_algorithm.py`, `test_po_matching_wiring.py`,
+`test_exception_agents_missing_po.py`,
+`test_portal_self_service.py::test_po_flip_refuses_a_po_whose_total_the_erp_no_longer_vouches_for`,
+`test_erp_syspro_adapter.py` (`test_list_pos_report_names_every_po_it_skips_and_why`,
+`test_a_failed_logon_profile_read_fails_the_listing_instead_of_skipping`),
+`test_migration_0123_po_total_unverifiable.py`.
+
+**Later in PR #670: the stale total leaves every other surface too.** The
+"Elsewhere" bullet above deferred budgets and analytics; that deferral is
+closed. Display paths send `null` for a marked PO's total and line money
+(`models/procurement.po_vouched_money`) — the PO API with the reason, the
+supplier portal with only a `total_unverifiable` flag, since the reason code is
+the buyer's — and the web shows a named state, not a dash that would read as
+"no total". Aggregates follow §35 (exclude and count, the rule `excluded_rebate_count`
+(§62) and the budgets' `excluded_row_count` already apply): budget `committed`,
+the `/cfo` open-PO and GR/IR accrual legs and by-entity open POs leave the PO
+out and report `unverifiable_po_count` / `open_po_unverifiable_count`, rendered
+beside the figure. A separate count, not folded into `excluded_row_count`,
+because that one means "re-denominate the row" and this one means "the ERP has
+to price the PO". *Rejected:* showing the last-synced figure labelled "stale" —
+a labelled number still gets copied, summed and compared, which is what the mark
+exists to stop. Guards: `po-matching.md` § A PO total the ERP no longer vouches for.
+
+**Amendment (2026-10-26): the sync's re-match raises holds, never clears them.**
+A product-owner decision, **pending the CISO / Security Analyst review** the
+note above asks for. It answers that note's question for the sync itself:
+anyone with ERP access could raise a PO total and close an over-billing
+`po_mismatch` at sync time with no FeohLedger sign-off, and ERP-side actors are
+outside the implicated set `segregation_refusal` checks.
+
+- The PO sync passes `erp_po_sync` to `refresh_invoices_citing_pos`, and
+  `invoice_warnings._reconcile_po_exceptions` then never calls
+  `_close_cleared_po_exceptions`. The re-match may still open or keep a
+  `po_mismatch` / `quality_hold`. This replaces "lifts the same way" in *When it
+  lands*. Re-pricing a marked PO clears the mark, not the hold.
+- A row the re-match no longer finds stays open and payment-blocking, with
+  `erp_report = {"kind": "po_rematch_clears", "erp_type", "po_number",
+  "observed_on"}`: §319's machine-detail column, PII-free, so a reviewer can see
+  why the row now reads as clearable. Clearing it is a person's action through
+  `record_decision`, under its segregation checks. A later refresh that finds
+  the finding again removes the note.
+- Refreshes a FeohLedger action triggers (invoice save, receipt, QMS sync) keep
+  their auto-close. Before §323 the sync re-matched nothing (checked against
+  `5f833334^`), so this leaves every human-triggered path as it was. The
+  residual: an ERP-side increase can still let the hold lift at the invoice's
+  next FeohLedger edit, as it could before §323. That is the open question for
+  the CISO review (`docs/followups.md`). The note is not yet rendered by either
+  client (also `docs/followups.md`).
+- *Considered and rejected:* closing on sync when the invoice is still
+  pre-approval, as the relink rule does. An approver still reviews the invoice,
+  but not the ERP edit, and the payment gate is where this control has to hold.
+
+Guards: `test_purchase_orders.py` (`test_sync_erp_raising_a_po_total_never_clears_the_hold`:
+the run is still refused; `test_sync_erp_lowering_a_po_total_opens_a_blocking_hold`;
+`test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before`; and the
+re-price leg of `test_sync_erp_marks_an_already_synced_po_the_adapter_now_skips`).
+
+## 324. Blackbaud reports the POs it skips, a PO listing that fails says so, and an org can see its SKY call usage (PR #670 round 3, 2026-10-26)
+
+**1. Blackbaud FE NXT names a PO it drops for want of a total.** §323 added
+`list_pos_report` and left Blackbaud's wiring as a follow-up. A PO FE NXT lists
+with no usable `order_total` (absent, null, unreadable, or not finite) is now
+`SkippedPo(number, unpriceable)`, so a PO synced at a total and later listed
+without one is marked and held exactly as SYSPRO's are. Templates and deleted
+orders are still dropped without a report: neither is a PO the match may use,
+and a `DeletedOrder` the sync marked would hold invoices over a PO that no
+longer exists rather than one the ERP stopped pricing.
+
+**2. A PO listing that could not be read whole raises.** `list_pos` caught
+every exception except the budget refusal and returned `[]`. The PO sync read
+that as "the ERP has no POs": it synced nothing, said nothing, and dropped the
+skip report from (1) with it, so the mark could never land during an outage. It
+also read only 10 pages (1,000 POs) and returned them as the whole list. The PO
+listing now goes through `_sync_rows`, like vendors and the chart: a failed
+page, a transport error (`httpx.HTTPError`, now mapped for all three listings,
+as Business Central, Merge.dev and NetSuite already did) or more than
+`SYNC_LISTING_MAX_ROWS` raises `ErpListingIncomplete` (a coded 502), a lost
+connection is the coded 409, and a budget refusal is still the coded 429 of
+§322. Nothing is synced in any of them.
+
+Tests: `backend/tests/test_erp_blackbaud_adapter.py`
+(`test_list_pos_report_names_every_po_it_left_out_for_want_of_a_total`,
+`test_a_po_listing_that_cannot_be_read_whole_raises_rather_than_finding_none`,
+`test_a_transport_error_on_a_listing_is_an_incomplete_listing`,
+`test_a_po_listing_without_a_connection_says_so`),
+`tests/test_purchase_orders.py::test_sync_erp_marks_a_blackbaud_po_that_lost_its_order_total`
+(the real adapter through `sync-erp`: synced at 100.00, marked when the total
+goes, cleared when it returns).
+
+**3. An org can see today's SKY call usage.** The `erp_call_quota` notice
+(§322) was the only place an org learned where it stood against the budget,
+and only at 80%, 100% or a refusal. `GET /api/organization/erp/oauth/status`,
+the connection status the ERP panel already reads, now carries `call_usage`
+for an adapter that has a `call_budget` (`ErpAdapter.call_budget()`, None by
+default; Blackbaud's is the one): `scope` (`org_share` on the platform key,
+`subscription` on the org's own), `used`, `limit`, `resets_at`, and
+`paused_reason` / `paused_until` while calls are refused. The panel renders it
+under the connection line in all six locales, with localized counts and times.
+
+- *The figure is the org's own.* On the platform key `used` is this org's calls
+  against its share; the key's total is not reported, since it is every
+  tenant's activity. On an org's own key it is every call on that key, against
+  the key's quota.
+- *It is a read only* (`CallBudget.usage`). `check` sends notices and is the
+  gate; a status page rendered every visit must do neither. A pause is the
+  key's cool-down, or a share or quota already used by our own count — the
+  same three reasons a push would be refused with.
+- *It fails open.* A Redis error, a missing subscription key or an adapter that
+  will not build gives `call_usage: null` and the panel shows nothing. The
+  figure is a courtesy over a courtesy brake; a status read that errored over
+  it would hide the connection state, which matters more.
+- *Rejected:* a separate usage endpoint. The status read is already the
+  panel's one call for "where does this connection stand", is admin-only, and
+  is where the expiry warning (§295) lives.
+
+Tests: `backend/tests/test_erp_oauth.py` (the share and the other tenant's
+calls kept out of it, a 429 cool-down and a used-up share as pauses, an own
+key against its quota, Redis down, a non-budgeted ERP, no key),
+`frontend/src/lib/types/erpConnection.test.ts` (`callUsageLines`, every
+sentence in every locale).
+
+## 325. Every adapter that drops a numbered PO for want of a total reports it (PR #670 review, 2026-10-26)
+
+**Context.** §323 made `list_pos_report` the way an adapter says "I have this
+PO and cannot state its total", so the sync stops matching against a total
+stored for it earlier. SYSPRO and Blackbaud FE NXT (§324) overrode it. The
+PR's review found three more adapters that silently skipped a numbered PO with
+no usable total (NetSuite `foreigntotal`, Business Central
+`totalAmountIncludingTax`, Sage Accounting (ZA) `Total`), and one that synced
+it at 0 (Sage Intacct `txnTotal`). Those had exactly the gap §323 closed: the
+earlier total stayed trusted, and for Intacct every invoice against the PO read
+as over-billed.
+
+**Decision.** All four override `list_pos_report` and name such a PO
+`unpriceable`; `list_pos` returns the report's `pos`. A PO with no number is
+still dropped unreported, because no stored row can be found for it. The four
+PO listings still degrade on a failed read, as §284 kept for POs: NetSuite and
+Business Central return what they had read (and stop at their page cap), the
+two Sage adapters an empty list. Unlike Blackbaud's, they do not raise
+`ErpListingIncomplete`, so a failed or capped read hides the skips in the part
+it did not read. That gap is a `docs/followups.md` (c) entry.
+
+**Tests.** `test_erp_po_sync.py` (NetSuite and Business Central),
+`test_erp_sage_accounting_za_adapter.py::test_a_po_with_no_total_is_reported_skipped`,
+`test_erp_sage_intacct_adapter.py::test_a_po_with_no_total_is_reported_skipped_never_synced_at_zero`.
+
+## 326. The PO matcher refuses a cancelled PO, and still matches a closed one (PR #670 review, 2026-10-26)
+
+**Context.** The PR #670 money-path review found that `po_matching` ignored the
+PO's status: an invoice citing a `cancelled` order matched it and could pass the
+amount control, although accruals and budgets already counted that order as
+dead (`DEAD_PO_STATUSES`). It predates the PR.
+
+**Decision.** A PO in `CANCELLED_PO_STATUSES` (`cancelled`, `voided`) is never
+matched against: the matcher compares nothing and raises
+`po_match.issue.po_cancelled`, and `refresh_warnings` raises the `po_cancelled`
+warning with a payment-blocking `po_mismatch`, the currency guard's treatment.
+The ERP PO sync re-matches the invoices citing a PO whose status moves into or
+out of that set, so a cancellation holds its invoices at sync time (hold-only,
+as §323 amended).
+
+**`closed` is not refused.** An ERP closes a PO once it is fully billed, and
+the invoice being matched can be the bill that closed it (we push it; the ERP
+marks the PO fully billed; the next sync reads `closed`). Refusing `closed`
+would hold the ordinary last invoice on every PO. A closed PO stays a valid
+match; a second invoice against a fully billed PO is the over-billing and
+duplicate checks' job, not the status's.
+
+**Tests.** `test_po_matching_algorithm.py` (`test_a_cancelled_po_is_never_matched_against`,
+`test_a_closed_po_still_matches`) and
+`test_purchase_orders.py::test_sync_erp_cancelling_a_po_holds_the_invoice_citing_it`.
+
+## 327. The ERP PO sync refreshes a PO's lines, in place where goods were received (PR #670 review, 2026-10-26)
+
+**Context.** The PR #670 money-path review found that the sync refreshed an
+existing PO's `total` but never its lines, which predates the PR. The 3-way
+receipt-value check is `po_total × gr_qty / po_qty_total`, so after an ERP
+amendment from 10 × 10 to 20 × 10 the stored 10 ordered units valued a 10-unit
+receipt at the whole 200, and a 200 invoice passed "billed beyond receipt"
+with half the goods delivered. The GR/IR accrual was overstated the same way.
+
+**Decision.** When the adapter sends lines, the sync makes the stored lines
+match them, comparing at `po_line_items`' column scales so an unchanged PO is a
+no-op. Goods-receipt lines reference PO lines by id (migration 0109), so a line
+something was received against is never deleted: it is updated in place,
+paired with an ERP line of the same SKU, else the same description. Unreceived
+lines are replaced and new ones added. When a received line has nothing to pair
+with, the sync changes no line and marks the PO with its own `PoSkipReason`,
+`lines_changed`, so §323's machinery refuses the match and holds the invoice
+for a person. A payload without lines leaves the stored ones alone. Any line
+change re-matches the invoices citing the PO, hold-only (§323 amended).
+
+**Rejected.** Pairing received lines by position: ERP line order is not stable
+across amendments, and a wrong pairing would move a receipt onto another
+line's quantity. Deleting received lines and nulling the receipts' link: it
+would erase which line the goods arrived against.
+
+**Tests.** `test_purchase_orders.py`: `test_sync_erp_replaces_the_lines_of_a_po_nothing_was_received_against`,
+`test_sync_erp_is_idempotent_for_lines`, `test_sync_erp_updates_a_received_line_in_place`,
+`test_sync_erp_marks_a_po_whose_received_line_the_erp_dropped`.
+
+## 328. A PO sync re-keys a row an earlier adapter build stored differently, and retires its placeholder (PR #670 review, 2026-10-26)
+
+**Context.** Before PR #670 the Merge.dev adapter keyed a PO by `number`, then
+`transaction_number`, then its Merge record id, and filed every PO with none of
+those under one shared `"UNKNOWN"` row. Merge's real number field is
+`purchase_order_number`, so most POs were stored under a UUID. Once the adapter
+read the right field, the next sync created a second row under the real number
+and never touched the UUID row: `/cfo` open-PO accruals and the by-entity rollup
+summed the order twice, and the merged `"UNKNOWN"` row stayed open.
+
+**Decision.** Generic, so another adapter's re-keying needs no new mechanism:
+
+- `PoPayload.legacy_po_numbers` names the keys an earlier build used for the
+  same PO. When no row holds the real number, the sync re-keys the first row
+  found under a legacy key (the same `_sync_target` scope as the upsert), then
+  refreshes it as an existing PO, and re-matches the invoices citing it.
+- `ErpAdapter.retired_po_numbers` names placeholders an earlier build wrote for
+  several POs. The sync marks such a row `unpriceable` (§323), so it is never
+  matched or summed; an already-marked row is left alone.
+
+Both are counted in the sync's audit row (`rekeyed`, `retired`). A re-keyed row
+keeps its id, so receipts and invoices already linked to it stay linked.
+
+**Rejected.** A one-off data migration: it would need Merge's record shape in
+the database, which the row does not keep, and could not tell a UUID key from a
+real PO number. The sync already has the record in hand.
+
+**Tests.** `test_erp_po_sync.py::test_merge_dev_list_pos_reads_purchase_order_number`,
+`test_purchase_orders.py::test_sync_erp_rekeys_a_row_an_earlier_build_stored_under_another_key`,
+`test_purchase_orders.py::test_sync_erp_marks_a_retired_placeholder_row`.
+

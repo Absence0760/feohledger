@@ -89,7 +89,7 @@ async def _check(realdb, *, notified=True, refresh=None, now=NOW):
     notify = AsyncMock(return_value=notified)
     refresher = refresh or AsyncMock(return_value="tok")
     with (
-        patch.object(health, "_notify", notify),
+        patch.object(health, "notify_org_admins", notify),
         patch.object(health.erp_oauth, "get_access_token", refresher),
         patch.object(health, "_resolved_erp", AsyncMock(return_value={"x": 1})),
     ):
@@ -177,6 +177,6 @@ async def test_a_lost_connection_is_announced_once(realdb):
 async def test_the_sweep_counts_one_orgs_failure_and_carries_on(realdb, monkeypatch):
     monkeypatch.setattr(settings, "erp_connection_keepalive_days", 0)
     await _connect(realdb, refresh_token_expires_at=(NOW + timedelta(days=2)).isoformat())
-    with patch.object(health, "_notify", AsyncMock(side_effect=RuntimeError("smtp"))):
+    with patch.object(health, "notify_org_admins", AsyncMock(side_effect=RuntimeError("smtp"))):
         result = await health.run_connection_health_once(now=NOW)
     assert result.failures >= 1

@@ -550,3 +550,49 @@ async def test_cfo_gate_uses_invoice_amount_not_po_total(realdb):
         assert inv.po_number == "PO-DOES-NOT-EXIST-INV-MPO-CFO"
         exc = await s.get(APException, exc_id)
         assert exc.status == "escalated"
+
+
+async def test_a_po_whose_total_the_erp_no_longer_vouches_for_is_not_a_candidate(realdb):
+    """Two POs match on vendor + amount, but the ERP sync could not price one
+    of them exactly (decisions §323): its total is a stale figure, never the
+    evidence an invoice is linked on, so the other PO is the only candidate."""
+    from sqlalchemy import update
+
+    from app.models.procurement import PurchaseOrder
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+
+    inv_id, _corr, _exc_id = await _seed_missing_po(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("1000.00"), Decimal("1000.00")],
+        number="INV-MPO-UNV",
+    )
+    async with mk() as s:
+        await s.execute(
+            update(PurchaseOrder)
+            .where(PurchaseOrder.po_number == "PO-INV-MPO-UNV-0")
+            .values(total_unverifiable_reason="unpriceable")
+        )
+        await s.commit()
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = (
+            await s.execute(select(APException).where(APException.invoice_id == inv_id))
+        ).scalar_one()
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+    assert result.decision.action_taken == ACTION_AUTO_RESOLVED
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+    assert inv.po_number == "PO-INV-MPO-UNV-1"

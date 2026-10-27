@@ -4,12 +4,15 @@ Emulates just enough of each provider's API surface to satisfy the backend's
 real ERP adapters (backend/app/services/erp_adapters/):
 
     /merge/api/accounting/v1/...            Merge.dev unified accounting API
-    /netsuite/services/rest/record/v1/...   NetSuite SuiteTalk REST (TBA)
+    /netsuite/services/rest/record/v1/...   NetSuite SuiteTalk REST (TBA or OAuth 2.0 bearer)
+    /netsuite/services/rest/auth/oauth2/v1/token   NetSuite OAuth 2.0 client credentials (M2M)
     /d365/...                               Dynamics 365 Business Central OData
 
 State is in-memory only (module-level dicts), fully deterministic, and
 resettable via POST /__reset. No external deps beyond fastapi + uvicorn, plus
-defusedxml for the request-supplied XML the SYSPRO routes parse.
+defusedxml for the request-supplied XML the SYSPRO routes parse and
+cryptography for the NetSuite OAuth 2.0 client-assertion signature check
+(`netsuite_oauth2.py`).
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from defusedxml import ElementTree as SafeET
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+import netsuite_oauth2
 import qbo_records
 import qbo_sandbox
 
@@ -253,14 +257,15 @@ STATE: dict[str, Any] = _fresh_state()
 class ProviderError(Exception):
     """Raise anywhere to return a provider-shaped JSON error body."""
 
-    def __init__(self, status_code: int, body: dict):
+    def __init__(self, status_code: int, body: dict, headers: dict[str, str] | None = None):
         self.status_code = status_code
         self.body = body
+        self.headers = headers
 
 
 @app.exception_handler(ProviderError)
 async def _provider_error_handler(_request: Request, exc: ProviderError) -> JSONResponse:
-    return JSONResponse(exc.body, status_code=exc.status_code)
+    return JSONResponse(exc.body, status_code=exc.status_code, headers=exc.headers)
 
 
 # ---------------------------------------------------------------------------
@@ -315,13 +320,16 @@ async def set_status(body: dict) -> dict:
 merge = APIRouter(prefix="/merge/api/accounting/v1")
 
 # FIXED fixtures — e2e tests assert these literals. Do not change them.
+# As in Merge, a PO's `vendor` is the vendor's Merge id (a fixture vendor
+# below, so the PO sync links by id) and a line's `account` is a Merge
+# Account id, not an account number.
 MERGE_PO_FIXTURES: list[dict] = [
     {
         "id": "merge-po-301",
         "remote_id": "fake-remote-po-301",
-        "number": "PO-FAKE-301",
-        "status": "OPEN",
-        "vendor": {"id": "merge-vendor-a", "name": "Fake ERP Vendor A"},
+        "purchase_order_number": "PO-FAKE-301",
+        "status": "AUTHORIZED",
+        "vendor": {"id": "merge-vendor-701", "name": "Fake Merge Vendor Co"},
         "total_amount": 1250.00,
         "currency": "USD",
         "issue_date": "2026-02-10",
@@ -332,23 +340,23 @@ MERGE_PO_FIXTURES: list[dict] = [
                 "quantity": 10,
                 "unit_price": 100.00,
                 "total_line_amount": 1000.00,
-                "account": "6100",
+                "account": "merge-acct-6100",
             },
             {
                 "description": "Fake widget installation",
                 "quantity": 1,
                 "unit_price": 250.00,
                 "total_line_amount": 250.00,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
         ],
     },
     {
         "id": "merge-po-302",
         "remote_id": "fake-remote-po-302",
-        "number": "PO-FAKE-302",
-        "status": "OPEN",
-        "vendor": {"id": "merge-vendor-b", "name": "Fake ERP Vendor B"},
+        "purchase_order_number": "PO-FAKE-302",
+        "status": "AUTHORIZED",
+        "vendor": {"id": "merge-vendor-702", "name": "Fake Merge Supply Co"},
         "total_amount": 980.50,
         "currency": "USD",
         "issue_date": "2026-03-05",
@@ -359,23 +367,23 @@ MERGE_PO_FIXTURES: list[dict] = [
                 "quantity": 2,
                 "unit_price": 400.00,
                 "total_line_amount": 800.00,
-                "account": "6200",
+                "account": "merge-acct-6200",
             },
             {
                 "description": "Fake support hours",
                 "quantity": 1,
                 "unit_price": 180.50,
                 "total_line_amount": 180.50,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
         ],
     },
     {
         "id": "merge-po-303",
         "remote_id": "fake-remote-po-303",
-        "number": "PO-FAKE-303",
-        "status": "OPEN",
-        "vendor": {"id": "merge-vendor-a", "name": "Fake ERP Vendor A"},
+        "purchase_order_number": "PO-FAKE-303",
+        "status": "AUTHORIZED",
+        "vendor": {"id": "merge-vendor-701", "name": "Fake Merge Vendor Co"},
         "total_amount": 4400.00,
         "currency": "USD",
         "issue_date": "2026-04-01",
@@ -386,14 +394,14 @@ MERGE_PO_FIXTURES: list[dict] = [
                 "quantity": 4,
                 "unit_price": 1000.00,
                 "total_line_amount": 4000.00,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
             {
                 "description": "Fake consultant travel",
                 "quantity": 1,
                 "unit_price": 400.00,
                 "total_line_amount": 400.00,
-                "account": "6300",
+                "account": "merge-acct-6300",
             },
         ],
     },
@@ -435,68 +443,104 @@ MERGE_ACCOUNT_FIXTURES: list[dict] = [
     },
 ]
 
-MERGE_VENDOR_FIXTURES: list[dict] = [
+# Merge has no Vendor model and no `/vendors` path: a supplier is a `Contact`
+# with `is_supplier` true, listed at `GET /contacts?is_supplier=true`, and a
+# Contact carries NO payment term (Merge Accounting OpenAPI,
+# https://docs.merge.dev/openapi/accounting.json; https://docs.merge.dev/accounting/contacts/).
+# The `merge-vendor-70x` ids are kept because the PO fixtures above name them
+# as `vendor`, exactly as a Merge PurchaseOrder names a Contact id.
+MERGE_CONTACT_FIXTURES: list[dict] = [
     {
         "id": "merge-vendor-701",
         "remote_id": "fake-remote-vendor-701",
         "name": "Fake Merge Vendor Co",
+        "is_supplier": True,
+        "is_customer": False,
         "email_address": "ap@fakemergevendor.example",
-        "phone_number": "+1-555-0170",
+        "tax_number": "71-1234567",
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [{"number": "+1-555-0170", "type": "Work"}],
         "addresses": [
             {
-                "line1": "701 Fake Merge Ave",
-                "line2": None,
+                "type": "BILLING",
+                "street_1": "701 Fake Merge Ave",
+                "street_2": None,
                 "city": "Faketown",
                 "state": "CA",
                 "zip_code": "94107",
                 "country": "US",
             }
         ],
-        "tax_number": "71-1234567",
-        "payment_term": {"name": "Net 30"},
+        "remote_was_deleted": False,
     },
     {
         "id": "merge-vendor-702",
         "remote_id": "fake-remote-vendor-702",
         "name": "Fake Merge Supply Co",
+        "is_supplier": True,
+        "is_customer": False,
         "email_address": "billing@fakemergesupply.example",
-        "phone_number": "+1-555-0172",
+        "tax_number": "72-2345678",
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [{"number": "+1-555-0172", "type": "Work"}],
         "addresses": [
             {
-                "line1": "702 Fake Supply Rd",
-                "line2": None,
+                "type": "BILLING",
+                "street_1": "702 Fake Supply Rd",
+                "street_2": None,
                 "city": "Faketown",
                 "state": "CA",
                 "zip_code": "94108",
                 "country": "US",
             }
         ],
-        "tax_number": "72-2345678",
-        "payment_term": {"name": "Net 45"},
+        "remote_was_deleted": False,
     },
     {
         "id": "merge-vendor-703",
         "remote_id": "fake-remote-vendor-703",
         "name": "Fake Merge Services Co",
+        "is_supplier": True,
+        "is_customer": False,
         "email_address": "invoices@fakemergeservices.example",
-        "phone_number": "+1-555-0173",
+        "tax_number": "73-3456789",
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [{"number": "+1-555-0173", "type": "Work"}],
         "addresses": [
             {
-                "line1": "703 Fake Services Blvd",
-                "line2": None,
+                "type": "BILLING",
+                "street_1": "703 Fake Services Blvd",
+                "street_2": None,
                 "city": "Faketown",
                 "state": "CA",
                 "zip_code": "94109",
                 "country": "US",
             }
         ],
-        "tax_number": "73-3456789",
-        # Some ERPs surface payment_term as a bare string rather than an
-        # {"name": ...} object — the adapter's _merge_vendor_to_payload
-        # handles both; this fixture exercises the string branch.
-        "payment_term": "Net 60",
+        "remote_was_deleted": False,
+    },
+    # A CUSTOMER, not a supplier: served only when the request does not filter
+    # on `is_supplier=true`, so an adapter that forgets the filter imports a
+    # payee that is not one and the e2e spec's vendor count fails.
+    {
+        "id": "merge-customer-801",
+        "remote_id": "fake-remote-customer-801",
+        "name": "Fake Merge Customer Co",
+        "is_supplier": False,
+        "is_customer": True,
+        "email_address": "buyer@fakemergecustomer.example",
+        "tax_number": None,
+        "status": "ACTIVE",
+        "currency": "USD",
+        "phone_numbers": [],
+        "addresses": [],
+        "remote_was_deleted": False,
     },
 ]
+
 
 MERGE_401 = {"detail": "Authentication credentials were not provided."}
 
@@ -556,9 +600,9 @@ async def merge_create_invoice(request: Request) -> JSONResponse:
     # Like real Merge, the vendor (`contact`) and each line's `account` are
     # Merge object ids. A name or a GL code in either is a 400, not a bill
     # filed against nothing.
-    merge_vendor_ids = {v["id"] for v in MERGE_VENDOR_FIXTURES}
+    merge_contact_ids = {c["id"] for c in MERGE_CONTACT_FIXTURES}
     merge_account_ids = {a["id"] for a in MERGE_ACCOUNT_FIXTURES}
-    if model.get("contact") not in merge_vendor_ids:
+    if model.get("contact") not in merge_contact_ids:
         raise ProviderError(400, {"model": {"contact": ["Unknown contact id."]}})
     for line in model.get("line_items") or []:
         account = line.get("account")
@@ -613,10 +657,30 @@ async def merge_list_accounts(request: Request, cursor: str | None = None) -> di
     return _merge_paginate(MERGE_ACCOUNT_FIXTURES, cursor, "account-cursor-page-2")
 
 
-@merge.get("/vendors")
-async def merge_list_vendors(request: Request, cursor: str | None = None) -> dict:
+@merge.get("/contacts")
+async def merge_list_contacts(
+    request: Request,
+    cursor: str | None = None,
+    is_supplier: str | None = None,
+    expand: str | None = None,
+) -> dict:
+    """Merge's ``GET /contacts``. ``is_supplier=true`` keeps suppliers only;
+    ``addresses`` / ``phone_numbers`` come back as objects only when named in
+    ``expand``, else as bare ids, as Merge returns an unexpanded relation.
+    There is deliberately no ``/vendors`` route: Merge has none, so a request
+    for it is this app's 404, as it is Merge's."""
     _require_merge_auth(request)
-    return _merge_paginate(MERGE_VENDOR_FIXTURES, cursor, "vendor-cursor-page-2")
+    contacts = MERGE_CONTACT_FIXTURES
+    if is_supplier is not None:
+        want = is_supplier.strip().lower() == "true"
+        contacts = [c for c in contacts if c["is_supplier"] is want]
+    expanded = set((expand or "").split(","))
+    body = _merge_paginate(contacts, cursor, "contact-cursor-page-2")
+    for rec in body["results"]:
+        for rel in ("addresses", "phone_numbers"):
+            if rel not in expanded:
+                rec[rel] = [f"{rec['id']}-{rel}-{i}" for i, _ in enumerate(rec[rel])]
+    return body
 
 
 app.include_router(merge)
@@ -643,18 +707,104 @@ def _netsuite_error(status: int, code: str, detail: str) -> ProviderError:
 
 
 def _require_netsuite_auth(request: Request) -> None:
-    """Loose OAuth 1.0 TBA check: header shape + required params only.
+    """Either sign-in method NetSuite accepts.
 
-    Does NOT verify the HMAC signature — presence of oauth_consumer_key,
-    oauth_token and oauth_signature in an `Authorization: OAuth ...` header
-    is enough for the fake.
+    * ``Bearer <token>`` (OAuth 2.0 client credentials): the token must be one
+      the fake's token endpoint issued (``netsuite_oauth2_token``) and not yet
+      expired — the assertion behind it was verified, signature included.
+    * ``OAuth ...`` (TBA): a loose check, header shape + required params only.
+      Does NOT verify the HMAC signature — presence of oauth_consumer_key,
+      oauth_token and oauth_signature is enough for the fake.
     """
     auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        expiry = _netsuite_oauth2_state()["tokens"].get(auth.removeprefix("Bearer ").strip())
+        if expiry is None or expiry <= time.time():
+            raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
+        return
     if not auth.startswith("OAuth"):
         raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
     for param in ("oauth_consumer_key", "oauth_token", "oauth_signature"):
         if f"{param}=" not in auth:
             raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
+
+
+# OAuth 2.0 client credentials (M2M). The token endpoint verifies the JWT
+# client assertion the way NetSuite does (`netsuite_oauth2.verify_token_request`:
+# alg, kid, signature, iss, aud, scope, iat/exp) against certificates registered
+# through `POST /__netsuite/oauth2/certificates` — the fake's stand-in for an
+# administrator mapping a certificate to the integration record. The mappings
+# live outside STATE, so `/__reset` (a parallel e2e worker's) never unmaps a
+# connection mid-run; issued tokens live in STATE and a reset expires them,
+# which the adapter recovers from by minting again on the 401.
+_NETSUITE_OAUTH2_CERTIFICATES: dict[str, netsuite_oauth2.Certificate] = {}
+
+
+def _netsuite_oauth2_state() -> dict[str, Any]:
+    return STATE.setdefault("netsuite_oauth2", {"tokens": {}, "counter": 0, "minted": 0})
+
+
+netsuite_oauth2_router = APIRouter(prefix="/netsuite/services/rest/auth/oauth2/v1")
+
+
+@netsuite_oauth2_router.post("/token")
+async def netsuite_oauth2_token(request: Request) -> dict:
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    form = {k: v[0] for k, v in parse_qs(raw).items()}
+    try:
+        netsuite_oauth2.verify_token_request(
+            form,
+            token_url=str(request.url.replace(query="")),
+            certificates=_NETSUITE_OAUTH2_CERTIFICATES,
+            now=int(time.time()),
+        )
+    except netsuite_oauth2.TokenError as exc:
+        raise ProviderError(400, exc.body()) from None
+    st = _netsuite_oauth2_state()
+    st["counter"] += 1
+    st["minted"] += 1
+    token = f"fake-ns-oauth2-token-{st['counter']}"
+    st["tokens"][token] = time.time() + netsuite_oauth2.TOKEN_LIFETIME_SECONDS
+    return {
+        "access_token": token,
+        "expires_in": netsuite_oauth2.TOKEN_LIFETIME_SECONDS,
+        "token_type": "Bearer",
+    }
+
+
+app.include_router(netsuite_oauth2_router)
+
+
+@app.post("/__netsuite/oauth2/certificates")
+async def netsuite_oauth2_register_certificate(body: dict) -> dict:
+    """Test hook: map a certificate (its public key, or the X.509 PEM) to an
+    integration's client id under ``certificate_id`` — what an administrator
+    does on NetSuite's OAuth 2.0 Client Credentials Setup page. Only the
+    PUBLIC half is ever sent here; the private key stays with the caller."""
+    try:
+        cert = netsuite_oauth2.register(
+            str(body.get("certificate_id") or ""),
+            str(body.get("client_id") or ""),
+            str(body.get("public_key_pem") or ""),
+        )
+    except ValueError as exc:
+        raise ProviderError(400, {"error": "invalid_request", "error_description": str(exc)})
+    _NETSUITE_OAUTH2_CERTIFICATES[cert.certificate_id] = cert
+    return {"status": "ok", "certificate_id": cert.certificate_id}
+
+
+@app.post("/__netsuite/oauth2/expire-tokens")
+async def netsuite_oauth2_expire_tokens() -> dict:
+    """Test hook: every issued bearer token stops working (NetSuite's 401 on
+    an expired token), so a test can prove the adapter mints a new one."""
+    _netsuite_oauth2_state()["tokens"].clear()
+    return {"status": "ok"}
+
+
+@app.get("/__netsuite/oauth2/stats")
+async def netsuite_oauth2_stats() -> dict:
+    """Test hook: how many tokens the endpoint has issued since the reset."""
+    return {"minted": _netsuite_oauth2_state()["minted"]}
 
 
 # Vendor and account internal ids. A vendorBill must reference both BY ID —
@@ -1082,7 +1232,9 @@ INTACCT_PO_FIXTURES: list[dict] = [
     {
         "key": "401",
         "documentNumber": "PO-INTACCT-401",
-        "vendor": {"name": "Fake Intacct Vendor A"},
+        # The vendor fixture's `id`: what the vendor sync stamps, and what the
+        # PO sync links by before the name.
+        "vendor": {"id": "V-ACME", "name": "Fake Intacct Vendor A"},
         "state": "pending",
         "txnTotal": "1250.00",
         "currency": {"txnCurrency": "USD"},
@@ -1090,7 +1242,7 @@ INTACCT_PO_FIXTURES: list[dict] = [
     {
         "key": "402",
         "documentNumber": "PO-INTACCT-402",
-        "vendor": {"name": "Fake Intacct Vendor B"},
+        "vendor": {"id": "V-BETA", "name": "Fake Intacct Vendor B"},
         "state": "closed",
         "txnTotal": "980.50",
         "currency": {"txnCurrency": "USD"},
@@ -1245,27 +1397,77 @@ app.include_router(intacct)
 syspro = APIRouter(prefix="/syspro/SYSPROWCFService/Rest")
 
 SYSPRO_SUPPLIERS: list[dict] = [
-    {"Supplier": "0000001", "SupplierName": "Fake SYSPRO Supplier A"},
-    {"Supplier": "0000002", "SupplierName": "Fake SYSPRO Supplier B"},
+    {"Supplier": "0000001", "SupplierName": "Fake SYSPRO Supplier A", "OnHold": "N"},
+    {"Supplier": "0000002", "SupplierName": "Fake SYSPRO Supplier B", "OnHold": "N"},
+    # On hold: SYSPRO's "inactive" supplier. Synced inactive; APSTIN refuses it.
+    {"Supplier": "0000003", "SupplierName": "Fake SYSPRO Supplier On Hold", "OnHold": "Y"},
 ]
 SYSPRO_GL: list[dict] = [
     {"GlCode": "6100", "Description": "Fake Office Supplies", "AccountType": "E"},
     {"GlCode": "6200", "Description": "Fake Software", "AccountType": "E"},
-    {"GlCode": "2000", "Description": "Fake Creditors Control", "AccountType": "L"},
+    # A ledger code on hold, and the creditors control account: AP Invoice
+    # Posting refuses both on a manually entered distribution.
+    {"GlCode": "6300", "Description": "Fake Suspended Costs", "AccountType": "E", "AccOnHldFlag": "Y"},
+    {
+        "GlCode": "2000",
+        "Description": "Fake Creditors Control",
+        "AccountType": "L",
+        "ControlAccFlag": "Y",
+    },
 ]
 SYSPRO_PO_HEADERS: list[dict] = [
     {"PurchaseOrder": "PO-SYS-501", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
     {"PurchaseOrder": "PO-SYS-502", "Supplier": "0000002", "OrderStatus": "9", "Currency": "ZAR"},
+    # A USD order: MPrice is the local (ZAR) price, MForeignPrice the USD one.
+    {"PurchaseOrder": "PO-SYS-503", "Supplier": "0000002", "OrderStatus": "4", "Currency": "USD"},
+    # A merchandise line, a miscellaneous charge (value, no qty x price) and a
+    # comment line.
+    {"PurchaseOrder": "PO-SYS-504", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+    # A EUR order with one line priced only in local MPrice: it has no EUR
+    # total, so the adapter skips it rather than summing EUR and ZAR prices.
+    {"PurchaseOrder": "PO-SYS-505", "Supplier": "0000001", "OrderStatus": "4", "Currency": "EUR"},
 ]
 SYSPRO_PO_DETAILS: list[dict] = [
-    {"PurchaseOrder": "PO-SYS-501", "MOrderQty": "10.000", "MPrice": "100.00"},
-    {"PurchaseOrder": "PO-SYS-501", "MOrderQty": "1.000", "MPrice": "250.00"},
-    {"PurchaseOrder": "PO-SYS-502", "MOrderQty": "2.000", "MPrice": "490.25"},
+    {"PurchaseOrder": "PO-SYS-501", "LineType": "1", "MOrderQty": "10.000", "MPrice": "100.00"},
+    {"PurchaseOrder": "PO-SYS-501", "LineType": "1", "MOrderQty": "1.000", "MPrice": "250.00"},
+    {"PurchaseOrder": "PO-SYS-502", "LineType": "1", "MOrderQty": "2.000", "MPrice": "490.25"},
+    {
+        "PurchaseOrder": "PO-SYS-503",
+        "LineType": "1",
+        "MOrderQty": "4.000",
+        "MPrice": "1830.00",
+        "MForeignPrice": "100.00",
+    },
+    {"PurchaseOrder": "PO-SYS-504", "LineType": "1", "MOrderQty": "3.000", "MPrice": "20.00"},
+    {
+        "PurchaseOrder": "PO-SYS-504",
+        "LineType": "5",
+        "MOrderQty": "0.000",
+        "MPrice": "0.00",
+        "NMscChargeValue": "45.50",
+    },
+    {"PurchaseOrder": "PO-SYS-504", "LineType": "6", "MOrderQty": "0.000", "MPrice": "0.00"},
+    {
+        "PurchaseOrder": "PO-SYS-505",
+        "LineType": "1",
+        "MOrderQty": "2.000",
+        "MPrice": "180.00",
+        "MForeignPrice": "10.00",
+    },
+    {
+        "PurchaseOrder": "PO-SYS-505",
+        "LineType": "1",
+        "MOrderQty": "1.000",
+        "MPrice": "50.00",
+        "MForeignPrice": "0.00",
+    },
 ]
 
 
 def _syspro_state() -> dict[str, Any]:
-    return STATE.setdefault("syspro", {"sessions": set(), "invoices": {}, "journal": 0})
+    return STATE.setdefault(
+        "syspro", {"sessions": set(), "invoices": {}, "payments": [], "journal": 0}
+    )
 
 
 def _syspro_text(body: str) -> Response:
@@ -1289,6 +1491,25 @@ async def syspro_logoff(UserId: str = "") -> Response:
     return _syspro_text("0")
 
 
+#: The fake company's local currency (SYSPRO Company Setup; fixed once the
+#: company exists). PO-SYS-501 / 502 / 504 are in it, PO-SYS-503 / 505 are not.
+SYSPRO_LOCAL_CURRENCY = "ZAR"
+
+
+@syspro.get("/GetLogonProfile")
+async def syspro_logon_profile(UserId: str = "") -> Response:
+    """The e.net call describing the session's company. Element names as the
+    open-source client wildland/syspro-ruby reads them
+    (``lib/syspro/get_logon_profile.rb``), trimmed to the company fields."""
+    if UserId not in _syspro_state()["sessions"]:
+        return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
+    root = ET.Element("LogonProfile")
+    ET.SubElement(root, "CompanyName").text = "Fake SYSPRO Company"
+    ET.SubElement(root, "LocalCurrencyCode").text = SYSPRO_LOCAL_CURRENCY
+    ET.SubElement(root, "CurrencyDescription").text = "South African Rand"
+    return _syspro_text(ET.tostring(root, encoding="unicode"))
+
+
 @syspro.get("/__sessions")
 async def syspro_open_sessions() -> dict:
     """Test hook: how many sessions are still logged on (should be 0)."""
@@ -1303,6 +1524,7 @@ def _syspro_table(name: str) -> list[dict]:
         "PorMasterHdr": SYSPRO_PO_HEADERS,
         "PorMasterDetail": SYSPRO_PO_DETAILS,
         "ApInvoice": invoices,
+        "ApInvoicePay": _syspro_state()["payments"],
     }
     if name not in tables:
         raise KeyError(name)
@@ -1330,6 +1552,18 @@ def _syspro_parse(document: str) -> ET.Element | None:
         return None
 
 
+#: COMFND ``Condition`` values (string comparison, as on the char key columns
+#: the adapter filters and pages by).
+_SYSPRO_CONDITIONS = {
+    "EQ": lambda a, b: a == b,
+    "NE": lambda a, b: a != b,
+    "GT": lambda a, b: a > b,
+    "GE": lambda a, b: a >= b,
+    "LT": lambda a, b: a < b,
+    "LE": lambda a, b: a <= b,
+}
+
+
 @syspro.get("/Query/Query")
 async def syspro_query(UserId: str = "", BusinessObject: str = "", XmlIn: str = "") -> Response:
     if UserId not in _syspro_state()["sessions"]:
@@ -1347,7 +1581,15 @@ async def syspro_query(UserId: str = "", BusinessObject: str = "", XmlIn: str = 
         return _syspro_text("ERROR: Table not available to COMFND")
     for expr in query.findall("Where/Expression"):
         column, value = expr.findtext("Column", ""), expr.findtext("Value", "")
-        rows = [r for r in rows if str(r.get(column, "")) == value]
+        compare = _SYSPRO_CONDITIONS.get(expr.findtext("Condition") or "EQ")
+        if compare is None:
+            return _syspro_text("ERROR: Invalid condition in Where expression")
+        rows = [r for r in rows if compare(str(r.get(column, "")), value)]
+    # COMFND returns the FIRST ReturnRows rows in OrderBy order — which is why
+    # a caller must page with a GT cursor rather than read one capped query.
+    order_by = query.findtext("OrderBy/Column")
+    if order_by:
+        rows = sorted(rows, key=lambda r: str(r.get(order_by, "")))
     rows = rows[: int(query.findtext("ReturnRows") or len(rows))]
     return _syspro_text(_syspro_rows_xml(table, rows, columns))
 
@@ -1369,16 +1611,28 @@ async def syspro_post(
         return _syspro_text("ERROR: Posting element missing")
     supplier = posting.findtext("Supplier", "")
     invoice = posting.findtext("Invoice", "")
-    if supplier not in {s["Supplier"] for s in SYSPRO_SUPPLIERS}:
+    suppliers = {s["Supplier"]: s for s in SYSPRO_SUPPLIERS}
+    if supplier not in suppliers:
         return _syspro_text(f"ERROR: Supplier '{supplier}' not on file")
+    if suppliers[supplier].get("OnHold") == "Y":
+        return _syspro_text(f"ERROR: Supplier '{supplier}' is on hold")
     if (supplier, invoice) in state["invoices"]:
         return _syspro_text(f"ERROR: Invoice '{invoice}' already on file")
     amount = Decimal(posting.findtext("InvoiceAmount", "0"))
-    known_gl = {g["GlCode"] for g in SYSPRO_GL}
+    ledgers = {g["GlCode"]: g for g in SYSPRO_GL}
     distributed = Decimal(0)
     for line in document.findall("Item/Distribution/DistributionLine"):
-        if line.findtext("LedgerCode", "") not in known_gl:
+        code = line.findtext("LedgerCode", "")
+        if code not in ledgers:
             return _syspro_text("ERROR: Ledger code not on file")
+        if ledgers[code].get("AccOnHldFlag") == "Y":
+            return _syspro_text(f"ERROR: Ledger code '{code}' is on hold")
+        if ledgers[code].get("ControlAccFlag") == "Y":
+            # AP Invoice Posting: manually entered ledger codes can't be
+            # control accounts.
+            return _syspro_text(
+                f"ERROR: Ledger code '{code}' is a control account and cannot be used"
+            )
         distributed += Decimal(line.findtext("DistributionValue", "0"))
     if distributed != amount:
         return _syspro_text("ERROR: Distribution does not balance to the invoice amount")
@@ -1404,6 +1658,31 @@ async def syspro_set_balance(body: dict) -> dict:
     if record is None:
         raise ProviderError(404, {"detail": "unknown invoice"})
     record["MthInvBal1"] = str(body.get("balance", record["MthInvBal1"]))
+    return {"status": "ok"}
+
+
+@syspro.post("/__pay")
+async def syspro_pay(body: dict) -> dict:
+    """Test hook: {"supplier", "invoice", "amount", "trn_type"?} — records an
+    ApInvoicePay row (``TrnType`` default "P", a payment) and takes the amount
+    off the balance, as an AP payment run or a manual cheque does. Pass another
+    ``trn_type`` (e.g. "A") for an adjustment that zeroes it with no payment."""
+    state = _syspro_state()
+    record = state["invoices"].get((body.get("supplier"), body.get("invoice")))
+    if record is None:
+        raise ProviderError(404, {"detail": "unknown invoice"})
+    amount = Decimal(str(body.get("amount", record["MthInvBal1"])))
+    state["journal"] += 1
+    state["payments"].append(
+        {
+            "Supplier": record["Supplier"],
+            "Invoice": record["Invoice"],
+            "TrnType": str(body.get("trn_type") or "P"),
+            "TrnValue": str(amount),
+            "PaymentNumber": f"{state['journal']:06d}",
+        }
+    )
+    record["MthInvBal1"] = str(Decimal(record["MthInvBal1"]) - amount)
     return {"status": "ok"}
 
 
@@ -2038,6 +2317,9 @@ SAGEZA_POS: list[dict] = [
     {
         "ID": 501,
         "DocumentNumber": "PO-SAGEZA-501",
+        # Supplier A's ID: the id the vendor sync stamps, which the PO sync
+        # links by before the name.
+        "SupplierId": 101,
         "SupplierName": "Fake Sage ZA Supplier A",
         "Total": 1150.0,
         "Status": "Unprocessed",
@@ -2211,6 +2493,7 @@ app.include_router(sageza)
 # State lives under STATE["blackbaud"], created on first use (reset-safe).
 
 import json
+from datetime import date, timedelta
 
 blackbaud = APIRouter(prefix="/blackbaud")
 
@@ -2222,6 +2505,13 @@ BLACKBAUD_VENDOR_FIXTURES: list[dict] = [
      "vendor_status": "Active", "payment_defaults": {"payment_terms": "Net 30"}},
     {"vendor_id": 137, "vendor_name": "Fake Blackbaud Vendor B", "ui_defined_id": "BBV-B",
      "vendor_status": "Active"},
+    # `VendorStatus` is Active / Inactive / OnHold. An Inactive vendor takes no
+    # invoice (the create answers 400); an OnHold one does, and FE NXT holds
+    # its payments instead.
+    {"vendor_id": 138, "vendor_name": "Fake Blackbaud Vendor Inactive", "ui_defined_id": "BBV-I",
+     "vendor_status": "Inactive"},
+    {"vendor_id": 139, "vendor_name": "Fake Blackbaud Vendor On Hold", "ui_defined_id": "BBV-H",
+     "vendor_status": "OnHold"},
 ]
 BLACKBAUD_ACCOUNT_FIXTURES: list[dict] = [
     {"account_id": 1, "account_number": "01-5000-00", "description": "Fake Program Supplies",
@@ -2230,7 +2520,57 @@ BLACKBAUD_ACCOUNT_FIXTURES: list[dict] = [
      "class": "Unrestricted Net Assets", "prevent_data_entry": False},
     {"account_id": 3, "account_number": "01-2000-00", "description": "Fake Accounts Payable",
      "class": "Unrestricted Net Assets", "prevent_data_entry": False},
+    # Posting to this account queues a job that ends at status 7 (failed):
+    # validation FE NXT runs in the background job rather than on the create.
+    {"account_id": 4, "account_number": "01-5900-00",
+     "description": "Fake Grant Expense (fails in the job)",
+     "class": "Temporarily Restricted Net Assets", "prevent_data_entry": False},
 ]
+BLACKBAUD_JOB_FAILING_ACCOUNT = "01-5900-00"
+
+
+def _blackbaud_fiscal_years() -> list[dict]:
+    """ListFiscalYears (`ApiCollection[FiscalYear]`): calendar years 2024-2030.
+
+    FY 2024 is `Closed`; in FY 2025 periods 1-3 (Jan-Mar) are `closed`;
+    everything else is open, so a current-dated invoice posts.
+    """
+    years = []
+    for n, year in enumerate(range(2024, 2031), start=1):
+        periods = []
+        for month in range(1, 13):
+            end_day = (date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1)).day
+            periods.append({
+                "fiscal_period_id": n * 100 + month,
+                "start_date": f"{year}-{month:02d}-01T00:00:00",
+                "end_date": f"{year}-{month:02d}-{end_day:02d}T00:00:00",
+                "sequence": month,
+                "closed": year == 2024 or (year == 2025 and month <= 3),
+            })
+        years.append({
+            "fiscal_year_id": n,
+            "year": str(year),
+            "description": f"FY {year}",
+            "start_date": f"{year}-01-01T00:00:00",
+            "end_date": f"{year}-12-31T00:00:00",
+            "status": "Closed" if year == 2024 else "Open",
+            "fiscal_periods": periods,
+        })
+    return years
+
+
+def _blackbaud_period_closed(post_date: str) -> bool:
+    day = date.fromisoformat(str(post_date)[:10])
+    for year in _blackbaud_fiscal_years():
+        if not year["start_date"][:10] <= day.isoformat() <= year["end_date"][:10]:
+            continue
+        if year["status"] in ("Closed", "Purged"):
+            return True
+        return any(
+            p["closed"] and p["start_date"][:10] <= day.isoformat() <= p["end_date"][:10]
+            for p in year["fiscal_periods"]
+        )
+    return False
 BLACKBAUD_PO_FIXTURES: list[dict] = [
     {"purchase_order_id": 501, "order_number": 1001, "vendor_id": 136,
      "vendor_name": "Fake Blackbaud Vendor A", "type": "Regular", "order_total": 1250.00,
@@ -2238,6 +2578,10 @@ BLACKBAUD_PO_FIXTURES: list[dict] = [
     {"purchase_order_id": 502, "order_number": 1002, "vendor_id": 137,
      "vendor_name": "Fake Blackbaud Vendor B", "type": "Regular", "order_total": 980.50,
      "order_status": "ClosedOrder"},
+    # `order_total` absent: a summary row with no figure to match against.
+    {"purchase_order_id": 503, "order_number": 1003, "vendor_id": 136,
+     "vendor_name": "Fake Blackbaud Vendor A", "type": "Regular",
+     "order_status": "OpenPurchaseOrder"},
 ]
 
 
@@ -2248,6 +2592,17 @@ def _blackbaud_state() -> dict[str, Any]:
 
 
 def _require_blackbaud_auth(request: Request) -> None:
+    throttle = _blackbaud_state().get("throttle")
+    if throttle and throttle["remaining"] > 0:
+        # SKY's two refusals: 429 (rate limit) and 403 + Retry-After (quota),
+        # each with Retry-After (the adapter's call budget honours both).
+        throttle["remaining"] -= 1
+        raise ProviderError(
+            throttle["status"],
+            {"statusCode": throttle["status"], "message": "Rate limit is exceeded."
+             if throttle["status"] == 429 else "Out of call volume quota."},
+            headers={"Retry-After": str(throttle["retry_after"])},
+        )
     if not request.headers.get("bb-api-subscription-key", "").strip():
         raise ProviderError(
             401, {"statusCode": 401, "message": "Access denied due to missing subscription key."}
@@ -2300,6 +2655,44 @@ async def blackbaud_vendors(request: Request) -> dict:
     return _blackbaud_page(request, BLACKBAUD_VENDOR_FIXTURES)
 
 
+@blackbaud.get("/accountspayable/v1/vendors/{vendor_id}")
+async def blackbaud_vendor(request: Request, vendor_id: int) -> dict:
+    """GetVendor (`VendorDetail`, which carries `vendor_status`)."""
+    _require_blackbaud_auth(request)
+    for vendor in BLACKBAUD_VENDOR_FIXTURES:
+        if vendor["vendor_id"] == vendor_id:
+            return copy.deepcopy(vendor)
+    raise ProviderError(404, {"Error": "The specified record could not be found."})
+
+
+@blackbaud.get("/generalledger/v1/fiscalyears")
+async def blackbaud_fiscal_years(request: Request) -> dict:
+    _require_blackbaud_auth(request)
+    years = _blackbaud_fiscal_years()
+    return {"count": len(years), "value": years}
+
+
+@blackbaud.post("/__seed-invoices")
+async def blackbaud_seed_invoices(body: dict) -> dict:
+    """Test hook: {"rows": [{"vendor_id", "invoice_number", "invoice_date",
+    "description"?, "status"?}, ...]} — invoices keyed by hand in FE NXT."""
+    state = _blackbaud_state()
+    for row in body.get("rows") or []:
+        state["next_invoice"] += 1
+        state["invoices"][state["next_invoice"]] = {
+            "invoice_id": state["next_invoice"],
+            "vendor_id": row["vendor_id"],
+            "invoice_number": row.get("invoice_number"),
+            "invoice_date": row.get("invoice_date"),
+            "description": row.get("description"),
+            "amount": str(row.get("amount", "1.00")),
+            "balance": str(row.get("amount", "1.00")),
+            "status": row.get("status") or "Approved",
+            "post_status": "Posted",
+        }
+    return {"status": "ok", "count": len(body.get("rows") or [])}
+
+
 @blackbaud.get("/accountspayable/v1/purchaseorders")
 async def blackbaud_purchase_orders(request: Request) -> dict:
     _require_blackbaud_auth(request)
@@ -2315,14 +2708,29 @@ async def blackbaud_accounts(request: Request) -> dict:
 @blackbaud.get("/accountspayable/v1/invoices")
 async def blackbaud_list_invoices(request: Request) -> dict:
     _require_blackbaud_auth(request)
+    # `search_text` "Can match vendor_name, invoice_number, description, or
+    # purchase_order_number"; `from_date` / `to_date` keep invoices dated
+    # after / before a date — read strictly (exclusive), the narrower reading.
     needle = (request.query_params.get("search_text") or "").lower()
-    rows = [
-        r
-        for r in _blackbaud_state()["invoices"].values()
-        if not needle
-        or needle in str(r.get("invoice_number", "")).lower()
-        or needle in str(r.get("description", "")).lower()
-    ]
+    after = request.query_params.get("from_date")
+    before = request.query_params.get("to_date")
+    vendor_names = {v["vendor_id"]: v["vendor_name"] for v in BLACKBAUD_VENDOR_FIXTURES}
+    rows = []
+    for r in _blackbaud_state()["invoices"].values():
+        haystack = (
+            r.get("invoice_number"),
+            r.get("description"),
+            r.get("purchase_order_number"),
+            vendor_names.get(r.get("vendor_id")),
+        )
+        if needle and not any(needle in str(h or "").lower() for h in haystack):
+            continue
+        day = str(r.get("invoice_date") or "")[:10]
+        if after and not day > after[:10]:
+            continue
+        if before and not day < before[:10]:
+            continue
+        rows.append(r)
     return _blackbaud_page(request, rows)
 
 
@@ -2338,8 +2746,15 @@ async def blackbaud_create_invoice(request: Request) -> dict:
                   "payment_details", "post_date"):
         if field not in body:
             raise _blackbaud_invalid(f"{field} is required.")
-    if body["vendor_id"] not in {v["vendor_id"] for v in BLACKBAUD_VENDOR_FIXTURES}:
+    vendor = next(
+        (v for v in BLACKBAUD_VENDOR_FIXTURES if v["vendor_id"] == body["vendor_id"]), None
+    )
+    if vendor is None:
         raise _blackbaud_invalid("The vendor could not be found.")
+    if vendor["vendor_status"] == "Inactive":
+        raise _blackbaud_invalid("The vendor is inactive.")
+    if _blackbaud_period_closed(body["post_date"]):
+        raise _blackbaud_invalid("The post date is in a closed fiscal period.")
     known = {a["account_number"] for a in BLACKBAUD_ACCOUNT_FIXTURES}
     debits = credits = Decimal(0)
     for dist in body["distributions"]:
@@ -2360,12 +2775,18 @@ async def blackbaud_create_invoice(request: Request) -> dict:
     if debits != credits or credits != Decimal(str(body["amount"])):
         raise _blackbaud_invalid("Distributions must balance to the invoice amount.")
     state = _blackbaud_state()
+    if any(d["account_number"] == BLACKBAUD_JOB_FAILING_ACCOUNT for d in body["distributions"]):
+        # Accepted, queued, and the job fails without creating an invoice.
+        state["next_job"] += 1
+        state["jobs"][state["next_job"]] = None
+        return {"process_id": state["next_job"]}
     state["next_invoice"] += 1
     invoice_id = state["next_invoice"]
     state["invoices"][invoice_id] = {
         "invoice_id": invoice_id,
         "vendor_id": body["vendor_id"],
         "invoice_number": body.get("invoice_number"),
+        "invoice_date": body.get("invoice_date"),
         "description": body.get("description"),
         "amount": str(body["amount"]),
         "balance": str(body["amount"]),
@@ -2380,8 +2801,11 @@ async def blackbaud_create_invoice(request: Request) -> dict:
 @blackbaud.get("/accountspayable/v1/backgroundProcess/{process_id}/status")
 async def blackbaud_job_status(request: Request, process_id: int) -> dict:
     _require_blackbaud_auth(request)
-    if process_id not in _blackbaud_state()["jobs"]:
+    jobs = _blackbaud_state()["jobs"]
+    if process_id not in jobs:
         raise ProviderError(404, {"Error": "The specified record could not be found."})
+    if jobs[process_id] is None:
+        return {"status": 7, "status_message": "Job failed", "process_id": process_id}
     return {"status": 5, "status_message": "Completed", "process_id": process_id}
 
 
@@ -2401,6 +2825,22 @@ async def blackbaud_get_invoice(request: Request, invoice_id: int) -> Response:
     if invoice is None:
         raise ProviderError(404, {"Error": "The specified record could not be found."})
     return _blackbaud_json(invoice)
+
+
+@blackbaud.post("/__throttle")
+async def blackbaud_throttle(body: dict) -> dict:
+    """Test hook: the next ``count`` SKY calls answer ``status`` (429 for the
+    rate limit, 403 for the daily quota) with ``Retry-After: retry_after``.
+    {"status": 403, "retry_after": 3600, "count": 1}; count 0 clears it."""
+    status = int(body.get("status", 429))
+    if status not in (429, 403):
+        raise ProviderError(400, {"detail": "status must be 429 or 403"})
+    _blackbaud_state()["throttle"] = {
+        "status": status,
+        "retry_after": max(1, int(body.get("retry_after", 1))),
+        "remaining": max(0, int(body.get("count", 1))),
+    }
+    return {"status": "ok"}
 
 
 @blackbaud.post("/__set-status")
@@ -2475,11 +2915,15 @@ D365_ACCOUNT_FIXTURES: list[dict] = [
 
 # BC `purchaseOrders` with `purchaseOrderLines` expanded. BC leaves
 # `currencyCode` blank for the company's local currency and renders a blank
-# date as 0001-01-01; PO-FAKE-BC-401 carries both.
+# date as 0001-01-01; PO-FAKE-BC-401 carries both. `vendorId` is the GUID of
+# the vendor fixture above — the id the vendor sync stamps — so the PO sync
+# links each order to that vendor by id, not by `vendorName`.
 D365_PO_FIXTURES: list[dict] = [
     {
         "id": "b4010000-0000-0000-0000-000000000401",
         "number": "PO-FAKE-BC-401",
+        "vendorId": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
+        "vendorNumber": "V0001",
         "vendorName": "Fake BC Vendor A",
         "currencyCode": "",
         "requestedReceiptDate": "0001-01-01",
@@ -2500,6 +2944,8 @@ D365_PO_FIXTURES: list[dict] = [
     {
         "id": "b4020000-0000-0000-0000-000000000402",
         "number": "PO-FAKE-BC-402",
+        "vendorId": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
+        "vendorNumber": "V0001",
         "vendorName": "Fake BC Vendor A",
         "currencyCode": "EUR",
         "requestedReceiptDate": "2026-05-20",
@@ -2668,12 +3114,15 @@ NETSUITE_SUITEQL_VENDOR_FIXTURES: list[dict] = [
 ]
 
 # SuiteQL purchase-order rows: `status` is the PurchOrd status letter
-# (B = Pending Receipt, H = Closed), `currency` the currency's ISO symbol.
+# (B = Pending Receipt, H = Closed), `currency` the currency's ISO symbol,
+# `vendorid` the `t.entity` internal id — a NETSUITE_SUITEQL_VENDOR_FIXTURES
+# `id` — and `vendorname` its display name (`BUILTIN.DF(t.entity)`).
 NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
     {
         "id": "501",
         "tranid": "PO-FAKE-NS-501",
         "status": "B",
+        "vendorid": "25",
         "vendorname": "Fake NetSuite Vendor A",
         "foreigntotal": 2100.50,
         "currency": "USD",
@@ -2683,6 +3132,7 @@ NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
         "id": "502",
         "tranid": "PO-FAKE-NS-502",
         "status": "H",
+        "vendorid": "26",
         "vendorname": "Fake NetSuite Vendor B",
         "foreigntotal": 640.00,
         "currency": "GBP",

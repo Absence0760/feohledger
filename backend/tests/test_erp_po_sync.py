@@ -29,6 +29,7 @@ import app.services.erp_adapters.dynamics_365_bc  # noqa: F401, E402
 import app.services.erp_adapters.merge_dev  # noqa: F401, E402
 import app.services.erp_adapters.mock_adapter  # noqa: F401, E402
 import app.services.erp_adapters.netsuite  # noqa: F401, E402
+from app.services.erp_adapters.base import PoSkipReason, SkippedPo  # noqa: E402
 
 
 def _run(coro):
@@ -181,9 +182,12 @@ def test_bc_list_pos_maps_orders_and_lines(monkeypatch):
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_make_mock_response(200, {"access_token": "tok"}))
         client.get = AsyncMock(return_value=_raw_json_response(200, text))
-        pos = _run(_bc_adapter(monkeypatch).list_pos())
+        listing = _run(_bc_adapter(monkeypatch).list_pos_report())
+    pos = listing.pos
 
     assert [p.po_number for p in pos] == ["PO-1", "PO-2"]
+    # Named, so a total synced for it earlier is no longer trusted (§323).
+    assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
     first, second = pos
     assert first.total == Decimal("99999999999999.99")
     assert first.vendor_name == "Acme"
@@ -230,6 +234,57 @@ def test_bc_list_pos_is_bounded_and_degrades(monkeypatch):
         assert _run(_bc_adapter(monkeypatch).list_pos()) == []
 
 
+def test_bc_list_pos_carries_the_vendor_id_list_vendors_reports(monkeypatch):
+    """A PO names its vendor by the GUID ``list_vendors`` stamps as
+    ``erp_vendor_id``, so the sync links it by id: the vendor renamed since the
+    PO was raised (``vendorName`` is the old name) and the second vendor with
+    the same name both resolve to the right supplier. BC's empty GUID is no
+    vendor."""
+    vendors = {
+        "value": [
+            {"id": "guid-acme-1", "number": "V0001", "displayName": "Acme"},
+            {"id": "guid-acme-2", "number": "V0002", "displayName": "Acme"},
+            {"id": "guid-renamed", "number": "V0003", "displayName": "Bolt Ltd"},
+        ]
+    }
+    pos = {
+        "value": [
+            {
+                "number": "PO-1",
+                "vendorId": "guid-acme-2",
+                "vendorName": "Acme",
+                "totalAmountIncludingTax": 10,
+            },
+            {
+                "number": "PO-2",
+                "vendorId": "guid-renamed",
+                "vendorName": "Bolt Old Name",
+                "totalAmountIncludingTax": 10,
+            },
+            {
+                "number": "PO-3",
+                "vendorId": "00000000-0000-0000-0000-000000000000",
+                "vendorName": "",
+                "totalAmountIncludingTax": 10,
+            },
+        ]
+    }
+
+    async def get(url, **_kw):
+        return _make_mock_response(200, pos if "purchaseOrders" in url else vendors)
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_make_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(side_effect=get)
+        adapter = _bc_adapter(monkeypatch)
+        vendor_ids = {v.erp_vendor_id for v in _run(adapter.list_vendors())}
+        by_number = {p.po_number: p.vendor_erp_id for p in _run(adapter.list_pos())}
+
+    assert by_number == {"PO-1": "guid-acme-2", "PO-2": "guid-renamed", "PO-3": None}
+    assert {"guid-acme-2", "guid-renamed"} <= vendor_ids
+
+
 # ---------- NetSuite (SuiteQL over `transaction`) -------------------------
 
 
@@ -251,7 +306,7 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     import json
 
     text = """{"items": [
-      {"id": "501", "tranid": "PO-501", "status": "B", "vendorname": "Acme",
+      {"id": "501", "tranid": "PO-501", "status": "B", "vendorid": 25, "vendorname": "Acme",
        "foreigntotal": 99999999999999.99, "currency": "usd", "duedate": "2026-06-01"},
       {"id": "502", "tranid": "PO-502", "status": "H", "vendorname": null,
        "foreigntotal": 640.00, "currency": null, "duedate": null},
@@ -264,8 +319,12 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_raw_json_response(200, text))
-        pos = _run(_netsuite_adapter().list_pos())
+        listing = _run(_netsuite_adapter().list_pos_report())
+    pos = listing.pos
 
+    # A numbered PO with no total is named, so a total synced for it earlier
+    # stops being matched against (decisions §323); one with no number is not.
+    assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
     assert [(p.po_number, p.status) for p in pos] == [
         ("PO-501", "open"),
         ("PO-502", "closed"),
@@ -276,6 +335,9 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     assert pos[0].total == Decimal("99999999999999.99")
     assert pos[0].currency == "USD"
     assert pos[0].vendor_name == "Acme"
+    # The vendor's internal id (`t.entity`), as the string `list_vendors` reports.
+    assert pos[0].vendor_erp_id == "25"
+    assert pos[1].vendor_erp_id is None  # absent: the name fallback only
     assert pos[0].expected_delivery_date == date(2026, 6, 1)
     assert pos[1].currency is None  # never defaulted
     assert pos[1].expected_delivery_date is None
@@ -283,9 +345,35 @@ def test_netsuite_list_pos_maps_suiteql_rows():
 
     query = json.loads(client.post.await_args.kwargs["content"])["q"]
     assert "FROM transaction" in query and "'PurchOrd'" in query
+    assert "t.entity AS vendorid" in query
     # Dates through TO_CHAR: SuiteQL otherwise formats them per user preference.
     assert "TO_CHAR(t.duedate, 'YYYY-MM-DD')" in query
     assert client.post.await_args.kwargs["headers"]["Prefer"] == "transient"
+
+
+def test_netsuite_po_links_to_the_vendor_id_list_vendors_reports_even_after_a_rename():
+    """Issue #652: the PO carries the same id the vendor sync stored, so a
+    vendor renamed in NetSuite (the PO still showing the old display name), or
+    two vendors sharing a name, still link to the right row."""
+    vendors = """{"items": [
+      {"id": 25, "entityid": "ACME-1", "companyname": "Acme Holdings (renamed)", "isinactive": "F"},
+      {"id": 26, "entityid": "ACME-2", "companyname": "Acme", "isinactive": "F"}
+    ], "hasMore": false}"""
+    pos = """{"items": [
+      {"id": "501", "tranid": "PO-501", "status": "B", "vendorid": 25, "vendorname": "Acme",
+       "foreigntotal": 10, "currency": "USD"}
+    ], "hasMore": false}"""
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_raw_json_response(200, vendors))
+        listed = _run(_netsuite_adapter().list_vendors())
+        client.post = AsyncMock(return_value=_raw_json_response(200, pos))
+        (po,) = _run(_netsuite_adapter().list_pos())
+
+    by_id = {v.erp_vendor_id: v for v in listed}
+    assert po.vendor_erp_id == "25"
+    # The id names the renamed vendor, not the one now called "Acme".
+    assert by_id[po.vendor_erp_id].name == "Acme Holdings (renamed)"
 
 
 def test_netsuite_list_pos_is_bounded_and_degrades():
@@ -373,8 +461,46 @@ def test_merge_dev_list_pos_maps_response_into_po_payloads():
     assert p.line_items[0].quantity == Decimal("5")
     assert p.line_items[0].unit_price == Decimal("100")
     assert p.line_items[0].total == Decimal("500")
-    assert p.line_items[0].gl_account == "6010"
-    assert p.line_items[1].gl_account is None  # absent in payload
+    # `account` is a Merge Account id, not a code: never stored as one.
+    assert [li.gl_account for li in p.line_items] == [None, None]
+
+
+def test_merge_dev_list_pos_carries_the_vendor_id_list_vendors_reports():
+    """A PO names its vendor by the Merge id ``list_vendors`` stamps as
+    ``erp_vendor_id`` — expanded (``{"id": ...}``) or bare — so the sync links
+    it by id: a vendor renamed since the PO was raised and a second vendor with
+    the same name both resolve to the right one."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    vendors = {
+        "results": [
+            {"id": "mv-acme-1", "name": "Acme"},
+            {"id": "mv-acme-2", "name": "Acme"},
+            {"id": "mv-bolt", "name": "Bolt Ltd"},
+        ],
+        "next": None,
+    }
+    pos = {
+        "results": [
+            {"number": "PO-1", "vendor": {"id": "mv-acme-2", "name": "Acme"}},
+            {"number": "PO-2", "vendor": "mv-bolt"},
+            {"number": "PO-3", "vendor": None},
+        ],
+        "next": None,
+    }
+
+    async def get(url, **_kw):
+        return _make_mock_response(200, pos if url.endswith("/purchase-orders") else vendors)
+
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(side_effect=get)
+        vendor_ids = {v.erp_vendor_id for v in _run(adapter.list_vendors())}
+        by_number = {p.po_number: p.vendor_erp_id for p in _run(adapter.list_pos())}
+
+    assert by_number == {"PO-1": "mv-acme-2", "PO-2": "mv-bolt", "PO-3": None}
+    assert {"mv-acme-2", "mv-bolt"} <= vendor_ids
 
 
 def test_merge_dev_list_pos_maps_expected_delivery_date():
@@ -461,6 +587,11 @@ def test_merge_dev_list_pos_status_mapping_uses_internal_vocab():
         "CANCELLED": "cancelled",
         "CANCELED": "cancelled",
         "VOIDED": "cancelled",
+        # Merge's published PurchaseOrderStatusEnum.
+        "SUBMITTED": "open",
+        "AUTHORIZED": "open",
+        "BILLED": "closed",
+        "DELETED": "cancelled",
         "something_weird": "open",  # default fallback
     }
 
@@ -471,6 +602,60 @@ def test_merge_dev_list_pos_status_mapping_uses_internal_vocab():
             client.get = AsyncMock(return_value=_make_mock_response(200, body))
             pos = _run(adapter.list_pos())
         assert pos[0].status == expected, f"{raw_status} should map to {expected}"
+
+
+def test_merge_dev_list_pos_reads_purchase_order_number():
+    """Merge's PO number field is ``purchase_order_number``. Read without it,
+    every PO fell through to its Merge ``id`` and was stored under a UUID no
+    invoice quotes, so nothing could ever match it."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [{"id": "9b0c-uuid", "purchase_order_number": "PO-7", "status": "AUTHORIZED"}],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        pos = _run(adapter.list_pos())
+    assert [(p.po_number, p.status) for p in pos] == [("PO-7", "open")]
+    # The UUID an earlier build stored it under, so the sync re-keys that row
+    # instead of creating a second one beside it (decisions §328).
+    assert pos[0].legacy_po_numbers == ("9b0c-uuid",)
+    assert MergeDevAdapter.retired_po_numbers == ("UNKNOWN",)
+
+
+def test_merge_dev_list_pos_skips_a_po_with_no_number_or_id_never_a_shared_placeholder(caplog):
+    """The PO sync upserts by ``po_number``. Two records with neither a number
+    nor a Merge id used to both map to ``"UNKNOWN"``, so they landed in ONE
+    row, the second overwriting the first's vendor and total — a PO matched
+    against real invoices for an amount nobody issued. They are skipped, and
+    the log carries a count, never the record (vendor names, amounts)."""
+    import logging
+
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"purchase_order_number": "PO-7", "total_amount": 100},
+            {"total_amount": 500, "vendor": {"id": "c-1", "name": "Acme Secret Vendor"}},
+            {"purchase_order_number": "", "id": None, "total_amount": 900},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        with caplog.at_level(logging.WARNING, logger="app.services.erp_adapters.merge_dev"):
+            pos = _run(adapter.list_pos())
+
+    assert [p.po_number for p in pos] == ["PO-7"]
+    assert "UNKNOWN" not in {p.po_number for p in pos}
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("skipped 2 PO(s)" in m for m in messages), messages
+    assert not any("Acme Secret Vendor" in m or "500" in m for m in messages)
 
 
 def test_merge_dev_list_pos_follows_pagination_cursor():

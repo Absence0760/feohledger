@@ -9,7 +9,7 @@ emails and log-adjacent in-app rows.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from app.models.notification import (
@@ -289,5 +289,54 @@ def render_erp_connection(
             f"The authorization that lets FeohLedger reach {erp_name} expires on "
             f"{when}{left}. Reconnect it before then ({where} → Reconnect) so posting "
             f"bills and syncing payments keep working."
+        )
+    return RenderedNotification(title=title, body_text=body, body_html=_html(body))
+
+
+#: The ERP call-quota notices (``services/erp_call_budget``, decisions §322).
+ERP_QUOTA_WARNING = "warning"
+ERP_QUOTA_TENANT_BUDGET = "tenant_budget"
+ERP_QUOTA_SUBSCRIPTION = "subscription_quota"
+
+
+def render_erp_call_quota(
+    *,
+    notice: str,
+    erp_name: str,
+    used: int | None,
+    budget: int | None,
+    resets_at: datetime,
+) -> RenderedNotification:
+    """Render an ERP call-quota notice: this workspace is near or past its daily
+    share of the provider's API calls, or the provider says the subscription's
+    quota is used. Names only the ERP (a fixed display name), call counts and a
+    UTC time; nothing PII-bearing.
+    """
+    when = resets_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    held = (
+        f"Until then FeohLedger makes no further calls: invoices sent to {erp_name} are "
+        f"refused with a reason and can be retried after the reset, and syncs are refused "
+        f"the same way."
+    )
+    if notice == ERP_QUOTA_SUBSCRIPTION:
+        title = f"{erp_name} API calls are paused until {when}"
+        body = (
+            f"{erp_name} reports that the API subscription FeohLedger uses for your "
+            f"workspace has used its daily call quota. It resets at {when}. {held}"
+        )
+    elif notice == ERP_QUOTA_TENANT_BUDGET:
+        share = f"all {budget:,}" if budget else "all"
+        title = f"Your workspace has used today's {erp_name} API calls"
+        body = (
+            f"Your workspace has used {share} of the {erp_name} API calls it may make "
+            f"today. The allowance resets at {when}. {held}"
+        )
+    else:
+        counts = f"{used:,} of its {budget:,}" if used is not None and budget else "most of its"
+        title = f"Your workspace has used 80% of today's {erp_name} API calls"
+        body = (
+            f"Your workspace has made {counts} {erp_name} API calls for today. When the "
+            f"allowance is used, sends and syncs to {erp_name} are refused until it "
+            f"resets at {when}."
         )
     return RenderedNotification(title=title, body_text=body, body_html=_html(body))

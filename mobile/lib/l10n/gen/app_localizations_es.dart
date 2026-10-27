@@ -2103,6 +2103,24 @@ class AppLocalizationsEs extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Descripción';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'La OC $po cambió en $erp el $date y una nueva comprobación ya coincide. Revísela para liberar la retención.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'La OC $po cambió en $erp y una nueva comprobación ya coincide. Revísela para liberar la retención.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'La orden de compra cambió en $erp y una nueva comprobación ya coincide. Revísela para liberar la retención.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'su ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Factura';
 
   @override
@@ -2819,6 +2837,16 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'El pedido $poNumber está cancelado — la factura no se cotejó con él';
+  }
+
+  @override
+  String invoiceWarningPoTotalUnverifiable(String poNumber) {
+    return 'El total del pedido $poNumber no se pudo confirmar en el ERP en la última sincronización; los importes no se compararon';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return 'Coincidencia parcial de 3 vías — coincidencia $matchType con el pedido $poNumber, pero solo se ha recibido parte de la cantidad pedida';
   }
@@ -3022,6 +3050,14 @@ class AppLocalizationsEs extends AppLocalizations {
   ) {
     return 'Discrepancia de moneda: factura en $invoiceCurrency, pedido en $poCurrency; importes no comparados';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'Pedido cancelado — importes no comparados';
+
+  @override
+  String get invoicePoMatchIssuePoTotalUnverifiable =>
+      'Total del pedido no confirmado por el ERP en la última sincronización; importes no comparados';
 
   @override
   String invoicePoMatchIssueAmountMismatch(

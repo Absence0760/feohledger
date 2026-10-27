@@ -297,6 +297,7 @@ async def update_organization(
         org.name = body.name
     credential_changes: dict[str, list[str]] = {}
     erp_secrets_to_drop: frozenset[str] = frozenset()
+    erp_drop_reason = "erp_destination_changed"
 
     if body.settings is not None:
         _validate_settings_patch(body.settings)
@@ -333,6 +334,12 @@ async def update_organization(
                 body.settings["erp"] = kept or None
             await ensure_live_erp_entitled(db, org.id, body.settings.get("erp"))
             erp_secrets_to_drop = erp_catalog.secrets_to_drop(erp_before, body.settings["erp"])
+            # Same connection: only a switched-off sign-in method's secrets go.
+            erp_drop_reason = (
+                "erp_sign_in_method_changed"
+                if erp_catalog.same_connection(erp_before, body.settings["erp"])
+                else "erp_destination_changed"
+            )
 
         # The chat webhook URL has one sanctioned writer — the audited
         # `PUT /api/organization/chat-notifications/webhook`. This generic merge
@@ -516,7 +523,7 @@ async def update_organization(
                             "block": "erp",
                             "changed": changed,
                             "cleared": changed,
-                            "reason": "erp_destination_changed",
+                            "reason": erp_drop_reason,
                         },
                     )
                 except Exception:

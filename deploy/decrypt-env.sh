@@ -158,5 +158,14 @@ if ! grep -Eq '^(FEOH_ANTHROPIC_API_KEY|FEOH_EXTRACTION_PROVIDER)=.+' .env.tmp; 
 	echo "WARN: neither FEOH_ANTHROPIC_API_KEY nor FEOH_EXTRACTION_PROVIDER is set — every invoice upload's extraction will fail (manual entry only). See deploy/prod.sops.yaml.example § Invoice extraction." >&2
 fi
 
+# The published DPA (§ 8) says sub-processor change notices are emailed to
+# every customer's administrators; FEOH_SUBPROCESSOR_NOTICES_ENABLED runs the
+# sweep that sends them (docs/decisions.md §321). It is off by default for
+# local dev, and the app refuses to boot a deployed env with it off
+# (config.py _require_subprocessor_notices_in_deployed_envs) — refused here
+# too, so the deploy stops before compose restarts the API into a boot loop.
+feoh_is_true "$(env_value FEOH_SUBPROCESSOR_NOTICES_ENABLED)" ||
+	die "FEOH_SUBPROCESSOR_NOTICES_ENABLED must be true — the published DPA says sub-processor change notices are emailed to customers, and the app refuses to boot a deployed env without the sweep that sends them. See deploy/prod.sops.yaml.example § Sub-processor change notices."
+
 mv .env.tmp .env
 echo "decrypt-env.sh: deploy/.env written and checked."

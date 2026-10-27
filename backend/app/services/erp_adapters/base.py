@@ -6,6 +6,10 @@ import enum
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.erp_call_budget import CallBudget
 
 
 class ErpInvoiceStatus(enum.StrEnum):
@@ -87,6 +91,11 @@ class InvoicePayload:
     #: An adapter with asynchronous creates checks this job before queueing
     #: another, so a retry while the first is still running cannot post twice.
     pending_job_id: str | None = None
+    #: The invoice dates earlier attempts of this push were sent with, when
+    #: they differ from ``invoice_date`` (persisted by ``services/erp``). An
+    #: adapter whose duplicate lookup narrows by date searches these too, so
+    #: a bill an earlier attempt created is found after the date was edited.
+    prior_invoice_dates: list[date] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +309,9 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "due_date_missing",
         "amount_not_positive",
         "job_unconfirmed",
+        "job_failed",
+        # `services/erp_call_budget`: the shared SKY call quota (decisions §322)
+        "erp_call_budget_exhausted",
         # `services/erp` itself: the sealed ERP credentials could not be opened
         "erp_credentials_unavailable",
         # `services/erp_export_gate`: an open duplicate / fraud exception (§286)
@@ -537,6 +549,60 @@ class PoPayload:
     # default is a label nobody gave the figure; decisions §197), and the sync
     # then stores NULL, rendered bare.
     currency: str | None = None
+    # Numbers an earlier build of this adapter stored the same PO under (Merge
+    # keyed a PO by its record id before it read `purchase_order_number`). When
+    # no row holds `po_number` yet, the sync re-keys the row found under one of
+    # these instead of creating a duplicate the old row's total is summed
+    # beside (decisions §328).
+    legacy_po_numbers: tuple[str, ...] = ()
+
+
+class PoSkipReason(enum.StrEnum):
+    """Why an adapter's PO listing left a purchase order out (``SkippedPo``).
+
+    Coded, never the ERP's own text. Every reason means the same thing to the
+    sync: the ERP has this PO, and the adapter could not state its total
+    exactly, so whatever total FeohLedger holds for that number may no longer
+    be the ERP's (decisions §323).
+    """
+
+    #: The total cannot be computed exactly from what the ERP returned (a
+    #: discount, a price unit of measure, a charge or price of unknown
+    #: currency, a missing price, no total field).
+    unpriceable = "unpriceable"
+    #: The PO's lines could not be read whole.
+    lines_unread = "lines_unread"
+    #: The ERP returned the header and no lines.
+    no_lines = "no_lines"
+    #: The PO is labelled with a currency the adapter cannot place against the
+    #: company's local currency, because that could not be read.
+    local_currency_unknown = "local_currency_unknown"
+    #: Stamped by the sync, not an adapter: the ERP amended lines goods were
+    #: already received against, and a received line has no ERP line it can be
+    #: paired with, so the stored lines cannot be refreshed safely.
+    lines_changed = "lines_changed"
+
+
+@dataclass(frozen=True)
+class SkippedPo:
+    """A PO the ERP has and ``list_pos`` deliberately did not return."""
+
+    po_number: str
+    reason: PoSkipReason
+
+
+@dataclass
+class PoListing:
+    """``ErpAdapter.list_pos_report``: the POs, and the ones left out.
+
+    ``skipped`` is what lets the sync tell "the ERP no longer reports a usable
+    total for this PO" apart from "this PO was never here": without it a PO the
+    adapter starts skipping keeps the total an earlier sync stored, and the PO
+    match keeps trusting it.
+    """
+
+    pos: list[PoPayload]
+    skipped: list[SkippedPo] = field(default_factory=list)
 
 
 @dataclass
@@ -658,6 +724,29 @@ class ErpListingIncomplete(RuntimeError):
         super().__init__(f"{provider} {collection} listing incomplete: {gap.value}")
 
 
+#: Stable reason code: the adapter refused to spend an API call because the
+#: org's share of a shared provider quota is used, the whole subscription's
+#: quota is, or the provider asked us to slow down (``services/erp_call_budget``,
+#: decisions §322). ``params.reason`` says which and ``params.retry_after`` when
+#: (ISO-8601 UTC). Nothing was sent.
+ERP_CALL_BUDGET_EXHAUSTED = "erp_call_budget_exhausted"
+
+
+class ErpCallBudgetExhausted(RuntimeError):
+    """An ERP read refused before its call by ``services/erp_call_budget``.
+
+    Raised by a sync listing or status read; a push returns the coded
+    :data:`ERP_CALL_BUDGET_EXHAUSTED` result instead. PII-free: the provider
+    literal, a reason word and a UTC timestamp.
+    """
+
+    def __init__(self, provider: str, reason: str, retry_after: datetime):
+        self.provider = provider
+        self.reason = reason
+        self.retry_after = retry_after
+        super().__init__(f"{provider} call budget exhausted: {reason}")
+
+
 def sync_listing_pages(page_size: int) -> int:
     """Pages a listing of ``page_size`` rows a page may read (rounded up)."""
     return -(-SYNC_LISTING_MAX_ROWS // page_size)
@@ -688,6 +777,19 @@ class ErpAdapter:
         """Request cancellation of a posted invoice."""
         raise NotImplementedError
 
+    def call_budget(self) -> CallBudget | None:
+        """The shared-quota budget this connection's calls are counted
+        against (``services/erp_call_budget``, decisions §322), or None for an
+        ERP whose API quota is not shared across tenants. Read by the
+        connection status endpoint to show the org its usage (§324).
+        """
+        return None
+
+    #: Placeholder PO numbers an earlier build of this adapter wrote for POs it
+    #: could not number, several POs into one row. The sync marks such a row
+    #: unverifiable so its merged total is never matched or summed (§328).
+    retired_po_numbers: tuple[str, ...] = ()
+
     async def list_pos(self) -> list[PoPayload]:
         """Pull purchase orders from the ERP.
 
@@ -697,6 +799,19 @@ class ErpAdapter:
         override this.
         """
         return []
+
+    async def list_pos_report(self) -> PoListing:
+        """:meth:`list_pos` plus the POs it deliberately left out.
+
+        What the PO sync calls. The default wraps :meth:`list_pos` and reports
+        nothing skipped, so an adapter that never skips a PO needs no change.
+        An adapter that DOES leave a PO out because it cannot state its total
+        exactly overrides this and names each one (:class:`SkippedPo`), so the
+        sync can mark a total synced earlier as no longer verifiable instead of
+        leaving it for the PO match to trust (decisions §323). Such an adapter
+        keeps :meth:`list_pos` returning ``(await self.list_pos_report()).pos``.
+        """
+        return PoListing(pos=await self.list_pos())
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """Pull the WHOLE chart of accounts from the ERP, or raise.

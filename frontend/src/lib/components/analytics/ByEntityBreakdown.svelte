@@ -161,6 +161,14 @@
 			{#if hasUnlabelledPos}
 				<p class="be-note" data-testid="open-po-no-currency">{m('byEntity.openPoNoCurrency')}</p>
 			{/if}
+			<!-- Open POs whose total the ERP could not confirm are left OUT of
+			     the column (decisions §323); the consolidated row's count covers
+			     every entity's. -->
+			{#if data.consolidated.open_po_unverifiable_count > 0}
+				<p class="be-skipped" role="alert" data-testid="open-po-unverifiable">
+					{m('byEntity.openPoUnverifiable', { n: data.consolidated.open_po_unverifiable_count })}
+				</p>
+			{/if}
 		{/if}
 	</div>
 {/if}

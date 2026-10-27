@@ -2083,6 +2083,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Description';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'PO $po changed in $erp on $date, and a re-check now matches. Review it to clear the hold.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'PO $po changed in $erp, and a re-check now matches. Review it to clear the hold.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'The purchase order changed in $erp, and a re-check now matches. Review it to clear the hold.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'your ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Invoice';
 
   @override
@@ -2799,6 +2817,16 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'PO $poNumber is cancelled — the invoice was not matched against it';
+  }
+
+  @override
+  String invoiceWarningPoTotalUnverifiable(String poNumber) {
+    return 'The total of PO $poNumber could not be confirmed from the ERP on its last sync — the amounts were not compared';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return 'Partial 3-way match — $matchType match against PO $poNumber, but only part of the ordered quantity has been received';
   }
@@ -3002,6 +3030,14 @@ class AppLocalizationsEn extends AppLocalizations {
   ) {
     return 'Currency mismatch: invoice in $invoiceCurrency, PO in $poCurrency — amounts not compared';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'PO is cancelled — amounts not compared';
+
+  @override
+  String get invoicePoMatchIssuePoTotalUnverifiable =>
+      'PO total not confirmed by the ERP on its last sync — amounts not compared';
 
   @override
   String invoicePoMatchIssueAmountMismatch(

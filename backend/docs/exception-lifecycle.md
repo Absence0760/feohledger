@@ -145,6 +145,16 @@ the row — **and enforces segregation of duties**. Every decider goes through i
   hold cleared by a `pass` someone implicated in the invoice typed in
   themselves, and a row an agent is mid-way through deciding
   (`exception_lifecycle.deciding`) is left for the agent ([po-matching.md](po-matching.md) § Before Payment).
+  **A refresh the ERP PO sync triggers never takes this door** (decisions
+  §323, amended — a product-owner call pending CISO review): it may raise a
+  `po_mismatch` / `quality_hold` but not clear one, because an ERP-side actor
+  who changed the PO is outside the invoice's implicated set and so invisible
+  to `segregation_refusal`. A row the sync's re-match no longer finds stays
+  open and payment-blocking, with `erp_report = {"kind": "po_rematch_clears",
+  "erp_type", "po_number", "observed_on"}` recording that the re-check now
+  matches; a person clears it here, through `record_decision`, under the
+  segregation refusal below. The note is removed if a later refresh finds the
+  finding again.
 
 Previously these were copies (the coordinator's helper carried a comment saying
 it was mirroring the API's; the payments one said the same), and none wrote an

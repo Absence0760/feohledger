@@ -506,6 +506,20 @@ def test_value_received_goods_returns_decimal_not_float():
     assert received == Decimal("33.33")
 
 
+async def test_received_goods_read_failure_raises_rather_than_reporting_zero():
+    """The GR/IR leg used to swallow every error into `0, {}, set()`, so a lost
+    connection rendered on /cfo as a confident "nothing received" and dropped
+    the unverifiable-PO count. A failed read must fail the request instead."""
+    from app.api.analytics import _received_amounts
+
+    class _BrokenSession:
+        async def execute(self, *_args, **_kwargs):
+            raise ConnectionResetError("connection lost")
+
+    with pytest.raises(ConnectionResetError):
+        await _received_amounts(_BrokenSession(), None)
+
+
 # ---------------------------------------------------------------------------
 # Working-capital impact
 # ---------------------------------------------------------------------------

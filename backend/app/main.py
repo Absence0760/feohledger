@@ -230,6 +230,7 @@ async def lifespan(app: FastAPI):
     from app.services.recurring_invoices import run_recurring_invoices_loop
     from app.services.retention_sweep import run_retention_loop
     from app.services.scheduled_reports import run_scheduled_reports_loop
+    from app.services.subprocessor_notices import run_subprocessor_notices_loop
     from app.services.sweep_health import supervise_task
     from app.services.vendor_rescreen import run_vendor_rescreen_loop
     from app.services.webhooks.delivery import run_webhook_delivery_loop
@@ -352,6 +353,15 @@ async def lifespan(app: FastAPI):
             run_connection_health_loop(), name="erp-connection-health"
         )
 
+    # Sub-processor change notices (issue #427, decisions §321). Disabled by
+    # default; MUST be on in a deployment with customers — the published DPA
+    # says each notice is emailed. Sends email only, never moves money.
+    subprocessor_notices_task: asyncio.Task | None = None
+    if settings.subprocessor_notices_enabled:
+        subprocessor_notices_task = start_sweep(
+            run_subprocessor_notices_loop(), name="subprocessor-notices"
+        )
+
     try:
         yield
     finally:
@@ -374,6 +384,7 @@ async def lifespan(app: FastAPI):
             commerce_task,
             status_sync_task,
             connection_health_task,
+            subprocessor_notices_task,
         ):
             if task is not None:
                 task.cancel()

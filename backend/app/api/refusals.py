@@ -13,6 +13,7 @@ A server-side catcher that turns one back into text reads it through
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
@@ -127,8 +128,29 @@ def erp_pull_failure(exc: Exception) -> HTTPException:
     listing — stays the 502 it always was: the gateway failed and a later
     retry may succeed.
     """
-    from app.services.erp_adapters.base import ErpListingIncomplete
+    from app.services.erp_adapters.base import (
+        ERP_CALL_BUDGET_EXHAUSTED,
+        ErpCallBudgetExhausted,
+        ErpListingIncomplete,
+    )
     from app.services.erp_oauth import ErpNotConnectedError, ErpTokenRefreshError
+
+    if isinstance(exc, ErpCallBudgetExhausted):
+        # Refused before the call by the shared-quota budget (decisions §322):
+        # a 429 with the time it frees up, nothing read and nothing synced.
+        wait = max(1, int((exc.retry_after - datetime.now(UTC)).total_seconds()))
+        return HTTPException(
+            status_code=429,
+            detail=coded_refusal(
+                ERP_CALL_BUDGET_EXHAUSTED,
+                f"{exc.provider} API calls are paused ({exc.reason}) until "
+                f"{exc.retry_after.isoformat()}, so nothing was synced.",
+                provider=exc.provider,
+                reason=exc.reason,
+                retry_after=exc.retry_after.isoformat(),
+            ),
+            headers={"Retry-After": str(wait)},
+        )
 
     if isinstance(exc, ErpListingIncomplete):
         return HTTPException(

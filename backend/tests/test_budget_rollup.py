@@ -106,8 +106,13 @@ async def _mk_invoice(
         await s.commit()
 
 
-async def _mk_converted_requisition(realdb, key="a", *, budget_id, po_total, currency="USD"):
-    """A `converted` requisition plus the PO it became — leg 2 of `committed`."""
+async def _mk_converted_requisition(
+    realdb, key="a", *, budget_id, po_total, currency="USD", unverifiable_reason=None
+):
+    """A `converted` requisition plus the PO it became — leg 2 of `committed`.
+
+    ``unverifiable_reason`` marks the PO as one whose total the ERP's last sync
+    could not price (decisions §323)."""
     mk = realdb.sessionmaker(key)
     org_id = realdb.info(key).org_id
     po_id = uuid.uuid4()
@@ -120,6 +125,7 @@ async def _mk_converted_requisition(realdb, key="a", *, budget_id, po_total, cur
                 # Conversion stamps the requisition's code onto the PO.
                 currency=currency,
                 status="open",
+                total_unverifiable_reason=unverifiable_reason,
                 organization_id=org_id,
             )
         )
@@ -292,6 +298,47 @@ async def test_rollup_discloses_currency_excluded_rows(realdb):
     # The per-budget rollup carries the same disclosure.
     assert spend["actual"] == 300.0
     assert spend["excluded_row_count"] == 2
+
+
+async def test_a_po_whose_total_is_unverifiable_is_left_out_of_committed_and_counted(realdb):
+    """A converted PO the ERP could not price at its last sync (decisions §323)
+    keeps a total nobody vouches for. `committed` leaves it out and every spend
+    surface — rollup, `/spend`, `/check` — counts it, apart from the currency
+    disclosure, so a figure that is a floor says so."""
+    bid, _cc = await _mk_budget(realdb, amount="10000.00", currency="USD")
+    await _mk_converted_requisition(realdb, budget_id=bid, po_total="1200.00")
+    await _mk_converted_requisition(
+        realdb, budget_id=bid, po_total="4000.00", unverifiable_reason="unpriceable"
+    )
+    # Marked AND in another currency: counted once, as unverifiable.
+    await _mk_converted_requisition(
+        realdb,
+        budget_id=bid,
+        po_total="50.00",
+        currency="EUR",
+        unverifiable_reason="lines_unread",
+    )
+
+    async with realdb.client(key="a", role="cfo") as c:
+        body = (await c.get("/api/budgets/rollup")).json()
+        spend = (await c.get(f"/api/budgets/{bid}/spend")).json()
+        check = (
+            await c.get("/api/budgets/check", params={"budget_id": str(bid), "amount": "0"})
+        ).json()
+
+    usd = _by_ccy(body)["USD"]
+    assert usd["committed"] == "1200.00"
+    assert usd["unverifiable_po_count"] == 2
+    assert usd["excluded_row_count"] == 0
+    assert body["unverifiable_po_count"] == 2
+    assert body["excluded_row_count"] == 0
+
+    assert spend["committed"] == 1200.0
+    assert spend["unverifiable_po_count"] == 2
+    assert spend["excluded_row_count"] == 0
+
+    assert check["committed"] == 1200.0
+    assert check["unverifiable_po_count"] == 2
 
 
 async def test_rollup_excluded_count_is_zero_on_a_clean_set(realdb):

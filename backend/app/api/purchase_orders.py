@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -21,12 +22,20 @@ from app.api.refusals import erp_pull_failure
 from app.database import get_control_db
 from app.models.invoice import Invoice
 from app.models.organization import Organization
-from app.models.procurement import POLineItem, PurchaseOrder, po_currency_code
+from app.models.procurement import (
+    CANCELLED_PO_STATUSES,
+    GRLineItem,
+    POLineItem,
+    PurchaseOrder,
+    po_currency_code,
+    po_vouched_money,
+)
 from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_adapters.base import PoSkipReason
 from app.services.erp_link_realm import connection_realm, legacy_links_trusted, link_is_live
 from app.services.goods_receipts import received_quantities
 from app.services.provider_credentials import (
@@ -47,13 +56,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/purchase-orders", tags=["purchase-orders"])
 
 
-def _line_item_dict(li: POLineItem) -> dict:
+def _vouched_total(po: PurchaseOrder):
+    """``total`` for the wire: ``None`` while the PO is marked unverifiable."""
+    total = po_vouched_money(po, po.total)
+    return None if total is None else json_money(total)
+
+
+def _line_item_dict(po: PurchaseOrder, li: POLineItem) -> dict:
+    # A marked PO's line money came from the same sync as its stale total, so it
+    # is withheld the same way (`po_vouched_money`). Quantities stay: the
+    # receipt form needs them, and they are not the figure the ERP disowned.
+    unit_price = po_vouched_money(po, li.unit_price)
+    line_total = po_vouched_money(po, li.total)
     return {
         "id": str(li.id),
         "description": li.description,
         "quantity": float(li.quantity) if li.quantity else None,
-        "unit_price": json_money(li.unit_price) if li.unit_price else None,
-        "total": json_money(li.total) if li.total else None,
+        "unit_price": json_money(unit_price) if unit_price else None,
+        "total": json_money(line_total) if line_total else None,
         # Item identity (migration 0111): the SKU snapshot and the catalog item.
         "sku": li.sku,
         "catalog_item_id": str(li.catalog_item_id) if li.catalog_item_id else None,
@@ -138,12 +158,18 @@ async def list_purchase_orders(
                 "po_number": po.po_number,
                 "vendor_id": str(po.vendor_id) if po.vendor_id else None,
                 "vendor_name": vendor_names.get(str(po.vendor_id)) if po.vendor_id else None,
-                "total": json_money(po.total),
+                # `null` while the PO is marked unverifiable: the stored figure
+                # is one the ERP no longer vouches for, and a client handed it
+                # would render it as the PO's total (decisions §323).
+                "total": _vouched_total(po),
                 # The PO's own code — `null` when no source recorded one, and the
                 # client renders the figure bare rather than borrowing the org's.
                 "currency": po.currency,
+                # Set when the ERP's last sync could not price this PO — why
+                # `total` (and every line figure) is `null`.
+                "total_unverifiable_reason": po.total_unverifiable_reason,
                 "status": po.status,
-                "line_items": [_line_item_dict(li) for li in po.line_items],
+                "line_items": [_line_item_dict(po, li) for li in po.line_items],
                 "created_at": po.created_at.isoformat() if po.created_at else "",
             }
             for po in pos
@@ -312,13 +338,14 @@ async def get_purchase_order(
         "po_number": po.po_number,
         "vendor_id": str(po.vendor_id) if po.vendor_id else None,
         "vendor_name": vendor_name,
-        "total": json_money(po.total),
+        "total": _vouched_total(po),  # `null` while marked — decisions §323
         # Labels `total` AND every line figure — lines carry no code of their own.
         "currency": po.currency,
+        "total_unverifiable_reason": po.total_unverifiable_reason,
         "status": po.status,
         "line_items": [
             {
-                **_line_item_dict(li),
+                **_line_item_dict(po, li),
                 # Received so far against this line, across live receipts that
                 # name it — what the receipt form subtracts to show what is left.
                 "quantity_received": float(received_per_line.get(li.id, 0)),
@@ -332,6 +359,126 @@ async def get_purchase_order(
         "linked_invoices": linked_invoices,
         "created_at": po.created_at.isoformat() if po.created_at else "",
     }
+
+
+async def _sync_target(
+    db: AsyncSession, po_number: str, org_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> PurchaseOrder | None:
+    """The one existing row an ERP PO sync refreshes for ``po_number``.
+
+    Scoped to the entity being synced into plus unstamped rows, own-entity
+    first, oldest first — see the upsert in :func:`sync_pos_from_erp` for why.
+    The decisions §323 mark targets this same row, so mark and clear agree.
+    """
+    result = await db.execute(
+        apply_entity_scope(
+            select(PurchaseOrder).where(
+                PurchaseOrder.po_number == po_number,
+                PurchaseOrder.organization_id == org_id,
+            ),
+            PurchaseOrder,
+            entity_id,
+            include_shared=True,
+        )
+        .order_by(PurchaseOrder.entity_id.is_(None), PurchaseOrder.created_at)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+def _at_scale(value: Decimal | None, places: str) -> Decimal | None:
+    """``value`` at its column's scale, so the ERP's ``3`` and the stored
+    ``3.0000`` compare equal (and a figure finer than the column is compared as
+    the column will hold it)."""
+    return None if value is None else Decimal(value).quantize(Decimal(places), ROUND_HALF_UP)
+
+
+def _line_content(line) -> tuple:
+    """What a PO line says, at ``po_line_items``' own scales, for comparing a
+    stored line with an ERP one."""
+    sku = line.sku if isinstance(line, POLineItem) else line.item_code
+    return (
+        (line.description or "").strip(),
+        _at_scale(line.quantity, "0.0001"),
+        _at_scale(line.unit_price, "0.01"),
+        _at_scale(line.total, "0.01"),
+        (sku or "").strip()[:100] or None,
+    )
+
+
+def _line_key(content: tuple) -> str | None:
+    """How a received line is paired with an ERP line: its SKU, else its
+    description. None when it has neither, so it cannot be paired."""
+    description, _, _, _, sku = content
+    return f"sku:{sku}" if sku else (f"desc:{description}" if description else None)
+
+
+async def _refresh_po_lines(db: AsyncSession, po: PurchaseOrder, payload_lines) -> str:
+    """Bring ``po``'s stored lines in line with the ERP's, and say what happened.
+
+    The 3-way receipt-value check scales the total by received / ordered
+    quantity, so lines left from before an ERP amendment value a receipt wrongly
+    (decisions §327). Goods-receipt lines point at PO lines by id, so a line
+    something was received against is updated in place, never deleted. Returns
+    ``unchanged``; ``refreshed``; or ``unpairable`` when a received line has no
+    ERP line with its SKU (or description) left to pair with, in which case
+    nothing is changed and the caller marks the PO.
+    """
+    stored = list(
+        (await db.execute(select(POLineItem).where(POLineItem.po_id == po.id))).scalars().all()
+    )
+    incoming = [_line_content(line) for line in payload_lines]
+    if sorted(map(repr, (_line_content(li) for li in stored))) == sorted(map(repr, incoming)):
+        return "unchanged"
+
+    received = set(
+        (
+            await db.execute(
+                select(GRLineItem.po_line_item_id).where(
+                    GRLineItem.po_line_item_id.in_([li.id for li in stored])
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    unclaimed = list(range(len(incoming)))
+    pairs: list[tuple[POLineItem, tuple]] = []
+    for line in (li for li in stored if li.id in received):
+        content = _line_content(line)
+        key = _line_key(content)
+        # An unchanged line pairs with its own copy first; otherwise any ERP
+        # line with the same SKU / description.
+        match = next((i for i in unclaimed if incoming[i] == content), None)
+        if match is None and key is not None:
+            match = next((i for i in unclaimed if _line_key(incoming[i]) == key), None)
+        if match is None:
+            return "unpairable"
+        unclaimed.remove(match)
+        pairs.append((line, incoming[match]))
+
+    for line, (description, quantity, unit_price, total, sku) in pairs:
+        line.description = description or None
+        line.quantity = quantity
+        line.unit_price = unit_price
+        line.total = total
+        line.sku = sku
+    for line in stored:
+        if line.id not in received:
+            await db.delete(line)
+    for i in unclaimed:
+        description, quantity, unit_price, total, sku = incoming[i]
+        db.add(
+            POLineItem(
+                po_id=po.id,
+                description=description or None,
+                quantity=quantity,
+                unit_price=unit_price,
+                total=total,
+                sku=sku,
+            )
+        )
+    return "refreshed"
 
 
 @router.post("/sync-erp")
@@ -370,11 +517,14 @@ async def sync_pos_from_erp(
         ) from exc
 
     try:
-        erp_pos = await adapter.list_pos()
+        # The POs AND the ones the adapter deliberately left out (decisions
+        # §323). An adapter that never skips one reports nothing skipped.
+        listing = await adapter.list_pos_report()
     except Exception as exc:
         logger.exception("ERP list_pos failed for org %s", org_id)
 
         raise erp_pull_failure(exc) from exc
+    erp_pos = listing.pos
 
     # Vendor lookup maps for linking POs to existing vendor rows: the ERP's own
     # supplier id first (what the vendor sync stamps), then the name. An id link
@@ -383,23 +533,79 @@ async def sync_pos_from_erp(
     # companies, so another company's "56" is a different supplier.
     realm = connection_realm(erp_config)
     trust_legacy = legacy_links_trusted(erp_config, realm)
-    v_result = await db.execute(select(Vendor).where(Vendor.organization_id == org_id))
+    #
+    # Only vendors a PO synced into this entity may belong to: the entity's own
+    # and shared (unstamped) ones — the scope the PO upsert below uses. Over the
+    # whole org, two subsidiaries' vendors holding the same ERP id (each entity
+    # its own ERP company) collapsed to whichever was read last, and a PO in
+    # entity B could be linked to entity A's vendor. A key two vendors in scope
+    # still share is ambiguous and links neither: no link is honest, and the
+    # next sync fills it once it is not; a guess is never corrected (a vendor
+    # already on a row is never re-pointed).
+    v_result = await db.execute(
+        apply_entity_scope(
+            select(Vendor).where(Vendor.organization_id == org_id),
+            Vendor,
+            entity_id,
+            include_shared=True,
+        )
+    )
     vendors = v_result.scalars().all()
-    vendor_by_erp_id = {
-        v.erp_vendor_id: v.id
+
+    def _unique(pairs) -> tuple[dict, set]:
+        found: dict = {}
+        ambiguous: set = set()
+        for key, vendor_id in pairs:
+            if key in found and found[key] != vendor_id:
+                ambiguous.add(key)
+            found[key] = vendor_id
+        return {k: v for k, v in found.items() if k not in ambiguous}, ambiguous
+
+    vendor_by_erp_id, ambiguous_erp_ids = _unique(
+        (v.erp_vendor_id, v.id)
+        for v in vendors
+        if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
+    )
+    vendor_by_name, _ = _unique((v.name.lower(), v.id) for v in vendors)
+    # Vendors linked to an ERP id in this realm: a name match must not land on
+    # one of them when the PO names a different id (see `resolve_vendor`).
+    erp_linked = {
+        v.id
         for v in vendors
         if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
     }
-    vendor_by_name = {v.name.lower(): v.id for v in vendors}
 
     def resolve_vendor(erp_po) -> uuid.UUID | None:
+        if erp_po.vendor_erp_id in ambiguous_erp_ids:
+            # The ERP named its supplier and two vendors claim that id: the
+            # name cannot say which one it meant either.
+            return None
         if erp_po.vendor_erp_id and erp_po.vendor_erp_id in vendor_by_erp_id:
             return vendor_by_erp_id[erp_po.vendor_erp_id]
-        return vendor_by_name.get(erp_po.vendor_name.lower()) if erp_po.vendor_name else None
+        if not erp_po.vendor_name:
+            return None
+        by_name = vendor_by_name.get(erp_po.vendor_name.lower())
+        # The ERP named a supplier id we have not linked. A same-named vendor
+        # already linked to ANOTHER id is a different supplier, so the PO stays
+        # unlinked (the next sync after the vendor sync fills it) rather than
+        # being matched against that vendor's invoices. A vendor with no ERP
+        # link yet may still be the one meant, as before.
+        if erp_po.vendor_erp_id and by_name in erp_linked:
+            return None
+        return by_name
 
     created = 0
     skipped = 0
     updated = 0
+    # PO numbers whose verifiable / unverifiable state this sync changed: the
+    # invoices citing them are re-matched below so a hold lands now, not at the
+    # invoice's next edit. The re-match never LIFTS one (decisions §323,
+    # amended): see the call below.
+    rematch: set[str] = set()
+    rekeyed = 0
+    # A legacy key the listing also reports as a real number belongs to that
+    # PO, so it is never re-keyed onto another one.
+    listed_numbers = {p.po_number for p in erp_pos} | {s.po_number for s in listing.skipped}
     for erp_po in erp_pos:
         # The upsert key is (po_number, org) SCOPED TO THE ENTITY BEING SYNCED
         # INTO — the second unscoped `po_number` match in this file. `po_number`
@@ -415,20 +621,22 @@ async def sync_pos_from_erp(
         # number. `limit(1)`, own-entity first, keeps the pick deterministic
         # and replaces a latent `MultipleResultsFound` (a 500 mid-sync) that
         # two same-numbered POs in one org could already trigger.
-        existing = await db.execute(
-            apply_entity_scope(
-                select(PurchaseOrder).where(
-                    PurchaseOrder.po_number == erp_po.po_number,
-                    PurchaseOrder.organization_id == org_id,
-                ),
-                PurchaseOrder,
-                entity_id,
-                include_shared=True,
-            )
-            .order_by(PurchaseOrder.entity_id.is_(None), PurchaseOrder.created_at)
-            .limit(1)
-        )
-        existing_po = existing.scalar_one_or_none()
+        existing_po = await _sync_target(db, erp_po.po_number, org_id, entity_id)
+        if existing_po is None:
+            # An earlier build of the adapter stored this PO under another key
+            # (Merge: its record id). Re-key that row rather than create a second
+            # one whose total is summed beside it (decisions §328). Counted in
+            # the sync's audit row as `rekeyed`.
+            for legacy in erp_po.legacy_po_numbers:
+                if legacy in listed_numbers:
+                    continue
+                legacy_row = await _sync_target(db, legacy, org_id, entity_id)
+                if legacy_row is not None:
+                    legacy_row.po_number = erp_po.po_number
+                    existing_po = legacy_row
+                    rekeyed += 1
+                    rematch.add(erp_po.po_number)
+                    break
         erp_currency = po_currency_code(erp_po.currency)
         if existing_po is not None:
             # Refresh the ERP-owned fields on an already-known PO. total and
@@ -446,8 +654,15 @@ async def sync_pos_from_erp(
             changed = False
             if existing_po.total != erp_po.total:
                 existing_po.total = erp_po.total
+                rematch.add(existing_po.po_number)
                 changed = True
             if existing_po.status != erp_po.status:
+                # Into or out of cancelled changes whether the matcher accepts
+                # the PO at all, so the invoices citing it are re-matched.
+                if (existing_po.status in CANCELLED_PO_STATUSES) != (
+                    erp_po.status in CANCELLED_PO_STATUSES
+                ):
+                    rematch.add(existing_po.po_number)
                 existing_po.status = erp_po.status
                 changed = True
             if (
@@ -464,6 +679,10 @@ async def sync_pos_from_erp(
             # silent re-denomination.
             if erp_currency is not None and existing_po.currency != erp_currency:
                 existing_po.currency = erp_currency
+                # The same figure in another currency is a different order: the
+                # invoices citing it are re-matched, so the currency guard holds
+                # them now rather than at their next edit.
+                rematch.add(existing_po.po_number)
                 changed = True
             # A PO first synced before its supplier was (the vendor sync not
             # yet run, or the supplier added since) gets linked now. Only a
@@ -474,6 +693,27 @@ async def sync_pos_from_erp(
                 if vendor_id is not None:
                     existing_po.vendor_id = vendor_id
                     changed = True
+            # The lines are the ERP's too (decisions §327). A payload with none
+            # (a headers-only adapter, NetSuite) leaves the stored lines alone:
+            # silence is not a correction.
+            mark: str | None = None
+            if erp_po.line_items:
+                outcome = await _refresh_po_lines(db, existing_po, erp_po.line_items)
+                if outcome == "refreshed":
+                    rematch.add(existing_po.po_number)
+                    changed = True
+                elif outcome == "unpairable":
+                    # Received lines the ERP amended past pairing: the stored
+                    # lines cannot be trusted, so neither can the total they
+                    # scale (§323's mark, with the sync's own reason).
+                    mark = str(PoSkipReason.lines_changed)
+            # The ERP priced it again: the total just written is one it vouches
+            # for, so a mark an earlier sync left (§323) comes off, unless the
+            # lines just stopped it.
+            if existing_po.total_unverifiable_reason != mark:
+                existing_po.total_unverifiable_reason = mark
+                rematch.add(existing_po.po_number)
+                changed = True
 
             if changed:
                 updated += 1
@@ -513,6 +753,71 @@ async def sync_pos_from_erp(
 
         created += 1
 
+    # POs the ERP has but the adapter could not price exactly (decisions §323).
+    # Nothing is created for them; an EXISTING row with the number keeps the
+    # total an earlier sync stored, which the ERP no longer vouches for, so it
+    # is marked and `po_matching` refuses to compare an invoice against it.
+    # The row marked is exactly the row the upsert above refreshes for that
+    # number (`_sync_target`), so a later sync that prices the PO clears the
+    # same mark it set — marking a wider set would leave marks no sync clears.
+    unverifiable = 0
+    reasons = {s.po_number: str(s.reason) for s in listing.skipped}
+    for po_number, reason in reasons.items():
+        po = await _sync_target(db, po_number, org_id, entity_id)
+        if po is None:
+            continue
+        unverifiable += 1
+        if po.total_unverifiable_reason != reason:
+            po.total_unverifiable_reason = reason
+            rematch.add(po_number)
+
+    # A placeholder an earlier build filed several POs under (Merge's
+    # "UNKNOWN") holds a total no single order has: marked, so it is never
+    # matched or summed (decisions §328). Counted as `retired` in the audit row.
+    retired = 0
+    for placeholder in adapter.retired_po_numbers:
+        po = await _sync_target(db, placeholder, org_id, entity_id)
+        if po is not None and po.total_unverifiable_reason is None:
+            po.total_unverifiable_reason = str(PoSkipReason.unpriceable)
+            rematch.add(placeholder)
+            retired += 1
+
+    if rematch:
+        from app.services.invoice_warnings import refresh_invoices_citing_pos
+
+        await db.flush()
+        # Not best-effort: the mark exists to RAISE a hold, and the payment gate
+        # reads only open exceptions. A mark written without its hold would
+        # leave an approved invoice payable against the stale total, so a
+        # failed re-match fails the sync and the whole transaction rolls back.
+        #
+        # Hold-only (`erp_po_sync`): the re-match may OPEN or keep a
+        # payment-blocking `po_mismatch` / `quality_hold` but never resolves
+        # one. Whoever can edit the PO in the ERP is outside the invoice's
+        # implicated set, so a sync that closed holds would let an ERP-side
+        # total increase release an over-billing hold with no FeohLedger
+        # sign-off. A row the re-match no longer finds stays open, annotated
+        # in `erp_report`, for a person to clear through `record_decision`.
+        #
+        # Scoped to the entity synced into (plus unstamped invoices), unless the
+        # row changed is itself unstamped: then any entity's invoice may match
+        # against it, and all are re-matched.
+        org_wide: set[str] = set()
+        for number in rematch:
+            row = await _sync_target(db, number, org_id, entity_id)
+            if row is not None and row.entity_id is None:
+                org_wide.add(number)
+        for numbers, scope in ((rematch - org_wide, entity_id), (org_wide, None)):
+            await refresh_invoices_citing_pos(
+                db,
+                org_id,
+                numbers,
+                org_settings=org.settings,
+                caller="erp_po_sync",
+                erp_po_sync={"erp_type": adapter.erp_type},
+                entity_id=scope,
+            )
+
     # One PII-free summary row per sync (same shape as the GL chart sync): the
     # trail records that POs — the 3-way-match reference the money path checks
     # invoices against — were created/amended in bulk, by whom, from where.
@@ -528,16 +833,30 @@ async def sync_pos_from_erp(
             "created": created,
             "updated": updated,
             "skipped": skipped,
+            "not_priced": len(reasons),
+            "unverifiable": unverifiable,
+            "rekeyed": rekeyed,
+            "retired": retired,
             "adapter": adapter.erp_type,
             "entity_id": str(entity_id) if entity_id else None,
         },
     )
     await db.commit()
+    message = f"Synced {created} new POs, updated {updated}, {skipped} already exist"
+    if unverifiable:
+        message += (
+            f"; {unverifiable} existing PO(s) could not be priced exactly by the ERP and "
+            "will not be matched against until they can"
+        )
     return {
         "success": True,
-        "message": (f"Synced {created} new POs, updated {updated}, {skipped} already exist"),
+        "message": message,
         "created": created,
         "updated": updated,
         "skipped": skipped,
+        # POs the ERP has but the adapter could not price exactly (not synced),
+        # and how many existing rows that left unverifiable (decisions §323).
+        "not_priced": len(reasons),
+        "unverifiable": unverifiable,
         "adapter": adapter.erp_type,
     }

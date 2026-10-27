@@ -61,14 +61,18 @@ def _po(
     line_items=None,
     vendor_id=None,
     currency: str | None = "USD",
+    total_unverifiable_reason: str | None = None,
+    status: str = "open",
 ):
     return SimpleNamespace(
         id=uuid.uuid4(),
         po_number="PO-100",
+        status=status,
         total=total,
         currency=currency,
         vendor_id=vendor_id,
         line_items=line_items or [],
+        total_unverifiable_reason=total_unverifiable_reason,
     )
 
 
@@ -648,3 +652,72 @@ async def test_partial_acceptance_with_no_quantity_is_its_own_code_not_a_spliced
         _mk_db(po=po, inspection=insp), _invoice(amount=Decimal("1000.00"), currency="USD")
     )
     assert [i["code"] for i in result.issues] == ["po_match.issue.partial_acceptance_unquantified"]
+
+
+# ---------------------------------------------------------------------------
+# A PO whose total the ERP no longer vouches for (decisions §323)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", ["cancelled", "voided"])
+@pytest.mark.asyncio
+async def test_a_cancelled_po_is_never_matched_against(status):
+    """The invoice equals the PO exactly, but the order was called off: it
+    authorizes nothing, so the amount control does not pass."""
+    po = _po(total=Decimal("1000.00"), status=status)
+    result = await match_invoice_to_po(_mk_db(po=po), _invoice(amount=Decimal("1000.00")))
+
+    assert result.status == "mismatch"
+    assert result.po_cancelled is True
+    assert result.within_tolerance is False
+    assert result.amount_variance is None
+    assert [i["code"] for i in result.issues] == ["po_match.issue.po_cancelled"]
+    assert result.to_json_dict()["details"]["po_cancelled"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_closed_po_still_matches():
+    """An ERP closes a PO once it is fully billed, which the invoice being
+    matched can itself have caused, so closed is matched as usual."""
+    po = _po(total=Decimal("1000.00"), status="closed")
+    result = await match_invoice_to_po(_mk_db(po=po), _invoice(amount=Decimal("1000.00")))
+
+    assert result.status == "matched"
+    assert result.po_cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_a_po_marked_unverifiable_is_never_matched_against():
+    """The invoice equals the stale total exactly — the case that used to read
+    `matched` at 0% against a figure the ERP's last sync could not confirm."""
+    po = _po(total=Decimal("1000.00"), total_unverifiable_reason="unpriceable")
+    result = await match_invoice_to_po(_mk_db(po=po), _invoice(amount=Decimal("1000.00")))
+
+    assert result.status == "mismatch"
+    assert result.po_total_unverifiable_reason == "unpriceable"
+    assert result.within_tolerance is False
+    assert result.amount_variance is None
+    assert result.amount_variance_pct is None
+    assert [i["code"] for i in result.issues] == ["po_match.issue.po_total_unverifiable"]
+    assert result.to_json_dict()["details"]["po_total_unverifiable_reason"] == "unpriceable"
+    # The stale figure is not kept on the result either: `invoice.po_match`
+    # reaches every API reader of the invoice.
+    assert result.po_total is None
+    assert result.to_json_dict()["details"]["po_total"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_unverifiable_po_measures_no_received_value_either():
+    """The 3-way receipt-value leg would scale the same stale total; it is
+    skipped, so nothing is claimed about billing beyond receipt from it."""
+    po = _po(
+        total=Decimal("1000.00"),
+        total_unverifiable_reason="unpriceable",
+        line_items=[_li(quantity=Decimal("10"))],
+    )
+    gr = _gr(line_items=[_li(received=Decimal("4"))])
+    result = await match_invoice_to_po(_mk_db(po=po, gr=gr), _invoice(amount=Decimal("1000.00")))
+    assert result.status == "mismatch"
+    assert result.match_type == "3-way"
+    assert result.received_value is None
+    assert result.billed_beyond_receipt is False

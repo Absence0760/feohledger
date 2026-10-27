@@ -13,7 +13,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.exception import Exception as APException
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_status import (
     APPROVED_OR_BEYOND_STATUSES,
     IN_REVIEW_STATUSES,
@@ -210,7 +210,11 @@ def invoice_number_letter_skeleton(value: str | None) -> str:
 
 
 async def refresh_warnings(
-    db: AsyncSession, invoice: Invoice, *, org_settings: dict | None = None
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    org_settings: dict | None = None,
+    erp_po_sync: dict | None = None,
 ) -> list[dict]:
     """Recompute warnings for a single invoice and persist them on the row.
 
@@ -219,6 +223,12 @@ async def refresh_warnings(
     `org_settings` drives the configurable fraud rules. When omitted (the
     common case from existing call sites that haven't threaded it
     through), the defaults in `DEFAULT_FRAUD_RULES` are used.
+
+    `erp_po_sync` marks a refresh an ERP PO sync triggered (decisions §323,
+    amended): it may RAISE a PO-match hold but never clear one. A row whose
+    finding it no longer reports stays open and is annotated instead
+    (:func:`_reconcile_po_exceptions`). The dict is the PII-free context the
+    annotation records (``erp_type``).
 
     Every category this function computes is rebuilt from scratch below —
     but `invoice.warnings` can already carry entries this function doesn't
@@ -478,7 +488,7 @@ async def refresh_warnings(
     # without re-running. Mismatches and missing POs raise exceptions for
     # the queue. Skip on draft `new` invoices that haven't been extracted yet.
     if invoice.po_number and _status_str(invoice.status) != "new":
-        await _refresh_po_match(db, invoice, warnings, org_settings)
+        await _refresh_po_match(db, invoice, warnings, org_settings, erp_po_sync=erp_po_sync)
     else:
         invoice.po_match = None
 
@@ -901,6 +911,8 @@ async def refresh_invoices_citing_pos(
     org_settings: dict | None,
     caller: str,
     best_effort: bool = False,
+    erp_po_sync: dict | None = None,
+    entity_id=None,
 ) -> None:
     """Re-run warnings (and so PO matching) on every invoice citing a PO number.
 
@@ -918,26 +930,33 @@ async def refresh_invoices_citing_pos(
     SAVEPOINT and a failure is logged, not raised. A single interactive write
     (recording or cancelling a receipt) leaves it off, so the write and the
     holds it raises or lifts land together or not at all.
+
+    ``erp_po_sync`` is for the ERP PO sync, and makes every refresh hold-only:
+    a PO total the ERP changed may raise a ``po_mismatch`` / ``quality_hold``
+    but never clear one (decisions §323, amended). See
+    :func:`_reconcile_po_exceptions`. It also narrows the refresh: ``entity_id``
+    (the entity the sync wrote into) limits it to that entity's invoices plus
+    unstamped ones, so another subsidiary's invoice citing the same number gets
+    no note about a PO it does not match against; and ``paid`` / ``done``
+    invoices are left alone, since a hold on money already paid stops nothing.
     """
     po_numbers = {n for n in po_numbers if n}
     if not po_numbers:
         return
 
     async def _run() -> None:
-        invoices = (
-            (
-                await db.execute(
-                    select(Invoice).where(
-                        Invoice.organization_id == org_id,
-                        Invoice.po_number.in_(po_numbers),
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        query = select(Invoice).where(
+            Invoice.organization_id == org_id,
+            Invoice.po_number.in_(po_numbers),
         )
+        if erp_po_sync is not None:
+            from app.tenant import apply_entity_scope
+
+            query = query.where(Invoice.status.not_in(_ERP_SYNC_SKIPPED_STATUSES))
+            query = apply_entity_scope(query, Invoice, entity_id, include_shared=True)
+        invoices = (await db.execute(query)).scalars().all()
         for inv in invoices:
-            await refresh_warnings(db, inv, org_settings=org_settings)
+            await refresh_warnings(db, inv, org_settings=org_settings, erp_po_sync=erp_po_sync)
 
     if not best_effort:
         await _run()
@@ -971,6 +990,19 @@ PO_MATCH_EXCEPTION_TYPES: tuple[str, ...] = ("po_mismatch", "quality_hold")
 #: the payment — the open row stays for a human (`segregation_refusal`).
 _PRE_APPROVAL_STATUSES = PRE_APPROVAL_STATUSES
 
+#: Invoices the ERP PO sync's re-match leaves alone: the money has gone, so a
+#: hold would stop nothing (``refresh_invoices_citing_pos``).
+_ERP_SYNC_SKIPPED_STATUSES = (InvoiceStatus.paid.value, InvoiceStatus.done.value)
+
+#: ``Exception.erp_report["kind"]`` of an open PO-match row that an ERP PO
+#: sync's re-match no longer finds (decisions §323, amended). The sync never
+#: clears a hold, so the row stays open and this records, as data, that the
+#: re-check after the ERP changed the PO now finds nothing to hold for —
+#: the reason a person may now clear it. PII-free: the ERP type, the PO number
+#: matched and the (UTC) day it was observed. Removed again by any later
+#: refresh that finds the finding back.
+ERP_REPORT_PO_REMATCH_CLEARS = "po_rematch_clears"
+
 #: The resolution text and actor an auto-close writes. Not a person — a
 #: detector observing that its own finding is gone — so the audit row carries
 #: no `actor_id`, the way a detector's raise carries none.
@@ -985,6 +1017,8 @@ async def _refresh_po_match(
     invoice: Invoice,
     warnings: list[dict],
     org_settings: dict | None = None,
+    *,
+    erp_po_sync: dict | None = None,
 ) -> None:
     """Run PO matching and append to warnings + exceptions on issues.
 
@@ -1005,7 +1039,8 @@ async def _refresh_po_match(
 
     Every open row of the two types this refresh no longer finds is then
     closed (`_close_cleared_po_exceptions`), so the hold lifts the moment the
-    evidence catches up.
+    evidence catches up — except on a refresh an ERP PO sync triggered
+    (``erp_po_sync``), which never clears a hold (decisions §323, amended).
     """
     rule = resolve_match_rule(
         org_settings, vendor_id=invoice.vendor_id, gl_account=invoice.gl_account
@@ -1036,6 +1071,22 @@ async def _refresh_po_match(
         flag = warning("po_not_found", "error", poNumber=invoice.po_number)
         warnings.append(flag)
         await _raise("po_mismatch", "error", flag)
+    elif match.status == "mismatch" and match.po_cancelled:
+        # The PO was called off: it authorizes nothing, so the invoice is held
+        # for a person whatever its amount (`procurement.CANCELLED_PO_STATUSES`).
+        flag = warning("po_cancelled", "warning", poNumber=match.po_number)
+        warnings.append(flag)
+        await _raise("po_mismatch", "warning", flag)
+    elif match.status == "mismatch" and match.po_total_unverifiable_reason:
+        # The PO's last ERP sync could not state its total exactly (decisions
+        # §323): the matcher compared nothing, because the total on the row is
+        # one the ERP no longer vouches for. Blocks like the currency guard —
+        # with no trustworthy figure there is no way to show the invoice is not
+        # over-billing — until a person checks the PO in the ERP or the next
+        # sync prices it again.
+        flag = warning("po_total_unverifiable", "warning", poNumber=match.po_number)
+        warnings.append(flag)
+        await _raise("po_mismatch", "warning", flag)
     elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
         # The currency guard tripped: the two are in different currencies, so
         # the matcher compared nothing and there is no variance to state. Same
@@ -1209,6 +1260,7 @@ async def _refresh_po_match(
         po_id=match.po_id,
         org_settings=org_settings,
         rule=rule,
+        erp_po_sync=erp_po_sync,
     )
 
 
@@ -1219,6 +1271,10 @@ def blocking_finding_types(match) -> set[str]:
     two against each other)."""
     found: set[str] = set()
     if match.status == "no_po":
+        found.add("po_mismatch")
+    elif match.status == "mismatch" and match.po_cancelled:
+        found.add("po_mismatch")
+    elif match.status == "mismatch" and match.po_total_unverifiable_reason:
         found.add("po_mismatch")
     elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
         found.add("po_mismatch")
@@ -1249,10 +1305,11 @@ async def _reconcile_po_exceptions(
     po_id: str | None = None,
     org_settings: dict | None,
     rule=None,
+    erp_po_sync: dict | None = None,
 ) -> None:
     """Square the invoice's open PO-match rows with what this refresh found.
 
-    Two jobs, over one read of the open/escalated ``po_mismatch`` /
+    Three jobs, over one read of the open/escalated ``po_mismatch`` /
     ``quality_hold`` rows:
 
     * a row of a type this refresh still FINDS, which an agent is mid-way
@@ -1261,7 +1318,19 @@ async def _reconcile_po_exceptions(
       per-type de-dupe, and the coordinator must escalate rather than resolve
       a row that now carries a finding the agent never evaluated;
     * a row of a type it no longer finds is closed
-      (:func:`_close_cleared_po_exceptions`).
+      (:func:`_close_cleared_po_exceptions`) — **unless an ERP PO sync
+      triggered this refresh** (``erp_po_sync``). A sync may raise a hold but
+      never clear one: whoever can edit a PO in the ERP is outside the
+      invoice's implicated set, so letting the sync close a ``po_mismatch``
+      would let an ERP-side total increase release an over-billing hold with no
+      FeohLedger sign-off (decisions §323, amended — a product-owner call
+      pending CISO review). The row stays open and blocking, and is annotated
+      in ``erp_report`` (kind :data:`ERP_REPORT_PO_REMATCH_CLEARS`) so the
+      person reviewing it sees why it now reads as clearable; they clear it
+      through ``exception_lifecycle.record_decision`` and its segregation
+      checks;
+    * an annotation that no longer holds — the finding is back — is removed,
+      whoever triggered the refresh.
     """
     rows = (
         (
@@ -1284,8 +1353,23 @@ async def _reconcile_po_exceptions(
     for row in rows:
         if row.exception_type in found and is_being_decided(row.id):
             mark_refound(row.id)
+        if (
+            row.exception_type in found
+            and (row.erp_report or {}).get("kind") == ERP_REPORT_PO_REMATCH_CLEARS
+        ):
+            # The finding is back: "now matches" is no longer true.
+            row.erp_report = None
 
     cleared_rows = [r for r in rows if r.exception_type not in found]
+    if cleared_rows and erp_po_sync is not None:
+        for row in cleared_rows:
+            row.erp_report = {
+                "kind": ERP_REPORT_PO_REMATCH_CLEARS,
+                "erp_type": erp_po_sync.get("erp_type"),
+                "po_number": po_ref or None,
+                "observed_on": utc_today().isoformat(),
+            }
+        return
     if cleared_rows:
         await _close_cleared_po_exceptions(
             db,

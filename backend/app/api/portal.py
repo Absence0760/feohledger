@@ -35,7 +35,7 @@ from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
-from app.models.procurement import POLineItem, PurchaseOrder
+from app.models.procurement import POLineItem, PurchaseOrder, po_vouched_money
 from app.models.supplier_chat import ChatAuthorRole, ChatThreadStatus, SupplierChatMessage
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
@@ -947,7 +947,8 @@ async def list_my_purchase_orders(
                 id=str(po.id),
                 po_number=po.po_number,
                 status=po.status,
-                total=po.total,
+                total=po_vouched_money(po, po.total),
+                total_unverifiable=bool(po.total_unverifiable_reason),
                 currency=po.currency,
                 line_item_count=n,
                 created_at=po.created_at,
@@ -983,15 +984,16 @@ async def get_my_purchase_order(
         id=str(po.id),
         po_number=po.po_number,
         status=po.status,
-        total=po.total,
+        total=po_vouched_money(po, po.total),
+        total_unverifiable=bool(po.total_unverifiable_reason),
         currency=po.currency,
         created_at=po.created_at,
         line_items=[
             PortalPOLineItem(
                 description=li.description,
                 quantity=li.quantity,
-                unit_price=li.unit_price,
-                total=li.total,
+                unit_price=po_vouched_money(po, li.unit_price),
+                total=po_vouched_money(po, li.total),
             )
             for li in lines
         ],
@@ -1057,6 +1059,16 @@ async def flip_purchase_order(
             correlation_id=str(existing.correlation_id),
             status=existing.status.value,
             message="Invoice already created from this PO.",
+        )
+
+    # The flip bills `po.total`. When the ERP's last sync could not price this
+    # PO (decisions §323) that total is one nobody vouches for, and an invoice
+    # minted at it would be a payable at an unconfirmed figure.
+    if po.total_unverifiable_reason:
+        raise HTTPException(
+            status_code=409,
+            detail="This purchase order's total could not be confirmed. "
+            "Submit your invoice instead.",
         )
 
     po_lines = (

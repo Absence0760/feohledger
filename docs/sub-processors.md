@@ -599,24 +599,42 @@ to them, not appointing someone to process it on our behalf. These belong in the
   delivery (`/api/analytics/scheduled-reports` — the tenant nominates the
   recipient addresses). Both are worth naming in the DPA as controller-directed
   transfers rather than omitting silently.
-- **Customer notice — and the gap in it.** GDPR Art. 28(2) requires giving
+- **Customer notice.** GDPR Art. 28(2) requires giving
   controllers advance notice and a chance to object before adding a new
   sub-processor, and both `/legal/sub-processors` § 9 and `/legal/dpa` § 8 commit
   us publicly to **30 days'** notice plus a right to object and, failing
   resolution, to terminate the affected part of the service.
 
-  **No notification mechanism exists.** There is no notification list, no
-  subscribe endpoint and no email template that reaches a customer's DPO. The
-  whole mechanism today is: update this file, update `/legal/sub-processors`,
-  change its last-updated date, and add a dated row to its § 10 change log — plus
-  a manual mail to anyone who has written in asking to be told. Do not describe
-  this as "per the DPA's change procedure" as though a procedure ran it. The
-  commitment is contractual, so this is a promise we cannot currently keep on the
-  notification half. Tracked in `docs/followups.md` (§ (c), "No mechanism backs
-  the 30-day sub-processor notice"); the durable fix is a per-org notification
-  fired from a changelog entry, so adding a register row and notifying are one
-  action rather than two.
+  **The notice is one action: add an entry to the change log.**
+  `backend/app/services/subprocessor_changelog.py` is the register's § 10 as
+  data (decisions §321, issue #427). For a change that needs notice — a new
+  sub-processor, a replacement, a provider promoted from "Configured only" to
+  "Deployed — always", or a change to what an existing one receives — append a
+  `ChangelogEntry` with `notice=True` and an `effective_on` at least 30 days
+  after `published_on` (or an `urgent_reason`, the DPA's security/availability
+  carve-out), run `pnpm gen:subprocessor-changelog`, and ship it with the edits
+  to this file and to the page. Two things follow from that one entry:
 
-  Until then, **do not add or promote a sub-processor without doing the notice by
-  hand first** — promoting a provider from "Configured only" to "Deployed —
-  always", or changing what an existing one receives, both count.
+  - `/legal/sub-processors` § 10 renders it (the generated
+    `frontend/src/lib/legal/subprocessorChangelog.generated.ts`;
+    `pnpm check:subprocessor-changelog` fails CI when stale, and refuses an
+    entry with under 30 days and no reason).
+  - The `subprocessor-notices` sweep (`services/subprocessor_notices.py`,
+    `FEOH_SUBPROCESSOR_NOTICES_ENABLED` — off by default, **on in production**)
+    emails it to every active administrator of every organisation that existed
+    on `published_on`, once per organisation: the (entry, organisation) pair
+    is claimed in the control-plane `subprocessor_notices` ledger before
+    sending, `sent_at` is stamped after, and a
+    `privacy.subprocessor_notice_sent` audit row is written in the tenant
+    (`audited_at`; retried alone if it fails, never re-sending). A notice that
+    went out with fewer than 30 days to run is recorded `late`. A `notice=True`
+    entry cannot be published before 2026-10-26, when this began.
+    `python scripts/subprocessor_notices.py list` shows what is still owed;
+    `send` sends it now.
+
+  An entry's `id` never changes and an entry is never deleted — the ledger is
+  keyed by it, so a rename re-notifies every customer. A row that needs no
+  notice (a system the customer controls, an editorial fix) is the same append
+  with `notice=False`. What is still manual: copying the notice to a non-admin
+  privacy/DPO address a customer has asked for at `privacy@` — tracked in
+  `docs/followups.md` § (c).

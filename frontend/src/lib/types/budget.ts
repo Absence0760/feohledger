@@ -85,6 +85,12 @@ export interface BudgetSpend {
 	 * `actual` are a FLOOR — render the disclosure beside the figure.
 	 */
 	excluded_row_count: number;
+	/**
+	 * A COUNT: linked open POs left out of `committed` because the ERP could
+	 * not confirm their total at its last sync (decisions §323). Same rule —
+	 * non-zero means `committed` is a floor.
+	 */
+	unverifiable_po_count: number;
 }
 
 /** One currency's slice of `GET /api/budgets/summary`. */
@@ -123,6 +129,8 @@ export interface BudgetCheck {
 	remaining_after: MoneyAmount;
 	would_overspend: boolean;
 	currency: string;
+	/** See `BudgetSpend.unverifiable_po_count` — non-zero means `remaining` may overstate. */
+	unverifiable_po_count: number;
 }
 
 // Request shapes. Money goes out as the EXACT DECIMAL STRING the user typed
@@ -175,6 +183,8 @@ export interface BudgetCurrencyRollup {
 	over_budget_count: number;
 	/** A count — see `BudgetSpend.excluded_row_count`. */
 	excluded_row_count: number;
+	/** A count — see `BudgetSpend.unverifiable_po_count`. */
+	unverifiable_po_count: number;
 }
 
 export interface BudgetRollup {
@@ -187,6 +197,8 @@ export interface BudgetRollup {
 	 * than presenting a partial total as a whole one.
 	 */
 	excluded_row_count: number;
+	/** Whole-set total of the per-currency `unverifiable_po_count` (decisions §323). */
+	unverifiable_po_count: number;
 	/** No budgets at all — a distinct state from a row of confident zeros. */
 	insufficient_data: boolean;
 }

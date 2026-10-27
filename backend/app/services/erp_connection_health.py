@@ -104,8 +104,12 @@ class ConnectionHealthResult:
     failures: int = 0
 
 
-async def _notify(org: Organization, rendered) -> bool:
-    """Tell the org's admins. Whether anyone was actually notified."""
+async def notify_org_admins(
+    org: Organization, rendered, *, event_type: str = EVENT_ERP_CONNECTION_EXPIRING
+) -> bool:
+    """Tell the org's admins, in-app and by email (preference-gated). Whether
+    anyone was actually notified. Also the delivery of the ERP call-quota
+    notices (``services/erp_call_budget``, ``erp_call_quota``)."""
     recipients = await resolve_role_user_ids(org.id, ADMIN_ROLE)
     if not recipients:
         return False
@@ -115,7 +119,7 @@ async def _notify(org: Organization, rendered) -> bool:
             db,
             correlation_id=uuid.uuid4(),
             organization_id=org.id,
-            event_type=EVENT_ERP_CONNECTION_EXPIRING,
+            event_type=event_type,
             entity_id=None,
             recipient_user_ids=recipients,
             rendered=rendered,
@@ -160,7 +164,7 @@ async def check_connection(
         if oauth.get(RECONNECT_NOTICE_KEY) == connection_id:
             return
         reason = str(oauth.get("reconnect_reason") or erp_oauth.reconnect_reason(oauth, now=now))
-        if await _notify(
+        if await notify_org_admins(
             org,
             render_erp_connection(
                 notice=ERP_NOTICE_RECONNECT, erp_name=spec.display_name, reason=reason
@@ -202,7 +206,7 @@ async def check_connection(
         expires_on=expires.date(),
         days_left=max(0, int(days_left)),
     )
-    if await _notify(org, rendered):
+    if await notify_org_admins(org, rendered):
         await erp_oauth.update_connection_metadata(
             spec.key,
             org.id,

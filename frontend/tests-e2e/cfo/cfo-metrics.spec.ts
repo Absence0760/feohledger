@@ -80,6 +80,9 @@ test.describe('/cfo CFO-metrics section (admin)', () => {
 					received_amount: '1500.00',
 					unposted_invoice_amount: '2000.00',
 					total_accrual: '8200.00',
+					// Two POs left out of the legs for a total the ERP could not
+					// confirm (decisions §323) — the card must say so.
+					unverifiable_po_count: 2,
 					by_currency: byCurrency
 				};
 				await route.fulfill({ response, json: body });
@@ -102,6 +105,9 @@ test.describe('/cfo CFO-metrics section (admin)', () => {
 		// The naive cross-currency 8,200 is never shown.
 		await expect(accruals).not.toContainText(/8[,.]?200/);
 		await expect(accruals.getByTestId('accruals-no-currency')).toBeVisible();
+		await expect(accruals.getByTestId('accruals-unverifiable-pos')).toContainText(
+			'2 purchase orders are left out of open POs and received goods'
+		);
 	});
 
 	test('re-fetches CFO metrics when the horizon control changes', async ({ page }) => {

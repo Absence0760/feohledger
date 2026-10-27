@@ -2104,6 +2104,24 @@ class AppLocalizationsFr extends AppLocalizations {
   String get exceptionDetailSectionDescription => 'Description';
 
   @override
+  String exceptionDetailPoRematch(String po, String erp, String date) {
+    return 'Le bon de commande $po a changé dans $erp le $date et une nouvelle vérification concorde désormais. Examinez-le pour lever le blocage.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoDate(String po, String erp) {
+    return 'Le bon de commande $po a changé dans $erp et une nouvelle vérification concorde désormais. Examinez-le pour lever le blocage.';
+  }
+
+  @override
+  String exceptionDetailPoRematchNoPo(String erp) {
+    return 'Le bon de commande a changé dans $erp et une nouvelle vérification concorde désormais. Examinez-le pour lever le blocage.';
+  }
+
+  @override
+  String get exceptionDetailYourErp => 'votre ERP';
+
+  @override
   String get exceptionDetailSectionInvoice => 'Facture';
 
   @override
@@ -2829,6 +2847,16 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCancelled(String poNumber) {
+    return 'La commande $poNumber est annulée — la facture n’a pas été rapprochée avec elle';
+  }
+
+  @override
+  String invoiceWarningPoTotalUnverifiable(String poNumber) {
+    return 'Le total de la commande $poNumber n’a pas pu être confirmé par l’ERP lors de la dernière synchronisation — les montants n’ont pas été comparés';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return 'Correspondance 3 voies partielle — correspondance $matchType avec la commande $poNumber, mais seule une partie de la quantité commandée a été reçue';
   }
@@ -3032,6 +3060,14 @@ class AppLocalizationsFr extends AppLocalizations {
   ) {
     return 'Devises différentes : facture en $invoiceCurrency, commande en $poCurrency — montants non comparés';
   }
+
+  @override
+  String get invoicePoMatchIssuePoCancelled =>
+      'Commande annulée — montants non comparés';
+
+  @override
+  String get invoicePoMatchIssuePoTotalUnverifiable =>
+      'Total de la commande non confirmé par l’ERP lors de la dernière synchronisation — montants non comparés';
 
   @override
   String invoicePoMatchIssueAmountMismatch(

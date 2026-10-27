@@ -2,12 +2,17 @@
 
 A deployed environment must refuse to start with a fail-open captcha, the
 log-only console email adapter, no provider-credential KMS key, or the
-well-known default / weak JWT signing key — both are silent
+well-known default / weak JWT signing key, or with the sub-processor
+change-notice sweep the published DPA relies on switched off — all silent
 misconfigurations that would otherwise ship to production. Local-dev / CI
 envs keep the convenient defaults.
 """
 
 from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -50,6 +55,7 @@ def test_deployed_env_accepts_a_strong_secret_key():
         hcaptcha_secret="hc",
         hcaptcha_sitekey="site-key",
         secret_key=_GOOD_KEY,
+        subprocessor_notices_enabled=True,
     )
     assert s.secret_key == _GOOD_KEY
 
@@ -90,6 +96,7 @@ def test_deployed_env_accepts_lithic_live_key_with_sandbox_off():
         secret_key=_GOOD_KEY,
         lithic_api_key="sk_live_abc",
         lithic_sandbox=False,
+        subprocessor_notices_enabled=True,
     )
     assert s.lithic_sandbox is False
 
@@ -118,6 +125,7 @@ def test_deployed_env_without_card_keys_ignores_sandbox_flag():
         hcaptcha_secret="hc",
         hcaptcha_sitekey="site-key",
         secret_key=_GOOD_KEY,
+        subprocessor_notices_enabled=True,
     )
     assert s.lithic_sandbox is True  # default unchanged, but boot succeeds
 
@@ -170,6 +178,7 @@ _DEPLOYED = {
     "hcaptcha_secret": "hc",
     "hcaptcha_sitekey": "site-key",
     "secret_key": _GOOD_KEY,
+    "subprocessor_notices_enabled": True,
 }
 
 
@@ -221,3 +230,51 @@ def test_deployed_env_with_signup_closed_needs_no_captcha_sitekey():
 
 def test_local_dev_needs_no_captcha_sitekey():
     assert Settings(environment="development").hcaptcha_sitekey == ""
+
+
+# ── Sub-processor change notices (deployed-env boot guard, decisions §321) ──
+
+
+@pytest.mark.parametrize("value", [False, None])
+def test_deployed_env_refuses_the_subprocessor_notice_sweep_off(value):
+    # The published DPA § 8 says change notices are emailed; with the sweep off
+    # nothing sends them and nothing says so. ``None`` = left unset (the default).
+    overrides = {k: v for k, v in _DEPLOYED.items() if k != "subprocessor_notices_enabled"}
+    if value is not None:
+        overrides["subprocessor_notices_enabled"] = value
+    with pytest.raises(ValidationError, match="FEOH_SUBPROCESSOR_NOTICES_ENABLED"):
+        Settings(**overrides, email_provider="ses")
+
+
+def test_deployed_env_accepts_the_subprocessor_notice_sweep_on():
+    assert Settings(**_DEPLOYED, email_provider="ses").subprocessor_notices_enabled is True
+
+
+def test_local_dev_keeps_the_subprocessor_notice_sweep_off():
+    # Off by default so a laptop, the test suite and CI never email a notice.
+    assert Settings(environment="development").subprocessor_notices_enabled is False
+
+
+# ── The day-one rehearsal's env must boot (it is production-shaped) ──────
+
+
+def test_the_day_one_rehearsal_env_passes_every_deployed_boot_guard(monkeypatch):
+    # scripts/day-one/stack.sh writes the API's env for CI's production-shaped
+    # job; a new deployed-env refusal it does not satisfy only shows up there,
+    # as an API that never comes up. Build Settings from that exact heredoc.
+    stack = Path(__file__).resolve().parents[2] / "scripts" / "day-one" / "stack.sh"
+    body = re.search(r'cat >"\$STATE_DIR/api\.env" <<EOF\n(.*?)\nEOF', stack.read_text(), re.S)
+    assert body, "stack.sh no longer writes api.env with a heredoc"
+    env: dict[str, str] = {}
+    for line in body.group(1).splitlines():
+        key, _, value = line.partition("=")
+        value = value.replace("$(openssl rand -hex 32)", "a" * 64)
+        env[key] = re.sub(r"\$\{[A-Z_]+\}", "1", value)
+    assert env["FEOH_ENVIRONMENT"] == "production"
+    for key in [k for k in os.environ if k.startswith("FEOH_")]:
+        monkeypatch.delenv(key)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    s = Settings(_env_file=None)
+    assert s.is_deployed
+    assert s.subprocessor_notices_enabled is True

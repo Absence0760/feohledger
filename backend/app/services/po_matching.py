@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.invoice import Invoice
-from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
+from app.models.procurement import (
+    CANCELLED_PO_STATUSES,
+    GoodsReceipt,
+    PurchaseOrder,
+    po_currency_code,
+)
 from app.models.quality_inspection import QualityInspection
 from app.services.invoice_warning_catalog import po_match_issue
 from app.services.matching_rules import resolve_match_rule
@@ -168,6 +173,14 @@ class MatchResult:
     #: `same` / `different` / `unknown` (see `compare_currencies`); `None` only
     #: when no PO was found.
     currency_check: str | None = None
+    #: Set when the PO's last ERP sync could not state its total exactly
+    #: (`PurchaseOrder.total_unverifiable_reason`, an
+    #: `erp_adapters.base.PoSkipReason` value). The amounts were then NOT
+    #: compared: `status` is `mismatch` and the variance fields are `None`.
+    po_total_unverifiable_reason: str | None = None
+    #: The PO is cancelled or voided (`CANCELLED_PO_STATUSES`): nothing was
+    #: compared and the invoice is held.
+    po_cancelled: bool = False
     gr_id: str | None = None
 
     #: invoice - PO, in the invoice's currency. `None` when the two are in
@@ -318,8 +331,34 @@ async def match_invoice_to_po(
     po_total = _to_decimal(po.total)
     tolerance = _to_decimal(tolerance_pct, Decimal("5.0"))
     result.match_type = "2-way"
+    result.po_total_unverifiable_reason = po.total_unverifiable_reason or None
 
-    if result.currency_check == CURRENCY_DIFFERENT:
+    if po.status in CANCELLED_PO_STATUSES:
+        # The order was called off in the ERP (or here): it authorizes nothing,
+        # so no invoice passes the amount control against it, whatever the
+        # figures say. Held for a person, like the currency guard.
+        result.amount_variance = None
+        result.amount_variance_pct = None
+        result.within_tolerance = False
+        result.status = "mismatch"
+        result.po_cancelled = True
+        result.issues.append(po_match_issue("po_cancelled"))
+    elif result.po_total_unverifiable_reason:
+        # The ERP still has this PO, but its last sync could not state the
+        # total exactly (decisions §323), so `po.total` is a figure from an
+        # earlier sync the ERP no longer vouches for. Comparing against it
+        # would pass or fail the amount control on a number nobody stands
+        # behind — the match refuses, like the currency guard below, and the
+        # warnings layer holds the invoice for a person. Nor is the figure
+        # stored on `invoice.po_match`, which every API reader of the invoice
+        # gets: a display path sends null for it (§323).
+        result.po_total = None
+        result.amount_variance = None
+        result.amount_variance_pct = None
+        result.within_tolerance = False
+        result.status = "mismatch"
+        result.issues.append(po_match_issue("po_total_unverifiable"))
+    elif result.currency_check == CURRENCY_DIFFERENT:
         # The currency guard. Before `purchase_orders.currency` existed this
         # compared the two figures as bare numbers, so EUR 1,000 against a USD
         # 1,000 order read `matched` at 0% — the amount control passed on two
@@ -431,8 +470,12 @@ async def match_invoice_to_po(
                 # Does the invoice bill beyond what arrived? Same exact-Decimal
                 # tolerance as the amount leg, measured against the received
                 # slice of the PO rather than its whole total. Skipped when the
-                # currencies differ — that is already a mismatch with no figure.
-                if result.currency_check != CURRENCY_DIFFERENT:
+                # currencies differ or the PO's total is unverifiable — each is
+                # already a mismatch with no figure to measure against.
+                if (
+                    result.currency_check != CURRENCY_DIFFERENT
+                    and not result.po_total_unverifiable_reason
+                ):
                     received_value = po_total * gr_qty_total / po_qty_total
                     result.received_value = received_value
                     if received_value > 0:
@@ -538,6 +581,8 @@ async def match_invoice_to_po(
         "variance": result.amount_variance,
         "variance_pct": result.amount_variance_pct,
         "currency_check": result.currency_check,
+        "po_total_unverifiable_reason": result.po_total_unverifiable_reason,
+        "po_cancelled": result.po_cancelled,
         "tolerance_pct": tolerance,
         "within_tolerance": result.within_tolerance,
         "has_gr": gr is not None,

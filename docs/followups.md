@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-26 — re-keying old Merge.dev PO rows in the sync (decisions §328, later in PR #670) replaced its (c) entry with a (b) one, running that sync per Merge.dev tenant after deploy, keeping the file at 155. Before that, 2026-10-26 — refreshing a synced PO's lines (decisions §327, later in PR #670) closed its (c) entry, taking the file from 156 → 155. Before that, 2026-10-26 — refusing a cancelled PO in the matcher (decisions §326, later in PR #670) closed its (c) entry, taking the file from 157 → 156. Before that, 2026-10-26 — scoping the PO sync's re-match to the synced entity and skipping paid / done invoices (later in PR #670) closed its (c) entry, taking the file from 158 → 157. Before that, 2026-10-26 — the PR #670 branch-wide money-path review opened five (c) entries (old Merge.dev PO rows, the re-match's scope, no exit for a never-priceable PO, PO lines never refreshed, the matcher ignoring PO status), taking the file from 153 → 158. Before that, 2026-10-26 — the branch review's skipped-PO wiring for NetSuite, Business Central, Sage (ZA) and Intacct (decisions §325, later in PR #670) opened one (c) entry, their PO listings still reading a failed or capped read as complete, taking the file from 152 → 153. Before that, 2026-10-26 — showing the "re-check now matches" note on `/exceptions` and the mobile exception detail (later in PR #670) closed its (c) entry, taking the file from 153 → 152. Before that, 2026-10-26 — letting a failed received-goods read fail `/api/analytics/cfo` instead of reporting a zero GR/IR leg (later in PR #670) closed its (c) entry, taking the file from 154 → 153. Before that, 2026-10-26 — withholding a marked PO's stale total on every surface and leaving it out of budgets and accruals (decisions §323, later in PR #670) closed the (c) entry for it and its review opened one, the received-goods accrual swallowing every error into zeros, keeping the file at 153. Before that, 2026-10-26 — wiring Blackbaud FE NXT into the skipped-PO report (decisions §324) closed its (c) entry, taking the file from 155 → 154. Before that, 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**148 open: 127 (c) · 10 (a) · 11 (b)** — re-derived from the file, never carried
+**155 open: 130 (c) · 12 (a) · 13 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -363,31 +363,45 @@ nobody re-reads outlives the thing it describes.
 
 ### The published legal set has loose ends
 
-- [ ] **No mechanism backs the 30-day sub-processor notice.** ([#427](https://github.com/Absence0760/feohledger/issues/427)) `/legal/sub-processors`
-      and the DPA both commit to 30 days' advance notice of a new sub-processor
-      and a right to object. The mechanism today is "this page is updated and a
-      dated change-log row is added" — there is no notification list, no
-      subscribe endpoint, and no email template that reaches a customer's DPO.
-      The commitment is contractual, so the gap is a promise we cannot currently
-      keep on the notification half.
-      **Durable fix:** a per-org notification (the admin contact already exists,
-      and `email_adapters` can send) fired from a changelog entry, so adding a
-      register row and notifying are one action rather than two. `~/github/threkir`'s
-      `docs/compliance/sub-processor-changelog.md` is the shape to copy for the
-      dated-entry half.
-      **The other half of #427 has landed:** `pnpm check:subprocessors`
-      (`scripts/check_subprocessor_registry.mjs`, CI's Frontend job — the
-      Compliance-drift workflow's summary points at it rather than running it
-      twice) now fails when a registered adapter is missing from
-      `docs/sub-processors.md` or a third-party processor it names never
-      reaches the published page. It reads both registration shapes — the
-      `@register_*_adapter` decorator and a module-level registry dict — and
-      reports any provider family whose registrations it cannot read at all, so
-      a family cannot again be silently invisible the way
-      `email_intake_adapters/` was. So the registers can no longer drift from
-      the code silently — what is still missing is telling customers when they
-      change.
-      **Trigger:** before adding or changing any sub-processor.
+- [ ] **The sub-processor notice has no privacy / DPO contact to reach.**
+      ([#427](https://github.com/Absence0760/feohledger/issues/427)) The notice
+      itself is built (decisions §321): a `notice=True` entry in
+      `backend/app/services/subprocessor_changelog.py` is published on
+      `/legal/sub-processors` § 10 and emailed to every active administrator of
+      every organisation, once, with a ledger row and an audit row. What it
+      cannot reach is a customer's DPO or privacy contact who is not an
+      administrator — the platform holds no such field, so `/legal/dpa` § 8
+      offers to copy the notice to another address *by hand* on request to
+      `privacy@`. That manual half is the part still resting on a mailbox.
+      **Durable fix:** an optional per-organisation privacy-notice address
+      (an audited writer like `PUT /api/organization/sso`, refused by the generic
+      `PATCH /api/organization`, a field on the organisation settings page),
+      added to the notice's recipients in `services/subprocessor_notices._admins`;
+      then drop the by-hand sentence from DPA § 8 and register § 9. Deciding
+      whether the contact is *instead of* or *as well as* the admins is the
+      contractual call counsel should make first.
+      **Trigger:** the first customer who asks for the notice at a non-admin
+      address, or before the DPA is countersigned by a customer with a DPO.
+
+- [ ] **A sub-processor notice can reach nobody, and nothing tells a person.**
+      (decisions §321) Two cases leave a customer organisation without the
+      notice the DPA promises: it has **no active administrator** (the sweep
+      releases its claim, counts it as `organizations_without_admin` on
+      `GET /api/health/sweeps`, and retries every tick — it stays owed), or
+      **some of its administrators' emails were refused** on a notice that
+      otherwise went out (`failed_recipients`; never re-sent, by design, so the
+      others are not mailed twice). Both are visible — the health counters and
+      `python scripts/subprocessor_notices.py list`, which names each partly
+      delivered notice — but nobody is paged and no procedure says what to do,
+      so the 30 days can run out on a counter nobody reads.
+      **Durable fix:** an operator procedure in `docs/founder-runbooks/`
+      (resend by hand to the missed admins or the organisation's contract
+      contact, then record it), plus an alert on a non-zero
+      `organizations_without_admin` / `failed_recipients` once the sweep-health
+      alerting can key on a counter rather than `failures` alone; the
+      privacy-contact field above would give the no-admin case a second address.
+      **Trigger:** the first `notice=True` change-log entry, or the first
+      non-zero value of either counter in production.
 
 ### Live Stripe billing has no subscription to invoice against
 
@@ -980,6 +994,56 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to pre-approval cover or the policy engine's
       `preapproval_required` rule, or a product call on pre-approval semantics.
 
+### Surfaced by the PR #670 money-path review (2026-10-26, decisions §323)
+
+- [ ] **(c) A PO the ERP can never price has no documented way out.** A SYSPRO
+      PO with a line discount, say, stays marked unverifiable for good, and
+      `po_mismatch` has no fingerprint suppression, so the next refresh after
+      a person resolves the hold (Send to ERP, approve-with-corrections)
+      raises it again.
+      **Durable fix:** decide the exit (a person-recorded "verified total" on
+      the PO, audited, or a per-row suppression a person sets) and document it
+      in `backend/docs/po-matching.md`.
+      **Trigger:** the first customer report of a hold that keeps coming back,
+      or the next change to the unverifiable-PO rules.
+- [ ] **(c) A failed or capped PO listing still reads as a complete one on four
+      adapters, which hides the skips it would have reported.** NetSuite and
+      Business Central end a failed read with what they have read so far and
+      stop at their page cap; Sage Accounting (ZA) and Sage Intacct answer an
+      empty list on a failed read (decisions §325 keeps that §284 behaviour for
+      POs). The sync treats absence as no evidence, so no row is wrongly marked,
+      but a PO that has just become unpriceable and falls in the unread part
+      keeps its stored total until a whole listing succeeds.
+      Blackbaud and SYSPRO raise `ErpListingIncomplete` instead (§324).
+      **Durable fix:** have each adapter's `list_pos_report` raise
+      `ErpListingIncomplete` on a failed or truncated read, the way Blackbaud's
+      `_sync_rows` does, and update the four "the PO list degrades" tests.
+      **Trigger:** the next change to any of those four adapters' PO listing, or
+      the first customer report of a stale PO total on one of them.
+- [ ] **(c) ⚠️ CISO REVIEW — an ERP-side PO increase can still lift a hold at
+      the invoice's next FeohLedger refresh.** The product owner ruled that the
+      sync's own re-match is hold-only (decisions §323, amended, pending CISO
+      review). Every other refresh kept its pre-§323 auto-close
+      (`invoice_warnings._close_cleared_po_exceptions`). So after the ERP raises
+      a total, the next refresh that passes org settings closes the
+      `po_mismatch` with no named actor: an invoice save, approve-with-
+      corrections (`services/review.py`), **Send to ERP / `/complete`**
+      (`api/workflow.py`), re-running extraction, CSV import, a goods receipt or
+      QMS sync on the PO, or the missing-PO agent's apply step. Its limits
+      (past-approval, segregation, hand-recorded receipts) are about a
+      different PO or FeohLedger-side evidence; a same-PO row on an approved
+      invoice still closes, and none of them see who edited the PO in the ERP.
+      Example: INV-9 is 1,200.00 against PO-9 at 1,000.00, held. PO-9 is raised
+      to 1,200.00 in the ERP and synced; a clerk clicks Send to ERP; the hold
+      closes and the next run pays 1,200.00.
+      **Durable fix (if the review wants it):** one guard in
+      `_close_cleared_po_exceptions`: skip a row whose `erp_report.kind` is
+      `po_rematch_clears`, so only a person clears it. That covers the case the
+      sync already saw; a row whose clearing total changed in the ERP between
+      syncs would also need the PO to record when the sync last changed its
+      total. Or accept the residual and record that in decisions §323.
+      **Trigger:** the CISO / Security Analyst review §323 asks for.
+
 ### Surfaced by the procurement bug hunt (2026-10-05, PR #498)
 
 - [ ] **(c) The budget PO-relief join reads `invoices.po_number`, which has no
@@ -1544,10 +1608,6 @@ scope (§260) — do not fold them into any of these.
       /v3/company/{realmId}/companyinfo/{realmId}`), as Xero and Sage already
       resolve theirs. **Trigger:** with the OAuth login-CSRF binding above, or
       before the platform Intuit app goes live.
-- [ ] **(c) SYSPRO's `void_invoice` docstring claims the same stance as
-      Business Central and NetSuite**, which now delete drafts while SYSPRO
-      deletes nothing. **Durable fix:** say SYSPRO never voids. **Trigger:**
-      the next edit to `syspro.py`.
 
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
@@ -1852,16 +1912,15 @@ scope (§260) — do not fold them into any of these.
       rule the realm pass applies would call them one supplier. **Durable fix:** count on the same normalised key
       `_identity_keys` builds, in both the pull and the local query.
       **Trigger:** the next change to `vendor_sync`'s name fallback.
-- [ ] **(c) Three adapters still drop or mislabel records the syncs read as
+- [ ] **(c) Two adapters still drop or mislabel records the syncs read as
       evidence.** (1) Sage Accounting (UK) skips ledgers with
       `included_in_chart: false`, so a row linked to one reads as a dead link.
-      (2) Merge.dev's account `status` and Business Central's vendor `blocked`
-      are not mapped to `active=False`, so an inactive record can be linked
-      or created as a payee. (3) Merge.dev's GL `parent_code` holds the
-      parent's Merge id, not its code. **Durable fix:** emit the out-of-chart
-      ledger with `active=False`, map both inactive flags, and resolve the
-      Merge parent id to its code within the pull. **Trigger:** the next
-      change to any of those three adapters' listings.
+      (2) Business Central's vendor `blocked` is not mapped to `active=False`,
+      so a blocked vendor can be linked or created as a payee. **Durable
+      fix:** emit the out-of-chart ledger with `active=False` and map
+      `blocked`. **Trigger:** the next change to either adapter's listings.
+      (Merge.dev's half — account `status` and the GL parent id — landed
+      2026-10-26 with the Contacts vendor fix.)
 - [ ] **(c) Vendor linking has three gaps of its own.** (1)
       `vendors.erp_vendor_id` has no unique index, so two rows sharing an id
       make `scalar_one_or_none` in `services/vendor_sync` raise and abort the
@@ -2007,14 +2066,6 @@ stay open.
       decisions.md. **Trigger:** before the first tenant matches invoices
       against live Xero or NetSuite POs, or the next change to the PO status
       vocabulary.
-- [ ] **(c) Most adapters still link a synced PO's vendor by name only.**
-      Only Xero and QuickBooks fill `PoPayload.vendor_erp_id`. NetSuite,
-      Business Central, Merge.dev, Sage Intacct, Sage Accounting ZA, SYSPRO
-      and Blackbaud FE NXT fall back to `vendor_name`, which a rename on
-      either side breaks, and which picks the wrong row when two vendors share
-      a name. **Durable fix:** read each ERP's supplier id on the PO (the same
-      id its `list_vendors` reports) into `vendor_erp_id`. **Trigger:** the
-      next change to that adapter's `list_pos`.
 
 ### Surfaced by Xero's Disconnect leaving the grant live (2026-10-20)
 
@@ -2033,6 +2084,21 @@ providers still have the same gap.
       none and make the Disconnect message say the grant must be removed at
       the provider. **Trigger:** the next change to either adapter's OAuth
       spec, or before either provider's platform app goes live.
+
+### Surfaced by the Blackbaud FE NXT API audit (#651, 2026-10-26)
+
+- [ ] **(c) A push refused by the SKY call budget is not re-sent when the
+      allowance resets.** `erp_call_budget_exhausted` (`tenant_budget` /
+      `subscription_quota`) fails the invoice before any call, with the reason
+      and `retry_after`. Someone has to retry it after 00:00 UTC, one invoice
+      or a bulk retry at a time. The original follow-up asked to *defer*
+      rather than fail. **Durable fix:** a sweep that, after the reset,
+      re-dispatches invoices whose last `invoice.erp_failed` refusal is
+      `erp_call_budget_exhausted` and whose state is unchanged since. It goes
+      through `erp_send.start_erp_send` (plan and export gates), in
+      `retry_after` order, and stops at the org's share again. **Trigger:**
+      the first tenant that hits its share in production, or a support request
+      to retry a batch by hand.
 
 ### Surfaced by refusing the ERP push for an invoice already being paid (2026-10-21, decisions §309)
 
@@ -2452,22 +2518,119 @@ as oversights.
 - [ ] **Verify the SYSPRO, Sage Intacct, Sage SA and Blackbaud adapters
       against a live system.** Each was built from published docs and tested
       against fake-erp only (decisions §269). Unverified:
-      **SYSPRO:** the APSTIN / COMFND schemas and the `ApInvoice` /
-      `PorMasterHdr` / `PorMasterDetail` column names.
+      **SYSPRO** (issue #650's sandbox list; column names are corroborated by a
+      third-party schema dump): the APSTIN element names
+      (copy `APSTIN.XSD` / `APSTINDOC.XSD` / `COMFND.XSD` and an e.net
+      Diagnostics sample into `tools/fake-erp/fixtures/syspro/`); the exact
+      APSTIN and Logon error wording `classify_apstin_error` /
+      `classify_logon_error` match on (duplicate, supplier / ledger on hold,
+      control account, closed period, session expired, licence busy); whether
+      COMFND takes the `GT` condition the PO walk pages with; the
+      `ApInvoicePay.TrnType` code for a payment (assumed `P`), the sign
+      convention of `TrnValue` (the paid rule compares `abs(sum)` with
+      `abs(OrigInvValue)`, so +150 and a −250 refund would read as 100 paid)
+      and whether `TrnValue` is in the invoice's currency or local (if local, a
+      foreign invoice never reads `paid` — closed, but wrong); whether the
+      `ApInvoicePay` read (`return_rows=1000`) can truncate, which it does not
+      check today; whether
+      `GetLogonProfile` / `LocalCurrencyCode` is served on the REST host as
+      the syspro-ruby client reads it; `MForeignPrice`
+      being the PO-currency price, the currency of a foreign PO's
+      `NMscChargeValue`, and the line-discount and price-UOM arithmetic (POs
+      with any of those are skipped today, never synced at a guessed total).
+      Still open and higher risk: **tax** — APSTIN sends no tax code and
+      distributes the gross, so an exclusive-tax supplier may post at 115 %
+      or be refused; **success detection** — a post with no error element is
+      read as posted, so a read-back of `ApInvoice` requiring `OrigInvValue ==
+      amount` (`posted_total_unconfirmed` when it fails) is the durable fix,
+      once **`OrigInvValue`'s currency and tax basis** are known (the
+      idempotency compare depends on them too); the `ApInvoice.Invoice` width
+      (a `doc_number_too_long` preflight); the GET query-string length for a
+      long bill; `posting_period` / `IgnoreWarnings` behaviour for a closed or
+      future period; `ApInvoice.InvoiceStatus` for reversed invoices;
+      whether `GenMaster.Company` scopes a COMFND read; the e.net licence a
+      logon takes (and a `runtime_product_code` for ISV Managed Run Time);
+      and the TLS binding a customer has to publish.
       **Intacct:** bill `state` values, the purchasing-document query name,
       `txnTotal`, and whether REST can reverse a paid bill.
       **Sage SA:** the `SupplierInvoice/Save` body, `DocumentNumber` and
       `Reference` limits, OData filters, `CurrencyId` for home-currency
       suppliers, account categories, and delete in a locked period.
       **Blackbaud:** an empty `transaction_code_values`, the description
-      length, and job latency.
+      length, and job latency; which date ListInvoices' `from_date` /
+      `to_date` filter on and whether they are inclusive (the adapter
+      queries a day either side, `#651` B5); whether a closed period, an
+      inactive vendor or a missing project fails the create (400) or the
+      background job (status 7), and whether `PreClosed` years take
+      postings (B4, B7); and whether the cohort sandbox can read
+      `/generalledger/v1/fiscalyears` (a 403 is treated as "cannot
+      check").
       **Why blocked:** each needs a sandbox or developer-programme account.
       **Durable fix:** run each adapter's post / status / sync / void against
       its sandbox, then correct the adapter and fake-erp together.
       **Trigger:** the first customer on each ERP, or sandbox access, whichever
       comes first.
 
+- [ ] **Verify NetSuite's OAuth 2.0 client-credentials sign-in against a real
+      account** ([#654](https://github.com/Absence0760/feohledger/issues/654); built under #653).
+      The grant is built from Oracle's documentation and proven against
+      fake-erp, whose token endpoint verifies the assertion's signature and
+      claims (`tools/fake-erp/netsuite_oauth2.py`). Unverified against Oracle:
+      that `rest_webservices` alone covers SuiteQL, the exact `aud` NetSuite
+      compares (its doc pages differ in the domain they show), the token
+      endpoint's real error bodies, and whether `expires_in` arrives as a
+      number or a string (both are read).
+      **Why blocked:** needs a NetSuite account with an integration record and
+      a mapped certificate — a design partner's sandbox or the SuiteCloud
+      Developer Network.
+      **Durable fix:** map a certificate, run test-connection, the three syncs,
+      a push and a void through `auth_method: oauth2_m2m`, then correct the
+      adapter and fake-erp together.
+      **Trigger:** before the first NetSuite customer, and in any case before a
+      customer must onboard on NetSuite 2027.1, where TBA is closed to new
+      integrations.
+
+- [ ] **Whether Blackbaud sells a higher-volume SKY product for a
+      multi-tenant app, and what the platform key's tier really is.** The
+      per-org call budget is in (decisions §322): each tenant on the platform
+      key gets `FEOH_ERP_BLACKBAUD_TENANT_DAILY_CALL_BUDGET` (2,500) of
+      `FEOH_ERP_BLACKBAUD_DAILY_CALL_QUOTA` (25,000, "Standard APIs") a day,
+      and admins are warned at 80%. Both figures are assumptions about a
+      subscription we have not bought. Blackbaud's community posts mention
+      Partner subscriptions metered per application *per customer* and paid
+      tiers of 100K and 250K calls a day. Those would change the right
+      defaults, or make the per-tenant share unnecessary. **Durable fix:** ask
+      Blackbaud (developer support / Partner Program) which product a
+      commercial multi-tenant FE NXT integration is meant to use and its
+      limits. Set both settings in `infra-secrets` to match, and if no
+      higher tier exists, document that a tenant past its share stores its own
+      `subscription_key`. **Trigger:** before a second production tenant
+      connects through the platform key, or the first `erp_call_quota` notice
+      in production.
+
 ## (b) Operator steps on merged code
+
+- [ ] **Run one PO sync on each Merge.dev tenant after deploying PR #670.**
+      Built (decisions §328): the sync re-keys POs an earlier build stored under
+      their Merge id and marks the old `"UNKNOWN"` row, but only when it runs.
+      Until then `/cfo` open-PO accruals can count such a PO twice. Run
+      `POST /api/purchase-orders/sync-erp` per Merge.dev tenant and check the
+      audit row's `rekeyed` / `retired` counts.
+      **Trigger:** the deploy that ships PR #670, if any tenant has synced
+      Merge.dev POs.
+
+- [ ] **Turn on the sub-processor notice sweep in production.** Built
+      (decisions §321): the published DPA now says every sub-processor change
+      that needs the 30-day notice is emailed to each customer's
+      administrators, and `FEOH_SUBPROCESSOR_NOTICES_ENABLED` (off by default)
+      is what sends it. Set `FEOH_SUBPROCESSOR_NOTICES_ENABLED: "true"` in
+      `infra-secrets/feohledger/prod.sops.yaml` (never in this repo), deploy,
+      and confirm `subprocessor-notices` is running on `GET /api/health/sweeps`;
+      until it is set `deploy/decrypt-env.sh` refuses the file and the API
+      refuses to boot (`FEOH_ENVIRONMENT=production`). SES must
+      be out of its sandbox for the email to reach a customer.
+      **Trigger:** before the deploy that publishes the 2026-10-26 legal text,
+      and in any case before customer #1.
 
 - [ ] **Make the first recording of real QuickBooks payment shapes.** Built
       (decisions §318): `backend/tests/test_qbo_recorded_replay.py` replays
@@ -2498,7 +2661,10 @@ as oversights.
       tenant brings its own app (decisions §270). Steps: register each app
       with the redirect URI `FEOH_API_PUBLIC_URL/api/erp/oauth/callback`. For
       Intuit, also pass the production app assessment and publish real
-      Disconnect / Reconnect pages; for Blackbaud, buy a SKY API subscription.
+      Disconnect / Reconnect pages; for Blackbaud, subscribe the SKY developer
+      account to the "Standard APIs" product (free, no approval: 10
+      calls/s and 25,000/day per subscription), and check whether the
+      Blackbaud Partner Program terms apply to a commercial multi-tenant app.
       Then put `FEOH_ERP_QBO_*`, `FEOH_ERP_XERO_*`,
       `FEOH_ERP_SAGE_ACCOUNTING_*` and `FEOH_ERP_BLACKBAUD_*` (client id,
       secret, subscription key) in `infra-secrets/feohledger/prod.sops.yaml`.

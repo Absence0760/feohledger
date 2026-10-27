@@ -407,6 +407,67 @@ def test_merge_dev_list_gl_accounts_maps_response_into_payloads():
     assert by_code["1000"].account_type == "asset"
 
 
+def test_merge_dev_list_gl_accounts_resolves_parent_id_to_its_code_never_the_uuid():
+    """A Merge Account's ``parent_account`` is the parent's Merge id (uuid),
+    not its code. Stored as ``parent_code`` it named no chart row. It is the
+    parent's ``erp_account_id``, resolved to the parent's code within the
+    pull; a parent outside the pull gets no code rather than the uuid. A null
+    parent is not "top-level" on every ERP behind Merge, so the sync is not
+    told to clear one (``reports_parent`` False)."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "u-child", "name": "Pens", "account_number": "6110", "parent_account": "u-par"},
+            {"id": "u-par", "name": "Office", "account_number": "6100", "parent_account": None},
+            {"id": "u-orphan", "name": "Misc", "account_number": "6900", "parent_account": "u-x"},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, body))
+        out = {a.code: a for a in _run(adapter.list_gl_accounts())}
+
+    assert (out["6110"].parent_code, out["6110"].parent_erp_account_id) == ("6100", "u-par")
+    assert (out["6100"].parent_code, out["6100"].parent_erp_account_id) == (None, None)
+    assert (out["6900"].parent_code, out["6900"].parent_erp_account_id) == (None, "u-x")
+    assert not any(a.reports_parent for a in out.values())
+
+
+def test_merge_dev_list_gl_accounts_emits_inactive_and_deleted_accounts_inactive():
+    """Merge's Account ``status`` is ACTIVE / PENDING / INACTIVE. An INACTIVE
+    account, or one deleted in the ERP (``remote_was_deleted``), is emitted
+    ``active=False`` — not dropped, since a row linked to it is not dead —
+    so the sync marks it inactive and no line posts to it."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "u1", "name": "A", "account_number": "1", "status": "ACTIVE"},
+            {"id": "u2", "name": "B", "account_number": "2", "status": "INACTIVE"},
+            {"id": "u3", "name": "C", "account_number": "3", "status": "PENDING"},
+            {"id": "u4", "name": "D", "account_number": "4", "remote_was_deleted": True},
+            {"id": "u5", "name": "E", "account_number": "5"},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, body))
+        out = _run(adapter.list_gl_accounts())
+
+    assert {a.code: a.active for a in out} == {
+        "1": True,
+        "2": False,
+        "3": True,
+        "4": False,
+        "5": True,
+    }
+
+
 def test_merge_dev_list_gl_accounts_classification_normalization():
     """Merge ships several classifications we map down to the same
     internal type. Lock the table — losing one (e.g. EXPENSES vs

@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import {
 	API_BASE,
 	authedTenantHeaders,
@@ -9,6 +10,7 @@ import {
 } from '../fixtures/helpers';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
+	FAKE_ERP_BASE,
 	createApprovedInvoice,
 	deleteInvoice,
 	erpFailureFromAudit,
@@ -210,5 +212,97 @@ test.describe('/erp netsuite adapter against fake-erp', () => {
 		expect(open!.status).toBe('open');
 		expect(closed!.status).toBe('closed');
 		expect(closed!.currency).toBe('GBP');
+	});
+});
+
+/**
+ * OAuth 2.0 client credentials (M2M) — the sign-in NetSuite requires of every
+ * NEW integration from 2027.1 (issue #653). The fake's token endpoint verifies
+ * the adapter's JWT client assertion as NetSuite does, signature included
+ * (tools/fake-erp/netsuite_oauth2.py), against a certificate this spec maps the
+ * way an administrator would: only the PUBLIC key goes to the fake, and the
+ * private key is sealed through `PUT /api/organization/credentials/erp` like
+ * any other ERP secret. The key pair is generated per run — no key is
+ * committed anywhere.
+ */
+test.describe('/erp netsuite adapter: OAuth 2.0 client credentials', () => {
+	const certificateId = `e2e-ns-cert-${Date.now()}`;
+	const clientId = `e2e-ns-client-${Date.now()}`;
+	const { publicKey, privateKey } = generateKeyPairSync('ec', {
+		namedCurve: 'P-256',
+		publicKeyEncoding: { type: 'spki', format: 'pem' },
+		privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+	});
+
+	async function mintedTokens(): Promise<number> {
+		const resp = await fetch(`${FAKE_ERP_BASE}/__netsuite/oauth2/stats`);
+		return ((await resp.json()) as { minted: number }).minted;
+	}
+
+	test.beforeEach(async ({ page }) => {
+		await skipUnlessReachable(SERVICES.fakeErp);
+		const mapped = await fetch(`${FAKE_ERP_BASE}/__netsuite/oauth2/certificates`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				certificate_id: certificateId,
+				client_id: clientId,
+				public_key_pem: publicKey
+			})
+		});
+		expect(mapped.ok, `map the certificate (${mapped.status})`).toBe(true);
+		await setErpSettings(page, {
+			type: 'netsuite',
+			integration_method: 'direct',
+			account_id: 'FAKE123',
+			auth_method: 'oauth2_m2m',
+			client_id: clientId,
+			certificate_id: certificateId,
+			private_key: privateKey
+		});
+	});
+
+	test.afterAll(async ({ browser }) => {
+		const context = await browser.newContext({ baseURL: tenantBase(currentTenantSlug()) });
+		const page = await context.newPage();
+		await signInAndWait(page);
+		await setErpSettings(page, null);
+		await context.close();
+	});
+
+	test('connection test signs in with a verified client assertion, and re-mints after a 401', async ({
+		page
+	}) => {
+		const before = await mintedTokens();
+		const first = await testErpConnection(page);
+		expect(first.success, first.message).toBe(true);
+		expect(await mintedTokens()).toBeGreaterThan(before);
+
+		// NetSuite revokes / expires the bearer early: the next call's 401 makes
+		// the adapter exchange a fresh assertion rather than fail.
+		await fetch(`${FAKE_ERP_BASE}/__netsuite/oauth2/expire-tokens`, { method: 'POST' });
+		const afterExpiry = await mintedTokens();
+		const second = await testErpConnection(page);
+		expect(second.success, second.message).toBe(true);
+		expect(await mintedTokens()).toBeGreaterThan(afterExpiry);
+	});
+
+	test('full send: an approved invoice posts as a vendorBill under the bearer token', async ({
+		page
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-NS-OAUTH2',
+			amount: '310.40',
+			vendor: 'Fake NetSuite Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await erpReferenceFromAudit(page, inv.id)).toMatch(/^\d+$/);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
 	});
 });

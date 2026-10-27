@@ -21,7 +21,7 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
-COPY app.py qbo_records.py qbo_sandbox.py .
+COPY app.py netsuite_oauth2.py qbo_records.py qbo_sandbox.py .
 COPY fixtures fixtures
 
 EXPOSE 8080

@@ -168,5 +168,13 @@ FEOH_SIGNUP_ENABLED: "false"
 # reporting only, never a charge — and with the default `mock` provider it
 # bills nothing — so it stays on in every deployment.
 FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED: "true"
+
+# ── Sub-processor change notices (issue #427, docs/decisions.md §321) ──
+# The published DPA (§ 8) says every change-log entry that needs the 30-day
+# notice is EMAILED to each customer organisation's administrators; this sweep
+# is what sends it (backend/app/services/subprocessor_notices.py). REQUIRED:
+# with it off the API refuses to boot (FEOH_ENVIRONMENT=production) and
+# decrypt-env.sh refuses the file. Email only, never moves money.
+FEOH_SUBPROCESSOR_NOTICES_ENABLED: "true"
 # FEOH_BILLING_PROVIDER: "stripe_billing"
 # FEOH_BILLING_STRIPE_API_KEY: ""

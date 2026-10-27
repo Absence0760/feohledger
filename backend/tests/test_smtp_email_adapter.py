@@ -94,3 +94,23 @@ def test_test_connection_true_when_reachable(fake_smtp):
     adapter = SmtpAdapter({"smtp_host": "localhost", "smtp_port": 1025})
     assert asyncio.run(adapter.test_connection()) is True
     assert fake_smtp["noop"] == 1
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["Acme\r\nBcc: victim@evil.test", "Acme\nX-Injected: 1", "Acme Ltd", "Acme\x85Ltd"],
+)
+def test_a_line_break_in_an_interpolated_subject_is_folded(fake_smtp, name):
+    # Senders put names nobody validated for control characters into subjects
+    # (an organisation name in the sub-processor notice). EmailMessage folds
+    # them onto one line, so the message neither injects a header nor is
+    # refused by the email policy, which raises on a linefeed in a header.
+    from app.services.email_adapters.smtp_adapter import SmtpAdapter
+
+    adapter = SmtpAdapter({"smtp_host": "localhost", "smtp_port": 1025})
+    message = EmailMessage(to="dev@acme.test", subject=f"Notice for {name}", body_text="x")
+    asyncio.run(adapter.send(message))
+    mime = fake_smtp["sent"][0]
+    assert "\n" not in mime["Subject"] and "\r" not in mime["Subject"]
+    assert mime["Bcc"] is None and mime["X-Injected"] is None
+    assert mime["Subject"].startswith("Notice for Acme ")

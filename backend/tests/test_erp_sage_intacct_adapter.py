@@ -26,6 +26,8 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     LineItemPayload,
     ListingGap,
+    PoSkipReason,
+    SkippedPo,
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
@@ -476,6 +478,65 @@ def test_list_pos_maps_total_exactly_and_state():
         ("PO-1", "Acme", Decimal("1250.10"), "open", "USD"),
         ("PO-2", "Beta", Decimal("5.00"), "closed", "ZAR"),
     ]
+
+
+def test_a_po_with_no_total_is_reported_skipped_never_synced_at_zero():
+    """It used to sync at 0, which every invoice against it then over-billed,
+    and a total an earlier sync stored for the number stayed trusted. It is now
+    left out and named, so the sync marks that total unverifiable (§323)."""
+    fake = FakeIntacct()
+    fake.query_rows["purchasing/document::Purchase Order"] = [
+        [
+            {"documentNumber": "PO-1", "txnTotal": "10.00"},
+            {"documentNumber": "PO-NO-TOTAL", "txnTotal": None},
+            {"documentNumber": "PO-BAD", "txnTotal": "n/a"},
+            {"documentNumber": None, "txnTotal": "5.00"},
+        ]
+    ]
+    listing = _run(fake, lambda: SageIntacctAdapter(CONFIG).list_pos_report())
+    assert [p.po_number for p in listing.pos] == ["PO-1"]
+    assert listing.skipped == [
+        SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable),
+        SkippedPo("PO-BAD", PoSkipReason.unpriceable),
+    ]
+
+
+def test_list_pos_carries_the_vendor_id_list_vendors_reports():
+    """A PO names its vendor by the ``id`` ``list_vendors`` stamps as
+    ``erp_vendor_id``, so the sync links it by id: a vendor renamed since the PO
+    was raised and a second vendor with the same name both resolve to the right
+    one. The query asks for ``vendor.id``; nested or flat, it is read."""
+    fake = FakeIntacct()
+    fake.query_rows["accounts-payable/vendor"] = [
+        [
+            {"key": "1", "id": "V-ACME-1", "name": "Acme"},
+            {"key": "2", "id": "V-ACME-2", "name": "Acme"},
+            {"key": "3", "id": "V-BOLT", "name": "Bolt Ltd"},
+        ]
+    ]
+    fake.query_rows["purchasing/document::Purchase Order"] = [
+        [
+            {
+                "documentNumber": "PO-1",
+                "vendor": {"id": "V-ACME-2", "name": "Acme"},
+                "txnTotal": "1",
+            },
+            {
+                "documentNumber": "PO-2",
+                "vendor.id": "V-BOLT",
+                "vendor.name": "Bolt Old",
+                "txnTotal": "1",
+            },
+            {"documentNumber": "PO-3", "vendor": {"name": "Acme"}, "txnTotal": "1"},
+        ]
+    ]
+    adapter = SageIntacctAdapter(CONFIG)
+    vendor_ids = {v.erp_vendor_id for v in _run(fake, adapter.list_vendors)}
+    by_number = {p.po_number: p.vendor_erp_id for p in _run(fake, adapter.list_pos)}
+    assert by_number == {"PO-1": "V-ACME-2", "PO-2": "V-BOLT", "PO-3": None}
+    assert {"V-ACME-2", "V-BOLT"} <= vendor_ids
+    po_query = json.loads(fake.of("POST", "/services/core/query")[-1].content)
+    assert "vendor.id" in po_query["fields"]
 
 
 def test_chart_and_vendor_listings_raise_on_failure_the_po_list_degrades():

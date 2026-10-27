@@ -101,9 +101,33 @@ def test_base_adapter_list_vendors_default_is_empty_not_raises():
 # ---------- Merge.dev adapter -------------------------------------------
 
 
-def test_merge_dev_list_vendors_maps_response_into_vendor_payloads():
-    """One Merge.dev page → list of VendorPayload with the right field
-    mapping. Locks the keys we read from the upstream JSON."""
+def test_merge_dev_list_vendors_reads_supplier_contacts_not_a_vendors_path():
+    """Merge's Accounting API has no ``/vendors`` path and no Vendor model: a
+    supplier is a ``Contact`` listed at ``GET /contacts?is_supplier=true``
+    (https://docs.merge.dev/openapi/accounting.json). The old adapter read
+    ``/vendors``, which a live Merge account answers with an error, so every
+    vendor sync failed and every bill push was refused ``vendor_not_linked``.
+    ``addresses`` / ``phone_numbers`` are expanded so they arrive as objects."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, {"results": [], "next": None}))
+        _run(adapter.list_vendors())
+
+    call = client.get.await_args_list[0]
+    assert call.args[0].endswith("/contacts")
+    assert call.kwargs["params"]["is_supplier"] == "true"
+    assert set(call.kwargs["params"]["expand"].split(",")) == {"addresses", "phone_numbers"}
+    assert call.kwargs["params"]["page_size"] == "100"
+
+
+def test_merge_dev_list_vendors_maps_a_supplier_contact_into_a_vendor_payload():
+    """One Merge ``Contact`` page → VendorPayload. Locks the Contact keys we
+    read: ``phone_numbers[].number``, ``addresses[].street_1/street_2``,
+    ``tax_number``, ``email_address``. A Contact has no payment term, so
+    ``payment_terms`` is None — never invented."""
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
@@ -111,20 +135,29 @@ def test_merge_dev_list_vendors_maps_response_into_vendor_payloads():
         "results": [
             {
                 "id": "merge-vendor-1",
+                "remote_id": "qbo-57",
                 "name": "Acme Supplies",
+                "is_supplier": True,
+                "is_customer": False,
                 "email_address": "ap@acme.test",
-                "phone_number": "555-0100",
                 "tax_number": "12-3456789",
-                "payment_term": {"name": "Net 45"},
+                "status": "ACTIVE",
+                "phone_numbers": [
+                    {"number": None, "type": "Fax"},
+                    {"number": "555-0100", "type": "Work"},
+                ],
                 "addresses": [
                     {
-                        "line1": "123 Main St",
+                        "type": "BILLING",
+                        "street_1": "123 Main St",
+                        "street_2": "Suite 4",
                         "city": "Springfield",
                         "state": "IL",
                         "zip_code": "62701",
                         "country": "US",
                     }
                 ],
+                "remote_was_deleted": False,
             }
         ],
         "next": None,
@@ -142,18 +175,48 @@ def test_merge_dev_list_vendors_maps_response_into_vendor_payloads():
     assert v.email == "ap@acme.test"
     assert v.phone == "555-0100"
     assert v.tax_id == "12-3456789"
-    assert v.payment_terms == "Net 45"
-    assert v.address == "123 Main St, Springfield, IL, 62701, US"
+    assert v.payment_terms is None
+    assert v.address == "123 Main St, Suite 4, Springfield, IL, 62701, US"
+    assert v.active is True
 
 
-def test_merge_dev_list_vendors_handles_missing_optional_fields():
-    """Real ERP data is messy — no email/phone/address/payment term. The
-    adapter maps what's there and leaves the rest None, never crashing."""
+def test_merge_dev_list_vendors_reads_no_payment_term_even_if_a_payload_carries_one():
+    """``payment_term`` is not a Contact field. A stray one (an integration's
+    passthrough, or the old Vendor shape) is not read as the vendor's terms:
+    the sync keeps the local value rather than adopting a guess."""
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     body = {
-        "results": [{"id": "merge-vendor-2", "name": "Bare Vendor"}],
+        "results": [{"id": "c-1", "name": "Acme", "payment_term": {"name": "Net 30"}}],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        vendors = _run(adapter.list_vendors())
+
+    assert vendors[0].payment_terms is None
+
+
+def test_merge_dev_list_vendors_handles_missing_optional_fields():
+    """Real ERP data is messy — no email/phone/address. Unexpanded relations
+    arrive as bare id strings, not objects; the adapter maps what's there and
+    leaves the rest None, never crashing."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "merge-vendor-2", "name": "Bare Vendor"},
+            {
+                "id": "merge-vendor-3",
+                "name": "Unexpanded",
+                "addresses": ["addr-uuid"],
+                "phone_numbers": ["phone-uuid"],
+                "status": None,
+            },
+        ],
         "next": None,
     }
 
@@ -162,15 +225,114 @@ def test_merge_dev_list_vendors_handles_missing_optional_fields():
         client.get = AsyncMock(return_value=_make_mock_response(200, body))
         vendors = _run(adapter.list_vendors())
 
-    assert len(vendors) == 1
-    v = vendors[0]
-    assert v.erp_vendor_id == "merge-vendor-2"
-    assert v.name == "Bare Vendor"
-    assert v.email is None
-    assert v.phone is None
-    assert v.address is None
-    assert v.tax_id is None
-    assert v.payment_terms is None
+    assert [v.erp_vendor_id for v in vendors] == ["merge-vendor-2", "merge-vendor-3"]
+    for v in vendors:
+        assert v.email is None
+        assert v.phone is None
+        assert v.address is None
+        assert v.tax_id is None
+        assert v.payment_terms is None
+        assert v.active is True
+
+
+def test_merge_dev_archived_or_deleted_contact_is_emitted_inactive():
+    """An ``ARCHIVED`` contact, or one deleted in the underlying ERP
+    (``remote_was_deleted``), still exists as a link target but takes no new
+    bill: emitted ``active=False`` (not dropped), as the other adapters do, so
+    the sync deactivates a linked vendor and never creates a payee for it."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "c-live", "name": "Live", "status": "ACTIVE"},
+            {"id": "c-arch", "name": "Archived", "status": "ARCHIVED"},
+            {"id": "c-del", "name": "Deleted", "status": "ACTIVE", "remote_was_deleted": True},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        vendors = _run(adapter.list_vendors())
+
+    assert {v.erp_vendor_id: v.active for v in vendors} == {
+        "c-live": True,
+        "c-arch": False,
+        "c-del": False,
+    }
+
+
+def test_merge_dev_never_lists_a_customer_contact_as_a_vendor():
+    """The listing filters on ``is_supplier=true``; a record that still says
+    ``is_supplier: false`` is a customer, never a payee."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    body = {
+        "results": [
+            {"id": "c-sup", "name": "Supplier", "is_supplier": True},
+            {"id": "c-cust", "name": "Customer", "is_supplier": False, "is_customer": True},
+            {"id": "c-unknown", "name": "Unflagged", "is_supplier": None},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        vendors = _run(adapter.list_vendors())
+
+    assert [v.erp_vendor_id for v in vendors] == ["c-sup", "c-unknown"]
+
+
+def test_merge_dev_vendor_id_is_the_id_a_po_and_a_bill_reference():
+    """A Merge PurchaseOrder's ``vendor`` and an Invoice's ``contact`` are both
+    the Contact's Merge ``id`` (uuid). The id ``list_vendors`` reports is the
+    one ``list_pos`` reads into ``vendor_erp_id`` and ``post_invoice`` sends,
+    so the PO sync links by id and the push names the right contact."""
+    from decimal import Decimal
+
+    from app.services.erp_adapters.base import InvoicePayload
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter, _merge_po_to_payload
+
+    contact_id = "6c4f1f0e-0d36-4d3b-9b0f-4f3e2b1a0c11"
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    listing = {"results": [{"id": contact_id, "remote_id": "57", "name": "Acme"}], "next": None}
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, listing))
+        [vendor] = _run(adapter.list_vendors())
+
+    # The PO names its vendor by the Contact id — bare, or expanded.
+    assert (
+        _merge_po_to_payload({"purchase_order_number": "PO-1", "vendor": contact_id}).vendor_erp_id
+        == vendor.erp_vendor_id
+    )
+    expanded = _merge_po_to_payload(
+        {"purchase_order_number": "PO-1", "vendor": {"id": contact_id, "name": "Acme"}}
+    )
+    assert expanded.vendor_erp_id == vendor.erp_vendor_id
+
+    # And the bill posts that same id as its `contact`.
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            return_value=_make_mock_response(201, {"model": {"id": "inv-1", "number": "INV-1"}})
+        )
+        result = _run(
+            adapter.post_invoice(
+                InvoicePayload(
+                    correlation_id="corr-1",
+                    invoice_number="INV-1",
+                    vendor_name="Acme",
+                    amount=Decimal("10.00"),
+                    vendor_erp_id=vendor.erp_vendor_id,
+                )
+            )
+        )
+    assert result.success
+    sent = json.loads(client.post.await_args.kwargs["content"])
+    assert sent["model"]["contact"] == contact_id
 
 
 def test_merge_dev_skips_a_vendor_with_no_merge_id_never_keys_it_otherwise():

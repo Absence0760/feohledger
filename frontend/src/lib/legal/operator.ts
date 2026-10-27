@@ -141,7 +141,7 @@ export const CONTACT = {
  * commit as any substantive change to the text — a stale effective date on a
  * changed policy defeats the Art 12 transparency the date exists to provide.
  */
-export const LAST_UPDATED = '2026-10-20';
+export const LAST_UPDATED = '2026-10-26';
 
 /**
  * The live operator facts.

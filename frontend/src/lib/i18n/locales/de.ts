@@ -198,6 +198,7 @@ export const messages = {
 	'profile.notifications.event.cashShortfallProjected': 'Prognostizierte Liquiditätslücke',
 	'profile.notifications.event.aiInvoiceUsage': 'Nutzung KI-gelesener Rechnungen',
 	'profile.notifications.event.erpConnectionExpiring': "ERP-Verbindung muss erneuert werden",
+	'profile.notifications.event.erpCallQuota': "ERP-API-Kontingent verbraucht",
 	'profile.notifications.inAppFor': 'In-App-Benachrichtigungen für „{event}“',
 	'profile.notifications.emailFor': 'E-Mail-Benachrichtigungen für „{event}“',
 
@@ -598,6 +599,8 @@ export const messages = {
 	'invoices.warning.poAmountVariance': 'Betragsabweichung {variancePct} gegenüber Bestellung {poNumber} (Rechnung {invoiceAmount}, Bestellung {poTotal})',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Betragsabweichung {variancePct} gegenüber Bestellung {poNumber}, für die keine Währung erfasst ist (Rechnung {invoiceAmount}, Bestellung {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'Die Rechnung lautet auf {invoiceCurrency}, Bestellung {poNumber} jedoch auf {poCurrency} — die Beträge wurden nicht verglichen',
+	'invoices.warning.poCancelled': 'Bestellung {poNumber} ist storniert — die Rechnung wurde nicht mit ihr abgeglichen',
+	'invoices.warning.poTotalUnverifiable': 'Die Summe der Bestellung {poNumber} konnte bei der letzten Synchronisierung nicht vom ERP bestätigt werden — die Beträge wurden nicht verglichen',
 	'invoices.warning.poPartialReceipt': 'Teilweiser 3-Wege-Abgleich — {matchType}-Abgleich gegen Bestellung {poNumber}, es wurde jedoch nur ein Teil der bestellten Menge geliefert',
 	'invoices.warning.poOverReceipt': 'Überlieferung: {receivedQuantity} geliefert gegenüber {orderedQuantity} bestellt (+{excessQuantity}) bei Bestellung {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Es wurden mehr Waren geliefert als bei Bestellung {poNumber} bestellt',
@@ -626,6 +629,8 @@ export const messages = {
 	'invoices.warning.glCodeStalePrior': 'Das zwischengespeicherte Sachkonto „{code}“ des Lieferanten ist nicht mehr im aktiven Kontenplan.',
 	'invoices.poMatch.issue.poNotFound': 'Bestellung {poNumber} nicht gefunden',
 	'invoices.poMatch.issue.currencyMismatch': 'Währungsabweichung: Rechnung in {invoiceCurrency}, Bestellung in {poCurrency} — Beträge nicht verglichen',
+	'invoices.poMatch.issue.poCancelled': 'Bestellung storniert — Beträge nicht verglichen',
+	'invoices.poMatch.issue.poTotalUnverifiable': 'Bestellsumme bei der letzten Synchronisierung nicht vom ERP bestätigt — Beträge nicht verglichen',
 	'invoices.poMatch.issue.amountMismatch': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
@@ -1294,6 +1299,9 @@ export const messages = {
 	'exceptions.toast.loadFailed': 'Ausnahmen konnten nicht geladen werden',
 	'exceptions.toast.noteRequired': 'Eine Lösungsnotiz ist erforderlich',
 	'exceptions.toast.actionFailed': 'Aktion fehlgeschlagen',
+	'exceptions.poRematch.note': "Bestellung {po} wurde am {date} in {erp} geändert; eine erneute Prüfung stimmt jetzt überein. Prüfen Sie sie, um die Sperre aufzuheben.",
+	'exceptions.poRematch.noteNoDate': "Bestellung {po} wurde in {erp} geändert; eine erneute Prüfung stimmt jetzt überein. Prüfen Sie sie, um die Sperre aufzuheben.",
+	'exceptions.poRematch.noteNoPo': "Die Bestellung wurde in {erp} geändert; eine erneute Prüfung stimmt jetzt überein. Prüfen Sie sie, um die Sperre aufzuheben.",
 	'exceptions.erpPayment.title': "Von {erp} gemeldete Zahlung",
 	'exceptions.erpPayment.intro': "Laut ERP ist diese Rechnung bezahlt. Prüfen Sie die Angaben und erfassen Sie dann die Zahlung: Damit wird die Ausnahme gelöst und die Rechnung als bezahlt markiert. FeohLedger versendet kein Geld.",
 	'exceptions.erpPayment.record': "Zahlung aus dem ERP erfassen",
@@ -1832,6 +1840,8 @@ export const messages = {
 		'{n, plural, one {⚠ # Budget überschreitet seine Zuweisung.} other {⚠ # Budgets überschreiten ihre Zuweisung.}}',
 	'cfo.budgets.excluded':
 		'Unvollständig: {n, plural, one {# verknüpfte Anforderung, Bestellung oder Rechnung lautet} other {# verknüpfte Anforderungen, Bestellungen oder Rechnungen lauten}} auf eine andere Währung als das Budget und wurden ausgeschlossen — gebunden und Ist unten sind eine Untergrenze, nicht das vollständige Bild. Stellen Sie die Währung um oder lesen Sie die Werte direkt am Budget.',
+	'cfo.budgets.unverifiablePos':
+		'Unvollständig: {n, plural, one {# verknüpfte Bestellung ist} other {# verknüpfte Bestellungen sind}} nicht im gebundenen Betrag enthalten, weil das ERP {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen konnte — gebunden unten ist eine Untergrenze. Synchronisieren Sie die Bestellungen erneut, sobald das ERP sie bewerten kann.',
 	'cfo.budgets.empty': 'Es wurden noch keine Budgets angelegt.',
 	'cfo.budgets.loadFailed': 'Budget vs. Ist konnte nicht geladen werden.',
 	'cfo.forecastVariance.title': 'Plan gegen Ist',
@@ -1894,6 +1904,8 @@ export const messages = {
 	'cfoMetrics.accruals.total': 'Gesamtabgrenzung',
 	'cfoMetrics.accruals.noCurrency':
 		'Bestellungen ohne erfasste Währung stehen in einer eigenen Zeile ohne Währungssymbol. Jede Währung wird für sich saldiert; die Zeilen werden nie addiert.',
+	'cfoMetrics.accruals.unverifiablePos':
+		'{n, plural, one {# Bestellung ist} other {# Bestellungen sind}} nicht in offenen Bestellungen und erhaltenen Waren enthalten, weil das ERP {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen konnte — diese Abgrenzungen sind eine Untergrenze.',
 	'cfoMetrics.concentration.title': 'Lieferantenkonzentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} macht {pct}% der Ausgaben aus — Konzentrationsrisiko.',
 	'cfoMetrics.concentration.top10': 'Top 10 Lieferanten',
@@ -2543,6 +2555,8 @@ export const messages = {
 	'budgets.modal.detail.allocated': 'Zugewiesen',
 	'budgets.modal.detail.committed': 'Gebunden',
 	'budgets.modal.detail.actual': 'Tatsächlich',
+	'budgets.modal.unverifiablePos':
+		'{n, plural, one {# verknüpfte Bestellung ist} other {# verknüpfte Bestellungen sind}} nicht im gebundenen Betrag enthalten: Das ERP konnte {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen, daher ist gebunden eine Untergrenze und verbleibend womöglich zu hoch.',
 	'budgets.modal.detail.remaining': 'Verbleibend',
 	'budgets.modal.loadingSpend': 'Ausgaben werden geladen…',
 	'budgets.modal.field.name': 'Name',
@@ -2644,6 +2658,8 @@ export const messages = {
 	'purchaseOrders.toast.loadListFailed': 'Bestellungen konnten nicht geladen werden',
 	'purchaseOrders.toast.loadFailed': 'Bestellung konnte nicht geladen werden',
 	'purchaseOrders.toast.syncFailed': 'ERP-Synchronisierung fehlgeschlagen',
+	'purchaseOrders.toast.unverifiable':
+		'Das ERP konnte die Summe {n, plural, one {# bestehenden Bestellung} other {von # bestehenden Bestellungen}} nicht bestätigen — Rechnungen dazu werden zurückgehalten, bis eine Synchronisierung sie bestätigt',
 	'purchaseOrders.loadMore': 'Mehr laden ({shown} von {total})',
 	'purchaseOrders.showingAll':
 		'{total, plural, one {Alle # Bestellung werden angezeigt} other {Alle # Bestellungen werden angezeigt}}',
@@ -2666,6 +2682,18 @@ export const messages = {
 	'purchaseOrders.modal.amount': 'Betrag',
 	'purchaseOrders.modal.invoiceStatus': 'Status',
 	'purchaseOrders.modal.noLinkedInvoices': 'Keine Rechnungen verweisen auf diese Bestellung.',
+	'purchaseOrders.total.unverifiable': 'Nicht bestätigt',
+	'purchaseOrders.modal.unverifiableNote':
+		'Das ERP konnte diese Bestellung bei der letzten Synchronisierung nicht bewerten: {reason}. Summe und Positionsbeträge werden ausgeblendet, weil das ERP sie nicht mehr bestätigt; Rechnungen dazu werden zurückgehalten, bis eine Synchronisierung sie wieder bewertet.',
+	'purchaseOrders.unverifiableReason.unpriceable':
+		'ihre Summe lässt sich nicht exakt ermitteln (etwa wegen eines Rabatts, einer Preiseinheit oder eines fehlenden Preises)',
+	'purchaseOrders.unverifiableReason.linesUnread':
+		'ihre Positionen konnten nicht vollständig gelesen werden',
+	'purchaseOrders.unverifiableReason.noLines': 'sie kam ohne Positionen zurück',
+	'purchaseOrders.unverifiableReason.linesChanged': 'ihre Positionen wurden im ERP geändert, nachdem Waren auf sie eingegangen waren',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
+		'ihre Währung ließ sich nicht der Hauswährung des Unternehmens zuordnen',
+	'purchaseOrders.unverifiableReason.unknown': 'der Grund wurde nicht erfasst',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': 'Wareneingänge',
@@ -3042,6 +3070,8 @@ export const messages = {
 		'Ausstehend enthält {n, plural, one {# offene Rechnung} other {# offene Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
 	'byEntity.unconvertedSpend':
 		'Ausgaben enthalten {n, plural, one {# Rechnung} other {# Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
+	'byEntity.openPoUnverifiable':
+		'{n, plural, one {# offene Bestellung ist} other {# offene Bestellungen sind}} nicht in „Offene Bestellungen“ enthalten, weil das ERP {n, plural, one {ihre Summe} other {ihre Summen}} bei der letzten Synchronisierung nicht bestätigen konnte.',
 	'byEntity.openPoNoCurrency':
 		'Für einige Bestellungen ist keine Währung erfasst; ihre offenen Beträge stehen in einer eigenen Zeile ohne Währungssymbol und werden nie zu einer anderen Währung addiert.',
 
@@ -5007,6 +5037,10 @@ export const messages = {
 	'erpRefusal.dueDateMissing': "{provider} benötigt ein Fälligkeitsdatum. Ergänzen Sie es und versuchen Sie es dann erneut.",
 	'erpRefusal.amountNotPositive': "{provider} nimmt nur Rechnungen über einen Betrag größer als null an. Korrigieren Sie den Betrag oder erfassen Sie stattdessen eine Gutschrift.",
 	'erpRefusal.jobUnconfirmed': "{provider} hat die Rechnung angenommen, aber noch nicht bestätigt, dass sie angelegt wurde. Versuchen Sie es erneut, um nachzusehen – sie wird nicht doppelt gesendet.",
+	'erpRefusal.jobFailed': "{provider} hat die Rechnung angenommen, aber der Hintergrundauftrag ist fehlgeschlagen und hat nichts angelegt. Prüfen Sie Lieferant, Konten, Transaktionscodes und Buchungszeitraum in {provider}, und versuchen Sie es dann erneut.",
+	'erpRefusal.callBudgetTenant': "Dieser Arbeitsbereich hat seinen Anteil an den heutigen {provider}-API-Aufrufen verbraucht, daher hat FeohLedger keinen Aufruf gesendet. Das Kontingent wird um Mitternacht UTC zurückgesetzt – versuchen Sie es dann erneut.",
+	'erpRefusal.callBudgetQuota': "{provider} hat die API-Aufrufe für das von FeohLedger genutzte Abonnement pausiert (das Tageskontingent ist verbraucht), daher hat FeohLedger keinen Aufruf gesendet. Es wird um Mitternacht UTC zurückgesetzt – versuchen Sie es dann erneut.",
+	'erpRefusal.callBudgetRateLimited': "{provider} hat FeohLedger gebeten, langsamer zu werden, daher wurde kein Aufruf gesendet. Versuchen Sie es in einer Minute erneut.",
 	'erpRefusal.credentialsUnavailable': "Die ERP-Zugangsdaten konnten gerade nicht geöffnet werden. Versuchen Sie es in einigen Minuten erneut; wenn es weiterhin fehlschlägt, wenden Sie sich an einen Administrator.",
 	'erpRefusal.periodClosed': "{provider} hat diese Rechnung abgelehnt, weil ihr Datum in einem abgeschlossenen Zeitraum liegt (die Bücher sind geschlossen). Ändern Sie das Rechnungsdatum oder öffnen Sie den Zeitraum in {provider} wieder, und versuchen Sie es dann erneut.",
 	'erpRefusal.vendorInactive': "{provider} hat diese Rechnung abgelehnt, weil der Lieferant dort inaktiv oder gelöscht ist. Aktivieren Sie den Lieferanten in {provider}, und versuchen Sie es dann erneut.",

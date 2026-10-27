@@ -45,6 +45,19 @@ export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
  *  send doors answer with. */
 export const PAYMENT_BLOCKS_ERP_EXPORT = 'payment_blocks_erp_export';
 
+/** The ERP's shared API quota stopped the call before it was made
+ *  (`backend/app/services/erp_call_budget.py`, decisions §322): a push's
+ *  `invoice.erp_failed` refusal, and the 429 a chart / vendor / PO sync answers
+ *  (`codedRefusals.ts`). `params.reason` says whose allowance ran out. */
+export const ERP_CALL_BUDGET_EXHAUSTED = 'erp_call_budget_exhausted';
+
+/** The sentence per `reason`. */
+const CALL_BUDGET_KEYS: Record<string, MessageKey> = {
+	tenant_budget: 'erpRefusal.callBudgetTenant',
+	subscription_quota: 'erpRefusal.callBudgetQuota',
+	rate_limited: 'erpRefusal.callBudgetRateLimited'
+};
+
 /** The sentence per `claim`, plain and possibly-posted. */
 const CLAIM_KEYS: Record<string, { plain: MessageKey; posted: MessageKey }> = {
 	payment: {
@@ -106,6 +119,8 @@ const KEYS: Record<string, MessageKey> = {
 	due_date_missing: 'erpRefusal.dueDateMissing',
 	amount_not_positive: 'erpRefusal.amountNotPositive',
 	job_unconfirmed: 'erpRefusal.jobUnconfirmed',
+	job_failed: 'erpRefusal.jobFailed',
+	[ERP_CALL_BUDGET_EXHAUSTED]: 'erpRefusal.callBudgetTenant',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',
@@ -185,6 +200,11 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 			return null;
 		}
 		return t(key, { provider, accounts: formatList(accounts as string[]) });
+	}
+	if (refusal.code === ERP_CALL_BUDGET_EXHAUSTED) {
+		const reason = refusal.params.reason;
+		const sentence = typeof reason === 'string' ? CALL_BUDGET_KEYS[reason] : undefined;
+		return sentence ? t(sentence, { provider }) : null;
 	}
 	if (NAMES_INTUIT_CODE.has(refusal.code)) {
 		const code = refusal.params.intuit_code;

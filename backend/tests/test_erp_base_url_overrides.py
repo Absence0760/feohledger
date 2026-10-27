@@ -230,7 +230,8 @@ def test_netsuite_oauth_signature_is_computed_over_the_override_url(monkeypatch)
     ).decode()
 
     auth_header = client.get.await_args.kwargs["headers"]["Authorization"]
-    assert f'oauth_signature="{quote(expected_sig)}"' in auth_header
+    # RFC 5849 §3.6 encoding: `/` in the base64 is encoded too (safe="~").
+    assert f'oauth_signature="{quote(expected_sig, safe="~")}"' in auth_header
 
 
 # ---------- Dynamics 365 BC ------------------------------------------------

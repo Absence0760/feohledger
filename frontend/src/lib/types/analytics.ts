@@ -167,6 +167,12 @@ export interface CfoAccruals {
 	received_amount: MoneyString;
 	unposted_invoice_amount: MoneyString;
 	total_accrual: MoneyString;
+	/**
+	 * A COUNT: POs left out of the open-PO and received legs because the ERP
+	 * could not confirm their total at its last sync (decisions §323).
+	 * Non-zero means every leg is a floor — say so beside them.
+	 */
+	unverifiable_po_count: number;
 	/** Ordered by code, the unknown-currency row last. */
 	by_currency: CfoAccrualsByCurrency[];
 }
@@ -325,6 +331,8 @@ export interface EntityMetrics {
 	 * Render each in its own code, the `null` one bare (decisions §197).
 	 */
 	open_po_by_currency: CurrencyFigure[];
+	/** A COUNT: open POs left out of `open_po_by_currency` for an unverifiable total (decisions §323). */
+	open_po_unverifiable_count: number;
 }
 
 export interface EntityRollupRow extends EntityMetrics {

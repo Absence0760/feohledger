@@ -45,7 +45,8 @@ import {
  *      different amount is refused `duplicate_invoice_number`, never
  *      overwritten or accepted.
  *   5. PO sync — COMFND over PorMasterHdr / PorMasterDetail; totals are the
- *      exact sum of qty × price, statuses map, currency is kept.
+ *      exact sum of qty × price (the foreign price on a foreign order, plus
+ *      miscellaneous charges), statuses map, currency is kept.
  */
 
 const SYSPRO_ERP_CONFIG = {
@@ -220,5 +221,20 @@ test.describe('/erp syspro adapter against fake-erp', () => {
 		expect(open!.currency).toBe('ZAR');
 		expect(open!.status).toBe('open');
 		expect(complete!.status).toBe('closed');
+
+		// A USD order is totalled from MForeignPrice (4 × 100.00), never from
+		// the local MPrice labelled USD.
+		const foreign = pos.find((p) => p.po_number === 'PO-SYS-503');
+		expect(foreign, 'PO-SYS-503 synced').toBeTruthy();
+		expect(String(foreign!.total)).toMatch(/^400(\.0+)?$/);
+		expect(foreign!.currency).toBe('USD');
+		// 3 × 20.00 plus a 45.50 miscellaneous charge; the comment line adds nothing.
+		const charged = pos.find((p) => p.po_number === 'PO-SYS-504');
+		expect(charged, 'PO-SYS-504 synced').toBeTruthy();
+		expect(String(charged!.total)).toMatch(/^105\.50*$/);
+		// A EUR order (the company is ZAR, per GetLogonProfile) with one line
+		// priced only in local MPrice has no EUR total: skipped, never summed
+		// to a mixed-currency 70.00 EUR.
+		expect(pos.find((p) => p.po_number === 'PO-SYS-505')).toBeUndefined();
 	});
 });

@@ -201,6 +201,7 @@ export const messages = {
 	'profile.notifications.event.cashShortfallProjected': '資金不足の予測',
 	'profile.notifications.event.aiInvoiceUsage': 'AI読み取り請求書の利用状況',
 	'profile.notifications.event.erpConnectionExpiring': "ERP 接続の再接続が必要",
+	'profile.notifications.event.erpCallQuota': "ERP API の利用枠を使い切りました",
 	'profile.notifications.inAppFor': '「{event}」のアプリ内通知',
 	'profile.notifications.emailFor': '「{event}」のメール通知',
 
@@ -593,6 +594,8 @@ export const messages = {
 	'invoices.warning.poAmountVariance': '発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': '通貨が記録されていない発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）',
 	'invoices.warning.poCurrencyMismatch': '請求書は {invoiceCurrency}、発注 {poNumber} は {poCurrency} のため、金額を比較していません',
+	'invoices.warning.poCancelled': '発注 {poNumber} は取り消されています — 請求書はこの発注と照合されていません',
+	'invoices.warning.poTotalUnverifiable': '発注 {poNumber} の合計は前回の同期で ERP から確認できなかったため、金額を比較していません',
 	'invoices.warning.poPartialReceipt': '3 ウェイ照合が部分一致 — 発注 {poNumber} に対する{matchType}照合ですが、発注数量の一部のみ入荷しています',
 	'invoices.warning.poOverReceipt': '過剰入荷: 発注 {poNumber} で発注 {orderedQuantity} に対し {receivedQuantity} 入荷（+{excessQuantity}）',
 	'invoices.warning.poOverReceiptUnquantified': '発注 {poNumber} の発注数量を超える入荷があります',
@@ -621,6 +624,8 @@ export const messages = {
 	'invoices.warning.glCodeStalePrior': 'この仕入先のキャッシュされた勘定科目「{code}」は有効な勘定科目表にありません。',
 	'invoices.poMatch.issue.poNotFound': '発注 {poNumber} が見つかりません',
 	'invoices.poMatch.issue.currencyMismatch': '通貨の不一致: 請求は {invoiceCurrency}、発注は {poCurrency} — 金額は比較されていません',
+	'invoices.poMatch.issue.poCancelled': '発注は取り消されています — 金額は比較されていません',
+	'invoices.poMatch.issue.poTotalUnverifiable': '発注の合計は前回の同期で ERP により確認されていません — 金額は比較されていません',
 	'invoices.poMatch.issue.amountMismatch': '金額の不一致: 請求 {invoiceAmount} / 発注 {poTotal}（{variancePct}）',
 	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': '金額の不一致: 請求 {invoiceAmount} / 発注 {poTotal}（{variancePct}）',
 	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': '金額の不一致: 請求 {invoiceAmount} / 発注 {poTotal}（{variancePct}）',
@@ -1273,6 +1278,9 @@ export const messages = {
 	'exceptions.toast.loadFailed': '例外を読み込めませんでした',
 	'exceptions.toast.noteRequired': '解決メモは必須です',
 	'exceptions.toast.actionFailed': '操作に失敗しました',
+	'exceptions.poRematch.note': "発注書 {po} は {date} に {erp} で変更され、再照合で一致するようになりました。確認して保留を解除してください。",
+	'exceptions.poRematch.noteNoDate': "発注書 {po} は {erp} で変更され、再照合で一致するようになりました。確認して保留を解除してください。",
+	'exceptions.poRematch.noteNoPo': "発注書が {erp} で変更され、再照合で一致するようになりました。確認して保留を解除してください。",
 	'exceptions.erpPayment.title': "{erp} が報告した支払い",
 	'exceptions.erpPayment.intro': "ERP ではこの請求書は支払済みです。内容を確認してから支払いを記録してください。記録すると例外が解決され、請求書は支払済みになります。FeohLedger から送金は行われません。",
 	'exceptions.erpPayment.record': "ERP の支払いを記録",
@@ -1792,6 +1800,8 @@ export const messages = {
 		'{n, plural, other {⚠ # 件の予算が予算額を超過しています。}}',
 	'cfo.budgets.excluded':
 		'不完全: {n, plural, other {# 件の紐づく購買依頼・発注・請求書}}が予算とは異なる通貨で計上されているため除外されています。下のコミット済みと実績は下限値であり、全体像ではありません。通貨を揃えるか、各予算の画面で確認してください。',
+	'cfo.budgets.unverifiablePos':
+		'不完全: 前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の紐づく発注}}をコミット済みから除外しています。下のコミット済みは下限値です。ERP で金額が確定したら発注を再同期してください。',
 	'cfo.budgets.empty': 'まだ予算が登録されていません。',
 	'cfo.budgets.loadFailed': '予算対実績の読み込みに失敗しました。',
 	'cfo.forecastVariance.title': '予実比較',
@@ -1852,6 +1862,8 @@ export const messages = {
 	'cfoMetrics.accruals.total': '未払費用合計',
 	'cfoMetrics.accruals.noCurrency':
 		'通貨が記録されていない発注は、記号なしの別行に表示されます。通貨ごとに個別に相殺し、各行を合算することはありません。',
+	'cfoMetrics.accruals.unverifiablePos':
+		'前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の発注}}を未決済発注と受領済み品目から除外しています。この見越計上は下限値です。',
 	'cfoMetrics.concentration.title': '仕入先集中度',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor}が支出の{pct}%を占めています — 集中リスク。',
 	'cfoMetrics.concentration.top10': '上位10社',
@@ -2494,6 +2506,8 @@ export const messages = {
 	'budgets.modal.detail.allocated': '割当',
 	'budgets.modal.detail.committed': 'コミット済み',
 	'budgets.modal.detail.actual': '実績',
+	'budgets.modal.unverifiablePos':
+		'前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の紐づく発注}}をコミット済みから除外しています。コミット済みは下限値で、残額は実際より多く見えている可能性があります。',
 	'budgets.modal.detail.remaining': '残り',
 	'budgets.modal.loadingSpend': '支出を読み込み中…',
 	'budgets.modal.field.name': '名前',
@@ -2595,6 +2609,8 @@ export const messages = {
 	'purchaseOrders.toast.loadListFailed': '発注書の読み込みに失敗しました',
 	'purchaseOrders.toast.loadFailed': '発注書の読み込みに失敗しました',
 	'purchaseOrders.toast.syncFailed': 'ERP同期に失敗しました',
+	'purchaseOrders.toast.unverifiable':
+		'ERP で既存の発注 {n, plural, other {# 件}}の合計を確認できませんでした。同期で確認されるまで、これを参照する請求書は保留されます',
 	'purchaseOrders.loadMore': 'さらに読み込む（{total}件中{shown}件）',
 	'purchaseOrders.showingAll': '{total, plural, other {#件すべての発注書を表示中}}',
 	'purchaseOrders.modal.aria': '発注書',
@@ -2616,6 +2632,15 @@ export const messages = {
 	'purchaseOrders.modal.amount': '金額',
 	'purchaseOrders.modal.invoiceStatus': 'ステータス',
 	'purchaseOrders.modal.noLinkedInvoices': 'この発注書を参照している請求書はありません。',
+	'purchaseOrders.total.unverifiable': '確認できません',
+	'purchaseOrders.modal.unverifiableNote':
+		'前回の同期で ERP がこの発注の金額を確定できませんでした（{reason}）。ERP が保証しなくなったため、合計と明細の金額は表示しません。この発注を参照する請求書は、同期で金額が確定するまで保留されます。',
+	'purchaseOrders.unverifiableReason.unpriceable': '合計を正確に算出できません（値引き、価格単位、価格の欠落など）',
+	'purchaseOrders.unverifiableReason.linesUnread': '明細をすべて読み取れませんでした',
+	'purchaseOrders.unverifiableReason.noLines': '明細がありませんでした',
+	'purchaseOrders.unverifiableReason.linesChanged': '商品の受領後に ERP で明細が変更されました',
+	'purchaseOrders.unverifiableReason.localCurrencyUnknown': '通貨を会社の自国通貨と対応付けられませんでした',
+	'purchaseOrders.unverifiableReason.unknown': '理由は記録されていません',
 
 	// Goods Receipts (routes/goods-receipts/+page.svelte)
 	'goodsReceipts.title': '入荷',
@@ -2986,6 +3011,8 @@ export const messages = {
 		'未払いには、{currency} への為替レートが未確定の未決済請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
 	'byEntity.unconvertedSpend':
 		'支出には、{currency} への為替レートが未確定の請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
+	'byEntity.openPoUnverifiable':
+		'前回の同期で ERP が合計を確認できなかったため、{n, plural, other {# 件の未決済発注}}を未決済発注から除外しています。',
 	'byEntity.openPoNoCurrency':
 		'通貨が記録されていない発注があります。その未処理額は記号なしの別行に表示され、他の通貨の額に加算されることはありません。',
 
@@ -4919,6 +4946,10 @@ export const messages = {
 	'erpRefusal.dueDateMissing': "{provider} には支払期日が必要です。入力してから再試行してください。",
 	'erpRefusal.amountNotPositive': "{provider} は金額が 0 より大きい請求書のみ受け付けます。金額を修正するか、代わりにクレジットメモを登録してください。",
 	'erpRefusal.jobUnconfirmed': "{provider} は請求書を受け付けましたが、作成されたことをまだ確認できていません。再試行して確認してください（二重に送信されることはありません）。",
+	'erpRefusal.jobFailed': "{provider} は請求書を受け付けましたが、バックグラウンドジョブが失敗し、何も作成されませんでした。{provider} で仕入先、勘定科目、取引コード、転記期間を確認してから再試行してください。",
+	'erpRefusal.callBudgetTenant': "このワークスペースは本日の {provider} API 呼び出しの割り当てを使い切ったため、FeohLedger は呼び出しを行いませんでした。割り当ては UTC の午前 0 時にリセットされます。その後に再試行してください。",
+	'erpRefusal.callBudgetQuota': "{provider} は FeohLedger が使用するサブスクリプションの API 呼び出しを一時停止しました（1 日のクォータを使い切りました）。そのため FeohLedger は呼び出しを行いませんでした。UTC の午前 0 時にリセットされます。その後に再試行してください。",
+	'erpRefusal.callBudgetRateLimited': "{provider} から呼び出しを減らすよう求められたため、呼び出しは行われませんでした。1 分後に再試行してください。",
 	'erpRefusal.credentialsUnavailable': "現在 ERP の認証情報を開けませんでした。数分後に再試行してください。失敗が続く場合は管理者に連絡してください。",
 	'erpRefusal.periodClosed': "請求の日付が締め済みの期間（帳簿の締め）に含まれるため、{provider} がこの請求を拒否しました。請求書の日付を変更するか、{provider} で期間を再オープンしてから再試行してください。",
 	'erpRefusal.vendorInactive': "仕入先が無効または削除済みのため、{provider} がこの請求を拒否しました。{provider} で仕入先を有効にしてから再試行してください。",

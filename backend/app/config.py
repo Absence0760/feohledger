@@ -343,6 +343,14 @@ class Settings(BaseSettings):
     # Authorize-endpoint override (operator-trusted, non-secret). Empty →
     # Blackbaud's real one. Dev points it at fake-erp so the connect runs locally.
     erp_blackbaud_authorize_url: str = ""
+    # SKY call budget (services/erp_call_budget, decisions §322). SKY meters
+    # calls per subscription key and resets its daily quota at 00:00 UTC. The
+    # quota is the key's tier as Blackbaud states it (25,000 on "Standard
+    # APIs"); no call is made past it. The tenant budget is what ONE tenant on
+    # the shared platform key may spend a day (0 = no per-tenant share); a
+    # tenant with its own subscription_key has its key's whole quota.
+    erp_blackbaud_daily_call_quota: int = 25_000
+    erp_blackbaud_tenant_daily_call_budget: int = 2_500
     # ERP OAuth authorization-code connections (QuickBooks Online, Xero, Sage
     # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
     # `state` carried across the provider's consent redirect.
@@ -843,6 +851,17 @@ class Settings(BaseSettings):
     # an event re-sent after a lost marker write replays as the original.
     billing_ai_overage_sweep_interval_seconds: int = 3600
 
+    # Sub-processor change notices (`services/subprocessor_notices.py`, issue
+    # #427, decisions §321). The sweep emails every organisation's active
+    # administrators about each change-log entry that needs the DPA's 30-day
+    # notice, once per organisation, and records when. OFF by default like
+    # every sweep that emails, so local dev / tests never send one; it MUST be
+    # on in every deployment — the published DPA says the notice is emailed,
+    # so a deployed environment refuses to boot with it off
+    # (`_require_subprocessor_notices_in_deployed_envs`).
+    subprocessor_notices_enabled: bool = False
+    subprocessor_notices_interval_seconds: int = 3600
+
     # SAML 2.0 SSO (Service-Provider side). Additive, separate code path from
     # OIDC; like OIDC it is gated PER-TENANT via Organization.settings.sso
     # (protocol="saml") — there is no global on/off, so a fresh clone + pnpm dev
@@ -1241,6 +1260,23 @@ class Settings(BaseSettings):
                 "FEOH_NIUM_SANDBOX must be false when Nium credentials are set in a "
                 f"deployed environment ({self.environment!r}); refusing to boot a live "
                 "card program pointed at the Nium sandbox host."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_subprocessor_notices_in_deployed_envs(self) -> "Settings":
+        # The published DPA (§ 8) and /legal/sub-processors say every change-log
+        # entry that needs the 30-day notice is EMAILED to each customer's
+        # administrators; this sweep is the only thing that sends it. Off in a
+        # deployment, the contract describes a mechanism that is not running and
+        # nothing anywhere says so. Off by default so local dev / tests / CI never
+        # send one (decisions §321).
+        if self.is_deployed and not self.subprocessor_notices_enabled:
+            raise ValueError(
+                "FEOH_SUBPROCESSOR_NOTICES_ENABLED must be true when FEOH_ENVIRONMENT is "
+                f"deployed ({self.environment!r}); the published DPA says sub-processor "
+                "change notices are emailed to every customer's administrators, and this "
+                "sweep is what sends them."
             )
         return self
 
