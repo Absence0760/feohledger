@@ -345,7 +345,7 @@ class NetSuiteAdapter(ErpAdapter):
             logger.warning(
                 "NetSuite OAuth 2.0 token request refused: HTTP %s (%s)",
                 resp.status_code,
-                _oauth_error_code(resp),
+                _refusal_reason(resp),
             )
             return resp
         try:
@@ -851,7 +851,7 @@ async def _dispatch(
     return await client.get(url, headers=headers)
 
 
-def _oauth_error_code(resp: httpx.Response) -> str:
+def _refusal_reason(resp: httpx.Response) -> str:
     """The OAuth ``error`` code of a refused token request (``invalid_client``,
     ``invalid_grant``), for the log. Only one of RFC 6749 §5.2's token-endpoint
     codes is returned (RFC 7523's JWT-assertion grant reuses them), and as our
