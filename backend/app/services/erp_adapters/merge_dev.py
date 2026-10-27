@@ -122,6 +122,8 @@ class MergeDevAdapter(ErpAdapter):
     """
 
     erp_type = "merge_dev"
+    # Every PO with no number used to be filed under this one row (§328).
+    retired_po_numbers = ("UNKNOWN",)
 
     def _headers(self, *, idempotency_key: str | None = None) -> dict[str, str]:
         headers = {
@@ -443,6 +445,11 @@ def _merge_po_to_payload(raw: dict) -> PoPayload | None:
     # it and stores NULL for an absent or malformed code — never a default.
     raw_currency = raw.get("currency")
 
+    # The key a build before `purchase_order_number` stored this PO under
+    # (`number`, else `transaction_number`, else the record id), so the sync can
+    # re-key that row rather than create a second one beside it (§328).
+    legacy = raw.get("number") or raw.get("transaction_number") or raw.get("id")
+
     return PoPayload(
         po_number=str(po_number),
         vendor_name=vendor_name,
@@ -452,6 +459,7 @@ def _merge_po_to_payload(raw: dict) -> PoPayload | None:
         expected_delivery_date=expected_delivery_date,
         line_items=line_items,
         currency=raw_currency if isinstance(raw_currency, str) else None,
+        legacy_po_numbers=(str(legacy),) if legacy and str(legacy) != str(po_number) else (),
     )
 
 

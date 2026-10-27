@@ -1791,3 +1791,68 @@ async def test_sync_erp_marks_a_po_whose_received_line_the_erp_dropped(realdb, m
     assert po.total_unverifiable_reason == "lines_changed"
     assert {li.sku for li in await _lines_of(realdb, "PO-L4")} == {"A", "B"}
     assert [r.status for r in await _po_mismatch_rows(realdb, inv_id)] == ["open"]
+
+
+# ---------------------------------------------------------------------------
+# sync-erp: rows an earlier adapter build keyed differently (decisions §328)
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_erp_rekeys_a_row_an_earlier_build_stored_under_another_key(realdb, monkeypatch):
+    """Merge POs used to be stored under their Merge UUID. The next sync made a
+    second row under the real number, and /cfo summed both. Now the UUID row is
+    re-keyed and refreshed: one row, the ERP's total."""
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _add_po(mk, org_id, po_number="3f2a-uuid", total=Decimal("10000.00"))
+
+    body = await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(
+                po_number="PO-0042",
+                total=Decimal("10000.00"),
+                currency="USD",
+                legacy_po_numbers=("3f2a-uuid",),
+            )
+        ],
+    )
+
+    assert body["created"] == 0
+    async with mk() as s:
+        numbers = (
+            (
+                await s.execute(
+                    select(PurchaseOrder.po_number).where(
+                        PurchaseOrder.po_number.in_(["PO-0042", "3f2a-uuid"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert numbers == ["PO-0042"]
+
+
+async def test_sync_erp_marks_a_retired_placeholder_row(realdb, monkeypatch):
+    """Every unnumbered Merge PO used to be filed under one "UNKNOWN" row, a
+    total no single order has. The sync marks it, so it is never matched or
+    summed, and a second sync leaves it as it is."""
+    from app.services.erp_adapters.mock_adapter import MockAdapter
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _add_po(mk, org_id, po_number="UNKNOWN", total=Decimal("1400.00"))
+    monkeypatch.setattr(MockAdapter, "retired_po_numbers", ("UNKNOWN",))
+
+    await _sync_with_listing(realdb, monkeypatch, [])
+    await _sync_with_listing(realdb, monkeypatch, [])
+
+    async with mk() as s:
+        po = (
+            await s.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == "UNKNOWN"))
+        ).scalar_one()
+    assert po.total_unverifiable_reason == "unpriceable"

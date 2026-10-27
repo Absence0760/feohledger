@@ -549,6 +549,12 @@ class PoPayload:
     # default is a label nobody gave the figure; decisions §197), and the sync
     # then stores NULL, rendered bare.
     currency: str | None = None
+    # Numbers an earlier build of this adapter stored the same PO under (Merge
+    # keyed a PO by its record id before it read `purchase_order_number`). When
+    # no row holds `po_number` yet, the sync re-keys the row found under one of
+    # these instead of creating a duplicate the old row's total is summed
+    # beside (decisions §328).
+    legacy_po_numbers: tuple[str, ...] = ()
 
 
 class PoSkipReason(enum.StrEnum):
@@ -778,6 +784,11 @@ class ErpAdapter:
         connection status endpoint to show the org its usage (§324).
         """
         return None
+
+    #: Placeholder PO numbers an earlier build of this adapter wrote for POs it
+    #: could not number, several POs into one row. The sync marks such a row
+    #: unverifiable so its merged total is never matched or summed (§328).
+    retired_po_numbers: tuple[str, ...] = ()
 
     async def list_pos(self) -> list[PoPayload]:
         """Pull purchase orders from the ERP.

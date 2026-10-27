@@ -602,6 +602,7 @@ async def sync_pos_from_erp(
     # invoice's next edit. The re-match never LIFTS one (decisions §323,
     # amended): see the call below.
     rematch: set[str] = set()
+    rekeyed = 0
     for erp_po in erp_pos:
         # The upsert key is (po_number, org) SCOPED TO THE ENTITY BEING SYNCED
         # INTO — the second unscoped `po_number` match in this file. `po_number`
@@ -618,6 +619,19 @@ async def sync_pos_from_erp(
         # and replaces a latent `MultipleResultsFound` (a 500 mid-sync) that
         # two same-numbered POs in one org could already trigger.
         existing_po = await _sync_target(db, erp_po.po_number, org_id, entity_id)
+        if existing_po is None:
+            # An earlier build of the adapter stored this PO under another key
+            # (Merge: its record id). Re-key that row rather than create a second
+            # one whose total is summed beside it (decisions §328). Counted in
+            # the sync's audit row as `rekeyed`.
+            for legacy in erp_po.legacy_po_numbers:
+                legacy_row = await _sync_target(db, legacy, org_id, entity_id)
+                if legacy_row is not None:
+                    legacy_row.po_number = erp_po.po_number
+                    existing_po = legacy_row
+                    rekeyed += 1
+                    rematch.add(erp_po.po_number)
+                    break
         erp_currency = po_currency_code(erp_po.currency)
         if existing_po is not None:
             # Refresh the ERP-owned fields on an already-known PO. total and
@@ -752,6 +766,17 @@ async def sync_pos_from_erp(
             po.total_unverifiable_reason = reason
             rematch.add(po_number)
 
+    # A placeholder an earlier build filed several POs under (Merge's
+    # "UNKNOWN") holds a total no single order has: marked, so it is never
+    # matched or summed (decisions §328). Counted as `retired` in the audit row.
+    retired = 0
+    for placeholder in adapter.retired_po_numbers:
+        po = await _sync_target(db, placeholder, org_id, entity_id)
+        if po is not None and po.total_unverifiable_reason is None:
+            po.total_unverifiable_reason = str(PoSkipReason.unpriceable)
+            rematch.add(placeholder)
+            retired += 1
+
     if rematch:
         from app.services.invoice_warnings import refresh_invoices_citing_pos
 
@@ -805,6 +830,8 @@ async def sync_pos_from_erp(
             "skipped": skipped,
             "not_priced": len(reasons),
             "unverifiable": unverifiable,
+            "rekeyed": rekeyed,
+            "retired": retired,
             "adapter": adapter.erp_type,
             "entity_id": str(entity_id) if entity_id else None,
         },

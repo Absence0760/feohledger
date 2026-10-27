@@ -620,6 +620,10 @@ def test_merge_dev_list_pos_reads_purchase_order_number():
         client.get = AsyncMock(return_value=_make_mock_response(200, body))
         pos = _run(adapter.list_pos())
     assert [(p.po_number, p.status) for p in pos] == [("PO-7", "open")]
+    # The UUID an earlier build stored it under, so the sync re-keys that row
+    # instead of creating a second one beside it (decisions §328).
+    assert pos[0].legacy_po_numbers == ("9b0c-uuid",)
+    assert MergeDevAdapter.retired_po_numbers == ("UNKNOWN",)
 
 
 def test_merge_dev_list_pos_skips_a_po_with_no_number_or_id_never_a_shared_placeholder(caplog):

@@ -1521,6 +1521,15 @@ closed / cancelled, as Xero's do. A Merge PO with neither a number nor a Merge
 `po_number`, and the `"UNKNOWN"` placeholder it used to get filed every such PO
 into one row, each overwriting the last one's vendor and total.
 
+**Repairing Merge.dev POs synced before `purchase_order_number`** (decisions
+§328). Those POs were stored under their Merge record id, and the unnumbered
+ones under `"UNKNOWN"`. No manual step is needed: the next PO sync re-keys each
+id-keyed row to its real number instead of creating a second row
+(`PoPayload.legacy_po_numbers`), and marks the `"UNKNOWN"` row unverifiable
+(`ErpAdapter.retired_po_numbers`), so accruals and budgets stop summing it.
+The sync's audit row counts both (`rekeyed`, `retired`). Run one PO sync per
+Merge.dev tenant after deploying; until then `/cfo` can count such a PO twice.
+
 **Repairing a chart synced before §284.** On a QuickBooks Online tenant, every
 invoice push is refused after migration 0115, with `account_not_linked` for the
 GL accounts and `vendor_not_linked` for the vendor, until the chart has been

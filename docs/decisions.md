@@ -15593,3 +15593,34 @@ would erase which line the goods arrived against.
 `test_sync_erp_is_idempotent_for_lines`, `test_sync_erp_updates_a_received_line_in_place`,
 `test_sync_erp_marks_a_po_whose_received_line_the_erp_dropped`.
 
+## 328. A PO sync re-keys a row an earlier adapter build stored differently, and retires its placeholder (PR #670 review, 2026-10-26)
+
+**Context.** Before PR #670 the Merge.dev adapter keyed a PO by `number`, then
+`transaction_number`, then its Merge record id, and filed every PO with none of
+those under one shared `"UNKNOWN"` row. Merge's real number field is
+`purchase_order_number`, so most POs were stored under a UUID. Once the adapter
+read the right field, the next sync created a second row under the real number
+and never touched the UUID row: `/cfo` open-PO accruals and the by-entity rollup
+summed the order twice, and the merged `"UNKNOWN"` row stayed open.
+
+**Decision.** Generic, so another adapter's re-keying needs no new mechanism:
+
+- `PoPayload.legacy_po_numbers` names the keys an earlier build used for the
+  same PO. When no row holds the real number, the sync re-keys the first row
+  found under a legacy key (the same `_sync_target` scope as the upsert), then
+  refreshes it as an existing PO, and re-matches the invoices citing it.
+- `ErpAdapter.retired_po_numbers` names placeholders an earlier build wrote for
+  several POs. The sync marks such a row `unpriceable` (§323), so it is never
+  matched or summed; an already-marked row is left alone.
+
+Both are counted in the sync's audit row (`rekeyed`, `retired`). A re-keyed row
+keeps its id, so receipts and invoices already linked to it stay linked.
+
+**Rejected.** A one-off data migration: it would need Merge's record shape in
+the database, which the row does not keep, and could not tell a UUID key from a
+real PO number. The sync already has the record in hand.
+
+**Tests.** `test_erp_po_sync.py::test_merge_dev_list_pos_reads_purchase_order_number`,
+`test_purchase_orders.py::test_sync_erp_rekeys_a_row_an_earlier_build_stored_under_another_key`,
+`test_purchase_orders.py::test_sync_erp_marks_a_retired_placeholder_row`.
+
