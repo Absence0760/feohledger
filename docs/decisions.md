@@ -15564,3 +15564,32 @@ duplicate checks' job, not the status's.
 `test_a_closed_po_still_matches`) and
 `test_purchase_orders.py::test_sync_erp_cancelling_a_po_holds_the_invoice_citing_it`.
 
+## 327. The ERP PO sync refreshes a PO's lines, in place where goods were received (PR #670 review, 2026-10-26)
+
+**Context.** The PR #670 money-path review found that the sync refreshed an
+existing PO's `total` but never its lines, which predates the PR. The 3-way
+receipt-value check is `po_total × gr_qty / po_qty_total`, so after an ERP
+amendment from 10 × 10 to 20 × 10 the stored 10 ordered units valued a 10-unit
+receipt at the whole 200, and a 200 invoice passed "billed beyond receipt"
+with half the goods delivered. The GR/IR accrual was overstated the same way.
+
+**Decision.** When the adapter sends lines, the sync makes the stored lines
+match them, comparing at `po_line_items`' column scales so an unchanged PO is a
+no-op. Goods-receipt lines reference PO lines by id (migration 0109), so a line
+something was received against is never deleted: it is updated in place,
+paired with an ERP line of the same SKU, else the same description. Unreceived
+lines are replaced and new ones added. When a received line has nothing to pair
+with, the sync changes no line and marks the PO with its own `PoSkipReason`,
+`lines_changed`, so §323's machinery refuses the match and holds the invoice
+for a person. A payload without lines leaves the stored ones alone. Any line
+change re-matches the invoices citing the PO, hold-only (§323 amended).
+
+**Rejected.** Pairing received lines by position: ERP line order is not stable
+across amendments, and a wrong pairing would move a receipt onto another
+line's quantity. Deleting received lines and nulling the receipts' link: it
+would erase which line the goods arrived against.
+
+**Tests.** `test_purchase_orders.py`: `test_sync_erp_replaces_the_lines_of_a_po_nothing_was_received_against`,
+`test_sync_erp_is_idempotent_for_lines`, `test_sync_erp_updates_a_received_line_in_place`,
+`test_sync_erp_marks_a_po_whose_received_line_the_erp_dropped`.
+

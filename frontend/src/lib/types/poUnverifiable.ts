@@ -12,6 +12,7 @@ export const PO_UNVERIFIABLE_REASON_KEYS = {
 	unpriceable: 'purchaseOrders.unverifiableReason.unpriceable',
 	lines_unread: 'purchaseOrders.unverifiableReason.linesUnread',
 	no_lines: 'purchaseOrders.unverifiableReason.noLines',
+	lines_changed: 'purchaseOrders.unverifiableReason.linesChanged',
 	local_currency_unknown: 'purchaseOrders.unverifiableReason.localCurrencyUnknown'
 } as const satisfies Record<string, MessageKey>;
 

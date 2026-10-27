@@ -2689,6 +2689,7 @@ export const messages = {
 		'o total não pode ser calculado com exatidão (por exemplo, um desconto, uma unidade de preço ou um preço ausente)',
 	'purchaseOrders.unverifiableReason.linesUnread': 'as linhas não puderam ser lidas por inteiro',
 	'purchaseOrders.unverifiableReason.noLines': 'ele voltou sem linhas',
+	'purchaseOrders.unverifiableReason.linesChanged': 'as linhas foram alteradas no ERP depois do recebimento de mercadorias',
 	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
 		'a moeda não pôde ser relacionada à moeda da própria empresa',
 	'purchaseOrders.unverifiableReason.unknown': 'o motivo não foi registrado',

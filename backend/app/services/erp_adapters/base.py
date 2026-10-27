@@ -571,6 +571,10 @@ class PoSkipReason(enum.StrEnum):
     #: The PO is labelled with a currency the adapter cannot place against the
     #: company's local currency, because that could not be read.
     local_currency_unknown = "local_currency_unknown"
+    #: Stamped by the sync, not an adapter: the ERP amended lines goods were
+    #: already received against, and a received line has no ERP line it can be
+    #: paired with, so the stored lines cannot be refreshed safely.
+    lines_changed = "lines_changed"
 
 
 @dataclass(frozen=True)

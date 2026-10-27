@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
-from app.models.procurement import POLineItem, PurchaseOrder
+from app.models.procurement import GoodsReceipt, GRLineItem, POLineItem, PurchaseOrder
 from app.models.vendor import Vendor
 
 # ---------------------------------------------------------------------------
@@ -1650,3 +1650,144 @@ async def test_a_refresh_outside_the_erp_sync_still_auto_closes_as_before(realdb
         await s.commit()
     [row] = await _po_mismatch_rows(realdb, inv_id)
     assert row.status == "resolved"
+
+
+# ---------------------------------------------------------------------------
+# sync-erp: the ERP's lines are refreshed too (decisions §327)
+# ---------------------------------------------------------------------------
+
+
+async def _lines_of(realdb, po_number: str) -> list[POLineItem]:
+    async with realdb.sessionmaker("a")() as s:
+        po_id = (
+            await s.execute(select(PurchaseOrder.id).where(PurchaseOrder.po_number == po_number))
+        ).scalar_one()
+        return list(
+            (await s.execute(select(POLineItem).where(POLineItem.po_id == po_id))).scalars().all()
+        )
+
+
+async def _receive_against(realdb, po_number: str, line: POLineItem, qty: str) -> uuid.UUID:
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        po_id = (
+            await s.execute(select(PurchaseOrder.id).where(PurchaseOrder.po_number == po_number))
+        ).scalar_one()
+        gr = GoodsReceipt(gr_number=f"GR-{po_number}", po_id=po_id, organization_id=org_id)
+        s.add(gr)
+        await s.flush()
+        gr_line = GRLineItem(
+            gr_id=gr.id, po_line_item_id=line.id, quantity_received=Decimal(qty), sku=line.sku
+        )
+        s.add(gr_line)
+        await s.commit()
+        return gr_line.id
+
+
+def _po_with_lines(number: str, *lines: tuple[str, str, str, str]):
+    """A PoPayload whose total is its lines' sum; each line (sku, qty, price, total)."""
+    from app.services.erp_adapters.base import PoLinePayload, PoPayload
+
+    return PoPayload(
+        po_number=number,
+        total=sum((Decimal(t) for _, _, _, t in lines), Decimal("0")),
+        currency="USD",
+        line_items=[
+            PoLinePayload(
+                description=f"Item {sku}",
+                item_code=sku,
+                quantity=Decimal(q),
+                unit_price=Decimal(p),
+                total=Decimal(t),
+            )
+            for sku, q, p, t in lines
+        ],
+    )
+
+
+async def test_sync_erp_replaces_the_lines_of_a_po_nothing_was_received_against(
+    realdb, monkeypatch
+):
+    """PO-1 is 10 × 10 = 100; the ERP amends it to 20 × 10 = 200. The total
+    used to move while the lines stayed at 10 units, so a 10-unit receipt was
+    valued at the whole 200. Now the lines follow the ERP."""
+    await _sync_with_listing(
+        realdb, monkeypatch, [_po_with_lines("PO-L1", ("A", "10", "10", "100"))]
+    )
+    await _sync_with_listing(
+        realdb, monkeypatch, [_po_with_lines("PO-L1", ("A", "20", "10", "200"))]
+    )
+
+    lines = await _lines_of(realdb, "PO-L1")
+    assert [(li.sku, li.quantity, li.total) for li in lines] == [
+        ("A", Decimal("20.0000"), Decimal("200.00"))
+    ]
+
+
+async def test_sync_erp_is_idempotent_for_lines(realdb, monkeypatch):
+    """The same lines twice change nothing: the second sync reports the PO as
+    skipped, and the line ids are kept."""
+    payload = _po_with_lines("PO-L2", ("A", "3", "33.33", "99.99"))
+    await _sync_with_listing(realdb, monkeypatch, [payload])
+    before = [li.id for li in await _lines_of(realdb, "PO-L2")]
+    body = await _sync_with_listing(realdb, monkeypatch, [payload])
+
+    assert body["skipped"] == 1 and body["updated"] == 0
+    assert [li.id for li in await _lines_of(realdb, "PO-L2")] == before
+
+
+async def test_sync_erp_updates_a_received_line_in_place(realdb, monkeypatch):
+    """Goods were received against line A; the ERP raises A's quantity and adds
+    line B. A is updated in place, so the receipt still points at it, and B is
+    added."""
+    await _sync_with_listing(
+        realdb, monkeypatch, [_po_with_lines("PO-L3", ("A", "10", "10", "100"))]
+    )
+    (line_a,) = await _lines_of(realdb, "PO-L3")
+    await _receive_against(realdb, "PO-L3", line_a, "5")
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [_po_with_lines("PO-L3", ("A", "15", "10", "150"), ("B", "1", "50", "50"))],
+    )
+
+    by_sku = {li.sku: li for li in await _lines_of(realdb, "PO-L3")}
+    assert set(by_sku) == {"A", "B"}
+    assert by_sku["A"].id == line_a.id
+    assert by_sku["A"].quantity == Decimal("15.0000")
+    async with realdb.sessionmaker("a")() as s:
+        po = (
+            await s.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == "PO-L3"))
+        ).scalar_one()
+    assert po.total == Decimal("200.00")
+    assert po.total_unverifiable_reason is None
+
+
+async def test_sync_erp_marks_a_po_whose_received_line_the_erp_dropped(realdb, monkeypatch):
+    """Goods were received against line A, and the ERP's amended PO has no A:
+    there is nothing to pair the receipt with, so the stored lines are left as
+    they are, the PO is marked `lines_changed` and the invoice citing it is
+    held for a person."""
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [_po_with_lines("PO-L4", ("A", "10", "10", "100"), ("B", "10", "10", "100"))],
+    )
+    line_a = next(li for li in await _lines_of(realdb, "PO-L4") if li.sku == "A")
+    await _receive_against(realdb, "PO-L4", line_a, "10")
+    inv_id = await _seed_approved_po_invoice(
+        realdb, number="INV-L4-1", po_number="PO-L4", amount="100.00"
+    )
+
+    await _sync_with_listing(
+        realdb, monkeypatch, [_po_with_lines("PO-L4", ("B", "20", "10", "200"))]
+    )
+
+    async with realdb.sessionmaker("a")() as s:
+        po = (
+            await s.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == "PO-L4"))
+        ).scalar_one()
+    assert po.total_unverifiable_reason == "lines_changed"
+    assert {li.sku for li in await _lines_of(realdb, "PO-L4")} == {"A", "B"}
+    assert [r.status for r in await _po_mismatch_rows(realdb, inv_id)] == ["open"]

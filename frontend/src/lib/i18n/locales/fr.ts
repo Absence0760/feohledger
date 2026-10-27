@@ -2689,6 +2689,7 @@ export const messages = {
 		'son total ne peut pas être calculé exactement (par exemple une remise, une unité de prix ou un prix manquant)',
 	'purchaseOrders.unverifiableReason.linesUnread': 'ses lignes n’ont pas pu être lues en entier',
 	'purchaseOrders.unverifiableReason.noLines': 'il est revenu sans lignes',
+	'purchaseOrders.unverifiableReason.linesChanged': 'ses lignes ont été modifiées dans l’ERP après une réception de marchandises',
 	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
 		'sa devise n’a pas pu être rapportée à celle de l’entreprise',
 	'purchaseOrders.unverifiableReason.unknown': 'le motif n’a pas été enregistré',

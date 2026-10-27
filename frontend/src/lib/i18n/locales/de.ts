@@ -2690,6 +2690,7 @@ export const messages = {
 	'purchaseOrders.unverifiableReason.linesUnread':
 		'ihre Positionen konnten nicht vollständig gelesen werden',
 	'purchaseOrders.unverifiableReason.noLines': 'sie kam ohne Positionen zurück',
+	'purchaseOrders.unverifiableReason.linesChanged': 'ihre Positionen wurden im ERP geändert, nachdem Waren auf sie eingegangen waren',
 	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
 		'ihre Währung ließ sich nicht der Hauswährung des Unternehmens zuordnen',
 	'purchaseOrders.unverifiableReason.unknown': 'der Grund wurde nicht erfasst',

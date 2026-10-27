@@ -2856,6 +2856,7 @@ export const en = {
 		'its total cannot be worked out exactly (for example a discount, a price unit of measure or a missing price)',
 	'purchaseOrders.unverifiableReason.linesUnread': 'its lines could not be read in full',
 	'purchaseOrders.unverifiableReason.noLines': 'it came back with no lines',
+	'purchaseOrders.unverifiableReason.linesChanged': 'its lines were changed in the ERP after goods were received against them',
 	'purchaseOrders.unverifiableReason.localCurrencyUnknown':
 		'its currency could not be placed against the company\'s own',
 	'purchaseOrders.unverifiableReason.unknown': 'the reason was not recorded',

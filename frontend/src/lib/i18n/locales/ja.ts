@@ -2638,6 +2638,7 @@ export const messages = {
 	'purchaseOrders.unverifiableReason.unpriceable': '合計を正確に算出できません（値引き、価格単位、価格の欠落など）',
 	'purchaseOrders.unverifiableReason.linesUnread': '明細をすべて読み取れませんでした',
 	'purchaseOrders.unverifiableReason.noLines': '明細がありませんでした',
+	'purchaseOrders.unverifiableReason.linesChanged': '商品の受領後に ERP で明細が変更されました',
 	'purchaseOrders.unverifiableReason.localCurrencyUnknown': '通貨を会社の自国通貨と対応付けられませんでした',
 	'purchaseOrders.unverifiableReason.unknown': '理由は記録されていません',
 

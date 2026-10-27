@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -23,6 +24,7 @@ from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.procurement import (
     CANCELLED_PO_STATUSES,
+    GRLineItem,
     POLineItem,
     PurchaseOrder,
     po_currency_code,
@@ -33,6 +35,7 @@ from app.models.vendor import Vendor
 from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_adapters.base import PoSkipReason
 from app.services.erp_link_realm import connection_realm, legacy_links_trusted, link_is_live
 from app.services.goods_receipts import received_quantities
 from app.services.provider_credentials import (
@@ -383,6 +386,101 @@ async def _sync_target(
     return result.scalar_one_or_none()
 
 
+def _at_scale(value: Decimal | None, places: str) -> Decimal | None:
+    """``value`` at its column's scale, so the ERP's ``3`` and the stored
+    ``3.0000`` compare equal (and a figure finer than the column is compared as
+    the column will hold it)."""
+    return None if value is None else Decimal(value).quantize(Decimal(places), ROUND_HALF_UP)
+
+
+def _line_content(line) -> tuple:
+    """What a PO line says, at ``po_line_items``' own scales, for comparing a
+    stored line with an ERP one."""
+    sku = line.sku if isinstance(line, POLineItem) else line.item_code
+    return (
+        (line.description or "").strip(),
+        _at_scale(line.quantity, "0.0001"),
+        _at_scale(line.unit_price, "0.01"),
+        _at_scale(line.total, "0.01"),
+        (sku or "").strip()[:100] or None,
+    )
+
+
+def _line_key(content: tuple) -> str | None:
+    """How a received line is paired with an ERP line: its SKU, else its
+    description. None when it has neither, so it cannot be paired."""
+    description, _, _, _, sku = content
+    return f"sku:{sku}" if sku else (f"desc:{description}" if description else None)
+
+
+async def _refresh_po_lines(db: AsyncSession, po: PurchaseOrder, payload_lines) -> str:
+    """Bring ``po``'s stored lines in line with the ERP's, and say what happened.
+
+    The 3-way receipt-value check scales the total by received / ordered
+    quantity, so lines left from before an ERP amendment value a receipt wrongly
+    (decisions §327). Goods-receipt lines point at PO lines by id, so a line
+    something was received against is updated in place, never deleted. Returns
+    ``unchanged``; ``refreshed``; or ``unpairable`` when a received line has no
+    ERP line with its SKU (or description) left to pair with, in which case
+    nothing is changed and the caller marks the PO.
+    """
+    stored = list(
+        (await db.execute(select(POLineItem).where(POLineItem.po_id == po.id))).scalars().all()
+    )
+    incoming = [_line_content(line) for line in payload_lines]
+    if sorted(map(repr, (_line_content(li) for li in stored))) == sorted(map(repr, incoming)):
+        return "unchanged"
+
+    received = set(
+        (
+            await db.execute(
+                select(GRLineItem.po_line_item_id).where(
+                    GRLineItem.po_line_item_id.in_([li.id for li in stored])
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    unclaimed = list(range(len(incoming)))
+    pairs: list[tuple[POLineItem, tuple]] = []
+    for line in (li for li in stored if li.id in received):
+        content = _line_content(line)
+        key = _line_key(content)
+        # An unchanged line pairs with its own copy first; otherwise any ERP
+        # line with the same SKU / description.
+        match = next((i for i in unclaimed if incoming[i] == content), None)
+        if match is None and key is not None:
+            match = next((i for i in unclaimed if _line_key(incoming[i]) == key), None)
+        if match is None:
+            return "unpairable"
+        unclaimed.remove(match)
+        pairs.append((line, incoming[match]))
+
+    for line, (description, quantity, unit_price, total, sku) in pairs:
+        line.description = description or None
+        line.quantity = quantity
+        line.unit_price = unit_price
+        line.total = total
+        line.sku = sku
+    for line in stored:
+        if line.id not in received:
+            await db.delete(line)
+    for i in unclaimed:
+        description, quantity, unit_price, total, sku = incoming[i]
+        db.add(
+            POLineItem(
+                po_id=po.id,
+                description=description or None,
+                quantity=quantity,
+                unit_price=unit_price,
+                total=total,
+                sku=sku,
+            )
+        )
+    return "refreshed"
+
+
 @router.post("/sync-erp")
 async def sync_pos_from_erp(
     db: AsyncSession = Depends(get_tenant_db),
@@ -539,12 +637,6 @@ async def sync_pos_from_erp(
                 existing_po.total = erp_po.total
                 rematch.add(existing_po.po_number)
                 changed = True
-            # The ERP priced it again: the total just written is one it vouches
-            # for, so a mark an earlier sync left (§323) comes off.
-            if existing_po.total_unverifiable_reason is not None:
-                existing_po.total_unverifiable_reason = None
-                rematch.add(existing_po.po_number)
-                changed = True
             if existing_po.status != erp_po.status:
                 # Into or out of cancelled changes whether the matcher accepts
                 # the PO at all, so the invoices citing it are re-matched.
@@ -582,6 +674,27 @@ async def sync_pos_from_erp(
                 if vendor_id is not None:
                     existing_po.vendor_id = vendor_id
                     changed = True
+            # The lines are the ERP's too (decisions §327). A payload with none
+            # (a headers-only adapter, NetSuite) leaves the stored lines alone:
+            # silence is not a correction.
+            mark: str | None = None
+            if erp_po.line_items:
+                outcome = await _refresh_po_lines(db, existing_po, erp_po.line_items)
+                if outcome == "refreshed":
+                    rematch.add(existing_po.po_number)
+                    changed = True
+                elif outcome == "unpairable":
+                    # Received lines the ERP amended past pairing: the stored
+                    # lines cannot be trusted, so neither can the total they
+                    # scale (§323's mark, with the sync's own reason).
+                    mark = str(PoSkipReason.lines_changed)
+            # The ERP priced it again: the total just written is one it vouches
+            # for, so a mark an earlier sync left (§323) comes off, unless the
+            # lines just stopped it.
+            if existing_po.total_unverifiable_reason != mark:
+                existing_po.total_unverifiable_reason = mark
+                rematch.add(existing_po.po_number)
+                changed = True
 
             if changed:
                 updated += 1

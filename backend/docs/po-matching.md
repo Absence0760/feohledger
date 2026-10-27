@@ -146,6 +146,29 @@ Covered by `backend/tests/test_po_matching_algorithm.py` (the guard),
 `test_po_matching_critical_path.py::test_realdb_currency_guard_against_recorded_po_currencies`
 and the three agent test files.
 
+### The sync refreshes a PO's lines, never just its total
+
+The receipt-value check scales the PO total by received / ordered quantity, so
+a re-sync that moved the total and kept the old lines valued receipts wrongly:
+a PO amended from 10 × 10 to 20 × 10 kept 10 ordered units, and a 10-unit
+receipt was valued at the whole 200. When the adapter sends lines, the sync now
+brings the stored ones in line (`api/purchase_orders._refresh_po_lines`,
+decisions §327), comparing at the column scales so the ERP's `3` and the stored
+`3.0000` are the same line:
+
+- **No goods received against the lines:** they are replaced.
+- **Goods received against some:** a goods-receipt line points at its PO line
+  by id, so a received line is updated in place, paired with an ERP line of the
+  same SKU (else the same description); unreceived lines are replaced; new ERP
+  lines are added.
+- **A received line with nothing to pair with** (the ERP dropped it, or changed
+  its SKU and description): nothing is changed and the PO is marked
+  `lines_changed`, so the match refuses it and the invoice is held until a
+  person looks. A later sync whose lines pair again lifts the mark.
+
+A payload with no lines (NetSuite's headers-only sync) leaves the stored lines
+alone. A line refresh re-matches the invoices citing the PO, hold-only.
+
 ### A cancelled PO authorizes nothing
 
 A PO whose status is `cancelled` or `voided` (`procurement.CANCELLED_PO_STATUSES`)
@@ -175,7 +198,8 @@ The adapter now names each skipped PO (`ErpAdapter.list_pos_report`), and the
 PO sync stamps `purchase_orders.total_unverifiable_reason` (a `PoSkipReason`:
 `unpriceable`, `lines_unread`, `no_lines`, `local_currency_unknown`) on the
 existing row the sync would refresh for that number (own entity first, else an
-unstamped row — the row a later priced sync clears). While it is set:
+unstamped row — the row a later priced sync clears). The sync stamps one reason
+of its own, `lines_changed`, described below. While it is set:
 
 - the matcher **compares nothing**: `status = "mismatch"`,
   `within_tolerance = false`, `po_total` / `amount_variance` /
