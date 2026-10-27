@@ -149,7 +149,7 @@ fall-through to vision (not an error).
 ## Dependencies
 
 No new dependency. XML parsing reuses **lxml** (already pinned `>=5,<7`); PDF
-embedded-file extraction reuses **PyMuPDF / fitz** (already pinned `>=1.27`).
+embedded-file extraction reuses **PyMuPDF** (`import pymupdf`; the old `fitz` name is deprecated in 2.x), already pinned in `pyproject.toml`.
 
 ## Storage + email intake
 

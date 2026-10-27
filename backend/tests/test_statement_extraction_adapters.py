@@ -51,8 +51,8 @@ Page 1 of 1
 def _pdf_with_text(text: str) -> bytes:
     """Render a real PDF carrying a text layer, so the reader is exercised
     through PyMuPDF rather than a stub."""
-    fitz = pytest.importorskip("fitz")
-    doc = fitz.open()
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((40, 60), text, fontsize=9, fontname="cour")
     return doc.tobytes()

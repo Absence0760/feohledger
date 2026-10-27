@@ -27,7 +27,7 @@ import pathlib
 from datetime import date, datetime
 from decimal import Decimal
 
-import fitz  # PyMuPDF, already pinned in backend/pyproject.toml
+import pymupdf  # PyMuPDF, already pinned in backend/pyproject.toml
 import pytest
 from PIL import Image
 from pydantic import ValidationError
@@ -59,7 +59,7 @@ APP_ORIGIN = "https://app.feohledger.test"
 
 
 def _pdf_text(pdf_bytes: bytes) -> str:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         return "\n".join(page.get_text() for page in doc)
     finally:
@@ -68,7 +68,7 @@ def _pdf_text(pdf_bytes: bytes) -> str:
 
 def _pdf_image_sizes(pdf_bytes: bytes) -> list[tuple[int, int]]:
     """Pixel size of every image placed on any page, so tests can tell whose mark it is."""
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         return [(img[2], img[3]) for page in doc for img in page.get_images(full=True)]
     finally:

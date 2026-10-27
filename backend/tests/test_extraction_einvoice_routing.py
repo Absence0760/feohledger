@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import fitz
+import pymupdf
 import pytest
 
 _FIX = Path(__file__).parent / "fixtures" / "e_invoice"
@@ -26,7 +26,7 @@ _CII = (_FIX / "cii_invoice.xml").read_bytes()
 
 
 def _facturx_pdf() -> bytes:
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page()
     doc.embfile_add("factur-x.xml", _CII, filename="factur-x.xml")
     return doc.tobytes()
@@ -242,7 +242,7 @@ async def test_plain_pdf_still_uses_configured_adapter():
     statuses: list = []
 
     # A plain PDF with no embedded XML — detect returns NONE → mock adapter.
-    plain = fitz.open()
+    plain = pymupdf.open()
     plain.new_page().insert_text((72, 72), "Just a scan")
     plain_bytes = plain.tobytes()
 

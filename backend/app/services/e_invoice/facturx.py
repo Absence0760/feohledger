@@ -6,15 +6,15 @@ UN/CEFACT CII XML attachment. The conventional attachment name is
 ``xrechnung.xml`` (German XRechnung-in-PDF). We match those names first, then
 fall back to sniffing any attachment whose bytes parse as a CII document.
 
-Uses PyMuPDF (``fitz``), already pinned in ``pyproject.toml`` — no new
-dependency. Never raises: any fitz / parse error returns ``None`` so a corrupt
+Uses PyMuPDF (``pymupdf``), already pinned in ``pyproject.toml`` — no new
+dependency. Never raises: any PyMuPDF / parse error returns ``None`` so a corrupt
 or password-protected PDF degrades cleanly to "no embedded XML" (the caller
 then falls back to vision OCR on the rendered pages).
 """
 
 from __future__ import annotations
 
-import fitz
+import pymupdf
 
 # Conventional embedded-XML filenames, lower-cased for case-insensitive match.
 _CII_FILENAMES = {
@@ -49,7 +49,7 @@ def extract_embedded_cii_xml(pdf_bytes: bytes) -> bytes | None:
         return None
     doc = None
     try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         names = doc.embfile_names()
         if not names:
             return None

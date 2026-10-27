@@ -13,9 +13,9 @@ import pytest
 
 def _make_pdf(num_pages: int) -> bytes:
     """Create a minimal multi-page PDF using PyMuPDF."""
-    import fitz
+    import pymupdf
 
-    doc = fitz.open()
+    doc = pymupdf.open()
     for i in range(num_pages):
         page = doc.new_page(width=200, height=200)
         page.insert_text((50, 100), f"Page {i + 1}", fontsize=20)

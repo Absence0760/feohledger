@@ -231,10 +231,10 @@ def test_parse_e_invoice_translates_syntactically_broken_xml_to_malformed():
     name *without* validating its content, so a hybrid PDF can carry
     syntactically broken CII. detect → FACTURX_PDF, then parse_cii on the
     broken bytes raises XMLSyntaxError, which parse.py translates."""
-    import fitz
+    import pymupdf
 
     broken_cii = b'<?xml version="1.0"?><rsm:CrossIndustryInvoice><Unclosed'
-    pdf = fitz.open()
+    pdf = pymupdf.open()
     pdf.new_page()
     pdf.embfile_add("factur-x.xml", broken_cii, filename="factur-x.xml")
     pdf_bytes = pdf.tobytes()
