@@ -2572,7 +2572,7 @@ as oversights.
       comes first.
 
 - [ ] **Verify NetSuite's OAuth 2.0 client-credentials sign-in against a real
-      account** ([#653](https://github.com/Absence0760/feohledger/issues/653)).
+      account** ([#654](https://github.com/Absence0760/feohledger/issues/654); built under #653).
       The grant is built from Oracle's documentation and proven against
       fake-erp, whose token endpoint verifies the assertion's signature and
       claims (`tools/fake-erp/netsuite_oauth2.py`). Unverified against Oracle:
