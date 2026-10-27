@@ -12,7 +12,7 @@
 #
 # Keep this list minimal: fake-erp is a deterministic in-memory fixture and
 # every dependency it grows is one more thing to pin and scan.
-fastapi>=0.161.1,<1
+fastapi>=0.162.0,<1
 uvicorn>=0.54.0,<1
 # Request-supplied XML (the SYSPRO routes) is parsed through defusedxml, not
 # the stdlib parser, so a DTD / entity-expansion payload is refused.
