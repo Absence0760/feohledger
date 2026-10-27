@@ -15,11 +15,11 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-import fitz  # PyMuPDF, already pinned in backend/pyproject.toml
+import pymupdf  # PyMuPDF, already pinned in backend/pyproject.toml
 
 
 def _extract_text(pdf_bytes: bytes) -> str:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         return "\n".join(page.get_text() for page in doc)
     finally:

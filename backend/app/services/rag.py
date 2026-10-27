@@ -64,14 +64,14 @@ def extract_invoice_text(file_bytes: bytes) -> str:
     if not file_bytes or b"%PDF-" not in file_bytes[:1024]:
         return ""
     try:
-        import fitz  # PyMuPDF
+        import pymupdf  # PyMuPDF
     except ImportError:
         logger.warning("PyMuPDF not available — skipping text extraction for RAG.")
         return ""
 
     text_chunks: list[str] = []
     try:
-        with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+        with pymupdf.open(stream=file_bytes, filetype="pdf") as doc:
             for page in doc:
                 text_chunks.append(page.get_text("text"))
     except Exception as exc:

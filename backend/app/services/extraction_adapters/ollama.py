@@ -135,9 +135,9 @@ class OllamaAdapter(ExtractionAdapter):
         and degrades to a no-op when Tesseract is not available on the host.
         """
         try:
-            import fitz  # PyMuPDF
+            import pymupdf  # PyMuPDF
 
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
             images = []
             for i, page in enumerate(doc):
                 if i >= max_pages:

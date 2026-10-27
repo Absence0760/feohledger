@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-import fitz
+import pymupdf
 import pytest
 
 from app.services.rag import extract_invoice_text
@@ -30,7 +30,7 @@ def test_a_file_with_no_pdf_header_is_empty_and_quiet(payload, caplog):
 
 
 def test_a_pdf_text_layer_is_still_read():
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page().insert_text((72, 72), "Invoice INV-42 from Acme")
     pdf = doc.tobytes()
     doc.close()

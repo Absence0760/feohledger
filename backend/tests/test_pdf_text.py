@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-import fitz
+import pymupdf
 
 from app.services.pdf_text import (
     CJK_FONT,
@@ -38,7 +38,7 @@ LONG_NUMBER = ROWS["invoice_numbers"][0]
 
 def _spans(pdf: bytes) -> list[tuple[str, str]]:
     """(text, font name) for every span PyMuPDF finds."""
-    doc = fitz.open(stream=pdf, filetype="pdf")
+    doc = pymupdf.open(stream=pdf, filetype="pdf")
     try:
         out = []
         for page in doc:

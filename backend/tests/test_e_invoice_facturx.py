@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
+import pymupdf
 
 from app.services.e_invoice import extract_embedded_cii_xml
 
@@ -12,7 +12,7 @@ _CII = (Path(__file__).parent / "fixtures" / "e_invoice" / "cii_invoice.xml").re
 
 
 def _pdf_with_embedded(name: str, data: bytes) -> bytes:
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page()
     doc.embfile_add(name, data, filename=name)
     return doc.tobytes()
@@ -36,7 +36,7 @@ def test_extract_falls_back_to_content_sniff_on_odd_name():
 
 
 def test_plain_pdf_returns_none():
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((72, 72), "No embedded XML here")
     assert extract_embedded_cii_xml(doc.tobytes()) is None

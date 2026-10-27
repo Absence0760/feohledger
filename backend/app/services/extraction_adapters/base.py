@@ -38,9 +38,9 @@ def pdf_text_layer(pdf_bytes: bytes, *, min_chars: int = 50) -> str | None:
     Never raises.
     """
     try:
-        import fitz  # PyMuPDF
+        import pymupdf  # PyMuPDF
 
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         text = ""
         for page in doc:
             text += page.get_text()

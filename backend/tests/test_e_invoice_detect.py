@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
+import pymupdf
 
 from app.services.e_invoice import detect_format
 from app.services.e_invoice.detect import DetectedFormat
@@ -19,14 +19,14 @@ _CII = (_FIX / "cii_invoice.xml").read_bytes()
 
 
 def _facturx_pdf() -> bytes:
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page()
     doc.embfile_add("factur-x.xml", _CII, filename="factur-x.xml")
     return doc.tobytes()
 
 
 def _plain_pdf() -> bytes:
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((72, 72), "Scanned invoice, no embedded XML")
     return doc.tobytes()

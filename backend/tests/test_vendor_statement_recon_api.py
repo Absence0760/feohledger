@@ -850,8 +850,8 @@ async def test_clerk_cannot_upload_a_statement(realdb):
 def _statement_pdf(rows: list[str]) -> bytes:
     """A real PDF carrying a text layer, so the `mock` adapter's offline reader
     is exercised end to end rather than stubbed out."""
-    fitz = pytest.importorskip("fitz")
-    doc = fitz.open()
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
     page = doc.new_page()
     text = "Statement of Account\nInvoice     Date          Amount\n" + "\n".join(rows)
     page.insert_text((40, 60), text, fontsize=9, fontname="cour")
