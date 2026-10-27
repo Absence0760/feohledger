@@ -12,5 +12,5 @@
 #
 # Keep this list minimal: fake-commerce is a deterministic in-memory fixture and
 # every dependency it grows is one more thing to pin and scan.
-fastapi>=0.161.1,<1
+fastapi>=0.162.0,<1
 uvicorn>=0.54.0,<1
