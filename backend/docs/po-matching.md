@@ -180,7 +180,10 @@ unstamped row — the row a later priced sync clears). While it is set:
 
 The sync re-matches the invoices citing a PO whose mark, total or stated currency
 changed (the same figure in another currency is a different order, which the
-currency guard must hold), in the
+currency guard must hold). It re-matches the invoices that can match that row:
+the synced entity's and unstamped ones, or every entity's when the row itself is
+unstamped. `paid` and `done` invoices are left alone, since a hold on money
+already paid stops nothing. It runs in the
 same transaction and not best-effort, so the hold lands at sync time or the sync
 fails and the mark is rolled back with it. The next sync that prices the PO
 clears the mark — but **not the hold**.

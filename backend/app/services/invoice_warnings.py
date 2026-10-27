@@ -13,7 +13,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.exception import Exception as APException
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_status import (
     APPROVED_OR_BEYOND_STATUSES,
     IN_REVIEW_STATUSES,
@@ -912,6 +912,7 @@ async def refresh_invoices_citing_pos(
     caller: str,
     best_effort: bool = False,
     erp_po_sync: dict | None = None,
+    entity_id=None,
 ) -> None:
     """Re-run warnings (and so PO matching) on every invoice citing a PO number.
 
@@ -933,25 +934,27 @@ async def refresh_invoices_citing_pos(
     ``erp_po_sync`` is for the ERP PO sync, and makes every refresh hold-only:
     a PO total the ERP changed may raise a ``po_mismatch`` / ``quality_hold``
     but never clear one (decisions §323, amended). See
-    :func:`_reconcile_po_exceptions`.
+    :func:`_reconcile_po_exceptions`. It also narrows the refresh: ``entity_id``
+    (the entity the sync wrote into) limits it to that entity's invoices plus
+    unstamped ones, so another subsidiary's invoice citing the same number gets
+    no note about a PO it does not match against; and ``paid`` / ``done``
+    invoices are left alone, since a hold on money already paid stops nothing.
     """
     po_numbers = {n for n in po_numbers if n}
     if not po_numbers:
         return
 
     async def _run() -> None:
-        invoices = (
-            (
-                await db.execute(
-                    select(Invoice).where(
-                        Invoice.organization_id == org_id,
-                        Invoice.po_number.in_(po_numbers),
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        query = select(Invoice).where(
+            Invoice.organization_id == org_id,
+            Invoice.po_number.in_(po_numbers),
         )
+        if erp_po_sync is not None:
+            from app.tenant import apply_entity_scope
+
+            query = query.where(Invoice.status.not_in(_ERP_SYNC_SKIPPED_STATUSES))
+            query = apply_entity_scope(query, Invoice, entity_id, include_shared=True)
+        invoices = (await db.execute(query)).scalars().all()
         for inv in invoices:
             await refresh_warnings(db, inv, org_settings=org_settings, erp_po_sync=erp_po_sync)
 
@@ -986,6 +989,10 @@ PO_MATCH_EXCEPTION_TYPES: tuple[str, ...] = ("po_mismatch", "quality_hold")
 #: clear the hold would let the person who changed the reference also release
 #: the payment — the open row stays for a human (`segregation_refusal`).
 _PRE_APPROVAL_STATUSES = PRE_APPROVAL_STATUSES
+
+#: Invoices the ERP PO sync's re-match leaves alone: the money has gone, so a
+#: hold would stop nothing (``refresh_invoices_citing_pos``).
+_ERP_SYNC_SKIPPED_STATUSES = (InvoiceStatus.paid.value, InvoiceStatus.done.value)
 
 #: ``Exception.erp_report["kind"]`` of an open PO-match row that an ERP PO
 #: sync's re-match no longer finds (decisions §323, amended). The sync never

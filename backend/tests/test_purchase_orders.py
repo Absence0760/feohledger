@@ -1473,6 +1473,58 @@ async def test_sync_erp_restating_a_po_currency_opens_a_blocking_hold(realdb, mo
     assert "INV-CCY-1" in resp.json()["detail"]
 
 
+async def test_sync_erp_rematch_skips_other_entities_and_paid_invoices(realdb, monkeypatch):
+    """The sync re-matches the invoices that can match the PO it changed: this
+    entity's and unstamped ones. Another subsidiary's invoice citing the same
+    number is left alone (it matches its own PO), and so is a paid one (a hold
+    on money already gone stops nothing)."""
+    from app.models.entity import Entity
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-SCOPE", total=Decimal("150.00"), currency="USD")],
+    )
+    async with realdb.sessionmaker("a")() as s:
+        default_entity = (
+            await s.execute(select(Entity).where(Entity.is_default.is_(True)))
+        ).scalar_one()
+        other = Entity(name="Sub C", slug="sub-c-rematch", organization_id=org_id)
+        s.add(other)
+        await s.flush()
+
+        def inv(number, status, entity):
+            return Invoice(
+                invoice_number=number,
+                vendor_name="Rematch Vendor",
+                amount=Decimal("150.00"),
+                currency="USD",
+                po_number="PO-SCOPE",
+                status=status,
+                organization_id=org_id,
+                entity_id=entity,
+            )
+
+        ours = inv("INV-SCOPE-OURS", InvoiceStatus.approved, default_entity.id)
+        theirs = inv("INV-SCOPE-THEIRS", InvoiceStatus.approved, other.id)
+        paid = inv("INV-SCOPE-PAID", InvoiceStatus.paid, default_entity.id)
+        s.add_all([ours, theirs, paid])
+        await s.commit()
+        ids = {"ours": ours.id, "theirs": theirs.id, "paid": paid.id}
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-SCOPE", total=Decimal("100.00"), currency="USD")],
+    )
+
+    assert [r.status for r in await _po_mismatch_rows(realdb, ids["ours"])] == ["open"]
+    assert await _po_mismatch_rows(realdb, ids["theirs"]) == []
+    assert await _po_mismatch_rows(realdb, ids["paid"]) == []
+
+
 async def test_sync_erp_raising_a_po_total_never_clears_the_hold(realdb, monkeypatch):
     """The over-billing hold is open; someone raises the PO total in the ERP to
     the invoiced amount and syncs. The re-match now MATCHES, but the hold stays

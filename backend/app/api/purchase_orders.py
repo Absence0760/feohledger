@@ -648,14 +648,25 @@ async def sync_pos_from_erp(
         # total increase release an over-billing hold with no FeohLedger
         # sign-off. A row the re-match no longer finds stays open, annotated
         # in `erp_report`, for a person to clear through `record_decision`.
-        await refresh_invoices_citing_pos(
-            db,
-            org_id,
-            rematch,
-            org_settings=org.settings,
-            caller="erp_po_sync",
-            erp_po_sync={"erp_type": adapter.erp_type},
-        )
+        #
+        # Scoped to the entity synced into (plus unstamped invoices), unless the
+        # row changed is itself unstamped: then any entity's invoice may match
+        # against it, and all are re-matched.
+        org_wide: set[str] = set()
+        for number in rematch:
+            row = await _sync_target(db, number, org_id, entity_id)
+            if row is not None and row.entity_id is None:
+                org_wide.add(number)
+        for numbers, scope in ((rematch - org_wide, entity_id), (org_wide, None)):
+            await refresh_invoices_citing_pos(
+                db,
+                org_id,
+                numbers,
+                org_settings=org.settings,
+                caller="erp_po_sync",
+                erp_po_sync={"erp_type": adapter.erp_type},
+                entity_id=scope,
+            )
 
     # One PII-free summary row per sync (same shape as the GL chart sync): the
     # trail records that POs — the 3-way-match reference the money path checks
