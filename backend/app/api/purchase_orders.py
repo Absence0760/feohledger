@@ -603,6 +603,9 @@ async def sync_pos_from_erp(
     # amended): see the call below.
     rematch: set[str] = set()
     rekeyed = 0
+    # A legacy key the listing also reports as a real number belongs to that
+    # PO, so it is never re-keyed onto another one.
+    listed_numbers = {p.po_number for p in erp_pos} | {s.po_number for s in listing.skipped}
     for erp_po in erp_pos:
         # The upsert key is (po_number, org) SCOPED TO THE ENTITY BEING SYNCED
         # INTO — the second unscoped `po_number` match in this file. `po_number`
@@ -625,6 +628,8 @@ async def sync_pos_from_erp(
             # one whose total is summed beside it (decisions §328). Counted in
             # the sync's audit row as `rekeyed`.
             for legacy in erp_po.legacy_po_numbers:
+                if legacy in listed_numbers:
+                    continue
                 legacy_row = await _sync_target(db, legacy, org_id, entity_id)
                 if legacy_row is not None:
                     legacy_row.po_number = erp_po.po_number

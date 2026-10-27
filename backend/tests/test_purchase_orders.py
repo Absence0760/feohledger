@@ -1856,3 +1856,39 @@ async def test_sync_erp_marks_a_retired_placeholder_row(realdb, monkeypatch):
             await s.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == "UNKNOWN"))
         ).scalar_one()
     assert po.total_unverifiable_reason == "unpriceable"
+
+
+async def test_sync_erp_never_rekeys_a_row_another_listed_po_owns(realdb, monkeypatch):
+    """PO-7's legacy key "123" is also another PO's real number in the same
+    listing. Row "123" belongs to that PO, whichever order they come in: it is
+    refreshed, and PO-7 gets a row of its own."""
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _add_po(mk, org_id, po_number="123", total=Decimal("50.00"))
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(po_number="123", total=Decimal("60.00"), currency="USD"),
+            PoPayload(
+                po_number="PO-7",
+                total=Decimal("700.00"),
+                currency="USD",
+                legacy_po_numbers=("123",),
+            ),
+        ],
+    )
+
+    async with mk() as s:
+        rows = {
+            p.po_number: p.total
+            for p in (
+                await s.execute(
+                    select(PurchaseOrder).where(PurchaseOrder.po_number.in_(["123", "PO-7"]))
+                )
+            ).scalars()
+        }
+    assert rows == {"123": Decimal("60.00"), "PO-7": Decimal("700.00")}
