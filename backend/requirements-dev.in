@@ -1,3 +1,3 @@
 # Extra pins folded into the hash-locked dev requirements.
 # Compiled together with pyproject.toml [dev] into requirements-dev.lock.
-pip==26.2.1
+pip==26.2.2
