@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-31 — the follow-ups batch closed six (c) entries (four PO listings reading a failed read as complete, decisions §329; the unlocked run builder, §330; the hand-rolled load-error blocks; the three copied buttons; the assistant stream's 429; the English ERP reconciliation sentences, §331) and opened two (c) entries (three adapters still reading a failed PO listing as empty, and the uncatalogued QuickBooks write-back sentences), taking the file from 155 → 151. Before that, 2026-10-26 — re-keying old Merge.dev PO rows in the sync (decisions §328, later in PR #670) replaced its (c) entry with a (b) one, running that sync per Merge.dev tenant after deploy, keeping the file at 155. Before that, 2026-10-26 — refreshing a synced PO's lines (decisions §327, later in PR #670) closed its (c) entry, taking the file from 156 → 155. Before that, 2026-10-26 — refusing a cancelled PO in the matcher (decisions §326, later in PR #670) closed its (c) entry, taking the file from 157 → 156. Before that, 2026-10-26 — scoping the PO sync's re-match to the synced entity and skipping paid / done invoices (later in PR #670) closed its (c) entry, taking the file from 158 → 157. Before that, 2026-10-26 — the PR #670 branch-wide money-path review opened five (c) entries (old Merge.dev PO rows, the re-match's scope, no exit for a never-priceable PO, PO lines never refreshed, the matcher ignoring PO status), taking the file from 153 → 158. Before that, 2026-10-26 — the branch review's skipped-PO wiring for NetSuite, Business Central, Sage (ZA) and Intacct (decisions §325, later in PR #670) opened one (c) entry, their PO listings still reading a failed or capped read as complete, taking the file from 152 → 153. Before that, 2026-10-26 — showing the "re-check now matches" note on `/exceptions` and the mobile exception detail (later in PR #670) closed its (c) entry, taking the file from 153 → 152. Before that, 2026-10-26 — letting a failed received-goods read fail `/api/analytics/cfo` instead of reporting a zero GR/IR leg (later in PR #670) closed its (c) entry, taking the file from 154 → 153. Before that, 2026-10-26 — withholding a marked PO's stale total on every surface and leaving it out of budgets and accruals (decisions §323, later in PR #670) closed the (c) entry for it and its review opened one, the received-goods accrual swallowing every error into zeros, keeping the file at 153. Before that, 2026-10-26 — wiring Blackbaud FE NXT into the skipped-PO report (decisions §324) closed its (c) entry, taking the file from 155 → 154. Before that, 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-10-31 (round 2) — the follow-ups batch closed six (c) entries (the last three PO listings and the write-back sentences, decisions §332; the ERP push ignoring vendor status, §333; the SSRF re-resolution, §334; the OAuth login-CSRF, §336; the unconfirmed QuickBooks realm, §337) and opened six (zero-total POs on three adapters, sanctions false-positive adjudication, two unguarded configurable hosts, localhost CORS in production, the mobile ERP refusal, `/adaptive`'s missing Retry), keeping the file at 151; the resume/retry in-doubt entry's trigger fired (§335). Before that, 2026-10-31 — the follow-ups batch closed six (c) entries (four PO listings reading a failed read as complete, decisions §329; the unlocked run builder, §330; the hand-rolled load-error blocks; the three copied buttons; the assistant stream's 429; the English ERP reconciliation sentences, §331) and opened two (c) entries (three adapters still reading a failed PO listing as empty, and the uncatalogued QuickBooks write-back sentences), taking the file from 155 → 151. Before that, 2026-10-26 — re-keying old Merge.dev PO rows in the sync (decisions §328, later in PR #670) replaced its (c) entry with a (b) one, running that sync per Merge.dev tenant after deploy, keeping the file at 155. Before that, 2026-10-26 — refreshing a synced PO's lines (decisions §327, later in PR #670) closed its (c) entry, taking the file from 156 → 155. Before that, 2026-10-26 — refusing a cancelled PO in the matcher (decisions §326, later in PR #670) closed its (c) entry, taking the file from 157 → 156. Before that, 2026-10-26 — scoping the PO sync's re-match to the synced entity and skipping paid / done invoices (later in PR #670) closed its (c) entry, taking the file from 158 → 157. Before that, 2026-10-26 — the PR #670 branch-wide money-path review opened five (c) entries (old Merge.dev PO rows, the re-match's scope, no exit for a never-priceable PO, PO lines never refreshed, the matcher ignoring PO status), taking the file from 153 → 158. Before that, 2026-10-26 — the branch review's skipped-PO wiring for NetSuite, Business Central, Sage (ZA) and Intacct (decisions §325, later in PR #670) opened one (c) entry, their PO listings still reading a failed or capped read as complete, taking the file from 152 → 153. Before that, 2026-10-26 — showing the "re-check now matches" note on `/exceptions` and the mobile exception detail (later in PR #670) closed its (c) entry, taking the file from 153 → 152. Before that, 2026-10-26 — letting a failed received-goods read fail `/api/analytics/cfo` instead of reporting a zero GR/IR leg (later in PR #670) closed its (c) entry, taking the file from 154 → 153. Before that, 2026-10-26 — withholding a marked PO's stale total on every surface and leaving it out of budgets and accruals (decisions §323, later in PR #670) closed the (c) entry for it and its review opened one, the received-goods accrual swallowing every error into zeros, keeping the file at 153. Before that, 2026-10-26 — wiring Blackbaud FE NXT into the skipped-PO report (decisions §324) closed its (c) entry, taking the file from 155 → 154. Before that, 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -1065,9 +1065,10 @@ or is a sibling of a fix that needs its own pass.
       before the adapter call, and have `payment_runs.classify_payment_failure`
       return IN_DOUBT for any marked row regardless of reason, so the reconciler — not
       a retry — resolves it.
-      **Trigger:** the next change to `/resume`, `/retry-failed` or
-      `classify_payment_failure`, or the first resumed run seen after a mid-dispatch
-      crash.
+      **Trigger: FIRED (2026-10-31).** Decisions §335 put a **Retry failed
+      payments** control in the run dialog that offers the retry for exactly this
+      row, which until then needed a direct API call. Scheduled in the
+      follow-ups batch PR (#679) before it leaves draft.
 
 ### Surfaced by the auth bug hunt, round 3 (2026-10-05)
 
@@ -1490,17 +1491,6 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 
-- [ ] **(c) The ERP OAuth callback is not bound to the browser that started it
-      (login-CSRF).** A rogue tenant admin can get a victim to approve consent
-      and link the victim's books to the attacker's tenant. **Durable fix:**
-      make `/authorize` a credentialed fetch (`credentials: 'include'`) to the
-      API public host, which sets an HttpOnly, Secure, `SameSite=Lax` nonce
-      cookie there; put the cookie's hash in the signed `state` and compare it
-      at the callback. A custom-domain origin cannot set a first-party cookie on
-      the API host, so custom-domain tenants start the connect from
-      `<slug>.<app domain>`. **Trigger:** before the platform QuickBooks, Xero,
-      Sage or Blackbaud OAuth apps are configured in production, or before the
-      first custom-domain tenant connects an OAuth ERP.
 - [ ] **(c) A VAT-registered Business Central company cannot post at all.** The
       adapter reads back `totalAmountIncludingTax` and, when BC adds VAT on top
       of the approved gross, deletes the draft and refuses
@@ -1529,12 +1519,6 @@ scope (§260) — do not fold them into any of these.
       (`no_external_tenant`). **Durable fix:** a company picker after consent,
       stored with the grant. **Trigger:** the first customer whose consent
       covers more than one company.
-- [ ] **(c) The SSRF guard checks an admin-supplied ERP host once, then httpx
-      resolves it again.** DNS rebinding passes the check (`utils/url_safety`).
-      Business Central and Sage SA now also allowlist their API host, but SYSPRO
-      is customer-hosted. **Durable fix:** connect to the IP the guard
-      resolved (a pinned transport). **Trigger:** the first customer-hosted
-      SYSPRO connection in production.
 - [ ] **(c) A vendor holds one `erp_vendor_id`, whichever ERP set it.** A tenant
       that switches ERP posts the old ERP's ids, and the new ERP rejects them,
       and some syncs stored a name or code where the ERP gave no id. **Durable
@@ -1585,16 +1569,6 @@ scope (§260) — do not fold them into any of these.
       `erp_oauth.revoke` best-effort, recording the outcome in the deletion
       report. **Trigger:** the next change to `tenant_deletion`, or before the
       first tenant with a live OAuth ERP is deleted.
-- [ ] **(c) QuickBooks' company id comes from the unsigned callback query.**
-      `realmId` is read from the redirect, so a tenant admin can consent to
-      their own company while naming another company's realm, which then
-      reads as `already_linked` for its real owner. Tokens are never shared —
-      it is a squatting / denial problem, not a leak. **Durable fix:** confirm
-      the realm with one API call under the new token (`GET
-      /v3/company/{realmId}/companyinfo/{realmId}`), as Xero and Sage already
-      resolve theirs. **Trigger:** with the OAuth login-CSRF binding above, or
-      before the platform Intuit app goes live.
-
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
 - [ ] **(c) Approving first and recording the receipt second still works.**
@@ -1839,20 +1813,6 @@ scope (§260) — do not fold them into any of these.
       a decision no person made. **Trigger:** the next change to
       `_ensure_exception` or to the line-total reconciliation, or a reviewer
       report of a hold that keeps coming back.
-- [ ] **(c) The ERP push does not check the vendor's status.** A payment run
-      refuses a vendor that is blocked, unverified or held for sanctions
-      screening, but `services/erp._call_erp` posts that vendor's approved
-      bill, and in the ERP it can be paid past our screening. The same
-      reasoning as §286, applied to the payee rather than the debt.
-      **Durable fix:** a second check beside `erp_export_gate`, reading the
-      payment path's own vendor-payability rule (`services/payment_runs`)
-      rather than a copy, with its own coded refusal in `ERP_REFUSAL_CODES`;
-      decide per status whether booking is still correct (an `unverified`
-      vendor's bill is a real debt; a sanctions hit or a block is not one to
-      put where it can be paid). **Trigger:** the next change to
-      `erp_export_gate`, or before the first tenant with live ERP pushes and
-      sanctions screening both enabled.
-
 ### Surfaced by reviewing the QuickBooks live-test fixes (2026-10-19, decisions §284–§287)
 
 - [ ] **(c) A chart or vendor listing over `SYNC_LISTING_MAX_ROWS` cannot sync
@@ -2331,27 +2291,50 @@ user-visible halves still open.
       the next release tag, which is when the walkthrough would otherwise be
       repeated by hand.
 
-### Surfaced by the 2026-10-31 follow-ups batch (decisions §329–§331)
+### Surfaced by the 2026-10-31 follow-ups batch, round 2 (decisions §332–§337)
 
-- [ ] **(c) Merge.dev, Xero and QuickBooks Online still read a failed PO listing
-      as "no POs".** Merge.dev returns an empty list on an HTTP or network error
-      (`test_merge_dev_list_pos_returns_empty_on_http_error`); Xero and QBO
-      degrade the same way. None of them reports skips through
-      `list_pos_report`, so no skip is hidden today — §329's gap only opens if
-      one of them starts reporting. **Durable fix:** raise
-      `ErpListingIncomplete` on a failed or truncated PO read, as the other six
-      adapters now do (§324, §329). **Trigger:** any of the three overriding
-      `list_pos_report`, or the next change to its PO listing.
-- [ ] **(c) The QuickBooks write-back and ERP sync-back failure sentences are
-      English, with machine codes and API paths in them.**
-      `erp_payment_writeback.py`'s three failure sentences and
-      `payment_erp_sync`'s sync-back failure still pass a plain `description=`
-      carrying adapter error codes, a payment id and an API retry path — the
-      only ERP-side exceptions §331 left uncatalogued. **Durable fix:** move the
-      code, payment id and run id into `erp_report`, reword for an AP user, and
-      catalogue them as `exception.erp_*` codes (`pnpm gen:warning-messages`).
-      **Trigger:** the next change to either module, or the first non-English
-      tenant using QuickBooks write-back.
+- [ ] **(c) Merge.dev, Xero and QuickBooks Online sync a PO with no usable total
+      at 0.** Their PO mappers fall back to `Decimal("0")`, so every invoice
+      against such a PO reads as over-billed and raises `po_mismatch` — the bug
+      §325 fixed for Sage Intacct. **Durable fix:** override
+      `list_pos_report` on the three and report the PO `unpriceable` (§323,
+      §325), with a test per adapter. **Trigger:** the next change to any of
+      their PO mappers, or the first `po_mismatch` against a zero-total synced PO.
+- [ ] **(c) A vendor whose sanctions screen keeps returning `match` or `review`
+      can be neither paid nor booked, and there is no recorded way to clear a
+      false positive.** §333 refuses the ERP push on the stored screen, and
+      dispatch / `/compliance/release` re-screen live. **Durable fix:** an
+      audited "adjudicated false positive" stamp (who, when, which screen
+      result) that later screens and both gates respect, under a permission a
+      preparer cannot hold. **Trigger:** the first live sanctions provider, or a
+      customer report of a stuck vendor.
+- [ ] **(c) Two adapters call a per-org configurable host with no SSRF guard.**
+      `services/peppol_adapters/as4_gateway.py` posts to `config["gateway_url"]`,
+      and the Ollama extraction adapter to `ollama_base_url` / `base_url`.
+      §334's pinned transport does not reach them. **Durable fix:**
+      `assert_public_url_async` plus `pinned_async_client`, with a dev loopback
+      allowance like SSO's, and add both to `test_url_safety.py`'s guarded set.
+      **Trigger:** before the PEPPOL gateway or Ollama can be configured per
+      tenant in production.
+- [ ] **(c) CORS admits `localhost` origins with credentials in production.**
+      The CORS rule always allows loopback origins alongside
+      `FEOH_CORS_PRODUCTION_DOMAIN`. A page on a visitor's own machine is not a
+      remote attacker, but §336's credentialed `/authorize` makes credentialed
+      CORS load-bearing. **Durable fix:** admit loopback origins only when
+      `FEOH_ENVIRONMENT` is not a deployed one, with a test per environment.
+      **Trigger:** the next change to CORS config, or the Security Analyst's
+      review of §336.
+- [ ] **(c) Mobile does not show the ERP refusal behind a reconciliation row.**
+      The web resolve dialog states `erp_report.refusal` through `erpRefusal.*`
+      (§332); the mobile exception detail shows only the catalogued sentence.
+      **Durable fix:** a mobile ERP refusal-code map with ARB strings, read on
+      the exception detail. **Trigger:** the next change to the mobile
+      exception detail.
+- [ ] **(c) `/adaptive`'s routing error has no Retry.** It shows a
+      `role="alert"` message with no way to reload, unlike the `ui/LoadError`
+      blocks the rest of the page uses. **Durable fix:** render `ui/LoadError`
+      with the routing reload as `onretry`. **Trigger:** the next change to
+      `/adaptive`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
@@ -2589,7 +2572,7 @@ as oversights.
       `FEOH_ERP_SAGE_ACCOUNTING_*` and `FEOH_ERP_BLACKBAUD_*` (client id,
       secret, subscription key) in `infra-secrets/feohledger/prod.sops.yaml`.
       **Trigger:** before selling ERP sync (on any plan, Free included since
-      decisions §281) to customers on those ERPs. The login-CSRF (c) entry above must land first.
+      decisions §281) to customers on those ERPs. The login-CSRF binding it depended on landed (decisions §336); have the Security Analyst review that design before the production apps are configured.
 
 - [ ] **Turn on QuickBooks status sync in production.** Built and off by
       default (decisions §295). In the Intuit developer portal, on the

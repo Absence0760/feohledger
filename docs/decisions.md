@@ -15693,3 +15693,144 @@ pre-payment bill-check sentences used to end with moved into `erp_report`
 **Not done.** The QuickBooks write-back failures (`erp_payment_writeback.py`)
 and `payment_erp_sync`'s sync-back failure still carry adapter codes, payment
 ids and API paths in English (`docs/followups.md`).
+
+## 332. The last three PO listings read whole, and the write-back sentences are catalogue codes (§329 / §331 follow-ups, 2026-10-31)
+
+**Decision.**
+
+1. Merge.dev, Xero and QuickBooks Online read their PO listing up to their
+   bound or raise `ErpListingIncomplete` (`fetch_failed` / `truncated`), as §329
+   did for the other six. Merge.dev used to answer `[]` on a failure and stop at
+   1,000; Xero ended at a failed page (or a lost token) with what it had and
+   stopped at 10 pages; QuickBooks returned the first 50 of a longer list.
+   QuickBooks' `_query_all` is always complete and maps a failed page to
+   `fetch_failed`, so its chart and vendor syncs also answer the coded 502
+   instead of naming an exception class.
+2. The QuickBooks write-back's three failure sentences and `payment_erp_sync`'s
+   failed-leg sentence are `exception.erp_*` codes
+   (`erp_payment_writeback_failed` / `_balance_open` /
+   `erp_payment_void_writeback_failed`, with `_unnamed` twins;
+   `erp_sync_back_failed`, never named). Payment id, run id, bill, the coded
+   refusal or exception class, and the invoice status ride `erp_report`. The
+   retry is stated as the run's Retry ERP sync action, not an API path. The web
+   resolve dialog states the refusal from `erp_report.refusal` through the
+   existing `erpRefusal.*` messages. `open_erp_reconciliation_exception` takes
+   only `finding=`.
+
+**Rejected.** Keeping best-effort PO reads on these three because they report
+no skips: the listing is read as the whole list either way, and the gap reopens
+the moment one starts reporting.
+
+## 333. The ERP push refuses a vendor the payment path will not pay (§286 / §309 follow-up, 2026-10-31)
+
+**Context.** A payment run refuses a vendor that is not `active`; dispatch
+refuses one that is `payments_blocked` or screens `match`, and holds one that
+screens `review`. The ERP push asked none of this, so a blocked or
+sanctions-held payee's approved bill was booked in the ERP, where it can be paid
+against the ERP's own vendor record past our screening — §286's reasoning
+applied to the payee instead of the debt.
+
+**Decision.** `erp_export_gate.erp_export_vendor_hold` runs after the exception
+check (§286) and the live-claim check (§309), at `_call_erp` and the three send
+doors (and so the auto-send), with the coded refusal `vendor_blocks_erp_export`,
+`params = {hold, possibly_posted?}`. It reads `payment_runs.vendor_payability`,
+the one vendor read the run gate's `inactive_vendor_statuses` now shares.
+
+- **Refused:** `payments_blocked`; last stored screen `match` / `review`;
+  `rejected`; any unknown status (fail-closed — the bookable statuses are named).
+- **Books:** `unverified` and `inactive`. The approver signed a real debt;
+  verification is a pre-payment control the run gate still enforces, and the ERP
+  applies its own inactive-vendor rule. Use the block, not deactivation, for
+  suspicion.
+
+The gate reads the **stored** screen, never a live one: no provider charge and no
+`sanctions_checks` row per push. A stale `review` is cleared by re-screening,
+which the 409 names. A vendor whose screen persists at `match` / `review` is
+neither payable nor bookable; false-positive adjudication is tracked in
+`docs/followups.md`.
+
+**Rejected.** Refusing `unverified` (it would stop booking the AI-extracted
+vendors whose bills are most common, for a control about paying, not owing); a
+live screen per push (cost, and a third-party call on the send path).
+
+**Tests.** `test_erp_export_blocking_exceptions.py` (each state × each door,
+`_call_erp`, parity with the run gate, re-screen and unblock exits),
+`test_erp_auto_send_on_approval.py`, `erpRefusals.test.ts`,
+`codedRefusals.test.ts`.
+
+## 334. SSRF-guarded requests connect to the address they vetted (2026-10-31)
+
+**Context.** Checking a URL and then letting httpx resolve it again leaves a
+DNS-rebinding window: a record can pass the check and answer the connect with
+`127.0.0.1` or `169.254.169.254`.
+
+**Decision.** `utils/url_safety` provides a pinned transport: a custom httpcore
+network backend resolves the host once per connection, judges every address,
+and connects to a vetted IP literal. The URL is unchanged, so `Host`, SNI and
+certificate verification still use the hostname. `pinned_async_client` (and the
+blocking `pinned_client`, worker threads only) is the one factory; a call site
+may pass its own resolver for a stricter rule (outbound webhooks) or its own
+error type (commerce, SSO). Proxies, mounts and custom transports are refused,
+because each would resolve or connect around the pin. Adopted by SYSPRO,
+outbound webhooks, Slack / Teams, the commerce client, Clearbit / D&B, SSO
+discovery / JWKS / token, and the branding logo fetch. Operator overrides stay
+unpinned (trusted, as they already skip the check). Dev loopback allowances skip
+the address judgement but still pin. Hosts restricted to a vendor's own domain
+(Business Central, Sage SA) are not pinned — a rebind would need that vendor's
+DNS — and `tests/test_url_safety.py::_PLAIN_CLIENT_ALLOWED` keeps that list
+explicit.
+
+**Rejected.** Re-checking immediately before sending (issue #171's accepted
+fix): it narrows the window but does not close it.
+
+## 335. Retry-failed is offered from one gate, and an empty retry is refused (2026-10-31)
+
+**Decision.** `POST /api/payments/runs/{id}/retry-failed` raises every up-front
+refusal from `payment_controls.run_retry_failed_refusal`, the same function
+behind `GET /runs/{id}`'s `actions.retry_failed` (§305). It reads the run status
+derived from its payments, as the endpoint always did. A run with no retry-safe
+failure is now refused (409 `payment_run_nothing_to_retry`) instead of being
+claimed, audited and dispatched with nothing to send. The run dialog offers
+**Retry failed payments** from that verdict; `payment_run_not_retryable` hides it
+rather than showing it disabled. Mobile does not offer the control: its runs list
+carries no verdict.
+
+**Consequence.** The control exposes the in-doubt resume case recorded in
+`docs/followups.md` (a resumed dispatch refused before the adapter call is
+classed retry-safe), so that entry's trigger has fired.
+
+## 336. ERP OAuth connects are bound to the starting browser (2026-10-31)
+
+**Context.** The OAuth callback is public, so a signed `state` alone allowed
+login-CSRF: a rogue tenant admin could get a victim to approve consent and link
+the victim's books to the attacker's tenant.
+
+**Decision.** `/authorize`, the one bearer-authenticated step, is a credentialed
+fetch to the API host that sets a `__Host-feoh_erp_oauth_nonce` HttpOnly, Secure
+cookie; the signed state carries its SHA-256. The callback compares them in
+constant time after burning the state, refuses with `erp_error=browser_mismatch`
+(and a best-effort `organization.erp_connect_refused` audit row), and clears the
+cookie only once it has matched — so a junk-state link cannot wipe an admin's
+cookie mid-connect. Consequences:
+
+- The app and the API must be same-site, inside `FEOH_CORS_PRODUCTION_DOMAIN`.
+- Custom-domain tenants connect from `<slug>.<domain>` (coded 409
+  `erp_connect_platform_host`, `params.url`), and the callback returns there.
+- Loopback dev uses `SameSite=None; Secure`, because `*.localhost` →
+  `localhost` is cross-site; deployed environments never do. Local connects need
+  Chromium.
+- One cookie slot per browser: two parallel connects cannot both finish.
+
+**Rejected.** A bearer-less "start" redirect (the binding becomes a transferable
+link again); confirming on the tenant origin after the redirect (the handle in
+the URL can be leaked by the victim).
+
+## 337. QuickBooks' realm is confirmed, not read from the redirect (2026-10-31)
+
+**Decision.** The callback links `realmId` only after
+`GET /v3/company/{realm}/companyinfo/{realm}` answers 200 with `CompanyInfo`
+under the new token, the way Xero and Sage resolve theirs; anything else refuses
+with `no_external_tenant`. Realm ids are checked against `[A-Za-z0-9-]{1,64}`
+before entering the URL. A refused realm does not revoke the token: Intuit's
+revoke applies to the app's whole grant for a company, so revoking after a
+failed reconnect (an outage, say) could cut that tenant's live connection.
