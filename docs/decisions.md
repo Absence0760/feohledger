@@ -15984,3 +15984,99 @@ export are not in the verdicts, because they need the invoices locked.
 **Open.** The bank-rejected void on a tenant that switched to processor mode
 after exporting is a double-payment path §251 meant to close
 (`docs/followups.md`, Security Analyst review).
+
+## 345. Every outbound host is classified, and per-org config never repoints a vendor API (§339 follow-up, 2026-10-31)
+
+**Context.** A sweep of every adapter for a host read from per-org settings
+found one that carried a credential: Stripe Treasury read
+`settings.payments.api_base`, which any tenant admin can write, and sent the
+sealed Stripe secret key to whatever host it named.
+
+**Decision.** A host is one of three classes:
+
+- **Per-org** — goes through `url_safety.org_host_client`, or its own check plus
+  pinned client where it needs a custom resolver, error type or blocking client
+  (`_ORG_HOST_BESPOKE`: SYSPRO, SSO, the branding logo, outbound webhooks, the
+  commerce client).
+- **Per-org but constrained to the vendor's domain** (NetSuite's account id,
+  Business Central / Sage SA's exact host, Shopify / Lightspeed handles) —
+  validated strictly, tested against an injection corpus, and listed in
+  `_PLAIN_CLIENT_ALLOWED` with its reason.
+- **Operator config** (`FEOH_*` or a vendor constant).
+
+Slack, Teams, Clearbit and D&B adopt `org_host_client` with a literal
+`allow_private=False` (no local emulator). Stripe Treasury no longer reads a
+per-org `api_base`; `FEOH_STRIPE_API_BASE` stays for stripe-mock. Modules that
+read a per-org URL but send nothing yet (generic QMS, Avalara, TaxJar, the
+workflow webhook step) sit in `_ORG_HOST_NOT_YET_SENT`, which fails the moment
+one builds a client. Any module under `app/` importing an HTTP or SMTP client
+must be classified (`test_every_module_with_an_http_client_classifies_its_host`).
+The full table is `backend/docs/adapter-patterns.md` § Where an adapter's host
+comes from.
+
+**Rejected.** Converting the bespoke sites to `org_host_client`: each needs
+something the helper does not offer, and each already checks and pins.
+
+## 346. The payments Cards tab offers Generate card (2026-10-31)
+
+**Decision.** `POST /api/cards/generate` gets a web caller: a dialog on the Cards
+tab, offered to holders of `payment.execute` on a `processor` execution mode —
+the endpoint's first two gates. Whether `cards.enabled` is on is not exposed to
+the page; the endpoint's 400 is now coded `cards_not_enabled` (same status and
+message) and stated in the dialog. Invoices come from `GET /api/invoices`
+narrowed to `PAYABLE_INVOICE_STATUSES`, mirrored as `CARDABLE_INVOICE_STATUSES`
+with a vitest that reads the backend tuple, because the payment queue has no
+search. The picker does not pre-judge the other gates; §342's per-invoice skips
+explain them. A 4xx means nothing was issued; a 5xx or dropped connection is
+reported as "some cards may have been issued" and reloads the list, because the
+mint commits per invoice and a retry answers `card_skip_already_carded`.
+
+**Rejected.** The queue's bulk bar (the follow-up asked for the Cards tab);
+search on `/payments/queue` (its whole-queue totals would describe a filtered
+list).
+
+## 347. Submit, Send to ERP and Retry ERP are offered from their gates; `/complete` and the ERP push start only from their statuses (2026-10-31)
+
+**Decision.** `GET /api/invoices/{id}/review-actions` also answers `complete`,
+`send_to_erp` and `retry_erp`, from `api/workflow.workflow_action_refusals`: the
+route's role list, then `complete_status_refusal` / `complete_entry_refusal` /
+`erp_send.erp_send_refusal` — status, then plan (§258), then the export gate
+(§286 / §309 / §333) read through its write-free half
+(`blocked_erp_export_detail`).
+
+- `/complete` advances only `new` and `approved` (409
+  `invoice_not_completable`). It used to close `sent_to_erp`, `posted_in_erp`
+  and `paid` to `done`, which skipped the payment of a `posted_in_erp` invoice.
+- `/send-to-erp` starts only from `approved` (409 `invoice_not_erp_sendable`).
+  `failed → sending_to_erp` is a legal edge, so it pushed failed, never-approved
+  extractions into the ERP.
+- `/retry-erp` needs an approved invoice's failed push
+  (`invoice_not_erp_retryable`).
+
+The status gate runs before the plan gate, on an unlocked read and again under
+the lock; the auto-send path (`only_from`) skips it. The modal hides
+`invoice_not_completable` and `invoice_not_erp_retryable` and shows every other
+refusal beside a disabled control. Not covered: the required-fields 422, and a
+duplicate `/complete`'s own `refresh_warnings` would open.
+
+**Open.** `POST /bulk/status → done` has no source-status or live-claim gate
+(`docs/followups.md`).
+
+## 348. Expense report and card reconciliation actions are offered from their gates; the owner cannot reject their own report (2026-10-31)
+
+**Decision.** Submit, approve, reject and attach / detach on an expense report,
+and match, create-expense, unmatch and ignore on a card transaction, follow
+§305: each endpoint raises from one `services/expense_controls` gate and the
+list and detail reads ship the same answer as `actions`. The page used to
+restate role + status + `employee_user_id`; it offered an ap_manager an Approve
+the CFO gate refused (now a disabled Approve with the reason), and it hid Reject
+from the owner while the endpoint accepted it. The endpoint now refuses that
+(403 `expense_report_self_reject`): the decider is never the submitter, for
+reject as for approve, as pre-approval reject already did — accepting it let an
+owner with a manager role record a review decision on their own claim and
+unlock its submitted lines. A repeat ignore of a card transaction is refused
+(409), because it wrote a second audit row. An ignored transaction can still be
+matched or turned into an expense; that is how an ignore is undone. Not in the
+verdicts, because they depend on input the row does not hold: submit's blocking
+policy violations, attach's per-line refusals, and match's checks on the chosen
+expense.
