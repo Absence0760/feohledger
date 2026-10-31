@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -118,6 +118,7 @@ from app.services.payment_controls import (
     run_approve_refusal,
     run_cancel_refusal,
     run_execute_refusal,
+    run_retry_failed_refusal,
 )
 from app.services.payment_execution_mode import resolve_execution_mode
 from app.services.payment_runs import (
@@ -142,7 +143,6 @@ from app.services.payment_runs import (
     recompute_run_status,
     rollup_payment_statuses,
     run_refusal_reasons,
-    superseded_payment_ids,
 )
 from app.services.payment_settlement import settlement_coverage
 from app.services.payment_settlement_record import (
@@ -3497,11 +3497,22 @@ RUN_APPROVE_ROLES = (ROLE_CFO,)
 RUN_CANCEL_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 
 
-def run_action_refusals(run: PaymentRun, user: User, org: Organization) -> dict:
-    """What ``POST /runs/{id}/approve``, ``/execute`` and ``/cancel`` would
-    answer ``user`` for ``run`` right now — each the coded refusal (``{code,
-    message, params}``) or ``None``. The run dialog offers a control exactly
-    when its entry is ``None`` (issue #575).
+def run_action_refusals(
+    run: PaymentRun,
+    user: User,
+    org: Organization,
+    *,
+    effective_status: str,
+    retryable_failures: int,
+) -> dict:
+    """What ``POST /runs/{id}/approve``, ``/execute``, ``/cancel`` and
+    ``/retry-failed`` would answer ``user`` for ``run`` right now — each the
+    coded refusal (``{code, message, params}``) or ``None``. The run dialog
+    offers a control exactly when its entry is ``None`` (issue #575).
+
+    ``effective_status`` / ``retryable_failures`` are what ``/retry-failed``
+    gates on (the derived status and ``count_retryable_failures`` over the
+    run's active payments); the caller has already computed both.
 
     Each is the endpoint's own dependency predicate (``holds_any_role`` /
     ``holds_any_permission`` over the same role / permission set) followed by
@@ -3518,6 +3529,13 @@ def run_action_refusals(run: PaymentRun, user: User, org: Organization) -> dict:
             run_execute_refusal(run, user.id, payment_config),
         ),
         "cancel": _verdict(holds_any_role(user, RUN_CANCEL_ROLES), run_cancel_refusal(run)),
+        # `/retry-failed`'s dependency is `payment.execute`, like `/execute`.
+        "retry_failed": _verdict(
+            holds_any_permission(user, {PERM_PAYMENT_EXECUTE}),
+            run_retry_failed_refusal(
+                run, effective_status, retryable_failures, user.id, payment_config
+            ),
+        ),
     }
 
 
@@ -3587,6 +3605,8 @@ async def get_payment_run(
     # recovered run would read `partial` forever.
     active = active_run_payments(p for p, _ in rows)
     rollup = rollup_payment_statuses(p.status for p in active)
+    effective_status = derive_run_status(run.status, rollup)
+    retryable_failures = count_retryable_failures(active)
 
     return {
         "id": str(run.id),
@@ -3594,7 +3614,7 @@ async def get_payment_run(
         # status, the counts and `retryable_failures` below can't contradict
         # each other — a run reporting `submitted` with `retryable_failures: 1`
         # offered a retry button that `/retry-failed` then 409ed.
-        "status": derive_run_status(run.status, rollup),
+        "status": effective_status,
         # Money serialises as an exact Decimal STRING, never float().
         "total_amount": str(run.total_amount) if run.total_amount else "0",
         # Early-payment discounts the run's ACTIVE payments take — already
@@ -3625,13 +3645,18 @@ async def get_payment_run(
         # processor (`is_retry_safe`) is excluded: the endpoint would only skip
         # it as `needs_reconciliation`, and offering a button that can't act is
         # how an operator ends up hunting for a second way to force the payment.
-        "retryable_failures": sum(
-            1 for p in active if p.status in RETRYABLE_PAYMENT_STATUSES and is_retry_safe(p)
+        "retryable_failures": retryable_failures,
+        # The caller's verdict on each run decision, from the gates those
+        # endpoints raise from (`run_action_refusals`). The three draft-run
+        # ones read the STORED status, which is what those endpoints compare;
+        # `retry_failed` reads the derived one, which is what it compares.
+        "actions": run_action_refusals(
+            run,
+            user,
+            org,
+            effective_status=effective_status,
+            retryable_failures=retryable_failures,
         ),
-        # The caller's verdict on the three draft-run decisions, from the gates
-        # those endpoints raise from (`run_action_refusals`). Read off the
-        # STORED status, which is what the endpoints compare.
-        "actions": run_action_refusals(run, user, org),
         "payments": payments,
     }
 
@@ -5275,11 +5300,14 @@ async def retry_run_erp_sync(
 # prove no order was created at the processor (see the endpoint docstring).
 RETRYABLE_PAYMENT_STATUSES = ("failed", "cancelled")
 
-# The run statuses that can carry a failed payment worth re-attempting. A
-# `draft` run has never been dispatched (use `/execute`), an `executing` one is
-# either mid-flight or crashed (use `/resume`), and a `cancelled` one has no
-# payments left at all.
-RETRYABLE_RUN_STATUSES = ("partial", "failed")
+
+def count_retryable_failures(active: Iterable[Payment]) -> int:
+    """How many of a run's ACTIVE payments `/retry-failed` may actually send
+    again: failed, and provably never accepted by the processor
+    (`is_retry_safe`). The run detail's `retryable_failures` and the endpoint's
+    `payment_run_nothing_to_retry` gate both read this, so the count a reader
+    sees and the gate the POST applies cannot disagree."""
+    return sum(1 for p in active if p.status in RETRYABLE_PAYMENT_STATUSES and is_retry_safe(p))
 
 
 @router.post("/runs/{run_id}/retry-failed")
@@ -5348,6 +5376,14 @@ async def retry_failed_payments(
       payment. The savepoint around each insert is the backstop for the same
       conflict arriving as a race.
 
+    **Refused up front** (`payment_controls.run_retry_failed_refusal`, the
+    same gate the run dialog's `actions.retry_failed` verdict reads): a run
+    whose derived status is not `partial`/`failed` (409
+    `payment_run_not_retryable`), the run's creator (403, maker-checker), a run
+    still awaiting CFO sign-off (403), and a run none of whose failures is
+    retry-safe (409 `payment_run_nothing_to_retry` — every one would only be
+    skipped as `needs_reconciliation`, so nothing is claimed or audited).
+
     **Idempotency.** The run is row-locked and claimed (`→ executing`) before
     anything is booked, so a double-click / concurrent retry blocks on the lock
     and then 409s against the non-retryable status — it can't produce a second
@@ -5365,58 +5401,38 @@ async def retry_failed_payments(
     # that can't act" `retryable_failures` exists to prevent. The read
     # endpoints derive the same way (`payment_runs.derive_run_status`), so the
     # status an operator sees and the status this gates on cannot diverge.
-    effective_status = derive_run_status(
-        run.status,
-        rollup_payment_statuses(
-            p.status
-            for p in active_run_payments(
-                (await db.execute(select(Payment).where(Payment.payment_run_id == run_id)))
-                .scalars()
-                .all()
-            )
-        ),
+    active = active_run_payments(
+        (await db.execute(select(Payment).where(Payment.payment_run_id == run_id))).scalars().all()
     )
-    if effective_status not in RETRYABLE_RUN_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Can only retry a run that finished with failures "
-                f"({' or '.join(RETRYABLE_RUN_STATUSES)}), not '{effective_status}'"
-            ),
-        )
-    # Re-attempting moves money exactly like /execute — same maker-checker gate
-    # and the same CFO threshold. Skipping either here would turn `/retry-failed`
-    # into a way around both.
-    check_run_segregation(
-        run.initiated_by,
+    effective_status = derive_run_status(
+        run.status, rollup_payment_statuses(p.status for p in active)
+    )
+    # Every pre-booking refusal comes from the ONE gate the run dialog's
+    # `actions.retry_failed` verdict is built from, so the control is offered
+    # exactly when this would accept it: the run's state; maker-checker and the
+    # CFO threshold (re-attempting moves money exactly like /execute, so
+    # skipping either would turn this into a way around both); and "nothing
+    # here may be sent again", which used to claim the run for an empty
+    # dispatch pass and answer 200.
+    refusal = run_retry_failed_refusal(
+        run,
+        effective_status,
+        count_retryable_failures(active),
         user.id,
         (org.settings or {}).get("payments"),
-        action="execute",
     )
-    if run.requires_cfo_approval and run.cfo_approved_at is None:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "This run exceeds the org's CFO-approval threshold and is awaiting "
-                "sign-off from a user with the CFO role."
-            ),
-        )
+    if refusal is not None:
+        raise refusal.http()
 
     # Same pre-flight as /execute and /resume: a run whose processor can't be
     # resolved retries nothing, so refuse before booking any retry attempt row.
     adapter = await _require_payment_adapter(org)
 
-    all_run_payments = (
-        (await db.execute(select(Payment).where(Payment.payment_run_id == run_id))).scalars().all()
-    )
-    # An earlier attempt a previous retry already replaced is history — its
-    # successor is what describes where the invoice stands.
-    superseded = superseded_payment_ids(all_run_payments)
-    failed_payments = [
-        p
-        for p in all_run_payments
-        if p.status in RETRYABLE_PAYMENT_STATUSES and p.id not in superseded
-    ]
+    # From the SAME active set the gate above counted — an earlier attempt a
+    # previous retry already replaced is history, its successor is what
+    # describes where the invoice stands — so the gate and the loop can never
+    # judge two different reads of the run.
+    failed_payments = [p for p in active if p.status in RETRYABLE_PAYMENT_STATUSES]
 
     # Which of those invoices can legitimately take another attempt. Every gate
     # `create_payment_run_for_invoices` applies at run-creation time is re-run

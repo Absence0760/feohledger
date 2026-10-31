@@ -169,6 +169,69 @@ def run_cancel_refusal(run) -> ActionRefusal | None:
     return None
 
 
+RUN_NOT_RETRYABLE = "payment_run_not_retryable"
+RUN_NOTHING_TO_RETRY = "payment_run_nothing_to_retry"
+
+#: The run statuses that can carry a failed payment worth re-attempting. A
+#: `draft` run has never been dispatched (use `/execute`), an `executing` one is
+#: either mid-flight or crashed (use `/resume`), and a `cancelled` one has no
+#: payments left at all.
+RETRYABLE_RUN_STATUSES = ("partial", "failed")
+
+
+def run_retry_failed_refusal(
+    run,
+    effective_status: str,
+    retryable_failures: int,
+    actor_id: uuid.UUID,
+    payment_config: dict | None,
+) -> ActionRefusal | None:
+    """Why ``POST /runs/{id}/retry-failed`` would refuse ``actor_id`` before
+    anything is booked, or ``None`` — the ONE definition the endpoint raises
+    from and the run dialog's ``actions.retry_failed`` is read from
+    (``docs/decisions.md`` §305).
+
+    ``effective_status`` is the run status its ACTIVE payments support
+    (``payment_runs.derive_run_status``), never the stored column, which no
+    webhook or reconciler rewrites. ``retryable_failures`` is the count of
+    active failed payments that are provably retry-safe
+    (``payment_runs.is_retry_safe``): a run whose every failure might have
+    reached the processor has nothing a retry may send, and the endpoint
+    refuses it instead of claiming the run for an empty dispatch pass.
+
+    Re-attempting moves money exactly like ``/execute``, so the same
+    maker-checker and CFO-threshold gates apply, in the same order and with the
+    same sentences. The processor resolution that follows (a record-only
+    tenant, an unsupported provider) is org configuration the page reads from
+    ``GET /api/payments/execution-mode``, as for Execute.
+    """
+    if effective_status not in RETRYABLE_RUN_STATUSES:
+        return ActionRefusal(
+            RUN_NOT_RETRYABLE,
+            "Can only retry a run that finished with failures "
+            f"({' or '.join(RETRYABLE_RUN_STATUSES)}), not '{effective_status}'",
+            status.HTTP_409_CONFLICT,
+        )
+    if run_segregation_violated(run.initiated_by, actor_id, payment_config):
+        return _segregation("execute")
+    if run.requires_cfo_approval and run.cfo_approved_at is None:
+        return ActionRefusal(
+            RUN_AWAITING_CFO,
+            "This run exceeds the org's CFO-approval threshold and is awaiting "
+            "sign-off from a user with the CFO role.",
+            status.HTTP_403_FORBIDDEN,
+        )
+    if retryable_failures <= 0:
+        return ActionRefusal(
+            RUN_NOTHING_TO_RETRY,
+            "None of this run's failed payments can be sent again safely: each may "
+            "have reached the payment processor. Check each one with the processor, "
+            "then void it or record what happened.",
+            status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
 # ── Payment void verdict ─────────────────────────────────────────────────
 
 PAYMENT_VOID_TERMINAL = "payment_void_terminal"

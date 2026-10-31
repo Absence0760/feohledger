@@ -658,12 +658,32 @@ Now:
 
 **`/retry-failed` in one paragraph.** Accepted only on a `partial` / `failed`
 run (`draft` → use `/execute`; `executing` → use `/resume`). Same
-`payment.execute` permission, the same maker-checker `check_run_segregation`,
-and the same CFO-threshold gate as `/execute` — skipping any of those would
-make retry a way around all three. It books a second attempt for the failed
-payments it judges safe, then re-drives the run through the same
-`_dispatch_run_payments` loop, so anything already `completed` / `submitted` /
-`processing` / `pending_compliance` is never re-sent to the processor.
+`payment.execute` permission, the same maker-checker gate, and the same
+CFO-threshold gate as `/execute` — skipping any of those would make retry a way
+around all three. It books a second attempt for the failed payments it judges
+safe, then re-drives the run through the same `_dispatch_run_payments` loop, so
+anything already `completed` / `submitted` / `processing` /
+`pending_compliance` is never re-sent to the processor.
+
+**Every up-front refusal is one gate, and the run dialog reads it.**
+`payment_controls.run_retry_failed_refusal` decides, in order: the run's
+DERIVED status is not `partial` / `failed` (409 `payment_run_not_retryable`);
+the caller created the run (403 `payment_run_segregation`); the run is still
+awaiting CFO sign-off (403 `payment_run_awaiting_cfo`); none of its active
+failures is retry-safe (409 `payment_run_nothing_to_retry`). The endpoint
+raises from it, and `GET /runs/{id}` ships the same answer as
+`actions.retry_failed` (beside `approve` / `execute` / `cancel`), so the web run
+dialog's **Retry failed payments** control is offered exactly when the POST
+would accept it (`tests/test_payment_action_verdicts.py` asks both sides for
+every role × run state). The last refusal is new: a run whose every failure is
+in doubt used to be accepted, claimed (`→ executing`), audited
+`payment_run.retried` and dispatched with nothing to send, answering 200 with
+`payments_retried: 0`. Now nothing is claimed or written, and the reader is told
+to reconcile each payment with the processor. A run with at least one safe
+failure is still accepted, and its in-doubt ones are skipped as
+`needs_reconciliation` exactly as before. Processor resolution (record-only
+tenant, unsupported provider) stays a separate pre-flight the page reads from
+`GET /payments/execution-mode`, as for Execute.
 
 #### A retry books a NEW payment; it never re-arms the old one
 
@@ -779,8 +799,9 @@ re-sent.
   a claim on its invoice.
 
 `retryable_failures` on the run detail counts only failures the endpoint will
-actually re-attempt, so the retry button can never offer an action that could
-only be skipped.
+actually re-attempt (`api/payments.count_retryable_failures`), and the
+endpoint's `payment_run_nothing_to_retry` refusal reads the same count, so the
+retry control can never offer an action that could only be skipped.
 
 **Idempotency** comes from the run claim: the row is locked and flipped to
 `executing` before anything is booked, so a double-click blocks on the lock and

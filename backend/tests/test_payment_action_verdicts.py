@@ -1,7 +1,7 @@
 """The payment pages' action verdicts say exactly what the endpoints answer
 (issue #575 § One rule, one place).
 
-* `GET /api/payments/runs/{id}` carries `actions.{approve,execute,cancel}` —
+* `GET /api/payments/runs/{id}` carries `actions.{approve,execute,cancel,retry_failed}` —
   the run dialog used to show a CFO who created the run "Approve as CFO", and
   the creator an enabled Execute, each of which could only 403.
 * `GET /api/payments` rows carry `void_refusal` — the History tab restated a
@@ -182,6 +182,153 @@ async def test_the_run_verdicts_match_what_approve_execute_and_cancel_answer(
         expected_execute.add("payment_run_segregation")
     assert seen["execute"] == expected_execute, seen["execute"]
     assert seen["cancel"] == {None, "payment_run_not_draft"}, seen["cancel"]
+
+
+# `/retry-failed` — the run dialog's `actions.retry_failed`. A failure the
+# adapter decided before any order existed is retry-safe; an
+# `unexpected_error:*` may have reached the processor and never is
+# (`payment_runs.is_retry_safe`).
+_SAFE = ("failed", "compliance_refusal: sanctions match")
+_IN_DOUBT = ("failed", "unexpected_error:ReadTimeout")
+
+
+async def _retry_run(
+    realdb,
+    *,
+    status: str,
+    legs: list[tuple[str, str | None]],
+    initiated_by=None,
+    requires_cfo=False,
+    cfo_approved=False,
+) -> uuid.UUID:
+    from datetime import UTC, datetime
+
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    run_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            PaymentRun(
+                id=run_id,
+                organization_id=org_id,
+                status=status,
+                total_amount=Decimal("100.00") * len(legs),
+                initiated_by=initiated_by,
+                requires_cfo_approval=requires_cfo,
+                cfo_approved_at=datetime.now(UTC) if cfo_approved else None,
+                cfo_approved_by=uuid.uuid4() if cfo_approved else None,
+            )
+        )
+        await s.commit()
+    for pay_status, reason in legs:
+        inv_id = await _invoice(
+            mk,
+            org_id,
+            status=InvoiceStatus.paid if pay_status == "completed" else InvoiceStatus.approved,
+        )
+        async with mk() as s:
+            s.add(
+                Payment(
+                    invoice_id=inv_id,
+                    payment_run_id=run_id,
+                    amount=Decimal("100.00"),
+                    method="ach",
+                    status=pay_status,
+                    failure_reason=reason,
+                    provider=None if pay_status == "pending" else "mock",
+                    provider_payment_id="px_done" if pay_status == "completed" else None,
+                    correlation_id=uuid.uuid4(),
+                )
+            )
+            await s.commit()
+    return run_id
+
+
+def _retry_scenarios(realdb, role):
+    me = realdb.info(TENANT).users[role]
+    someone = realdb.info(TENANT).users["admin" if role != "admin" else "ap_manager"]
+    return {
+        "failed_safe": {"status": "failed", "legs": [_SAFE], "initiated_by": someone},
+        "partial_safe": {
+            "status": "partial",
+            "legs": [("completed", None), _SAFE],
+            "initiated_by": someone,
+        },
+        "failed_no_creator": {"status": "failed", "legs": [_SAFE], "initiated_by": None},
+        "created_by_caller": {"status": "failed", "legs": [_SAFE], "initiated_by": me},
+        "needs_cfo": {
+            "status": "failed",
+            "legs": [_SAFE],
+            "initiated_by": someone,
+            "requires_cfo": True,
+        },
+        "cfo_signed": {
+            "status": "failed",
+            "legs": [_SAFE],
+            "initiated_by": someone,
+            "requires_cfo": True,
+            "cfo_approved": True,
+        },
+        "only_in_doubt": {"status": "failed", "legs": [_IN_DOUBT], "initiated_by": someone},
+        "mixed": {"status": "failed", "legs": [_SAFE, _IN_DOUBT], "initiated_by": someone},
+        "draft": {"status": "draft", "legs": [("pending", None)], "initiated_by": someone},
+        "completed": {
+            "status": "completed",
+            "legs": [("completed", None)],
+            "initiated_by": someone,
+        },
+        # Stored `submitted`, but its one leg has since failed (a webhook the
+        # column never heard about): derived `failed`, so retry is OPEN even
+        # though Execute / Cancel, which read the stored column, are not.
+        "stored_submitted_now_failed": {
+            "status": "submitted",
+            "legs": [_SAFE],
+            "initiated_by": someone,
+        },
+        # Stored `partial`, but every leg it now carries has settled (a webhook
+        # the column never heard about): derived `completed`, so retry is shut.
+        "stored_partial_now_settled": {
+            "status": "partial",
+            "legs": [("completed", None)],
+            "initiated_by": someone,
+        },
+    }
+
+
+@pytest.mark.parametrize("opted_out", [False, True])
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_retry_failed_verdict_matches_what_retry_failed_answers(realdb, role, opted_out):
+    """`actions.retry_failed` is `None` exactly when `POST /runs/{id}/retry-failed`
+    accepts, and otherwise carries the sentence it refuses with — for every
+    role and every run state below, with maker-checker on and opted out."""
+    await _set_payments_settings(
+        realdb, {"provider": "mock", **({"require_run_segregation": False} if opted_out else {})}
+    )
+    seen: set = set()
+    for name, kwargs in _retry_scenarios(realdb, role).items():
+        run_id = await _retry_run(realdb, **kwargs)
+        actions = await _run_verdict(realdb, role, run_id)
+        async with realdb.client(key=TENANT, role=role) as c:
+            resp = await c.post(f"/api/payments/runs/{run_id}/retry-failed")
+        if actions is None:
+            assert resp.status_code == 403, (role, name, resp.text)
+            continue
+        verdict = actions["retry_failed"]
+        _assert_parity(verdict, resp, (role, name, opted_out))
+        seen.add(verdict and verdict["code"])
+
+    if role == "ap_clerk":
+        assert seen == set()
+        return
+    expected = {
+        None,
+        "payment_run_not_retryable",
+        "payment_run_awaiting_cfo",
+        "payment_run_nothing_to_retry",
+    }
+    if not opted_out:
+        expected.add("payment_run_segregation")
+    assert seen == expected, seen
 
 
 VOID_STATUSES = (

@@ -613,9 +613,23 @@ async def test_failure_classifier_splits_deterministic_from_in_doubt():
 # ---------------------------------------------------------------------------
 
 
-async def _assert_untouched_and_not_dispatched(mk, run_id, payment_id, *, reason, realdb):
-    """Drive `/retry-failed` with a processor spy that must never fire, then
-    assert the failed attempt is byte-identical."""
+async def _assert_untouched_and_not_dispatched(mk, run_id, payment_id, *, realdb):
+    """Drive `/retry-failed` on a run whose ONLY failure is in doubt, with a
+    processor spy that must never fire, then assert the failed attempt is
+    byte-identical.
+
+    With nothing provably retry-safe the endpoint refuses up front
+    (`payment_run_nothing_to_retry`) — the same verdict the run dialog reads,
+    so the control is never offered for such a run — rather than claiming the
+    run for an empty dispatch pass. The per-payment `needs_reconciliation`
+    skip for a MIXED run is pinned by
+    `test_retry_skips_the_in_doubt_failure_of_a_mixed_run`."""
+    from app.services.payment_controls import RUN_NOTHING_TO_RETRY
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        detail = (await c.get(f"/api/payments/runs/{run_id}")).json()
+    assert detail["retryable_failures"] == 0
+    assert detail["actions"]["retry_failed"]["code"] == RUN_NOTHING_TO_RETRY
     async with mk() as s:
         before = await s.get(Payment, uuid.UUID(payment_id))
         snapshot = (
@@ -638,12 +652,14 @@ async def _assert_untouched_and_not_dispatched(mk, run_id, payment_id, *, reason
         async with realdb.client(key=TENANT, role="admin") as c:
             r = await c.post(f"/api/payments/runs/{run_id}/retry-failed")
 
-    assert r.status_code == 200, r.text
-    assert r.json()["payments_retried"] == 0
-    assert r.json()["skip_reasons"] == [reason]
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == detail["actions"]["retry_failed"]["message"]
     assert dispatched == []
 
     async with mk() as s:
+        # Nothing claimed the run either: it still reads as the failure it was.
+        run = await s.get(PaymentRun, uuid.UUID(run_id))
+        assert run.status == "failed"
         after = await s.get(Payment, uuid.UUID(payment_id))
         assert (
             after.status,
@@ -658,7 +674,7 @@ async def _assert_untouched_and_not_dispatched(mk, run_id, payment_id, *, reason
         assert len(await _payments_for_invoice_in_session(s, after.invoice_id)) == 1
 
 
-async def test_retry_skips_a_reconciler_aged_out_payment(realdb):
+async def test_retry_refuses_a_run_whose_only_failure_aged_out_at_the_reconciler(realdb):
     """The reconciler fails a payment that was genuinely `submitted` (real money
     in flight, processor handle populated) purely because it aged out. Its true
     outcome at the processor is UNKNOWN — re-sending under a fresh idempotency
@@ -680,12 +696,10 @@ async def test_retry_skips_a_reconciler_aged_out_payment(realdb):
         ],
     )
 
-    await _assert_untouched_and_not_dispatched(
-        mk, run_id, payment_id, reason="needs_reconciliation", realdb=realdb
-    )
+    await _assert_untouched_and_not_dispatched(mk, run_id, payment_id, realdb=realdb)
 
 
-async def test_retry_skips_an_unexpected_error_failure(realdb):
+async def test_retry_refuses_a_run_whose_only_failure_is_an_unexpected_error(realdb):
     """`unexpected_error:*` is our dispatcher swallowing whatever the adapter
     raised — including a read timeout that arrived AFTER the processor accepted
     the order. Nothing here proves no money moved."""
@@ -699,12 +713,10 @@ async def test_retry_skips_an_unexpected_error_failure(realdb):
         payments=[("RETRY-TIMEOUT-1", "failed", "unexpected_error:ReadTimeout")],
     )
 
-    await _assert_untouched_and_not_dispatched(
-        mk, run_id, payment_id, reason="needs_reconciliation", realdb=realdb
-    )
+    await _assert_untouched_and_not_dispatched(mk, run_id, payment_id, realdb=realdb)
 
 
-async def test_retry_skips_an_adapter_transport_error(realdb):
+async def test_retry_refuses_a_run_whose_only_failure_is_a_transport_error(realdb):
     """A `*_transport_error:*` means the HTTP request may well have been
     received and actioned before the connection died."""
     org_id = realdb.info(TENANT).org_id
@@ -717,12 +729,10 @@ async def test_retry_skips_an_adapter_transport_error(realdb):
         payments=[("RETRY-TRANSPORT-1", "failed", "column_transport_error:ConnectTimeout")],
     )
 
-    await _assert_untouched_and_not_dispatched(
-        mk, run_id, payment_id, reason="needs_reconciliation", realdb=realdb
-    )
+    await _assert_untouched_and_not_dispatched(mk, run_id, payment_id, realdb=realdb)
 
 
-async def test_retry_skips_an_unclassified_failure_reason(realdb):
+async def test_retry_refuses_a_run_whose_only_failure_is_unclassified(realdb):
     """Fail closed: a reason nothing in this codebase produces (a future
     adapter, a legacy row) is treated as in-doubt, not waved through."""
     org_id = realdb.info(TENANT).org_id
@@ -735,9 +745,7 @@ async def test_retry_skips_an_unclassified_failure_reason(realdb):
         payments=[("RETRY-UNKNOWN-1", "failed", "something_new_from_a_future_adapter")],
     )
 
-    await _assert_untouched_and_not_dispatched(
-        mk, run_id, payment_id, reason="needs_reconciliation", realdb=realdb
-    )
+    await _assert_untouched_and_not_dispatched(mk, run_id, payment_id, realdb=realdb)
 
 
 async def test_in_doubt_failures_are_not_counted_as_retryable(realdb):
@@ -763,6 +771,57 @@ async def test_in_doubt_failures_are_not_counted_as_retryable(realdb):
     body = r.json()
     assert body["payments_failed"] == 2
     assert body["retryable_failures"] == 1
+    # One safe failure is enough for the control to be offered.
+    assert body["actions"]["retry_failed"] is None
+
+
+async def test_retry_skips_the_in_doubt_failure_of_a_mixed_run(realdb):
+    """A run with one retry-safe failure and one in-doubt failure is accepted:
+    the safe one is re-sent, the in-doubt one is skipped as
+    `needs_reconciliation` and left byte-identical, with no second attempt."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+
+    run_id, (safe_id, doubt_id) = await _seed_run(
+        mk,
+        org_id,
+        run_status="failed",
+        payments=[
+            ("RETRY-MIXDOUBT-SAFE", "failed", DETERMINISTIC_FAILURE),
+            ("RETRY-MIXDOUBT-DOUBT", "failed", "unexpected_error:ReadTimeout"),
+        ],
+    )
+    async with mk() as s:
+        doubt_before = await s.get(Payment, uuid.UUID(doubt_id))
+        doubt_snapshot = (doubt_before.status, doubt_before.correlation_id)
+
+    dispatched: list[str] = []
+
+    async def _spy(self, payload):
+        dispatched.append(payload.invoice_id)
+        return SimpleNamespace(
+            success=True,
+            status=PaymentStatus.completed,
+            provider_payment_id="px_mixdoubt",
+            reference="MIXDOUBT-REF",
+            failure_reason=None,
+        )
+
+    with _ambient_patches(patch.object(MockPaymentAdapter, "create_payment", _spy)):
+        async with realdb.client(key=TENANT, role="admin") as c:
+            r = await c.post(f"/api/payments/runs/{run_id}/retry-failed")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["payments_retried"] == 1
+    assert r.json()["skip_reasons"] == ["needs_reconciliation"]
+    assert len(dispatched) == 1
+
+    async with mk() as s:
+        doubt_after = await s.get(Payment, uuid.UUID(doubt_id))
+        assert (doubt_after.status, doubt_after.correlation_id) == doubt_snapshot
+        assert len(await _payments_for_invoice_in_session(s, doubt_after.invoice_id)) == 1
+        safe_after = await s.get(Payment, uuid.UUID(safe_id))
+        assert len(await _payments_for_invoice_in_session(s, safe_after.invoice_id)) == 2
 
 
 # ---------------------------------------------------------------------------
