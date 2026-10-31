@@ -1630,8 +1630,11 @@ pnpm stripe:up     # stripe/stripe-mock on :12111
 pnpm stripe:down   # stop it
 ```
 
-`FEOH_STRIPE_API_BASE` (empty = live Stripe) repoints the adapter's API base; a
-per-config `api_base` overrides it. stripe-mock returns canned fixtures from
+`FEOH_STRIPE_API_BASE` (empty = live Stripe) repoints the adapter's API base. It
+is operator config only: an `api_base` key in the org's `settings.payments` block
+is ignored, because any tenant admin writes that block and the sealed secret key
+rides on every request — honouring it sent the key to whatever host the admin
+named. stripe-mock returns canned fixtures from
 Stripe's OpenAPI spec — it validates request shape + response parsing
 (`create_payment`, `get_payment_status`, `test_connection`), not stateful flows
 or real webhooks. The seam is locked by `backend/tests/test_stripe_api_base.py`

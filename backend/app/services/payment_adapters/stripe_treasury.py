@@ -82,12 +82,16 @@ class StripeTreasuryAdapter(PaymentAdapter):
         # Required: the FinancialAccount the payment debits from.
         self.financial_account_id: str = config.get("financial_account_id", "")
         self.webhook_secret: str = config.get("webhook_secret", "")
-        # Stripe API base. Defaults to live Stripe; FEOH_STRIPE_API_BASE (or a
-        # per-config api_base) repoints it at the local stripe-mock container for
-        # offline testing. See backend/docs/payments.md § Local testing.
+        # Stripe API base. Live Stripe, unless the OPERATOR sets
+        # FEOH_STRIPE_API_BASE (the local stripe-mock container; see
+        # backend/docs/payments.md § Local testing). Never from `config`: this is
+        # the org's `settings.payments` block, any tenant admin writes it, and
+        # the sealed secret key rides on every request — a per-org `api_base`
+        # handed that key to whatever host the admin named (decisions §339
+        # follow-up). The key is ignored if present.
         from app.config import settings
 
-        self.api_base: str = config.get("api_base") or settings.stripe_api_base or API_BASE
+        self.api_base: str = settings.stripe_api_base or API_BASE
 
     # ------------------------------------------------------------------
     # create_payment
