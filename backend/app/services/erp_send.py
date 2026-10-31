@@ -57,6 +57,74 @@ def _end_pending_on_rollback(session: Session) -> None:
         session.info.pop(_PENDING_KEY, None)
 
 
+#: `POST /send-to-erp` on an invoice that is not `approved`. ``params.status``.
+INVOICE_NOT_ERP_SENDABLE = "invoice_not_erp_sendable"
+
+#: `POST /retry-erp` on an invoice that is not an approved invoice's failed
+#: push (a failed extraction sits at `failed` too). ``params.status``.
+INVOICE_NOT_ERP_RETRYABLE = "invoice_not_erp_retryable"
+
+
+def erp_send_status_refusal(invoice: Invoice, *, retry: bool) -> dict | None:
+    """The coded 409 for a push from a status it cannot start from, or None.
+
+    A send starts from ``approved``; a retry from ``failed``, and only for an
+    invoice that was approved (``erp.retry_erp``'s own predicate, which stays
+    as its defence). These used to surface as the state machine's plain-string
+    "Cannot transition" 409; coded, the invoice modal's verdict can carry them
+    (decisions §305).
+    """
+    from app.api.refusals import coded_refusal
+
+    if retry:
+        if invoice.status is not InvoiceStatus.failed or not invoice.approved_by:
+            return coded_refusal(
+                INVOICE_NOT_ERP_RETRYABLE,
+                "Only an approved invoice whose ERP push failed can be retried.",
+                status=invoice.status.value,
+            )
+        return None
+    if invoice.status is not InvoiceStatus.approved:
+        return coded_refusal(
+            INVOICE_NOT_ERP_SENDABLE,
+            "Only an approved invoice can be sent to the ERP.",
+            status=invoice.status.value,
+        )
+    return None
+
+
+async def erp_send_refusal(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    org_id: uuid.UUID,
+    org_settings: dict | None,
+    control_db: AsyncSession,
+    retry: bool = False,
+) -> dict | None:
+    """What :func:`start_erp_send` would refuse this push with, or None.
+
+    The same gates in the same order — the status gate, the plan gate (§258),
+    the export gate (§286 / §309 / §333) — read without the row lock and
+    without the export gate's commit, so asking writes nothing. The caller
+    checks the endpoint's role first. ``/complete``'s ``refresh_warnings`` is
+    not run: a duplicate it would open in the same request is not yet an
+    exception, and the POST still refuses it.
+    """
+    from app.api.deps import PLAN_FEATURE_REQUIRED, ensure_live_erp_entitled
+    from app.api.refusals import refusal_of
+    from app.services.erp_export_gate import blocked_erp_export_detail
+
+    status_refusal = erp_send_status_refusal(invoice, retry=retry)
+    if status_refusal is not None:
+        return status_refusal
+    try:
+        await ensure_live_erp_entitled(control_db, org_id, (org_settings or {}).get("erp"))
+    except HTTPException as exc:
+        return refusal_of(exc, fallback_code=PLAN_FEATURE_REQUIRED)
+    return await blocked_erp_export_detail(db, invoice)
+
+
 def auto_send_configured(steps_config_snapshot: object) -> bool:
     """Does this frozen workflow say "send to the ERP on approval"?
 
@@ -92,7 +160,7 @@ async def start_erp_send(
     only_from: InvoiceStatus | None = None,
     inline_dispatch: bool = False,
 ) -> Invoice | None:
-    """Plan gate, lock, export gate, transition, commit, dispatch.
+    """Status gate, plan gate, lock, export gate, transition, commit, dispatch.
 
     The plan gate (§258) runs before the row lock, so the control-plane lookup
     never holds one; without a ``control_db`` it opens and closes its own
@@ -115,6 +183,17 @@ async def start_erp_send(
     from app.services.erp_export_gate import refuse_blocked_erp_export
     from app.services.workflow_engine import get_invoice_for_update, transition_invoice
 
+    # The status gate first, on an unlocked read, so a push that could never
+    # start from here says so rather than naming the plan (a downgraded tenant's
+    # `paid` invoice is not retryable, whatever the plan). Re-checked under the
+    # lock below. Not on the auto path, which skips a moved row silently.
+    if only_from is None:
+        current = await db.get(Invoice, invoice_id)
+        if current is not None:
+            status_refusal = erp_send_status_refusal(current, retry=retry)
+            if status_refusal is not None:
+                raise HTTPException(status_code=409, detail=status_refusal)
+
     erp_config = (org_settings or {}).get("erp")
     if control_db is not None:
         await ensure_live_erp_entitled(control_db, org_id, erp_config)
@@ -128,6 +207,11 @@ async def start_erp_send(
     if only_from is not None and invoice.status is not only_from:
         await db.rollback()
         return None
+
+    # Again under the lock: the row may have moved since the read above.
+    status_refusal = erp_send_status_refusal(invoice, retry=retry)
+    if status_refusal is not None:
+        raise HTTPException(status_code=409, detail=status_refusal)
 
     # Commits before raising, so an exception `/complete`'s `refresh_warnings`
     # just opened survives the refusal that names it (see the gate).

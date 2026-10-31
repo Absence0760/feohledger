@@ -1205,7 +1205,12 @@ reasoning).
   modal's "Send to ERP" on an approved invoice), `/send-to-erp` and
   `/retry-erp` return **409** with that coded refusal before they move the
   invoice, so it stays `approved` / `failed` and nothing is queued
-  (`erp_export_gate.refuse_blocked_erp_export`).
+  (`erp_export_gate.refuse_blocked_erp_export`). The invoice modal reads the
+  same answer first, from `GET /api/invoices/{id}/review-actions`
+  (`complete` / `send_to_erp` / `retry_erp`, built by
+  `erp_send.erp_send_refusal` over `blocked_erp_export_detail`), and shows
+  "Send to ERP" / "Retry" disabled with the reason instead of a button that
+  409s (`frontend/docs/ui-patterns.md` § Whether to offer an action).
 - **What the user does:** resolve or dismiss the exception in Exceptions, then
   send again. Clearing it goes through `exception_lifecycle.record_decision`,
   so someone implicated in the invoice cannot clear it for themselves.

@@ -300,16 +300,13 @@ _HOLD_SENTENCE = {
 }
 
 
-async def refuse_blocked_erp_export(db: AsyncSession, invoice) -> None:
-    """409 before an HTTP door queues a push the chokepoint would refuse.
+async def blocked_erp_export_detail(db: AsyncSession, invoice) -> dict | None:
+    """The coded 409 ``detail`` a door would refuse this push with, or None.
 
-    Commits before raising. A raised ``HTTPException`` rolls the request's
-    session back (``tenant.get_tenant_db``), and ``POST /complete`` runs
-    ``refresh_warnings`` first: the duplicate it may have opened in this very
-    request is the exception the refusal tells the user to resolve, so rolling
-    it back would send them to an Exceptions queue with nothing in it. The
-    invoice itself is unchanged, since every door calls this before its
-    transition.
+    Reads only. :func:`refuse_blocked_erp_export` raises it (after its commit),
+    and the invoice modal's verdict (``erp_send.erp_send_refusal``, served by
+    ``GET /api/invoices/{id}/review-actions``) reads it before offering Send /
+    Retry, so the page and the doors cannot disagree (decisions §305).
     """
     from app.api.refusals import coded_refusal
     from app.services.erp import possibly_posted
@@ -320,8 +317,7 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice) -> None:
     posted = possibly_posted(instance.state_data if instance is not None else None)
     refused = await erp_export_refusal(db, invoice, possibly_posted=posted)
     if refused is None:
-        return
-    await db.commit()
+        return None
     if refused.code == EXCEPTION_BLOCKS_ERP_EXPORT:
         exception_type = refused.params["exception_type"]
         message = (
@@ -337,7 +333,22 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice) -> None:
             " An earlier attempt may already have created the bill in the ERP; "
             "check there before anyone pays it."
         )
-    raise HTTPException(
-        status_code=409,
-        detail=coded_refusal(refused.code, message, **refused.params),
-    )
+    return coded_refusal(refused.code, message, **refused.params)
+
+
+async def refuse_blocked_erp_export(db: AsyncSession, invoice) -> None:
+    """409 before an HTTP door queues a push the chokepoint would refuse.
+
+    Commits before raising. A raised ``HTTPException`` rolls the request's
+    session back (``tenant.get_tenant_db``), and ``POST /complete`` runs
+    ``refresh_warnings`` first: the duplicate it may have opened in this very
+    request is the exception the refusal tells the user to resolve, so rolling
+    it back would send them to an Exceptions queue with nothing in it. The
+    invoice itself is unchanged, since every door calls this before its
+    transition.
+    """
+    detail = await blocked_erp_export_detail(db, invoice)
+    if detail is None:
+        return
+    await db.commit()
+    raise HTTPException(status_code=409, detail=detail)
