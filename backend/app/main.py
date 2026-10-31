@@ -465,29 +465,85 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 app.add_middleware(SecurityHeadersMiddleware)
 
 
-def _build_cors_origin_regex() -> str:
+def _is_loopback_origin(origin: str) -> bool:
+    """``http(s)://localhost``, ``*.localhost`` or a loopback IP literal, any port."""
+    from urllib.parse import urlparse
+
+    from app.services.erp_oauth import is_loopback_host
+
+    try:
+        return is_loopback_host(urlparse(origin).hostname)
+    except ValueError:
+        return False
+
+
+def _build_cors_origin_regex(*, deployed: bool | None = None) -> str | None:
     """Compose the allow_origin_regex from settings.
 
-    Local dev always gets ``localhost`` (any subdomain + port). Production
-    domains come from ``FEOH_CORS_PRODUCTION_DOMAIN`` (comma-separated for
-    multi-domain deploys). Empty domain → only localhost matches, which
-    is the right default for local boot.
+    Outside a deployed environment ``localhost`` (any subdomain + port) is
+    admitted: the dev frontend, every worktree's ``E2E_WEB_ORIGIN`` port and the
+    tenant subdomains under them. A deployed ``FEOH_ENVIRONMENT`` admits no
+    loopback origin by pattern: the middleware sends ``Allow-Credentials`` and
+    the ERP ``/authorize`` call is a credentialed fetch (decisions §336), so a
+    page served from a visitor's own machine must not be a trusted origin there.
+    Production domains come from ``FEOH_CORS_PRODUCTION_DOMAIN``
+    (comma-separated for multi-domain deploys). ``None`` when nothing is
+    admitted by pattern (a deployed environment with no domain configured).
     """
     import re as _re
 
-    parts = [r"localhost(:\d+)?"]
+    if deployed is None:
+        deployed = settings.is_deployed
+    parts = [] if deployed else [r"localhost(:\d+)?"]
     raw = (settings.cors_production_domain or "").strip()
     for domain in (d.strip() for d in raw.split(",") if d.strip()):
         parts.append(_re.escape(domain))
+    if not parts:
+        return None
     return r"https?://([\w-]+\.)?(" + "|".join(parts) + ")"
 
 
-# CORS — `cors_origins` is the exact-match allowlist (the dev frontend);
-# the regex below covers tenant subdomains under localhost + any configured
-# production domain.
+def _cors_allow_origins(
+    *,
+    deployed: bool | None = None,
+    origins: list[str] | None = None,
+    explicit: bool | None = None,
+) -> list[str]:
+    """The exact-match origin allowlist.
+
+    ``FEOH_CORS_ORIGINS``' shipped default is the loopback dev frontend, a
+    convenience for local boot. A deployed environment drops loopback entries
+    from that DEFAULT, for the reason ``_build_cors_origin_regex`` gives. A list
+    the operator set explicitly is used as written, loopback included: operator
+    configuration is trusted, as it is for the SSRF overrides (decisions §334).
+    That is how the day-one rehearsal (``scripts/day-one/stack.sh``) runs a
+    production-shaped API behind a ``*.localhost`` browser. It logs a warning at
+    boot, since a real deployment never wants it.
+    """
+    if deployed is None:
+        deployed = settings.is_deployed
+    if origins is None:
+        origins = list(settings.cors_origins)
+    if explicit is None:
+        explicit = "cors_origins" in settings.model_fields_set
+    if not deployed:
+        return list(origins)
+    if explicit:
+        if any(_is_loopback_origin(o) for o in origins):
+            logging.getLogger(__name__).warning(
+                "FEOH_CORS_ORIGINS names a loopback origin in a deployed environment; "
+                "admitting it because it was set explicitly"
+            )
+        return list(origins)
+    return [o for o in origins if not _is_loopback_origin(o)]
+
+
+# CORS — `_cors_allow_origins()` is the exact-match allowlist (the dev frontend,
+# outside a deployed environment); the regex covers tenant subdomains under
+# localhost (outside a deployed environment) + any configured production domain.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=_cors_allow_origins(),
     allow_origin_regex=_build_cors_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],

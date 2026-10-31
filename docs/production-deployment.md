@@ -187,6 +187,14 @@ puts the API on another registrable domain cannot connect an OAuth ERP at all:
 White-label tenants on a custom domain connect from their `<slug>.<domain>`
 address. See `backend/docs/erp-integration.md` § Connecting an OAuth ERP.
 
+**`FEOH_CORS_PRODUCTION_DOMAIN` is the only source of allowed origins in a
+deployed environment.** With `FEOH_ENVIRONMENT` set to a deployed value, the API
+admits no `localhost` / loopback origin: the dev pattern is off and the loopback
+entries of `FEOH_CORS_ORIGINS`' default are dropped, since a credentialed CORS
+response to a page on the visitor's own machine is not something production
+needs. Leave `FEOH_CORS_ORIGINS` unset; an explicit list is used as written and
+logs a warning at boot if it names a loopback origin.
+
 ## Network Architecture
 
 - **VPC** with public and private subnets across 2+ AZs
