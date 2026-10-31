@@ -286,9 +286,10 @@ fires. Every refusal answers with one generic, value-free 422: FastAPI's default
 validation body echoes the offending `input`, so the URL field carries no
 Pydantic constraints and all checks run in the handler instead.
 
-At send time the adapters post through `url_safety.pinned_async_client`, so the
-check and the connection cannot see two different DNS answers: the host is
-re-vetted inside the connect and the socket opens to the vetted IP. A refusal
+At send time the adapters post through `url_safety.org_host_client` (the
+per-org host client, decisions §339; no dev loopback allowance), so the check
+and the connection cannot see two different DNS answers: the host is re-vetted
+inside the connect and the socket opens to the vetted IP. A refusal
 there is logged (event type only) and the post is skipped, like a refusal at
 the check.
 

@@ -576,6 +576,15 @@ _PLAIN_CLIENT_ALLOWED: dict[str, tuple[int, str]] = {
         1,
         "only the trusted operator branch of _client (FEOH_OLLAMA_BASE_URL)",
     ),
+    # Listed though it imports nothing from url_safety: its host is BUILT from a
+    # per-org value, so its plain clients are pinned here like the others.
+    "services/erp_adapters/netsuite.py": (
+        7,
+        "the host is <account_id>.suitetalk.api.netsuite.com and account_id must "
+        "match [A-Za-z0-9_-]+ before it reaches a URL (_ACCOUNT_ID_RE; injection "
+        "cases in test_erp_base_url_overrides), so the token only ever goes to "
+        "Oracle's domain; the other branch is the operator override (fake-erp)",
+    ),
 }
 
 #: Modules that send to a host a TENANT can configure. Each must stay in the
@@ -585,7 +594,37 @@ _PLAIN_CLIENT_ALLOWED: dict[str, tuple[int, str]] = {
 _ORG_HOST_MODULES = (
     "services/peppol_adapters/as4_gateway.py",  # settings.peppol.gateway_url
     "services/extraction_adapters/ollama.py",  # settings.extraction.base_url (BYOK)
+    "services/chat_notification_adapters/slack_adapter.py",  # chat webhook_url
+    "services/chat_notification_adapters/teams_adapter.py",  # chat webhook_url
+    "services/enrichment_adapters/clearbit.py",  # settings.enrichment base_url
+    "services/enrichment_adapters/dun_bradstreet.py",  # settings.enrichment base_url
 )
+
+#: Modules that send to a per-org host through their OWN check + pinned client,
+#: because they need something ``org_host_client`` does not offer: a resolver
+#: raising the caller's error type (SSO, commerce), the stricter outbound-webhook
+#: address rule, a blocking client in a worker thread (the PDF logo), or a check
+#: and a client built in different methods (SYSPRO). Each must still build a
+#: pinned client, so the guard is the same and only the spelling differs.
+_ORG_HOST_BESPOKE = {
+    "services/sso.py": "settings.sso discovery / JWKS / token URLs",
+    "services/branding.py": "settings.company.logo_url (blocking, worker thread)",
+    "services/webhooks/delivery.py": "an outbound webhook subscription's URL",
+    "services/commerce_adapters/base.py": "store_url / shop domain / prefix hosts",
+    "services/erp_adapters/syspro.py": "settings.erp.base_url (customer-hosted)",
+}
+
+#: Modules that READ a per-org host but send nothing to it yet (skeletons, or
+#: a step that records instead of sending). The day one builds an HTTP client
+#: it must route that host through ``org_host_client`` and move to
+#: ``_ORG_HOST_MODULES`` — this list makes that a failing test, not a review
+#: catch.
+_ORG_HOST_NOT_YET_SENT = {
+    "services/qms_adapters/generic_qms.py": "settings.qms.base_url",
+    "services/tax_rate_adapters/avalara.py": "tax config base_url",
+    "services/tax_rate_adapters/taxjar.py": "tax config base_url",
+    "services/workflow_builder.py": "a workflow webhook step's url (recorded, not sent)",
+}
 
 
 def test_org_configurable_hosts_go_through_org_host_client():
@@ -600,6 +639,51 @@ def test_org_configurable_hosts_go_through_org_host_client():
             and node.func.id == "org_host_client"
         ]
         assert calls, f"{rel} does not route its per-org host through org_host_client"
+
+
+_PINNED_FACTORIES = {"org_host_client", "pinned_async_client", "pinned_client"}
+_HTTP_CLIENT_NAMES = _PINNED_FACTORIES | {"AsyncClient", "Client", "request", "stream"}
+
+
+def _called_names(tree) -> set[str]:
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                names.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                names.add(node.func.attr)
+    return names
+
+
+def test_bespoke_per_org_hosts_still_build_a_pinned_client():
+    for rel in _ORG_HOST_BESPOKE:
+        names = _called_names(ast.parse((_APP / rel).read_text()))
+        assert names & _PINNED_FACTORIES, f"{rel} sends to a per-org host unpinned"
+
+
+def test_per_org_hosts_not_yet_sent_build_no_http_client():
+    for rel, field in _ORG_HOST_NOT_YET_SENT.items():
+        tree = ast.parse((_APP / rel).read_text())
+        imports_httpx = any(
+            (isinstance(n, ast.Import) and any(a.name == "httpx" for a in n.names))
+            or (isinstance(n, ast.ImportFrom) and n.module == "httpx")
+            for n in ast.walk(tree)
+        )
+        built = _called_names(tree) & _HTTP_CLIENT_NAMES
+        assert not imports_httpx and not built, (
+            f"{rel} now sends to {field}: route it through url_safety.org_host_client "
+            "and move the module to _ORG_HOST_MODULES (decisions §339)"
+        )
+
+
+def test_per_org_host_inventories_do_not_overlap():
+    org, bespoke, pending = (
+        set(_ORG_HOST_MODULES),
+        set(_ORG_HOST_BESPOKE),
+        set(_ORG_HOST_NOT_YET_SENT),
+    )
+    assert not (org & bespoke or org & pending or bespoke & pending)
 
 
 def _guarded_modules():
@@ -627,7 +711,10 @@ def _plain_client_calls(tree) -> int:
 
 
 def test_guarded_modules_send_through_the_pinned_client():
-    seen = {rel: n for rel, tree in _guarded_modules() if (n := _plain_client_calls(tree))}
+    trees = dict(_guarded_modules())
+    for rel in _PLAIN_CLIENT_ALLOWED:
+        trees.setdefault(rel, ast.parse((_APP / rel).read_text()))
+    seen = {rel: n for rel, tree in trees.items() if (n := _plain_client_calls(tree))}
     expected = {rel: count for rel, (count, _why) in _PLAIN_CLIENT_ALLOWED.items()}
     assert seen == expected, (
         "a module that SSRF-checks a URL builds a plain httpx client: use "
@@ -818,3 +905,91 @@ async def test_ollama_operator_base_url_keeps_a_plain_client(deployed, monkeypat
     client = await adapter._client(5)
     async with client:
         assert not isinstance(client._transport, url_safety.PinnedAsyncTransport)
+
+
+# ---------------------------------------------------------------------------
+# Slack / Teams webhook_url and the Clearbit / D&B base_url: per-org hosts
+# through org_host_client (no dev loopback allowance — nothing local to reach)
+# ---------------------------------------------------------------------------
+
+
+def _chat_message():
+    from app.services.chat_notification_adapters.base import ChatMessage
+
+    return ChatMessage(
+        event_type="invoice_approved",
+        title="Invoice INV-1 was approved",
+        invoice_number="INV-1",
+        vendor_name="Acme",
+        status="approved",
+    )
+
+
+def _chat_adapters():
+    from app.services.chat_notification_adapters.slack_adapter import (
+        SlackChatNotificationAdapter,
+    )
+    from app.services.chat_notification_adapters.teams_adapter import (
+        TeamsChatNotificationAdapter,
+    )
+
+    return [SlackChatNotificationAdapter, TeamsChatNotificationAdapter]
+
+
+def _enrichment_adapters():
+    from app.services.enrichment_adapters.clearbit import ClearbitAdapter
+    from app.services.enrichment_adapters.dun_bradstreet import DunBradstreetAdapter
+
+    return [ClearbitAdapter, DunBradstreetAdapter]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("idx", [0, 1])
+@pytest.mark.parametrize("env", ["deployed", "not_deployed"])
+async def test_chat_webhook_url_internal_is_skipped_without_dialling(recorder, request, idx, env):
+    """Loopback is refused even outside a deployed environment."""
+    request.getfixturevalue(env)
+    cls = _chat_adapters()[idx]
+    await cls({"webhook_url": "http://127.0.0.1:9000/hook"}).send(_chat_message())
+    assert recorder.log.dialled == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("idx", [0, 1])
+async def test_chat_webhook_url_rebind_is_refused_at_connect(recorder, idx):
+    cls = _chat_adapters()[idx]
+    with patch.object(socket, "getaddrinfo", _RebindingDns(PUBLIC_IP, "169.254.169.254")):
+        await cls({"webhook_url": f"https://{HOST}/hook"}).send(_chat_message())
+    assert recorder.log.dialled == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("idx", [0, 1])
+@pytest.mark.parametrize("env", ["deployed", "not_deployed"])
+async def test_enrichment_base_url_internal_is_refused_without_dialling(
+    recorder, request, idx, env
+):
+    from app.services.enrichment_adapters.base import VendorEnrichmentQuery
+
+    request.getfixturevalue(env)
+    cls = _enrichment_adapters()[idx]
+    adapter = cls({"api_key": "k", "base_url": "http://169.254.169.254"})
+    with pytest.raises(UnsafeUrlError):
+        await adapter.enrich_vendor(VendorEnrichmentQuery(vendor_name="Acme", domain="acme.com"))
+    assert await adapter.test_connection() is False
+    assert recorder.log.dialled == []  # the API key never left the process
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("idx", [0, 1])
+async def test_enrichment_base_url_rebind_is_refused_at_connect(recorder, idx):
+    from app.services.enrichment_adapters.base import VendorEnrichmentQuery
+
+    cls = _enrichment_adapters()[idx]
+    adapter = cls({"api_key": "k", "base_url": f"https://{HOST}"})
+    with patch.object(socket, "getaddrinfo", _RebindingDns(PUBLIC_IP, "127.0.0.1")):
+        with pytest.raises(UnsafeUrlError):
+            await adapter.enrich_vendor(
+                VendorEnrichmentQuery(vendor_name="Acme", domain="acme.com")
+            )
+    assert recorder.log.dialled == []

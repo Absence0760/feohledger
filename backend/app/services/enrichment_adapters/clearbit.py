@@ -54,13 +54,16 @@ class ClearbitAdapter:
         if not query.domain:
             return VendorFirmographics(provider=self.provider_name, matched=False)
 
-        # SSRF guard: base_url is admin-overridable — refuse an internal host.
-        # The client is pinned too, so httpx's own lookup cannot be rebound.
-        from app.utils.url_safety import assert_public_url_async, pinned_async_client
+        # SSRF guard: base_url is a per-org override (settings.enrichment), so
+        # `org_host_client` refuses an internal host up front and pins the
+        # connect (decisions §339). No dev loopback allowance: no local Clearbit.
+        from app.utils.url_safety import org_host_client
 
-        await assert_public_url_async(self.base_url)
+        client = await org_host_client(
+            self.base_url, allow_private=False, timeout=self.timeout, follow_redirects=False
+        )
         headers = {"Authorization": f"Bearer {self.api_key}"}
-        async with pinned_async_client(timeout=self.timeout, follow_redirects=False) as client:
+        async with client:
             resp = await client.get(
                 f"{self.base_url}/v2/companies/find",
                 params={"domain": query.domain},

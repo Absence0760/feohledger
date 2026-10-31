@@ -1811,7 +1811,11 @@ carry committed, non-secret local-dev values in `backend/.env.development`:
 (TRUSTED), so they bypass the SSRF guard that screens *tenant-admin-supplied*
 config. An admin-entered `base_url` in Organization settings is still guarded
 — only the operator who owns the process env can point an adapter at an
-arbitrary host.
+arbitrary host. NetSuite has no admin `base_url`: its host is built from
+`account_id`, which must be one hostname label (`[A-Za-z0-9_-]+`, so no dot,
+port, `@`, `/` or non-ASCII) before it reaches a URL — the token only ever goes
+to `<account>.suitetalk.api.netsuite.com`. Every adapter's host class is in
+`adapter-patterns.md` § Where an adapter's host comes from.
 
 ### Running the suite
 
