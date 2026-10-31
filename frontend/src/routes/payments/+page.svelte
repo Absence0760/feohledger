@@ -84,6 +84,7 @@
 		type RebateListResponse,
 		type RebateTransition
 	} from '#lib/types/cardRebate.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
@@ -2630,12 +2631,12 @@
 	{:else if activeTab === 'runs'}
 		{#if runsErrored}
 			<!-- A failed load is a dead end without a way back: the toast that
-			     reported it has already faded. Same error-with-retry block
-			     `/admin/api-keys` uses. -->
-			<div class="state error" data-testid="runs-error" role="alert">
-				<p>{m('payments.runs.empty.errored')}</p>
-				<button type="button" class="btn-cancel" onclick={loadRuns}>{m('payments.runs.retry')}</button>
-			</div>
+			     reported it has already faded. -->
+			<LoadError
+				message={m('payments.runs.empty.errored')}
+				onretry={loadRuns}
+				testId="runs-error"
+			/>
 		{:else}
 		<DataTable
 			columns={RUNS_COLUMNS}
@@ -3568,7 +3569,6 @@
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
 
-	/* Error-with-retry block — same shape as `/admin/api-keys`. */
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
@@ -3576,10 +3576,6 @@
 
 	.state.error {
 		color: var(--danger);
-	}
-
-	.state.error p {
-		margin: 0 0 8px;
 	}
 
 	/* --- Summary --- */

@@ -31,6 +31,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -310,12 +311,8 @@
 		<!-- Not rendered ALONGSIDE the table: the banner and "No experiments yet."
 		     used to appear together, telling the reader two different things at
 		     once — and neither offered a way to try again, since the toast-less
-		     banner came from a dependency-free `$effect`. Same error-with-retry
-		     block `/admin/api-keys` uses. -->
-		<div class="state error" data-testid="experiments-error" role="alert">
-			<p>{loadError}</p>
-			<button type="button" class="btn-cancel" onclick={load}>{m('experiments.retry')}</button>
-		</div>
+		     banner came from a dependency-free `$effect`. -->
+		<LoadError message={loadError} onretry={load} testId="experiments-error" />
 	{:else}
 	<DataTable
 		columns={COLUMNS}
@@ -514,20 +511,6 @@
 	/* The status pill is `<Badge>` now — it had re-typed the shared recipe by
 	   hand, under classes that named the paint (green/amber/grey) rather than
 	   the status. The tone per status lives in `types/experiments`. */
-	/* Error-with-retry block — same shape as `/admin/api-keys`. */
-	.state {
-		color: var(--text-muted);
-		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
-	}
-
-	.state.error p {
-		margin: 0 0 8px;
-	}
-
 	.error-banner {
 		color: var(--danger);
 		margin: 8px 0;

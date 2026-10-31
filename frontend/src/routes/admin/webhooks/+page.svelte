@@ -16,6 +16,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -485,10 +486,7 @@
 		{#if subsLoading}
 			<p class="state" data-testid="webhooks-loading">{m('admin.webhooks.loadingSubs')}</p>
 		{:else if subsError}
-			<div class="state error" data-testid="webhooks-error" role="alert">
-				<p>{subsError}</p>
-				<button type="button" class="btn-cancel" onclick={loadSubs}>{m('admin.webhooks.retry')}</button>
-			</div>
+			<LoadError message={subsError} onretry={loadSubs} testId="webhooks-error" />
 		{:else}
 			<DataTable
 				columns={SUB_COLUMNS}
@@ -588,10 +586,7 @@
 		{#if deliveriesLoading}
 			<p class="state" data-testid="deliveries-loading">{m('admin.webhooks.loadingDeliveries')}</p>
 		{:else if deliveriesError}
-			<div class="state error" data-testid="deliveries-error" role="alert">
-				<p>{deliveriesError}</p>
-				<button type="button" class="btn-cancel" onclick={loadDeliveries}>{m('admin.webhooks.retry')}</button>
-			</div>
+			<LoadError message={deliveriesError} onretry={loadDeliveries} testId="deliveries-error" />
 		{:else}
 			<DataTable
 				columns={DELIVERY_COLUMNS}
@@ -886,10 +881,6 @@
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
 	}
 
 	.mono {

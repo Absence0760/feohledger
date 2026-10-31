@@ -19,6 +19,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
@@ -402,10 +403,11 @@
 		</p>
 	{:else}
 		{#if errored}
-			<p class="sr-error" role="alert" data-testid="scheduled-reports-error">
-				{loadError}
-				<button type="button" class="btn-cancel" onclick={load}>{m('scheduledReports.retry')}</button>
-			</p>
+			<LoadError
+				message={loadError ?? m('scheduledReports.loadFailed')}
+				onretry={load}
+				testId="scheduled-reports-error"
+			/>
 		{/if}
 		<DataTable
 			columns={COLUMNS}
@@ -667,15 +669,6 @@
 		font-size: 0.88rem;
 		margin: 0;
 		padding: 16px 0;
-	}
-	.sr-error {
-		color: var(--danger);
-		font-weight: 500;
-		font-size: 0.88rem;
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		margin: 0 0 12px;
 	}
 	.sr-sub,
 	.sr-run-error,

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
@@ -116,10 +117,7 @@
 	{#if loading}
 		<p class="state" data-testid="retention-loading">Loading…</p>
 	{:else if error}
-		<div class="state error" data-testid="retention-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn-cancel" onclick={load}>Retry</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="retention-error" />
 	{:else}
 		<div class="policy-card">
 			{#each RETENTION_RECORD_CLASSES as cls (cls)}
@@ -185,10 +183,6 @@
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
 	}
 
 	.policy-card {
