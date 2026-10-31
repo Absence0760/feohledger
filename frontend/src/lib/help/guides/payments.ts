@@ -249,7 +249,7 @@ export const PAYMENT_GUIDES: Guide[] = [
 						type: 'list',
 						items: [
 							'A {ui:payments.status.failed} payment never moved money, so there is nothing to void.',
-							'A payment on {ui:payments.status.pendingCompliance} never reached the processor. Use {ui:payments.history.complianceDismiss} instead, which also closes its compliance exception.',
+							'A payment on {ui:payments.status.pendingCompliance} is held for a compliance check, so it can\'t be voided. Use {ui:payments.history.complianceDismiss} instead, which also closes its compliance exception.',
 							'A draft run that hasn\'t been executed is canceled from the run itself with {ui:paymentRuns.runDetail.cancelRun}.'
 						]
 					},

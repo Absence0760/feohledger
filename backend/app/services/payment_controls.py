@@ -281,7 +281,10 @@ def payment_void_refusal(payment) -> ActionRefusal | None:
     if payment.status == "pending_compliance":
         return ActionRefusal(
             PAYMENT_VOID_COMPLIANCE_HOLD,
-            "This payment is held for a compliance check and never reached the processor. "
+            # Not "never reached the processor": a row carrying
+            # `dispatch_attempted_at` (decisions §343) may have, and dismissing
+            # such a hold flags it for reconciliation rather than assuming so.
+            "This payment is held for a compliance check, so it cannot be voided. "
             "Release or dismiss the hold instead.",
             status.HTTP_409_CONFLICT,
         )

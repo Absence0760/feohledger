@@ -2158,8 +2158,17 @@ async def _lock_payment_invoice(db: AsyncSession, payment: Payment) -> Invoice |
     (`/compliance/release` loads it first, and `_dispatch_run_payments` keeps
     one session across many payments with `expire_on_commit=False`): without
     it the locked SELECT would hand back the cached row and its stale status.
-    Lock order is payment, then invoice — every caller already holds the
-    payment's lock, and no path takes them the other way round.
+    Lock order here is payment, then invoice — every caller already holds the
+    payment's lock. Recording a payment made outside FeohLedger takes them the
+    other way round: `POST /record-outside` (`services/external_payment`, the
+    invoice `FOR UPDATE`, then its live payments `FOR UPDATE`) and
+    `POST /runs/{id}/record-outside` (run, then its invoices, then its
+    payments). They cannot deadlock with a caller of this function for long,
+    because THIS wait is the bounded one (below): a caller holding the payment
+    gives up on the invoice with `InvoiceLockedError` — a 409 on the request
+    paths, the retry-safe `invoice_locked` refusal in the dispatch loop — having
+    sent nothing, and the recording then proceeds. (The NACHA export locks the
+    run and its invoices but no payment row, so it shares no cycle with this.)
 
     `FOR NO KEY UPDATE` (`key_share=True`), not `FOR UPDATE`: it still conflicts
     with every status writer (`get_invoice_for_update`'s `FOR UPDATE` and plain

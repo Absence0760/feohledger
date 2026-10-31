@@ -451,6 +451,30 @@ async def test_void_refuses_a_pending_leg_of_a_run(realdb, run_status):
         assert (await s.get(Payment, payment.id)).status == "pending"
 
 
+async def test_the_compliance_hold_void_refusal_does_not_claim_the_processor_was_never_reached():
+    """A held payment that carries `dispatch_attempted_at` (decisions §343) may
+    have reached the processor before it was parked, so the refusal names the
+    hold and the exits — never "never reached the processor"."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from app.services.payment_controls import (
+        PAYMENT_VOID_COMPLIANCE_HOLD,
+        payment_void_refusal,
+    )
+
+    for stamp in (None, datetime.now(UTC)):
+        held = SimpleNamespace(
+            status="pending_compliance", payment_run_id=uuid.uuid4(), dispatch_attempted_at=stamp
+        )
+        refusal = payment_void_refusal(held)
+        assert refusal is not None
+        assert refusal.code == PAYMENT_VOID_COMPLIANCE_HOLD
+        assert refusal.http_status == 409
+        assert "never reached" not in refusal.message
+        assert "Release or dismiss the hold" in refusal.message
+
+
 async def test_a_standalone_pending_payment_stays_voidable(realdb):
     """`POST /api/payments` books a payment with no run; nothing will ever send
     it, so the void is its only undo. It frees the invoice's live-payment slot
