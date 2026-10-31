@@ -320,6 +320,13 @@ const BUILDERS: Record<string, Builder> = {
 	approval_not_named_approver: fixed('refusal.approvalNotNamedApprover'),
 	// `services/review.py::refuse_unless_in_review`
 	invoice_not_in_review: fixed('refusal.invoiceNotInReview'),
+	// `api/workflow.py` — `/complete`'s status and entry gates, and
+	// `services/erp_send.erp_send_status_refusal` for `/send-to-erp` /
+	// `/retry-erp`; the invoice modal's Submit / Retry ERP verdicts.
+	invoice_not_completable: fixed('refusal.invoiceNotCompletable'),
+	invoice_entry_window_closed: fixed('refusal.invoiceEntryWindowClosed'),
+	invoice_not_erp_sendable: fixed('refusal.invoiceNotErpSendable'),
+	invoice_not_erp_retryable: fixed('refusal.invoiceNotErpRetryable'),
 	// `services/payment_controls.py` — the run dialog's `actions` verdict
 	// Maker-checker names the step it refuses in `params.step` for the two
 	// that are not approve / execute (`payment_controls._segregation_for`).

@@ -191,3 +191,160 @@ test.describe('invoice modal — review decisions follow the server verdict', ()
 		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 	});
 });
+
+/**
+ * Submit / Send to ERP and Retry ERP follow the same verdict read
+ * (`complete` / `retry_erp`), instead of `canSubmitStatus` / `canRetryErp`'s
+ * status + role lists. The verdict is STUBBED here so each refusal renders
+ * deterministically; which refusal the server gives for which row is the
+ * backend parity test's job (`test_review_actions_parity.py` § workflow).
+ */
+type Verdict = { code: string; message: string; params: Record<string, unknown> } | null;
+
+async function stubVerdicts(
+	page: import('@playwright/test').Page,
+	id: string,
+	verdicts: { complete?: Verdict; retry_erp?: Verdict }
+) {
+	const notCompletable = {
+		code: 'invoice_not_completable',
+		message: 'x',
+		params: {}
+	};
+	const body = {
+		approve: null,
+		reject: null,
+		complete: verdicts.complete === undefined ? notCompletable : verdicts.complete,
+		send_to_erp: null,
+		retry_erp:
+			verdicts.retry_erp === undefined
+				? { code: 'invoice_not_erp_retryable', message: 'x', params: {} }
+				: verdicts.retry_erp
+	};
+	await page.route(
+		(url) => url.pathname === `/api/invoices/${id}/review-actions`,
+		(route) => route.fulfill({ json: body })
+	);
+}
+
+/** An invoice of this admin's, put straight into ``status`` (the fixture,
+ *  not the path that leads there). */
+async function createAt(
+	page: import('@playwright/test').Page,
+	number: string,
+	status: 'approved' | 'failed'
+): Promise<string> {
+	const res = await page.request.post(`${API_BASE}/api/invoices`, {
+		headers: await authedTenantHeaders(page),
+		data: { vendor: 'E2E Workflow Verdict Vendor', invoice_number: number, amount: '42.17', currency: 'USD' }
+	});
+	expect(res.status()).toBe(201);
+	const id = ((await res.json()) as { id: string }).id;
+	tenantPsql(
+		`UPDATE invoices SET status='${status}', approved_by='Approver', approval_date=CURRENT_DATE WHERE id='${id}'`
+	);
+	return id;
+}
+
+/** The ERP panel renders for a `failed` invoice once the trail holds an ERP
+ *  event; stub one refused push so Retry has somewhere to live. */
+async function stubFailedPush(page: import('@playwright/test').Page, id: string) {
+	await page.route(
+		(url) => url.pathname === `/api/invoices/${id}/audit-log`,
+		(route) =>
+			route.fulfill({
+				json: [
+					{
+						id: '00000000-0000-0000-0000-000000000001',
+						actor_name: null,
+						action: 'invoice.erp_failed',
+						details: { error: 'ERP post failed: timeout' },
+						created_at: new Date().toISOString()
+					}
+				]
+			})
+	);
+}
+
+test.describe('invoice modal — Submit and Retry ERP follow the server verdict', () => {
+	test.afterEach(() => deleteInvoicesWhere(`invoice_number LIKE '${PREFIX}-WF-%'`));
+
+	test('Send to ERP refused by the export gate is shown disabled, with the reason', async ({
+		page
+	}) => {
+		const id = await createAt(page, `${PREFIX}-WF-DUP-${Date.now()}`, 'approved');
+		await stubVerdicts(page, id, {
+			complete: {
+				code: 'exception_blocks_erp_export',
+				message: 'server English',
+				params: { exception_type: 'duplicate' }
+			}
+		});
+		await page.goto(`/invoices?id=${id}`);
+		const modal = page.locator('div.modal[role="dialog"]');
+		const send = modal.getByRole('button', { name: 'Send to ERP' });
+		await expect(send).toBeDisabled();
+		const reason = modal.getByTestId('submit-refusal');
+		await expect(reason).toContainText('Resolve or dismiss it in Exceptions');
+		await expect(send).toHaveAttribute('aria-describedby', 'submit-refusal');
+	});
+
+	test('a status /complete does not advance offers no Submit at all', async ({ page }) => {
+		const id = await createAt(page, `${PREFIX}-WF-NC-${Date.now()}`, 'approved');
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`)
+		);
+		await stubVerdicts(page, id, {});
+		await page.goto(`/invoices?id=${id}`);
+		await verdict;
+		const modal = page.locator('div.modal[role="dialog"]');
+		// Positive anchor first, so the absence below cannot pass on an empty page.
+		await expect(modal.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+		await expect(modal.locator('.btn-submit')).toHaveCount(0);
+		await expect(modal.getByTestId('submit-refusal')).toHaveCount(0);
+	});
+
+	test('Retry refused for a held vendor is disabled, with the reason', async ({ page }) => {
+		const id = await createAt(page, `${PREFIX}-WF-RT-${Date.now()}`, 'failed');
+		await stubFailedPush(page, id);
+		await stubVerdicts(page, id, {
+			retry_erp: {
+				code: 'vendor_blocks_erp_export',
+				message: 'server English',
+				params: { hold: 'payments_blocked' }
+			}
+		});
+		await page.goto(`/invoices?id=${id}`);
+		const modal = page.locator('div.modal[role="dialog"]');
+		const retry = modal.getByTestId('retry-erp');
+		await expect(retry).toBeDisabled();
+		await expect(modal.getByTestId('retry-erp-refusal')).toHaveText(
+			"This invoice's vendor is blocked from payment. Unblock the vendor before sending the invoice to the ERP."
+		);
+	});
+
+	test('Retry the server allows is enabled; one it calls not retryable is absent', async ({
+		page
+	}) => {
+		const allowed = await createAt(page, `${PREFIX}-WF-RA-${Date.now()}`, 'failed');
+		await stubFailedPush(page, allowed);
+		await stubVerdicts(page, allowed, { retry_erp: null });
+		await page.goto(`/invoices?id=${allowed}`);
+		let modal = page.locator('div.modal[role="dialog"]');
+		await expect(modal.getByTestId('retry-erp')).toBeEnabled();
+		await expect(modal.getByTestId('retry-erp-refusal')).toHaveCount(0);
+
+		const refused = await createAt(page, `${PREFIX}-WF-RN-${Date.now()}`, 'failed');
+		await stubFailedPush(page, refused);
+		await stubVerdicts(page, refused, {});
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${refused}/review-actions`)
+		);
+		await page.goto(`/invoices?id=${refused}`);
+		await verdict;
+		modal = page.locator('div.modal[role="dialog"]');
+		// The ERP panel itself renders (the failed push's error), Retry does not.
+		await expect(modal.getByTestId('erp-error')).toBeVisible();
+		await expect(modal.getByTestId('retry-erp')).toHaveCount(0);
+	});
+});

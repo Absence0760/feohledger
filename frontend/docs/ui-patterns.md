@@ -828,7 +828,8 @@ Where each verdict lives (backend gate → field):
 | Payment runs list | `actions.sync_erp` | `payment_controls.run_sync_erp_refusal` |
 | Run dialog | `actions.{approve,execute,cancel,retry_failed}` | `payment_controls.run_{approve,execute,cancel,retry_failed}_refusal` |
 | Run dialog (paying outside) | `actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}` | `payment_controls.run_record_outside_refusal`, `.run_nacha_export_refusal`, `.run_nacha_void_refusal` |
-| Invoice modal | `GET /api/invoices/{id}/review-actions` | `review.review_refusals` (the approve gates, on a scratch chain) |
+| Invoice modal | `GET /api/invoices/{id}/review-actions` → `approve`, `reject` | `review.review_refusals` (the approve gates, on a scratch chain) |
+| Invoice modal (Submit / Send to ERP, Retry ERP) | same read → `complete`, `retry_erp` (and `send_to_erp`) | `api/workflow.workflow_action_refusals`: `complete_status_refusal`, `complete_entry_refusal`, `erp_send.erp_send_refusal` (plan, status, ERP export gate). `invoice_not_completable` / `invoice_not_erp_retryable` hide the control (about the status); the required-fields check stays a form check |
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
