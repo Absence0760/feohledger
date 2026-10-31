@@ -124,9 +124,9 @@ def _create_run_db(
 
     The handler issues, IN THIS ORDER: (1) `select(Invoice).where(Invoice.id
     .in_(...))` `FOR NO KEY UPDATE` → `.scalars().all()`, wrapped in the bounded
-    lock wait's three `lock_timeout` statements (decisions §330), (2) `net_payable_amounts` → ONE grouped
-    already-applied-credit-memo SUM over every invoice → `.all()` of
-    `(invoice_id, total)`, then `run_refusal_reasons`' own three:
+    lock wait's three `lock_timeout` statements (decisions §330),
+    (2) `net_payable_amounts` → ONE grouped already-applied-credit-memo SUM
+    over every invoice → `.all()` of `(invoice_id, total)`, then `run_refusal_reasons`' own three:
     (3) the unresolved payment-blocking exception gate → `.all()` of
     `(invoice_id, exception_type)` rows, (4) the live-virtual-card claim gate
     → `.scalars().all()` of invoice ids, (5) the live-payment backstop →
