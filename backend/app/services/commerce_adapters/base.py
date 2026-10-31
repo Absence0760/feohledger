@@ -331,11 +331,40 @@ class CommerceAdapter(ABC):
         return str(value).strip()
 
     def http_client(self, **kwargs: Any) -> httpx.AsyncClient:
-        """An ``httpx.AsyncClient`` with the family's timeout (and the test transport)."""
+        """An ``httpx.AsyncClient`` with the family's timeout (and the test transport).
+
+        Outside the operator override, the client is PINNED
+        (``url_safety.pinned_async_client``): a provider's host is often built
+        from tenant config (a shop domain, a store URL), and :meth:`api_base`'s
+        check alone would let a rebinding DNS record answer it with a public
+        address and httpx's own lookup with an internal one. A refusal at
+        connect time raises :class:`CommerceConfigError`, as the check does.
+        """
         kwargs.setdefault("timeout", DEFAULT_TIMEOUT_SECONDS)
         if _TRANSPORT_OVERRIDE is not None:
             kwargs["transport"] = _TRANSPORT_OVERRIDE
-        return httpx.AsyncClient(**kwargs)
+            return httpx.AsyncClient(**kwargs)
+        if settings.commerce_api_base_override.strip():
+            # Operator-controlled (local dev + e2e; a deployed env refuses to
+            # boot with it set): fake-commerce on localhost, so not pinned.
+            return httpx.AsyncClient(**kwargs)
+        from app.utils.url_safety import (
+            UnsafeUrlError,
+            pinned_async_client,
+            resolve_public_addresses,
+        )
+
+        label = self.spec.label
+
+        async def resolve(host: str, port: int) -> list[str]:
+            try:
+                return await resolve_public_addresses(host, port)
+            except UnsafeUrlError:
+                raise CommerceConfigError(
+                    f"{label} address does not resolve to a public host."
+                ) from None
+
+        return pinned_async_client(resolve=resolve, **kwargs)
 
     async def api_base(self, default: str) -> str:
         """The API root to call: the operator override, else ``default``.

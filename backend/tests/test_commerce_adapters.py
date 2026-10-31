@@ -307,6 +307,43 @@ async def test_api_base_refuses_plain_http_and_internal_hosts(secret_provider, m
         await adapter.api_base("https://169.254.169.254")
 
 
+async def test_http_client_is_pinned_and_a_rebind_is_a_config_error(secret_provider, monkeypatch):
+    """`api_base`'s check resolves once; httpx would resolve again at connect.
+    Outside the overrides the client is pinned, and an internal answer at
+    connect time is the same CommerceConfigError the check raises."""
+    import httpcore
+
+    from app.utils import url_safety
+
+    monkeypatch.setattr(settings, "commerce_api_base_override", "")
+    monkeypatch.setattr(commerce_base, "_TRANSPORT_OVERRIDE", None)
+
+    class _Backend(httpcore.AsyncNetworkBackend):
+        async def connect_tcp(self, *_a, **_kw):
+            raise AssertionError("an internal answer must not be dialled")
+
+        async def connect_unix_socket(self, *_a, **_kw):
+            raise AssertionError("never a unix socket")
+
+        async def sleep(self, seconds):
+            pass
+
+    async def lookup(host, port):
+        return ["169.254.169.254"]
+
+    monkeypatch.setattr(url_safety.httpcore, "AnyIOBackend", _Backend)
+    monkeypatch.setattr(url_safety, "_lookup_async", lookup)
+    adapter = secret_provider({"provider": "secretshop"})
+    async with adapter.http_client() as client:
+        assert isinstance(client._transport, url_safety.PinnedAsyncTransport)
+        with pytest.raises(CommerceConfigError):
+            await client.get("https://shop.example.com/admin/api/locations.json")
+
+    monkeypatch.setattr(settings, "commerce_api_base_override", "http://localhost:12113")
+    async with adapter.http_client() as client:
+        assert not isinstance(client._transport, url_safety.PinnedAsyncTransport)
+
+
 def test_require_names_the_missing_field(secret_provider):
     with pytest.raises(CommerceConfigError, match="access_token"):
         secret_provider({"provider": "secretshop"}).require("access_token")

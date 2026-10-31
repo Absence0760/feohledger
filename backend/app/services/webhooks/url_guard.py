@@ -18,11 +18,14 @@ literal-IP host is judged the same way, and IPv4-mapped IPv6
 (``::ffff:10.0.0.1``) is unwrapped and judged as its embedded IPv4 address.
 Fail-closed: a host that does not resolve is rejected too.
 
-Residual risk: the actual connection is opened by ``httpx``, which performs its
-own lookup — a narrow rebinding window remains between this check and the
-socket connect. Pinning the checked IP for the connection would close it;
-re-resolving immediately before send is the accepted fix per issue #171. See
-``backend/docs/public-api.md`` § Outbound webhooks.
+The send itself is pinned. ``httpx`` would otherwise perform its OWN lookup
+when it opens the socket, leaving a rebinding window between this check and
+the connect. ``delivery._post`` instead uses ``url_safety.pinned_async_client``
+with :func:`resolve_pinned_addresses` as its resolver: the host is resolved
+once per connection, every address is judged by this module's rule, and the
+socket is opened to a vetted IP literal (``Host`` / SNI / certificate check
+still name the hostname). See ``backend/docs/public-api.md`` § Outbound
+webhooks.
 
 Dev escape hatch: ``FEOH_WEBHOOKS_ALLOW_PRIVATE_TARGETS=true`` skips only the
 address checks (URL scheme/host shape is still enforced) so the delivery path
@@ -108,6 +111,13 @@ async def ensure_public_webhook_target(url: str) -> None:
         # checks are skipped — scheme/host shape is still enforced above.
         return
 
+    await _vetted_addresses(host)
+
+
+async def _vetted_addresses(
+    host: str,
+) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """``host``'s addresses, or ``WebhookTargetNotAllowed`` unless all are public."""
     try:
         addresses = [ipaddress.ip_address(host)]  # literal-IP host
     except ValueError:
@@ -119,3 +129,28 @@ async def ensure_public_webhook_target(url: str) -> None:
 
     if not addresses or any(_is_blocked(a) for a in addresses):
         raise WebhookTargetNotAllowed(REJECT_DETAIL)
+    return addresses
+
+
+async def resolve_pinned_addresses(host: str, port: int) -> list[str]:
+    """The pinned-client resolver for a delivery: this module's rule, at connect.
+
+    Handed to ``url_safety.pinned_async_client`` by ``delivery._post``. The
+    address the socket opens to is one of the addresses returned here, so a
+    record that flips between ``ensure_public_webhook_target`` and the connect
+    can no longer reach an internal host. Under the dev escape hatch the
+    addresses are not judged, but the connection is still pinned to them.
+    """
+    if settings.webhooks_allow_private_targets:
+        try:
+            addresses = [ipaddress.ip_address(host)]
+        except ValueError:
+            try:
+                addresses = await _resolve_host(host)
+            except (OSError, UnicodeError) as exc:
+                raise WebhookTargetNotAllowed(REJECT_DETAIL) from exc
+        if not addresses:
+            raise WebhookTargetNotAllowed(REJECT_DETAIL)
+    else:
+        addresses = await _vetted_addresses(host)
+    return [str(a) for a in addresses]

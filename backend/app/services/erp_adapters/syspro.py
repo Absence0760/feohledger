@@ -105,6 +105,7 @@ from app.services.erp_adapters.base import (
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.log_redaction import redact_query_strings_containing
+from app.utils.url_safety import UnsafeUrlError
 
 logger = logging.getLogger(__name__)
 
@@ -715,12 +716,30 @@ class SysproAdapter(ErpAdapter):
             base = f"{base}{REST_SUFFIX}"
         return base
 
+    def _client(self, timeout: float) -> httpx.AsyncClient:
+        """The HTTP client for every SYSPRO call.
+
+        A customer-hosted ``base_url`` gets the pinned client: the check in
+        :meth:`_rest_base` alone would let a rebinding DNS record answer it
+        with a public address and httpx's own lookup with an internal one, and
+        the request carries the operator password. The operator override is
+        trusted (it is how dev and e2e reach fake-erp on localhost), so it
+        keeps a plain client, exactly as it skips the guard.
+        """
+        if settings.erp_syspro_api_base:
+            return httpx.AsyncClient(timeout=timeout)
+        from app.utils.url_safety import pinned_async_client
+
+        return pinned_async_client(timeout=timeout)
+
     async def _get(
         self, client: httpx.AsyncClient, url: str, params: dict[str, str], step: str
     ) -> httpx.Response:
         try:
             return await client.get(url, params=params)
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, UnsafeUrlError) as exc:
+            # UnsafeUrlError: the pinned client refused the address it resolved
+            # at connect (a record that rebound mid-session). Same failed step.
             # httpx error strings can carry the request URL, and this URL's
             # query holds the operator password / session id. Name the step and
             # the exception class only.
@@ -758,7 +777,9 @@ class SysproAdapter(ErpAdapter):
     async def _logoff(self, client: httpx.AsyncClient, base: str, session: str) -> None:
         try:
             resp = await client.get(f"{base}/Logoff", params={"UserId": session})
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, UnsafeUrlError) as exc:
+            # Runs in `_session`'s finally: a refusal here must not replace the
+            # outcome of a post that already happened.
             logger.warning("SYSPRO logoff failed: %s", type(exc).__name__)
             return
         if resp.status_code != 200:
@@ -839,7 +860,7 @@ class SysproAdapter(ErpAdapter):
         params_xml = build_apstin_parameters(str(self.config.get("posting_period") or "C"))
         doc_xml = build_apstin_document(payload, lines)
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self._client(timeout=30) as client:
             async with self._session(client, base) as session:
                 # Idempotency: SYSPRO holds one AP invoice per (supplier,
                 # invoice number). A retry after a timed-out post finds the
@@ -915,7 +936,7 @@ class SysproAdapter(ErpAdapter):
         supplier, invoice = key
         base = await self._rest_base()
         key_filter = [("Supplier", supplier), ("Invoice", invoice)]
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self._client(timeout=15) as client:
             async with self._session(client, base) as session:
                 rows = await self._comfnd(
                     client,
@@ -957,7 +978,7 @@ class SysproAdapter(ErpAdapter):
 
     async def _list(self, table: str, columns: list[str], rows: int = _LIST_ROWS):
         base = await self._rest_base()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self._client(timeout=30) as client:
             async with self._session(client, base) as session:
                 return await self._comfnd(
                     client, base, session, build_comfnd_query(table, columns, return_rows=rows)
@@ -1132,7 +1153,7 @@ class SysproAdapter(ErpAdapter):
         at all, the listing raises :class:`ErpListingIncomplete` instead.
         """
         base = await self._rest_base()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self._client(timeout=30) as client:
             async with self._session(client, base) as session:
                 headers = await self._walk(
                     client,

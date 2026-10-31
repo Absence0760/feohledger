@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-
 from app.services.enrichment_adapters.base import (
     EnrichmentNotConfigured,
     VendorEnrichmentQuery,
@@ -62,10 +60,11 @@ class DunBradstreetAdapter:
             match_params["countryISOAlpha2Code"] = query.vendor_country.upper()
 
         # SSRF guard: base_url is admin-overridable — refuse an internal host.
-        from app.utils.url_safety import assert_public_url_async
+        # The client is pinned too, so httpx's own lookup cannot be rebound.
+        from app.utils.url_safety import assert_public_url_async, pinned_async_client
 
         await assert_public_url_async(self.base_url)
-        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=False) as client:
+        async with pinned_async_client(timeout=self.timeout, follow_redirects=False) as client:
             # 1. Resolve the vendor to a DUNS via cleanseMatch.
             match_resp = await client.get(
                 f"{self.base_url}/v1/match/cleanseMatch",
