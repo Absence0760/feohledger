@@ -678,9 +678,11 @@
 			{/if}
 
 			{#if routingError}
-				<div class="state error" role="alert" data-testid="adaptive-routing-error">
-					<p>{routingError}</p>
-				</div>
+				<LoadError
+					message={routingError}
+					onretry={loadRouting}
+					testId="adaptive-routing-error"
+				/>
 			{:else if routingLoading}
 				<p class="state">{m('common.loading')}</p>
 			{:else if routing}
@@ -1089,13 +1091,6 @@
 		padding: 0.75rem 0;
 	}
 
-	.state.error {
-		color: var(--danger);
-	}
-
-	.state.error p {
-		margin: 0 0 8px;
-	}
 	/* The stale-value guard reads as a *changed* state, not a failure — same
 	   amber "a human needs to look" register the rest of the app uses. */
 	.state.changed {
