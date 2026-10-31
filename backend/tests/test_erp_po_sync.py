@@ -755,34 +755,66 @@ def test_merge_dev_list_pos_follows_pagination_cursor():
     assert [p.po_number for p in pos] == ["P-1", "P-2", "P-3"]
 
 
-def test_merge_dev_list_pos_returns_empty_on_http_error():
-    """Adapter degrades gracefully — the sync endpoint shows "0 new
-    POs" instead of bubbling a 502 to the operator clicking the
-    button."""
-    from app.services.erp_adapters.merge_dev import MergeDevAdapter
-
-    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
-    with patch("httpx.AsyncClient") as client_cls:
-        client = client_cls.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_make_mock_response(500, {"detail": "boom"}))
-        pos = _run(adapter.list_pos())
-    assert pos == []
-
-
-def test_merge_dev_list_pos_returns_empty_on_network_error():
-    """Total network failure must not raise out of the adapter — the
-    API endpoint converts adapter exceptions to 502, but a `[]` return
-    is the friendlier "ERP unreachable, no new POs" outcome."""
+def test_merge_dev_po_listing_is_read_whole_or_raises():
+    """A failed or capped PO read raises, never "no POs" or the first pages:
+    the PO sync reads the listing's skips, which a partial read would hide
+    (decisions §329). It used to answer [] on a 500 or a network error and
+    stop silently at 10 pages."""
     import httpx
 
+    from app.services.erp_adapters.base import (
+        SYNC_LISTING_MAX_ROWS,
+        ErpListingIncomplete,
+        ListingGap,
+    )
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+
+    def page(n: int, *, more: bool = True) -> MagicMock:
+        rows = [{"purchase_order_number": f"P-{n}-{i}", "total_amount": "1"} for i in range(100)]
+        return _make_mock_response(200, {"results": rows, "next": f"c{n}" if more else None})
+
+    pages = SYNC_LISTING_MAX_ROWS // 100
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
+
+        # Past the old 10-page cap: read whole.
+        client.get = AsyncMock(side_effect=[page(n, more=n < 11) for n in range(12)])
+        assert len(_run(adapter.list_pos())) == 1200
+
+        # A collection past SYNC_LISTING_MAX_ROWS: truncated, nothing returned.
+        client.get = AsyncMock(side_effect=[page(n) for n in range(pages + 1)])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_pos_report())
+        assert exc.value.gap is ListingGap.truncated
+        assert client.get.await_count == pages
+
+        # The first page failing: never "no POs".
+        client.get = AsyncMock(return_value=_make_mock_response(500, {"detail": "boom"}))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_pos())
+        assert exc.value.gap is ListingGap.fetch_failed
+        assert exc.value.collection == "purchase-orders"
+        assert "boom" not in str(exc.value)
+
+        # A later page failing: never the first page's POs.
+        client.get = AsyncMock(side_effect=[page(0), _make_mock_response(502, {})])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
+
+        # A network error, and an unreadable body.
         client.get = AsyncMock(side_effect=httpx.ConnectError("dns fail"))
-        pos = _run(adapter.list_pos())
-    assert pos == []
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
+        bad = _make_mock_response(200, {})
+        bad.json.side_effect = ValueError("not json")
+        client.get = AsyncMock(return_value=bad)
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(adapter.list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
 
 
 # ---------- API endpoint integration --------------------------------------

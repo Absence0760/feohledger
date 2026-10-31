@@ -162,8 +162,6 @@ _ACCOUNT_CLASS_MAP = {
     "EXPENSE": "expense",
 }
 
-_PAGE_CAP = 10
-
 
 def _connections_url() -> str:
     """Xero's tenant-connections endpoint, which sits beside (not under) the
@@ -551,46 +549,30 @@ class XeroAdapter(OAuthErpAdapter):
         except Exception:
             return False
 
-    async def _paged(self, path: str, params: dict, key: str) -> list[dict]:
-        """Best-effort paged GET (an error ends the walk, never raises) — the
-        PO list only. The vendor listing uses :meth:`_paged_complete`."""
-        try:
-            headers = await self._headers()
-        except Exception:
-            return []
-        out: list[dict] = []
-        async with self.oauth_client(timeout=30) as client:
-            for page in range(1, _PAGE_CAP + 1):
-                try:
-                    resp = await client.get(
-                        f"{_api_base()}/{path}", params={**params, "page": page}, headers=headers
-                    )
-                except httpx.HTTPError:
-                    break
-                if resp.status_code != 200:
-                    break
-                rows = _json(resp).get(key) or []
-                out.extend(rows)
-                if len(rows) < 100:
-                    break
-        return out
-
     async def _paged_complete(self, path: str, params: dict, key: str) -> list[dict]:
         """Every row of a paged collection, or :class:`ErpListingIncomplete`.
 
-        A failed page (a 429 included) raises instead of ending the walk with
-        what was read: the vendor sync reads absence as evidence (base).
+        A failed page (a 429 included), a transport error or an unreadable body
+        raises instead of ending the walk with what was read: the vendor sync
+        reads absence as evidence (base), and the PO sync reads the listing's
+        skips, which a partial read would silently shorten (decisions §329).
         """
         headers = await self._headers()
         out: list[dict] = []
         async with self.oauth_client(timeout=30) as client:
             for page in range(1, sync_listing_pages(100) + 1):
-                resp = await client.get(
-                    f"{_api_base()}/{path}", params={**params, "page": page}, headers=headers
-                )
+                try:
+                    resp = await client.get(
+                        f"{_api_base()}/{path}", params={**params, "page": page}, headers=headers
+                    )
+                except httpx.HTTPError:
+                    raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed) from None
                 if resp.status_code != 200:
                     raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed)
-                rows = _json(resp).get(key) or []
+                try:
+                    rows = _json(resp).get(key) or []
+                except ValueError:
+                    raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed) from None
                 out.extend(rows)
                 if len(rows) < 100:
                     return out
@@ -655,7 +637,13 @@ class XeroAdapter(OAuthErpAdapter):
         return out
 
     async def list_pos(self) -> list[PoPayload]:
-        rows = await self._paged("PurchaseOrders", {}, "PurchaseOrders")
+        """Every purchase order, or :class:`ErpListingIncomplete`.
+
+        Read whole or not at all (:meth:`_paged_complete`): it used to end at a
+        failed page with what it had (nothing, on the first) and stop silently
+        at 10 pages, which the PO sync read as the whole list (decisions §329).
+        """
+        rows = await self._paged_complete("PurchaseOrders", {}, "PurchaseOrders")
         return [_xero_po_to_payload(raw) for raw in rows if raw.get("PurchaseOrderNumber")]
 
 

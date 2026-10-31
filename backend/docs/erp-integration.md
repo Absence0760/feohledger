@@ -1316,8 +1316,7 @@ syncs count codes and names across the pull. So every adapter's chart and
 vendor listing returns the whole collection or raises: up to
 `base.SYNC_LISTING_MAX_ROWS` (10,000 rows; QuickBooks reads 50 pages of 1000,
 50,000), and any failed page or a collection past the bound raises
-`ErpListingIncomplete` (`fetch_failed` / `truncated`; QuickBooks raises its own
-request error on a failed page). `POST /api/gl-accounts/sync-erp` and
+`ErpListingIncomplete` (`fetch_failed` / `truncated`). `POST /api/gl-accounts/sync-erp` and
 `POST /api/vendors/sync-erp` answer **502** and change nothing, with the coded
 detail `erp_listing_incomplete` (`params: {provider, gap}`) the browser states
 in the reader's language. Every sync (chart, vendors, POs) that finds the OAuth
@@ -1330,8 +1329,9 @@ changes nothing either. A PO listing is read whole too: nothing is unlinked by
 a PO's absence, but the listing's `skipped` report (below) only covers the part
 it read, so a failed or capped PO read raises `ErpListingIncomplete` and
 `POST /api/purchase-orders/sync-erp` answers the same coded 502 and syncs
-nothing. Every adapter that overrides `list_pos_report` (SYSPRO, Blackbaud FE
-NXT, NetSuite, Business Central, Sage Accounting (ZA), Sage Intacct) does.
+nothing. Every adapter with a PO listing does: SYSPRO, Blackbaud FE NXT,
+NetSuite, Business Central, Sage Accounting (ZA), Sage Intacct, Merge.dev, Xero
+and QuickBooks Online.
 
 **A sync with no realm never touches another company's rows.** `mock`, and an
 OAuth ERP with no consent, have no realm. A sync under one leaves alone every
@@ -1518,11 +1518,13 @@ Intacct report the same way: a numbered PO with no usable total (`order_total`,
 `unpriceable`. Intacct used to sync such a PO at 0. A PO with no number is
 dropped without a report, since there is no row to mark. Merge.dev, Xero and
 QuickBooks Online do not override `list_pos_report` and report nothing skipped
-(decisions §325). Each of the six that report skips reads its PO listing whole
-or raises `ErpListingIncomplete`: a read that ended at a failed page or a page
-cap would silently drop the skips in the part it never read, leaving those
-stored totals trusted. NetSuite and Business Central used to return what they
-had read (capped at 1,000 POs), and the two Sage adapters an empty list.
+(decisions §325). Every PO listing, theirs included, is read whole or raises
+`ErpListingIncomplete`: a read that ended at a failed page or a page cap would
+silently drop the skips in the part it never read, leaving those stored totals
+trusted. NetSuite, Business Central and Xero used to return what they had read
+(capped at 1,000 POs), Merge.dev and the two Sage adapters an empty list on a
+failure (Merge.dev also stopped at 1,000), and QuickBooks Online the first
+50,000 (decisions §329 and its follow-up).
 
 **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
@@ -2137,7 +2139,7 @@ which apps created on or after 2026-03-02 must use.
 | `test_connection` | `GET Organisation` | |
 | `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False`. Xero sets `IsSupplier` only once a contact has a bill, so a supplier you have only sent purchase orders to is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone |
 | `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
-| `list_pos` | `GET PurchaseOrders` | `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open |
+| `list_pos` | `GET PurchaseOrders` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`, a 429, transport error or unreadable page included); `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
 | `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
 | `void_invoice` | `POST Invoices/{id}` | DRAFT/SUBMITTED → `DELETED`; unpaid, uncredited AUTHORISED → `VOIDED`; anything with money applied → `False` |

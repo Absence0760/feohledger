@@ -239,46 +239,26 @@ class MergeDevAdapter(ErpAdapter):
         return False
 
     async def list_pos(self) -> list[PoPayload]:
-        """Pull purchase orders via Merge's unified `/purchase-orders`.
+        """Every purchase order via Merge's unified ``/purchase-orders``, or
+        :class:`ErpListingIncomplete` — never the pages read before a failure.
 
-        Best-effort: any non-2xx returns an empty list rather than
-        propagating, because the sync endpoint should degrade to
-        "synced 0 POs" instead of 500ing the request. The underlying
-        Merge call is paginated; we follow `next` cursors so the full
-        list comes back, capped at 1000 to bound memory.
+        Read whole or not at all (:meth:`_list_complete`): a non-2xx, a network
+        error, an unreadable page or more than ``SYNC_LISTING_MAX_ROWS`` raises,
+        and the PO sync answers the coded 502 with nothing synced. It used to
+        answer "no POs" on a failure and stop silently at 1,000, which hides
+        whatever the unread part held (decisions §323, §329).
         """
         items: list[PoPayload] = []
         unnumbered = 0
-        cursor: str | None = None
-        params = {"page_size": "100", "expand": "vendor,line_items"}
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(10):  # 10 pages × 100 = 1000 PO cap
-                if cursor:
-                    params["cursor"] = cursor
-                try:
-                    resp = await client.get(
-                        f"{_api_base()}/purchase-orders",
-                        params=params,
-                        headers=self._headers(),
-                    )
-                except httpx.HTTPError:
-                    break
-
-                if resp.status_code != 200:
-                    break
-
-                body = resp.json() if resp.content else {}
-                for raw in body.get("results", []) or []:
-                    payload = _merge_po_to_payload(raw)
-                    if payload is None:
-                        unnumbered += 1
-                    else:
-                        items.append(payload)
-
-                cursor = body.get("next")
-                if not cursor:
-                    break
+        records = await self._list_complete(
+            "purchase-orders", {"page_size": "100", "expand": "vendor,line_items"}
+        )
+        for raw in records:
+            payload = _merge_po_to_payload(raw)
+            if payload is None:
+                unnumbered += 1
+            else:
+                items.append(payload)
 
         if unnumbered:
             # A count only: a PO record can carry vendor names and amounts.
@@ -288,10 +268,12 @@ class MergeDevAdapter(ErpAdapter):
     async def _list_complete(self, path: str, params: dict[str, str]) -> list[dict]:
         """Every record of a Merge collection, following ``next`` cursors.
 
-        Any non-2xx or network error raises :class:`ErpListingIncomplete`, as
-        does a collection longer than ``SYNC_LISTING_MAX_ROWS``: the chart and
-        vendor syncs read absence as evidence (base), so they never get the
-        pages read before a failure as if they were the whole collection.
+        Any non-2xx, network error or unreadable body raises
+        :class:`ErpListingIncomplete`, as does a collection longer than
+        ``SYNC_LISTING_MAX_ROWS``: the chart and vendor syncs read absence as
+        evidence (base), and the PO sync reads the listing's skips, so none of
+        them gets the pages read before a failure as if they were the whole
+        collection.
         """
         records: list[dict] = []
         params = dict(params)
@@ -305,7 +287,10 @@ class MergeDevAdapter(ErpAdapter):
                     raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed) from None
                 if resp.status_code != 200:
                     raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed)
-                body = resp.json() if resp.content else {}
+                try:
+                    body = resp.json() if resp.content else {}
+                except ValueError:
+                    raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed) from None
                 records.extend(r for r in body.get("results") or [] if isinstance(r, dict))
                 cursor = body.get("next")
                 if not cursor:

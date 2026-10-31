@@ -919,21 +919,59 @@ def test_list_pos_is_exact(token, no_override):
     assert line.unit_price == Decimal("83.3666") and line.quantity == Decimal("3")
 
 
-def test_read_failure_raises_instead_of_an_empty_sync(token, no_override):
+@pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts", "list_pos"])
+def test_read_failure_raises_instead_of_an_empty_sync(token, no_override, listing):
+    """A failed page is a coded incomplete listing, never "none" or the rows
+    read so far; Intuit's Fault (which echoes submitted fields) never reaches
+    the message (decisions §329)."""
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
+
     async def fail(method, url, **kw):
         return _resp(500, {"Fault": {"Error": [{"Detail": "LEAKY"}]}})
 
     qbo = _Qbo()
     qbo.request = fail
-    with pytest.raises(RuntimeError) as exc:
-        _run_with(qbo, lambda: _adapter().list_vendors())
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run_with(qbo, lambda: getattr(_adapter(), listing)())
+    assert exc.value.gap is ListingGap.fetch_failed
     assert "LEAKY" not in str(exc.value)
 
+    import httpx
 
-@pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts"])
+    async def unreachable(method, url, **kw):
+        raise httpx.ConnectError("dns")
+
+    qbo.request = unreachable
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run_with(qbo, lambda: getattr(_adapter(), listing)())
+    assert exc.value.gap is ListingGap.fetch_failed
+
+
+def test_a_later_po_page_failing_never_returns_the_first(token, no_override):
+    import asyncio
+
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
+    from app.services.erp_adapters.quickbooks_online import QboRequestError
+
+    pages = iter([{"PurchaseOrder": [{"Id": str(i), "TotalAmt": 1} for i in range(1000)]}])
+
+    async def query(self, statement):
+        try:
+            return next(pages)
+        except StopIteration:
+            raise QboRequestError(503) from None
+
+    with patch.object(QuickBooksOnlineAdapter, "_query", query):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            asyncio.run(_adapter().list_pos_report())
+    assert (exc.value.gap, exc.value.collection) == (ListingGap.fetch_failed, "PurchaseOrder")
+
+
+@pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts", "list_pos"])
 def test_a_listing_past_the_page_cap_raises_never_truncates(no_override, listing):
     """The first 50 pages of a longer list are not the list: the chart and
-    vendor syncs read absence as evidence (decisions §284)."""
+    vendor syncs read absence as evidence (decisions §284), and the PO sync
+    reads the listing's skips, which a capped read would hide (§329)."""
     import asyncio
 
     from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
@@ -950,9 +988,6 @@ def test_a_listing_past_the_page_cap_raises_never_truncates(no_override, listing
             asyncio.run(getattr(_adapter(), listing)())
         assert exc.value.gap is ListingGap.truncated
         assert len(calls) == 50
-        # The PO list keeps its bounded, best-effort read.
-        calls.clear()
-        assert len(asyncio.run(_adapter().list_pos())) == 50_000
 
 
 def test_test_connection_reads_company_info(token, no_override):

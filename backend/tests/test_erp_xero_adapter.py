@@ -887,6 +887,51 @@ def test_list_pos_maps_status_total_and_currency_exactly(token):
     assert row.line_items[0].unit_price == Decimal("625.05")
 
 
+def test_a_po_listing_is_read_whole_or_raises(token):
+    """A failed or capped PO read raises, never "no POs" or the pages read so
+    far: the PO sync reads the listing's skips, which a partial read would
+    hide (decisions §329). It used to end at a failed page with what it had
+    and stop silently at 10 pages."""
+
+    def page(n: int, size: int = 100) -> httpx.Response:
+        rows = [{"PurchaseOrderNumber": f"PO-{n}-{i}", "Total": 1} for i in range(size)]
+        return _resp(200, {"PurchaseOrders": rows})
+
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+
+        # Past the old 10-page cap: read whole.
+        client.get = AsyncMock(side_effect=[page(n, 100 if n < 11 else 7) for n in range(12)])
+        assert len(_run(_adapter().list_pos())) == 1107
+
+        # A collection past SYNC_LISTING_MAX_ROWS: truncated.
+        client.get = AsyncMock(return_value=page(0))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_pos_report())
+        assert exc.value.gap is ListingGap.truncated
+        assert client.get.await_count == SYNC_LISTING_MAX_ROWS // 100
+
+        # The first page failing (a 429 included), then a later one.
+        client.get = AsyncMock(return_value=_resp(429, {}))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_pos())
+        assert (exc.value.gap, exc.value.collection) == (ListingGap.fetch_failed, "PurchaseOrders")
+        client.get = AsyncMock(side_effect=[page(0), _resp(500, {})])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
+
+        # A transport error, and an unreadable body.
+        client.get = AsyncMock(side_effect=httpx.ConnectError("dns"))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
+        client.get = AsyncMock(return_value=httpx.Response(200, content=b"<html>"))
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_adapter().list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
+
+
 # ---------------------------------------------------------------------------
 # bill_allocation: the shared split
 # ---------------------------------------------------------------------------

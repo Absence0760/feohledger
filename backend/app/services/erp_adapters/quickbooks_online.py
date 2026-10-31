@@ -445,38 +445,39 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             raise QboRequestError(resp.status_code)
         return _json(resp).get("QueryResponse") or {}
 
-    async def _query_all(
-        self, entity: str, *, include_inactive: bool = False, complete: bool = False
-    ) -> list[dict]:
-        """Every row of ``entity``, paged. A failed page raises
-        (``QboRequestError``).
+    async def _query_all(self, entity: str, *, include_inactive: bool = False) -> list[dict]:
+        """Every row of ``entity``, paged, or :class:`ErpListingIncomplete`.
+
+        Read whole or not at all: a failed page (a non-200, a transport error,
+        an unreadable body) raises ``fetch_failed`` and an entity longer than
+        ``_MAX_PAGES`` pages raises ``truncated`` — never the rows read so far.
+        The chart and vendor syncs read absence as evidence (base), and the PO
+        sync reads the listing's skips, which a partial read would silently
+        shorten (decisions §329). A lost connection still raises
+        ``ErpNotConnectedError`` from the token read, for the coded 409.
 
         ``include_inactive``: a plain ``select`` returns only ACTIVE accounts and
         vendors, so an account the company made inactive simply vanished from
         the pull — and a row still linked to it looked like a link to a deleted
         account. ``where Active IN (true, false)`` is QuickBooks' documented way
         to read both.
-
-        ``complete``: an entity longer than ``_MAX_PAGES`` pages raises
-        :class:`ErpListingIncomplete` instead of returning the first pages —
-        the chart and vendor syncs read absence as evidence (base).
         """
         where = " where Active IN (true, false)" if include_inactive else ""
         rows: list[dict] = []
         start = 1
         for _ in range(_MAX_PAGES):
-            page = (
-                await self._query(
-                    f"select * from {entity}{where} STARTPOSITION {start} MAXRESULTS {_PAGE_SIZE}"
-                )
-            ).get(entity) or []
+            statement = (
+                f"select * from {entity}{where} STARTPOSITION {start} MAXRESULTS {_PAGE_SIZE}"
+            )
+            try:
+                page = (await self._query(statement)).get(entity) or []
+            except (QboRequestError, httpx.HTTPError, ValueError):
+                raise ErpListingIncomplete(PROVIDER, entity, ListingGap.fetch_failed) from None
             rows.extend(r for r in page if isinstance(r, dict))
             if len(page) < _PAGE_SIZE:
                 return rows
             start += _PAGE_SIZE
-        if complete:
-            raise ErpListingIncomplete(PROVIDER, entity, ListingGap.truncated)
-        return rows
+        raise ErpListingIncomplete(PROVIDER, entity, ListingGap.truncated)
 
     # -- post --------------------------------------------------------------
 
@@ -1117,11 +1118,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         return resp.status_code == 200
 
     async def list_vendors(self) -> list[VendorPayload]:
-        rows = [
-            v
-            for v in await self._query_all("Vendor", include_inactive=True, complete=True)
-            if v.get("Id")
-        ]
+        rows = [v for v in await self._query_all("Vendor", include_inactive=True) if v.get("Id")]
         return [_vendor_payload(v) for v in _undeleted_all(rows, _vendor_name_key)]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
@@ -1134,11 +1131,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         the sync recognises a row that collapsed two accounts into one.
         """
         rows = _undeleted_all(
-            [
-                a
-                for a in await self._query_all("Account", include_inactive=True, complete=True)
-                if a.get("Id")
-            ],
+            [a for a in await self._query_all("Account", include_inactive=True) if a.get("Id")],
             _account_code,
         )
         code_by_id = {str(a["Id"]): _account_code(a) for a in rows}
@@ -1173,6 +1166,10 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         discarded. ``gl_account`` stays None — and is never taken from the
         ref's ``name``, which two sub-accounts can share. Persist it by id,
         through the chart sync's code, when a consumer needs it.
+
+        Read whole or not at all (:meth:`_query_all`): a failed page or more
+        than 50 pages raises :class:`ErpListingIncomplete`, never "no POs" or
+        the first 50,000 (decisions §329).
         """
         return [_po_payload(p) for p in await self._query_all("PurchaseOrder")]
 
