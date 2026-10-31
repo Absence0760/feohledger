@@ -123,7 +123,8 @@ def _create_run_db(
     """Build an AsyncSession mock for `create_payment_run`.
 
     The handler issues, IN THIS ORDER: (1) `select(Invoice).where(Invoice.id
-    .in_(...))` → `.scalars().all()`, (2) `net_payable_amounts` → ONE grouped
+    .in_(...))` `FOR NO KEY UPDATE` → `.scalars().all()`, wrapped in the bounded
+    lock wait's three `lock_timeout` statements (decisions §330), (2) `net_payable_amounts` → ONE grouped
     already-applied-credit-memo SUM over every invoice → `.all()` of
     `(invoice_id, total)`, then `run_refusal_reasons`' own three:
     (3) the unresolved payment-blocking exception gate → `.all()` of
@@ -233,9 +234,19 @@ def _create_run_db(
         )
     )
 
+    # (1) is now taken under `payment_runs.lock_run_invoices` (decisions §330):
+    # `utils/db_locks.bounded_lock_wait` reads the session's `lock_timeout`,
+    # sets the bound, runs the locking SELECT, then restores the previous value.
+    lock_timeout_sel = MagicMock()
+    lock_timeout_sel.scalar_one = MagicMock(return_value="0")
+    set_config_sel = MagicMock()
+
     db.execute = AsyncMock(
         side_effect=[
+            lock_timeout_sel,
+            set_config_sel,
             sel,
+            set_config_sel,
             credit_sel,
             block_sel,
             card_sel,
