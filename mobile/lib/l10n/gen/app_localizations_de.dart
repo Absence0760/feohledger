@@ -3150,6 +3150,174 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedBlockingException(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Eine andere Ausnahme zu dieser Rechnung blockiert die Zahlung. Lösen Sie diese Ausnahme, dann erfasst FeohLedger die Zahlung automatisch.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Eine andere Ausnahme zu dieser Rechnung blockiert die Zahlung. Lösen Sie diese Ausnahme, dann erfasst FeohLedger die Zahlung automatisch.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedInRun(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Die Rechnung ist auch in einem FeohLedger-Zahlungslauf, sodass der Lieferant doppelt bezahlt werden könnte. Nehmen Sie sie aus dem Lauf oder brechen Sie den Lauf ab, und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedInRunUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Die Rechnung ist auch in einem FeohLedger-Zahlungslauf, sodass der Lieferant doppelt bezahlt werden könnte. Nehmen Sie sie aus dem Lauf oder brechen Sie den Lauf ab, und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedPaymentLive(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: FeohLedger hat für diese Rechnung eine eigene Zahlung in Bearbeitung, sodass der Lieferant doppelt bezahlt werden könnte. Stornieren Sie diese Zahlung, wenn die Zahlung aus dem ERP die tatsächliche ist, und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: FeohLedger hat für diese Rechnung eine eigene Zahlung in Bearbeitung, sodass der Lieferant doppelt bezahlt werden könnte. Stornieren Sie diese Zahlung, wenn die Zahlung aus dem ERP die tatsächliche ist, und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCardLive(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Für diese Rechnung ist noch eine virtuelle Karte aktiv, sodass der Lieferant doppelt bezahlt werden könnte. Sperren Sie die Karte und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Für diese Rechnung ist noch eine virtuelle Karte aktiv, sodass der Lieferant doppelt bezahlt werden könnte. Sperren Sie die Karte und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCreditConflict(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Eine angewendete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung, daher lässt sich der offene Betrag nicht bestimmen. Korrigieren Sie die Gutschrift und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Eine angewendete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung, daher lässt sich der offene Betrag nicht bestimmen. Korrigieren Sie die Gutschrift und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNothingToPay(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Gutschriften decken bereits die gesamte Rechnung ab, es gibt also keine Zahlung zu erfassen. Prüfen Sie die Rechnung im ERP und lösen Sie dann diese Ausnahme.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Gutschriften decken bereits die gesamte Rechnung ab, es gibt also keine Zahlung zu erfassen. Prüfen Sie die Rechnung im ERP und lösen Sie dann diese Ausnahme.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNotPayable(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Die Rechnung hat keinen Status, in dem sie als bezahlt markiert werden kann. Prüfen Sie die Rechnung und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Die Rechnung hat keinen Status, in dem sie als bezahlt markiert werden kann. Prüfen Sie die Rechnung und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: FeohLedger hat die Erfassung abgelehnt. Prüfen Sie die Rechnung und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedOtherUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: FeohLedger hat die Erfassung abgelehnt. Prüfen Sie die Rechnung und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
+
+  @override
+  String exceptionDescriptionErpPaidWithdrawn(String erp) {
+    return '$erp hat diese Rechnung als bezahlt gemeldet, zeigt sie aber nicht mehr als bezahlt an. FeohLedger hat diese Zahlung nicht erfasst. Prüfen Sie die Rechnung im ERP: Ist sie noch offen, lösen Sie diese Ausnahme und bezahlen Sie sie wie gewohnt.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidWithdrawnUnnamed =>
+      'Ihr ERP hat diese Rechnung als bezahlt gemeldet, zeigt sie aber nicht mehr als bezahlt an. FeohLedger hat diese Zahlung nicht erfasst. Prüfen Sie die Rechnung im ERP: Ist sie noch offen, lösen Sie diese Ausnahme und bezahlen Sie sie wie gewohnt.';
+
+  @override
+  String exceptionDescriptionErpPaidRetryFailed(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht automatisch erfassen. Prüfen Sie die Angaben und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidRetryFailedUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht automatisch erfassen. Prüfen Sie die Angaben und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme.';
+
+  @override
+  String exceptionDescriptionErpSettledShort(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber die eigene Zahlung von FeohLedger wurde über weniger als den von der Kreditorenbuchhaltung freigegebenen Betrag abgewickelt, daher bleibt die Rechnung im Status „Zahlung geplant“. Öffnen Sie die Zahlung und akzeptieren Sie entweder den abgewickelten Betrag oder stornieren Sie die Zahlung.';
+  }
+
+  @override
+  String get exceptionDescriptionErpSettledShortUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber die eigene Zahlung von FeohLedger wurde über weniger als den von der Kreditorenbuchhaltung freigegebenen Betrag abgewickelt, daher bleibt die Rechnung im Status „Zahlung geplant“. Öffnen Sie die Zahlung und akzeptieren Sie entweder den abgewickelten Betrag oder stornieren Sie die Zahlung.';
+
+  @override
+  String exceptionDescriptionErpVoidedAfterPost(String erp) {
+    return '$erp meldet diese Rechnung als storniert oder annulliert, aber FeohLedger hatte sie bereits zur Zahlung weitergegeben, daher wurde sie hier nicht storniert. Prüfen Sie, ob eine Zahlung an den Lieferanten unterwegs ist, und stoppen oder holen Sie sie zurück, wenn die Rechnung wirklich ungültig ist.';
+  }
+
+  @override
+  String get exceptionDescriptionErpVoidedAfterPostUnnamed =>
+      'Ihr ERP meldet diese Rechnung als storniert oder annulliert, aber FeohLedger hatte sie bereits zur Zahlung weitergegeben, daher wurde sie hier nicht storniert. Prüfen Sie, ob eine Zahlung an den Lieferanten unterwegs ist, und stoppen oder holen Sie sie zurück, wenn die Rechnung wirklich ungültig ist.';
+
+  @override
+  String get exceptionDescriptionErpCreditSettlement =>
+      'Laut ERP ist diese Rechnung zumindest teilweise durch eine dort angewendete Lieferantengutschrift beglichen. FeohLedger bezahlt sie erst, wenn jemand bestätigt, was noch offen ist.';
+
+  @override
+  String get exceptionDescriptionErpPaidWhileScheduled =>
+      'Laut ERP wurde diese Rechnung durch eine Zahlung beglichen, die nicht von FeohLedger stammt, während in FeohLedger eine Zahlung dafür geplant ist. Stoppen oder stornieren Sie eine der beiden, bevor beide beim Lieferanten ankommen.';
+
+  @override
+  String get exceptionDescriptionErpPaidTwice =>
+      'FeohLedger hat diese Rechnung bezahlt, und laut ERP wurde sie zusätzlich durch eine Zahlung beglichen, die nicht von FeohLedger stammt – der Lieferant wurde möglicherweise doppelt bezahlt. Holen Sie eine der Zahlungen zurück.';
+
+  @override
+  String get exceptionDescriptionErpPartlyPaidOutside =>
+      'Laut ERP wurde ein Teil dieser Rechnung außerhalb von FeohLedger bezahlt oder gutgeschrieben; eine FeohLedger-Zahlung über den vollen Betrag würde sie überzahlen. Klären Sie vor der Zahlung, was noch offen ist.';
+
+  @override
+  String get exceptionDescriptionErpRecordedPaymentWithdrawn =>
+      'Das ERP hat diese Rechnung als bezahlt gemeldet und FeohLedger hat diese Zahlung erfasst, aber das ERP zeigt sie nicht mehr als bezahlt an (die Zahlung wurde dort gelöscht oder storniert). Bestätigen Sie, ob sie noch offen ist.';
+
+  @override
+  String get exceptionDescriptionErpBillDeletedBlocking =>
+      'Der Beleg, als der diese Rechnung im ERP gebucht wurde, wurde dort gelöscht oder storniert; FeohLedger bezahlt sie erst, wenn jemand bestätigt, dass sie noch offen ist.';
+
+  @override
+  String get exceptionDescriptionErpBillDeleted =>
+      'Der Beleg, als der diese Rechnung im ERP gebucht wurde, wurde dort gelöscht oder storniert. Bestätigen Sie, dass die Bücher noch übereinstimmen.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoDocument =>
+      'FeohLedger kann den Beleg dieser Rechnung im ERP nicht prüfen, weil das ERP beim Buchen nicht angegeben hat, welchen Beleg es angelegt hat, daher bezahlt FeohLedger sie nicht. Prüfen Sie im ERP, ob sie noch offen ist, und erfassen Sie sie dann als außerhalb von FeohLedger bezahlt oder buchen Sie sie erneut.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoCompany =>
+      'FeohLedger kann den Beleg dieser Rechnung im ERP nicht prüfen, weil bei der Buchung nicht festgehalten wurde, an welches ERP-Unternehmen sie ging, daher bezahlt FeohLedger sie nicht. Prüfen Sie im ERP, ob sie noch offen ist, und erfassen Sie sie dann als außerhalb von FeohLedger bezahlt oder buchen Sie sie erneut.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedOtherCompany =>
+      'FeohLedger kann den Beleg dieser Rechnung im ERP nicht prüfen, weil sie an ein anderes ERP-Unternehmen gebucht wurde als das jetzt verbundene, daher bezahlt FeohLedger sie nicht. Prüfen Sie im ERP, ob sie noch offen ist, und erfassen Sie sie dann als außerhalb von FeohLedger bezahlt oder buchen Sie sie erneut.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPaid =>
+      'FeohLedger war im Begriff, diese Rechnung zu bezahlen, aber laut ERP ist ihr Beleg bereits bezahlt. Die Zahlung wurde gestoppt, bevor Geld bewegt wurde. Bestätigen Sie vor der Zahlung, was noch offen ist; wurde für diese Rechnung bereits eine virtuelle Karte ausgegeben, sperren Sie sie.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPartiallyPaid =>
+      'FeohLedger war im Begriff, diese Rechnung zu bezahlen, aber laut ERP ist ihr Beleg teilweise bezahlt. Die Zahlung wurde gestoppt, bevor Geld bewegt wurde. Bestätigen Sie vor der Zahlung, was noch offen ist; wurde für diese Rechnung bereits eine virtuelle Karte ausgegeben, sperren Sie sie.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedDeleted =>
+      'FeohLedger war im Begriff, diese Rechnung zu bezahlen, aber laut ERP ist ihr Beleg gelöscht oder storniert. Die Zahlung wurde gestoppt, bevor Geld bewegt wurde. Bestätigen Sie vor der Zahlung, was noch offen ist; wurde für diese Rechnung bereits eine virtuelle Karte ausgegeben, sperren Sie sie.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedUnconfirmed =>
+      'FeohLedger war im Begriff, diese Rechnung zu bezahlen, aber das ERP konnte nicht bestätigen, dass ihr Beleg noch offen und unbezahlt ist. Die Zahlung wurde gestoppt, bevor Geld bewegt wurde. Bestätigen Sie vor der Zahlung, was noch offen ist; wurde für diese Rechnung bereits eine virtuelle Karte ausgegeben, sperren Sie sie.';
+
+  @override
+  String get exceptionDescriptionErpReportedPaymentVoided =>
+      'Eine vom ERP gemeldete Zahlung wurde in FeohLedger storniert, aber das ERP zeigt die Rechnung möglicherweise noch als bezahlt an. FeohLedger bezahlt sie erst wieder, wenn jemand bestätigt, dass die Zahlung im ERP rückgängig gemacht ist.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Abgeglichen';
 
   @override

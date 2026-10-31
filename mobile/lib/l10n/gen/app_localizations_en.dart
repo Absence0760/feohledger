@@ -3128,6 +3128,174 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedBlockingException(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedInRun(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP\'s payment from this exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedInRunUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP\'s payment from this exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedPaymentLive(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP\'s payment is the real one, then record the ERP\'s payment from this exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP\'s payment is the real one, then record the ERP\'s payment from this exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCardLive(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP\'s payment from this exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP\'s payment from this exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCreditConflict(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because an applied credit memo no longer matches this invoice\'s supplier or currency, so the amount owed can\'t be stated. Correct the credit memo, then record the ERP\'s payment from this exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because an applied credit memo no longer matches this invoice\'s supplier or currency, so the amount owed can\'t be stated. Correct the credit memo, then record the ERP\'s payment from this exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNothingToPay(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNotPayable(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP\'s payment from this exception or resolve it.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP\'s payment from this exception or resolve it.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP\'s payment from this exception or resolve it.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedOtherUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP\'s payment from this exception or resolve it.';
+
+  @override
+  String exceptionDescriptionErpPaidWithdrawn(String erp) {
+    return '$erp reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidWithdrawnUnnamed =>
+      'Your ERP reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.';
+
+  @override
+  String exceptionDescriptionErpPaidRetryFailed(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment automatically. Check the details, then record the ERP\'s payment from this exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidRetryFailedUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment automatically. Check the details, then record the ERP\'s payment from this exception.';
+
+  @override
+  String exceptionDescriptionErpSettledShort(String erp) {
+    return '$erp reports this bill paid, but FeohLedger\'s own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.';
+  }
+
+  @override
+  String get exceptionDescriptionErpSettledShortUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger\'s own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.';
+
+  @override
+  String exceptionDescriptionErpVoidedAfterPost(String erp) {
+    return '$erp reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.';
+  }
+
+  @override
+  String get exceptionDescriptionErpVoidedAfterPostUnnamed =>
+      'Your ERP reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.';
+
+  @override
+  String get exceptionDescriptionErpCreditSettlement =>
+      'The ERP shows this bill settled, at least in part by a vendor credit applied there. FeohLedger will not pay it until someone confirms what is still owed.';
+
+  @override
+  String get exceptionDescriptionErpPaidWhileScheduled =>
+      'The ERP shows this bill paid by a payment FeohLedger did not make, while a FeohLedger payment is scheduled for it. Stop or void one of them before both reach the supplier.';
+
+  @override
+  String get exceptionDescriptionErpPaidTwice =>
+      'FeohLedger paid this invoice, and the ERP shows the bill also paid by a payment FeohLedger did not make — the supplier may have been paid twice. Recover one of the payments.';
+
+  @override
+  String get exceptionDescriptionErpPartlyPaidOutside =>
+      'The ERP shows part of this bill paid or credited outside FeohLedger; a FeohLedger payment for the full amount would overpay it. Reconcile what is still owed before paying.';
+
+  @override
+  String get exceptionDescriptionErpRecordedPaymentWithdrawn =>
+      'The ERP reported this bill paid, and FeohLedger recorded that payment, but the ERP no longer shows it paid (the payment was deleted or voided there). Confirm whether it is still owed.';
+
+  @override
+  String get exceptionDescriptionErpBillDeletedBlocking =>
+      'The bill this invoice was posted as has been deleted or voided in the ERP; FeohLedger will not pay it until someone confirms it is still owed.';
+
+  @override
+  String get exceptionDescriptionErpBillDeleted =>
+      'The bill this invoice was posted as has been deleted or voided in the ERP. Confirm the books still agree.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoDocument =>
+      'FeohLedger cannot check this invoice\'s bill in the ERP, because the ERP did not say which bill it created when the invoice was posted, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoCompany =>
+      'FeohLedger cannot check this invoice\'s bill in the ERP, because the posting did not record which ERP company it went to, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedOtherCompany =>
+      'FeohLedger cannot check this invoice\'s bill in the ERP, because it was posted to a different ERP company than the one now connected, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPaid =>
+      'FeohLedger was about to pay this invoice, but the ERP shows its bill already paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPartiallyPaid =>
+      'FeohLedger was about to pay this invoice, but the ERP shows its bill partly paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedDeleted =>
+      'FeohLedger was about to pay this invoice, but the ERP shows its bill deleted or voided. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedUnconfirmed =>
+      'FeohLedger was about to pay this invoice, but the ERP could not confirm its bill is still open and unpaid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.';
+
+  @override
+  String get exceptionDescriptionErpReportedPaymentVoided =>
+      'A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP\'s payment is undone.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Matched';
 
   @override

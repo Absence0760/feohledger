@@ -356,5 +356,47 @@ void main() {
     test('nothing to show is null', () {
       expect(exceptionDescriptionText(en, exc({})), isNull);
     });
+
+    // decisions §319: the ERP reconciliation sentences carry a code too.
+    test('an ERP sentence names the product in the reader\'s language', () {
+      final out = exceptionDescriptionText(
+        de,
+        exc({
+          'exception_type': 'erp_reconciliation',
+          'description': 'QuickBooks Online reports this bill paid, but …',
+          'description_code': 'exception.erp_paid_unrecorded_in_run',
+          'description_params': {'erp': 'QuickBooks Online'},
+        }),
+      );
+      expect(out?.summary, startsWith('QuickBooks Online meldet'));
+      expect(out?.summary, contains('Zahlungslauf'));
+      expect(out?.findings, isEmpty);
+    });
+
+    test('an ERP with no product name reads the locale\'s "your ERP"', () {
+      final out = exceptionDescriptionText(
+        de,
+        exc({
+          'exception_type': 'erp_reconciliation',
+          'description': 'Your ERP reports this bill voided or cancelled, …',
+          'description_code': 'exception.erp_voided_after_post_unnamed',
+          'description_params': <String, dynamic>{},
+        }),
+      );
+      expect(out?.summary, startsWith('Ihr ERP meldet'));
+    });
+
+    test('a named ERP sentence missing its product falls back to English', () {
+      final out = exceptionDescriptionText(
+        de,
+        exc({
+          'exception_type': 'erp_reconciliation',
+          'description': 'Xero reports this bill paid, but …',
+          'description_code': 'exception.erp_settled_short',
+          'description_params': <String, dynamic>{},
+        }),
+      );
+      expect(out?.summary, 'Xero reports this bill paid, but …');
+    });
   });
 }

@@ -227,6 +227,45 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'exception.missing_data_after_extraction': {},
   'exception.price_variance_findings': {'count': 'count'},
   'exception.contract_noncompliant_findings': {'count': 'count'},
+  'exception.erp_paid_unrecorded_blocking_exception': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_blocking_exception_unnamed': {},
+  'exception.erp_paid_unrecorded_in_run': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_in_run_unnamed': {},
+  'exception.erp_paid_unrecorded_payment_live': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_payment_live_unnamed': {},
+  'exception.erp_paid_unrecorded_card_live': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_card_live_unnamed': {},
+  'exception.erp_paid_unrecorded_credit_conflict': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_credit_conflict_unnamed': {},
+  'exception.erp_paid_unrecorded_nothing_to_pay': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_nothing_to_pay_unnamed': {},
+  'exception.erp_paid_unrecorded_not_payable': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_not_payable_unnamed': {},
+  'exception.erp_paid_unrecorded_other': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_other_unnamed': {},
+  'exception.erp_paid_withdrawn': {'erp': 'text'},
+  'exception.erp_paid_withdrawn_unnamed': {},
+  'exception.erp_paid_retry_failed': {'erp': 'text'},
+  'exception.erp_paid_retry_failed_unnamed': {},
+  'exception.erp_settled_short': {'erp': 'text'},
+  'exception.erp_settled_short_unnamed': {},
+  'exception.erp_voided_after_post': {'erp': 'text'},
+  'exception.erp_voided_after_post_unnamed': {},
+  'exception.erp_credit_settlement': {},
+  'exception.erp_paid_while_scheduled': {},
+  'exception.erp_paid_twice': {},
+  'exception.erp_partly_paid_outside': {},
+  'exception.erp_recorded_payment_withdrawn': {},
+  'exception.erp_bill_deleted_blocking': {},
+  'exception.erp_bill_deleted': {},
+  'exception.erp_bill_unlinked_no_document': {},
+  'exception.erp_bill_unlinked_no_company': {},
+  'exception.erp_bill_unlinked_other_company': {},
+  'exception.erp_dispatch_stopped_paid': {},
+  'exception.erp_dispatch_stopped_partially_paid': {},
+  'exception.erp_dispatch_stopped_deleted': {},
+  'exception.erp_dispatch_stopped_unconfirmed': {},
+  'exception.erp_reported_payment_voided': {},
 };
 
 /// The localized sentence for [warningCode], or `null` when this build does
@@ -816,6 +855,147 @@ String? _localizeWarningCode(
       final count = _count(p['count']);
       if (count == null) return null;
       return l.exceptionDescriptionContractNoncompliantFindings(count);
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.
+    case 'exception.erp_paid_unrecorded_blocking_exception':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedBlockingException(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.
+    case 'exception.erp_paid_unrecorded_blocking_exception_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_in_run':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedInRun(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_in_run_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedInRunUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP's payment is the real one, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_payment_live':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedPaymentLive(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP's payment is the real one, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_payment_live_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_card_live':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedCardLive(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_card_live_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because an applied credit memo no longer matches this invoice's supplier or currency, so the amount owed can't be stated. Correct the credit memo, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_credit_conflict':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedCreditConflict(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because an applied credit memo no longer matches this invoice's supplier or currency, so the amount owed can't be stated. Correct the credit memo, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_unrecorded_credit_conflict_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.
+    case 'exception.erp_paid_unrecorded_nothing_to_pay':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedNothingToPay(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.
+    case 'exception.erp_paid_unrecorded_nothing_to_pay_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP's payment from this exception or resolve it.
+    case 'exception.erp_paid_unrecorded_not_payable':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedNotPayable(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP's payment from this exception or resolve it.
+    case 'exception.erp_paid_unrecorded_not_payable_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP's payment from this exception or resolve it.
+    case 'exception.erp_paid_unrecorded_other':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedOther(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP's payment from this exception or resolve it.
+    case 'exception.erp_paid_unrecorded_other_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedOtherUnnamed;
+    // {erp} reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.
+    case 'exception.erp_paid_withdrawn':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidWithdrawn(erp);
+    // Your ERP reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.
+    case 'exception.erp_paid_withdrawn_unnamed':
+      return l.exceptionDescriptionErpPaidWithdrawnUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment automatically. Check the details, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_retry_failed':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidRetryFailed(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment automatically. Check the details, then record the ERP's payment from this exception.
+    case 'exception.erp_paid_retry_failed_unnamed':
+      return l.exceptionDescriptionErpPaidRetryFailedUnnamed;
+    // {erp} reports this bill paid, but FeohLedger's own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.
+    case 'exception.erp_settled_short':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpSettledShort(erp);
+    // Your ERP reports this bill paid, but FeohLedger's own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.
+    case 'exception.erp_settled_short_unnamed':
+      return l.exceptionDescriptionErpSettledShortUnnamed;
+    // {erp} reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.
+    case 'exception.erp_voided_after_post':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpVoidedAfterPost(erp);
+    // Your ERP reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.
+    case 'exception.erp_voided_after_post_unnamed':
+      return l.exceptionDescriptionErpVoidedAfterPostUnnamed;
+    // The ERP shows this bill settled, at least in part by a vendor credit applied there. FeohLedger will not pay it until someone confirms what is still owed.
+    case 'exception.erp_credit_settlement':
+      return l.exceptionDescriptionErpCreditSettlement;
+    // The ERP shows this bill paid by a payment FeohLedger did not make, while a FeohLedger payment is scheduled for it. Stop or void one of them before both reach the supplier.
+    case 'exception.erp_paid_while_scheduled':
+      return l.exceptionDescriptionErpPaidWhileScheduled;
+    // FeohLedger paid this invoice, and the ERP shows the bill also paid by a payment FeohLedger did not make — the supplier may have been paid twice. Recover one of the payments.
+    case 'exception.erp_paid_twice':
+      return l.exceptionDescriptionErpPaidTwice;
+    // The ERP shows part of this bill paid or credited outside FeohLedger; a FeohLedger payment for the full amount would overpay it. Reconcile what is still owed before paying.
+    case 'exception.erp_partly_paid_outside':
+      return l.exceptionDescriptionErpPartlyPaidOutside;
+    // The ERP reported this bill paid, and FeohLedger recorded that payment, but the ERP no longer shows it paid (the payment was deleted or voided there). Confirm whether it is still owed.
+    case 'exception.erp_recorded_payment_withdrawn':
+      return l.exceptionDescriptionErpRecordedPaymentWithdrawn;
+    // The bill this invoice was posted as has been deleted or voided in the ERP; FeohLedger will not pay it until someone confirms it is still owed.
+    case 'exception.erp_bill_deleted_blocking':
+      return l.exceptionDescriptionErpBillDeletedBlocking;
+    // The bill this invoice was posted as has been deleted or voided in the ERP. Confirm the books still agree.
+    case 'exception.erp_bill_deleted':
+      return l.exceptionDescriptionErpBillDeleted;
+    // FeohLedger cannot check this invoice's bill in the ERP, because the ERP did not say which bill it created when the invoice was posted, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.
+    case 'exception.erp_bill_unlinked_no_document':
+      return l.exceptionDescriptionErpBillUnlinkedNoDocument;
+    // FeohLedger cannot check this invoice's bill in the ERP, because the posting did not record which ERP company it went to, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.
+    case 'exception.erp_bill_unlinked_no_company':
+      return l.exceptionDescriptionErpBillUnlinkedNoCompany;
+    // FeohLedger cannot check this invoice's bill in the ERP, because it was posted to a different ERP company than the one now connected, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.
+    case 'exception.erp_bill_unlinked_other_company':
+      return l.exceptionDescriptionErpBillUnlinkedOtherCompany;
+    // FeohLedger was about to pay this invoice, but the ERP shows its bill already paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.
+    case 'exception.erp_dispatch_stopped_paid':
+      return l.exceptionDescriptionErpDispatchStoppedPaid;
+    // FeohLedger was about to pay this invoice, but the ERP shows its bill partly paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.
+    case 'exception.erp_dispatch_stopped_partially_paid':
+      return l.exceptionDescriptionErpDispatchStoppedPartiallyPaid;
+    // FeohLedger was about to pay this invoice, but the ERP shows its bill deleted or voided. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.
+    case 'exception.erp_dispatch_stopped_deleted':
+      return l.exceptionDescriptionErpDispatchStoppedDeleted;
+    // FeohLedger was about to pay this invoice, but the ERP could not confirm its bill is still open and unpaid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.
+    case 'exception.erp_dispatch_stopped_unconfirmed':
+      return l.exceptionDescriptionErpDispatchStoppedUnconfirmed;
+    // A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP's payment is undone.
+    case 'exception.erp_reported_payment_voided':
+      return l.exceptionDescriptionErpReportedPaymentVoided;
   }
   return null;
 }

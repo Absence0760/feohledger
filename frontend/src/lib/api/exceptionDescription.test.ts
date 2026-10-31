@@ -104,6 +104,45 @@ describe('exceptionDescriptionText', () => {
 		);
 		expect(out).toEqual({ summary: 'Round amount: 5000.00 ZAR', findings: [] });
 	});
+
+	// decisions §319: the ERP reconciliation sentences are catalogued too.
+	it('localizes an ERP sentence, keeping the product name as written', () => {
+		const out = exceptionDescriptionText(
+			{
+				description: 'QuickBooks Online reports this bill paid, but …',
+				description_code: 'exception.erp_paid_unrecorded_in_run',
+				description_params: { erp: 'QuickBooks Online' }
+			},
+			translateDe
+		);
+		expect(out?.findings).toEqual([]);
+		expect(out?.summary).toMatch(/^QuickBooks Online meldet /);
+		expect(out?.summary).toContain('Zahlungslauf');
+	});
+
+	it('says the locale’s own "your ERP" for an ERP with no product name', () => {
+		const out = exceptionDescriptionText(
+			{
+				description: 'Your ERP reports this bill voided or cancelled, …',
+				description_code: 'exception.erp_voided_after_post_unnamed',
+				description_params: {}
+			},
+			translateDe
+		);
+		expect(out?.summary).toMatch(/^Ihr ERP meldet /);
+	});
+
+	it('falls back to English when a named ERP sentence arrives without the name', () => {
+		const out = exceptionDescriptionText(
+			{
+				description: 'Xero reports this bill paid, but …',
+				description_code: 'exception.erp_settled_short',
+				description_params: {}
+			},
+			translateDe
+		);
+		expect(out).toEqual({ summary: 'Xero reports this bill paid, but …', findings: [] });
+	});
 });
 
 describe('exceptionDescriptionTitle', () => {

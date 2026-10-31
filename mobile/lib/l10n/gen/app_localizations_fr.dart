@@ -3158,6 +3158,174 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedBlockingException(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : une autre exception sur cette facture bloque le paiement. Résolvez cette exception et FeohLedger enregistrera le paiement automatiquement.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : une autre exception sur cette facture bloque le paiement. Résolvez cette exception et FeohLedger enregistrera le paiement automatiquement.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedInRun(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : la facture figure aussi dans un cycle de paiement FeohLedger, le fournisseur pourrait donc être payé deux fois. Retirez-la du cycle ou annulez le cycle, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedInRunUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : la facture figure aussi dans un cycle de paiement FeohLedger, le fournisseur pourrait donc être payé deux fois. Retirez-la du cycle ou annulez le cycle, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedPaymentLive(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : FeohLedger a son propre paiement en cours pour cette facture, le fournisseur pourrait donc être payé deux fois. Annulez ce paiement si celui de l\'ERP est le vrai, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : FeohLedger a son propre paiement en cours pour cette facture, le fournisseur pourrait donc être payé deux fois. Annulez ce paiement si celui de l\'ERP est le vrai, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCardLive(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : une carte virtuelle est encore active pour cette facture, le fournisseur pourrait donc être payé deux fois. Annulez la carte, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : une carte virtuelle est encore active pour cette facture, le fournisseur pourrait donc être payé deux fois. Annulez la carte, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCreditConflict(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : un avoir appliqué ne correspond plus au fournisseur ou à la devise de cette facture, le montant dû ne peut donc pas être établi. Corrigez l\'avoir, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : un avoir appliqué ne correspond plus au fournisseur ou à la devise de cette facture, le montant dû ne peut donc pas être établi. Corrigez l\'avoir, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNothingToPay(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : des avoirs couvrent déjà la totalité de la facture, il n\'y a donc aucun paiement à enregistrer. Vérifiez la facture dans l\'ERP, puis résolvez cette exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : des avoirs couvrent déjà la totalité de la facture, il n\'y a donc aucun paiement à enregistrer. Vérifiez la facture dans l\'ERP, puis résolvez cette exception.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNotPayable(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : la facture n\'est pas à un statut qui permet de la marquer comme payée. Vérifiez la facture, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : la facture n\'est pas à un statut qui permet de la marquer comme payée. Vérifiez la facture, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : FeohLedger a refusé de l\'enregistrer. Vérifiez la facture, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedOtherUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : FeohLedger a refusé de l\'enregistrer. Vérifiez la facture, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
+
+  @override
+  String exceptionDescriptionErpPaidWithdrawn(String erp) {
+    return '$erp a indiqué que cette facture était payée, mais ne l\'affiche plus comme payée. FeohLedger n\'a pas enregistré ce paiement. Vérifiez la facture dans l\'ERP : si elle est toujours due, résolvez cette exception et payez-la comme d\'habitude.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidWithdrawnUnnamed =>
+      'Votre ERP a indiqué que cette facture était payée, mais ne l\'affiche plus comme payée. FeohLedger n\'a pas enregistré ce paiement. Vérifiez la facture dans l\'ERP : si elle est toujours due, résolvez cette exception et payez-la comme d\'habitude.';
+
+  @override
+  String exceptionDescriptionErpPaidRetryFailed(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement automatiquement. Vérifiez les informations, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidRetryFailedUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement automatiquement. Vérifiez les informations, puis enregistrez le paiement de l\'ERP depuis cette exception.';
+
+  @override
+  String exceptionDescriptionErpSettledShort(String erp) {
+    return '$erp indique que cette facture est payée, mais le propre paiement de FeohLedger a été réglé pour un montant inférieur à celui autorisé par la comptabilité fournisseurs ; la facture reste donc au statut « Paiement planifié ». Ouvrez le paiement et acceptez le montant réglé ou annulez le paiement.';
+  }
+
+  @override
+  String get exceptionDescriptionErpSettledShortUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais le propre paiement de FeohLedger a été réglé pour un montant inférieur à celui autorisé par la comptabilité fournisseurs ; la facture reste donc au statut « Paiement planifié ». Ouvrez le paiement et acceptez le montant réglé ou annulez le paiement.';
+
+  @override
+  String exceptionDescriptionErpVoidedAfterPost(String erp) {
+    return '$erp indique que cette facture est annulée, mais FeohLedger l\'avait déjà transmise pour paiement ; elle n\'a donc pas été annulée ici. Vérifiez si un paiement est en route vers le fournisseur, et arrêtez-le ou récupérez-le si la facture est réellement annulée.';
+  }
+
+  @override
+  String get exceptionDescriptionErpVoidedAfterPostUnnamed =>
+      'Votre ERP indique que cette facture est annulée, mais FeohLedger l\'avait déjà transmise pour paiement ; elle n\'a donc pas été annulée ici. Vérifiez si un paiement est en route vers le fournisseur, et arrêtez-le ou récupérez-le si la facture est réellement annulée.';
+
+  @override
+  String get exceptionDescriptionErpCreditSettlement =>
+      'Selon l\'ERP, cette facture est réglée, au moins en partie, par un avoir fournisseur appliqué dans l\'ERP. FeohLedger ne la paiera pas tant que quelqu\'un n\'aura pas confirmé ce qui reste dû.';
+
+  @override
+  String get exceptionDescriptionErpPaidWhileScheduled =>
+      'Selon l\'ERP, cette facture a été payée par un paiement que FeohLedger n\'a pas effectué, alors qu\'un paiement FeohLedger est planifié pour elle. Arrêtez ou annulez l\'un des deux avant qu\'ils n\'atteignent tous deux le fournisseur.';
+
+  @override
+  String get exceptionDescriptionErpPaidTwice =>
+      'FeohLedger a payé cette facture, et selon l\'ERP elle a aussi été payée par un paiement que FeohLedger n\'a pas effectué : le fournisseur a peut-être été payé deux fois. Récupérez l\'un des paiements.';
+
+  @override
+  String get exceptionDescriptionErpPartlyPaidOutside =>
+      'Selon l\'ERP, une partie de cette facture a été payée ou créditée en dehors de FeohLedger ; un paiement FeohLedger du montant total la surpaierait. Rapprochez ce qui reste dû avant de payer.';
+
+  @override
+  String get exceptionDescriptionErpRecordedPaymentWithdrawn =>
+      'L\'ERP a indiqué que cette facture était payée et FeohLedger a enregistré ce paiement, mais l\'ERP ne l\'affiche plus comme payée (le paiement y a été supprimé ou annulé). Confirmez si elle est toujours due.';
+
+  @override
+  String get exceptionDescriptionErpBillDeletedBlocking =>
+      'La pièce sous laquelle cette facture a été comptabilisée a été supprimée ou annulée dans l\'ERP ; FeohLedger ne la paiera pas tant que quelqu\'un n\'aura pas confirmé qu\'elle est toujours due.';
+
+  @override
+  String get exceptionDescriptionErpBillDeleted =>
+      'La pièce sous laquelle cette facture a été comptabilisée a été supprimée ou annulée dans l\'ERP. Vérifiez que les comptes concordent toujours.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoDocument =>
+      'FeohLedger ne peut pas vérifier la pièce de cette facture dans l\'ERP, car l\'ERP n\'a pas indiqué quelle pièce il a créée lors de la comptabilisation ; elle ne sera donc pas payée. Vérifiez dans l\'ERP si elle est toujours due, puis enregistrez-la comme payée en dehors de FeohLedger ou comptabilisez-la à nouveau.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoCompany =>
+      'FeohLedger ne peut pas vérifier la pièce de cette facture dans l\'ERP, car la comptabilisation n\'a pas enregistré la société de l\'ERP concernée ; elle ne sera donc pas payée. Vérifiez dans l\'ERP si elle est toujours due, puis enregistrez-la comme payée en dehors de FeohLedger ou comptabilisez-la à nouveau.';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedOtherCompany =>
+      'FeohLedger ne peut pas vérifier la pièce de cette facture dans l\'ERP, car elle a été comptabilisée dans une autre société de l\'ERP que celle connectée actuellement ; elle ne sera donc pas payée. Vérifiez dans l\'ERP si elle est toujours due, puis enregistrez-la comme payée en dehors de FeohLedger ou comptabilisez-la à nouveau.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPaid =>
+      'FeohLedger s\'apprêtait à payer cette facture, mais selon l\'ERP sa pièce est déjà payée. Le paiement a été arrêté avant tout mouvement d\'argent. Confirmez ce qui reste dû avant de la payer ; si une carte virtuelle a déjà été émise pour cette facture, annulez-la.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPartiallyPaid =>
+      'FeohLedger s\'apprêtait à payer cette facture, mais selon l\'ERP sa pièce est partiellement payée. Le paiement a été arrêté avant tout mouvement d\'argent. Confirmez ce qui reste dû avant de la payer ; si une carte virtuelle a déjà été émise pour cette facture, annulez-la.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedDeleted =>
+      'FeohLedger s\'apprêtait à payer cette facture, mais selon l\'ERP sa pièce est supprimée ou annulée. Le paiement a été arrêté avant tout mouvement d\'argent. Confirmez ce qui reste dû avant de la payer ; si une carte virtuelle a déjà été émise pour cette facture, annulez-la.';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedUnconfirmed =>
+      'FeohLedger s\'apprêtait à payer cette facture, mais l\'ERP n\'a pas pu confirmer que sa pièce est toujours ouverte et impayée. Le paiement a été arrêté avant tout mouvement d\'argent. Confirmez ce qui reste dû avant de la payer ; si une carte virtuelle a déjà été émise pour cette facture, annulez-la.';
+
+  @override
+  String get exceptionDescriptionErpReportedPaymentVoided =>
+      'Un paiement signalé par l\'ERP a été annulé dans FeohLedger, mais l\'ERP affiche peut-être encore la facture comme payée. FeohLedger ne la paiera plus tant que quelqu\'un n\'aura pas confirmé que le paiement de l\'ERP est annulé.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Rapproché';
 
   @override
