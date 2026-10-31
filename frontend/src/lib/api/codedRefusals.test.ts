@@ -114,7 +114,13 @@ describe('codedRefusalText', () => {
 		['workspace_close_audit_unavailable', 'refusal.workspaceCloseAuditUnavailable'],
 		['workspace_close_incomplete', 'refusal.workspaceCloseIncomplete'],
 		['workspace_close_actor_not_admin', 'refusal.workspaceCloseActorNotAdmin'],
-		['signup_slug_held', 'refusal.signupSlugHeld']
+		['signup_slug_held', 'refusal.signupSlugHeld'],
+		['expense_report_not_owner', 'refusal.expenseReportNotOwner'],
+		['expense_report_self_reject', 'refusal.expenseReportSelfReject'],
+		['card_txn_already_matched', 'refusal.cardTxnAlreadyMatched'],
+		['card_txn_not_matched', 'refusal.cardTxnNotMatched'],
+		['card_txn_matched_not_ignorable', 'refusal.cardTxnMatchedNotIgnorable'],
+		['card_txn_already_ignored', 'refusal.cardTxnAlreadyIgnored']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
@@ -294,6 +300,16 @@ describe('codedRefusalText', () => {
 		expect(
 			codedRefusalText('credit_memo_not_editable', { status: 'from_the_future' }, enT)
 		).toContain('from_the_future');
+	});
+
+	it("names an expense report's status by its label, and refuses without one", () => {
+		expect(codedRefusalText('expense_report_not_draft', { status: 'submitted' }, enT)).toContain(
+			EN_ALL['expenses.reports.status.submitted']
+		);
+		expect(
+			codedRefusalText('expense_report_not_submitted', { status: 'approved' }, enT)
+		).toContain(EN_ALL['expenses.reports.status.approved']);
+		expect(codedRefusalText('expense_report_not_submitted', {}, enT)).toBeNull();
 	});
 
 	it('states the remaining balance with its currency, or bare without one', () => {

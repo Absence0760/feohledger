@@ -834,12 +834,21 @@ Where each verdict lives (backend gate → field):
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
 | Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
+| Expense reports (list + detail) | `actions.{submit,approve,reject,compose}` | `services/expense_controls.report_{submit,approve,reject,compose}_refusal` |
+| Expense card transactions | `actions.{match,create_expense,unmatch,ignore}` | `services/expense_controls.card_txn_{link,unmatch,ignore}_refusal` |
 
 Each is pinned by a backend parity test that, for every seeded role and row
 state, asks both sides — the verdict and the real POST — and fails unless they
 agree (`tests/test_payment_action_verdicts.py`,
 `tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
-`tests/test_payment_queue_blocked.py`). A new verdict ships with one.
+`tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`).
+A new verdict ships with one.
+
+Which refusals a page *explains* beside a disabled control, rather than hiding
+the control, is a presentation choice keyed on the verdict's `code` — never a
+restated rule. The expenses page explains only `expense_cfo_required` (Approve
+stays visible, disabled, naming the CFO gate) and hides every other refusal,
+the reader's own report included.
 
 ### Clickable rows (`RowLink` + `isRowOpenClick`)
 

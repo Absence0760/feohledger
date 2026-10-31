@@ -64,6 +64,7 @@ import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
 import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
 import { vendorStatusLabelKey } from '#lib/types/vendor.ts';
+import { expenseReportStatusLabelKey } from '#lib/types/expense.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
@@ -353,8 +354,32 @@ const BUILDERS: Record<string, Builder> = {
 	approval_max_amount_misconfigured: fixed('refusal.approvalMaxMisconfigured'),
 	approval_cfo_required: (p, t) =>
 		approvalGate(p, t, 'refusal.approvalCfoRequired', 'refusal.approvalCfoRequiredUnknownLimit'),
-	// `api/expenses.py` — the report approval CFO gate
+	// `services/expense_controls.py` — the report approval CFO gate, and the
+	// report / card-transaction gates the expenses page's `actions` verdicts
+	// are read from
 	expense_cfo_required: expenseCfoGate,
+	expense_report_not_owner: fixed('refusal.expenseReportNotOwner'),
+	expense_report_not_draft: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.expenseReportNotDraft', {
+					status: statusLabel(status, expenseReportStatusLabelKey, t)
+				});
+	},
+	expense_report_not_submitted: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.expenseReportNotSubmitted', {
+					status: statusLabel(status, expenseReportStatusLabelKey, t)
+				});
+	},
+	expense_report_self_reject: fixed('refusal.expenseReportSelfReject'),
+	card_txn_already_matched: fixed('refusal.cardTxnAlreadyMatched'),
+	card_txn_not_matched: fixed('refusal.cardTxnNotMatched'),
+	card_txn_matched_not_ignorable: fixed('refusal.cardTxnMatchedNotIgnorable'),
+	card_txn_already_ignored: fixed('refusal.cardTxnAlreadyIgnored'),
 	// `services/exception_lifecycle.py` — the SAME codes `/bulk/resolve`
 	// reports per skipped row, so the two doors agree on the names.
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),

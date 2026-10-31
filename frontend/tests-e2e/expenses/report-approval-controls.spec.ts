@@ -16,7 +16,8 @@ import {
 //
 //   - the CFO-threshold gate boundary (== threshold approvable by a plain
 //     manager; > threshold demands cfo/admin — a 403 for an ap_manager),
-//     driven through the real UI where the gate is invisible client-side;
+//     and through the real UI, which states the gate beside a disabled
+//     Approve from the server's `actions.approve` verdict;
 //   - reject returns the report to `rejected` and ALL its children back to
 //     `draft` (no stranded `submitted` expenses);
 //   - every transition writes an append-only audit row (DB-immutable);
@@ -240,20 +241,21 @@ test.describe('/expenses — WF3 report approval controls', () => {
 		}
 	});
 
-	test('the UI surfaces the over-threshold 403 and leaves the report Submitted', async ({
+	test('the UI states the CFO gate beside a disabled Approve before any click', async ({
 		page,
 		tenantManager,
 		tenantClerk
 	}) => {
-		// The CFO-threshold gate is invisible client-side — `canDecideReport`
-		// only checks manager + not-owner + submitted, so the Approve button is
-		// shown to the ap_manager even for an over-threshold report. Clicking it
-		// must surface the server 403 as an error toast and NOT flip the badge.
+		// The page used to restate the rule (manager + not-owner + submitted) and
+		// offered the ap_manager an enabled Approve on an over-threshold report,
+		// which 403'd on click. It now reads the server's verdict
+		// (`actions.approve` = `expense_cfo_required`): Approve is shown DISABLED,
+		// with the gate's sentence beside it, and nothing can be pressed.
 		let reportId: string | null = null;
 		let expenseId: string | null = null;
 		try {
 			// Build the submitted, over-threshold report via the clerk's API token
-			// (no UI), then drive the Approve button as the manager with ONE sign-in.
+			// (no UI), then open it as the manager with ONE sign-in.
 			const clerkH = await roleHeaders(page, tenantClerk);
 			const built = await buildSubmittedReport(page, clerkH, '7500.00', 'UI403');
 			reportId = built.reportId;
@@ -262,14 +264,12 @@ test.describe('/expenses — WF3 report approval controls', () => {
 			await actAsInUi(page, tenantManager);
 			await page.getByRole('button', { name: `Open report ${built.reportNumber}` }).click();
 			await expect(page.locator('.report-title-block .badge')).toHaveText('Submitted');
-			await page.getByRole('button', { name: 'Approve', exact: true }).click();
-
-			// The error toast renders the server's "CFO approval required" detail.
-			await expect(page.locator('.toast.error')).toBeVisible();
-			await expect(page.getByText(/CFO approval required/i)).toBeVisible();
-			// Badge must NOT have flipped to Approved.
-			await expect(page.locator('.report-title-block .badge')).toHaveText('Submitted');
-			// And the DB agrees — no approval slipped through.
+			const approve = page.getByRole('button', { name: 'Approve', exact: true });
+			await expect(approve).toBeDisabled();
+			await expect(page.locator('#approve-refusal')).toContainText(/CFO/);
+			// Reject is the manager's and carries no threshold.
+			await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeEnabled();
+			// Nothing was approved.
 			expect(
 				tenantPsql(`SELECT status FROM expense_reports WHERE id='${reportId}'`).trim()
 			).toBe('submitted');
