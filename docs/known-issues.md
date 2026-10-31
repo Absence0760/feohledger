@@ -5,7 +5,7 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Nine entries are open**: the payment mock tests that fail locally in one pytest process (found 2026-10-31), the run builder reading
+**Eight entries are open**: the run builder reading
 a missing invoice currency as USD (found 2026-10-21), the app rendering nothing when browser
 storage is blocked (found 2026-10-20), the remove-tenant backup deletion the
 VM's IAM role refuses (found 2026-10-18),
@@ -14,7 +14,9 @@ writing the help centre, the `all`-mode approval-chain segregation deadlock,
 the legal-contents smooth-scroll race and the e2e cleanup race directly below,
 and the `payments/` local-e2e flake near the bottom. Merge.dev's vendor listing
 calling an endpoint Merge does not publish, found and struck on 2026-10-26, sits
-struck at the top. The paid-plan features no
+struck at the top. The payment mock tests that failed locally in one pytest
+process, found and struck on 2026-10-31, sit struck above the run-builder
+entry. The paid-plan features no
 route enforced and the direct ERP adapters posting bills without the ERP's
 vendor and account ids were struck on 2026-10-07 and 2026-10-08, but this line
 went on counting them as open — it said "seven" over five. The assistant
@@ -29,7 +31,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Twenty of the twenty-eight `##`
+refuses to start against a stale database. Twenty-one of the twenty-nine `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included,
 and later "seventeen of the twenty-four" while nineteen were struck.)
@@ -107,7 +109,45 @@ payment-terms assertions go with the field. The Contact `id` stays the
 because it rewrites the vendor contract the e2e spec asserts, which needs a run
 against the full stack.
 
-## Some payment mock tests fail locally when run in the same pytest process
+## ~~Some payment mock tests fail locally when run in the same pytest process~~ — FIXED 2026-10-31
+
+**Resolved 2026-10-31.** The suspected cause was right, and it was not the only
+path. `api/payments._require_payment_adapter` calls
+`provider_credentials.provider_config(org, "payments")` with no `db`, and
+`load_secrets` then opens its own `control_session_factory()` session on the
+module-global `control_engine`. The five payment files never opted into
+`provider_store_from_settings`, so every mock execute test made a real query
+against the developer's `feohledger`. It returned no row, so each test passed.
+But the pooled asyncpg connection stayed bound to that test's event loop, and
+the next test, on a new loop, drew it: `got Future … attached to a different
+loop`, or `another operation is in progress`. CI hid it twice over. pytest-split
+separated the files, and once any `realdb` test has run, the harness repoints
+the global sessionmaker at a NullPool engine
+(`_repoint_global_control_session_factory`), which holds nothing across loops.
+That is also why the failures depended on file order.
+
+The fix gives the five files (and `test_payment_reconciler*.py`, which reach the
+same accessor through `_reconcile_tenant`) the fixture. It also adds an autouse
+guard, `_refuse_real_engine_in_mock_tests` in `backend/tests/conftest.py`: a test
+without `realdb` that opens any SQLAlchemy connection raises
+`RealEngineInMockTestError` at the call, naming the app frames that got there.
+It also fails at teardown if the code under test swallowed the error. The first
+full run under the guard found three more side doors that best-effort code or a
+broad `pytest.raises` had been hiding. `audit_dispatch._write_auth_audit`
+resolves the tenant on its own control session: the login, session-revocation,
+custom-role, passkey and step-up test files now use the new
+`no_auth_audit_write` fixture. The `paid` notification's
+`resolve_role_user_ids` is now stubbed in `test_invoice_lifecycle.py`. And
+`provision_tenant`'s closed-slug check is now patched in the one DB-free
+provisioning test that reached it. The tests that connect on purpose, on
+engines they build and dispose themselves (`test_db_engine.py`,
+`test_control_plane_bootstrap.py`, `test_schema_build_parity.py` and two in
+`test_tenant_provisioning.py`), carry the `real_db_engine` marker. The full local run also exposed an
+unrelated order dependency in the `realdb` harness itself: a test that enrolled
+TOTP on the harness admin left the factor in place, which broke
+`test_privacy_unmasked_step_up`'s no-factor case in the same process. The
+harness now resets the seeded users' second factors before each test. Guard tests: `backend/tests/test_mock_db_engine_guard.py`.
+Rule: `backend/CLAUDE.md` § Test databases. The diagnosis is kept below.
 
 **Found 2026-10-31** while integrating the follow-ups batch (PR #679).
 
