@@ -8,7 +8,9 @@
 # input guards, and the release-deploy grant (deploy.tf): one document, one
 # instance, one sha-shaped parameter; and the SPA stack (frontend.tf): a bucket
 # only this distribution reads, the platform certificate on the apex + wildcard,
-# a publish grant scoped to that bucket and distribution, and DNS that stays on
+# a publish grant scoped to that bucket and distribution, a missing-asset alarm
+# on the 404 rate with the monitoring subscription that publishes that metric,
+# and DNS that stays on
 # the VM until frontend_on_cloudfront moves it — with api. on the VM regardless;
 # the VM's database grant: rds-db:connect on the app role alone; and the
 # external uptime checks (uptime.tf): which hosts are checked and how,
@@ -867,6 +869,20 @@ run "distribution_serves_the_apex_and_every_tenant_on_the_platform_certificate" 
   }
 }
 
+run "missing_asset_alarm_watches_404s_and_has_its_metric" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.frontend_404.metric_name == "404ErrorRate" && aws_cloudwatch_metric_alarm.frontend_404.dimensions["DistributionId"] == aws_cloudfront_distribution.frontend.id
+    error_message = "The missing-asset alarm must watch this distribution's 404 rate: the 4xx rate also counts the 403s CloudFront gives disallowed-method requests (scanner POSTs), which page for nothing."
+  }
+
+  assert {
+    condition     = aws_cloudfront_monitoring_subscription.frontend.distribution_id == aws_cloudfront_distribution.frontend.id && one(one(aws_cloudfront_monitoring_subscription.frontend.monitoring_subscription).realtime_metrics_subscription_config).realtime_metrics_subscription_status == "Enabled"
+    error_message = "404ErrorRate is an additional metric: without an enabled monitoring subscription it has no data and the alarm can never fire."
+  }
+}
+
 run "publish_grant_covers_only_this_bucket_and_distribution" {
   command = plan
 
@@ -1034,7 +1050,7 @@ run "only_customer_facing_alarms_page" {
         aws_cloudwatch_metric_alarm.db_cpu_credits,
         aws_cloudwatch_metric_alarm.app_cpu_credits,
         aws_cloudwatch_metric_alarm.frontend_5xx,
-        aws_cloudwatch_metric_alarm.frontend_4xx,
+        aws_cloudwatch_metric_alarm.frontend_404,
         aws_cloudwatch_metric_alarm.platform_certificate_expiry,
       ] : !contains(a.alarm_actions, "arn:aws:sns:us-east-1:000000000000:feohledger-prod-pager")
     ])

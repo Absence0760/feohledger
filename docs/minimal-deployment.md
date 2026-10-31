@@ -69,6 +69,7 @@ when each piece graduates.
 | RDS storage 20 GB gp3 (backup storage up to the DB's size is free) | ~$2.30 |
 | VPC flow logs (rejected traffic only) + CloudWatch alarms | ~$1–2 |
 | SPA on S3 + CloudFront (inside CloudFront's always-free 1 TB / 10M requests) | ~$0–1 |
+| CloudFront additional metrics on the SPA distribution (feeds the 404 alarm; up to 8 metrics × $0.30) | ~$2.40 |
 | **Total** | **~$45–55** |
 | Plus external uptime checks (3 Route 53 HTTPS checks) and SMS paging (a toll-free number), `infra/uptime.tf` | ~$8–13 |
 

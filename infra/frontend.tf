@@ -359,13 +359,51 @@ resource "aws_cloudwatch_metric_alarm" "frontend_5xx" {
   ok_actions          = [aws_sns_topic.alerts.arn]
 }
 
-# The SPA fallback means a route can never 404, so a 4xx surge is missing
-# files — a publish that left a referenced asset out — or a scan.
-resource "aws_cloudwatch_metric_alarm" "frontend_4xx" {
-  alarm_name          = "${var.project}-${var.environment}-frontend-4xx"
-  alarm_description   = "More than 10% of SPA requests were 4xx for 15 minutes — a publish may have left assets out (deploy/README.md § Frontend rollback)."
+# The missing-asset alarm watches the 404 rate, not the 4xx rate.
+#
+# What it exists to catch is a publish that left a referenced file out. The
+# router (cloudfront/spa-router.js) rewrites every route to /index.html, so a
+# route never 404s; a missing file under /_app/ or /marketing/, or a listed root
+# file, reaches S3 and gets S3's 404 (the bucket policy grants CloudFront
+# s3:ListBucket for exactly that). A disallowed method is a different status:
+# the distribution allows only GET and HEAD, so CloudFront answers any POST with
+# 403 before the origin is involved.
+#
+# That difference is why 4xxErrorRate was the wrong metric. On 2026-10-31 the
+# old 4xx alarm fired for ten minutes on a single vulnerability scanner POSTing
+# WordPress and login paths: every one of those requests was a 403, no deploy
+# had happened, and every real request got a 200. A minimum-request floor would
+# not have helped, because the scanner was most of the traffic in that window.
+# 404ErrorRate counts only the missing-file answer.
+#
+# 404ErrorRate is one of CloudFront's "additional metrics", published only for a
+# distribution with a monitoring subscription. Without one the metric has no
+# data, and treat_missing_data = "notBreaching" would leave the alarm silently
+# blind, so the subscription lives here beside the alarm. Cost: the
+# subscription publishes up to 8 metrics (cache hit rate, origin latency, and
+# the 401/403/404/502/503/504 error rates), each billed as a CloudWatch custom
+# metric at $0.30/month for the first 10,000 metrics, so at most $2.40/month for
+# this one distribution, flat regardless of traffic (CloudWatch pricing page and
+# the CloudFront developer guide, checked 2026-10-30).
+#
+# CloudFront's control plane is global, so the subscription takes the default
+# provider like the distribution itself.
+
+resource "aws_cloudfront_monitoring_subscription" "frontend" {
+  distribution_id = aws_cloudfront_distribution.frontend.id
+
+  monitoring_subscription {
+    realtime_metrics_subscription_config {
+      realtime_metrics_subscription_status = "Enabled"
+    }
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "frontend_404" {
+  alarm_name          = "${var.project}-${var.environment}-frontend-404"
+  alarm_description   = "More than 10% of SPA requests were 404s for 15 minutes — a publish may have left assets out (deploy/README.md § Frontend rollback). Routes never 404 and disallowed-method requests are 403s, so neither trips this."
   namespace           = "AWS/CloudFront"
-  metric_name         = "4xxErrorRate"
+  metric_name         = "404ErrorRate"
   dimensions          = { DistributionId = aws_cloudfront_distribution.frontend.id, Region = "Global" }
   statistic           = "Average"
   period              = 300
@@ -375,6 +413,8 @@ resource "aws_cloudwatch_metric_alarm" "frontend_4xx" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.alerts.arn]
   ok_actions          = [aws_sns_topic.alerts.arn]
+
+  depends_on = [aws_cloudfront_monitoring_subscription.frontend]
 }
 
 # ── Deploy-role permission ───────────────────────────────────────────────────
