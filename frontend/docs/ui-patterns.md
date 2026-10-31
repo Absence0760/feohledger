@@ -334,7 +334,8 @@ appears when one or more rows are selected:
         <BulkDeleteButton
             onconfirm={handleBulkDelete}
             disabled={busy}
-            label={`Delete ${selected.size}`}
+            label={m('things.bulk.delete', { n: selected.size })}
+            confirmLabel={m('things.bulk.confirmDelete')}
         />
         <!-- additional .bulk-action-btn buttons go here -->
     {/snippet}
@@ -349,6 +350,11 @@ appears when one or more rows are selected:
   their `<td class="checkbox-col">` empty rather than disabled.
 - Delete is always armed-confirm (one click arms; outside-click or
   second click un-arms or commits). `BulkDeleteButton` does this.
+  Pass `confirmLabel` (the armed label) from the catalogue too — its
+  fallback, `"Confirm " + label`, is English-only. `title` sets a native
+  tooltip; wrap the button in a `<span title>` instead when the tooltip
+  must show while it is `disabled` (`/invoices` does). Never restyle a
+  local `.bulk-delete-btn` copy — `/invoices` carried one until it drifted.
 - Bulk endpoints return a partial-success shape — `{deleted: [],
   failed: [{id, reason, ...}]}` — and the page surfaces the per-row
   reason in a toast. See `bulk_delete_users` in `backend/app/api/admin.py`

@@ -4652,8 +4652,6 @@ export const messages = {
 	'invoices.modal.toast.approvedPartialGeneric': 'この請求書を承認しました。次に進むには、さらに承認が必要です。',
 	'invoices.modal.toast.contractLinked': '契約をリンクしました',
 	'invoices.modal.toast.contractUnlinked': '契約のリンクを解除しました',
-	'invoices.modal.toast.deleteFailed': '削除に失敗しました',
-	'invoices.modal.toast.deleted': '請求書を削除しました',
 	'invoices.modal.toast.erpRetryInitiated': 'ERP の再試行を開始しました',
 	'invoices.modal.toast.exportFailed': 'エクスポートに失敗しました',
 	'invoices.modal.toast.extractionComplete': '抽出が完了しました — フィールドが入力されました',

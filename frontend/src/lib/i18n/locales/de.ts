@@ -4743,8 +4743,6 @@ export const messages = {
 		'Sie haben diese Rechnung genehmigt. Weitere Genehmigungen sind erforderlich, bevor sie weitergeleitet wird.',
 	'invoices.modal.toast.contractLinked': 'Vertrag verknüpft',
 	'invoices.modal.toast.contractUnlinked': 'Vertragsverknüpfung getrennt',
-	'invoices.modal.toast.deleteFailed': 'Löschen fehlgeschlagen',
-	'invoices.modal.toast.deleted': 'Rechnung gelöscht',
 	'invoices.modal.toast.erpRetryInitiated': 'ERP-Wiederholung gestartet',
 	'invoices.modal.toast.exportFailed': 'Export fehlgeschlagen',
 	'invoices.modal.toast.extractionComplete': 'Extraktion abgeschlossen — Felder ausgefüllt',

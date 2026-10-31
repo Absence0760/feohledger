@@ -4920,8 +4920,6 @@ export const en = {
 		'You approved this invoice. More approvals are needed before it moves forward.',
 	'invoices.modal.toast.contractLinked': 'Contract linked',
 	'invoices.modal.toast.contractUnlinked': 'Contract unlinked',
-	'invoices.modal.toast.deleteFailed': 'Delete failed',
-	'invoices.modal.toast.deleted': 'Invoice deleted',
 	'invoices.modal.toast.erpRetryInitiated': 'ERP retry initiated',
 	'invoices.modal.toast.exportFailed': 'Export failed',
 	'invoices.modal.toast.extractionComplete': 'Extraction complete — fields populated',

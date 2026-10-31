@@ -4735,8 +4735,6 @@ export const messages = {
 		'Aprobó esta factura. Se necesitan más aprobaciones antes de que avance.',
 	'invoices.modal.toast.contractLinked': 'Contrato vinculado',
 	'invoices.modal.toast.contractUnlinked': 'Contrato desvinculado',
-	'invoices.modal.toast.deleteFailed': 'Error al eliminar',
-	'invoices.modal.toast.deleted': 'Factura eliminada',
 	'invoices.modal.toast.erpRetryInitiated': 'Reintento de ERP iniciado',
 	'invoices.modal.toast.exportFailed': 'Error al exportar',
 	'invoices.modal.toast.extractionComplete': 'Extracción completada — campos rellenados',

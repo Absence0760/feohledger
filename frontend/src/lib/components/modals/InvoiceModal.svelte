@@ -494,8 +494,6 @@
 
 	let saving = $state(false);
 	let submitting = $state(false);
-	let deleting = $state(false);
-	let confirmDelete = $state(false);
 	let reviewing = $state(false);
 	let uploadingFile = $state(false);
 	let confirmDeleteFile = $state(false);
@@ -1059,21 +1057,6 @@
 		extractionStatus = '';
 		toast(m('invoices.modal.toast.extractionTimeout'), 'warning');
 		await refreshList();
-	}
-
-	async function deleteInvoice() {
-		deleting = true;
-		try {
-			await api.delete(`/api/invoices/${invoice.id}`);
-			toast(m('invoices.modal.toast.deleted'), 'success');
-			// The host refetches with its filters on close — see `submitDone`.
-			onclose();
-		} catch (err) {
-			toast(err instanceof Error ? err.message : m('invoices.modal.toast.deleteFailed'), 'error');
-		} finally {
-			deleting = false;
-			confirmDelete = false;
-		}
 	}
 
 	async function handleFileSelected(e: Event) {
@@ -3261,39 +3244,6 @@
 
 	.btn-cancel:hover {
 		background: var(--bg);
-	}
-
-	.btn-delete-outline {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 8px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		background: var(--surface);
-		color: var(--text-muted);
-		border: 1px solid var(--border);
-		transition: border-color 0.15s;
-	}
-
-	.btn-delete-outline:hover {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.btn-delete-outline.armed {
-		border-color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-		color: var(--danger);
-	}
-
-	.btn-delete-outline:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	/* --- Line items --- */

@@ -201,8 +201,13 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   `.cf-bar*` recipe; no charting dependency). Takes `bars=[{label, value,
   amountLabel, sub?}]`; the parent formats money via `formatMoney` and passes
   the numeric `value` only to drive bar width.
-- `ExamplePrompts.svelte` — empty-state with the three built-in roadmap prompts;
-  `onpick(prompt)` fills + sends.
+- `ExamplePrompts.svelte` — the chat empty state: icon, heading, sub-line and
+  one `.prompt-btn` per starter prompt; `onpick(prompt)` fills + sends.
+  `<ExamplePrompts onpick prompts? heading? sub? />` — defaults are the AP
+  assistant's three `EXAMPLE_PROMPTS` and `assistant.empty.*` copy; `/cash-flow`
+  passes its own four prompts and `cashFlow.empty.*` strings (already
+  localized). Both chat pages render this one component — don't restyle a
+  local prompt-chip copy.
 - `UsageMeter.svelte` — AI token usage bar over `GET /api/assistant/usage`
   (`data-testid="usage-meter"`). Budget `0` = unlimited (running total, no bar);
   amber ≥80%, red at/over budget.
