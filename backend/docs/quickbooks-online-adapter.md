@@ -23,7 +23,10 @@ this plan:
   compare-and-swap write.
 - Routes are `GET /api/organization/erp/oauth/{provider}/authorize` (JSON
   `authorize_url`) and one shared `GET /api/erp/oauth/callback`, so every
-  OAuth ERP registers one redirect URI.
+  OAuth ERP registers one redirect URI. The callback is bound to the browser
+  that called authorize (a nonce cookie), and the `realmId` it carries is
+  linked only after `companyinfo/{realmId}` answers under the new token
+  (`erp-integration.md` § Connecting an OAuth ERP).
 - Open question 1 is answered conservatively: `void_invoice` deletes only a
   bill with no payment applied (`Balance == TotalAmt`).
 - Open question 2 is answered by the shared line rules: the lines come from

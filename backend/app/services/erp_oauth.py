@@ -6,12 +6,24 @@ and we hold a rotating refresh token afterwards. This module is that flow, once,
 for every such adapter (``erp_adapters/oauth_base.OAuthErpAdapter``):
 
 * :func:`build_authorize_url` / :func:`consume_state` — the signed, single-use
-  ``state`` that carries org + user + provider across the provider's redirect;
+  ``state`` that carries org + user + provider across the provider's redirect,
+  bound to the starting browser by :data:`BROWSER_COOKIE` (below);
 * :func:`exchange_code` — the callback's code → token exchange;
 * :func:`get_access_token` — what adapters call; refreshes and persists;
 * :func:`revoke` — best-effort revocation on disconnect.
 
 The routes live in ``app/api/erp_oauth.py``.
+
+Bound to the browser that started it (login-CSRF)
+-------------------------------------------------
+The callback is public, so a signed state alone let a rogue tenant admin start
+a connect and have someone else consent, linking that person's books to the
+admin's tenant. ``/authorize`` therefore sets :data:`BROWSER_COOKIE` (random,
+HttpOnly, host-only on the API host — :func:`browser_cookie_attributes`) in
+the bearer-authenticated response, the state carries its SHA-256
+(:func:`browser_binding`), and the callback compares the two
+(:func:`browser_matches`, constant time). Only the admin's own browser can
+make that bearer request, so only it holds the cookie.
 
 Stored state — two halves, written together
 -------------------------------------------
@@ -100,6 +112,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import secrets
@@ -110,7 +123,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from sqlalchemy import select
@@ -131,6 +144,15 @@ OAUTH_PROVIDERS: dict[str, OAuthProviderSpec] = {}
 #: The one redirect URI every provider app registers (path under
 #: ``FEOH_API_PUBLIC_URL``). The tenant comes back in ``state``, not the URL.
 CALLBACK_PATH = "/api/erp/oauth/callback"
+
+#: The HttpOnly cookie that binds a connect to the browser that started it
+#: (:func:`browser_cookie_attributes`). Set by the ``/authorize`` response on the
+#: API host; its hash rides in ``state``; the callback compares and clears it.
+#: The ``__Host-`` prefix makes the browser refuse any version of it that is not
+#: ``Secure``, ``Path=/`` and host-only, so a sibling subdomain of the same site
+#: cannot toss in a value of its own choosing (the weakness of a plain
+#: double-submit cookie).
+BROWSER_COOKIE = "__Host-feoh_erp_oauth_nonce"
 
 #: Refresh when the access token has less than this left. Covers clock skew and
 #: a request that starts just before expiry.
@@ -311,15 +333,103 @@ def _state_ttl() -> int:
     return int(settings.erp_oauth_state_ttl_seconds)
 
 
+def new_browser_nonce() -> str:
+    """A fresh value for the :data:`BROWSER_COOKIE` nonce cookie."""
+    return secrets.token_urlsafe(32)
+
+
+def browser_binding(cookie_value: str) -> str:
+    """What ``state`` carries for a browser nonce: its SHA-256, never the value.
+
+    The state travels through the provider and the address bar; the cookie is
+    HttpOnly. Only the hash crosses into the URL, so the state alone cannot be
+    turned into a matching cookie.
+    """
+    return hashlib.sha256(cookie_value.encode()).hexdigest()
+
+
+def browser_matches(cookie_value: str | None, binding: str) -> bool:
+    """Does the callback's cookie belong to the browser that started the connect?
+
+    Constant-time, and false for a missing cookie or a state minted without a
+    binding (there is no such state after this change, but an absent field
+    must never read as a match).
+    """
+    if not cookie_value or not binding:
+        return False
+    return hmac.compare_digest(browser_binding(cookie_value), binding)
+
+
+def browser_cookie_attributes() -> dict[str, Any]:
+    """``Response.set_cookie`` keyword arguments for :data:`BROWSER_COOKIE`.
+
+    Host-only on the API's public host (no ``Domain``), ``Path=/`` (which the
+    ``__Host-`` prefix requires), HttpOnly, and alive as long as the ``state``
+    it pairs with. Only credentialed requests and top-level navigations to the
+    API host carry it, and the SPA makes exactly one credentialed request.
+
+    ``SameSite=Lax`` + ``Secure`` everywhere a real deployment runs: the app
+    (``<slug>.<domain>``) and the API (``api.<domain>``) are same-site, so the
+    credentialed ``/authorize`` fetch may set it, and the provider's top-level
+    GET redirect to the callback carries it.
+
+    A loopback API (local dev) is the one exception, and it is NOT "Secure off":
+    ``acme.localhost`` and ``localhost`` are different sites, and a browser
+    refuses a ``SameSite=Lax`` cookie set by a cross-site fetch (measured in
+    Chromium). ``SameSite=None`` is the only value that crosses, and it
+    requires ``Secure`` — which browsers accept from ``http://localhost``,
+    a potentially trustworthy origin. Gated on the configured API URL being a
+    loopback host AND the environment not being a deployed one, so a
+    misconfigured deployment keeps ``Lax`` (and its connects fail closed at the
+    callback) rather than silently loosening the cookie.
+    """
+    loopback = not settings.is_deployed and is_loopback_host(
+        urlsplit(settings.api_public_url).hostname
+    )
+    return {
+        "max_age": _state_ttl(),
+        "path": "/",
+        "httponly": True,
+        "secure": True,
+        "samesite": "none" if loopback else "lax",
+    }
+
+
+def is_loopback_host(host: str | None) -> bool:
+    """``localhost``, ``*.localhost`` or a loopback IP literal."""
+    h = (host or "").strip().lower().rstrip(".")
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    if h == "localhost" or h.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
 async def create_state(
-    *, org_id: uuid.UUID, org_slug: str, user_id: uuid.UUID, provider: str, client_source: str
+    *,
+    org_id: uuid.UUID,
+    org_slug: str,
+    user_id: uuid.UUID,
+    provider: str,
+    client_source: str,
+    browser_nonce: str,
 ) -> str:
     """Mint a signed ``state`` and record its nonce in Redis (single use).
 
     The signature stops forgery (the callback is public); the Redis nonce makes
     it single-use and is what an expired or replayed state fails on. Both carry
     the same binding, so neither alone is enough.
+
+    ``browser_nonce`` is the value of the :data:`BROWSER_COOKIE` the
+    ``/authorize`` response sets in the admin's browser; the state carries its
+    hash (``b``), and the callback refuses a browser without the matching
+    cookie (login-CSRF: a consent link handed to someone else links nothing).
     """
+    if not browser_nonce:
+        raise ValueError("a browser nonce is required")
     nonce = secrets.token_urlsafe(24)
     payload = {
         "n": nonce,
@@ -328,6 +438,7 @@ async def create_state(
         "u": str(user_id),
         "p": provider,
         "c": client_source,
+        "b": browser_binding(browser_nonce),
         "e": int(time.time()) + _state_ttl(),
     }
     body = _b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
@@ -339,7 +450,7 @@ async def create_state(
 
 async def consume_state(state: str) -> dict[str, str]:
     """Verify and burn ``state``. Returns ``{org_id, org_slug, user_id, provider,
-    client_source}``; raises :class:`OAuthStateError` otherwise."""
+    client_source, browser_binding}``; raises :class:`OAuthStateError` otherwise."""
     if not isinstance(state, str) or state.count(".") != 1 or len(state) > 2048:
         raise OAuthStateError("invalid_state")
     body, mac = state.split(".")
@@ -368,6 +479,7 @@ async def consume_state(state: str) -> dict[str, str]:
         "user_id": str(payload["u"]),
         "provider": str(payload["p"]),
         "client_source": str(payload.get("c") or ""),
+        "browser_binding": str(payload.get("b") or ""),
     }
 
 

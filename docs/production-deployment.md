@@ -176,6 +176,17 @@ FEOH_HCAPTCHA_SITEKEY=<from hCaptcha dashboard>
 
 See `docs/environment.md` for the full var list including extraction, ERP, and card platform keys.
 
+**The API and the tenant app must be same-site, and `FEOH_CORS_PRODUCTION_DOMAIN`
+must name the domain they share** (`api.feohledger.com` beside
+`<slug>.feohledger.com`, with `FEOH_CORS_PRODUCTION_DOMAIN=feohledger.com`). The
+ERP OAuth connect binds itself to the admin's browser with an HttpOnly
+`SameSite=Lax` cookie the credentialed `/authorize` fetch sets on the API host,
+and a browser refuses that cookie from a cross-site response. A deployment that
+puts the API on another registrable domain cannot connect an OAuth ERP at all:
+`/authorize` answers a coded 409 rather than fail after the consent screen.
+White-label tenants on a custom domain connect from their `<slug>.<domain>`
+address. See `backend/docs/erp-integration.md` § Connecting an OAuth ERP.
+
 ## Network Architecture
 
 - **VPC** with public and private subnets across 2+ AZs

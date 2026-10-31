@@ -18,6 +18,7 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.config import settings
@@ -1177,3 +1178,100 @@ def test_a_failed_pre_check_query_400_is_not_retryable(token, no_override):
     result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
     assert result.retryable is False
     assert result.message == "QuickBooks Online post failed: HTTP 400 (invalid_request)"
+
+
+# ---------------------------------------------------------------------------
+# Consent: the realm the unsigned callback names is confirmed under the new
+# token before it is linked (quickbooks_online.confirm_realm)
+# ---------------------------------------------------------------------------
+
+
+class _CompanyInfo:
+    """Records the confirmation call and answers it."""
+
+    def __init__(self, status: int = 200, body: dict | None = None, error: Exception | None = None):
+        self.status = status
+        self.body = {"CompanyInfo": {"Id": "1", "CompanyName": "Co"}} if body is None else body
+        self.error = error
+        self.calls: list[dict] = []
+
+    def client(self, *_a, **_kw):
+        outer = self
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, params=None, headers=None):
+                outer.calls.append({"url": url, "params": params, "headers": headers})
+                if outer.error is not None:
+                    raise outer.error
+                return _resp(outer.status, outer.body)
+
+        return _Client()
+
+
+async def _resolve(info: _CompanyInfo, realm: str = REALM, erp_settings: dict | None = None):
+    from app.services.erp_adapters import quickbooks_online
+
+    with patch.object(quickbooks_online.httpx, "AsyncClient", new=info.client):
+        return await QuickBooksOnlineAdapter.resolve_external_tenant_id(
+            access_token="new-token",
+            token_response={},
+            callback_params={"realmId": realm},
+            erp_settings={"environment": "sandbox"} if erp_settings is None else erp_settings,
+        )
+
+
+async def test_consent_confirms_the_realm_under_the_new_token(no_override):
+    info = _CompanyInfo()
+    assert await _resolve(info) == REALM
+    (call,) = info.calls
+    assert call["url"] == (
+        f"https://sandbox-quickbooks.api.intuit.com/v3/company/{REALM}/companyinfo/{REALM}"
+    )
+    assert call["headers"]["Authorization"] == "Bearer new-token"
+    assert call["params"] == {"minorversion": "75"}
+
+
+async def test_consent_confirms_against_production_and_the_operator_override(monkeypatch):
+    monkeypatch.setattr(settings, "erp_qbo_api_base", "")
+    info = _CompanyInfo()
+    await _resolve(info, erp_settings={})
+    assert info.calls[0]["url"].startswith("https://quickbooks.api.intuit.com/v3/company/")
+    monkeypatch.setattr(settings, "erp_qbo_api_base", "http://localhost:12112/qbo/")
+    await _resolve(info)
+    assert (
+        info.calls[1]["url"] == f"http://localhost:12112/qbo/v3/company/{REALM}/companyinfo/{REALM}"
+    )
+
+
+@pytest.mark.parametrize(
+    "info",
+    [
+        _CompanyInfo(status=403, body={"Fault": {"Error": [{"code": "3100"}]}}),
+        _CompanyInfo(status=401, body={}),
+        _CompanyInfo(status=500, body={}),
+        _CompanyInfo(status=200, body={"QueryResponse": {}}),
+        _CompanyInfo(error=httpx.ConnectError("down")),
+    ],
+    ids=["another-company", "unauthorized", "outage", "no-company-info", "unreachable"],
+)
+async def test_a_realm_the_new_token_does_not_reach_is_refused(no_override, info):
+    assert await _resolve(info) is None
+
+
+@pytest.mark.parametrize("realm", ["../preferences", "9130/x", "a b", "x" * 65, "9130?q=1"])
+async def test_a_realm_that_is_not_an_id_never_reaches_a_url(no_override, realm):
+    info = _CompanyInfo()
+    assert await _resolve(info, realm=realm) is None
+    assert info.calls == []
+
+
+async def test_no_realm_in_the_callback_makes_no_call(no_override):
+    info = _CompanyInfo()
+    assert await _resolve(info, realm="") is None
+    assert info.calls == []

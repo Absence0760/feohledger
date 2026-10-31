@@ -63,6 +63,7 @@ any other read failure fails the push without creating anything.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
@@ -113,6 +114,8 @@ from app.services.erp_adapters.posted_total import (
 from app.utils.json_money import dumps_exact_json
 
 PROVIDER = "QuickBooks Online"
+logger = logging.getLogger(__name__)
+
 MINOR_VERSION = "75"
 #: Intuit's ``requestid`` limit (characters).
 REQUEST_ID_MAX = 50
@@ -160,6 +163,55 @@ QBO_OAUTH = erp_oauth.register_oauth_provider(
         revoke_url_setting="erp_qbo_revoke_url",
     )
 )
+
+
+def _api_base(erp_settings: dict | None) -> str:
+    """The v3 API host for an org's ``settings.erp`` (no trailing slash)."""
+    if settings.erp_qbo_api_base:
+        # OPERATOR-controlled override (env, not tenant config) pointing
+        # local dev + e2e at fake-erp; trusted, like erp_d365_api_base.
+        return settings.erp_qbo_api_base.rstrip("/")
+    if ((erp_settings or {}).get("environment") or "production") == "sandbox":
+        return _SANDBOX_BASE
+    return _PRODUCTION_BASE
+
+
+#: What a realm id may look like before it goes into a URL path. Intuit's are
+#: digits; the fake ERP's carry letters and dashes. Anything else is refused at
+#: consent rather than spliced into ``/v3/company/{realm}/…``.
+_REALM_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+async def confirm_realm(access_token: str, realm: str, erp_settings: dict | None) -> bool:
+    """Does the token just issued reach company ``realm``?
+
+    ``GET /v3/company/{realm}/companyinfo/{realm}`` under the new token: Intuit
+    answers it only for the company the consent authorised, and refuses
+    (401/403, Fault 3100) any other. A 200 carrying a ``CompanyInfo`` object is
+    the only yes; a network error, any other status or another body is no.
+    Nothing is logged but the status.
+    """
+    if not _REALM_ID.fullmatch(realm):
+        return False
+    url = f"{_api_base(erp_settings)}/v3/company/{realm}/companyinfo/{realm}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                url,
+                params={"minorversion": MINOR_VERSION},
+                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            )
+    except httpx.HTTPError:
+        logger.warning("quickbooks_online: realm confirmation unreachable")
+        return False
+    if resp.status_code != 200:
+        logger.warning("quickbooks_online: realm confirmation refused (HTTP %s)", resp.status_code)
+        return False
+    try:
+        body = _json(resp)
+    except ValueError:
+        return False
+    return isinstance(body, dict) and isinstance(body.get("CompanyInfo"), dict)
 
 
 class QboRequestError(RuntimeError):
@@ -392,18 +444,40 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
     #: (``post_payment``) — decisions §295.
     supports_status_sync = True
 
+    @classmethod
+    async def resolve_external_tenant_id(
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
+    ) -> str | None:
+        """The ``realmId`` the redirect names, once the new token confirms it.
+
+        Intuit puts the company id in the callback query, which nothing signs:
+        a tenant admin could consent to their own company while naming another
+        company's realm, and that realm would then read ``already_linked`` for
+        its real owner (squatting, not a leak — the token only ever reaches the
+        consenting company). So the realm counts only after one call under the
+        new token reaches it (:func:`confirm_realm`), the way Xero's and Sage's
+        come from an API call rather than the URL. Unconfirmed → None, which
+        refuses the link (``no_external_tenant``).
+        """
+        realm = await super().resolve_external_tenant_id(
+            access_token=access_token,
+            token_response=token_response,
+            callback_params=callback_params,
+            erp_settings=erp_settings,
+        )
+        if not realm or not await confirm_realm(access_token, realm, erp_settings):
+            return None
+        return realm
+
     # -- transport ---------------------------------------------------------
 
     def _company_url(self, path: str) -> str:
-        if settings.erp_qbo_api_base:
-            # OPERATOR-controlled override (env, not tenant config) pointing
-            # local dev + e2e at fake-erp; trusted, like erp_d365_api_base.
-            base = settings.erp_qbo_api_base.rstrip("/")
-        elif (self.config.get("environment") or "production") == "sandbox":
-            base = _SANDBOX_BASE
-        else:
-            base = _PRODUCTION_BASE
-        return f"{base}/v3/company/{self.external_tenant_id()}/{path}"
+        return f"{_api_base(self.config)}/v3/company/{self.external_tenant_id()}/{path}"
 
     async def _request(
         self,

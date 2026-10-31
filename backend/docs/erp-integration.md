@@ -2912,8 +2912,8 @@ and calls `await self.access_token()`.
 
 | Route | Auth | Contract |
 |---|---|---|
-| `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan | `200 {"authorize_url"}`; the page navigates the browser to it. `404` unknown provider, `409` no app configured, `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
-| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>`. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant`, `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
+| `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan; called **credentialed** (`credentials: 'include'`) | `200 {"authorize_url"}` plus the HttpOnly nonce cookie `__Host-feoh_erp_oauth_nonce` on the API host (§ Bound to the browser that started it); the page navigates the browser to the URL. `404` unknown provider, `409` no app configured, `409` coded `erp_connect_platform_host` (`params.url` when there is a platform address to offer) when this host cannot carry the cookie — a custom domain, or an `Origin` not same-site with the API; `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
+| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant platform origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>` (the `FEOH_TENANT_URL_TEMPLATE` address, not a vanity one — that is where a connect starts; the vanity URL only when no template is set). Every answer given after the nonce cookie matched clears it; a forged, expired or mismatched state leaves it alone, so a junk-state link cannot break a connect in flight. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `browser_mismatch` (the browser lacks the nonce cookie the state's hash names — checked right after the state is burned, before the provider's answer or the code is looked at), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant` (no company id, or — QuickBooks — a `realmId` the new token cannot reach), `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
 | `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
 | `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
@@ -2923,6 +2923,50 @@ changed by name — never a token) BEFORE anything is saved, through
 `record_auth_audit_or_raise`; a row that cannot be written means nothing is
 linked or cleared. The revoke outcome, known only after the commit, follows as
 `organization.erp_token_revoked`.
+
+**Bound to the browser that started it (login-CSRF).** The callback is
+public and carries no JWT, so a signed single-use `state` alone let a rogue
+tenant admin start a connect, hand the consent URL to someone with access to
+other books, and have the victim's consent link those books to the admin's
+tenant. Now `/authorize` (bearer-authenticated, so only the admin's own
+browser can make it) sets `__Host-feoh_erp_oauth_nonce` — 32 random bytes,
+HttpOnly, `Secure`, `SameSite=Lax`, host-only on the API host, `Path=/` (the
+`__Host-` prefix makes the browser refuse a version a sibling subdomain tries to
+plant, so the value cannot be tossed in by another host on the same site),
+alive for `FEOH_ERP_OAUTH_STATE_TTL_SECONDS` — and the state carries the
+cookie's SHA-256 (`b`), never the value. The callback compares the two in
+constant time and refuses `browser_mismatch` otherwise, writing a best-effort
+`organization.erp_connect_refused` audit row (`{provider, reason}`) on the
+starting admin's trail — the evidence of an attempted login-CSRF. One cookie
+slot per browser: two connects started in two tabs within the TTL leave only the
+later one finishable. It is set on the
+bearer request deliberately: any later bearer-less hop (a "start" redirect)
+would be a transferable link again.
+
+Two consequences of where the cookie lives:
+
+- **The app and the API must be same-site** (`acme.feohledger.com` and
+  `api.feohledger.com`), because a browser refuses a `SameSite=Lax` cookie set
+  by a cross-site fetch. `/authorize` checks this up front from `Origin`
+  against the domains in `FEOH_CORS_PRODUCTION_DOMAIN` and answers the coded
+  409 rather than letting a connect fail after the consent screen. The check is
+  UX; the callback's comparison is the control, and fails closed regardless.
+- **A white-label custom domain cannot start a connect.** Its `/api` is a
+  same-origin proxy, so a cookie set there never reaches the callback on
+  `FEOH_API_PUBLIC_URL`. `/authorize` sees a `Host` that is not the API's and
+  refuses with `params.url` = the tenant's `<slug>.<app domain>` settings page;
+  the panel shows it as a link. The callback sends the admin back there too.
+
+**Local dev is the one exception to `SameSite=Lax`.** `acme.localhost` and
+`localhost` are different sites, and Chromium drops a Lax cookie set by that
+cross-site fetch (measured). When `FEOH_API_PUBLIC_URL` is a loopback host the
+cookie is `SameSite=None; Secure` instead — browsers accept `Secure` from
+`http://localhost` — so the Connect button works on a laptop. Firefox and
+Safari partition or block such third-party cookies, so test a local connect in
+Chromium (Playwright's `page.request` and Chromium both carry it). No deployed
+API can take this branch: it needs both a loopback `FEOH_API_PUBLIC_URL` and a
+non-deployed `FEOH_ENVIRONMENT`, so a misconfigured deployment keeps `Lax` and
+fails closed at the callback.
 
 The callback's query (`code`, `state`, `realmId`) never reaches the uvicorn
 access log: `app/utils/access_log.py` strips the query of every path in
@@ -2967,13 +3011,31 @@ tenant lookups (no stored connection to refresh yet), pinned by
 end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
 
 **Per-provider hooks on the spec.** The company id comes from
-`external_tenant_id_param` (a callback query parameter: QBO `realmId`), from
+`external_tenant_id_param` (a callback query parameter: QBO `realmId` — which
+nothing signs, so QuickBooks overrides the resolver to confirm it, below), from
 `external_tenant_id_token_field` (a token-response field: Blackbaud
 `environment_id`), or from an override of
 `OAuthErpAdapter.resolve_external_tenant_id` (Xero `GET /connections`, Sage's
 business lookup). `extra_token_headers(erp_settings)` adds headers to every
 token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
-or `body`. `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
+or `body`. The resolver also receives the org's saved `settings.erp`
+(`erp_settings`), which QuickBooks reads for its `environment`.
+
+**QuickBooks' realm is confirmed, not taken from the URL.** A tenant admin
+could consent to their own company while naming another company's `realmId`,
+which would then read `already_linked` for its real owner (squatting — the
+token only ever reaches the consenting company). So
+`QuickBooksOnlineAdapter.resolve_external_tenant_id` makes one call under the
+new token, `GET /v3/company/{realmId}/companyinfo/{realmId}`
+(`quickbooks_online.confirm_realm`, sandbox or production host by the saved
+`environment`, or `FEOH_ERP_QBO_API_BASE`), and links the realm only on a 200
+carrying a `CompanyInfo` object. Anything else — Intuit's 403 Fault 3100 for
+another company, a 401, an outage, a malformed realm (only
+`[A-Za-z0-9-]{1,64}` reaches a URL) — refuses with `no_external_tenant`.
+fake-erp answers it the same way: `companyinfo` for any realm but its own is
+the 403, so `tests-e2e/erp/quickbooks-online.spec.ts` drives the refusal.
+
+`revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
 which documents that) instead of RFC 7009's form body; sent a form, Intuit may
 refuse it, and Disconnect would then leave the grant live behind a
 `revoked: false` the user never sees. **Which providers revoke:** QuickBooks

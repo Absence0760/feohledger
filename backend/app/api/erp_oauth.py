@@ -4,17 +4,21 @@ QuickBooks Online (and Xero / Sage Accounting once their adapters land) need
 the customer's admin to consent in the provider's UI. The flow:
 
 1. The settings page calls ``GET /api/organization/erp/oauth/{provider}/authorize``
-   (admin, plan-gated) and navigates the browser to the ``authorize_url`` it
-   returns.
+   (admin, plan-gated, credentialed) and navigates the browser to the
+   ``authorize_url`` it returns. The response also sets the HttpOnly nonce
+   cookie that binds the connect to this browser (``erp_oauth.BROWSER_COOKIE``;
+   the login-CSRF fix). A host that cannot carry it — a vanity domain — is
+   refused with the platform address to start from instead.
 2. The provider redirects to the ONE fixed redirect URI every app registers,
    ``FEOH_API_PUBLIC_URL`` + ``/api/erp/oauth/callback``. It carries no JWT and
    no tenant header, so the tenant comes from the signed, single-use ``state``
    minted in step 1 (the SAML ACS pattern: tenant from server-minted state,
    never from the URL).
-3. The callback exchanges the code, seals the tokens in ``provider_credentials``
+3. The callback refuses a browser without the nonce cookie
+   (``browser_mismatch``), then exchanges the code, seals the tokens in ``provider_credentials``
    beside the consent metadata in ``settings.erp.oauth``, and 302s the browser
-   back to the tenant's own origin (``tenant_urls.tenant_base_url`` —
-   the same resolver every outbound tenant link uses) at
+   back to the tenant's PLATFORM origin (``tenant_urls.tenant_base_url``
+   without the vanity override — where the connect started) at
    ``/organization?section=erp&erp_connected=<provider>`` or
    ``…&erp_error=<stable_code>``. Never a token, code or provider message.
 
@@ -31,9 +35,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -43,6 +47,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ensure_live_erp_entitled, require_roles
+from app.api.refusals import coded_refusal
+from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.user import User
@@ -51,7 +57,7 @@ from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_o
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.erp_connection_health import expiring_soon
 from app.services.erp_link_realm import connection_realm
-from app.tenant import get_tenant, lock_organization
+from app.tenant import get_tenant, lock_organization, normalize_custom_domain
 from app.utils.tenant_urls import tenant_base_url
 
 logger = logging.getLogger(__name__)
@@ -230,9 +236,87 @@ async def oauth_status(
     )
 
 
+#: ``/authorize`` reached the API on a host whose cookies the callback will not
+#: see (a white-label vanity domain proxying ``/api``), or from a page that is
+#: not same-site with the API, so the browser-binding cookie cannot be set
+#: where the callback reads it. ``params.url``: the tenant's platform address,
+#: where the connect does work — absent when there is none to offer.
+CONNECT_FROM_PLATFORM_HOST = "erp_connect_platform_host"
+
+
+def _platform_settings_url(slug: str) -> str | None:
+    """The tenant's ERP settings page on its PLATFORM host (never a vanity one)."""
+    base = tenant_base_url(slug, None)
+    return f"{base}/organization?section=erp" if base else None
+
+
+def _same_site(host: str, other: str) -> bool:
+    """Are two hostnames one site for cookies, as far as this deployment knows?
+
+    Equal, or both under one domain the operator declared as the platform's
+    (``FEOH_CORS_PRODUCTION_DOMAIN`` — the same list that admits the app's
+    origins to CORS). A public-suffix computation is deliberately not
+    attempted: the declared domain is the operator's statement of what is ours.
+    Loopback hosts (local dev) count as one site here; the cookie's own
+    attributes handle the browser's view of them
+    (``erp_oauth.browser_cookie_attributes``).
+    """
+    if host == other:
+        return True
+    if erp_oauth.is_loopback_host(host) and erp_oauth.is_loopback_host(other):
+        return True
+    for domain in (d.strip().lower() for d in settings.cors_production_domain.split(",")):
+        if domain and all(h == domain or h.endswith(f".{domain}") for h in (host, other)):
+            return True
+    return False
+
+
+def _browser_cookie_refusal(request: Request, slug: str) -> HTTPException | None:
+    """Why this request cannot carry the browser binding, or None when it can.
+
+    UX only — never the control. The control is the callback's cookie
+    comparison, which fails closed whatever this decides: a request this
+    passes whose cookie the browser then drops still ends in
+    ``browser_mismatch``. This exists so an admin is told BEFORE the consent
+    screen rather than after it.
+
+    * The request must reach the API on its public host: a vanity domain
+      proxies ``/api`` same-origin, and a cookie set there is invisible to the
+      callback at ``FEOH_API_PUBLIC_URL``.
+    * A browser ``Origin`` must be same-site with that host, or the browser
+      refuses a ``SameSite=Lax`` cookie from the cross-site response. No
+      ``Origin`` (a non-browser client) is let through.
+    """
+    api_host = (urlsplit(settings.api_public_url).hostname or "").lower()
+    request_host = normalize_custom_domain(request.headers.get("host")) or ""
+    origin = request.headers.get("origin")
+    origin_host = (urlsplit(origin).hostname or "").lower() if origin else None
+    if request_host == api_host and (origin_host is None or _same_site(origin_host, api_host)):
+        return None
+    url = _platform_settings_url(slug)
+    if url and origin_host and (urlsplit(url).hostname or "").lower() == origin_host:
+        # Already on the platform address, and still not same-site with the
+        # API: a deployment shape this flow cannot serve. Pointing the admin at
+        # the page they are on would be a loop.
+        url = None
+    message = (
+        "Connecting an ERP has to start from your FeohLedger address, not a custom domain. "
+        "Open Organization → ERP there and connect again."
+        if url
+        else "Connecting an ERP is not available from this address. Ask your operator to "
+        "serve the API on the same domain as the app."
+    )
+    params = {"url": url} if url else {}
+    return HTTPException(
+        status_code=409, detail=coded_refusal(CONNECT_FROM_PLATFORM_HOST, message, **params)
+    )
+
+
 @router.get("/{provider}/authorize", response_model=AuthorizeResponse)
 async def oauth_authorize(
     provider: str,
+    request: Request,
+    response: Response,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
     db: AsyncSession = Depends(get_control_db),
@@ -241,9 +325,21 @@ async def oauth_authorize(
 
     JSON rather than a 302 because the SPA authenticates with a bearer header a
     top-level navigation can't carry; the page navigates to the URL itself.
+
+    **Bound to this browser.** The response sets the HttpOnly
+    ``erp_oauth.BROWSER_COOKIE`` on the API host and the state carries its
+    hash; the callback refuses a browser without it (``browser_mismatch``).
+    So the SPA calls this with ``credentials: 'include'``, and a consent URL
+    handed to anyone else — the login-CSRF in which a rogue admin gets a victim
+    to consent and links the victim's books to the admin's tenant — links
+    nothing. Only a bearer-authenticated request may set the cookie, which is
+    why it is set here and not on some later bearer-less hop.
     """
     spec = _spec_or_404(provider)
     await ensure_live_erp_entitled(db, org.id, _direct(spec.key))
+    refusal = _browser_cookie_refusal(request, org.slug)
+    if refusal is not None:
+        raise refusal
     resolved = await _resolved_erp_or_none(org, db)
     if resolved is None and _has_own_app(org, spec.key):
         # The tenant saved its own app, whose secret is sealed and unreadable
@@ -263,12 +359,17 @@ async def oauth_authorize(
                 "client id and secret, or ask the operator to configure the platform app."
             ),
         )
+    browser_nonce = erp_oauth.new_browser_nonce()
     state = await erp_oauth.create_state(
         org_id=org.id,
         org_slug=org.slug,
         user_id=user.id,
         provider=spec.key,
         client_source=creds.source,
+        browser_nonce=browser_nonce,
+    )
+    response.set_cookie(
+        erp_oauth.BROWSER_COOKIE, browser_nonce, **erp_oauth.browser_cookie_attributes()
     )
     return AuthorizeResponse(authorize_url=erp_oauth.build_authorize_url(spec, creds, state))
 
@@ -388,16 +489,46 @@ async def _record_or_503(org_id: uuid.UUID, actor_id: uuid.UUID, action: str, de
 # ---------------------------------------------------------------------------
 
 
-def _home(slug: str, org_settings: dict | None, **params: str):
-    """302 to the tenant's settings page, or a plain page when no URL is known."""
-    base = tenant_base_url(slug, org_settings)
+def _clear_browser_cookie(resp):
+    """Spend the nonce cookie: its state has been burned with it.
+
+    Only once the cookie MATCHED. A forged, expired or mismatched state is no
+    evidence the cookie belongs to it, and clearing there would let anyone who
+    lures an admin's browser to the callback with a junk ``state`` break the
+    connect that admin has in flight.
+    """
+    attrs = erp_oauth.browser_cookie_attributes()
+    resp.delete_cookie(
+        erp_oauth.BROWSER_COOKIE,
+        path=attrs["path"],
+        secure=attrs["secure"],
+        httponly=attrs["httponly"],
+        samesite=attrs["samesite"],
+    )
+    return resp
+
+
+def _home(slug: str, org_settings: dict | None, *, spend_cookie: bool = False, **params: str):
+    """302 to the tenant's settings page, or a plain page when no URL is known.
+
+    ``spend_cookie``: clear the nonce cookie (``_clear_browser_cookie``) — set
+    only on the answers given after the cookie matched the state.
+
+    The PLATFORM address first (``<slug>.<app domain>``): a connect can only
+    start there (``_browser_cookie_refusal``), so that is where the admin's
+    session is. A white-label tenant's own host is the fallback only when no
+    platform template is configured.
+    """
+    base = tenant_base_url(slug, None) or tenant_base_url(slug, org_settings)
     if not base:
         outcome = "connected" if "erp_connected" in params else "not connected"
-        return PlainTextResponse(
+        resp = PlainTextResponse(
             f"ERP {outcome}. Return to FeohLedger → Organization → ERP.", status_code=200
         )
-    query = urlencode({"section": "erp", **params})
-    return RedirectResponse(f"{base}/organization?{query}", status_code=302)
+    else:
+        query = urlencode({"section": "erp", **params})
+        resp = RedirectResponse(f"{base}/organization?{query}", status_code=302)
+    return _clear_browser_cookie(resp) if spend_cookie else resp
 
 
 async def _realm_claimed_elsewhere(
@@ -450,8 +581,32 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
     # sync helper would fail. Only the brand block (redirect base) is read.
     home_settings = dict(org.settings or {})
 
+    # Only the browser that started this connect carries the nonce cookie whose
+    # hash the state names. Checked after the state is burned (a mismatched
+    # state is spent, not left for another try) and before anything else — the
+    # provider's answer, the code, the admin's roles — so a browser that did
+    # not start the connect learns nothing more than that.
+    if not erp_oauth.browser_matches(
+        request.cookies.get(erp_oauth.BROWSER_COOKIE), bound["browser_binding"]
+    ):
+        logger.warning("erp_oauth: callback from a browser that did not start it (org %s)", org.id)
+        # Evidence of a possible login-CSRF attempt, on the starting admin's
+        # trail. Best-effort: nothing was linked, so there is nothing for a
+        # missing row to make unaccountable.
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=uuid.UUID(bound["user_id"]),
+            action="organization.erp_connect_refused",
+            entity_id=org.id,
+            entity_type="organization",
+            details={"provider": bound["provider"], "reason": "browser_mismatch"},
+        )
+        return _home(slug, home_settings, erp_error="browser_mismatch")
+
     def fail(code: str):
-        return _home(slug, home_settings, erp_error=code)
+        # From here the cookie has matched, and the state it paired with is
+        # burned: spend it on every answer.
+        return _home(slug, home_settings, spend_cookie=True, erp_error=code)
 
     if params.get("error"):
         # The admin declined consent (or the provider refused the request).
@@ -512,6 +667,7 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
                 access_token=str(token_response["access_token"]),
                 token_response=token_response,
                 callback_params=params,
+                erp_settings=resolved or {},
             )
         except Exception:  # noqa: BLE001 — any lookup failure refuses the connect
             logger.warning("erp_oauth: %s company lookup failed for org %s", spec.key, org.id)
@@ -548,7 +704,7 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
             await db.rollback()
             return fail("already_linked")
 
-    return _home(slug, org.settings, erp_connected=spec.key)
+    return _home(slug, org.settings, spend_cookie=True, erp_connected=spec.key)
 
 
 async def _link(

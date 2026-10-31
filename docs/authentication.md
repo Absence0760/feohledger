@@ -1042,6 +1042,20 @@ contract, defaulting to `true` so a stale caller fails open rather than hiding
 the card for an ordinary member). `frontend/tests-e2e/auth/profile-no-password.spec.ts`
 pins the page, beside `profile-sso-only-step-up.spec.ts` for the org-level case.
 
+## ERP OAuth connections are bound to the browser that started them
+
+Connecting QuickBooks Online, Xero, Sage Accounting or Blackbaud is an OAuth
+authorization-code flow whose callback is public, so it is authenticated by a
+signed single-use `state` — and, since the login-CSRF fix, by the browser too:
+`GET /api/organization/erp/oauth/{provider}/authorize` is a credentialed fetch
+that sets an HttpOnly nonce cookie on the API host, the state carries its
+hash, and the callback refuses (`erp_error=browser_mismatch`) a browser without
+it. A consent link handed to someone else therefore links nothing. The app and
+the API must be same-site, and a custom-domain tenant connects from its
+`<slug>.<app domain>` address. QuickBooks' unsigned `realmId` is confirmed with
+one API call under the new token before it is linked. Full reference:
+`backend/docs/erp-integration.md` § Connecting an OAuth ERP.
+
 ## Frontend Implementation
 
 - Auth state is managed in `src/lib/stores/auth.svelte.ts` (Svelte 5 runes)
