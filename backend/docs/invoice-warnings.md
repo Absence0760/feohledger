@@ -211,8 +211,9 @@ English fallback), its `code` and its `params`. Which code:
   $5000.00"` beside the warning's `"Round amount: 5000.00 ZAR"`. Extraction's
   duplicate exception (`services/extraction.py`) passes its duplicate warning's
   code the same way.
-- **A sentence no warning states** gets an `exception.*` code — today
-  `exception.missing_data_after_extraction`.
+- **A sentence no warning states** gets an `exception.*` code —
+  `exception.missing_data_after_extraction`, and the ERP reconciliation
+  sentences below.
 - **A composite** — one `price_variance` exception covering every flagged line,
   one `contract_noncompliant` exception covering every breached term — is
   built by `exception_findings(frame, findings)`. A single finding needs no
@@ -243,22 +244,56 @@ row (summary and findings one per line in its `title`) and the summary plus a
 findings list in the resolve dialog; mobile's exception detail screen does the
 same.
 
+### ERP reconciliation sentences (`exception.erp_*`)
+
+Every reconciliation row `services/erp_status_sync` and `api/erp_webhook` open
+(decisions §319) carries an `exception.erp_*` code (`ERP_RECONCILIATION_SPECS`):
+the ERP reported a payment FeohLedger could not record (one code per
+`external_payment` refusal, `erp_paid_unrecorded_<reason>`, `other` for a
+refusal the table does not name), the ERP later withdrew it, the automatic
+re-attempt failed, FeohLedger's own payment settled short, a bill voided after
+it was sent on, and the QuickBooks status sync-back / pre-dispatch check cases
+(credit settlement, paid while scheduled, paid twice, part-paid outside, bill
+deleted, a bill this connection cannot read, the payment stopped by bill state,
+an ERP-reported payment voided here).
+
+- **The ERP's product name is a `text` param, and its absence is a code.** A
+  sentence that opens with the ERP is declared twice: `{erp} reports …` with
+  `erp` = `erp_status_sync.erp_product_name` (a proper noun, never translated),
+  and an `_unnamed` twin that says "Your ERP" for an adapter with no product
+  name — a word, so its own code, never a spliced param. Build them through
+  `erp_status_sync.erp_finding(name, erp_type)`, which picks the twin.
+- **No ids in the sentence.** The bill, event, payment and refusal code are
+  machine detail on `exceptions.erp_report`; the sync-back sentences that used
+  to end in `(provider=…, bill=…, event=…)` now carry them there instead.
+- **A refreshed row moves all three together** (`_set_finding`): a later report,
+  a withdrawal or a failed re-attempt rewrites `description`,
+  `description_code` and `description_params` as one, so a row can never pair
+  new English with an old code.
+- `open_erp_reconciliation_exception` takes the finding as `finding=`; a plain
+  `description=` (exactly one of the two) remains only for the QuickBooks
+  write-back failures below.
+
+`test_every_erp_code_is_reachable` drives the builders, since the
+refusal-chosen codes and the `_unnamed` twins have no literal call site for the
+generic call-site scan to find.
+
 ## What is NOT localized
 
 Exceptions raised outside `_ensure_exception` (and outside extraction's
-duplicate path) still call `exception_service.create_exception` with composed
+duplicate path and the ERP reconciliation paths above) still call `exception_service.create_exception` with composed
 English and no code, so the queue renders them raw:
 
 | Site | Exception type | Description |
 |------|----------------|-------------|
 | `services/extraction.py` | `extraction_failed` | `Extraction failed: <error>` |
-| `api/erp_webhook.py` | `erp_reconciliation` | composed by the caller from the ERP's status report |
 | `api/positive_pay.py` | `fraud_flag` | `Positive Pay return: check <number> <reason>` — also the dedupe key (`description ==`), so keying it must move the dedupe too |
 | `api/vendors.py` (bank change) | `fraud_flag` | `Vendor bank details changed; verify before payment.` |
 | `api/payments.py` | `payment_compliance_hold` | the payment's `failure_reason` |
 | `services/payment_reconciler.py` | `payment_reconciliation` | the aged-out in-flight payment paragraph |
 | `services/payment_settlement_record.py` | `fraud_flag` | `describe_discrepancy(...)` |
 | `services/payment_erp_sync.py` | `erp_reconciliation` | the failed ERP sync-back paragraph |
+| `services/erp_payment_writeback.py` | `erp_reconciliation` | the QuickBooks write-back failure / open-balance / void-failure paragraphs (passed to `open_erp_reconciliation_exception` as `description=`; they carry the adapter's error code, the payment id and a retry path, the same family as the sync-back paragraph above) |
 
 `services/review.py`'s `review_rejected` exception is not on this list on
 purpose: its description is the reviewer's own words, which have no code by

@@ -720,6 +720,193 @@ PO_MATCH_ISSUE_SPECS: tuple[WarningSpec, ...] = (
 #: catalogue finding. Never a template placeholder.
 FINDINGS_PARAM = "findings"
 
+#: The exception type ERP reconciliation sentences are bucketed under. A
+#: ``paid_not_recorded`` row is raised as ``payment_reconciliation`` for a
+#: double-pay refusal, but the bucket is only a label (nothing keys on it).
+ERP_RECONCILIATION_TYPE = "erp_reconciliation"
+
+#: Suffix of the twin of every sentence that names the ERP: the adapter has no
+#: product name (`erp_status_sync.erp_product_name` is None), so the sentence
+#: says "Your ERP" — a word, so its own code, never a spliced param.
+ERP_UNNAMED_SUFFIX = "_unnamed"
+
+#: What stopped FeohLedger recording the ERP's payment, and what the reader does
+#: about it — one clause per ``external_payment`` refusal code (the code minus
+#: its ``external_payment_`` prefix), ``other`` for any code not listed.
+ERP_UNRECORDED_REASONS: dict[str, str] = {
+    "blocking_exception": (
+        "another exception on this invoice is blocking payment. Clear that exception "
+        "and FeohLedger records the payment automatically."
+    ),
+    "in_run": (
+        "the invoice is also in a FeohLedger payment run, so the supplier could be paid "
+        "twice. Take it out of the run or cancel the run, then record the ERP's payment "
+        "from this exception."
+    ),
+    "payment_live": (
+        "FeohLedger has its own payment in progress for this invoice, so the supplier "
+        "could be paid twice. Void that payment if the ERP's payment is the real one, "
+        "then record the ERP's payment from this exception."
+    ),
+    "card_live": (
+        "a virtual card is still live for this invoice, so the supplier could be paid "
+        "twice. Cancel the card, then record the ERP's payment from this exception."
+    ),
+    "credit_conflict": (
+        "an applied credit memo no longer matches this invoice's supplier or currency, "
+        "so the amount owed can't be stated. Correct the credit memo, then record the "
+        "ERP's payment from this exception."
+    ),
+    "nothing_to_pay": (
+        "credit memos already cover the whole invoice, so there is no payment to record. "
+        "Check the bill in the ERP, then resolve this exception."
+    ),
+    "not_payable": (
+        "the invoice is not at a status that can be marked paid. Check the invoice, then "
+        "record the ERP's payment from this exception or resolve it."
+    ),
+    "other": (
+        "FeohLedger refused to record it. Check the invoice, then record the ERP's payment "
+        "from this exception or resolve it."
+    ),
+}
+
+#: Sentences that open with the ERP's product name: bare name → the rest of the
+#: sentence after "<ERP> ". Each becomes two codes (named, ``_unnamed``).
+_ERP_NAMED_SENTENCES: dict[str, str] = {
+    **{
+        f"erp_paid_unrecorded_{reason}": (
+            f"reports this bill paid, but FeohLedger couldn't record that payment because {clause}"
+        )
+        for reason, clause in ERP_UNRECORDED_REASONS.items()
+    },
+    "erp_paid_withdrawn": (
+        "reported this bill paid, but no longer shows it paid. FeohLedger did not record "
+        "that payment. Check the bill in the ERP: if it is still owed, resolve this "
+        "exception and pay it as usual."
+    ),
+    "erp_paid_retry_failed": (
+        "reports this bill paid, but FeohLedger couldn't record that payment automatically. "
+        "Check the details, then record the ERP's payment from this exception."
+    ),
+    "erp_settled_short": (
+        "reports this bill paid, but FeohLedger's own payment for it settled for less than "
+        "AP authorized, so the invoice is held at Payment scheduled. Open the payment and "
+        "either accept the settled amount or void the payment."
+    ),
+    "erp_voided_after_post": (
+        "reports this bill voided or cancelled, but FeohLedger had already sent it on for "
+        "payment, so it was not cancelled here. Check whether a payment is on its way to "
+        "the supplier, and stop or recover it if the bill is really void."
+    ),
+}
+
+_DISPATCH_STOPPED_TAIL = (
+    " It was stopped before any money moved. Confirm what is still owed before paying "
+    "it; if a virtual card was already issued for this invoice, cancel it."
+)
+_UNLINKED_TAIL = (
+    ", so it will not pay it. Confirm in the ERP whether it is still owed, then record "
+    "it as paid outside FeohLedger or re-post it."
+)
+
+#: ERP sentences that do not name the product (QuickBooks status sync-back and
+#: the pre-dispatch bill check, decisions §295). Their machine detail — the
+#: bill, the event, the payment — is in ``exceptions.erp_report``.
+_ERP_UNNAMED_ONLY: dict[str, str] = {
+    "erp_credit_settlement": (
+        "The ERP shows this bill settled, at least in part by a vendor credit applied "
+        "there. FeohLedger will not pay it until someone confirms what is still owed."
+    ),
+    "erp_paid_while_scheduled": (
+        "The ERP shows this bill paid by a payment FeohLedger did not make, while a "
+        "FeohLedger payment is scheduled for it. Stop or void one of them before both "
+        "reach the supplier."
+    ),
+    "erp_paid_twice": (
+        "FeohLedger paid this invoice, and the ERP shows the bill also paid by a payment "
+        "FeohLedger did not make — the supplier may have been paid twice. Recover one of "
+        "the payments."
+    ),
+    "erp_partly_paid_outside": (
+        "The ERP shows part of this bill paid or credited outside FeohLedger; a FeohLedger "
+        "payment for the full amount would overpay it. Reconcile what is still owed "
+        "before paying."
+    ),
+    "erp_recorded_payment_withdrawn": (
+        "The ERP reported this bill paid, and FeohLedger recorded that payment, but the "
+        "ERP no longer shows it paid (the payment was deleted or voided there). Confirm "
+        "whether it is still owed."
+    ),
+    "erp_bill_deleted_blocking": (
+        "The bill this invoice was posted as has been deleted or voided in the ERP; "
+        "FeohLedger will not pay it until someone confirms it is still owed."
+    ),
+    "erp_bill_deleted": (
+        "The bill this invoice was posted as has been deleted or voided in the ERP. "
+        "Confirm the books still agree."
+    ),
+    "erp_bill_unlinked_no_document": (
+        "FeohLedger cannot check this invoice's bill in the ERP, because the ERP did not "
+        "say which bill it created when the invoice was posted" + _UNLINKED_TAIL
+    ),
+    "erp_bill_unlinked_no_company": (
+        "FeohLedger cannot check this invoice's bill in the ERP, because the posting did "
+        "not record which ERP company it went to" + _UNLINKED_TAIL
+    ),
+    "erp_bill_unlinked_other_company": (
+        "FeohLedger cannot check this invoice's bill in the ERP, because it was posted to "
+        "a different ERP company than the one now connected" + _UNLINKED_TAIL
+    ),
+    "erp_dispatch_stopped_paid": (
+        "FeohLedger was about to pay this invoice, but the ERP shows its bill already paid."
+        + _DISPATCH_STOPPED_TAIL
+    ),
+    "erp_dispatch_stopped_partially_paid": (
+        "FeohLedger was about to pay this invoice, but the ERP shows its bill partly paid."
+        + _DISPATCH_STOPPED_TAIL
+    ),
+    "erp_dispatch_stopped_deleted": (
+        "FeohLedger was about to pay this invoice, but the ERP shows its bill deleted or "
+        "voided." + _DISPATCH_STOPPED_TAIL
+    ),
+    "erp_dispatch_stopped_unconfirmed": (
+        "FeohLedger was about to pay this invoice, but the ERP could not confirm its bill "
+        "is still open and unpaid." + _DISPATCH_STOPPED_TAIL
+    ),
+    "erp_reported_payment_voided": (
+        "A payment the ERP reported was voided in FeohLedger, but the ERP may still show "
+        "the bill paid. FeohLedger will not pay it again until someone confirms the ERP's "
+        "payment is undone."
+    ),
+}
+
+#: ERP reconciliation descriptions (decisions §319): the sentence an AP user
+#: reads on a row `erp_status_sync` or `api/erp_webhook` opens. Built through
+#: `erp_status_sync.erp_finding` (the named / `_unnamed` pick) or
+#: `exception_finding` for the sentences that never name the product.
+ERP_RECONCILIATION_SPECS: tuple[WarningSpec, ...] = (
+    *(
+        spec
+        for name, rest in _ERP_NAMED_SENTENCES.items()
+        for spec in (
+            WarningSpec(
+                EXCEPTION_PREFIX + name, ERP_RECONCILIATION_TYPE, "{erp} " + rest, {"erp": "text"}
+            ),
+            WarningSpec(
+                EXCEPTION_PREFIX + name + ERP_UNNAMED_SUFFIX,
+                ERP_RECONCILIATION_TYPE,
+                "Your ERP " + rest,
+                {},
+            ),
+        )
+    ),
+    *(
+        WarningSpec(EXCEPTION_PREFIX + name, ERP_RECONCILIATION_TYPE, template, {})
+        for name, template in _ERP_UNNAMED_ONLY.items()
+    ),
+)
+
 #: Exception descriptions no warning states. `type` is the exception type the
 #: description belongs to (`exception_lifecycle.EXCEPTION_TYPES`).
 #:
@@ -751,6 +938,7 @@ EXCEPTION_DESCRIPTION_SPECS: tuple[WarningSpec, ...] = (
         "other {# contract-compliance findings}}",
         {"count": "count"},
     ),
+    *ERP_RECONCILIATION_SPECS,
 )
 
 #: Every sentence the catalogue declares, in generation order.

@@ -296,7 +296,12 @@ refusal codes) and the machine facts in `exceptions.erp_report` (migration
 ERP type, document id and event id, plus per kind the payment facts, the
 settling payment and shortfall, or the ERP status. The ERP's product name in
 those sentences comes from `erp_status_sync.erp_product_name` ("Your ERP" when
-an adapter has none).
+an adapter has none). Every one of those sentences — and the QuickBooks status
+sync-back and pre-dispatch bill-check sentences, whose bill / event / payment
+ids now ride `erp_report` too (`kind` `bill_state` / `dispatch_stopped` /
+`bill_unlinked` / `erp_payment_voided`) — is an `exception.erp_*` code in
+`invoice_warning_catalog`, so each client renders it in the reader's language
+(`invoice-warnings.md` § ERP reconciliation sentences).
 
 **Dedup key is `event_id` only — no fallback to `erp_document_id` /
 `correlation_id`.** Both of those are constant for an invoice's entire

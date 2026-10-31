@@ -57,6 +57,11 @@ from app.models.payment import Payment
 from app.models.workflow import WorkflowInstance
 from app.services.erp_adapters.base import ErpAdapter, ErpBillReport, ErpBillState
 from app.services.exception_service import create_exception
+from app.services.invoice_warning_catalog import (
+    ERP_UNNAMED_SUFFIX,
+    ERP_UNRECORDED_REASONS,
+    exception_finding,
+)
 from app.services.workflow_engine import get_invoice_for_update, transition_invoice
 from app.utils.dates import utc_today
 
@@ -170,64 +175,44 @@ def erp_product_name(erp_type: str | None) -> str | None:
     return _ERP_DISPLAY_NAMES.get((erp_type or "").strip().lower())
 
 
-def erp_display_name(erp_type: str | None) -> str:
-    """The ERP's name for an English sentence an AP user reads."""
-    return erp_product_name(erp_type) or "Your ERP"
+def erp_finding(name: str, erp_type: str | None, /, **params: object) -> dict:
+    """A catalogue finding for an ERP sentence that opens with the ERP's name.
+
+    ``name`` is the bare catalogue name (``"erp_settled_short"``). With a product
+    name the ``{erp}`` code is used; without one its ``_unnamed`` twin, which
+    says "Your ERP" — a word, so a code of its own, never a spliced param
+    (``invoice_warning_catalog.ERP_UNNAMED_SUFFIX``).
+    """
+    product = erp_product_name(erp_type)
+    if product is None:
+        return exception_finding(name + ERP_UNNAMED_SUFFIX, **params)
+    return exception_finding(name, erp=product, **params)
 
 
-#: What stopped FeohLedger recording the ERP's payment, and what the reader does
-#: about it — one clause per ``external_payment`` refusal code. A code missing
-#: here falls back to the generic clause.
-_UNRECORDED_REASONS: dict[str, str] = {
-    "external_payment_blocking_exception": (
-        "another exception on this invoice is blocking payment. Clear that exception "
-        "and FeohLedger records the payment automatically."
-    ),
-    "external_payment_in_run": (
-        "the invoice is also in a FeohLedger payment run, so the supplier could be paid "
-        "twice. Take it out of the run or cancel the run, then record the ERP's payment "
-        "from this exception."
-    ),
-    "external_payment_payment_live": (
-        "FeohLedger has its own payment in progress for this invoice, so the supplier "
-        "could be paid twice. Void that payment if the ERP's payment is the real one, "
-        "then record the ERP's payment from this exception."
-    ),
-    "external_payment_card_live": (
-        "a virtual card is still live for this invoice, so the supplier could be paid "
-        "twice. Cancel the card, then record the ERP's payment from this exception."
-    ),
-    "external_payment_credit_conflict": (
-        "an applied credit memo no longer matches this invoice's supplier or currency, "
-        "so the amount owed can't be stated. Correct the credit memo, then record the "
-        "ERP's payment from this exception."
-    ),
-    "external_payment_nothing_to_pay": (
-        "credit memos already cover the whole invoice, so there is no payment to record. "
-        "Check the bill in the ERP, then resolve this exception."
-    ),
-    "external_payment_not_payable": (
-        "the invoice is not at a status that can be marked paid. Check the invoice, then "
-        "record the ERP's payment from this exception or resolve it."
-    ),
-}
-_UNRECORDED_FALLBACK = (
-    "FeohLedger refused to record it. Check the invoice, then record the ERP's payment "
-    "from this exception or resolve it."
-)
+_REFUSAL_PREFIX = "external_payment_"
 
 
-def unrecorded_payment_description(erp_type: str | None, refusal_code: str) -> str:
+def unrecorded_payment_finding(erp_type: str | None, refusal_code: str) -> dict:
     """The sentence an AP user reads on a ``paid_not_recorded`` exception.
 
     What happened and what to do — no API path, no ids, no refusal code: those
-    are machine detail and live in ``Exception.erp_report``.
+    are machine detail and live in ``Exception.erp_report``. One catalogue code
+    per refusal (``ERP_UNRECORDED_REASONS``); an unlisted refusal reads the
+    generic ``other`` clause.
     """
-    reason = _UNRECORDED_REASONS.get(refusal_code, _UNRECORDED_FALLBACK)
-    return (
-        f"{erp_display_name(erp_type)} reports this bill paid, but FeohLedger couldn't "
-        f"record that payment because {reason}"
-    )
+    reason = refusal_code.removeprefix(_REFUSAL_PREFIX)
+    if not refusal_code.startswith(_REFUSAL_PREFIX) or reason not in ERP_UNRECORDED_REASONS:
+        reason = "other"
+    return erp_finding(f"erp_paid_unrecorded_{reason}", erp_type)
+
+
+def _set_finding(row: APException, finding: dict) -> None:
+    """Restate a live row in ``finding``'s words: the English fallback and the
+    code + params a client localizes on move together, never one without the
+    other."""
+    row.description = finding["message"]
+    row.description_code = finding.get("code")
+    row.description_params = finding.get("params")
 
 
 async def open_erp_reconciliation_exception(
@@ -235,7 +220,8 @@ async def open_erp_reconciliation_exception(
     invoice: Invoice,
     *,
     org_id,
-    description: str,
+    finding: dict | None = None,
+    description: str | None = None,
     exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
     erp_report: dict | None = None,
 ) -> bool:
@@ -249,16 +235,29 @@ async def open_erp_reconciliation_exception(
     A ``paid_not_recorded`` report goes through :func:`_keep_erp_paid_report`
     instead, which keeps at most ONE live such row per invoice and refreshes it.
 
-    ``description`` is the sentence for a person and carries nothing from the
-    ERP's payload, which may include vendor bank / tax / address fields.
-    ``erp_report`` is the PII-free machine detail, as data (decisions §319).
+    ``finding`` is the sentence for a person, as an ``invoice_warning_catalog``
+    finding (``erp_finding`` / ``exception_finding``): its English is stored as
+    ``description`` and its code + params let each client render it in the
+    reader's language. It carries nothing from the ERP's payload, which may
+    include vendor bank / tax / address fields. ``erp_report`` is the PII-free
+    machine detail, as data (decisions §319).
+
+    ``description`` (plain English, no code) remains only for the QuickBooks
+    write-back's sync-failure sentences (``erp_payment_writeback``), which carry
+    machine codes like the other sync-back failures and are not catalogued yet
+    (``backend/docs/invoice-warnings.md`` § What is NOT localized). Pass exactly
+    one of the two.
     """
+    if (finding is None) == (description is None):
+        raise TypeError("pass exactly one of `finding` or `description`")
+    if finding is None:
+        finding = {"message": description, "code": None, "params": None}
     if (erp_report or {}).get("kind") == ERP_REPORT_PAID_NOT_RECORDED:
         return await _keep_erp_paid_report(
             db,
             invoice,
             org_id=org_id,
-            description=description,
+            finding=finding,
             exception_type=exception_type,
             erp_report=erp_report,
         )
@@ -268,7 +267,7 @@ async def open_erp_reconciliation_exception(
         db,
         invoice,
         org_id=org_id,
-        description=description,
+        finding=finding,
         exception_type=exception_type,
         erp_report=erp_report,
     )
@@ -315,7 +314,7 @@ async def _keep_erp_paid_report(
     invoice: Invoice,
     *,
     org_id,
-    description: str,
+    finding: dict,
     exception_type: str,
     erp_report: dict,
 ) -> bool:
@@ -345,7 +344,7 @@ async def _keep_erp_paid_report(
         row = blocking[0]
         row.erp_report = _merged_report(row.erp_report, erp_report, keep_refusal=not new_blocking)
         if new_blocking:
-            row.description = description
+            _set_finding(row, finding)
         await _supersede(db, invoice, others)
         return False
     if new_blocking and not await _live_of_type(db, invoice.id, exception_type):
@@ -354,7 +353,7 @@ async def _keep_erp_paid_report(
             db,
             invoice,
             org_id=org_id,
-            description=description,
+            finding=finding,
             exception_type=exception_type,
             erp_report=erp_report,
         )
@@ -362,7 +361,7 @@ async def _keep_erp_paid_report(
     if others:
         row = others[0]
         row.erp_report = _merged_report(row.erp_report, erp_report, keep_refusal=False)
-        row.description = description
+        _set_finding(row, finding)
         await _supersede(db, invoice, others[1:])
         return False
     # The facts ride a row of their own, never swallowed by the per-type dedupe
@@ -373,7 +372,7 @@ async def _keep_erp_paid_report(
         db,
         invoice,
         org_id=org_id,
-        description=description,
+        finding=finding,
         exception_type=ERP_RECONCILIATION_EXCEPTION_TYPE,
         erp_report=erp_report,
     )
@@ -407,7 +406,7 @@ async def _create_reconciliation(
     invoice: Invoice,
     *,
     org_id,
-    description: str,
+    finding: dict,
     exception_type: str,
     erp_report: dict | None,
 ) -> None:
@@ -415,7 +414,9 @@ async def _create_reconciliation(
         db,
         exception_type=exception_type,
         severity="error",
-        description=description,
+        description=finding["message"],
+        description_code=finding.get("code"),
+        description_params=finding.get("params"),
         status="open",
         organization_id=org_id,
         invoice=invoice,
@@ -514,7 +515,7 @@ async def record_erp_reported_payment(
                 if double_pay
                 else ERP_RECONCILIATION_EXCEPTION_TYPE
             ),
-            description=unrecorded_payment_description(erp_type, exc.refusal.code),
+            finding=unrecorded_payment_finding(erp_type, exc.refusal.code),
             erp_report={
                 "kind": ERP_REPORT_PAID_NOT_RECORDED,
                 "erp_type": erp_type,
@@ -643,11 +644,7 @@ async def withdraw_erp_paid_reports(
             "withdrawn_as": erp_state,
             "withdrawn_at": datetime.now(UTC).isoformat(),
         }
-        row.description = (
-            f"{erp_display_name(erp_type)} reported this bill paid, but no longer shows it "
-            "paid. FeohLedger did not record that payment. Check the bill in the ERP: if it "
-            "is still owed, resolve this exception and pay it as usual."
-        )
+        _set_finding(row, erp_finding("erp_paid_withdrawn", erp_type))
     return len(rows)
 
 
@@ -753,10 +750,9 @@ async def _mark_retry_failed(db: AsyncSession, invoice_id: uuid.UUID) -> None:
                 **(row.erp_report or {}),
                 "retry_failed_at": datetime.now(UTC).isoformat(),
             }
-            row.description = (
-                f"{erp_display_name((row.erp_report or {}).get('erp_type'))} reports this bill "
-                "paid, but FeohLedger couldn't record that payment automatically. Check the "
-                "details, then record the ERP's payment from this exception."
+            _set_finding(
+                row,
+                erp_finding("erp_paid_retry_failed", (row.erp_report or {}).get("erp_type")),
             )
     except Exception:  # noqa: BLE001 — best-effort annotation of an already-logged failure
         logger.exception(
@@ -845,9 +841,28 @@ async def _matching_invoice_id(
     return rows[0][0] if len(rows) == 1 else None
 
 
-def _describe(report: ErpBillReport, provider: str, event_id: str | None) -> str:
-    source = event_id or "reconciliation-sweep"
-    return f"(provider={provider}, bill={report.bill_id}, event={source})"
+#: ``erp_report["kind"]`` of a row status sync-back opened from a bill report
+#: (``apply_bill_report``), of one the pre-dispatch check opened
+#: (``check_erp_bill_before_dispatch``), of one for a bill this connection
+#: cannot read, and of one a void of an ERP-reported payment opened. Machine
+#: detail only — what the row asks is in its description.
+ERP_REPORT_BILL_STATE = "bill_state"
+ERP_REPORT_DISPATCH_STOPPED = "dispatch_stopped"
+ERP_REPORT_BILL_UNLINKED = "bill_unlinked"
+ERP_REPORT_PAYMENT_VOIDED = "erp_payment_voided"
+
+
+def _bill_report_detail(report: ErpBillReport, provider: str, event_id: str | None) -> dict:
+    """What used to ride the sentence as ``(provider=…, bill=…, event=…)``, as
+    data. ``event_id`` None means the reconciliation sweep read it."""
+    return {
+        "kind": ERP_REPORT_BILL_STATE,
+        "erp_type": provider,
+        "erp_document_id": report.bill_id,
+        "event_id": str(event_id) if event_id else None,
+        "source": "webhook" if event_id else "reconciliation_sweep",
+        "bill_state": report.state.value,
+    }
 
 
 async def apply_bill_report(
@@ -892,7 +907,7 @@ async def apply_bill_report(
         return SyncOutcome("unmatched")
     invoice = await get_invoice_for_update(db, invoice_id)
     status = invoice.status
-    where = _describe(report, erp_type, event_id)
+    detail = _bill_report_detail(report, erp_type, event_id)
     action = "unchanged"
 
     if report.state in (ErpBillState.open, ErpBillState.partially_paid, ErpBillState.deleted):
@@ -914,11 +929,8 @@ async def apply_bill_report(
                 invoice,
                 org_id=org.id,
                 exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
-                description=(
-                    "The ERP shows this bill settled, at least in part by a vendor credit "
-                    "applied there. FeohLedger will not pay it until someone confirms what "
-                    f"is still owed {where}."
-                ),
+                finding=exception_finding("erp_credit_settlement"),
+                erp_report=detail,
             )
             action = "credit_settlement_flagged" if opened else action
         elif status in ERP_PAID_RECORDABLE:
@@ -939,11 +951,8 @@ async def apply_bill_report(
                 invoice,
                 org_id=org.id,
                 exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
-                description=(
-                    "The ERP shows this bill paid by a payment FeohLedger did not make, "
-                    "while a FeohLedger payment is scheduled for it. Stop or void one of "
-                    f"them before both reach the supplier {where}."
-                ),
+                finding=exception_finding("erp_paid_while_scheduled"),
+                erp_report=detail,
             )
             action = "double_payment_flagged" if opened else action
         elif status == InvoiceStatus.paid and await _paid_through_feohledger(db, invoice.id):
@@ -955,11 +964,8 @@ async def apply_bill_report(
                 db,
                 invoice,
                 org_id=org.id,
-                description=(
-                    "FeohLedger paid this invoice, and the ERP shows the bill also paid by a "
-                    "payment FeohLedger did not make — the supplier may have been paid twice. "
-                    f"Recover one of the payments {where}."
-                ),
+                finding=exception_finding("erp_paid_twice"),
+                erp_report=detail,
             )
             action = "double_payment_flagged" if opened else action
     elif report.state is ErpBillState.partially_paid and report.reduced_outside:
@@ -969,11 +975,8 @@ async def apply_bill_report(
                 invoice,
                 org_id=org.id,
                 exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
-                description=(
-                    "The ERP shows part of this bill paid or credited outside FeohLedger; "
-                    "a FeohLedger payment for the full amount would overpay it. "
-                    f"Reconcile what is still owed before paying {where}."
-                ),
+                finding=exception_finding("erp_partly_paid_outside"),
+                erp_report=detail,
             )
             action = "partial_payment_flagged" if opened else action
     elif report.state is ErpBillState.open and status == InvoiceStatus.paid:
@@ -982,11 +985,8 @@ async def apply_bill_report(
                 db,
                 invoice,
                 org_id=org.id,
-                description=(
-                    "The ERP reported this bill paid, and FeohLedger recorded that payment, "
-                    "but the ERP no longer shows it paid (the payment was deleted or "
-                    f"voided there). Confirm whether it is still owed {where}."
-                ),
+                finding=exception_finding("erp_recorded_payment_withdrawn"),
+                erp_report=detail,
             )
             action = "unpaid_flagged" if opened else action
     elif report.state is ErpBillState.deleted:
@@ -1000,16 +1000,10 @@ async def apply_bill_report(
                 if blocking
                 else ERP_RECONCILIATION_EXCEPTION_TYPE
             ),
-            description=(
-                "The bill this invoice was posted as has been deleted or voided in the ERP"
-                + (
-                    "; FeohLedger will not pay it until someone confirms it is still owed "
-                    if blocking
-                    else ". Confirm the books still agree "
-                )
-                + where
-                + "."
+            finding=exception_finding(
+                "erp_bill_deleted_blocking" if blocking else "erp_bill_deleted"
             ),
+            erp_report=detail,
         )
         action = "deleted_flagged" if opened else action
 
@@ -1170,11 +1164,13 @@ async def erp_bill_dispatch_refusal(
             db,
             invoice,
             org_id=org.id,
-            description=(
-                "FeohLedger cannot check this invoice's bill in the ERP under the current "
-                f"connection ({unlinked}), so it will not pay it. Confirm in the ERP whether "
-                "it is still owed, then record it as paid outside FeohLedger or re-post it."
-            ),
+            finding=exception_finding(f"erp_bill_unlinked_{unlinked}"),
+            erp_report={
+                "kind": ERP_REPORT_BILL_UNLINKED,
+                "erp_type": erp_config.get("type"),
+                "erp_document_id": bill_id,
+                "unlinked": unlinked,
+            },
         )
         return f"{ERP_BILL_UNLINKED}:{unlinked}"
     adapter = _adapter_or_none(erp_config)
@@ -1207,12 +1203,22 @@ async def erp_bill_dispatch_refusal(
         invoice,
         org_id=org.id,
         exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
-        description=(
-            f"FeohLedger was about to pay this invoice, but the ERP shows its bill "
-            f"{report.state.value} (bill={bill_id}). It was stopped before any money moved "
-            f"({subject}). Confirm what is still owed before paying it; if a virtual card was "
-            "already issued for this invoice, cancel it."
+        finding=exception_finding(
+            "erp_dispatch_stopped_"
+            + (
+                report.state.value
+                if report.state
+                in (ErpBillState.paid, ErpBillState.partially_paid, ErpBillState.deleted)
+                else "unconfirmed"
+            )
         ),
+        erp_report={
+            "kind": ERP_REPORT_DISPATCH_STOPPED,
+            "erp_type": erp_config.get("type"),
+            "erp_document_id": bill_id,
+            "bill_state": report.state.value,
+            "payment_id": str(payment.id) if payment is not None else None,
+        },
     )
     return f"{ERP_BILL_NOT_OPEN}:{report.state.value}"
 
@@ -1247,11 +1253,12 @@ async def flag_void_of_erp_reported_payment(
         invoice,
         org_id=org_id,
         exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
-        description=(
-            f"A payment the ERP reported (bill={bill_id}) was voided in FeohLedger, but the "
-            "ERP may still show the bill paid. FeohLedger will not pay it again until "
-            "someone confirms the ERP's payment is undone."
-        ),
+        finding=exception_finding("erp_reported_payment_voided"),
+        erp_report={
+            "kind": ERP_REPORT_PAYMENT_VOIDED,
+            "erp_document_id": bill_id,
+            "payment_id": str(payment.id),
+        },
     )
 
 

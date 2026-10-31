@@ -173,6 +173,18 @@ async def _blocking(realdb, invoice_id: str) -> list[str]:
         )
 
 
+async def _open_row(realdb, invoice_id: str) -> APException:
+    async with realdb.sessionmaker("a")() as s:
+        return (
+            await s.execute(
+                select(APException).where(
+                    APException.invoice_id == uuid.UUID(invoice_id),
+                    APException.status == "open",
+                )
+            )
+        ).scalar_one()
+
+
 async def test_a_bill_paid_in_quickbooks_after_approval_is_not_paid_again(realdb):
     await _connect(realdb)
     invoice_id = await _posted_invoice(realdb, bill_id="501")
@@ -196,6 +208,19 @@ async def test_a_bill_paid_in_quickbooks_after_approval_is_not_paid_again(realdb
     async with realdb.sessionmaker("a")() as s:
         invoice = await s.get(Invoice, uuid.UUID(invoice_id))
     assert invoice.status == InvoiceStatus.posted_in_erp
+    # A catalogued sentence for an AP user; the bill and payment are data
+    # (decisions §319), not spliced into the prose.
+    row = await _open_row(realdb, invoice_id)
+    assert row.description_code == "exception.erp_dispatch_stopped_paid"
+    assert row.description_params == {}
+    assert "501" not in row.description and str(payment.id) not in row.description
+    assert row.erp_report == {
+        "kind": "dispatch_stopped",
+        "erp_type": "quickbooks_online",
+        "erp_document_id": "501",
+        "bill_state": "paid",
+        "payment_id": str(payment.id),
+    }
 
 
 async def test_a_bill_paid_while_an_earlier_item_of_the_same_run_is_sent(realdb, monkeypatch):
@@ -306,6 +331,12 @@ async def test_a_bill_in_another_quickbooks_company_is_held_and_owned(realdb):
     )
     assert qbo.reads == []
     assert await _blocking(realdb, invoice_id) == ["erp_reconciliation"]
+    row = await _open_row(realdb, invoice_id)
+    assert row.description_code == "exception.erp_bill_unlinked_other_company"
+    assert "other_company" not in row.description
+    assert row.erp_report["kind"] == "bill_unlinked"
+    assert row.erp_report["unlinked"] == "other_company"
+    assert row.erp_report["erp_document_id"] == "901"
 
 
 async def test_without_status_sync_there_is_no_live_read(realdb, monkeypatch):
@@ -499,6 +530,8 @@ async def test_a_deleted_bill_blocks(realdb):
         await _execute(realdb, run_id)
     assert (await _payment(realdb, invoice_id)).failure_reason == "erp_bill_not_open:deleted"
     assert await _blocking(realdb, invoice_id) == ["payment_reconciliation"]
+    row = await _open_row(realdb, invoice_id)
+    assert row.description_code == "exception.erp_dispatch_stopped_deleted"
 
 
 async def test_one_bad_bill_does_not_hold_the_rest_of_the_run(realdb):
@@ -561,6 +594,8 @@ async def test_a_push_that_named_no_document_is_held(realdb):
         await _execute(realdb, run_id)
     assert (await _payment(realdb, invoice_id)).failure_reason == "erp_bill_unlinked:no_document"
     assert qbo.reads == []
+    row = await _open_row(realdb, invoice_id)
+    assert row.description_code == "exception.erp_bill_unlinked_no_document"
 
 
 async def test_a_nacha_export_with_an_unreadable_bill_says_retry_and_commits_nothing(realdb):
