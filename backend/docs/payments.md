@@ -1222,7 +1222,9 @@ slot, and the void is its only undo.
 
 The History tab offers Void exactly when the row's `void_refusal` is `null` —
 the same function, so the button and the endpoint cannot disagree
-(`docs/decisions.md` §305; `tests/test_payment_action_verdicts.py`).
+(`docs/decisions.md` §305; `tests/test_payment_action_verdicts.py`). The row's
+**Accept settlement** works the same way (`accept_settlement_refusal`, from
+`payment_controls.settlement_accept_refusal` — see § Settlement verification).
 
 ### A void re-flags the invoice if the vendor's bank details changed since
 
@@ -1474,7 +1476,16 @@ audit row carries the evidence.**
 **Both exits are reachable in the app**, not only over the API. `/payments` →
 History renders what the rail settled beside what AP authorized (a `Settled …`
 sub-line under the amount — the hold was previously invisible), and offers an
-**Accept settlement** row action gated on `payment.execute`. Its confirm dialog
+**Accept settlement** row action exactly when the row's
+`accept_settlement_refusal` is `null`. That verdict is `payment.execute` then
+`payment_controls.settlement_accept_refusal`, the one gate
+`/settlement/accept` raises from: the payment is `completed`
+(`payment_settlement_not_completed`), the recorded settlement does NOT cover the
+invoice (`payment_settlement_covered` — an unreported figure reads covered, so a
+payment no rail reported on is never offered it), and the invoice is still held
+at `payment_scheduled` (`payment_settlement_not_held`). The row used to offer
+the action wherever any figure was reported, and the dialog then fetched the
+invoice to discover whether anything was held. Its confirm dialog
 shows both figures, requires the `reason`, states that accepting declares the
 shortfall final and releases the invoice to `paid`, and — because only the
 server can decide coverage — reads the invoice's own status first so an invoice
@@ -2040,8 +2051,12 @@ money — it only reports money that already moved. 409 when the run has no
 settled payment to sync.
 
 **It is reachable in the app**, not only over the API: `/payments` → Runs
-carries a **Retry ERP sync** row action gated on `payment.execute` (hidden on a
-`draft` / `cancelled` run, which can hold no settled payment), whose confirm
+carries a **Retry ERP sync** row action offered exactly when the row's
+`actions.sync_erp` is `null` — `payment.execute` then
+`payment_controls.run_sync_erp_refusal`, the gate the endpoint raises from (409
+`payment_run_nothing_settled` when the run has no settled ACTIVE payment; the
+page used to restate "not `draft` / `cancelled`", which offered it on a `failed`
+or `executing` run that could only 409), whose confirm
 names the run and says it moves no money, and whose result renders the real
 returned counts — leading with `transitioned`, with an explicit "nothing to
 recover" state when it is zero.
@@ -2223,6 +2238,8 @@ dispatch step:
   re-staging all refuse — so a second file, a cancel-and-restage, or a later
   switch to processor mode can't pay the same suppliers again. A second file for
   an `exported` run needs `regenerate=true` (else 409 `nacha_already_exported`)
+  — and `regenerate=true` on a run with no exported file is refused (409
+  `nacha_nothing_to_regenerate`) rather than quietly exporting a first one —
   and carries the next file-ID modifier (A, B, C… — counted on
   `payment_runs.nacha_export_count`, migration 0106), so the bank's
   duplicate-file check can tell them apart. If the bank rejected the file,
@@ -2251,6 +2268,16 @@ dispatch step:
   Anything else refuses the whole file naming the invoice — never the bank data.
 - Each export writes `payment_run.nacha_exported` with counts, total, SEC code,
   effective date, file-ID modifier and the file's SHA-256 — not the file.
+- **The run-level refusals are one gate**, `payment_controls.run_nacha_export_refusal`,
+  in order: the run's state (`nacha_already_exported`,
+  `nacha_nothing_to_regenerate`, `nacha_run_not_exportable`), record-only,
+  configured, maker-checker (`payment_run_segregation`, `params.step:
+  "nacha_export"`), CFO sign-off, something pending (`nacha_nothing_to_export`). Every
+  one answers with the coded detail. `GET /runs/{id}` ships the same answers as
+  `actions.nacha_export` / `actions.nacha_regenerate` (and the void's
+  `payment_controls.run_nacha_void_refusal` as `actions.nacha_void`), which the
+  run dialog's bank-file panel reads. The per-payment checks above stay in the
+  endpoint, so a `null` verdict can still meet a refusal that names an invoice.
 
 Once the bank has taken the file, `POST /api/payments/runs/{id}/record-outside`
 `{reference, paid_on}` records every pending payment of the `exported` (or
@@ -2262,7 +2289,12 @@ leaves the process at once and a rollback can't recall it), runs the
 per-invoice gates, and refuses `external_payment_amount_changed` if what an
 invoice owes on `paid_on` is no longer the staged figure — booking the staged
 amount over a credit applied since would record both. One refusal refuses the
-whole run, naming the invoice. Locks are taken run → invoices → payments, the
+whole run, naming the invoice. The run-level refusals (status
+`payment_run_not_recordable`, maker-checker with `params.step:
+"record_outside"`, CFO sign-off, `payment_run_nothing_to_record`) are
+`payment_controls.run_record_outside_refusal`, which `GET /runs/{id}` ships as
+`actions.record_outside` for the run dialog's **Record run as paid**; the
+per-invoice ones are not in it. Locks are taken run → invoices → payments, the
 same invoice-before-payment order as the single record.
 
 ### The ERP reports an invoice paid that FeohLedger never paid

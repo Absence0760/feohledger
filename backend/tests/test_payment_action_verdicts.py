@@ -464,3 +464,343 @@ async def test_a_standalone_pending_payment_stays_voidable(realdb):
     assert resp.status_code == 200, resp.text
     async with realdb.sessionmaker(TENANT)() as s:
         assert (await s.get(Payment, pay_id)).status == "voided"
+
+
+# ── Settlement acceptance — the History row's `accept_settlement_refusal` ──
+#
+# The page used to offer "Accept settlement" on every `completed` payment that
+# carried any reported figure, then fetch the invoice to find out whether it
+# was still held. The verdict now runs `settlement_accept_refusal`: completed,
+# NOT already covering the invoice, and the invoice held at `payment_scheduled`.
+
+_SETTLEMENT_SCENARIOS = {
+    # (payment status, settled amount, settled currency, invoice status)
+    "short_and_held": ("completed", "60.00", "USD", InvoiceStatus.payment_scheduled),
+    "uncertain_currency_and_held": ("completed", "90.00", "EUR", InvoiceStatus.payment_scheduled),
+    "covered": ("completed", "100.00", "USD", InvoiceStatus.payment_scheduled),
+    "never_reported": ("completed", None, None, InvoiceStatus.payment_scheduled),
+    "short_but_released": ("completed", "60.00", "USD", InvoiceStatus.paid),
+    "not_completed": ("submitted", "60.00", "USD", InvoiceStatus.payment_scheduled),
+}
+
+
+async def _settled_payment(realdb, pay_status, settled, settled_ccy, invoice_status) -> uuid.UUID:
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _invoice(mk, realdb.info(TENANT).org_id, status=invoice_status)
+    pay_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            Payment(
+                id=pay_id,
+                invoice_id=inv_id,
+                amount=Decimal("100.00"),
+                method="ach",
+                status=pay_status,
+                settled_amount=None if settled is None else Decimal(settled),
+                settled_currency=settled_ccy,
+                correlation_id=uuid.uuid4(),
+            )
+        )
+        await s.commit()
+    return pay_id
+
+
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_settlement_verdict_matches_what_accept_answers(realdb, role):
+    seen: dict[str, str | None] = {}
+    for name, args in _SETTLEMENT_SCENARIOS.items():
+        pay_id = await _settled_payment(realdb, *args)
+        async with realdb.client(key=TENANT, role=role) as c:
+            listing = await c.get("/api/payments", params={"page_size": 100})
+            resp = await c.post(
+                f"/api/payments/{pay_id}/settlement/accept", json={"reason": "parity"}
+            )
+        if listing.status_code == 403:
+            assert resp.status_code == 403, (role, name, resp.text)
+            continue
+        assert listing.status_code == 200, listing.text
+        row = {item["id"]: item for item in listing.json()["items"]}[str(pay_id)]
+        verdict = row["accept_settlement_refusal"]
+        _assert_parity(verdict, resp, (role, name))
+        seen[name] = verdict and verdict["code"]
+
+    if role == "ap_clerk":
+        assert seen == {}
+        return
+    assert seen == {
+        "short_and_held": None,
+        "uncertain_currency_and_held": None,
+        "covered": "payment_settlement_covered",
+        # NULL reads "nothing contradicts the invoice being settled": no
+        # shortfall exists to accept, so the row is not offered the exit.
+        "never_reported": "payment_settlement_covered",
+        "short_but_released": "payment_settlement_not_held",
+        "not_completed": "payment_settlement_not_completed",
+    }, seen
+
+
+# ── Runs list — `actions.sync_erp` ───────────────────────────────────────
+#
+# The Runs tab used to offer "Retry ERP sync" on every run that was not
+# `draft` / `cancelled`; the endpoint refuses any run with no settled leg.
+
+_SYNC_SCENARIOS = {
+    "completed": {"status": "completed", "legs": [("completed", None)]},
+    "partial": {"status": "partial", "legs": [("completed", None), _SAFE]},
+    "failed": {"status": "failed", "legs": [_SAFE]},
+    "executing": {"status": "executing", "legs": [("submitted", None)]},
+    "draft": {"status": "draft", "legs": [("pending", None)]},
+}
+
+
+async def _runs_list_row(realdb, role, run_id):
+    async with realdb.client(key=TENANT, role=role) as c:
+        resp = await c.get("/api/payments/runs/", params={"page_size": 100})
+    if resp.status_code == 403:
+        return None
+    assert resp.status_code == 200, resp.text
+    return {item["id"]: item for item in resp.json()["items"]}[str(run_id)]
+
+
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_sync_erp_verdict_matches_what_sync_erp_answers(realdb, role):
+    seen: dict[str, str | None] = {}
+    for name, kwargs in _SYNC_SCENARIOS.items():
+        run_id = await _retry_run(realdb, initiated_by=uuid.uuid4(), **kwargs)
+        row = await _runs_list_row(realdb, role, run_id)
+        async with realdb.client(key=TENANT, role=role) as c:
+            resp = await c.post(f"/api/payments/runs/{run_id}/sync-erp")
+        if row is None:
+            assert resp.status_code == 403, (role, name, resp.text)
+            continue
+        verdict = row["actions"]["sync_erp"]
+        _assert_parity(verdict, resp, (role, name))
+        seen[name] = verdict and verdict["code"]
+
+    if role in ("admin", "ap_manager", "cfo"):
+        assert seen == {
+            "completed": None,
+            "partial": None,
+            "failed": "payment_run_nothing_settled",
+            "executing": "payment_run_nothing_settled",
+            "draft": "payment_run_nothing_settled",
+        }, seen
+    else:
+        # Reaching the list (`payment.record_external`) is not the right to
+        # re-run the sync-back (`payment.execute`).
+        assert set(seen.values()) <= {"role_not_permitted"}, seen
+
+
+# ── Paying a run outside FeohLedger — `actions.record_outside`,
+#    `nacha_export`, `nacha_regenerate`, `nacha_void` ─────────────────────
+
+ODFI = "021000021"  # a valid ABA
+RDFI = "011000015"  # a valid ABA
+NACHA_CFG = {"company_name": "PyTest Co", "company_id": "1987654321", "odfi_routing": ODFI}
+
+
+async def _bank_run(
+    realdb,
+    *,
+    status="draft",
+    initiated_by=None,
+    requires_cfo=False,
+    cfo_approved=False,
+    leg_status="pending",
+) -> uuid.UUID:
+    """A run whose one leg could genuinely go in a bank file and be recorded:
+    an active vendor with ACH details, an approved USD invoice — so a verdict
+    of `None` is held to a 200, not excused by a per-payment refusal."""
+    from datetime import UTC, datetime
+
+    from app.models.vendor import Vendor
+
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    vendor_id, inv_id, run_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            Vendor(
+                id=vendor_id,
+                organization_id=org_id,
+                name="Verdict Payee Inc",
+                status="active",
+                bank_details={"routing_number": RDFI, "account_number": "55501234"},
+            )
+        )
+        s.add(
+            Invoice(
+                id=inv_id,
+                organization_id=org_id,
+                invoice_number=f"PAV-{uuid.uuid4().hex[:8]}",
+                vendor_name="Verdict Payee Inc",
+                vendor_id=vendor_id,
+                amount=Decimal("100.00"),
+                currency="USD",
+                status=InvoiceStatus.approved,
+                correlation_id=uuid.uuid4(),
+            )
+        )
+        s.add(
+            PaymentRun(
+                id=run_id,
+                organization_id=org_id,
+                status=status,
+                total_amount=Decimal("100.00"),
+                initiated_by=initiated_by,
+                requires_cfo_approval=requires_cfo,
+                cfo_approved_at=datetime.now(UTC) if cfo_approved else None,
+                cfo_approved_by=uuid.uuid4() if cfo_approved else None,
+            )
+        )
+        await s.flush()
+        s.add(
+            Payment(
+                invoice_id=inv_id,
+                payment_run_id=run_id,
+                amount=Decimal("100.00"),
+                method="ach",
+                status=leg_status,
+                correlation_id=uuid.uuid4(),
+            )
+        )
+        await s.commit()
+    return run_id
+
+
+def _outside_scenarios(realdb, role):
+    me = realdb.info(TENANT).users[role]
+    someone = realdb.info(TENANT).users["admin" if role != "admin" else "ap_manager"]
+    return {
+        "draft": {"initiated_by": someone},
+        "draft_created_by_caller": {"initiated_by": me},
+        "needs_cfo": {"initiated_by": someone, "requires_cfo": True},
+        "cfo_signed": {"initiated_by": someone, "requires_cfo": True, "cfo_approved": True},
+        "exported": {"initiated_by": someone, "status": "exported"},
+        "exported_created_by_caller": {"initiated_by": me, "status": "exported"},
+        "cancelled": {"initiated_by": someone, "status": "cancelled"},
+        "completed": {"initiated_by": someone, "status": "completed", "leg_status": "completed"},
+        # A draft whose only leg is gone (failed): nothing left to send.
+        "draft_nothing_left": {"initiated_by": someone, "leg_status": "failed"},
+    }
+
+
+def _assert_bank_parity(verdict, resp, label):
+    """`_assert_parity` for the run's bank-file / record controls. The NACHA
+    export answers with a CODED detail (it always did), so its refusal is
+    compared by code and params; the plain-text ones by sentence."""
+    if verdict is None:
+        assert resp.status_code == 200, (label, resp.text)
+        return
+    assert resp.status_code in (403, 409), (label, verdict, resp.text)
+    detail = resp.json()["detail"]
+    if isinstance(detail, dict):
+        assert detail["code"] == verdict["code"], (label, verdict, detail)
+        assert detail.get("params") == verdict.get("params"), (label, verdict, detail)
+    else:
+        assert detail == verdict["message"], (label, verdict, detail)
+
+
+_OUTSIDE_ACTIONS = ("record_outside", "nacha_export", "nacha_regenerate", "nacha_void")
+
+
+async def _outside_post(c, run_id, action):
+    from app.utils.dates import utc_today
+
+    if action == "record_outside":
+        return await c.post(
+            f"/api/payments/runs/{run_id}/record-outside",
+            json={"reference": "BANK-REF-1", "paid_on": utc_today().isoformat()},
+        )
+    if action == "nacha_void":
+        return await c.post(
+            f"/api/payments/runs/{run_id}/nacha/void", json={"reason": "bank rejected it"}
+        )
+    params = {"regenerate": "true"} if action == "nacha_regenerate" else {}
+    return await c.get(f"/api/payments/runs/{run_id}/nacha", params=params)
+
+
+_OUTSIDE_MODES = ("record_only", "record_only_unconfigured", "processor", "opted_out")
+
+
+@pytest.mark.parametrize("mode", _OUTSIDE_MODES)
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(realdb, role, mode):
+    """`actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}` are
+    `None` exactly when their endpoint accepts, and otherwise carry the refusal
+    it answers with — every role, every run state, on a configured record-only
+    tenant, an unconfigured one, a processor tenant, and with maker-checker
+    opted out. Each action gets its own fresh run: a success changes it."""
+    payments = {
+        "record_only": {"mode": "record_only", "nacha": NACHA_CFG},
+        "record_only_unconfigured": {"mode": "record_only"},
+        "processor": {"provider": "mock", "nacha": NACHA_CFG},
+        "opted_out": {
+            "mode": "record_only",
+            "nacha": NACHA_CFG,
+            "require_run_segregation": False,
+        },
+    }[mode]
+    await _set_payments_settings(realdb, payments)
+    seen: dict[str, set] = {a: set() for a in _OUTSIDE_ACTIONS}
+    for name, kwargs in _outside_scenarios(realdb, role).items():
+        for action in _OUTSIDE_ACTIONS:
+            run_id = await _bank_run(realdb, **kwargs)
+            actions = await _run_verdict(realdb, role, run_id)
+            async with realdb.client(key=TENANT, role=role) as c:
+                resp = await _outside_post(c, run_id, action)
+            if actions is None:
+                assert resp.status_code == 403, (role, mode, name, action, resp.text)
+                continue
+            verdict = actions[action]
+            _assert_bank_parity(verdict, resp, (role, mode, name, action))
+            seen[action].add(verdict and verdict["code"])
+
+    if role == "ap_clerk":
+        return
+    assert seen["nacha_void"] <= {None, "nacha_run_not_exported", "role_not_permitted"}
+    if role == "ap_manager" and mode == "record_only":
+        # The matrix reaches the gates it claims to.
+        assert seen["nacha_export"] == {
+            None,
+            "nacha_already_exported",
+            "nacha_run_not_exportable",
+            "payment_run_segregation",
+            "payment_run_awaiting_cfo",
+            "nacha_nothing_to_export",
+        }, seen["nacha_export"]
+        assert seen["nacha_regenerate"] == {
+            None,
+            "nacha_nothing_to_regenerate",
+            "payment_run_segregation",
+        }, seen["nacha_regenerate"]
+        assert seen["nacha_void"] == {None, "nacha_run_not_exported"}, seen["nacha_void"]
+    if role == "admin":
+        expected_record = {
+            None,
+            "payment_run_not_recordable",
+            "payment_run_awaiting_cfo",
+            "payment_run_nothing_to_record",
+        }
+        if mode != "opted_out":
+            expected_record.add("payment_run_segregation")
+        assert seen["record_outside"] == expected_record, seen["record_outside"]
+        if mode == "record_only_unconfigured":
+            assert "nacha_not_configured" in seen["nacha_export"], seen["nacha_export"]
+        if mode == "processor":
+            assert "nacha_requires_record_only" in seen["nacha_export"], seen["nacha_export"]
+
+
+async def test_regenerate_refuses_a_run_with_no_exported_file(realdb):
+    """`regenerate=true` on a draft used to export a FIRST file under a flag
+    that says "a second one" — a run the bank had rejected (released back to
+    draft) was re-claimed without the reader being told. It is refused, and the
+    run stays a draft."""
+    await _set_payments_settings(realdb, {"mode": "record_only", "nacha": NACHA_CFG})
+    run_id = await _bank_run(realdb, initiated_by=uuid.uuid4())
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.get(f"/api/payments/runs/{run_id}/nacha", params={"regenerate": "true"})
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "nacha_nothing_to_regenerate"
+    async with realdb.sessionmaker(TENANT)() as s:
+        assert (await s.get(PaymentRun, run_id)).status == "draft"

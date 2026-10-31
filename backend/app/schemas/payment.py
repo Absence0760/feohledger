@@ -311,7 +311,9 @@ class PaymentListItem(PaymentResponse):
 
     * ``void_refusal`` — ``POST /api/payments/{id}/void``;
     * ``release_refusal`` / ``dismiss_refusal`` — ``POST
-      /api/payments/{id}/compliance/release`` / ``dismiss``.
+      /api/payments/{id}/compliance/release`` / ``dismiss``;
+    * ``accept_settlement_refusal`` — ``POST
+      /api/payments/{id}/settlement/accept``.
 
     Required, not defaulted: a ``None`` nobody computed would read as
     "allowed".
@@ -320,6 +322,7 @@ class PaymentListItem(PaymentResponse):
     void_refusal: CodedRefusal | None
     release_refusal: CodedRefusal | None
     dismiss_refusal: CodedRefusal | None
+    accept_settlement_refusal: CodedRefusal | None
 
 
 class PaymentListResponse(BaseModel):
@@ -411,8 +414,26 @@ class PaymentRunResponse(BaseModel):
         )
 
 
+class PaymentRunRowActions(BaseModel):
+    """A Runs-tab row's verdict on its own row action, for the caller — the
+    coded refusal ``POST /runs/{id}/sync-erp`` would answer with, or ``None``
+    when it would accept (``payment_controls.run_sync_erp_refusal`` after the
+    endpoint's ``payment.execute``). Required: a ``None`` nobody computed
+    would read as "allowed"."""
+
+    sync_erp: CodedRefusal | None
+
+
+class PaymentRunListItem(PaymentRunResponse):
+    """A Runs-tab row: the run plus the caller's verdict on its row action
+    (issue #575). The run dialog's decisions ride ``GET /runs/{id}``'s
+    ``actions`` instead."""
+
+    actions: PaymentRunRowActions
+
+
 class PaymentRunListResponse(BaseModel):
-    items: list[PaymentRunResponse]
+    items: list[PaymentRunListItem]
     total: int
     page: int
     page_size: int
