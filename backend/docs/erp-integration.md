@@ -1241,6 +1241,10 @@ the three cannot disagree about what is live (decisions §309).
   `params = {claim: "payment" | "virtual_card"}`, plus `possibly_posted: true`
   on the same terms as above. 409 at the doors, `failed` on the first attempt
   at `_call_erp`.
+- **A run staged during a push cannot slip past it.** The run builder locks its
+  invoices `FOR NO KEY UPDATE` before any check (`payment_runs.lock_run_invoices`),
+  which waits on the send's `FOR UPDATE`; whichever commits first, the other
+  sees it and refuses (`payments.md` § The ERP is a third rail).
 - **What the user does:** cancel the run (`POST /api/payments/runs/{id}/cancel`;
   an exported run first needs `/nacha/void`) or void the payment, or cancel the
   card, then send again. A voided, failed or cancelled payment and a cancelled

@@ -536,7 +536,10 @@ wait is now bounded: `_lock_payment_invoice` takes the lock through
 `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS` (default `5000`; `0` = wait forever).
 The direct card mint (`POST /api/cards/generate`) takes the same lock mode under
 the same bound, so a mint and a dispatch on one invoice run one after the other
-(`virtual-cards.md` § The direct mint locks before it checks).
+(`virtual-cards.md` § The direct mint locks before it checks). So does run
+creation (`POST /api/payments/runs` and the copilot's draft-run), through
+`payment_runs.lock_run_invoices`: it locks every invoice in the run, in id
+order, before any check reads one (§ The ERP is a third rail).
 
 - **The bound is scoped to the one locking statement.** It runs in a SAVEPOINT,
   sets `lock_timeout` with `SET LOCAL` semantics and restores the previous value
@@ -555,7 +558,9 @@ the same bound, so a mint and a dispatch on one invoice run one after the other
   - `POST {id}/void`, `POST {id}/settlement/accept` and
     `POST {id}/compliance/release` answer `409` with a detail starting
     `invoice_locked:` and change nothing (the release leaves the payment
-    `pending_compliance`, not `failed`, so the operator just retries).
+    `pending_compliance`, not `failed`, so the operator just retries);
+  - run creation answers the same `409 invoice_locked:` with no run and no
+    payment booked.
 - **What it does not bound.** The *other* invoice writers (send-to-erp,
   approve, `PATCH`, `payment_erp_sync`, `POST /api/payments`) still wait out a
   dispatch holding the lock across a processor call, for as long as that call
@@ -887,7 +892,32 @@ ERP the supported order is push first, then pay: a payment against a
 `posted_in_erp` invoice never meets this gate. See `erp-integration.md`
 § An invoice FeohLedger is already paying refuses the push, and decisions §309.
 
-**Tests:** `tests/test_erp_export_blocking_exceptions.py`.
+**The run and the push serialise on the invoice row.** `/send-to-erp` holds the
+invoice `FOR UPDATE` across its gate and its `approved → sending_to_erp`
+transition. The run builder used to read its invoices with a plain SELECT, so a
+run staged in that window saw `approved` and no live payment and booked a
+`pending` payment beside the push (its payment insert's `FOR KEY SHARE` only
+waited for the send to commit). It now locks the run's invoices
+`FOR NO KEY UPDATE`, in id order, under the bounded wait above
+(`payment_runs.lock_run_invoices`) before any check, and every check after is a
+fresh statement:
+
+- send first: the run waits, then sees `sending_to_erp` and 409s
+  `not approved for payment`;
+- run first: the send waits, then its gate sees the live payment and 409s
+  `payment_blocks_erp_export`.
+
+The ERP side needs no extra predicate in the run builder: an in-flight or
+finished push has already moved the invoice off `PAYABLE_INVOICE_STATUSES` in
+the transaction that passed its gate. The same lock serialises two runs over one
+invoice (the second is refused on the first's live payment, not left to the
+unique index) and a run with a card mint or a dispatch. A copilot replay that
+waited on the lock re-checks `plan_id` after it, so it still returns the first
+request's run instead of 409ing on that run's payments.
+
+**Tests:** `tests/test_erp_export_blocking_exceptions.py` (the concurrency
+cases drive a real `/send-to-erp` and `POST /api/payments/runs` in parallel and
+wait on `pg_stat_activity`, not a sleep).
 
 ### Voiding a settled payment reverses the discount it captured
 

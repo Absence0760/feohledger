@@ -1072,6 +1072,71 @@ def _raise_refusal(
     )
 
 
+async def lock_run_invoices(
+    db: AsyncSession,
+    invoice_ids: Iterable[uuid.UUID],
+    *,
+    scope_entity_id: uuid.UUID | None,
+    timeout_ms: int,
+) -> list[Invoice]:
+    """Lock a run's invoices ``FOR NO KEY UPDATE`` in id order, re-read.
+
+    The run builder used to read its invoices with a plain SELECT, so nothing
+    serialised it with the other writers that decide on the same invoice. The
+    case that mattered (the decisions §309 follow-up): ``/send-to-erp`` holds
+    the invoice ``FOR UPDATE`` while its export gate asks whether FeohLedger is
+    already paying it, then moves it to ``sending_to_erp``. A run staged in that
+    window read the invoice as ``approved``, saw no live payment, and booked a
+    ``pending`` one; its FK insert's ``FOR KEY SHARE`` only waited for the
+    send's commit and then went ahead. The bill was then both pushed to the ERP
+    and in a FeohLedger run, which is the double payment §309 refuses.
+
+    With the lock the two serialise in either order:
+
+    - **send first.** The run waits for the send's commit, then its status check
+      (a fresh statement on the re-read row) sees ``sending_to_erp`` and 409s.
+    - **run first.** The send's ``FOR UPDATE`` waits for the run's commit, then
+      its export gate sees the run's live payment and 409s
+      ``payment_blocks_erp_export``.
+
+    The ERP side needs no extra check here: an in-flight or done push has moved
+    the invoice off ``PAYABLE_INVOICE_STATUSES`` (``sending_to_erp``,
+    ``sent_to_erp``, ``failed``) in the same transaction that passed its gate,
+    so the status check under the lock is that check.
+
+    Lock mode and order are the card mint's (``card_issuance.lock_invoices_for_mint``)
+    and dispatch's (``api/payments._lock_payment_invoice``): ``FOR NO KEY UPDATE``
+    conflicts with every status writer and with each other, so a second run, a
+    mint or a dispatch on the same invoice waits and then sees this run's
+    payment; it leaves the ``FOR KEY SHARE`` an FK insert takes alone. Id order
+    means two runs over overlapping invoices cannot deadlock each other, and the
+    run takes no vendor or payment lock, so there is no cycle with the mint
+    (vendor, then invoice) or with dispatch (payment, then invoice).
+
+    The wait is bounded by ``timeout_ms`` in a savepoint (``utils/db_locks``,
+    decisions §233) and raises ``LockWaitTimeout`` with the caller's
+    transaction intact; nothing has been booked at that point, so the refusal
+    is retry-safe. ``populate_existing`` so a row the session already holds is
+    refreshed rather than handed back stale.
+
+    Narrowed to ``scope_entity_id`` (``tenant.apply_entity_scope``); an
+    out-of-scope id is simply absent, which the caller reports as not found.
+    """
+    from app.utils.db_locks import bounded_lock_wait
+
+    ids = sorted(set(invoice_ids))
+    if not ids:
+        return []
+    async with bounded_lock_wait(db, timeout_ms):
+        rows = await db.execute(
+            apply_entity_scope(select(Invoice).where(Invoice.id.in_(ids)), Invoice, scope_entity_id)
+            .order_by(Invoice.id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+        return list(rows.scalars().all())
+
+
 async def create_payment_run_for_invoices(
     db: AsyncSession,
     *,
@@ -1133,12 +1198,33 @@ async def create_payment_run_for_invoices(
             return existing_result
 
     invoice_ids = [item.invoice_id for item in items]
-    result = await db.execute(
-        apply_entity_scope(
-            select(Invoice).where(Invoice.id.in_(invoice_ids)), Invoice, scope_entity_id
+    # Lock before any check reads the invoice (decisions §309's follow-up):
+    # every gate below is a fresh statement that then sees what a concurrent
+    # `/send-to-erp`, card mint, dispatch or second run committed while this
+    # request waited. See `lock_run_invoices`.
+    from app.api.payments import INVOICE_LOCKED_DETAIL
+    from app.config import settings as app_settings
+    from app.utils.db_locks import LockWaitTimeout
+
+    try:
+        locked = await lock_run_invoices(
+            db,
+            invoice_ids,
+            scope_entity_id=scope_entity_id,
+            timeout_ms=app_settings.payment_invoice_lock_timeout_ms,
         )
-    )
-    invoices = {inv.id: inv for inv in result.scalars().all()}
+    except LockWaitTimeout:
+        raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL) from None
+    invoices = {inv.id: inv for inv in locked}
+
+    # A concurrent request for the same plan may have staged it while this one
+    # waited on the locks. Its payments are now live, so without this re-check
+    # the replay would 409 on the live-payment refusal instead of returning the
+    # run, and the copilot's enact would stop being safe to retry.
+    if plan_id is not None:
+        existing_result = await _existing_run_for_plan(db, plan_id)
+        if existing_result is not None:
+            return existing_result
 
     if len(invoices) != len(invoice_ids):
         raise HTTPException(status_code=404, detail="One or more invoices not found")

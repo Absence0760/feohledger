@@ -33,12 +33,14 @@ Pinned here, on real Postgres over real HTTP:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
@@ -1420,3 +1422,192 @@ async def test_call_erp_refuses_a_live_payment_before_any_adapter_is_built():
             await _call_erp(_Db(), SimpleNamespace(id=inv_id), {"type": "quickbooks_online"})
     factory.assert_not_called()
     assert exc.value.refusal == {"code": PAID_CODE, "params": {"claim": "payment"}}
+
+
+# ---------------------------------------------------------------------------
+# The run builder and the send serialise on the invoice row
+# ---------------------------------------------------------------------------
+#
+# `/send-to-erp` holds the invoice `FOR UPDATE` across its export gate and its
+# `approved → sending_to_erp` transition. The run builder used to read its
+# invoices with a plain SELECT: a run staged inside that window saw `approved`
+# and no live payment, and its payment insert's `FOR KEY SHARE` only waited for
+# the send's commit before booking a `pending` payment beside the push. It now
+# locks the invoices `FOR NO KEY UPDATE` before any check
+# (`payment_runs.lock_run_invoices`), so the two serialise in either order.
+
+
+async def _a_backend_waits_on_a_lock(mk, *, timeout_s: float = 10.0) -> bool:
+    """Poll `pg_stat_activity` until a backend on this tenant DB is queued on a
+    lock: the real signal that the second request reached it, not a sleep."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return True
+        await asyncio.sleep(0.02)
+    return False
+
+
+async def _payments_for(mk, inv_id) -> list:
+    from app.models.payment import Payment
+
+    async with mk() as s:
+        rows = await s.execute(select(Payment).where(Payment.invoice_id == inv_id))
+        return list(rows.scalars())
+
+
+def _run_body(inv_id) -> dict:
+    return {"items": [{"invoice_id": str(inv_id), "method": "ach"}]}
+
+
+async def test_a_run_staged_while_the_send_holds_the_invoice_waits_and_is_refused(
+    realdb, dispatched, monkeypatch
+):
+    """The send has passed its gate (no live payment) and still holds the
+    invoice. The run queues on the lock, then sees `sending_to_erp` and 409s:
+    no payment is booked beside the push."""
+    import app.services.erp_export_gate as gate
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="RACE-SEND-FIRST")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        run: dict = {}
+        original = gate.erp_export_refusal
+
+        async def gate_then_start_the_run(db, invoice_id, *, possibly_posted):
+            refused = await original(db, invoice_id, possibly_posted=possibly_posted)
+            run["task"] = asyncio.create_task(c.post("/api/payments/runs", json=_run_body(inv_id)))
+            run["queued"] = await _a_backend_waits_on_a_lock(mk)
+            return refused
+
+        monkeypatch.setattr(gate, "erp_export_refusal", gate_then_start_the_run)
+        sent = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+        staged = await run["task"]
+
+    assert sent.status_code == 202, sent.text
+    assert dispatched == [inv_id]
+    assert run["queued"], "the run must queue on the invoice lock, not read past it"
+    assert staged.status_code == 409, staged.text
+    assert "not approved for payment" in staged.json()["detail"]
+    assert await _payments_for(mk, inv_id) == []
+    assert await _status(mk, inv_id) == InvoiceStatus.sending_to_erp
+
+
+async def test_a_send_made_while_the_run_holds_the_invoice_waits_and_is_refused(
+    realdb, dispatched, monkeypatch
+):
+    """The other order: the run holds the invoice and has booked its payment.
+    The send queues on the lock, then its gate sees the live payment and 409s
+    `payment_blocks_erp_export`; the invoice stays `approved`."""
+    import app.services.audit_dispatch as audit_dispatch
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="RACE-RUN-FIRST")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        send: dict = {}
+        original = audit_dispatch.dispatch_audit
+
+        async def audit_then_start_the_send(db, **kwargs):
+            result = await original(db, **kwargs)
+            if kwargs.get("action") == "payment_run.created" and "task" not in send:
+                send["task"] = asyncio.create_task(c.post(f"/api/invoices/{inv_id}/send-to-erp"))
+                send["queued"] = await _a_backend_waits_on_a_lock(mk)
+            return result
+
+        monkeypatch.setattr(audit_dispatch, "dispatch_audit", audit_then_start_the_send)
+        staged = await c.post("/api/payments/runs", json=_run_body(inv_id))
+        sent = await send["task"]
+
+    assert staged.status_code == 201, staged.text
+    assert send["queued"], "the send must queue on the invoice lock"
+    _assert_paid_refusal(sent, "payment")
+    assert dispatched == []
+    assert await _status(mk, inv_id) == InvoiceStatus.approved
+    assert [p.status for p in await _payments_for(mk, inv_id)] == ["pending"]
+
+
+async def test_a_run_refuses_invoice_locked_past_the_bound_and_books_nothing(realdb, monkeypatch):
+    """A holder of the invoice lock (a dispatch across its processor call)
+    makes the run wait at most `payment_invoice_lock_timeout_ms`, then refuse by
+    name with nothing booked. Retry-safe: once the holder is gone it stages."""
+    from app.api.payments import INVOICE_LOCKED_DETAIL
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "payment_invoice_lock_timeout_ms", 200)
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="RACE-HELD")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        async with mk() as holder:
+            await holder.execute(
+                text("SELECT id FROM invoices WHERE id = :id FOR NO KEY UPDATE"), {"id": inv_id}
+            )
+            refused = await c.post("/api/payments/runs", json=_run_body(inv_id))
+            await holder.rollback()
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"] == INVOICE_LOCKED_DETAIL
+        assert await _payments_for(mk, inv_id) == []
+
+        staged = await c.post("/api/payments/runs", json=_run_body(inv_id))
+    assert staged.status_code == 201, staged.text
+
+
+async def test_a_plan_replay_that_waited_on_the_lock_returns_the_winners_run(realdb):
+    """The copilot's enact is idempotent on `plan_id`. A replay that queued on
+    the invoice lock behind the first request must return that run, not 409 on
+    the payment the first request just made live."""
+    from app.models.entity import Entity
+    from app.services.payment_runs import PaymentRunItemInput, create_payment_run_for_invoices
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="RACE-PLAN")
+    async with mk() as s:
+        entity_id = (
+            await s.execute(select(Entity.id).where(Entity.is_default.is_(True)).limit(1))
+        ).scalar_one()
+    org = SimpleNamespace(id=info.org_id, name="PyTest", slug=info.slug, settings={})
+    user = SimpleNamespace(id=info.users["admin"], full_name="Plan Tester")
+    plan_id = f"plan-{uuid.uuid4().hex}"
+
+    async def stage(db):
+        return await create_payment_run_for_invoices(
+            db,
+            org=org,
+            org_id=info.org_id,
+            entity_id=entity_id,
+            scope_entity_id=None,
+            user=user,
+            items=[PaymentRunItemInput(invoice_id=inv_id, method="ach")],
+            plan_id=plan_id,
+        )
+
+    async with mk() as first_db, mk() as replay_db:
+        first = await stage(first_db)
+        assert first.created is True
+        first_run_id = first.run.id
+        replay_task = asyncio.create_task(stage(replay_db))
+        assert await _a_backend_waits_on_a_lock(mk), "the replay must queue on the lock"
+        await first_db.commit()
+        replay = await replay_task
+        replay_run_id = replay.run.id
+        await replay_db.rollback()
+
+    assert replay.created is False
+    assert replay_run_id == first_run_id
+    assert len(await _payments_for(mk, inv_id)) == 1
