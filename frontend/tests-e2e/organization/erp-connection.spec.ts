@@ -387,6 +387,49 @@ test.describe('/organization ERP connection', () => {
 		}
 	});
 
+	test('connect from a custom domain says where to connect instead, as a named link', async ({
+		page
+	}) => {
+		// The backend refuses `/authorize` on a host whose cookies its OAuth
+		// callback never sees (a white-label domain proxying `/api`): the
+		// browser-binding cookie could not be set (backend/app/api/erp_oauth.py).
+		await stubStatus(page, () => oauthStatus());
+		const platformUrl = 'https://acme.feohledger.test/organization?section=erp';
+		await page.route(
+			(url) => url.pathname === '/api/organization/erp/oauth/quickbooks_online/authorize',
+			(route) =>
+				route.fulfill({
+					status: 409,
+					json: {
+						detail: {
+							code: 'erp_connect_platform_host',
+							message: 'server English, never shown',
+							params: { url: platformUrl }
+						}
+					}
+				})
+		);
+
+		await page.goto('/organization?section=erp');
+		const card = panel(page);
+		try {
+			await card.getByTestId('erp-provider-select').selectOption('quickbooks_online');
+			await card.getByRole('button', { name: 'Connect to QuickBooks Online' }).click();
+			await expect(card.getByTestId('erp-status')).toHaveText(
+				'Connecting QuickBooks Online has to start from your FeohLedger address, not a custom domain. Open this page there and connect again:'
+			);
+			const link = card.getByRole('link', {
+				name: 'Open Organization → ERP at your FeohLedger address'
+			});
+			await expect(link).toHaveAttribute('href', platformUrl);
+			// Still on this page: nothing navigated to a consent screen.
+			await expect(page).toHaveURL(/section=erp/);
+			await expect(card.getByRole('button', { name: 'Connect to QuickBooks Online' })).toBeEnabled();
+		} finally {
+			await resetErp(page);
+		}
+	});
+
 	test('a choice is never overwritten by the panel finishing its load', async ({ page }) => {
 		// The dropdown must not appear until the stored-secret names are in:
 		// the load seeds the selection from the saved config once they arrive,

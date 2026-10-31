@@ -400,7 +400,9 @@ async function streamChatTurn(
 }
 
 export const api = {
-	get: <T>(path: string) => request<T>(path),
+	// `init.credentials`: send and accept cookies on the API host. Every other
+	// request is bearer-only, so this stays opt-in per call.
+	get: <T>(path: string, init?: Pick<RequestInit, 'credentials'>) => request<T>(path, init),
 	// `headers` is for the few writes that carry a per-request header of their
 	// own — today the `Idempotency-Key` on recording a goods receipt.
 	post: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
