@@ -46,7 +46,11 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
 from app.services.gl_chart import load_invoice_chart
-from app.services.invoice_warnings import refresh_warnings
+from app.services.invoice_warnings import (
+    find_normalized_number_match,
+    normalize_invoice_number,
+    refresh_warnings,
+)
 from app.services.numeric_bounds import MONEY_NUMERIC, fits_numeric
 from app.utils.dates import parse_ambiguous_date
 
@@ -195,14 +199,28 @@ _CORPORATE_CARD_COLUMNS = {
 }
 
 
+#: A row whose invoice number normalizes equal to an invoice already in the
+#: ledger for the same vendor (`INV-1` vs `INV-001`) — reported, not imported.
+#: Params: `invoice_number`, `existing_invoice_id`, `existing_invoice_number`.
+CSV_INVOICE_NUMBER_MATCHES_EXISTING = "csv_invoice_number_matches_existing"
+#: The same, against an invoice of ANOTHER entity (the vendor is shared): the
+#: row is refused but the other entity's invoice is not named (decisions §40).
+#: Params: `invoice_number`.
+CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY = "csv_invoice_number_matches_other_entity"
+#: The same, against an earlier row of the same file that was imported.
+#: Params: `invoice_number`, `other_row`, `other_invoice_number`.
+CSV_INVOICE_NUMBER_MATCHES_ROW = "csv_invoice_number_matches_row"
+
+
 @dataclass
 class ImportRowError:
     row: int
     message: str
     #: A row refused for a reason the client localizes carries that refusal's
-    #: structured body (``code`` + typed params — today only
-    #: ``gl_chart.ChartRefusal.body``), merged into the serialized error beside
-    #: ``row``. ``message`` stays the English fallback either way.
+    #: structured body, merged into the serialized error beside ``row``:
+    #: ``gl_chart.ChartRefusal.body`` (its own shape), or ``{code, params}`` in
+    #: the coded-refusal shape for the near-duplicate number refusals above.
+    #: ``message`` stays the English fallback either way.
     structured: dict | None = None
 
     def to_dict(self) -> dict:
@@ -462,6 +480,10 @@ async def import_invoices_csv(
     # instant the import ran, which is the fact being recorded.
     provenance = build_import_provenance()
     created: list[Invoice] = []
+    # `(vendor_id, normalized number)` → (row, number as written) for every row
+    # this batch has imported, so two rows of ONE file that normalize equal are
+    # caught against each other and the second names the first by row.
+    batch_numbers: dict[tuple[uuid.UUID, str], tuple[int, str]] = {}
     # What the chart of the entity every row lands under says about each GL code
     # in the file, read once for the batch (`services/gl_chart`). A code that
     # exists only in ANOTHER entity's chart would resolve against the wrong one
@@ -568,6 +590,89 @@ async def import_invoices_csv(
             result.skipped += 1
             continue
 
+        # A NEAR duplicate — the same number once formatting is ignored
+        # (`INV-1` vs `INV-001`, `invoice_warnings.normalize_invoice_number`,
+        # decisions §77) — is neither skipped nor imported: it is reported as a
+        # row error naming the invoice it collides with. Skipping it silently
+        # would drop a row that may be a genuinely different invoice; importing
+        # it would land a payable the duplicate gate then flags as a
+        # payment-blocking `duplicate`. Same scope as the exact skip above.
+        normalized = normalize_invoice_number(invoice_number)
+        earlier = batch_numbers.get((vendor.id, normalized)) if normalized else None
+        if earlier is not None:
+            earlier_row, earlier_number = earlier
+            result.errors.append(
+                ImportRowError(
+                    row=i,
+                    message=(
+                        f"invoice_number {invoice_number!r} is the same invoice number as "
+                        f"{earlier_number!r} on row {earlier_row} for this vendor once "
+                        "formatting is ignored; not imported"
+                    ),
+                    structured={
+                        "code": CSV_INVOICE_NUMBER_MATCHES_ROW,
+                        "params": {
+                            "invoice_number": invoice_number,
+                            "other_row": earlier_row,
+                            "other_invoice_number": earlier_number,
+                        },
+                    },
+                )
+            )
+            result.skipped += 1
+            continue
+        match = await find_normalized_number_match(
+            db,
+            invoice_number,
+            and_(Invoice.organization_id == organization_id, Invoice.vendor_id == vendor.id),
+        )
+        if match is not None and (
+            entity_id is not None and match.entity_id is not None and match.entity_id != entity_id
+        ):
+            # The vendor is shared with another entity, which already holds
+            # this payable. Refused all the same, but stated as existence only:
+            # the importer works in its own entity and is not shown another
+            # entity's invoice id or number (decisions §40). A NULL entity on
+            # either side is unstamped, not "another entity".
+            result.errors.append(
+                ImportRowError(
+                    row=i,
+                    message=(
+                        f"invoice_number {invoice_number!r} is the same invoice number as an "
+                        "invoice for this vendor in another entity once formatting is "
+                        "ignored; not imported"
+                    ),
+                    structured={
+                        "code": CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY,
+                        "params": {"invoice_number": invoice_number},
+                    },
+                )
+            )
+            result.skipped += 1
+            continue
+        if match is not None:
+            existing_id, existing_number = match.id, match.invoice_number
+            result.errors.append(
+                ImportRowError(
+                    row=i,
+                    message=(
+                        f"invoice_number {invoice_number!r} is the same invoice number as "
+                        f"existing invoice {existing_number!r} for this vendor once "
+                        "formatting is ignored; not imported"
+                    ),
+                    structured={
+                        "code": CSV_INVOICE_NUMBER_MATCHES_EXISTING,
+                        "params": {
+                            "invoice_number": invoice_number,
+                            "existing_invoice_id": str(existing_id),
+                            "existing_invoice_number": existing_number,
+                        },
+                    },
+                )
+            )
+            result.skipped += 1
+            continue
+
         invoice = Invoice(
             organization_id=organization_id,
             entity_id=entity_id,
@@ -598,6 +703,8 @@ async def import_invoices_csv(
         )
         db.add(invoice)
         created.append(invoice)
+        if normalized:
+            batch_numbers[(vendor.id, normalized)] = (i, invoice_number)
         result.imported += 1
 
     # Flush first — `Invoice.id` AND `Invoice.correlation_id` are both column
