@@ -1812,9 +1812,11 @@ wrong for one of them. The live example is expense reports
 The `/expenses` Reports tab gated BOTH buttons on one manager-only predicate,
 so an over-threshold report 403'd for the `ap_manager` **and** showed the CFO no
 Approve button at all — the exact person the threshold escalates to could not
-act from the UI. The page now derives `canApproveReport` (the wider set) and
-`canDecideReport` (reject) separately; both keep the same SoD self-check, since
-the decider must never be the submitting employee. When adding a decision pair,
+act from the UI. The page no longer derives either: it reads the server's
+`actions.approve` / `actions.reject` verdicts on the report
+(`services/expense_controls`, decisions §305), so the two role sets, the CFO
+gate and the segregation check (the decider is never the submitting employee —
+the reject endpoint now enforces that too) each have one definition. When adding a decision pair,
 check the two backends' `require_roles` independently rather than assuming they
 match. Guarded by `frontend/tests-e2e/expenses/cfo-report-approval.spec.ts`.
 
