@@ -318,6 +318,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "exception_blocks_erp_export",
         # `services/erp_export_gate`: FeohLedger is already paying it (§309)
         "payment_blocks_erp_export",
+        # `services/erp_export_gate`: the vendor is blocked, sanctions-held or rejected
+        "vendor_blocks_erp_export",
         # `services/erp` itself: the invoice is due before it is dated
         "invoice_due_before_date",
         # A payment written back to the ERP (`post_payment`, decisions §295)

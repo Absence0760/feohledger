@@ -38,7 +38,30 @@ definition (``api/payments.LIVE_PAYMENT_TERMINAL_STATUSES`` and the card slot
 index). It runs at the same two places, after the exception check, and
 :func:`erp_export_refusal` is the one answer both take.
 
-Every string here is PII-free: an exception type and a claim are fixed literals.
+**A vendor the payment path will not pay refuses the push too** when paying
+it from the ERP would get round our screening (§286's reasoning applied to the
+payee rather than the debt). :func:`erp_export_vendor_hold` reads the payment
+path's own vendor read, ``payment_runs.vendor_payability``, and decides per
+status what may still be booked:
+
+* the sticky ``payments_blocked`` flag (a sanctions match or a manual block)
+  and a last stored screen of ``match`` / ``review`` refuse: those are the
+  verdicts dispatch's live pre-payment screen refuses or holds on, and a bill
+  in the ERP is paid without any screen. The gate reads the STORED screen and
+  never calls the adapter, so a stale ``review`` is cleared by re-screening
+  the vendor (``POST /api/vendors/{id}/screen``), which the 409 says;
+* ``rejected`` (an invalid or duplicate vendor record) refuses, and so does a
+  status this build does not know: the bill would book a liability to a payee
+  AP has declared invalid;
+* ``unverified`` and ``inactive`` still book. The approver signed a real debt;
+  verification is a pre-PAYMENT control (the run gate still holds the payment
+  here), and the ERP keeps its own vendor record and its own inactive rule.
+
+It runs at the same two places, after the live-claim check, with the coded
+refusal ``vendor_blocks_erp_export`` and ``params = {hold}``.
+
+Every string here is PII-free: an exception type, a claim and a hold are fixed
+literals, never a vendor field.
 """
 
 from __future__ import annotations
@@ -62,6 +85,22 @@ PAYMENT_BLOCKS_ERP_EXPORT = "payment_blocks_erp_export"
 #: executing or settled payment) or a live ``VirtualCard``.
 CLAIM_PAYMENT = "payment"
 CLAIM_VIRTUAL_CARD = "virtual_card"
+
+#: The refusal code when the invoice's vendor may not be paid in a way the ERP
+#: would get round, registered in the same two places. Its ``hold`` param says
+#: which.
+VENDOR_BLOCKS_ERP_EXPORT = "vendor_blocks_erp_export"
+
+#: The vendor lifecycle statuses whose approved bill may still be booked. Named
+#: rather than the refused ones, so a status added later refuses until someone
+#: decides otherwise (the run gate's ``PAYABLE_VENDOR_STATUS`` rule).
+ERP_BOOKABLE_VENDOR_STATUSES: frozenset[str] = frozenset({"active", "unverified", "inactive"})
+
+#: The ``hold`` values beyond the screening gate's own
+#: (``payment_runs.HOLD_PAYMENTS_BLOCKED`` / ``HOLD_SANCTIONS_MATCH`` /
+#: ``HOLD_SANCTIONS_REVIEW``).
+HOLD_VENDOR_REJECTED = "vendor_rejected"
+HOLD_VENDOR_STATUS_UNKNOWN = "vendor_status_unknown"
 
 
 async def erp_export_blocking_exception(db: AsyncSession, invoice_id: uuid.UUID) -> str | None:
@@ -139,6 +178,44 @@ def claimed_export_message(claim: str, *, possibly_posted: bool = False) -> str:
     return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
 
 
+async def erp_export_vendor_hold(db: AsyncSession, invoice) -> str | None:
+    """Why the invoice's vendor stops its push, or None.
+
+    Reads ``payment_runs.vendor_payability``, the one vendor read the run gate
+    (``inactive_vendor_statuses``) shares, so the two cannot read the vendor
+    differently. The screening hold is named first. An invoice with no linked
+    vendor is not refused here: there is no vendor record to judge, and the
+    adapter's own vendor resolution answers that.
+    """
+    from app.services.payment_runs import vendor_payability
+
+    payability = (await vendor_payability(db, [invoice])).get(invoice.id)
+    if payability is None:
+        return None
+    hold = payability.sanctions_hold
+    if hold is not None:
+        return hold
+    if payability.status in ERP_BOOKABLE_VENDOR_STATUSES:
+        return None
+    if payability.status == "rejected":
+        return HOLD_VENDOR_REJECTED
+    return HOLD_VENDOR_STATUS_UNKNOWN
+
+
+def vendor_hold_params(hold: str, *, possibly_posted: bool = False) -> dict:
+    """The vendor refusal's params; ``possibly_posted`` only when true."""
+    params: dict = {"hold": hold}
+    if possibly_posted:
+        params["possibly_posted"] = True
+    return params
+
+
+def vendor_hold_message(hold: str, *, possibly_posted: bool = False) -> str:
+    """The English ``error`` on the ``invoice.erp_failed`` row."""
+    message = f"ERP post refused: {VENDOR_BLOCKS_ERP_EXPORT} ({hold})"
+    return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
+
+
 @dataclass(frozen=True)
 class ExportRefusal:
     """Why the push is refused: the coded refusal, and its English for the
@@ -155,11 +232,13 @@ class ExportRefusal:
 
 
 async def erp_export_refusal(
-    db: AsyncSession, invoice_id: uuid.UUID, *, possibly_posted: bool
+    db: AsyncSession, invoice, *, possibly_posted: bool
 ) -> ExportRefusal | None:
     """Every reason this invoice may not be pushed now, or None. The first wins:
     an open duplicate / fraud exception (§286), then a live payment or card
-    (§309). Both the HTTP doors and ``erp._call_erp`` ask this one function."""
+    (§309), then a vendor the payment path will not pay. Both the HTTP doors and
+    ``erp._call_erp`` ask this one function."""
+    invoice_id = invoice.id
     exception_type = await erp_export_blocking_exception(db, invoice_id)
     if exception_type is not None:
         return ExportRefusal(
@@ -173,6 +252,13 @@ async def erp_export_refusal(
             PAYMENT_BLOCKS_ERP_EXPORT,
             claimed_export_params(claim, possibly_posted=possibly_posted),
             claimed_export_message(claim, possibly_posted=possibly_posted),
+        )
+    hold = await erp_export_vendor_hold(db, invoice)
+    if hold is not None:
+        return ExportRefusal(
+            VENDOR_BLOCKS_ERP_EXPORT,
+            vendor_hold_params(hold, possibly_posted=possibly_posted),
+            vendor_hold_message(hold, possibly_posted=possibly_posted),
         )
     return None
 
@@ -189,8 +275,32 @@ _CLAIM_SENTENCE = {
     ),
 }
 
+#: The 409's English for a vendor hold: what stops it, and what to do.
+_HOLD_SENTENCE = {
+    "payments_blocked": (
+        "This invoice's vendor is blocked from payment. "
+        "Unblock the vendor before sending the invoice to the ERP."
+    ),
+    "sanctions_match": (
+        "This invoice's vendor matched a sanctions list. "
+        "Review the vendor's screening before sending the invoice to the ERP."
+    ),
+    "sanctions_review": (
+        "This invoice's vendor is held for sanctions screening review. "
+        "Re-screen the vendor once the review is done, then send the invoice to the ERP."
+    ),
+    HOLD_VENDOR_REJECTED: (
+        "This invoice's vendor has been rejected. "
+        "Link the invoice to the correct vendor before sending it to the ERP."
+    ),
+    HOLD_VENDOR_STATUS_UNKNOWN: (
+        "This invoice's vendor has a status that cannot be sent to the ERP. "
+        "Set the vendor to active before sending the invoice to the ERP."
+    ),
+}
 
-async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> None:
+
+async def refuse_blocked_erp_export(db: AsyncSession, invoice) -> None:
     """409 before an HTTP door queues a push the chokepoint would refuse.
 
     Commits before raising. A raised ``HTTPException`` rolls the request's
@@ -206,9 +316,9 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> 
     from app.services.workflow_engine import get_workflow_instance
 
     # `/retry-erp` after a timed-out attempt: the bill may already be there.
-    instance = await get_workflow_instance(db, invoice_id)
+    instance = await get_workflow_instance(db, invoice.id)
     posted = possibly_posted(instance.state_data if instance is not None else None)
-    refused = await erp_export_refusal(db, invoice_id, possibly_posted=posted)
+    refused = await erp_export_refusal(db, invoice, possibly_posted=posted)
     if refused is None:
         return
     await db.commit()
@@ -218,8 +328,10 @@ async def refuse_blocked_erp_export(db: AsyncSession, invoice_id: uuid.UUID) -> 
             f"This invoice has an open {exception_type.replace('_', ' ')} exception. "
             "Resolve or dismiss it in Exceptions, then send it to the ERP."
         )
-    else:
+    elif refused.code == PAYMENT_BLOCKS_ERP_EXPORT:
         message = _CLAIM_SENTENCE[refused.params["claim"]]
+    else:
+        message = _HOLD_SENTENCE[refused.params["hold"]]
     if posted:
         message += (
             " An earlier attempt may already have created the bill in the ERP; "

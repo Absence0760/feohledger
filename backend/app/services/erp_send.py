@@ -131,7 +131,7 @@ async def start_erp_send(
 
     # Commits before raising, so an exception `/complete`'s `refresh_warnings`
     # just opened survives the refusal that names it (see the gate).
-    await refuse_blocked_erp_export(db, invoice_id)
+    await refuse_blocked_erp_export(db, invoice)
 
     if retry:
         from app.services.erp import retry_erp

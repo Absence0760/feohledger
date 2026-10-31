@@ -1267,6 +1267,45 @@ the three cannot disagree about what is live (decisions §309).
   `payment_reconciliation` exception. The supported order with an ERP is
   therefore *push, then pay*.
 
+### A vendor the payment path will not pay refuses the push
+
+A bill in the ERP is paid against the ERP's own vendor record, past our
+screening, so the same gate refuses an invoice whose vendor FeohLedger would
+refuse to pay in a way that matters there. It reads the payment path's own
+vendor read, `payment_runs.vendor_payability` (the one `inactive_vendor_statuses`
+— the run gate — now goes through too), and decides per state
+(`erp_export_gate.erp_export_vendor_hold`):
+
+| Vendor state | Push? | `hold` | Why |
+|---|---|---|---|
+| `payments_blocked` (a sanctions match or a manual block) | refused | `payments_blocked` | dispatch's compliance check refuses it first; paid from the ERP it would be paid anyway |
+| last stored screen `match` (block lifted) | refused | `sanctions_match` | the verdict dispatch's live pre-payment screen refuses on |
+| last stored screen `review` | refused | `sanctions_review` | the verdict dispatch's live pre-payment screen holds at `pending_compliance` on; re-screening the vendor rewrites it |
+| status `rejected` | refused | `vendor_rejected` | an invalid or duplicate vendor record: the bill would book a liability to a payee AP declared invalid |
+| any status this build does not know | refused | `vendor_status_unknown` | fail-closed, as the run gate names its one payable status |
+| `unverified` | **books** | — | the approved bill is a real debt; verification is a pre-PAYMENT control, and the run gate still refuses to pay it here |
+| `inactive` | **books** | — | a deactivated supplier's approved bill is still owed; the ERP applies its own inactive-vendor rule |
+| `active`, last screen `clear` / `unscreened` | books | — | the pre-payment screen backstops an unscreened vendor |
+| no linked vendor | books | — | nothing to judge; the adapter's own vendor resolution answers it |
+
+Code `vendor_blocks_erp_export`, `params = {hold}` plus `possibly_posted: true`
+on the same terms as above; checked after the two refusals above, at the same
+places (409 at `/complete`, `/send-to-erp`, `/retry-erp`; an
+`invoice.erp_auto_send_refused` row on the auto-send; `failed` on the first
+attempt at `_call_erp`, before any adapter, so a vendor blocked after the push
+was queued is stopped too). The gate reads the **last stored** screen
+(`Vendor.screening_status`), while dispatch screens **live**; it never calls
+the sanctions adapter (no provider charge and no `sanctions_checks` row per
+push). So the two share a read, not a verdict: a pre-payment screen does not
+rewrite the stored status, and a stale `review` (a provider misconfiguration
+since fixed, say) is cleared by re-screening — one vendor via
+`POST /api/vendors/{id}/screen`, many via `/bulk/screen` or the periodic sweep.
+A vendor whose screen keeps returning `review` / `match` is neither payable
+nor bookable; there is no recorded false-positive adjudication yet. What the user does: unblock the vendor (`POST /api/vendors/{id}/unblock`),
+re-screen it, or re-link the invoice to the right vendor, then send again.
+Tests: `tests/test_erp_export_blocking_exceptions.py` (each state × each door,
+`_call_erp`, the shared-read parity with the run gate).
+
 ## GL accounts and vendors are linked by the ERP's unique key
 
 A bill posts on `gl_accounts.erp_account_id` (§ above), so which ERP account a

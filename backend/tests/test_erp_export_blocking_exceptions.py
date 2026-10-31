@@ -1611,3 +1611,336 @@ async def test_a_plan_replay_that_waited_on_the_lock_returns_the_winners_run(rea
     assert replay.created is False
     assert replay_run_id == first_run_id
     assert len(await _payments_for(mk, inv_id)) == 1
+
+
+# ---------------------------------------------------------------------------
+# A vendor the payment path will not pay refuses the push
+# ---------------------------------------------------------------------------
+#
+# A payment run refuses a vendor that is not `active`; dispatch refuses one
+# that is `payments_blocked` and refuses or holds one whose last screen is a
+# sanctions `match` / `review`. A bill in the ERP is paid past all of that, so
+# the push refuses a blocked, sanctions-held, rejected or unknown-status
+# vendor. An `unverified` or `inactive` vendor's approved bill is a real debt
+# and still books: verification gates the PAYMENT, which the run gate still
+# holds here.
+
+VENDOR_CODE = "vendor_blocks_erp_export"
+
+#: case → (status, payments_blocked, screening_status, expected hold or None)
+_VENDOR_CASES = {
+    "blocked": ("active", True, "clear", "payments_blocked"),
+    # A sanctions match sets the block; a match left after an unblock still
+    # refuses, as the pre-payment screen would refuse it again.
+    "sanctions_match": ("active", False, "match", "sanctions_match"),
+    "sanctions_match_and_blocked": ("active", True, "match", "payments_blocked"),
+    "sanctions_review": ("active", False, "review", "sanctions_review"),
+    "rejected": ("rejected", False, "clear", "vendor_rejected"),
+    "unknown_status": ("archived", False, "clear", "vendor_status_unknown"),
+    # The sticky block outranks a status the push would otherwise book.
+    "unverified_but_blocked": ("unverified", True, "unscreened", "payments_blocked"),
+    "unverified": ("unverified", False, "unscreened", None),
+    "inactive": ("inactive", False, "clear", None),
+    "active": ("active", False, "clear", None),
+    "active_unscreened": ("active", False, "unscreened", None),
+}
+_REFUSED = [k for k, v in _VENDOR_CASES.items() if v[3] is not None]
+_BOOKED = [k for k, v in _VENDOR_CASES.items() if v[3] is None]
+
+
+async def _link_vendor(mk, org_id, inv_id, case: str) -> uuid.UUID:
+    """A vendor in `case`'s state, created a year ago (so no new-vendor fraud
+    rule fires on `/complete`), linked to the invoice."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.vendor import Vendor
+
+    status, blocked, screening, _ = _VENDOR_CASES[case]
+    async with mk() as s:
+        vendor = Vendor(
+            organization_id=org_id,
+            name="Northwind Supplies",
+            status=status,
+            payments_blocked=blocked,
+            payments_blocked_reason="manually blocked by AP" if blocked else None,
+            screening_status=screening,
+        )
+        s.add(vendor)
+        await s.flush()
+        vendor.created_at = datetime.now(UTC) - timedelta(days=400)
+        (await s.get(Invoice, inv_id)).vendor_id = vendor.id
+        await s.commit()
+        return vendor.id
+
+
+def _assert_vendor_refusal(res, hold: str, **extra) -> None:
+    assert res.status_code == 409, res.text
+    detail = res.json()["detail"]
+    assert detail["code"] == VENDOR_CODE
+    assert detail["params"] == {"hold": hold, **extra}
+    assert "send" in detail["message"] and "ERP" in detail["message"]
+    # PII guard: the sentence and params name a fixed hold, never the vendor.
+    assert "Northwind" not in res.text
+
+
+def test_the_vendor_refusal_code_is_registered_for_the_browser():
+    from app.services.erp_adapters.base import ERP_REFUSAL_CODES
+    from app.services.erp_export_gate import VENDOR_BLOCKS_ERP_EXPORT
+
+    assert VENDOR_BLOCKS_ERP_EXPORT == VENDOR_CODE
+    assert VENDOR_CODE in ERP_REFUSAL_CODES
+
+
+def test_every_hold_has_a_409_sentence():
+    """The screening gate's holds are the payment path's constants; the 409
+    has a sentence for each, and for the gate's own two."""
+    from app.services import erp_export_gate as gate
+    from app.services import payment_runs as pr
+
+    holds = {
+        pr.HOLD_PAYMENTS_BLOCKED,
+        pr.HOLD_SANCTIONS_MATCH,
+        pr.HOLD_SANCTIONS_REVIEW,
+        gate.HOLD_VENDOR_REJECTED,
+        gate.HOLD_VENDOR_STATUS_UNKNOWN,
+    }
+    assert set(gate._HOLD_SENTENCE) == holds
+    assert {v[3] for v in _VENDOR_CASES.values()} - {None} == holds
+
+
+@pytest.mark.parametrize("door", ["send-to-erp", "complete", "retry-erp"])
+@pytest.mark.parametrize("case", _REFUSED)
+async def test_a_vendor_the_payment_path_will_not_pay_refuses_every_door(
+    realdb, dispatched, case, door
+):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    start = InvoiceStatus.failed if door == "retry-erp" else InvoiceStatus.approved
+    inv_id = await _seed(mk, info.org_id, number=f"VNDX-{case}-{door}"[:50], status=start)
+    await _link_vendor(mk, info.org_id, inv_id, case)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/{door}")
+
+    _assert_vendor_refusal(res, _VENDOR_CASES[case][3])
+    assert await _status(mk, inv_id) == start
+    assert dispatched == []
+    assert await _audit(mk, inv_id, "invoice.erp_submitted") == []
+    assert await _audit(mk, inv_id, "invoice.erp_retried") == []
+
+
+@pytest.mark.parametrize("door", ["send-to-erp", "complete", "retry-erp"])
+@pytest.mark.parametrize("case", _BOOKED)
+async def test_an_unverified_inactive_or_active_vendor_still_books(realdb, dispatched, case, door):
+    """An unverified vendor's approved bill is a real debt: it books, while
+    the run gate still refuses to PAY it (see the parity test below)."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    start = InvoiceStatus.failed if door == "retry-erp" else InvoiceStatus.approved
+    inv_id = await _seed(mk, info.org_id, number=f"VNDOK-{case}-{door}"[:50], status=start)
+    await _link_vendor(mk, info.org_id, inv_id, case)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/{door}")
+
+    assert res.status_code in (200, 202), res.text
+    assert dispatched == [inv_id]
+    assert await _status(mk, inv_id) == InvoiceStatus.sending_to_erp
+
+
+async def test_an_invoice_without_a_linked_vendor_does_not_refuse_the_push(realdb, dispatched):
+    """No vendor row to judge: the run gate does not refuse it either, and the
+    adapter's own vendor resolution answers it."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-NONE")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert res.status_code == 202, res.text
+
+
+async def test_a_live_payment_is_named_before_a_vendor_hold(realdb, dispatched):
+    """§286 and §309 read as before: the vendor check runs last."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-BOTH")
+    await _link_vendor(mk, info.org_id, inv_id, "blocked")
+    await _stage_payment(mk, info.org_id, inv_id)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    _assert_paid_refusal(res, "payment")
+
+
+async def test_retry_erp_for_a_held_vendor_says_the_bill_may_be_posted(realdb, dispatched):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-RETRY", status=InvoiceStatus.failed)
+    await _set_state(
+        mk, inv_id, {"erp_retries": 3, "last_error": "HTTP 503", "erp_outcome_unknown": True}
+    )
+    await _link_vendor(mk, info.org_id, inv_id, "sanctions_review")
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/retry-erp")
+
+    _assert_vendor_refusal(res, "sanctions_review", possibly_posted=True)
+    assert "may already have created the bill in the ERP" in res.json()["detail"]["message"]
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    assert dispatched == []
+
+
+@pytest.mark.parametrize("case", ["blocked", "sanctions_match", "rejected"])
+async def test_a_vendor_blocked_after_the_push_was_queued_stops_it_at_call_erp(realdb, case):
+    """The door passed; the vendor is blocked (a re-screen match, a manual
+    block, a rejection) by the time the dispatcher runs. `_call_erp` refuses
+    before building an adapter, at `failed`, on the first attempt."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(
+        mk, info.org_id, number=f"VNDX-QUEUED-{case}", status=InvoiceStatus.sending_to_erp
+    )
+    await _link_vendor(mk, info.org_id, inv_id, case)
+    hold = _VENDOR_CASES[case][3]
+
+    spy = _SpyAdapter()
+    await _push(mk, inv_id, adapter=spy)
+
+    assert spy.posted == 0
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    (failed,) = await _audit(mk, inv_id, "invoice.erp_failed")
+    assert failed.details["refusal"] == {"code": VENDOR_CODE, "params": {"hold": hold}}
+    assert failed.details["error"] == f"ERP post refused: {VENDOR_CODE} ({hold})"
+    assert failed.details["retries"] == 1, "a refusal must not spend the backoff budget"
+    assert "Northwind" not in str(failed.details)
+
+
+async def test_unblocking_the_vendor_releases_the_push(realdb, dispatched):
+    """End to end: refused while blocked; `POST /vendors/{id}/unblock` (the
+    payment path's own release) lets the next send through."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-UNBLOCK")
+    vendor_id = await _link_vendor(mk, info.org_id, inv_id, "blocked")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        _assert_vendor_refusal(
+            await c.post(f"/api/invoices/{inv_id}/send-to-erp"), "payments_blocked"
+        )
+        unblocked = await c.post(f"/api/vendors/{vendor_id}/unblock")
+        assert unblocked.status_code == 200, unblocked.text
+        sent = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert sent.status_code == 202, sent.text
+    assert dispatched == [inv_id]
+
+
+async def test_re_screening_the_vendor_releases_a_review_hold(realdb, dispatched):
+    """The gate reads the STORED screen, so a stale `review` (a provider that
+    could not run, since fixed) is not a dead end: re-screening the vendor
+    (`POST /vendors/{id}/screen`, the exit the 409 names) rewrites it, and the
+    next send goes through. The local `mock` screen clears an ordinary name."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-RESCREEN")
+    vendor_id = await _link_vendor(mk, info.org_id, inv_id, "sanctions_review")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        _assert_vendor_refusal(
+            await c.post(f"/api/invoices/{inv_id}/send-to-erp"), "sanctions_review"
+        )
+        screened = await c.post(f"/api/vendors/{vendor_id}/screen")
+        assert screened.status_code == 200, screened.text
+        assert screened.json()["screening_status"] == "clear"
+        sent = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert sent.status_code == 202, sent.text
+    assert dispatched == [inv_id]
+
+
+# -- parity: the ERP gate and the payment path read the vendor the same way --
+
+
+async def test_the_erp_gate_and_the_run_gate_read_one_vendor_predicate(realdb, monkeypatch):
+    """Both gates go through `payment_runs.vendor_payability`, so neither can
+    read the vendor's columns differently from the other."""
+    from app.services import payment_runs
+    from app.services.erp_export_gate import erp_export_vendor_hold
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="VNDX-PARITY-SPY")
+    await _link_vendor(mk, info.org_id, inv_id, "unverified")
+
+    real = payment_runs.vendor_payability
+    calls: list[str] = []
+
+    async def _spy(db, invoices):
+        calls.append("read")
+        return await real(db, invoices)
+
+    monkeypatch.setattr(payment_runs, "vendor_payability", _spy)
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert await payment_runs.inactive_vendor_statuses(s, [inv]) == {inv_id: "unverified"}
+        assert await erp_export_vendor_hold(s, inv) is None
+    assert calls == ["read", "read"]
+
+
+@pytest.mark.parametrize("case", list(_VENDOR_CASES))
+async def test_the_erp_gate_never_refuses_a_vendor_the_payment_path_would_pay(realdb, case):
+    """Per case, against a real tenant:
+
+    * the run gate refuses exactly the non-`active` statuses (unchanged by the
+      shared read);
+    * the ERP gate refuses exactly the documented holds;
+    * a status refusal from the ERP gate (`rejected`, unknown) is always one
+      the run gate makes too; the push never refuses on status alone where
+      the run would pay. Its screening holds are the stored counterparts of
+      dispatch's live screen, pinned separately (the block by
+      `test_dispatch_refuses_the_blocked_vendor_the_erp_gate_refuses`, the
+      stored screen's exit by `test_re_screening_the_vendor_releases_a_review_hold`).
+    """
+    from app.services.erp_export_gate import erp_export_vendor_hold
+    from app.services.payment_runs import (
+        REFUSAL_VENDOR_NOT_ACTIVE,
+        run_refusal_reasons,
+        vendor_payability,
+    )
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number=f"VNDX-PARITY-{case}"[:50])
+    await _link_vendor(mk, info.org_id, inv_id, case)
+    status, _blocked, _screening, expected_hold = _VENDOR_CASES[case]
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        payability = (await vendor_payability(s, [inv]))[inv_id]
+        run = (await run_refusal_reasons(s, [inv])).get(inv_id)
+        hold = await erp_export_vendor_hold(s, inv)
+
+    run_refuses = run is not None and run.reason == REFUSAL_VENDOR_NOT_ACTIVE
+    assert run_refuses == (status != "active")
+    assert hold == expected_hold
+    if hold is not None and payability.sanctions_hold is None:
+        assert run_refuses, "a status refusal the run gate does not make"
+
+
+async def test_dispatch_refuses_the_blocked_vendor_the_erp_gate_refuses():
+    """The sticky block the ERP gate reads is the one the pre-payment
+    compliance check refuses first, before any screen or FX lock."""
+    from app.services.compliance import check_payment_compliance
+    from app.services.payment_runs import HOLD_PAYMENTS_BLOCKED, VendorPayability
+
+    vendor = SimpleNamespace(payments_blocked=True, payments_blocked_reason="manual")
+    decision = await check_payment_compliance(
+        None,
+        vendor=vendor,
+        payment_amount=Decimal("1"),
+        payment_currency="USD",
+        payment_method="ach",
+        org_settings=None,
+        organization_id=uuid.uuid4(),
+    )
+    assert decision.verdict == "refuse"
+    assert VendorPayability("active", True, "clear").sanctions_hold == HOLD_PAYMENTS_BLOCKED
