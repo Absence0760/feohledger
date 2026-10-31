@@ -321,9 +321,23 @@ const BUILDERS: Record<string, Builder> = {
 	// `services/review.py::refuse_unless_in_review`
 	invoice_not_in_review: fixed('refusal.invoiceNotInReview'),
 	// `services/payment_controls.py` — the run dialog's `actions` verdict
-	payment_run_segregation: fixed('refusal.paymentRunSegregation'),
+	// Maker-checker names the step it refuses in `params.step` for the two
+	// that are not approve / execute (`payment_controls._segregation_for`).
+	payment_run_segregation: (p, t) => {
+		const step = str(p, 'step');
+		if (step === 'nacha_export') return t('refusal.paymentRunSegregationExport');
+		if (step === 'record_outside') return t('refusal.paymentRunSegregationRecord');
+		return t('refusal.paymentRunSegregation');
+	},
 	payment_run_awaiting_cfo: fixed('refusal.paymentRunAwaitingCfo'),
 	payment_run_nothing_to_retry: fixed('refusal.paymentRunNothingToRetry'),
+	payment_run_nothing_settled: fixed('refusal.paymentRunNothingSettled'),
+	payment_run_not_recordable: fixed('refusal.paymentRunNotRecordable'),
+	payment_run_nothing_to_record: fixed('refusal.paymentRunNothingToRecord'),
+	// …and the History row's `accept_settlement_refusal`
+	payment_settlement_not_completed: fixed('refusal.paymentSettlementNotCompleted'),
+	payment_settlement_covered: fixed('refusal.paymentSettlementCovered'),
+	payment_settlement_not_held: fixed('refusal.paymentSettlementNotHeld'),
 	// `api/vendors.py::change_request_approve_refusal` — the queue's verdict
 	vendor_change_self_requested: fixed('refusal.vendorChangeSelfRequested'),
 	vendor_change_self_provisioned: fixed('refusal.vendorChangeSelfProvisioned'),
@@ -523,6 +537,12 @@ const BUILDERS: Record<string, Builder> = {
 	// names the invoice and the one remedy, which is the same for every reason.
 	nacha_payment_not_payable: nachaForInvoice('refusal.nachaPaymentNotPayable'),
 	nacha_already_exported: fixed('refusal.nachaAlreadyExported'),
+	// `services/payment_controls.py::run_nacha_export_refusal` /
+	// `run_nacha_void_refusal` — the run dialog's bank-file verdicts
+	nacha_run_not_exportable: fixed('refusal.nachaRunNotExportable'),
+	nacha_nothing_to_regenerate: fixed('refusal.nachaNothingToRegenerate'),
+	nacha_nothing_to_export: fixed('refusal.nachaNothingToExport'),
+	nacha_run_not_exported: fixed('refusal.nachaRunNotExported'),
 	// `api/deps.py::plan_feature_refusal` — every plan-feature gate (decisions
 	// §258). `params.feature` is a `FEATURE_*` key; one this build does not
 	// know (a newer backend) falls back to the server's sentence.

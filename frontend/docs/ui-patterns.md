@@ -824,8 +824,10 @@ Where each verdict lives (backend gate → field):
 | Page | Field | Gate(s) the endpoint raises from |
 |---|---|---|
 | Payment queue | `record_outside_refusal` | `services/external_payment.record_outside_refusals` (#573) |
-| Payment history | `void_refusal`, `release_refusal`, `dismiss_refusal` | `payment_controls.payment_void_refusal`, `.compliance_hold_refusal` |
+| Payment history | `void_refusal`, `release_refusal`, `dismiss_refusal`, `accept_settlement_refusal` | `payment_controls.payment_void_refusal`, `.compliance_hold_refusal`, `.settlement_accept_refusal` |
+| Payment runs list | `actions.sync_erp` | `payment_controls.run_sync_erp_refusal` |
 | Run dialog | `actions.{approve,execute,cancel,retry_failed}` | `payment_controls.run_{approve,execute,cancel,retry_failed}_refusal` |
+| Run dialog (paying outside) | `actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}` | `payment_controls.run_record_outside_refusal`, `.run_nacha_export_refusal`, `.run_nacha_void_refusal` |
 | Invoice modal | `GET /api/invoices/{id}/review-actions` | `review.review_refusals` (the approve gates, on a scratch chain) |
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |

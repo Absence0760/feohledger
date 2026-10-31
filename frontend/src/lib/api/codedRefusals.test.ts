@@ -342,10 +342,33 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['external_payment_nothing_to_pay', 'refusal.externalPaymentNothingToPay'],
 		['external_payment_paid_on_future', 'refusal.externalPaymentPaidOnFuture'],
 		['nacha_requires_record_only', 'refusal.nachaRequiresRecordOnly'],
-		['nacha_already_exported', 'refusal.nachaAlreadyExported']
+		['nacha_already_exported', 'refusal.nachaAlreadyExported'],
+		['nacha_run_not_exportable', 'refusal.nachaRunNotExportable'],
+		['nacha_nothing_to_regenerate', 'refusal.nachaNothingToRegenerate'],
+		['nacha_nothing_to_export', 'refusal.nachaNothingToExport'],
+		['nacha_run_not_exported', 'refusal.nachaRunNotExported'],
+		['payment_run_not_recordable', 'refusal.paymentRunNotRecordable'],
+		['payment_run_nothing_to_record', 'refusal.paymentRunNothingToRecord'],
+		['payment_run_nothing_settled', 'refusal.paymentRunNothingSettled'],
+		['payment_settlement_not_completed', 'refusal.paymentSettlementNotCompleted'],
+		['payment_settlement_covered', 'refusal.paymentSettlementCovered'],
+		['payment_settlement_not_held', 'refusal.paymentSettlementNotHeld']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
+
+	it.each([
+		[undefined, 'refusal.paymentRunSegregation'],
+		['a_newer_step', 'refusal.paymentRunSegregation'],
+		['nacha_export', 'refusal.paymentRunSegregationExport'],
+		['record_outside', 'refusal.paymentRunSegregationRecord']
+	] as [string | undefined, MainMessageKey][])(
+		'maker-checker on the %s step names that step (%s)',
+		(step, key) => {
+			const params = step === undefined ? {} : { step };
+			expect(codedRefusalText('payment_run_segregation', params, deT)).toBe(de[key]);
+		}
+	);
 
 	it('states the record-only refusal whatever the reason it resolved for', () => {
 		for (const reason of ['configured', 'unknown_mode', 'no_processor_in_deployed_environment']) {

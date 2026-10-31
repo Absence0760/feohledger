@@ -326,17 +326,22 @@ test.describe('/payments — paying outside FeohLedger', () => {
 			await expect(modal.getByTestId('run-record-only-note')).toBeVisible();
 			await expect(modal.getByRole('button', { name: /^Execute/ })).toHaveCount(0);
 
-			// No bank-file settings on this tenant: the refusal is stated in the
-			// dialog, naming what an admin has to fill in.
-			const nacha = page.waitForResponse(
-				(r) => new URL(r.url()).pathname === `/api/payments/runs/${runId}/nacha`
+			// No bank-file settings on this tenant: the server's verdict
+			// (`actions.nacha_export` = `nacha_not_configured`) disables the
+			// download BEFORE any click and states, beside it, what an admin has
+			// to fill in — it used to be a button that could only 409. The
+			// endpoint still refuses the same way.
+			const download = modal.getByRole('button', { name: 'Download bank file (NACHA)' });
+			await expect(download).toBeDisabled();
+			await expect(modal.getByTestId('run-nacha-export-refusal')).toContainText('Company name');
+			await expect(download).toHaveAttribute('aria-describedby', 'run-nacha-export-refusal');
+			const nacha = await page.request.get(`${API_BASE}/api/payments/runs/${runId}/nacha`, {
+				headers: h
+			});
+			expect(nacha.status()).toBe(409);
+			expect(((await nacha.json()) as { detail: { code: string } }).detail.code).toBe(
+				'nacha_not_configured'
 			);
-			await modal.getByRole('button', { name: 'Download bank file (NACHA)' }).click();
-			expect((await nacha).status()).toBe(409);
-			await expect(modal.getByTestId('nacha-error')).toContainText('Company name');
-			// Stated once, in the panel: an error toast repeating it never times
-			// out and sat over the button below (one error, one signal).
-			await expect(page.getByTestId('toast').filter({ hasText: 'Company name' })).toHaveCount(0);
 
 			// Record the run as paid by the customer's bank.
 			await modal.getByRole('button', { name: 'Record run as paid…' }).click();
@@ -429,6 +434,14 @@ test.describe('/payments — paying outside FeohLedger', () => {
 			expect(((await again.json()) as { detail: { code: string } }).detail.code).toBe(
 				'nacha_already_exported'
 			);
+
+			// …and the dialog no longer offers a first-file download: the run's
+			// verdict hides it (`nacha_already_exported`) in favour of the two
+			// exits and Regenerate.
+			await expect(modal.getByRole('button', { name: 'Bank rejected the file' })).toBeVisible();
+			await expect(
+				modal.getByRole('button', { name: 'Download bank file (NACHA)' })
+			).toHaveCount(0);
 
 			// 2. Regenerate is armed: the first click only warns.
 			await modal.getByRole('button', { name: 'Regenerate file' }).click();
