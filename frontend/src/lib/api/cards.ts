@@ -17,7 +17,10 @@
 //
 // See `backend/docs/virtual-cards.md` § Rebate status lifecycle.
 import { api } from '#lib/api.ts';
+import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { CardRebate, RebateListResponse } from '#lib/types/cardRebate.ts';
+import type { CardGenerateResponse, CardGenerateSkip } from '#lib/types/cardGenerate.ts';
 
 /** Mirrors `backend/app/api/pagination.py::DEFAULT_PAGE_SIZE`, so a bare call
  *  and the server's own default return the same rows. */
@@ -67,4 +70,30 @@ export function confirmCardRebate(rebateId: string): Promise<CardRebate> {
  */
 export function markCardRebatePaid(rebateId: string): Promise<CardRebate> {
 	return api.post<CardRebate>(`/api/cards/rebates/${rebateId}/mark-paid`, {});
+}
+
+/**
+ * Mint a virtual card directly for each invoice (`POST /api/cards/generate`,
+ * `payment.execute`). **This moves money** — a minted card is spendable — and
+ * the server runs every gate a payment run does. `items` are the cards this
+ * call minted; `skipped` (normalized to `[]` for an older backend) names every
+ * other invoice and why, so a retry of a mint that already succeeded reads as
+ * `card_skip_already_carded` with the card's id, never as a bare `total: 0`.
+ * A 409 `invoice_locked` (nothing minted, at least one lock timed out) is
+ * thrown as an `ApiError` like any other refusal.
+ */
+export async function generateCards(invoiceIds: string[]): Promise<CardGenerateResponse> {
+	const body = await api.post<CardGenerateResponse>('/api/cards/generate', {
+		invoice_ids: invoiceIds
+	});
+	return { ...body, skipped: body.skipped ?? [] };
+}
+
+/** One skip, in the reader's language — the server's English for a code this
+ *  build predates. `m` is passed in so this stays usable from pure modules. */
+export function cardGenerateSkipText(
+	skip: CardGenerateSkip,
+	m: (key: MessageKey, params?: Record<string, string | number>) => string
+): string {
+	return localizeApiDetail(skip, m) ?? skip.message;
 }

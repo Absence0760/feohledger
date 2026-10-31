@@ -795,3 +795,130 @@ describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
 		expect(localizeApiDetail(raw, deT)).not.toContain('payments-blocked');
 	});
 });
+
+describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+	const backendSource = (rel: string) =>
+		readFileSync(new URL(`../../../../backend/app/${rel}`, import.meta.url).pathname, 'utf8');
+
+	it('states every code the backend defines — the reverse of the literal pin above', () => {
+		const skipCodes = [
+			...backendSource('services/card_issuance.py').matchAll(/"(card_skip_[a-z_]+)"/g)
+		].map((x) => x[1]);
+		const csvCodes = [
+			...backendSource('services/csv_import.py').matchAll(/"(csv_invoice_number_[a-z_]+)"/g)
+		].map((x) => x[1]);
+		expect(skipCodes.length).toBeGreaterThan(10);
+		expect(csvCodes).toHaveLength(3);
+		for (const code of [...skipCodes, ...csvCodes]) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+	});
+
+	it.each([
+		['card_skip_not_found', {}],
+		['card_skip_not_payable', { status: 'ready_for_review' }],
+		['card_skip_vendor_changed', {}],
+		['card_skip_lock_timeout', {}],
+		['card_skip_already_carded', { card_id: 'c1' }],
+		['card_skip_blocked', { exception_type: 'quality_hold' }],
+		['card_skip_vendor_not_payable', { vendor_status: 'unverified' }],
+		['card_skip_live_payment', {}],
+		['card_skip_credit_conflict', {}],
+		['card_skip_nothing_owed', {}],
+		['card_skip_vendor_unscreenable', {}],
+		['card_skip_compliance_hold', { verdict: 'hold' }],
+		['card_skip_erp_bill', { erp_reason: 'erp_bill_not_open' }],
+		['card_skip_issue_failed', {}]
+	] as [string, Record<string, unknown>][])('%s is stated in every shipped locale', (code, params) => {
+		for (const [locale, messages] of LOCALES) {
+			// A skip is `coded_refusal`'s shape plus the invoice id.
+			const out = localizeApiDetail(
+				{ invoice_id: 'i1', ...detail(code, params) },
+				translator(messages as Record<string, string>, locale)
+			);
+			expect(out, `${locale} ${code}`).toBeTruthy();
+			expect(out, `${locale} ${code}`).not.toContain('{');
+			expect(out).not.toBe('server English');
+		}
+	});
+
+	it('names the invoice status, the exception type and the vendor status by their labels', () => {
+		expect(codedRefusalText('card_skip_not_payable', { status: 'ready_for_review' }, enT)).toContain(
+			`(this one is ${EN_ALL['invoices.status.readyForReview']})`
+		);
+		expect(
+			codedRefusalText('card_skip_blocked', { exception_type: 'duplicate' }, enT)
+		).toContain(EN_ALL['exceptions.type.duplicate']);
+		expect(
+			codedRefusalText('card_skip_vendor_not_payable', { vendor_status: 'unverified' }, deT)
+		).toContain(de['vendors.status.unverified']);
+		// A status this build has no label for is named verbatim, never blanked.
+		expect(
+			codedRefusalText('card_skip_vendor_not_payable', { vendor_status: 'frozen' }, enT)
+		).toContain('frozen');
+		// A missing param falls back to the server's sentence.
+		expect(codedRefusalText('card_skip_blocked', {}, enT)).toBeNull();
+		expect(codedRefusalText('card_skip_not_payable', {}, enT)).toBeNull();
+	});
+
+	it('states a CSV row that matches an existing invoice, naming both numbers', () => {
+		const row = {
+			row: 3,
+			message: 'server English',
+			code: 'csv_invoice_number_matches_existing',
+			params: { invoice_number: 'INV-1', existing_invoice_id: 'x', existing_invoice_number: 'INV-001' }
+		};
+		expect(localizeApiDetail(row, deT)).toBe(
+			interpolate(
+				de['refusal.csvInvoiceNumberMatchesExisting'],
+				{ number: 'INV-1', existing: 'INV-001' },
+				'de'
+			)
+		);
+	});
+
+	it('states a match in another entity without naming that entity’s invoice (§40)', () => {
+		for (const [locale, messages] of LOCALES) {
+			const out = codedRefusalText(
+				'csv_invoice_number_matches_other_entity',
+				{ invoice_number: 'INV-1' },
+				translator(messages as Record<string, string>, locale)
+			);
+			expect(out, locale).toContain('INV-1');
+			expect(out, locale).not.toContain('{');
+		}
+		expect(codedRefusalText('csv_invoice_number_matches_other_entity', {}, enT)).toBeNull();
+	});
+
+	it('states a CSV row that matches an earlier row of the file, naming that row', () => {
+		const out = localizeApiDetail(
+			{
+				row: 3,
+				message: 'server English',
+				code: 'csv_invoice_number_matches_row',
+				params: { invoice_number: '2026 7', other_row: 2, other_invoice_number: '2026-0007' }
+			},
+			enT
+		);
+		expect(out).toBe(
+			'Invoice number 2026 7 is the same as 2026-0007 on row 2 for this vendor once formatting ' +
+				'is ignored, so it was not imported.'
+		);
+		// A row number that did not arrive as a number falls back.
+		expect(
+			codedRefusalText(
+				'csv_invoice_number_matches_row',
+				{ invoice_number: 'a', other_row: '2', other_invoice_number: 'b' },
+				enT
+			)
+		).toBeNull();
+	});
+});

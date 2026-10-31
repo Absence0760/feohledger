@@ -63,6 +63,7 @@ import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
 import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
+import { vendorStatusLabelKey } from '#lib/types/vendor.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
@@ -589,7 +590,64 @@ const BUILDERS: Record<string, Builder> = {
 	workspace_close_in_progress: fixed('refusal.workspaceCloseInProgress'),
 	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
 	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
-	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete')
+	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete'),
+	// A CSV invoice row whose number is the same payable as another once
+	// formatting is ignored (`services/csv_import`, decisions §77) — a row error.
+	csv_invoice_number_matches_existing: (p, t) => {
+		const number = str(p, 'invoice_number');
+		const existing = str(p, 'existing_invoice_number');
+		return number === null || existing === null
+			? null
+			: t('refusal.csvInvoiceNumberMatchesExisting', { number, existing });
+	},
+	// The match is another entity's invoice: stated as existence only (§40).
+	csv_invoice_number_matches_other_entity: (p, t) => {
+		const number = str(p, 'invoice_number');
+		return number === null ? null : t('refusal.csvInvoiceNumberMatchesOtherEntity', { number });
+	},
+	csv_invoice_number_matches_row: (p, t) => {
+		const number = str(p, 'invoice_number');
+		const other = str(p, 'other_invoice_number');
+		const row = p.other_row;
+		return number === null || other === null || typeof row !== 'number'
+			? null
+			: t('refusal.csvInvoiceNumberMatchesRow', { number, other, row });
+	},
+	// Why `POST /api/cards/generate` minted nothing for one invoice
+	// (`services/card_issuance.CARD_SKIP_MESSAGES`) — one per gate.
+	card_skip_not_found: fixed('refusal.cardSkipNotFound'),
+	card_skip_not_payable: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.cardSkipNotPayable', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	},
+	card_skip_vendor_changed: fixed('refusal.cardSkipVendorChanged'),
+	card_skip_lock_timeout: fixed('refusal.cardSkipLockTimeout'),
+	card_skip_already_carded: fixed('refusal.cardSkipAlreadyCarded'),
+	card_skip_blocked: (p, t) => {
+		const type = str(p, 'exception_type');
+		if (type === null) return null;
+		const key = exceptionTypeLabelKey(type);
+		return t('refusal.cardSkipBlocked', { type: key ? t(key) : exceptionTypeFallback(type) });
+	},
+	card_skip_vendor_not_payable: (p, t) => {
+		const status = str(p, 'vendor_status');
+		return status === null
+			? null
+			: t('refusal.cardSkipVendorNotPayable', {
+					status: statusLabel(status, vendorStatusLabelKey, t)
+				});
+	},
+	card_skip_live_payment: fixed('refusal.cardSkipLivePayment'),
+	card_skip_credit_conflict: fixed('refusal.cardSkipCreditConflict'),
+	card_skip_nothing_owed: fixed('refusal.cardSkipNothingOwed'),
+	card_skip_vendor_unscreenable: fixed('refusal.cardSkipVendorUnscreenable'),
+	card_skip_compliance_hold: fixed('refusal.cardSkipComplianceHold'),
+	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
+	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart
