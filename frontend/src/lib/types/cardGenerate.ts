@@ -48,3 +48,33 @@ export function alreadyCardedCardId(skip: CardGenerateSkip): string | null {
 	const id = skip.params.card_id;
 	return typeof id === 'string' && id ? id : null;
 }
+
+/**
+ * The invoice statuses `POST /api/cards/generate` mints for — the backend's
+ * `api/payments.PAYABLE_INVOICE_STATUSES`, which the endpoint filters on. Used
+ * ONLY to narrow the Generate dialog's picker; the server re-runs every gate
+ * and names whatever it refuses in `skipped`, so a stale list costs an
+ * explained skip, never a card. `cardGenerate.test.ts` pins it to the backend.
+ */
+export const CARDABLE_INVOICE_STATUSES = ['approved', 'posted_in_erp', 'payment_scheduled'] as const;
+
+/** One requested invoice that got no card, with the number the reader picked
+ *  it by (`null` when the response names an invoice this dialog never sent). */
+export interface CardGenerateSkipRow {
+	invoiceId: string;
+	invoiceNumber: string | null;
+	skip: CardGenerateSkip;
+}
+
+/** The response's skips in the order the server listed them, each labelled
+ *  with the invoice number from the reader's own selection. */
+export function cardGenerateSkipRows(
+	response: CardGenerateResponse,
+	invoiceNumbers: ReadonlyMap<string, string>
+): CardGenerateSkipRow[] {
+	return (response.skipped ?? []).map((skip) => ({
+		invoiceId: skip.invoice_id,
+		invoiceNumber: invoiceNumbers.get(skip.invoice_id) ?? null,
+		skip
+	}));
+}

@@ -20,7 +20,13 @@ import { api } from '#lib/api.ts';
 import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { CardRebate, RebateListResponse } from '#lib/types/cardRebate.ts';
-import type { CardGenerateResponse, CardGenerateSkip } from '#lib/types/cardGenerate.ts';
+import {
+	CARDABLE_INVOICE_STATUSES,
+	type CardGenerateResponse,
+	type CardGenerateSkip
+} from '#lib/types/cardGenerate.ts';
+import type { InvoicePickerOption } from '#lib/utils/invoicePicker.ts';
+import type { SearchPickerPage } from '#lib/utils/searchPicker.ts';
 
 /** Mirrors `backend/app/api/pagination.py::DEFAULT_PAGE_SIZE`, so a bare call
  *  and the server's own default return the same rows. */
@@ -96,4 +102,28 @@ export function cardGenerateSkipText(
 	m: (key: MessageKey, params?: Record<string, string | number>) => string
 ): string {
 	return localizeApiDetail(skip, m) ?? skip.message;
+}
+
+/**
+ * One page of the invoices the Generate dialog's picker offers — a server-paged,
+ * server-searched read of `GET /api/invoices` narrowed to the statuses the mint
+ * accepts (`CARDABLE_INVOICE_STATUSES`). It does not pre-judge the other gates
+ * (an open exception, a live payment, an unverified vendor): the mint names
+ * each of those per invoice in `skipped`, which is the point of the dialog.
+ * Entity-scoped by the shared client's `X-Entity-ID`, like the mint itself.
+ */
+export async function listCardableInvoices(query: {
+	search: string;
+	page: number;
+	page_size: number;
+}): Promise<SearchPickerPage<InvoicePickerOption>> {
+	const qs = new URLSearchParams({
+		status: CARDABLE_INVOICE_STATUSES.join(','),
+		page: String(query.page),
+		page_size: String(query.page_size)
+	});
+	const search = query.search.trim();
+	if (search) qs.set('search', search);
+	const res = await api.get<{ items: InvoicePickerOption[]; total: number }>(`/api/invoices?${qs}`);
+	return { items: res.items ?? [], total: res.total ?? 0 };
 }

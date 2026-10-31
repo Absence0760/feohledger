@@ -51,7 +51,8 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
-	import { PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
+	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
+	import GenerateCardsModal from '#lib/components/payments/GenerateCardsModal.svelte';
 	import { isAllowed, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
 	import {
 		acceptPaymentSettlement,
@@ -1604,6 +1605,20 @@
 		await loadCards({ append: true, nextPage: cardsPage + 1 });
 	}
 
+	// --- Generate a card directly (`POST /api/cards/generate`) ---------------
+	// Gated on what the endpoint itself checks first: `payment.execute` (the
+	// permission, not a role — a custom role can hold or lose it) and a tenant
+	// whose payments FeohLedger dispatches (`refuse_record_only`; the
+	// execution-mode read the Execute controls already use, failing closed
+	// while unknown). Whether the card programme is switched on is not exposed
+	// to this page; the endpoint's coded `cards_not_enabled` is stated in the
+	// dialog instead. Per-invoice gates are the server's, reported as skips.
+	let generateOpen = $state(false);
+
+	function canGenerateCards(): boolean {
+		return !!auth.user && auth.can(PERM_PAYMENT_EXECUTE) && canDispatchPayments(executionMode);
+	}
+
 	// The AP-side reveal renders exactly what `CardDetailsResponse` declares
 	// (`backend/app/schemas/virtual_card.py`): `{card_number, exp_month, exp_year,
 	// cvv}`. FastAPI strips anything the response_model doesn't declare, so the
@@ -2810,6 +2825,16 @@
 		<div class="help-row section-title-row">
 			<h2 class="section-heading">{m('payments.rebates.cardsTitle')}</h2>
 			<HelpTip term="virtual-card" />
+			{#if canGenerateCards()}
+				<button
+					type="button"
+					class="btn-primary cards-generate"
+					data-testid="cards-generate"
+					onclick={() => (generateOpen = true)}
+				>
+					{m('payments.cards.generate')}
+				</button>
+			{/if}
 		</div>
 
 		<!-- The Cards tab stacks TWO tables (rebates above, cards here), so a
@@ -2874,6 +2899,15 @@
 	{/if}
 	</div>
 </PageHeader>
+
+{#if generateOpen}
+	<GenerateCardsModal
+		onclose={() => (generateOpen = false)}
+		ongenerated={() => {
+			void loadCards();
+		}}
+	/>
+{/if}
 
 {#if activeRunId}
 	<RunDetailModal
@@ -4214,6 +4248,10 @@
 
 	.section-title-row > .section-heading {
 		margin: 0;
+	}
+
+	.section-title-row > .cards-generate {
+		margin-left: auto;
 	}
 
 	.review-title-row {
