@@ -15,7 +15,17 @@
 	import type { PaymentStatus } from '#lib/types/payment.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
-	import { downloadRunNacha, recordRunOutside, voidRunNachaExport } from '#lib/api/payments.ts';
+	import {
+		downloadRunNacha,
+		recordRunOutside,
+		retryFailedRunPayments,
+		voidRunNachaExport
+	} from '#lib/api/payments.ts';
+	import {
+		isRunRetryOffered,
+		retrySkipReasonKey,
+		type RetryFailedResult
+	} from '#lib/types/runRetry.ts';
 	import {
 		isAllowed,
 		isOffered,
@@ -138,7 +148,19 @@
 		 *  answer with (`api/payments.py::run_action_refusals`, from the gates
 		 *  `/approve`, `/execute` and `/cancel` raise from). The footer offers a
 		 *  control from this and never restates its rule (issue #575). */
-		actions: { approve: ActionRefusal; execute: ActionRefusal; cancel: ActionRefusal };
+		actions: {
+			approve: ActionRefusal;
+			execute: ActionRefusal;
+			cancel: ActionRefusal;
+			/** `POST /runs/{id}/retry-failed`'s verdict
+			 *  (`payment_controls.run_retry_failed_refusal`). Optional so an older
+			 *  backend parses — and an absent verdict offers nothing. */
+			retry_failed?: ActionRefusal;
+		};
+		/** Failures `/retry-failed` would actually send again (retry-safe,
+		 *  latest attempt). Only used to word the armed note — the verdict, not
+		 *  this count, decides whether the control is offered. */
+		retryable_failures?: number;
 		payments: RunPayment[];
 	}
 
@@ -191,6 +213,52 @@
 			? run.actions.execute
 			: null
 	);
+	// Retry failed payments: on a run that finished with failures, only where
+	// FeohLedger sends payments (the endpoint shares /execute's processor
+	// pre-flight), and only as the server's verdict for THIS reader allows. It
+	// re-sends money, so it arms before it commits, like Execute.
+	const showRetry = $derived(
+		canDispatchPayments(executionMode) && isRunRetryOffered(run?.actions?.retry_failed)
+	);
+	let confirmRetry = $state(false);
+	let retrying = $state(false);
+	// What the last retry did, kept on screen after the reload: which payments
+	// went out again and, for the rest, why not — the reasons are the
+	// operator's next step (reconcile, unblock, rebuild the run).
+	let retryResult = $state<RetryFailedResult | null>(null);
+
+	async function retryFailed() {
+		if (!run || !isAllowed(run.actions?.retry_failed)) return;
+		retrying = true;
+		try {
+			const result = await retryFailedRunPayments(run.id);
+			retryResult = result;
+			toast(
+				m('paymentRuns.runDetail.retryResult', {
+					retried: result.payments_retried,
+					skipped: result.payments_skipped
+				}),
+				'success'
+			);
+			await load();
+			onchange?.();
+		} catch (err) {
+			toast(errorMessage(err, m('paymentRuns.runDetail.retryError')), 'error');
+			// The run may have moved under us (someone else retried, a webhook
+			// settled it): re-read so the control reflects the server again.
+			await load();
+		} finally {
+			retrying = false;
+			// Disarm whichever way it went, as Execute does.
+			confirmRetry = false;
+		}
+	}
+
+	function skipLabel(reason: string): string {
+		const key = retrySkipReasonKey(reason);
+		return key ? m(key) : reason;
+	}
+
 	const showBankFile = $derived(
 		auth.can(PERM_PAYMENT_EXECUTE) && canDownloadBankFile(executionMode)
 	);
@@ -912,9 +980,66 @@
 					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
 				</div>
 			{:else}
+				{#if retryResult}
+					<div class="footer-note" role="status" data-testid="run-retry-result">
+						<p>
+							{m('paymentRuns.runDetail.retryResult', {
+								retried: retryResult.payments_retried,
+								skipped: retryResult.payments_skipped
+							})}
+						</p>
+						{#if retryResult.skip_reasons.length > 0}
+							<p>{m('paymentRuns.runDetail.retrySkippedHeading')}</p>
+							<ul class="retry-skips">
+								{#each retryResult.skip_reasons as reason (reason)}
+									<li>{skipLabel(reason)}</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				{/if}
+				{#if showRetry && confirmRetry}
+					<!-- Announced the moment Retry arms: the next click sends money. -->
+					<p class="footer-note armed-note" role="alert" data-testid="retry-armed-note">
+						{m('paymentRuns.runDetail.retryArmedNote', { count: run?.retryable_failures ?? 0 })}
+					</p>
+				{/if}
 				<div class="actions">
 					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
+					<!-- The server's verdict (`actions.retry_failed`), never a status
+					     or role check here. Disabled with the reason when the reader
+					     can act on it (a colleague must retry a run this reader
+					     created; CFO sign-off is pending; every failure must be
+					     reconciled first); hidden for a role refusal or a run that did
+					     not finish with failures. -->
+					{#if showRetry}
+						{#if confirmRetry}
+							<button
+								class="btn-execute armed"
+								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
+								onclick={retryFailed}
+							>
+								{retrying
+									? m('paymentRuns.runDetail.retrying')
+									: m('paymentRuns.runDetail.confirmRetryFailed')}
+							</button>
+						{:else}
+							<button
+								class="btn-execute"
+								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
+								aria-describedby={run?.actions?.retry_failed ? 'run-retry-refusal' : undefined}
+								onclick={() => (confirmRetry = true)}
+							>
+								{m('paymentRuns.runDetail.retryFailed')}
+							</button>
+						{/if}
+					{/if}
 				</div>
+				{#if showRetry && run?.actions?.retry_failed}
+					<p class="footer-note" id="run-retry-refusal" data-testid="run-retry-refusal">
+						{refusalText(run.actions.retry_failed, m)}
+					</p>
+				{/if}
 			{/if}
 		</footer>
 	</div>
@@ -1091,6 +1216,15 @@
 		margin: 0;
 		font-size: 0.8rem;
 		color: var(--text-muted);
+	}
+
+	.footer-note p {
+		margin: 0;
+	}
+
+	.retry-skips {
+		margin: 4px 0 0;
+		padding-left: 18px;
 	}
 
 	.actions {

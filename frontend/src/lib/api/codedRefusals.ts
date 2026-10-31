@@ -321,6 +321,8 @@ const BUILDERS: Record<string, Builder> = {
 	invoice_not_in_review: fixed('refusal.invoiceNotInReview'),
 	// `services/payment_controls.py` — the run dialog's `actions` verdict
 	payment_run_segregation: fixed('refusal.paymentRunSegregation'),
+	payment_run_awaiting_cfo: fixed('refusal.paymentRunAwaitingCfo'),
+	payment_run_nothing_to_retry: fixed('refusal.paymentRunNothingToRetry'),
 	// `api/vendors.py::change_request_approve_refusal` — the queue's verdict
 	vendor_change_self_requested: fixed('refusal.vendorChangeSelfRequested'),
 	vendor_change_self_provisioned: fixed('refusal.vendorChangeSelfProvisioned'),

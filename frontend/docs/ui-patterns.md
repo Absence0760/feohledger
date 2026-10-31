@@ -825,7 +825,7 @@ Where each verdict lives (backend gate → field):
 |---|---|---|
 | Payment queue | `record_outside_refusal` | `services/external_payment.record_outside_refusals` (#573) |
 | Payment history | `void_refusal`, `release_refusal`, `dismiss_refusal` | `payment_controls.payment_void_refusal`, `.compliance_hold_refusal` |
-| Run dialog | `actions.{approve,execute,cancel}` | `payment_controls.run_{approve,execute,cancel}_refusal` |
+| Run dialog | `actions.{approve,execute,cancel,retry_failed}` | `payment_controls.run_{approve,execute,cancel,retry_failed}_refusal` |
 | Invoice modal | `GET /api/invoices/{id}/review-actions` | `review.review_refusals` (the approve gates, on a scratch chain) |
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
