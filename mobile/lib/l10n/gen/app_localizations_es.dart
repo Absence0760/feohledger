@@ -3317,6 +3317,43 @@ class AppLocalizationsEs extends AppLocalizations {
       'Se anuló en FeohLedger un pago informado por el ERP, pero es posible que el ERP siga mostrando la factura como pagada. FeohLedger no volverá a pagarla hasta que alguien confirme que el pago del ERP está deshecho.';
 
   @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp no registró el pago de esta factura, así que allí la factura sigue figurando como impagada aunque el dinero ya se pagó. Resuelva lo que lo impidió y luego use «Reintentar sincronización ERP» en la ejecución de pago correspondiente, en Pagos.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'Su ERP no registró el pago de esta factura, así que allí la factura sigue figurando como impagada aunque el dinero ya se pagó. Resuelva lo que lo impidió y luego use «Reintentar sincronización ERP» en la ejecución de pago correspondiente, en Pagos.';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp registró el pago de esta factura, pero allí la factura sigue mostrando $amount pendientes (un descuento o un crédito aplicado en FeohLedger). Cierre la diferencia en el ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'Su ERP registró el pago de esta factura, pero allí la factura sigue mostrando $amount pendientes (un descuento o un crédito aplicado en FeohLedger). Cierre la diferencia en el ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp sigue mostrando esta factura como pagada mediante un pago que se anuló en FeohLedger, porque no se pudo anular en el ERP. Anule ese pago en el ERP para que los libros cuadren.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'Su ERP sigue mostrando esta factura como pagada mediante un pago que se anuló en FeohLedger, porque no se pudo anular en el ERP. Anule ese pago en el ERP para que los libros cuadren.';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'El pago de esta factura se liquidó, pero FeohLedger no pudo terminar de registrarlo, así que la factura no ha pasado a «Pagada» aunque el dinero ya salió. Nada lo reintenta automáticamente: use «Reintentar sincronización ERP» en la ejecución de pago correspondiente, en Pagos.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Coincide';
 
   @override

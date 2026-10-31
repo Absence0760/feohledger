@@ -2359,6 +2359,44 @@
   "exceptionDescriptionErpDispatchStoppedDeleted": "FeohLedger was about to pay this invoice, but the ERP shows its bill deleted or voided. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.",
   "exceptionDescriptionErpDispatchStoppedUnconfirmed": "FeohLedger was about to pay this invoice, but the ERP could not confirm its bill is still open and unpaid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.",
   "exceptionDescriptionErpReportedPaymentVoided": "A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP's payment is undone.",
+  "exceptionDescriptionErpPaymentWritebackFailed": "{erp} did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.",
+  "@exceptionDescriptionErpPaymentWritebackFailed": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentWritebackFailedUnnamed": "Your ERP did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.",
+  "exceptionDescriptionErpPaymentWritebackBalanceOpen": "{erp} recorded this invoice's payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.",
+  "@exceptionDescriptionErpPaymentWritebackBalanceOpen": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed": "Your ERP recorded this invoice's payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.",
+  "@exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentVoidWritebackFailed": "{erp} still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.",
+  "@exceptionDescriptionErpPaymentVoidWritebackFailed": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed": "Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.",
+  "exceptionDescriptionErpSyncBackFailed": "This invoice's payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment's run in Payments.",
   "warningsPoMatchStatusMatched": "Matched",
   "warningsPoMatchStatusMismatch": "Mismatch",
   "warningsPoMatchStatusPartial": "Partial",

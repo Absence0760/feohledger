@@ -132,6 +132,36 @@ describe('exceptionDescriptionText', () => {
 		expect(out?.summary).toMatch(/^Ihr ERP meldet /);
 	});
 
+	// The payment write-back / sync-back sentences (§331 follow-up): no ids, no
+	// API path, and the open balance formatted as money in the reader's locale.
+	it('localizes the write-back open-balance sentence with its money figure', () => {
+		const out = exceptionDescriptionText(
+			{
+				description: 'QuickBooks Online recorded this invoice’s payment, but …',
+				description_code: 'exception.erp_payment_writeback_balance_open',
+				description_params: { erp: 'QuickBooks Online', amount: '2.00', currency: 'EUR' }
+			},
+			translateDe
+		);
+		expect(out?.summary).toMatch(/^QuickBooks Online hat die Zahlung /);
+		// Money goes through the shared formatter with the row's currency.
+		expect(out?.summary).toContain('€2.00');
+		expect(out?.summary).not.toContain('{amount}');
+	});
+
+	it('localizes the sync-back failure, which names no ERP', () => {
+		const out = exceptionDescriptionText(
+			{
+				description: 'This invoice’s payment settled, but …',
+				description_code: 'exception.erp_sync_back_failed',
+				description_params: {}
+			},
+			translateDe
+		);
+		expect(out?.summary).toContain('ERP-Abgleich wiederholen');
+		expect(out?.summary).not.toMatch(/\/api\//);
+	});
+
 	it('falls back to English when a named ERP sentence arrives without the name', () => {
 		const out = exceptionDescriptionText(
 			{

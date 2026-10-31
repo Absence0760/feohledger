@@ -3296,6 +3296,43 @@ class AppLocalizationsEn extends AppLocalizations {
       'A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP\'s payment is undone.';
 
   @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp did not record this invoice\'s payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment\'s run in Payments.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'Your ERP did not record this invoice\'s payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment\'s run in Payments.';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp recorded this invoice\'s payment, but the bill still shows $amount open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'Your ERP recorded this invoice\'s payment, but the bill still shows $amount open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'This invoice\'s payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment\'s run in Payments.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Matched';
 
   @override

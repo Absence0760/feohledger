@@ -223,6 +223,18 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'exception.erp_voided_after_post': 'exceptions.description.erpVoidedAfterPost',
 	// Your ERP reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.
 	'exception.erp_voided_after_post_unnamed': 'exceptions.description.erpVoidedAfterPostUnnamed',
+	// {erp} did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.
+	'exception.erp_payment_writeback_failed': 'exceptions.description.erpPaymentWritebackFailed',
+	// Your ERP did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.
+	'exception.erp_payment_writeback_failed_unnamed': 'exceptions.description.erpPaymentWritebackFailedUnnamed',
+	// {erp} recorded this invoice's payment, but the bill still shows {amount} {currency} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.
+	'exception.erp_payment_writeback_balance_open': 'exceptions.description.erpPaymentWritebackBalanceOpen',
+	// Your ERP recorded this invoice's payment, but the bill still shows {amount} {currency} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.
+	'exception.erp_payment_writeback_balance_open_unnamed': 'exceptions.description.erpPaymentWritebackBalanceOpenUnnamed',
+	// {erp} still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.
+	'exception.erp_payment_void_writeback_failed': 'exceptions.description.erpPaymentVoidWritebackFailed',
+	// Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.
+	'exception.erp_payment_void_writeback_failed_unnamed': 'exceptions.description.erpPaymentVoidWritebackFailedUnnamed',
 	// The ERP shows this bill settled, at least in part by a vendor credit applied there. FeohLedger will not pay it until someone confirms what is still owed.
 	'exception.erp_credit_settlement': 'exceptions.description.erpCreditSettlement',
 	// The ERP shows this bill paid by a payment FeohLedger did not make, while a FeohLedger payment is scheduled for it. Stop or void one of them before both reach the supplier.
@@ -253,6 +265,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'exception.erp_dispatch_stopped_unconfirmed': 'exceptions.description.erpDispatchStoppedUnconfirmed',
 	// A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP's payment is undone.
 	'exception.erp_reported_payment_voided': 'exceptions.description.erpReportedPaymentVoided',
+	// This invoice's payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment's run in Payments.
+	'exception.erp_sync_back_failed': 'exceptions.description.erpSyncBackFailed',
 } as const satisfies Record<string, MessageKey>;
 
 /**
@@ -361,6 +375,12 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'exception.erp_settled_short_unnamed': {},
 	'exception.erp_voided_after_post': { erp: 'text' },
 	'exception.erp_voided_after_post_unnamed': {},
+	'exception.erp_payment_writeback_failed': { erp: 'text' },
+	'exception.erp_payment_writeback_failed_unnamed': {},
+	'exception.erp_payment_writeback_balance_open': { erp: 'text', amount: 'money', currency: 'currency' },
+	'exception.erp_payment_writeback_balance_open_unnamed': { amount: 'money', currency: 'currency' },
+	'exception.erp_payment_void_writeback_failed': { erp: 'text' },
+	'exception.erp_payment_void_writeback_failed_unnamed': {},
 	'exception.erp_credit_settlement': {},
 	'exception.erp_paid_while_scheduled': {},
 	'exception.erp_paid_twice': {},
@@ -376,6 +396,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'exception.erp_dispatch_stopped_deleted': {},
 	'exception.erp_dispatch_stopped_unconfirmed': {},
 	'exception.erp_reported_payment_voided': {},
+	'exception.erp_sync_back_failed': {},
 } as const satisfies Record<
 	keyof typeof INVOICE_WARNING_MESSAGE_KEYS,
 	Record<string, WarningParamKind>

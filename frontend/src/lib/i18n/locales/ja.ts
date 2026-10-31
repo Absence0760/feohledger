@@ -678,6 +678,13 @@ export const messages = {
 	'exceptions.description.erpDispatchStoppedDeleted': "FeohLedger はこの請求書を支払おうとしていましたが、ERP ではその伝票が削除または無効化されています。支払いは資金が動く前に停止されました。支払う前に未払い額を確認し、この請求書のバーチャルカードがすでに発行されている場合はキャンセルしてください。",
 	'exceptions.description.erpDispatchStoppedUnconfirmed': "FeohLedger はこの請求書を支払おうとしていましたが、ERP はその伝票がまだ未払いのまま開いていることを確認できませんでした。支払いは資金が動く前に停止されました。支払う前に未払い額を確認し、この請求書のバーチャルカードがすでに発行されている場合はキャンセルしてください。",
 	'exceptions.description.erpReportedPaymentVoided': "ERP が報告した支払いが FeohLedger で無効化されましたが、ERP ではまだ請求書が支払済みと表示されている可能性があります。ERP の支払いが取り消されたことを誰かが確認するまで、FeohLedger はこれを再び支払いません。",
+	'exceptions.description.erpPaymentWritebackFailed': "{erp} はこの請求書の支払いを記録しなかったため、資金は支払済みにもかかわらず、ERP では請求書が未払いのまま表示されています。原因を解消してから、「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。",
+	'exceptions.description.erpPaymentWritebackFailedUnnamed': "ご利用の ERP はこの請求書の支払いを記録しなかったため、資金は支払済みにもかかわらず、ERP では請求書が未払いのまま表示されています。原因を解消してから、「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。",
+	'exceptions.description.erpPaymentWritebackBalanceOpen': "{erp} はこの請求書の支払いを記録しましたが、請求書にはまだ {amount} の未決済残高が表示されています（FeohLedger で適用した割引またはクレジット）。ERP で差額を解消してください。",
+	'exceptions.description.erpPaymentWritebackBalanceOpenUnnamed': "ご利用の ERP はこの請求書の支払いを記録しましたが、請求書にはまだ {amount} の未決済残高が表示されています（FeohLedger で適用した割引またはクレジット）。ERP で差額を解消してください。",
+	'exceptions.description.erpPaymentVoidWritebackFailed': "{erp} では、FeohLedger で無効化された支払いによってこの請求書がまだ支払済みと表示されています。ERP での無効化に失敗したためです。帳簿を一致させるため、ERP でその支払いを無効化してください。",
+	'exceptions.description.erpPaymentVoidWritebackFailedUnnamed': "ご利用の ERP では、FeohLedger で無効化された支払いによってこの請求書がまだ支払済みと表示されています。ERP での無効化に失敗したためです。帳簿を一致させるため、ERP でその支払いを無効化してください。",
+	'exceptions.description.erpSyncBackFailed': "この請求書の支払いは決済されましたが、FeohLedger が記録を完了できなかったため、資金は出金済みにもかかわらず請求書は「支払済み」になっていません。自動では再試行されません。「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。",
 	'invoices.priorsTitle':
 		'抽出の事前情報: {cache, plural, other {取引先キャッシュ項目 # 件}}、{rag, plural, other {RAG 近傍 # 件}}',
 	'invoices.empty': 'フィルターに一致する請求書はありません。',

@@ -251,6 +251,19 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'exception.erp_settled_short_unnamed': {},
   'exception.erp_voided_after_post': {'erp': 'text'},
   'exception.erp_voided_after_post_unnamed': {},
+  'exception.erp_payment_writeback_failed': {'erp': 'text'},
+  'exception.erp_payment_writeback_failed_unnamed': {},
+  'exception.erp_payment_writeback_balance_open': {
+    'erp': 'text',
+    'amount': 'money',
+    'currency': 'currency',
+  },
+  'exception.erp_payment_writeback_balance_open_unnamed': {
+    'amount': 'money',
+    'currency': 'currency',
+  },
+  'exception.erp_payment_void_writeback_failed': {'erp': 'text'},
+  'exception.erp_payment_void_writeback_failed_unnamed': {},
   'exception.erp_credit_settlement': {},
   'exception.erp_paid_while_scheduled': {},
   'exception.erp_paid_twice': {},
@@ -266,6 +279,7 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'exception.erp_dispatch_stopped_deleted': {},
   'exception.erp_dispatch_stopped_unconfirmed': {},
   'exception.erp_reported_payment_voided': {},
+  'exception.erp_sync_back_failed': {},
 };
 
 /// The localized sentence for [warningCode], or `null` when this build does
@@ -951,6 +965,36 @@ String? _localizeWarningCode(
     // Your ERP reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.
     case 'exception.erp_voided_after_post_unnamed':
       return l.exceptionDescriptionErpVoidedAfterPostUnnamed;
+    // {erp} did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.
+    case 'exception.erp_payment_writeback_failed':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaymentWritebackFailed(erp);
+    // Your ERP did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.
+    case 'exception.erp_payment_writeback_failed_unnamed':
+      return l.exceptionDescriptionErpPaymentWritebackFailedUnnamed;
+    // {erp} recorded this invoice's payment, but the bill still shows {amount} {currency} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.
+    case 'exception.erp_payment_writeback_balance_open':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      final amount = _money(p['amount'], currency);
+      if (amount == null) return null;
+      return l.exceptionDescriptionErpPaymentWritebackBalanceOpen(erp, amount);
+    // Your ERP recorded this invoice's payment, but the bill still shows {amount} {currency} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.
+    case 'exception.erp_payment_writeback_balance_open_unnamed':
+      final amount = _money(p['amount'], currency);
+      if (amount == null) return null;
+      return l.exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+        amount,
+      );
+    // {erp} still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.
+    case 'exception.erp_payment_void_writeback_failed':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaymentVoidWritebackFailed(erp);
+    // Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.
+    case 'exception.erp_payment_void_writeback_failed_unnamed':
+      return l.exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed;
     // The ERP shows this bill settled, at least in part by a vendor credit applied there. FeohLedger will not pay it until someone confirms what is still owed.
     case 'exception.erp_credit_settlement':
       return l.exceptionDescriptionErpCreditSettlement;
@@ -996,6 +1040,9 @@ String? _localizeWarningCode(
     // A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP's payment is undone.
     case 'exception.erp_reported_payment_voided':
       return l.exceptionDescriptionErpReportedPaymentVoided;
+    // This invoice's payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment's run in Payments.
+    case 'exception.erp_sync_back_failed':
+      return l.exceptionDescriptionErpSyncBackFailed;
   }
   return null;
 }

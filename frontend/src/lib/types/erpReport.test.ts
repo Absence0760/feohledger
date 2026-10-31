@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { erpPrefill, isErpPaidReport, isPoRematchClears, poRematchNote } from './erpReport.ts';
+import {
+	erpPrefill,
+	erpRefusalNote,
+	isErpPaidReport,
+	isPoRematchClears,
+	poRematchNote
+} from './erpReport.ts';
 
 describe('isErpPaidReport', () => {
 	it('is true only for a paid_not_recorded report', () => {
@@ -38,6 +44,29 @@ describe('erpPrefill', () => {
 
 	it('starts empty with no report at all', () => {
 		expect(erpPrefill(null, today)).toEqual({ method: '', reference: '', paidOn: today });
+	});
+});
+
+describe('erpRefusalNote', () => {
+	const t = (key: string, params?: Record<string, string | number>) =>
+		`${key}${params ? ' ' + JSON.stringify(params) : ''}`;
+	const refusal = { code: 'payment_account_not_mapped', params: { provider: 'QuickBooks Online' } };
+
+	it('states the coded refusal of a failed payment write-back or void', () => {
+		for (const kind of ['payment_writeback_failed', 'payment_void_writeback_failed']) {
+			expect(erpRefusalNote({ kind, refusal }, t)).toBe(
+				'erpRefusal.paymentAccountNotMapped {"provider":"QuickBooks Online"}'
+			);
+		}
+	});
+
+	it('is null with no refusal, an unknown code, or any other row', () => {
+		expect(erpRefusalNote({ kind: 'payment_writeback_failed', refusal: null }, t)).toBeNull();
+		expect(
+			erpRefusalNote({ kind: 'payment_writeback_failed', refusal: { code: 'newer_code' } }, t)
+		).toBeNull();
+		expect(erpRefusalNote({ kind: 'payment_sync_back_failed', refusal }, t)).toBeNull();
+		expect(erpRefusalNote(null, t)).toBeNull();
 	});
 });
 

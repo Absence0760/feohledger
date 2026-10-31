@@ -3318,6 +3318,43 @@ class AppLocalizationsDe extends AppLocalizations {
       'Eine vom ERP gemeldete Zahlung wurde in FeohLedger storniert, aber das ERP zeigt die Rechnung möglicherweise noch als bezahlt an. FeohLedger bezahlt sie erst wieder, wenn jemand bestätigt, dass die Zahlung im ERP rückgängig gemacht ist.';
 
   @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp hat die Zahlung dieser Rechnung nicht erfasst, daher wird die Rechnung dort weiterhin als unbezahlt angezeigt, obwohl das Geld gezahlt wurde. Beheben Sie die Ursache und verwenden Sie dann „ERP-Abgleich wiederholen“ beim Zahlungslauf dieser Zahlung unter Zahlungen.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'Ihr ERP hat die Zahlung dieser Rechnung nicht erfasst, daher wird die Rechnung dort weiterhin als unbezahlt angezeigt, obwohl das Geld gezahlt wurde. Beheben Sie die Ursache und verwenden Sie dann „ERP-Abgleich wiederholen“ beim Zahlungslauf dieser Zahlung unter Zahlungen.';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp hat die Zahlung dieser Rechnung erfasst, aber dort sind noch $amount offen (ein in FeohLedger abgezogenes Skonto oder eine Gutschrift). Gleichen Sie die Differenz im ERP aus.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'Ihr ERP hat die Zahlung dieser Rechnung erfasst, aber dort sind noch $amount offen (ein in FeohLedger abgezogenes Skonto oder eine Gutschrift). Gleichen Sie die Differenz im ERP aus.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp zeigt diese Rechnung weiterhin als bezahlt an – durch eine Zahlung, die in FeohLedger storniert wurde, deren Stornierung im ERP aber fehlgeschlagen ist. Stornieren Sie diese Zahlung im ERP, damit die Bücher übereinstimmen.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'Ihr ERP zeigt diese Rechnung weiterhin als bezahlt an – durch eine Zahlung, die in FeohLedger storniert wurde, deren Stornierung im ERP aber fehlgeschlagen ist. Stornieren Sie diese Zahlung im ERP, damit die Bücher übereinstimmen.';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'Die Zahlung dieser Rechnung wurde abgewickelt, aber FeohLedger konnte die Erfassung nicht abschließen, daher steht die Rechnung noch nicht auf „Bezahlt“, obwohl das Geld geflossen ist. Nichts wiederholt dies automatisch: Verwenden Sie „ERP-Abgleich wiederholen“ beim Zahlungslauf dieser Zahlung unter Zahlungen.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Abgeglichen';
 
   @override

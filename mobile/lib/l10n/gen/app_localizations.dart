@@ -4990,6 +4990,53 @@ abstract class AppLocalizations {
   /// **'A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP\'s payment is undone.'**
   String get exceptionDescriptionErpReportedPaymentVoided;
 
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} did not record this invoice\'s payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment\'s run in Payments.'**
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackFailedUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP did not record this invoice\'s payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment\'s run in Payments.'**
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackBalanceOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} recorded this invoice\'s payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.'**
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  );
+
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP recorded this invoice\'s payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.'**
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  );
+
+  /// No description provided for @exceptionDescriptionErpPaymentVoidWritebackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.'**
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.'**
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpSyncBackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice\'s payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment\'s run in Payments.'**
+  String get exceptionDescriptionErpSyncBackFailed;
+
   /// No description provided for @warningsPoMatchStatusMatched.
   ///
   /// In en, this message translates to:

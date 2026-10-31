@@ -3317,6 +3317,43 @@ class AppLocalizationsPt extends AppLocalizations {
       'Um pagamento informado pelo ERP foi estornado no FeohLedger, mas o ERP ainda pode mostrar a fatura como paga. O FeohLedger não vai pagá-la de novo até que alguém confirme que o pagamento do ERP foi desfeito.';
 
   @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp não registrou o pagamento desta fatura, então ela ainda aparece lá como não paga, embora o dinheiro já tenha sido pago. Resolva o que impediu e depois use “Repetir sincronização com o ERP” no lote de pagamento correspondente, em Pagamentos.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'Seu ERP não registrou o pagamento desta fatura, então ela ainda aparece lá como não paga, embora o dinheiro já tenha sido pago. Resolva o que impediu e depois use “Repetir sincronização com o ERP” no lote de pagamento correspondente, em Pagamentos.';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp registrou o pagamento desta fatura, mas ela ainda mostra $amount em aberto lá (um desconto ou crédito aplicado no FeohLedger). Feche a diferença no ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'Seu ERP registrou o pagamento desta fatura, mas ela ainda mostra $amount em aberto lá (um desconto ou crédito aplicado no FeohLedger). Feche a diferença no ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp ainda mostra esta fatura como paga por um pagamento que foi estornado no FeohLedger, porque o estorno no ERP falhou. Estorne esse pagamento no ERP para que os livros confiram.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'Seu ERP ainda mostra esta fatura como paga por um pagamento que foi estornado no FeohLedger, porque o estorno no ERP falhou. Estorne esse pagamento no ERP para que os livros confiram.';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'O pagamento desta fatura foi liquidado, mas o FeohLedger não conseguiu concluir o registro, então a fatura não passou para “Paga”, embora o dinheiro já tenha saído. Nada tenta de novo automaticamente: use “Repetir sincronização com o ERP” no lote de pagamento correspondente, em Pagamentos.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Conciliado';
 
   @override
@@ -6645,6 +6682,43 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get exceptionDescriptionErpReportedPaymentVoided =>
       'Um pagamento informado pelo ERP foi estornado no FeohLedger, mas o ERP ainda pode mostrar a fatura como paga. O FeohLedger não vai pagá-la de novo até que alguém confirme que o pagamento do ERP foi desfeito.';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp não registrou o pagamento desta fatura, então ela ainda aparece lá como não paga, embora o dinheiro já tenha sido pago. Resolva o que impediu e depois use “Repetir sincronização com o ERP” no lote de pagamento correspondente, em Pagamentos.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'Seu ERP não registrou o pagamento desta fatura, então ela ainda aparece lá como não paga, embora o dinheiro já tenha sido pago. Resolva o que impediu e depois use “Repetir sincronização com o ERP” no lote de pagamento correspondente, em Pagamentos.';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp registrou o pagamento desta fatura, mas ela ainda mostra $amount em aberto lá (um desconto ou crédito aplicado no FeohLedger). Feche a diferença no ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'Seu ERP registrou o pagamento desta fatura, mas ela ainda mostra $amount em aberto lá (um desconto ou crédito aplicado no FeohLedger). Feche a diferença no ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp ainda mostra esta fatura como paga por um pagamento que foi estornado no FeohLedger, porque o estorno no ERP falhou. Estorne esse pagamento no ERP para que os livros confiram.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'Seu ERP ainda mostra esta fatura como paga por um pagamento que foi estornado no FeohLedger, porque o estorno no ERP falhou. Estorne esse pagamento no ERP para que os livros confiram.';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'O pagamento desta fatura foi liquidado, mas o FeohLedger não conseguiu concluir o registro, então a fatura não passou para “Paga”, embora o dinheiro já tenha saído. Nada tenta de novo automaticamente: use “Repetir sincronização com o ERP” no lote de pagamento correspondente, em Pagamentos.';
 
   @override
   String get warningsPoMatchStatusMatched => 'Conciliado';

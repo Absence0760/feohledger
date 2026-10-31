@@ -3136,6 +3136,43 @@ class AppLocalizationsJa extends AppLocalizations {
       'ERP が報告した支払いが FeohLedger で無効化されましたが、ERP ではまだ請求書が支払済みと表示されている可能性があります。ERP の支払いが取り消されたことを誰かが確認するまで、FeohLedger はこれを再び支払いません。';
 
   @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp はこの請求書の支払いを記録しなかったため、資金は支払済みにもかかわらず、ERP では請求書が未払いのまま表示されています。原因を解消してから、「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'ご利用の ERP はこの請求書の支払いを記録しなかったため、資金は支払済みにもかかわらず、ERP では請求書が未払いのまま表示されています。原因を解消してから、「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp はこの請求書の支払いを記録しましたが、請求書にはまだ $amount の未決済残高が表示されています（FeohLedger で適用した割引またはクレジット）。ERP で差額を解消してください。';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'ご利用の ERP はこの請求書の支払いを記録しましたが、請求書にはまだ $amount の未決済残高が表示されています（FeohLedger で適用した割引またはクレジット）。ERP で差額を解消してください。';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp では、FeohLedger で無効化された支払いによってこの請求書がまだ支払済みと表示されています。ERP での無効化に失敗したためです。帳簿を一致させるため、ERP でその支払いを無効化してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'ご利用の ERP では、FeohLedger で無効化された支払いによってこの請求書がまだ支払済みと表示されています。ERP での無効化に失敗したためです。帳簿を一致させるため、ERP でその支払いを無効化してください。';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'この請求書の支払いは決済されましたが、FeohLedger が記録を完了できなかったため、資金は出金済みにもかかわらず請求書は「支払済み」になっていません。自動では再試行されません。「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。';
+
+  @override
   String get warningsPoMatchStatusMatched => '一致';
 
   @override

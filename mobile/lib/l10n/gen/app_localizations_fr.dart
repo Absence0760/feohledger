@@ -3326,6 +3326,43 @@ class AppLocalizationsFr extends AppLocalizations {
       'Un paiement signalé par l\'ERP a été annulé dans FeohLedger, mais l\'ERP affiche peut-être encore la facture comme payée. FeohLedger ne la paiera plus tant que quelqu\'un n\'aura pas confirmé que le paiement de l\'ERP est annulé.';
 
   @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp n\'a pas enregistré le paiement de cette facture : elle y apparaît donc toujours comme impayée alors que l\'argent a été versé. Corrigez ce qui l\'a empêché, puis utilisez « Relancer la synchro ERP » sur le lot de paiement concerné, dans Paiements.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'Votre ERP n\'a pas enregistré le paiement de cette facture : elle y apparaît donc toujours comme impayée alors que l\'argent a été versé. Corrigez ce qui l\'a empêché, puis utilisez « Relancer la synchro ERP » sur le lot de paiement concerné, dans Paiements.';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp a enregistré le paiement de cette facture, mais elle y affiche encore $amount restant dû (un escompte ou un avoir pris dans FeohLedger). Soldez l\'écart dans l\'ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'Votre ERP a enregistré le paiement de cette facture, mais elle y affiche encore $amount restant dû (un escompte ou un avoir pris dans FeohLedger). Soldez l\'écart dans l\'ERP.';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp affiche toujours cette facture comme payée par un paiement annulé dans FeohLedger, car son annulation dans l\'ERP a échoué. Annulez ce paiement dans l\'ERP pour que les comptes concordent.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'Votre ERP affiche toujours cette facture comme payée par un paiement annulé dans FeohLedger, car son annulation dans l\'ERP a échoué. Annulez ce paiement dans l\'ERP pour que les comptes concordent.';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'Le paiement de cette facture a été réglé, mais FeohLedger n\'a pas pu finir de l\'enregistrer : la facture n\'est donc pas passée à « Payée » alors que l\'argent est parti. Rien ne le relance automatiquement : utilisez « Relancer la synchro ERP » sur le lot de paiement concerné, dans Paiements.';
+
+  @override
   String get warningsPoMatchStatusMatched => 'Rapproché';
 
   @override
