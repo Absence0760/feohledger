@@ -1553,13 +1553,23 @@ the purchase-orders page says so in a warning toast and in place of the figure.
 The supplier portal shows no figure for such a PO and refuses to flip it into an
 invoice (409); budgets and the CFO accruals leave it out and count it
 (`po-matching.md` § A PO total the ERP no longer vouches for).
-Blackbaud FE NXT, NetSuite, Business Central, Sage Accounting (ZA) and Sage
-Intacct report the same way: a numbered PO with no usable total (`order_total`,
-`foreigntotal`, `totalAmountIncludingTax`, `Total`, `txnTotal`) is
-`unpriceable`. Intacct used to sync such a PO at 0. A PO with no number is
-dropped without a report, since there is no row to mark. Merge.dev, Xero and
-QuickBooks Online do not override `list_pos_report` and report nothing skipped
-(decisions §325). Every PO listing, theirs included, is read whole or raises
+Blackbaud FE NXT, NetSuite, Business Central, Sage Accounting (ZA), Sage
+Intacct, Merge.dev, Xero and QuickBooks Online report the same way: a numbered
+PO with no usable total (`order_total`, `foreigntotal`,
+`totalAmountIncludingTax`, `Total`, `txnTotal`, `total_amount`, Xero's `Total`,
+`TotalAmt`) is `unpriceable`. "No usable total" is absent, empty, unreadable or
+not finite (`NaN`); a stated `0` is the ERP's figure and syncs as one. The total
+is never summed from the PO's lines, which can omit tax, charges or discounts
+the header carries. Intacct, Merge.dev, Xero and QuickBooks Online used to sync
+such a PO at 0, so every invoice against it read as over-billed (decisions
+§325 and its follow-up). A PO with no number is dropped without a report, since
+there is no row to mark; QuickBooks Online used to file one with neither a
+`DocNumber` nor an `Id` under the literal number `"None"`. A Merge.dev skip carries
+the key an earlier build stored the PO under (`SkippedPo.legacy_po_numbers`,
+§328): only a priced PO re-keys, so when no row is stored under the real number
+yet the sync marks the legacy row where it stands (never a key the listing
+reports as another PO's number), and the priced sync that later re-keys it
+clears the mark. Every PO listing, theirs included, is read whole or raises
 `ErpListingIncomplete`: a read that ended at a failed page or a page cap would
 silently drop the skips in the part it never read, leaving those stored totals
 trusted. NetSuite, Business Central and Xero used to return what they had read
@@ -1587,8 +1597,14 @@ ones under `"UNKNOWN"`. No manual step is needed: the next PO sync re-keys each
 id-keyed row to its real number instead of creating a second row
 (`PoPayload.legacy_po_numbers`), and marks the `"UNKNOWN"` row unverifiable
 (`ErpAdapter.retired_po_numbers`), so accruals and budgets stop summing it.
-The sync's audit row counts both (`rekeyed`, `retired`). Run one PO sync per
-Merge.dev tenant after deploying; until then `/cfo` can count such a PO twice.
+The sync's audit row counts both (`rekeyed`, `retired`). Only a priced PO
+re-keys: one the ERP now lists with no total, still stored under its record id,
+is marked `unpriceable` where it stands, and the sync that next prices it
+re-keys the row and clears the mark. Run one PO sync per Merge.dev tenant after
+deploying; until then `/cfo` can count such a PO twice. QuickBooks Online
+retires `"None"` the same way, the number it filed a PO with neither a
+`DocNumber` nor an `Id` under. A placeholder the listing reports as a real PO
+number is that PO's and is never marked.
 
 **Repairing a chart synced before §284.** On a QuickBooks Online tenant, every
 invoice push is refused after migration 0115, with `account_not_linked` for the
@@ -2185,7 +2201,7 @@ which apps created on or after 2026-03-02 must use.
 | `test_connection` | `GET Organisation` | |
 | `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False`. Xero sets `IsSupplier` only once a contact has a bill, so a supplier you have only sent purchase orders to is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone |
 | `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
-| `list_pos` | `GET PurchaseOrders` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`, a 429, transport error or unreadable page included); `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open |
+| `list_pos` | `GET PurchaseOrders` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`, a 429, transport error or unreadable page included); `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open; a numbered PO with no usable `Total` skipped and named `unpriceable` (`list_pos_report`), never synced at 0 |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
 | `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
 | `void_invoice` | `POST Invoices/{id}` | DRAFT/SUBMITTED → `DELETED`; unpaid, uncredited AUTHORISED → `VOIDED`; anything with money applied → `False` |
