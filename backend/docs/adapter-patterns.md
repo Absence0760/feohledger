@@ -45,6 +45,14 @@ the client (`utils/url_safety`, decisions §334 / §339):
 | ERP Merge.dev / Xero / Sage / Intacct / Blackbaud, payments, cards, sanctions, FX, 1099, TIN, LLMs, billing, SMTP, AWS | vendor constant or `FEOH_*` | operator |
 | QMS `generic`, tax-rate `avalara` / `taxjar`, workflow webhook step | per-org URL, **nothing sent yet** | `_ORG_HOST_NOT_YET_SENT` — fails the day a client is built |
 
+The classification is enforced by discovery, not by review: any module under
+`app/` that imports `httpx`, `aiohttp`, `requests`, `smtplib` or
+`urllib.request` must appear in one of `test_url_safety.py`'s lists
+(`_OPERATOR_HOST_MODULES` with its reason, `_ORG_HOST_MODULES`,
+`_ORG_HOST_BESPOKE` or `_PLAIN_CLIENT_ALLOWED`), so a new adapter that reads
+`cfg["base_url"]` into a plain client fails CI. The four no-emulator
+`org_host_client` adopters are also pinned to a literal `allow_private=False`.
+
 `stripe_treasury` used to accept a per-org `api_base`; it is now
 `FEOH_STRIPE_API_BASE` only (`payments.md` § Local testing). Operator overrides
 that point at fake-erp / fake-commerce / stripe-mock stay unpinned (§334).

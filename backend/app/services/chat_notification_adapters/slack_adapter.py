@@ -110,6 +110,9 @@ class SlackChatNotificationAdapter(ChatNotificationAdapter):
         # no local Slack to reach.
         from app.utils.url_safety import UnsafeUrlError, org_host_client
 
+        # Built before the client, so nothing can raise between creating it
+        # and entering its `async with`.
+        body = self.build_body(message)
         try:
             client = await org_host_client(
                 self.webhook_url, allow_private=False, timeout=TIMEOUT, follow_redirects=False
@@ -120,7 +123,6 @@ class SlackChatNotificationAdapter(ChatNotificationAdapter):
                 message.event_type,
             )
             return
-        body = self.build_body(message)
         try:
             async with client:
                 response = await client.post(self.webhook_url, json=body)

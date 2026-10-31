@@ -665,25 +665,141 @@ def test_bespoke_per_org_hosts_still_build_a_pinned_client():
 def test_per_org_hosts_not_yet_sent_build_no_http_client():
     for rel, field in _ORG_HOST_NOT_YET_SENT.items():
         tree = ast.parse((_APP / rel).read_text())
-        imports_httpx = any(
-            (isinstance(n, ast.Import) and any(a.name == "httpx" for a in n.names))
-            or (isinstance(n, ast.ImportFrom) and n.module == "httpx")
-            for n in ast.walk(tree)
-        )
+        imported = _imported_client_modules(tree)
         built = _called_names(tree) & _HTTP_CLIENT_NAMES
-        assert not imports_httpx and not built, (
+        assert not imported and not built, (
             f"{rel} now sends to {field}: route it through url_safety.org_host_client "
             "and move the module to _ORG_HOST_MODULES (decisions §339)"
         )
 
 
+#: Modules that import an HTTP / SMTP client but send only to an OPERATOR host:
+#: a vendor constant, a ``FEOH_*`` setting, or a per-org value that merely picks
+#: one of the vendor's own constant hosts (``sandbox``, ``environment``). None
+#: reads a destination from per-org settings. A module that starts to belongs in
+#: ``_ORG_HOST_MODULES`` instead.
+_OPERATOR_HOST_MODULES = {
+    "services/assistant/claude_adapter.py": "Anthropic constant",
+    "services/assistant/ollama_adapter.py": "FEOH_OLLAMA_BASE_URL (orchestrator config)",
+    "services/audit_summary.py": "Anthropic constant",
+    "services/billing_adapters/stripe_billing.py": "FEOH_BILLING_STRIPE_API_BASE",
+    "services/card_adapters/lithic.py": "Lithic constants; `sandbox` picks one",
+    "services/card_adapters/nium.py": "Nium constants; `sandbox` picks one",
+    "services/commerce_adapters/cin7.py": "Cin7 constant, via the pinned commerce client",
+    "services/commerce_adapters/lightspeed.py": "validated <prefix>.retail.lightspeed.app",
+    "services/commerce_adapters/shopify.py": "validated <handle>.myshopify.com",
+    "services/commerce_adapters/square.py": "Square constants; `environment` picks one",
+    "services/commerce_adapters/woocommerce.py": "store_url, sent via commerce base (bespoke)",
+    "services/email_adapters/smtp_adapter.py": "FEOH_SMTP_* (email dispatcher config)",
+    "services/embedding_adapters/openai_adapter.py": "OpenAI constant",
+    "services/erp_adapters/blackbaud_fe_nxt.py": "SKY constant / FEOH_ERP_BLACKBAUD_*",
+    "services/erp_adapters/merge_dev.py": "FEOH_ERP_MERGE_API_BASE",
+    "services/erp_adapters/oauth_base.py": "the OAuth subclasses' constant / FEOH_* hosts",
+    "services/erp_adapters/quickbooks_online.py": "Intuit constants; `environment` picks one",
+    "services/erp_adapters/sage_accounting.py": "Sage constant / FEOH_ERP_SAGE_*",
+    "services/erp_adapters/sage_intacct.py": "Intacct constant / FEOH_ERP_INTACCT_API_BASE",
+    "services/erp_adapters/xero.py": "Xero constant / FEOH_ERP_XERO_API_BASE",
+    "services/erp_call_budget.py": "httpx types only; sends nothing",
+    "services/erp_oauth.py": "provider-spec constants / FEOH_* token URL overrides",
+    "services/erp_status_sync.py": "httpx types only; sends nothing",
+    "services/exception_agents/llm_rationale.py": "Anthropic constant",
+    "services/extraction_adapters/claude_vision.py": "Anthropic constant",
+    "services/extraction_adapters/openai_vision.py": "OpenAI constant",
+    "services/fx_adapters/openexchangerates.py": "OXR constant",
+    "services/llm_fraud_detection.py": "Anthropic constant",
+    "services/payment_adapters/checkeeper.py": "Checkeeper constants; `sandbox` picks one",
+    "services/payment_adapters/column.py": "Column constants; `sandbox` picks one",
+    "services/payment_adapters/dwolla.py": "Dwolla constants; `sandbox` picks one",
+    "services/payment_adapters/increase.py": "Increase constants; `sandbox` picks one",
+    "services/payment_adapters/modern_treasury.py": "Modern Treasury constant",
+    "services/payment_adapters/stripe_treasury.py": "Stripe constant / FEOH_STRIPE_API_BASE",
+    "services/sanctions_adapters/complyadvantage.py": "ComplyAdvantage constant",
+    "services/sanctions_adapters/dowjones.py": "Dow Jones constant",
+    "services/sanctions_adapters/refinitiv.py": "World-Check constant",
+    "services/tax_filing_adapters/tax1099_adapter.py": "Tax1099 constant",
+    "services/tin_validation_adapters/tax1099_adapter.py": "Tax1099 constant",
+    "utils/hcaptcha.py": "hCaptcha constant",
+}
+
+_CLIENT_MODULES = {"httpx", "aiohttp", "smtplib", "urllib.request", "requests"}
+
+
+def _imported_client_modules(tree) -> set[str]:
+    found = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            found |= {a.name for a in n.names if a.name in _CLIENT_MODULES}
+        elif isinstance(n, ast.ImportFrom):
+            if n.module in _CLIENT_MODULES:
+                found.add(n.module)
+            elif n.module == "urllib" and any(a.name == "request" for a in n.names):
+                found.add("urllib.request")
+    return found
+
+
+def test_every_module_with_an_http_client_classifies_its_host():
+    """Discovery, not inventory: a module that imports a client library must say
+    where its host comes from, so a new adapter reading ``cfg["base_url"]``
+    into a plain client cannot pass silently (the Stripe ``api_base`` shape)."""
+    classified = (
+        set(_PLAIN_CLIENT_ALLOWED)
+        | set(_ORG_HOST_MODULES)
+        | set(_ORG_HOST_BESPOKE)
+        | set(_OPERATOR_HOST_MODULES)
+        | {"utils/url_safety.py"}
+    )
+    unclassified = sorted(
+        rel
+        for path in _APP.rglob("*.py")
+        if (rel := path.relative_to(_APP).as_posix()) not in classified
+        and _imported_client_modules(ast.parse(path.read_text()))
+    )
+    assert unclassified == [], (
+        "these modules build an outbound client but say nothing about its host: "
+        "classify each in _OPERATOR_HOST_MODULES, _ORG_HOST_MODULES (org_host_client), "
+        "_ORG_HOST_BESPOKE or _PLAIN_CLIENT_ALLOWED"
+    )
+    stale = sorted(rel for rel in _OPERATOR_HOST_MODULES if not (_APP / rel).exists())
+    assert stale == []
+
+
+#: Per-org hosts with no local emulator: the dev loopback allowance must stay off.
+_ORG_HOST_NO_LOOPBACK = (
+    "services/chat_notification_adapters/slack_adapter.py",
+    "services/chat_notification_adapters/teams_adapter.py",
+    "services/enrichment_adapters/clearbit.py",
+    "services/enrichment_adapters/dun_bradstreet.py",
+)
+
+
+def test_per_org_hosts_without_an_emulator_never_allow_loopback():
+    for rel in _ORG_HOST_NO_LOOPBACK:
+        calls = [
+            n
+            for n in ast.walk(ast.parse((_APP / rel).read_text()))
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "org_host_client"
+        ]
+        assert calls, rel
+        for call in calls:
+            kw = {k.arg: k.value for k in call.keywords}
+            value = kw.get("allow_private")
+            assert isinstance(value, ast.Constant) and value.value is False, (
+                f"{rel}: allow_private must be the literal False (no local emulator)"
+            )
+
+
 def test_per_org_host_inventories_do_not_overlap():
-    org, bespoke, pending = (
+    lists = [
         set(_ORG_HOST_MODULES),
         set(_ORG_HOST_BESPOKE),
         set(_ORG_HOST_NOT_YET_SENT),
-    )
-    assert not (org & bespoke or org & pending or bespoke & pending)
+        set(_OPERATOR_HOST_MODULES),
+    ]
+    for i, a in enumerate(lists):
+        for b in lists[i + 1 :]:
+            assert not a & b, a & b
 
 
 def _guarded_modules():
