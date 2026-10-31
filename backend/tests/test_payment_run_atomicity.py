@@ -158,7 +158,9 @@ def _queue_db(
             # invoice names a vendor).
             if getattr(inv, "vendor_id", None):
                 vendor_status_res = MagicMock()
-                vendor_status_res.all = MagicMock(return_value=[(inv.vendor_id, "active")])
+                vendor_status_res.all = MagicMock(
+                    return_value=[(inv.vendor_id, "active", False, "clear")]
+                )
                 per_pay_results.append(vendor_status_res)
             card_claim_res = MagicMock()
             card_claim_scalars = MagicMock()

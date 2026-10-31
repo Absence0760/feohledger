@@ -557,7 +557,7 @@ def _mock_db(*, run, payment, invoice, vendor_bank, compliance_vendor=None, comp
     # `inactive_vendor_statuses` — the invoice names a vendor, so its status is
     # read; still `active`, so dispatch carries on.
     vendor_status_res = MagicMock()
-    vendor_status_res.all = MagicMock(return_value=[(invoice.vendor_id, "active")])
+    vendor_status_res.all = MagicMock(return_value=[(invoice.vendor_id, "active", False, "clear")])
 
     # `payable_amount` → `applicable_discounts`: no accepted offer, so the
     # payment moves the net it was booked at.

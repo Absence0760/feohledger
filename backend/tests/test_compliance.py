@@ -724,7 +724,7 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
     # `inactive_vendor_statuses` — the vendor is still `active`, so dispatch
     # carries on to the compliance gate this test is about.
     vendor_status_res = MagicMock()
-    vendor_status_res.all = MagicMock(return_value=[(vendor_id, "active")])
+    vendor_status_res.all = MagicMock(return_value=[(vendor_id, "active", False, "clear")])
     # `payable_amount` → `applicable_discounts`: no accepted offer.
     offers_res = MagicMock()
     offers_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))

@@ -482,6 +482,100 @@ async def blocked_invoice_ids(db: AsyncSession, invoice_ids: list[uuid.UUID]) ->
 #: someone decides otherwise (``backend/docs/vendor-management.md``).
 PAYABLE_VENDOR_STATUS = "active"
 
+#: The vendor's LAST STORED screen (``Vendor.screening_status``) that says a
+#: payment would be refused (``match``) or held for review (``review``: a
+#: ``review_required`` verdict, adverse media, or a provider that could not
+#: run). Dispatch does not read this column — ``compliance.check_payment_compliance``
+#: screens afresh and refuses / holds on the same verdicts — so it is the
+#: stored counterpart of that live check, for a gate that must not call the
+#: sanctions adapter (the ERP push). A re-screen (``POST /api/vendors/{id}/screen``,
+#: the periodic sweep) rewrites it. ``clear`` and ``unscreened`` are neither:
+#: the pre-payment screen is the backstop for a vendor never screened.
+SANCTIONS_HELD_SCREENING_STATUSES: frozenset[str] = frozenset({"match", "review"})
+
+#: :attr:`VendorPayability.sanctions_hold` values, PII-free fixed literals.
+HOLD_PAYMENTS_BLOCKED = "payments_blocked"
+HOLD_SANCTIONS_MATCH = "sanctions_match"
+HOLD_SANCTIONS_REVIEW = "sanctions_review"
+
+
+@dataclass(frozen=True)
+class VendorPayability:
+    """What the payment path reads off a vendor to decide whether it may be paid.
+
+    One read, two questions, so every gate that asks either one reads the same
+    columns the same way:
+
+    * :attr:`status_payable` — the lifecycle gate (``status == active``) the run
+      builder, the queue, ``POST /api/payments``, dispatch and ``/retry-failed``
+      enforce through :func:`inactive_vendor_statuses`;
+    * :attr:`sanctions_hold` — the screening gate: the sticky
+      ``payments_blocked`` flag ``check_payment_compliance`` refuses first (set
+      by a sanctions ``match`` or a manual block), then a last STORED screen of
+      ``match`` / ``review`` — the verdicts that live pre-payment screen
+      refuses or holds on, read here without calling the adapter.
+
+    The ERP push reads both (``services/erp_export_gate``, which decides per
+    status what may still be booked).
+    """
+
+    status: str
+    payments_blocked: bool
+    screening_status: str
+
+    @property
+    def status_payable(self) -> bool:
+        return self.status == PAYABLE_VENDOR_STATUS
+
+    @property
+    def sanctions_hold(self) -> str | None:
+        """Why the screening gate stops a payment to this vendor, or None.
+        The sticky block is named first: it is what refuses before any screen."""
+        if self.payments_blocked:
+            return HOLD_PAYMENTS_BLOCKED
+        if self.screening_status == "match":
+            return HOLD_SANCTIONS_MATCH
+        if self.screening_status in SANCTIONS_HELD_SCREENING_STATUSES:
+            return HOLD_SANCTIONS_REVIEW
+        return None
+
+
+async def vendor_payability(
+    db: AsyncSession, invoices: Iterable[Invoice]
+) -> dict[uuid.UUID, VendorPayability]:
+    """Map each invoice with a linked, existing vendor → that vendor's payability.
+
+    One query for the whole batch. An invoice with NO vendor (``vendor_id``
+    NULL, or the row deleted) is absent, for the reason
+    :func:`inactive_vendor_statuses` gives. A NULL status reads ``"unknown"``
+    (never payable) and a NULL screening status ``"unscreened"``.
+    """
+    from app.models.vendor import Vendor
+
+    rows = list(invoices)
+    vendor_ids = {inv.vendor_id for inv in rows if inv.vendor_id is not None}
+    if not vendor_ids:
+        return {}
+    by_vendor = {
+        vid: VendorPayability(
+            status=status or "unknown",
+            payments_blocked=bool(blocked),
+            screening_status=screening or "unscreened",
+        )
+        for vid, status, blocked, screening in (
+            await db.execute(
+                select(
+                    Vendor.id, Vendor.status, Vendor.payments_blocked, Vendor.screening_status
+                ).where(Vendor.id.in_(vendor_ids))
+            )
+        ).all()
+    }
+    return {
+        inv.id: by_vendor[inv.vendor_id]
+        for inv in rows
+        if inv.vendor_id is not None and inv.vendor_id in by_vendor
+    }
+
 
 async def inactive_vendor_statuses(
     db: AsyncSession, invoices: Iterable[Invoice]
@@ -503,25 +597,14 @@ async def inactive_vendor_statuses(
     is the documented path for it and this gate does not second-guess it.
 
     The status string returned is a fixed, PII-free vocabulary — never the
-    vendor's name.
+    vendor's name. Read through :func:`vendor_payability`, the one read every
+    vendor-payability gate shares (the ERP push's included).
     """
-    from app.models.vendor import Vendor
-
-    rows = list(invoices)
-    vendor_ids = {inv.vendor_id for inv in rows if inv.vendor_id is not None}
-    if not vendor_ids:
-        return {}
-    statuses = dict(
-        (await db.execute(select(Vendor.id, Vendor.status).where(Vendor.id.in_(vendor_ids)))).all()
-    )
-    out: dict[uuid.UUID, str] = {}
-    for inv in rows:
-        if inv.vendor_id is None or inv.vendor_id not in statuses:
-            continue
-        status = statuses[inv.vendor_id]
-        if status != PAYABLE_VENDOR_STATUS:
-            out[inv.id] = status or "unknown"
-    return out
+    return {
+        inv_id: payability.status
+        for inv_id, payability in (await vendor_payability(db, invoices)).items()
+        if not payability.status_payable
+    }
 
 
 #: The only rail that can legitimately pay an invoice already holding a live
