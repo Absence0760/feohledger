@@ -2109,8 +2109,13 @@ query-string parameters, which is how the WCF REST host takes them:
   tax id or address.
 - **https only, SSRF-guarded.** An admin `base_url` must be `https` (the
   password would otherwise travel in clear text) and passes
-  `assert_public_url_async` before any request; `FEOH_ERP_SYSPRO_API_BASE` is
-  the operator override for fake-erp and skips both. A SYSPRO server on a
+  `assert_public_url_async` before any request, and every request then goes
+  through `url_safety.pinned_async_client` (`SysproAdapter._client`): the host
+  is re-vetted inside the connect and the socket opens to the vetted IP, so a
+  DNS-rebinding record cannot pass the check and then send the operator
+  password to an internal host. `FEOH_ERP_SYSPRO_API_BASE` is the operator
+  override for fake-erp and skips the https rule, the check and the pin. A
+  SYSPRO server on a
   private network therefore has to be published (reverse proxy with TLS) before
   it can be connected.
 - **Failure messages** never echo the response: SYSPRO's error text quotes the

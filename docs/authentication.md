@@ -718,6 +718,15 @@ own `issuer`, and this mirrors the check `api/auth_sso.py` already applied to
 `authorization_endpoint`, so a compromised or mis-served document cannot
 redirect either fetch off-host.
 
+The three fetches themselves go through `sso._sso_http_client`, a
+`url_safety.pinned_async_client`. Without it the check above resolves the host
+once and `httpx` resolves it again at connect, so a DNS-rebinding record could
+pass the check and still receive the token `POST`. The pinned client re-vets
+the host inside the connect and dials the vetted IP (the `Host` header, SNI and
+certificate verification still name the hostname); a refusal raises the
+caller's `SSOConfigError` / `SSOValidationError`. Outside a deployed
+environment it allows loopback, as the check does, so local Keycloak works.
+
 **Local-first carve-out** (guard rail 7): the documented local IdP is Keycloak
 on `http://localhost:8088`, and a loopback address is exactly what the guard
 rejects. Outside a deployed environment (`settings.is_deployed`, the same
