@@ -15624,3 +15624,72 @@ real PO number. The sync already has the record in hand.
 `test_purchase_orders.py::test_sync_erp_rekeys_a_row_an_earlier_build_stored_under_another_key`,
 `test_purchase_orders.py::test_sync_erp_marks_a_retired_placeholder_row`.
 
+
+## 329. The four remaining PO listings are read whole or raise (PR #670 follow-up, 2026-10-31)
+
+**Context.** §325 left NetSuite, Business Central, Sage Accounting (ZA) and Sage
+Intacct degrading on a failed PO read, as §287 rule 1 had kept for POs. §323
+made that unsafe in a different way: the sync reads the listing's `skipped`
+report, which covers only the part the adapter read, so a failed or capped read
+left a PO that had just become unpriceable trusted at its stored total.
+
+**Decision.** Each of the four `list_pos_report`s reads up to
+`SYNC_LISTING_MAX_ROWS` or raises `ErpListingIncomplete` (`fetch_failed` /
+`truncated`), as Blackbaud and SYSPRO do (§324). `list_pos` returns the report's
+`pos` and so raises too, and `POST /api/purchase-orders/sync-erp` answers the
+coded 502 with nothing synced. The 10-page best-effort mode is removed (NetSuite
+`_suiteql`, Business Central `_list_collection`); the Sage pair's `_MAX_PAGES`
+now bounds only the lookups made while posting a bill. A transport error (and on
+Intacct an unreadable body) on either Sage adapter's sync listings is now an
+`ErpListingIncomplete` rather than `SageZaError` / a raw `httpx` error, and a
+token failure on the PO read raises instead of reading as "no POs".
+
+**Rejected.** Returning the partial list with a truncation flag, for §287's
+reason: a partial report is still read as a complete one.
+
+**Tests.** `test_erp_po_sync.py::test_{bc,netsuite}_po_listing_is_read_whole_or_raises`;
+in both Sage adapter test files `test_every_sync_listing_raises_on_failure_the_po_list_included`,
+`test_a_po_listing_is_read_whole_or_raises` and
+`test_a_transport_error_on_any_sync_listing_is_an_incomplete_listing`.
+
+## 330. The run builder locks its invoices before it checks them (§309 follow-up, 2026-10-31)
+
+**Context.** `create_payment_run_for_invoices` read its invoices with a plain
+`SELECT`. A run staged while `/send-to-erp` held the invoice `FOR UPDATE` read
+`approved` with no live payment and booked a `pending` payment beside the push —
+its FK insert's `FOR KEY SHARE` only waited for the send's commit. That is the
+double claim §309 refuses.
+
+**Decision.** `payment_runs.lock_run_invoices` locks the run's invoices
+`FOR NO KEY UPDATE`, in id order, under the bounded invoice-lock wait (§233,
+`FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS`) before any gate reads them. Whichever
+commits first wins and the other refuses: the run on `sending_to_erp`, the send
+on `payment_blocks_erp_export`. No separate "ERP claim" predicate is needed: a
+push moves the invoice off `PAYABLE_INVOICE_STATUSES` in the same transaction
+that passed its gate. `FOR NO KEY UPDATE` matches dispatch and the card mint
+(§265). Id order and taking no vendor or payment lock keep it cycle-free with the
+mint (vendor → invoice) and dispatch (payment → invoice). A timeout is
+`409 invoice_locked` with nothing booked. A `plan_id` replay re-checks for an
+existing run after the lock, so the copilot's enact stays idempotent.
+
+**Rejected.** A plain re-read after the insert: a commit landing between the two
+statements still defeats it.
+
+**Tests.** `test_erp_export_blocking_exceptions.py` — run-waits-on-send,
+send-waits-on-run, lock timeout, and the `plan_id` replay under the lock.
+
+## 331. ERP reconciliation sentences are catalogue codes (§319 follow-up, 2026-10-31)
+
+**Decision.** Every sentence `open_erp_reconciliation_exception` writes is an
+`exception.erp_*` code in `invoice_warning_catalog` with typed params, carried
+as `description_code` / `description_params`; the English `description` stays as
+the fallback. A sentence that names the ERP has an `_unnamed` twin ("Your ERP")
+picked by `erp_finding()`, because a word picks the code rather than being
+spliced in — German's "your ERP" is declined. The ids the sync-back and
+pre-payment bill-check sentences used to end with moved into `erp_report`
+(`kind` `bill_state` / `dispatch_stopped` / `bill_unlinked` /
+`erp_payment_voided`), applying §319's no-ids-in-the-sentence rule to them.
+
+**Not done.** The QuickBooks write-back failures (`erp_payment_writeback.py`)
+and `payment_erp_sync`'s sync-back failure still carry adapter codes, payment
+ids and API paths in English (`docs/followups.md`).
