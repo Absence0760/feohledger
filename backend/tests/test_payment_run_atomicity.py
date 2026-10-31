@@ -96,6 +96,7 @@ def _payment(*, amount=Decimal("100.00"), status="pending"):
         completed_at=None,
         failure_reason=None,
         retry_of_payment_id=None,
+        dispatch_attempted_at=None,  # migration 0124
         correlation_id=uuid.uuid4(),
         source_currency=None,
         source_amount=None,
@@ -415,9 +416,10 @@ async def test_each_payment_commits_durably_before_the_next_is_attempted():
     ):
         await execute_payment_run(run_id=run.id, db=db, org=_org(), user=_user())
 
-    # 1 claim commit (draft -> executing) + 2 per-payment commits + 1 final
-    # rollup commit = 4. The old code committed exactly once, at the end.
-    assert db.commit.await_count == 4
+    # 1 claim commit (draft -> executing) + per payment, the dispatch marker's
+    # commit before the attempt and the outcome's commit after it (2 x 2) + 1
+    # final rollup commit = 6. The old code committed exactly once, at the end.
+    assert db.commit.await_count == 6
 
 
 # ---------------------------------------------------------------------------

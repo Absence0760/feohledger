@@ -1170,6 +1170,8 @@ def _payment(amount: Decimal = Decimal("10000.00")):
         # Migration 0104: the early-payment discount the row was booked with.
         discount_offer_id=None,
         discount_amount=None,
+        # Migration 0124: the in-doubt dispatch marker.
+        dispatch_attempted_at=None,
     )
 
 

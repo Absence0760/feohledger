@@ -660,6 +660,7 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
         completed_at=None,
         failure_reason=None,
         retry_of_payment_id=None,
+        dispatch_attempted_at=None,  # migration 0124
         correlation_id=uuid.uuid4(),
         source_currency=None,
         source_amount=None,
@@ -839,6 +840,7 @@ async def test_execute_payment_run_holds_virtual_card_for_null_vendor_invoice():
         completed_at=None,
         failure_reason=None,
         retry_of_payment_id=None,
+        dispatch_attempted_at=None,  # migration 0124
         correlation_id=uuid.uuid4(),
         source_currency=None,
         source_amount=None,

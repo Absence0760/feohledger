@@ -2387,7 +2387,155 @@ async def _flag_in_doubt_dispatch(db: AsyncSession, *, org_id: uuid.UUID, paymen
     )
 
 
+async def _flag_if_dispatch_in_doubt(
+    db: AsyncSession, *, org_id: uuid.UUID, payment: Payment
+) -> None:
+    """Flag ``payment``'s invoice for reconciliation when the row leaves the
+    live-payment slot still carrying a dispatch marker.
+
+    A row keeps `dispatch_attempted_at` only when an earlier dispatch pass may
+    have reached the processor without recording what happened
+    (`_dispatch_payment_guarded`). `failed` / `cancelled` free the invoice's
+    live-payment slot, so without a payment-blocking flag a fresh run would pay
+    the invoice again under a new idempotency key. The one rule for every
+    writer that can move a stamped row there: the dispatch outcome, the run
+    loop's `invoice_locked` refusal, and `/compliance/dismiss`.
+    """
+    if payment.dispatch_attempted_at is None:
+        return
+    if payment.status not in RETRYABLE_PAYMENT_STATUSES:
+        return
+    from app.services.payment_reconciler import flag_payment_for_reconciliation
+
+    # PII-free: the status only, never `failure_reason` (a dismissal's carries
+    # the operator's free-text note).
+    await flag_payment_for_reconciliation(
+        db,
+        organization_id=org_id,
+        payment=payment,
+        description=(
+            f"Payment {payment.id} is {payment.status}, but an earlier attempt to "
+            f"send it was interrupted after it may already have reached the "
+            f"processor, so the money may or may not have moved. Confirm with the "
+            f"processor and void or re-pay — this invoice is blocked from a new "
+            f"payment run until this is resolved."
+        ),
+        log_tag="payment-dispatch",
+    )
+
+
+async def _mark_dispatch_attempt(
+    db: AsyncSession, *, payment: Payment, expected_status: str
+) -> bool | None:
+    """Stamp `Payment.dispatch_attempted_at` and COMMIT it, then re-take the
+    payment's row lock. Returns whether the row already carried a stamp when
+    this attempt began, or ``None`` when another dispatcher claimed the row in
+    the gap the commit opens (skip it — its outcome is theirs to record).
+
+    Why a commit, and why here. The marker exists for the case where a pass
+    calls the processor and the process dies before the per-payment commit:
+    everything that pass wrote is lost, so the only record that it may have
+    reached the processor is one committed BEFORE the call. Nothing else can
+    carry it. A second connection cannot write the row (this transaction holds
+    its `FOR UPDATE` lock, so it would wait on us forever), and a savepoint is
+    not durable. So the stamp is the first write of the attempt and is
+    committed on its own, at the one moment the commit costs nothing: the
+    caller holds only the payment's row lock and has written nothing else, and
+    the invoice lock, every gate and the processor call all come after. The
+    commit does release the payment lock, so it is re-taken and re-checked: the
+    row must still read ``expected_status`` and still carry THIS stamp. A
+    concurrent dispatcher (two `/resume`s, a `/resume` racing `/execute`) that
+    got in between has re-stamped it, so the stamp comparison makes exactly one
+    of them proceed. Each stamp is taken under the row lock and forced past the
+    one it replaces, so a re-stamp always differs from the stamp it overwrote,
+    whatever two hosts' clocks say.
+
+    Callers hold the payment's row lock and have checked ``expected_status``;
+    the session uses `expire_on_commit=False`, so the caller's other loaded
+    instances survive the commit unexpired.
+    """
+    previous = payment.dispatch_attempted_at
+    previously_marked = previous is not None
+    stamp = datetime.now(UTC)
+    if previous is not None and stamp <= previous:
+        stamp = previous + timedelta(microseconds=1)
+    payment.dispatch_attempted_at = stamp
+    await db.commit()
+    await db.refresh(payment, with_for_update=True)
+    if payment.status != expected_status or payment.dispatch_attempted_at != stamp:
+        return None
+    return previously_marked
+
+
 async def _dispatch_payment_guarded(
+    db: AsyncSession,
+    *,
+    payment: Payment,
+    org: Organization,
+    adapter,
+    user: User,
+    now: datetime,
+    expected_status: str,
+    context: str,
+) -> tuple[bool, bool]:
+    """Dispatch one payment with a durable in-doubt marker round the attempt.
+
+    Every dispatch — `/execute`, `/resume`, `/retry-failed` (through the run
+    loop) and `/compliance/release` — comes through here. It stamps and commits
+    `Payment.dispatch_attempted_at` first (`_mark_dispatch_attempt`), runs the
+    attempt (`_dispatch_payment_attempt`), and clears the stamp in the same
+    transaction that records the attempt's outcome. A crash between the two
+    therefore leaves the row stamped, and `payment_runs.classify_payment_failure`
+    reads a stamped row as IN_DOUBT whatever reason a later pass writes onto it.
+
+    The stamp is cleared only when the row was UNSTAMPED when this attempt
+    began: then no earlier pass can have reached the processor without leaving
+    one, and this attempt's own outcome — reason, `provider_payment_id` — is
+    the whole story and classes as it always did. A row that was already
+    stamped keeps it for good. If such a row ends `failed`, it is also flagged
+    for reconciliation (`_flag_in_doubt_dispatch`), because `failed` frees the
+    invoice's live-payment slot and a fresh run would otherwise pay it again
+    under a new idempotency key.
+
+    `InvoiceLockedError` propagates with the stamp already cleared (when it may
+    be) on the session; the caller must commit before answering, or the
+    committed stamp outlives a refusal that provably sent nothing.
+
+    Returns ``(recorded, full_rollback)`` as `_dispatch_payment_attempt` does,
+    and ``(False, False)`` when another dispatcher claimed the row first.
+    """
+    previously_marked = await _mark_dispatch_attempt(
+        db, payment=payment, expected_status=expected_status
+    )
+    if previously_marked is None:
+        logger.info(
+            "payment %s: claimed by another dispatcher during %s; skipped", payment.id, context
+        )
+        return False, False
+    try:
+        recorded, full_rollback = await _dispatch_payment_attempt(
+            db,
+            payment=payment,
+            org=org,
+            adapter=adapter,
+            user=user,
+            now=now,
+            expected_status=expected_status,
+            context=context,
+        )
+    except InvoiceLockedError:
+        if not previously_marked:
+            payment.dispatch_attempted_at = None
+        raise
+    if recorded:
+        if not previously_marked:
+            payment.dispatch_attempted_at = None
+        else:
+            await _flag_if_dispatch_in_doubt(db, org_id=org.id, payment=payment)
+    return recorded, full_rollback
+
+
+async def _dispatch_payment_attempt(
     db: AsyncSession,
     *,
     payment: Payment,
@@ -2645,13 +2793,19 @@ async def release_compliance_hold(
         )
     except InvoiceLockedError:
         # Refused before the processor call: the payment stays
-        # `pending_compliance` (the request rolls back) and the operator can
-        # simply release again — unlike a run, there is no batch to keep going.
+        # `pending_compliance` and the operator can simply release again —
+        # unlike a run, there is no batch to keep going. Committed, not rolled
+        # back: the dispatch marker was committed before the attempt and has
+        # just been cleared on the session, and a rollback would leave the
+        # stamp behind on a release that provably sent nothing.
+        await db.commit()
         raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL) from None
     if not recorded:
-        # The connection dropped mid-release and another request moved the
-        # payment before it could be re-locked. What this attempt sent is in
-        # `payment.dispatch_unrecorded`; keep that, report the conflict.
+        # Another request moved the payment before this one could re-lock it:
+        # either in the gap the dispatch marker's commit opens (nothing was
+        # sent), or after the connection dropped mid-release (what this attempt
+        # sent is in `payment.dispatch_unrecorded`). Keep theirs, report the
+        # conflict.
         await db.commit()
         raise HTTPException(
             status_code=409,
@@ -2756,6 +2910,10 @@ async def dismiss_compliance_hold(
     payment.status = "failed"
     payment.failure_reason = f"compliance_dismissed by {user.full_name}: {body.reason}"
     payment.completed_at = now
+    # A hold reached by a `/resume` (or re-release) of a dispatch that crashed
+    # after its processor call keeps that pass's marker: the row is in doubt,
+    # and `failed` frees the invoice's live-payment slot.
+    await _flag_if_dispatch_in_doubt(db, org_id=org.id, payment=payment)
 
     from app.services.audit_dispatch import dispatch_audit
 
@@ -4507,15 +4665,21 @@ async def _dispatch_run_payments(
             payment.status = "failed"
             payment.failure_reason = INVOICE_LOCKED_REASON
             payment.completed_at = now
+            # A `/resume` of a pass that crashed after stamping the row: that
+            # pass may have reached the processor, so this refusal is in doubt
+            # (the stamp makes it so) and the invoice is blocked from a new run
+            # until a human reconciles it. A no-op on an unstamped row.
+            await _flag_if_dispatch_in_doubt(db, org_id=org.id, payment=payment)
         if full_rollback:
             # The connection was lost mid-attempt and the whole transaction
             # rolled back, expiring the run too (its status was committed by
             # the caller, so this only re-reads it).
             await db.refresh(run)
         if not recorded:
-            # Another dispatcher recorded this payment in the gap a full
-            # rollback opens; `payment.dispatch_unrecorded` already holds what
-            # this attempt sent. Never overwrite their outcome.
+            # Another dispatcher claimed this payment in the gap the dispatch
+            # marker's commit opens (this attempt sent nothing), or recorded it
+            # in the gap a full rollback opens (`payment.dispatch_unrecorded`
+            # already holds what this attempt sent). Never overwrite theirs.
             await db.commit()
             continue
 

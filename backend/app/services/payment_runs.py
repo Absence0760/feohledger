@@ -369,7 +369,12 @@ _RETRY_SAFE_FAILURE_SUFFIXES = (
 )
 
 
-def classify_payment_failure(*, failure_reason: str | None, provider_payment_id: str | None) -> str:
+def classify_payment_failure(
+    *,
+    failure_reason: str | None,
+    provider_payment_id: str | None,
+    dispatch_attempted: bool = False,
+) -> str:
     """Is this failed payment safe to re-attempt under a fresh idempotency key?
 
     Returns ``RETRY_SAFE`` only when we can prove no order was created at the
@@ -379,8 +384,18 @@ def classify_payment_failure(*, failure_reason: str | None, provider_payment_id:
     adapter here returns a handle only from a create call that SUCCEEDED, so
     holding one means an order exists over there and its true outcome has to be
     reconciled (or the payment voided) by a human before any re-send.
+
+    ``dispatch_attempted`` (the row still carries `Payment.dispatch_attempted_at`)
+    outranks it too: an earlier dispatch pass may have called the processor and
+    crashed before recording what it heard back. The reason on the row is then
+    from a LATER pass — a `/resume` that refused before its own adapter call —
+    and says nothing about the order the crashed pass may have created. The
+    reason classes only the pass that wrote it; the marker covers the one that
+    could not (migration 0124; `backend/docs/payments.md` § A dispatch attempt
+    is marked, durably, before it starts).
+    Production callers go through `is_retry_safe`, which always passes it.
     """
-    if provider_payment_id:
+    if provider_payment_id or dispatch_attempted:
         return IN_DOUBT
     reason = (failure_reason or "").strip()
     if not reason:
@@ -398,6 +413,7 @@ def is_retry_safe(payment: Payment) -> bool:
         classify_payment_failure(
             failure_reason=payment.failure_reason,
             provider_payment_id=payment.provider_payment_id,
+            dispatch_attempted=payment.dispatch_attempted_at is not None,
         )
         == RETRY_SAFE
     )

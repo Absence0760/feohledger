@@ -635,6 +635,80 @@ which only some processors honour.
 Pinned by `tests/test_payment_dispatch_db_error.py`, which injects a real
 Postgres error on the dispatch session after the processor call.
 
+### A dispatch attempt is marked, durably, before it starts
+
+The recovery above needs a live process. When the worker dies after
+`adapter.create_payment` returns and before the per-payment commit, nothing
+the attempt wrote survives: the row is still `pending` on an `executing` run,
+with no `provider_payment_id`. `/resume` re-sends it on the same
+`correlation_id`, which the processor dedupes. But if the resume refuses it
+before its own adapter call (`invoice_locked`, `invoice_not_payable`,
+`invoice_blocked:`, any pre-adapter reason), the row used to become `failed`
+with a retry-safe reason, and **Retry failed payments** sent it under a fresh
+idempotency key: a second order for an invoice the crashed pass may already
+have paid.
+
+`Payment.dispatch_attempted_at` (migration 0124) closes it:
+
+- **Stamped and committed before every attempt.** `_dispatch_payment_guarded`
+  (every dispatch path goes through it) writes the stamp and commits it
+  before the invoice lock, the gates and the processor call
+  (`_mark_dispatch_attempt`). A commit is the only durable record that
+  survives the process dying. A second connection can't write the row while
+  this transaction holds its `FOR UPDATE` lock, and a savepoint isn't durable.
+  At that point the attempt holds only the payment's row lock and has written
+  nothing else, so the commit gives nothing away. It does release the row lock,
+  so the row is re-locked and must still read the expected status **and carry
+  this attempt's stamp**. A concurrent dispatcher that got in between has
+  re-stamped it, so exactly one of them goes on to send. Each stamp is forced
+  past the one it replaces, so the comparison holds even when two hosts'
+  clocks disagree.
+- **Cleared in the transaction that records the outcome**, but only when
+  the row had no stamp when the attempt began. Then no earlier pass can have
+  reached the processor without leaving one, and the attempt's own reason and
+  handle tell the whole story, classified exactly as before. An ordinary
+  pre-adapter refusal is therefore still retry-safe.
+- **Kept for good when the row was already stamped.** The stamp then means an
+  earlier pass's outcome was never recorded. `classify_payment_failure`
+  answers IN_DOUBT for a stamped row whatever its reason, so `/retry-failed`
+  skips it (`needs_reconciliation`), `retryable_failures` leaves it out, and
+  a run with nothing else to retry is refused with `payment_run_nothing_to_retry`.
+  The run dialog therefore never offers the retry for it.
+- **A stamped row that leaves the live-payment slot is flagged.** When such a
+  row ends `failed` or `cancelled`, the payment-blocking
+  `payment_reconciliation` exception is opened, because those statuses free
+  the slot and a fresh run would otherwise pay the invoice again. This is one
+  rule (`_flag_if_dispatch_in_doubt`), applied at every writer that can get
+  there: the dispatch outcome, the run loop's `invoice_locked` refusal, and
+  `/compliance/dismiss`. The dismiss case covers a resume that lands on a
+  compliance hold. A human confirms with the processor and voids or re-pays.
+- **`invoice_locked` on `/compliance/release` commits before its 409**, so
+  the stamp it just cleared is not left behind by a rollback.
+
+**Accepted costs.** One extra commit per payment dispatched. Some rows get
+stamped and are reported in doubt even though nothing was ever sent:
+
+- a pass that crashed after stamping but before reaching the processor;
+- two dispatchers racing inside the stamp window, where the loser's stamp
+  makes the winner's row look previously attempted. The same applies when a
+  `/compliance/dismiss` wins the window against a `/compliance/release`: the
+  release backs off without clearing its stamp, and the dismissal flags the
+  row;
+- the migration's backfill.
+
+Each costs a human check. Missing one costs a second payment.
+
+**Backfill.** Migration 0124 stamps every `pending` payment on an `executing`
+run, because that is exactly what a crashed pass leaves behind, and nothing
+records which of them it reached. It stamps nothing else.
+
+Pinned by `tests/test_payment_dispatch_marker.py`. It kills the worker with a
+`BaseException` right after the mock processor accepts the order, then resumes
+it under a not-payable invoice and under a held invoice lock, and checks that
+`/retry-failed`, the run verdict and a fresh run all refuse. It also covers
+the dismissal flag, a release refused on the invoice lock, and a dispatcher
+losing the claim window.
+
 ### Why a payment failed, and retrying it
 
 `Payment.failure_reason` is written on every failure path — compliance refusal,
@@ -728,6 +802,7 @@ for a human to void or reconcile — when any of these hold:
 | `adapter_error:*` (card leg) | The card provider may have minted a card we never recorded. |
 | `db_error_after_processor_call:*` | The processor answered, then a database error aborted the dispatch transaction. The reply's handle is restored onto the row (§ A database error mid-dispatch). |
 | `dispatch_db_error:*` | The same abort before the processor call. This pass sent nothing, but the row may be a `/resume` of an earlier pass that did and crashed before its commit. |
+| `dispatch_attempted_at` still set | An earlier dispatch pass may have reached the processor and died before recording it; the reason on the row is from a later pass (§ A dispatch attempt is marked, durably, before it starts). Outranks every reason, like `provider_payment_id`. |
 | blank / unrecognised reason | Fail-closed: a future adapter or a legacy row is not waved through. |
 
 Everything else — our own `compliance_refusal:` / `compliance_dismissed` /
