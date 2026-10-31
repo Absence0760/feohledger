@@ -89,6 +89,32 @@ async def _seed_vendor(mk, org_id, *, name="Card Vendor Co"):
 
 
 @pytest.mark.asyncio
+async def test_a_tenant_with_cards_off_is_refused_with_a_code(realdb):
+    """The payments Cards tab offers Generate before it knows whether the
+    programme is switched on, so the refusal carries a code the dialog
+    localizes (`cards_not_enabled`) — same 400, same English, nothing minted."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _seed_vendor(mk, org_id)
+    inv_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="CARDSOFF"
+    )
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(inv_id)]})
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == {
+        "code": "cards_not_enabled",
+        "message": "Virtual cards are not enabled. Configure in Organization Settings.",
+        "params": {},
+    }
+    async with mk() as s:
+        cards = (await s.execute(select(VirtualCard).where(VirtualCard.invoice_id == inv_id))).all()
+    assert cards == []
+
+
+@pytest.mark.asyncio
 async def test_non_payable_invoice_is_not_minted_a_card(realdb):
     """An invoice still in `ready_for_review` (not yet approved) must never
     get a card minted, even if the caller asks for it in the batch. The

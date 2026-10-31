@@ -20,6 +20,7 @@ from app.api.deps import (
 )
 from app.api.pagination import PaginationParams, pagination_params
 from app.api.permissions import PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID
+from app.api.refusals import coded_refusal
 from app.config import settings
 from app.models.invoice import Invoice
 from app.models.organization import Organization
@@ -57,6 +58,9 @@ from app.tenant import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+#: `POST /generate` on a tenant whose card programme is switched off.
+CARDS_NOT_ENABLED = "cards_not_enabled"
 
 # Platform default rebate rate when the org has no negotiated rate on file.
 _DEFAULT_REBATE_RATE = Decimal("0.0100")  # 1%
@@ -594,9 +598,15 @@ async def generate_cards(
     """
     org_cards = (org.settings or {}).get("cards", {})
     if not org_cards.get("enabled"):
+        # Coded, so the payments Cards tab's Generate dialog states it in the
+        # reader's language (`api/codedRefusals.ts`); the message is the same
+        # English as before, and the status is unchanged.
         raise HTTPException(
             status_code=400,
-            detail="Virtual cards are not enabled. Configure in Organization Settings.",
+            detail=coded_refusal(
+                CARDS_NOT_ENABLED,
+                "Virtual cards are not enabled. Configure in Organization Settings.",
+            ),
         )
     # A minted card is spendable — issuing one moves money exactly as a run's
     # card leg does, and that leg is already refused on a record-only tenant

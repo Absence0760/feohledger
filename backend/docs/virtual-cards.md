@@ -494,7 +494,7 @@ If the supplier portal is implemented, vendors can:
 |---|---|---|
 | `GET` | `/api/cards` | List virtual cards (filterable by status, vendor, date) |
 | `GET` | `/api/cards/{id}/details` | Get full card number + CVV (admin/ap_manager/cfo, audit logged — see § Security) |
-| `POST` | `/api/cards/generate` | Generate cards for selected invoices (`payment.execute`). `items` / `total` = cards this request minted; `skipped` names every other invoice and the gate that stopped it — see § Why an invoice got no card |
+| `POST` | `/api/cards/generate` | Generate cards for selected invoices (`payment.execute`). `items` / `total` = cards this request minted; `skipped` names every other invoice and the gate that stopped it — see § Why an invoice got no card. A tenant whose `cards.enabled` is off gets 400 with the coded detail `cards_not_enabled`. The web caller is the payments Cards tab's **Generate card** dialog (`frontend/docs/routes-api-map.md` § `/payments`) |
 | `POST` | `/api/cards/{id}/cancel` | Cancel an unused card (`require_permission(payment.void)` — admin/cfo by default, **not** `ap_manager`; see § Cancel → The gate is `payment.void`) |
 | `POST` | `/api/cards/webhook/{provider}` | Receive charge/settlement webhooks (public-by-design, HMAC-gated) |
 | `GET` | `/api/cards/rebates` | List rebates (paginated `page` / `page_size`, optional `period`) — see § The rebate list is paginated |
