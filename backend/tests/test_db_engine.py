@@ -165,6 +165,8 @@ async def test_the_token_is_minted_off_the_event_loop() -> None:
     assert seen and seen[0] != loop_thread, "the token generator ran on the event loop"
 
 
+# Deliberately connects through the factory to the local server (its own engine).
+@pytest.mark.real_db_engine
 async def test_a_new_connection_gets_a_new_token_against_a_real_server(monkeypatch) -> None:
     """The load-bearing property, end to end through SQLAlchemy and asyncpg.
 
@@ -368,6 +370,8 @@ def test_concurrent_first_mints_build_one_client(fresh_client) -> None:
     make_client.assert_called_once_with("rds")
 
 
+# Deliberately connects through the factory to the local server (its own engine).
+@pytest.mark.real_db_engine
 def test_alembic_migrates_through_the_factory_with_a_token(monkeypatch) -> None:
     """alembic/env.py is what the deploy's migration step runs first after a
     cutover; it must sign in exactly as the app does. Real Alembic against the

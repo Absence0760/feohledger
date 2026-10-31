@@ -43,6 +43,10 @@ import pytest
 from app.services import sweep_health
 from app.services.payment_adapters import PaymentStatus, SettlementReport
 
+# Mock-DB tests: the reconciler reads each tenant's processor config through provider_credentials
+# (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 
 def _payment(*, status="submitted", submitted_at=None, provider_payment_id="px_123"):
     return SimpleNamespace(

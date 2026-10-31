@@ -25,6 +25,10 @@ from fastapi import HTTPException
 
 from tests.test_webauthn import RP_ID, SoftAuthenticator, _challenge_from_options
 
+# Mock-DB tests: a refused step-up writes an audit row through its own control-plane/tenant
+# sessions (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_auth_audit_write")
+
 
 def _fake_user(*, mfa_enabled: bool = False):
     return SimpleNamespace(

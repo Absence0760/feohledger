@@ -36,6 +36,10 @@ from tests.test_webauthn import (
     platform_rp,
 )
 
+# Mock-DB tests: a step-up writes an auth audit row through its own
+# control-plane/tenant sessions (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_auth_audit_write")
+
 ORIGIN = "http://localhost:7777"
 
 

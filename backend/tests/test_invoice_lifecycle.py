@@ -30,6 +30,17 @@ from app.models.invoice import InvoiceStatus
 from app.services.workflow_engine import transition_invoice
 
 
+@pytest.fixture(autouse=True)
+def _no_ap_manager_lookup(monkeypatch):
+    """Reaching `paid` fans the notification out to every AP manager, which
+    `notification_dispatch.resolve_role_user_ids` looks up on its own
+    control-plane session. These are mock-DB tests of the state machine, so
+    the lookup answers "nobody" instead of reaching the real database."""
+    monkeypatch.setattr(
+        "app.services.notification_dispatch.resolve_role_user_ids", AsyncMock(return_value=[])
+    )
+
+
 def _invoice(status: InvoiceStatus = InvoiceStatus.new):
     return SimpleNamespace(
         id=uuid.uuid4(),

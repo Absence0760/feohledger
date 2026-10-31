@@ -24,6 +24,10 @@ import pytest
 
 from app.services import payment_reconciler
 
+# Mock-DB tests: the reconciler reads each tenant's processor config through provider_credentials
+# (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 
 def _payment(*, status="submitted", submitted_at=None, provider_payment_id="px_123"):
     # Mirror the real Payment ORM row's money-path fields. The reconciler reads

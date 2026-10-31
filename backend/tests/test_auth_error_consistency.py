@@ -29,6 +29,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+# Mock-DB tests: login writes an auth audit row through its own control-plane/tenant sessions
+# (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_auth_audit_write")
+
 # Real `bcrypt_sha256` hash of the string "correctpw1" — used by the
 # fake-user fixtures so `verify_password` runs the production code
 # path and reliably rejects any other guess.
