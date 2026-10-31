@@ -5,7 +5,7 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Eight entries are open**: the run builder reading
+**Nine entries are open**: the payment mock tests that fail locally in one pytest process (found 2026-10-31), the run builder reading
 a missing invoice currency as USD (found 2026-10-21), the app rendering nothing when browser
 storage is blocked (found 2026-10-20), the remove-tenant backup deletion the
 VM's IAM role refuses (found 2026-10-18),
@@ -106,6 +106,34 @@ payment-terms assertions go with the field. The Contact `id` stays the
 `erp_vendor_id`, so nothing already linked moves. Not done in the #652 change
 because it rewrites the vendor contract the e2e spec asserts, which needs a run
 against the full stack.
+
+## Some payment mock tests fail locally when run in the same pytest process
+
+**Found 2026-10-31** while integrating the follow-ups batch (PR #679).
+
+**Symptom.** Run together locally, 13 mock tests across
+`test_payment_run_flow.py`, `test_payment_run_atomicity.py`,
+`test_international_payments.py` and `test_compliance.py`, plus
+`test_payment_run_critical_path.py::test_execute_transitions_invoice_via_transition_invoice_not_bare_assign`
+and `::test_execute_holds_payment_when_invoice_has_no_screenable_vendor`, fail
+with asyncpg's `got Future … attached to a different loop`, raised from
+`provider_credentials`. Each passes on its own, and the same tests fail the same
+way on unmodified `main`. CI is green because pytest-split puts them on
+different shards.
+
+**Root cause (suspected).** A mock-based test reaches the real control-plane
+engine through `provider_credentials` (it should be served by the
+`provider_store_from_settings` fixture), and that engine's pooled connection is
+bound to whichever test's event loop first opened it; a later test on a new loop
+then draws it.
+
+**Blast radius.** Local only — a contributor running those files together sees
+red for reasons unrelated to their diff. No production effect.
+
+**Recommended fix.** Find which of these tests reads provider secrets without the
+`provider_store_from_settings` fixture (or a realdb seal) and give it one, then
+add a guard that a mock-DB test touching `provider_credentials` fails loudly
+instead of reaching the real engine.
 
 ## The run builder reads a missing invoice currency as USD
 

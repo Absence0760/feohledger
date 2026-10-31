@@ -15834,3 +15834,153 @@ with `no_external_tenant`. Realm ids are checked against `[A-Za-z0-9-]{1,64}`
 before entering the URL. A refused realm does not revoke the token: Intuit's
 revoke applies to the app's whole grant for a company, so revoking after a
 failed reconnect (an outage, say) could cut that tenant's live connection.
+
+## 338. Loopback CORS origins are a non-deployed convenience (§336 follow-up, 2026-10-31)
+
+**Decision.** In a deployed `FEOH_ENVIRONMENT` (`settings.is_deployed`) the CORS
+middleware admits no loopback origin: the `localhost` pattern is off, and
+loopback entries are dropped from `FEOH_CORS_ORIGINS`' shipped default, because
+credentialed CORS now carries the ERP `/authorize` fetch (§336). A list the
+operator sets explicitly is used as written, with a boot warning if it names a
+loopback origin — the day-one rehearsal's path (`scripts/day-one/stack.sh` runs
+as `production` and sets its own list), following §334's trusted-operator rule.
+
+**Rejected.** Refusing to boot on an explicit loopback origin: it would break the
+production-shaped day-one rehearsal without adding a control, since only the
+operator can set the list.
+
+## 339. Hosts an organisation configures go through `org_host_client` (§334 follow-up, 2026-10-31)
+
+**Decision.** A per-org URL is untrusted. `url_safety.org_host_client` checks it
+up front (a clean refusal before a body is built) and pins it at connect
+(§334); outside a deployed environment loopback is allowed but still pinned. The
+adopters are the PEPPOL `as4_gateway` `gateway_url` (refusal
+`gateway_url_not_public`) and the Ollama extraction `base_url`. Their
+process-level settings (`FEOH_PEPPOL_GATEWAY_URL`, `FEOH_OLLAMA_BASE_URL`) are
+operator config and stay on a plain client. `test_url_safety._ORG_HOST_MODULES`
+keeps the list explicit.
+
+## 340. Merge.dev, Xero and QuickBooks Online report a PO with no usable total (§325 follow-up, 2026-10-31)
+
+**Context.** Their mappers fell back to `Decimal("0")`, so an invoice against
+such a PO read as over-billed and a total stored earlier stayed trusted.
+
+**Decision.** All three override `list_pos_report` and report a numbered PO
+whose total (`total_amount` / `Total` / `TotalAmt`) is absent, empty,
+unreadable or not finite as `unpriceable`. A stated 0 is the ERP's figure and
+syncs as one (§323); a total is never summed from lines (§325). Merge's skip
+carries `SkippedPo.legacy_po_numbers`: only a priced PO re-keys (§328), so when
+no row holds the real number the sync marks the row under the old key where it
+stands — never a key the listing reports as another PO's number — and the sync
+that next prices the PO re-keys it and clears the mark. QuickBooks drops a PO
+with neither `DocNumber` nor `Id` (a count is logged); it used to file such POs
+under `"None"`, which it now retires as Merge retires `"UNKNOWN"`, leaving alone
+a placeholder the listing reports as a real number. A garbled Xero `Total` skips
+that PO instead of failing the listing.
+
+**Rejected.** Treating a stated 0 as unpriceable (0 is a figure, and holding the
+invoice is the safe outcome); deriving a missing total from lines (lines can
+omit tax, charges or discounts).
+
+**Tests.** The three adapter tests,
+`test_purchase_orders.py::test_sync_erp_never_stores_a_po_with_no_total_at_zero`,
+`::test_sync_erp_marks_an_unpriceable_po_still_stored_under_its_legacy_key`,
+`::test_sync_erp_retires_quickbooks_none_row_but_never_a_listed_po_so_numbered`.
+
+## 341. CSV import refuses a normalized invoice-number match per row (2026-10-31)
+
+**Decision.** A byte-exact repeat for the same vendor is still skipped silently.
+A match once formatting is ignored (`INV-1` / `INV-001`), against the ledger or
+an earlier row of the same file, is a coded row error naming the invoice
+(`csv_invoice_number_matches_existing` / `csv_invoice_number_matches_row`); when
+the match is another entity's invoice it says only that a match exists
+(`csv_invoice_number_matches_other_entity`, §40). The lookup is the duplicate
+gate's own, extracted as `invoice_warnings.find_normalized_number_match`, so the
+two cannot disagree.
+
+**Rejected.** Skipping silently (it could drop a genuinely different invoice);
+importing for the gate to flag (it becomes queue work).
+
+**Consequence.** Historical `done` / `paid` near-matches, which used to import
+unflagged, are refused too — narrowing §77's accepted limit, so a supplier whose
+numbering truly distinguishes `INV-1` from `INV-001` enters those rows by hand.
+The importer matches on vendor id only; the gate also matches on name.
+
+## 342. `/cards/generate` names every skip (2026-10-31)
+
+**Decision.** The response adds `skipped: [{invoice_id, code, message, params}]`
+beside the unchanged `items` and `total`, with one `card_skip_*` code per gate in
+`card_issuance` (prefixed because the frontend refusal registry is shared) and
+params limited to fixed values or the caller's own ids. An out-of-scope invoice
+reads as a nonexistent one, and `lock_invoices_for_mint`'s vendor lookup is now
+entity-scoped so a lock timeout cannot tell them apart. A lost insert race reads
+`already_carded` only when the winning card is the same provider card;
+otherwise `issue_failed` with a warning, so an unrecorded provider card is never
+hidden behind a clean answer. The bare `409 invoice_locked` is kept when nothing
+was minted and a lock timed out (backward compatibility).
+
+## 343. A dispatch attempt is marked, committed, before it starts (migration 0124, 2026-10-31)
+
+**Context.** `/resume` re-dispatches `pending` rows, and one can be a row whose
+earlier pass called the processor and died before its commit. If the resume
+refused it before its own adapter call, it was recorded `failed` with a
+retry-safe reason, and Retry failed payments (§335) sent it again under a new
+idempotency key.
+
+**Decision.**
+
+- Every dispatch (`_dispatch_payment_guarded`, behind `/execute`, `/resume`,
+  `/retry-failed` and `/compliance/release`) stamps
+  `payments.dispatch_attempted_at` and commits it before the attempt, then
+  re-locks the row and requires its own stamp; each stamp is forced later than
+  the one it replaces, so exactly one of two racing dispatchers proceeds.
+- The stamp is cleared with the recorded outcome only when the row was
+  unstamped at the start, so a first attempt's ordinary refusal stays
+  retry-safe.
+- `classify_payment_failure` reads a stamped row as IN_DOUBT whatever its
+  reason, so `retryable_failures`, the run's retry verdict and `/retry-failed`
+  all refuse it.
+- A stamped row that ends `failed` or `cancelled` is flagged with the blocking
+  `payment_reconciliation` exception wherever that happens: the dispatch
+  outcome, the run loop's `invoice_locked` refusal, or `/compliance/dismiss`.
+
+The commit is the only record that survives the process dying. It is taken
+while the attempt holds only the payment row lock, before the invoice lock
+(§214, §233), so no guarantee is given up. Migration 0124 backfills `pending`
+payments on `executing` runs — exactly what a crashed pass leaves.
+
+**Rejected.** A second connection (it would wait on our own row lock forever); a
+savepoint (not durable); stamping just before the processor call (the commit
+would release the invoice lock mid-gates, so every gate would re-run).
+
+**Accepted costs.** One extra commit per payment, and rows reported in doubt that
+were never sent, each costing a human check: a crash between the stamp and the
+processor call, a lost race for the stamp window, and the backfill.
+
+**Tests.** `test_payment_dispatch_marker.py` (the real-DB crash-then-resume
+scenario, the race, dismiss and release), `test_migration_0124_payment_dispatch_marker.py`.
+
+## 344. Settlement accept, ERP sync and paying a run outside are offered from their gates; regenerate needs an exported file (2026-10-31)
+
+**Decision.** Six more payments controls follow §305: History's Accept
+settlement (`accept_settlement_refusal`), the Runs tab's Retry ERP sync
+(`actions.sync_erp`), and the run dialog's record-run-as-paid, bank-file
+download, regenerate and bank-rejected (`actions.record_outside` /
+`nacha_export` / `nacha_regenerate` / `nacha_void`). Each endpoint raises from
+one `payment_controls` gate and the read ships the same answer. Accept was
+offered on every completed payment with a reported figure, and the dialog then
+fetched the invoice to learn whether it was held; Retry ERP sync was offered on
+`failed` and `executing` runs that could only 409.
+
+`GET /runs/{id}/nacha?regenerate=true` on a run with no exported file is now
+refused (`nacha_nothing_to_regenerate`). It used to export a first file under a
+flag that means "a second one", so a run released back to draft after the bank
+rejected its file was claimed again without the reader being told, and the
+audit row recorded `regenerated: false`. No caller depended on it.
+
+The per-invoice and per-payment refusals inside record-run-as-paid and the
+export are not in the verdicts, because they need the invoices locked.
+
+**Open.** The bank-rejected void on a tenant that switched to processor mode
+after exporting is a double-payment path §251 meant to close
+(`docs/followups.md`, Security Analyst review).
