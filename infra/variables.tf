@@ -72,7 +72,7 @@ variable "domain_name" {
 }
 
 variable "monthly_budget_limit_usd" {
-  description = "Monthly AWS spend ceiling (USD) for the account-wide budget. The single-VM workload stack runs ~$45–55/month (t4g.medium VM + EBS + public IPv4 ~$31, db.t4g.micro RDS + storage ~$15, KMS, Route 53, S3, flow logs and alarms a few dollars), plus ~$8–13 for the external uptime checks and SMS paging (uptime.tf), so 75 leaves headroom while still flagging a runaway within days. Raise it deliberately when the stack grows."
+  description = "Monthly AWS spend ceiling (USD) for the account-wide budget. The single-VM workload stack runs ~$45–55/month (t4g.medium VM + EBS + public IPv4 ~$31, db.t4g.micro RDS + storage ~$15, KMS, Route 53, S3, flow logs, alarms and the SPA distribution's CloudFront additional metrics (~$2.40, frontend.tf) a few dollars), plus ~$8–13 for the external uptime checks and SMS paging (uptime.tf), so 75 leaves headroom while still flagging a runaway within days. Raise it deliberately when the stack grows."
   type        = number
   default     = 75
 

@@ -297,9 +297,15 @@ creates:
 - **Access logs** through CloudWatch log delivery into the access-logs sink under
   `cloudfront/`. Not the legacy `logging_config`, which needs bucket ACLs the
   sink disables.
-- **Alarms**: 5xx above 5% for 10 minutes and 4xx above 10% for 15 minutes, to
-  the alerts topic. The router means a route never 404s, so a 4xx surge means
-  missing files.
+- **Alarms**: 5xx above 5% for 10 minutes and 404s above 10% for 15 minutes, to
+  the alerts topic. The router means a route never 404s, so a 404 surge means a
+  publish left referenced files out. It watches 404, not 4xx, because the
+  distribution allows only GET/HEAD and answers any other method with 403: a
+  vulnerability scanner POSTing login and WordPress paths once tripped the old
+  4xx alarm with no deploy and no failed real request. `404ErrorRate` is a
+  CloudFront additional metric, so `aws_cloudfront_monitoring_subscription.frontend`
+  turns those on for this distribution (up to 8 metrics at the CloudWatch
+  custom-metric rate, $0.30 each, so at most ~$2.40/month).
 - **The deploy role's grant** (`aws_iam_role_policy.deploy_frontend`): list,
   put, delete and abort-multipart on that bucket, and create/get invalidation plus
   get-distribution on that distribution. Nothing else, and no `GetObject`.
