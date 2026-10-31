@@ -464,6 +464,27 @@ def pinned_async_client(
     return httpx.AsyncClient(transport=transport, trust_env=False, **kwargs)
 
 
+async def org_host_client(url: str, *, allow_private: bool, **kwargs: Any) -> httpx.AsyncClient:
+    """The client for a request to a host an ORGANISATION configured.
+
+    A per-org URL is untrusted input (any tenant admin can write it), so it gets
+    both halves of the guard: :func:`assert_public_url_async` up front, for a
+    clean refusal before any request body is built or sent, and the pinned
+    client, so the connect cannot be rebound past that check. ``allow_private``
+    is the dev loopback allowance (pass ``not settings.is_deployed``, as SSO
+    does): it skips the address judgement in both halves, so a local Ollama or
+    PEPPOL emulator on ``localhost`` keeps working, but the connection is still
+    pinned to what was resolved. Raises :class:`UnsafeUrlError` up front, and
+    the pinned transport raises it again at connect on a rebinding answer.
+
+    An OPERATOR's process-level setting is not this function's business: it is
+    trusted and keeps a plain client at the call site (decisions §334).
+    """
+    if not allow_private:
+        await assert_public_url_async(url)
+    return pinned_async_client(allow_private=allow_private, **kwargs)
+
+
 def pinned_client(
     *,
     resolve: SyncResolver | None = None,

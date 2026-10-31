@@ -568,7 +568,38 @@ _PLAIN_CLIENT_ALLOWED: dict[str, tuple[int, str]] = {
         2,
         "the test transport override and the operator override (fake-commerce)",
     ),
+    "services/peppol_adapters/as4_gateway.py": (
+        1,
+        "only the trusted operator branch of _client (FEOH_PEPPOL_GATEWAY_URL)",
+    ),
+    "services/extraction_adapters/ollama.py": (
+        1,
+        "only the trusted operator branch of _client (FEOH_OLLAMA_BASE_URL)",
+    ),
 }
+
+#: Modules that send to a host a TENANT can configure. Each must stay in the
+#: guarded set above (import url_safety) and route its per-org host through
+#: ``org_host_client``, so dropping the import cannot quietly drop the module
+#: out of the plain-client check too.
+_ORG_HOST_MODULES = (
+    "services/peppol_adapters/as4_gateway.py",  # settings.peppol.gateway_url
+    "services/extraction_adapters/ollama.py",  # settings.extraction.base_url (BYOK)
+)
+
+
+def test_org_configurable_hosts_go_through_org_host_client():
+    guarded = dict(_guarded_modules())
+    for rel in _ORG_HOST_MODULES:
+        assert rel in guarded, f"{rel} no longer imports url_safety"
+        calls = [
+            node
+            for node in ast.walk(guarded[rel])
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "org_host_client"
+        ]
+        assert calls, f"{rel} does not route its per-org host through org_host_client"
 
 
 def _guarded_modules():
@@ -621,3 +652,169 @@ def test_blocking_pinned_client_is_never_built_in_a_coroutine():
                 ):
                     offenders.append(f"{path.relative_to(_APP)}:{node.lineno}")
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# Hosts an organisation configures: PEPPOL gateway_url, Ollama base_url
+# ---------------------------------------------------------------------------
+#
+# A per-org URL is untrusted (any tenant admin writes it): in a deployed
+# environment it is checked up front and pinned at connect. Outside one,
+# loopback is allowed (local Ollama on :11435, a local Access Point emulator)
+# but still pinned. The operator's process-level setting is trusted and keeps a
+# plain client, as every other operator override does (decisions §334).
+
+_TAGS_BODY = b'{"models": [{"name": "llama3.2-vision:11b"}]}'
+_TAGS_OK = (
+    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+    + str(len(_TAGS_BODY)).encode()
+    + b"\r\n\r\n"
+    + _TAGS_BODY
+)
+
+
+@pytest.fixture
+def deployed(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "environment", "production")
+    assert settings.is_deployed
+
+
+@pytest.fixture
+def not_deployed(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "environment", "development")
+    assert not settings.is_deployed
+
+
+def _transmission():
+    from app.services.peppol_adapters.base import ParticipantId, TransmissionRequest
+
+    return TransmissionRequest(
+        sender=ParticipantId("9930", "DE111"),
+        receiver=ParticipantId("9930", "DE222"),
+        doc_type_id="d",
+        process_id="p",
+        payload=b"<Invoice/>",
+        business_message_id="m-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_org_host_client_refuses_an_internal_url_before_any_io(recorder, monkeypatch):
+    async def lookup(host, port):  # the pinned transport must not even resolve
+        raise AssertionError("resolved after the up-front refusal")
+
+    monkeypatch.setattr(url_safety, "_lookup_async", lookup)
+    with pytest.raises(UnsafeUrlError):
+        await url_safety.org_host_client("http://169.254.169.254/", allow_private=False)
+    assert recorder.log.dialled == []
+
+
+@pytest.mark.asyncio
+async def test_org_host_client_is_pinned_against_a_rebind(recorder):
+    url = f"https://{HOST}/"
+    with patch.object(socket, "getaddrinfo", _RebindingDns(PUBLIC_IP, "127.0.0.1")):
+        client = await url_safety.org_host_client(url, allow_private=False, timeout=5)
+        async with client:
+            with pytest.raises(UnsafeUrlError):
+                await client.get(url)
+    assert recorder.log.dialled == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("internal", ["http://169.254.169.254", "http://10.0.0.7:8080"])
+async def test_peppol_org_gateway_url_refused_when_deployed(recorder, deployed, internal):
+    from app.services.peppol_adapters.as4_gateway import (
+        GATEWAY_URL_NOT_PUBLIC,
+        AS4GatewayAdapter,
+    )
+    from app.services.peppol_adapters.base import ParticipantId
+
+    adapter = AS4GatewayAdapter({"gateway_url": internal, "api_key": "k"})
+    assert adapter.gateway_url_from_org
+    result = await adapter.send(_transmission())
+    assert (result.success, result.failure_reason) == (False, GATEWAY_URL_NOT_PUBLIC)
+    cap = await adapter.resolve_participant(ParticipantId("9930", "DE222"))
+    assert cap.unregistered_reason == GATEWAY_URL_NOT_PUBLIC
+    assert await adapter.test_connection() is False
+    assert recorder.log.dialled == []  # the API key never left the process
+
+
+@pytest.mark.asyncio
+async def test_peppol_org_gateway_url_on_loopback_allowed_outside_deployed(
+    recorder, not_deployed, monkeypatch
+):
+    """A local Access Point emulator works in dev, through the pinned client."""
+    from app.services.peppol_adapters.as4_gateway import AS4GatewayAdapter
+
+    async def lookup(host, port):
+        return ["127.0.0.1"]
+
+    monkeypatch.setattr(url_safety, "_lookup_async", lookup)
+    adapter = AS4GatewayAdapter({"gateway_url": "http://peppol.localhost:9100", "api_key": "k"})
+    assert await adapter.test_connection() is True
+    assert recorder.log.dialled == [("127.0.0.1", 9100)]
+
+
+@pytest.mark.asyncio
+async def test_peppol_operator_gateway_url_keeps_a_plain_client(deployed, monkeypatch):
+    """FEOH_PEPPOL_GATEWAY_URL is the operator's, so it is not judged."""
+    from app.config import settings
+    from app.services.peppol_adapters.as4_gateway import AS4GatewayAdapter
+
+    monkeypatch.setattr(settings, "peppol_gateway_url", "http://127.0.0.1:9100")
+    adapter = AS4GatewayAdapter({"api_key": "k"})
+    assert not adapter.gateway_url_from_org
+    client = await adapter._client()
+    async with client:
+        assert not isinstance(client._transport, url_safety.PinnedAsyncTransport)
+
+
+@pytest.mark.asyncio
+async def test_ollama_org_base_url_refused_when_deployed(recorder, deployed):
+    from app.services.extraction_adapters.ollama import UNSAFE_BASE_URL_ERROR, OllamaAdapter
+
+    adapter = OllamaAdapter({"base_url": "http://169.254.169.254"})
+    result = await adapter.extract(file_bytes=b"img", mime_type="image/png")
+    assert (result.success, result.error) == (False, UNSAFE_BASE_URL_ERROR)
+    statement = await adapter.extract_statement(file_bytes=b"img", mime_type="image/png")
+    assert statement.error == UNSAFE_BASE_URL_ERROR
+    assert await adapter.test_connection() is False
+    assert recorder.log.dialled == []
+
+
+@pytest.mark.asyncio
+async def test_ollama_org_base_url_on_loopback_allowed_outside_deployed(not_deployed, monkeypatch):
+    """The Compose model server on :11435 keeps working in dev, pinned."""
+    from app.services.extraction_adapters.ollama import OllamaAdapter
+
+    rec = _AsyncRecorder([_TAGS_OK])
+    monkeypatch.setattr(url_safety.httpcore, "AnyIOBackend", lambda: rec)
+
+    async def lookup(host, port):
+        return ["127.0.0.1"]
+
+    monkeypatch.setattr(url_safety, "_lookup_async", lookup)
+    adapter = OllamaAdapter({"base_url": "http://localhost:11435"})
+    assert await adapter.test_connection() is True
+    assert rec.log.dialled == [("127.0.0.1", 11435)]
+
+
+@pytest.mark.asyncio
+async def test_ollama_operator_base_url_keeps_a_plain_client(deployed, monkeypatch):
+    """Platform mode never carries a per-org base_url; FEOH_OLLAMA_BASE_URL is
+    the operator's and is not judged."""
+    from app.config import settings
+    from app.services.extraction_adapters.ollama import OllamaAdapter
+
+    monkeypatch.setattr(settings, "ollama_base_url", "http://127.0.0.1:11435")
+    adapter = OllamaAdapter({})
+    assert adapter._base_url() == "http://127.0.0.1:11435"
+    # A blank per-org value is "not set", the same as the PEPPOL adapter's.
+    assert OllamaAdapter({"base_url": "  "})._base_url() == "http://127.0.0.1:11435"
+    client = await adapter._client(5)
+    async with client:
+        assert not isinstance(client._transport, url_safety.PinnedAsyncTransport)
