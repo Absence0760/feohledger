@@ -28,6 +28,8 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     LineItemPayload,
     ListingGap,
+    PoSkipReason,
+    SkippedPo,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
 from app.services.erp_adapters.xero import XeroAdapter
@@ -885,6 +887,38 @@ def test_list_pos_maps_status_total_and_currency_exactly(token):
     assert row.currency == "ZAR"
     assert row.expected_delivery_date == date(2026, 11, 1)
     assert row.line_items[0].unit_price == Decimal("625.05")
+
+
+def test_a_po_with_no_usable_total_is_reported_unpriceable_never_synced_at_zero(token):
+    """A PO with no usable ``Total`` used to sync at 0, so every invoice
+    against it read as over-billed and raised ``po_mismatch``, and a total an
+    earlier sync stored stayed trusted. It is skipped and named ``unpriceable``
+    (decisions §323, §325), never priced from its lines (§325's rule); an
+    unreadable one no longer fails the whole listing. A stated 0 is the ERP's
+    figure and is kept."""
+    line = {"Description": "Paper", "Quantity": 2, "UnitAmount": 5, "LineAmount": 10}
+    rows = [
+        {"PurchaseOrderNumber": "PO-PRICED", "Total": 10, "LineItems": [line]},
+        {"PurchaseOrderNumber": "PO-MISSING", "LineItems": [line]},
+        {"PurchaseOrderNumber": "PO-NULL", "Total": None},
+        {"PurchaseOrderNumber": "PO-GARBAGE", "Total": "n/a"},
+        {"PurchaseOrderNumber": "PO-NAN", "Total": "NaN"},
+        {"PurchaseOrderNumber": "PO-ZERO", "Total": 0},
+        {"PurchaseOrderNumber": "", "Total": None},  # unnumbered: dropped
+    ]
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(200, {"PurchaseOrders": rows}))
+        listing = _run(_adapter().list_pos_report())
+        pos = _run(_adapter().list_pos())
+    assert [(p.po_number, p.total) for p in listing.pos] == [
+        ("PO-PRICED", Decimal("10")),
+        ("PO-ZERO", Decimal("0")),
+    ]
+    assert listing.skipped == [
+        SkippedPo(n, PoSkipReason.unpriceable)
+        for n in ("PO-MISSING", "PO-NULL", "PO-GARBAGE", "PO-NAN")
+    ]
+    assert [p.po_number for p in pos] == ["PO-PRICED", "PO-ZERO"]
 
 
 def test_a_po_listing_is_read_whole_or_raises(token):

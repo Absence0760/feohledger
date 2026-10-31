@@ -14,6 +14,7 @@ HTTP is mocked with `patch("httpx.AsyncClient")` as in
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,6 +28,8 @@ from app.services.erp_adapters.base import (
     ErpInvoiceStatus,
     InvoicePayload,
     LineItemPayload,
+    PoSkipReason,
+    SkippedPo,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
 from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
@@ -865,6 +868,7 @@ def test_list_pos_reads_no_chart_and_never_takes_a_line_account_by_name(token, n
     po = {
         "Id": "130",
         "DocNumber": "PO-1",
+        "TotalAmt": Decimal("10"),
         "VendorRef": {"value": "56", "name": "Acme"},
         "Line": [
             {
@@ -918,6 +922,50 @@ def test_list_pos_is_exact(token, no_override):
     assert (got.vendor_name, got.vendor_erp_id) == ("Acme", "56")
     (line,) = got.line_items
     assert line.unit_price == Decimal("83.3666") and line.quantity == Decimal("3")
+
+
+def test_a_po_with_no_usable_total_is_reported_unpriceable_never_synced_at_zero(
+    token, no_override, caplog
+):
+    """A PO with no usable ``TotalAmt`` used to sync at 0, so every invoice
+    against it read as over-billed and raised ``po_mismatch``, and a total an
+    earlier sync stored stayed trusted. It is skipped and named ``unpriceable``
+    (decisions §323, §325), never priced from its lines (§325's rule). A
+    stated 0 is the ERP's figure and is kept; a PO with neither a DocNumber
+    nor an Id is dropped, never filed under the literal number "None"."""
+    line = {
+        "Amount": Decimal("40"),
+        "ItemBasedExpenseLineDetail": {"Qty": 4, "UnitPrice": Decimal("10")},
+    }
+    pos = [
+        {"Id": "1", "DocNumber": "PO-PRICED", "TotalAmt": Decimal("40"), "Line": [line]},
+        {"Id": "2", "DocNumber": "PO-MISSING", "Line": [line]},
+        {"Id": "3", "DocNumber": "PO-NULL", "TotalAmt": None},
+        {"Id": "4", "DocNumber": "PO-GARBAGE", "TotalAmt": "n/a"},
+        {"Id": "5", "DocNumber": "PO-NAN", "TotalAmt": "NaN"},
+        {"Id": "6", "DocNumber": "PO-ZERO", "TotalAmt": 0},
+        {"Id": "7", "TotalAmt": None},  # no DocNumber: the Id is its number
+        {"TotalAmt": Decimal("5"), "VendorRef": {"name": "Secret Vendor"}},  # neither: dropped
+    ]
+    qbo = _Qbo()
+    qbo.request, _ = _query_router({"PurchaseOrder": [pos]})
+    with caplog.at_level(logging.WARNING, logger="app.services.erp_adapters.quickbooks_online"):
+        listing = _run_with(qbo, lambda: _adapter().list_pos_report())
+    # A count only, never the record (vendor names, amounts).
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("skipped 1 PO(s) with no number or id" in m for m in messages), messages
+    assert not any("Secret Vendor" in m for m in messages)
+    assert [(p.po_number, p.total) for p in listing.pos] == [
+        ("PO-PRICED", Decimal("40")),
+        ("PO-ZERO", Decimal("0")),
+    ]
+    assert listing.skipped == [
+        SkippedPo(n, PoSkipReason.unpriceable)
+        for n in ("PO-MISSING", "PO-NULL", "PO-GARBAGE", "PO-NAN", "7")
+    ]
+    qbo.request, _ = _query_router({"PurchaseOrder": [pos]})
+    got = _run_with(qbo, lambda: _adapter().list_pos())
+    assert [p.po_number for p in got] == ["PO-PRICED", "PO-ZERO"]
 
 
 @pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts", "list_pos"])

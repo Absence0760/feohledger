@@ -551,9 +551,9 @@ def test_merge_dev_list_pos_carries_the_vendor_id_list_vendors_reports():
     }
     pos = {
         "results": [
-            {"number": "PO-1", "vendor": {"id": "mv-acme-2", "name": "Acme"}},
-            {"number": "PO-2", "vendor": "mv-bolt"},
-            {"number": "PO-3", "vendor": None},
+            {"total_amount": "1", "number": "PO-1", "vendor": {"id": "mv-acme-2", "name": "Acme"}},
+            {"total_amount": "1", "number": "PO-2", "vendor": "mv-bolt"},
+            {"total_amount": "1", "number": "PO-3", "vendor": None},
         ],
         "next": None,
     }
@@ -581,16 +581,25 @@ def test_merge_dev_list_pos_maps_expected_delivery_date():
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
 
     cases = [
-        ({"number": "P", "delivery_date": "2025-03-10"}, date(2025, 3, 10)),
+        ({"total_amount": "1", "number": "P", "delivery_date": "2025-03-10"}, date(2025, 3, 10)),
         # full ISO datetime → date part
-        ({"number": "P", "delivery_date": "2025-03-10T12:00:00Z"}, date(2025, 3, 10)),
+        (
+            {"total_amount": "1", "number": "P", "delivery_date": "2025-03-10T12:00:00Z"},
+            date(2025, 3, 10),
+        ),
         # alternate field names
-        ({"number": "P", "expected_delivery_date": "2025-04-01"}, date(2025, 4, 1)),
-        ({"number": "P", "requested_delivery_date": "2025-05-02"}, date(2025, 5, 2)),
+        (
+            {"total_amount": "1", "number": "P", "expected_delivery_date": "2025-04-01"},
+            date(2025, 4, 1),
+        ),
+        (
+            {"total_amount": "1", "number": "P", "requested_delivery_date": "2025-05-02"},
+            date(2025, 5, 2),
+        ),
         # absent → None (no fabrication)
-        ({"number": "P"}, None),
+        ({"total_amount": "1", "number": "P"}, None),
         # unparseable garbage → None, must not raise
-        ({"number": "P", "delivery_date": "not-a-date"}, None),
+        ({"total_amount": "1", "number": "P", "delivery_date": "not-a-date"}, None),
     ]
     for raw, expected in cases:
         body = {"results": [raw], "next": None}
@@ -611,10 +620,11 @@ def test_merge_dev_list_pos_maps_currency_and_never_defaults_it():
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     cases = [
-        ({"number": "P", "currency": "EUR"}, "EUR"),
-        ({"number": "P"}, None),
-        ({"number": "P", "currency": None}, None),
-        ({"number": "P", "currency": 978}, None),  # a numeric ISO code is not ours to guess
+        ({"total_amount": "1", "number": "P", "currency": "EUR"}, "EUR"),
+        ({"total_amount": "1", "number": "P"}, None),
+        ({"total_amount": "1", "number": "P", "currency": None}, None),
+        # A numeric ISO code is not ours to guess.
+        ({"total_amount": "1", "number": "P", "currency": 978}, None),
     ]
     for raw, expected in cases:
         body = {"results": [raw], "next": None}
@@ -664,7 +674,10 @@ def test_merge_dev_list_pos_status_mapping_uses_internal_vocab():
     }
 
     for raw_status, expected in cases.items():
-        body = {"results": [{"number": "P", "status": raw_status}], "next": None}
+        body = {
+            "results": [{"total_amount": "1", "number": "P", "status": raw_status}],
+            "next": None,
+        }
         with patch("httpx.AsyncClient") as client_cls:
             client = client_cls.return_value.__aenter__.return_value
             client.get = AsyncMock(return_value=_make_mock_response(200, body))
@@ -680,7 +693,14 @@ def test_merge_dev_list_pos_reads_purchase_order_number():
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     body = {
-        "results": [{"id": "9b0c-uuid", "purchase_order_number": "PO-7", "status": "AUTHORIZED"}],
+        "results": [
+            {
+                "id": "9b0c-uuid",
+                "purchase_order_number": "PO-7",
+                "status": "AUTHORIZED",
+                "total_amount": "1",
+            }
+        ],
         "next": None,
     }
     with patch("httpx.AsyncClient") as client_cls:
@@ -734,11 +754,11 @@ def test_merge_dev_list_pos_follows_pagination_cursor():
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     page1 = {
-        "results": [{"number": "P-1"}, {"number": "P-2"}],
+        "results": [{"total_amount": "1", "number": "P-1"}, {"total_amount": "1", "number": "P-2"}],
         "next": "cursor-page-2",
     }
     page2 = {
-        "results": [{"number": "P-3"}],
+        "results": [{"total_amount": "1", "number": "P-3"}],
         "next": None,
     }
 
@@ -862,17 +882,19 @@ def test_po_payload_total_default_is_decimal_not_float():
 
 
 def test_merge_dev_list_pos_handles_missing_optional_fields():
-    """Real ERP data is messy — vendor unset, no line items, totals
-    missing. The adapter should map what's there and substitute safe
-    defaults for the rest, not crash."""
+    """Real ERP data is messy — vendor unset, no line items, no number. The
+    adapter maps what's there and leaves the rest empty, not crash. Only the
+    total is not optional: a PO without one is reported, never synced at 0
+    (``test_merge_dev_po_with_no_usable_total_is_reported_unpriceable``)."""
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     body: dict[str, Any] = {
         "results": [
             {
-                # No number, no vendor, no lines, no total. Worst-case payload.
+                # No number, no vendor, no lines. Worst-case payload with a total.
                 "id": "fallback-id",
+                "total_amount": "0",
             }
         ],
         "next": None,
@@ -880,12 +902,58 @@ def test_merge_dev_list_pos_handles_missing_optional_fields():
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
         client.get = AsyncMock(return_value=_make_mock_response(200, body))
-        pos = _run(adapter.list_pos())
+        listing = _run(adapter.list_pos_report())
 
-    assert len(pos) == 1
-    p = pos[0]
+    (p,) = listing.pos
+    assert listing.skipped == []
     assert p.po_number == "fallback-id"  # falls back to id
     assert p.vendor_name is None
+    # A stated zero is the ERP's figure, kept as one (§323: "a zero total is a
+    # figure"); only an absent or unreadable total is unpriceable.
     assert p.total == Decimal("0")
     assert p.status == "open"
     assert p.line_items == []
+
+
+def test_merge_dev_po_with_no_usable_total_is_reported_unpriceable():
+    """A numbered PO with no usable ``total_amount`` used to sync at 0, so every
+    invoice against it read as over-billed and raised ``po_mismatch``, and a
+    total an earlier sync stored stayed trusted. It is now skipped and named
+    ``unpriceable`` (decisions §323, §325) — never priced from its lines, which
+    is §325's rule — and ``list_pos`` returns only the priced ones."""
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    lines = [
+        {"description": "Toner", "quantity": "5", "unit_price": "100", "total_line_amount": "500"}
+    ]
+    body: dict[str, Any] = {
+        "results": [
+            {"purchase_order_number": "PO-PRICED", "total_amount": "1250.00"},
+            {"purchase_order_number": "PO-MISSING", "line_items": lines},
+            {"purchase_order_number": "PO-NULL", "total_amount": None},
+            {"purchase_order_number": "PO-EMPTY", "total_amount": ""},
+            {"purchase_order_number": "PO-GARBAGE", "total_amount": "n/a"},
+            {"purchase_order_number": "PO-NAN", "total_amount": "NaN"},
+            # Stored by an earlier build under its record id: the skip says so.
+            {"id": "9b0c-uuid", "purchase_order_number": "PO-LEGACY"},
+            # Unnumbered: dropped unreported, no row can be found for it.
+            {"purchase_order_number": "", "id": None},
+        ],
+        "next": None,
+    }
+    with patch("httpx.AsyncClient") as client_cls:
+        client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, body))
+        listing = _run(adapter.list_pos_report())
+        pos = _run(adapter.list_pos())
+
+    assert [(p.po_number, p.total) for p in listing.pos] == [("PO-PRICED", Decimal("1250.00"))]
+    assert listing.skipped == [
+        *(
+            SkippedPo(n, PoSkipReason.unpriceable)
+            for n in ("PO-MISSING", "PO-NULL", "PO-EMPTY", "PO-GARBAGE", "PO-NAN")
+        ),
+        SkippedPo("PO-LEGACY", PoSkipReason.unpriceable, legacy_po_numbers=("9b0c-uuid",)),
+    ]
+    assert [p.po_number for p in pos] == ["PO-PRICED"]

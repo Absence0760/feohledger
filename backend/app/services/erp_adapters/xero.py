@@ -35,7 +35,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import httpx
 
@@ -49,7 +49,10 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     ListingGap,
     PoLinePayload,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -642,14 +645,37 @@ class XeroAdapter(OAuthErpAdapter):
         return out
 
     async def list_pos(self) -> list[PoPayload]:
-        """Every purchase order, or :class:`ErpListingIncomplete`.
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
+        """Every purchase order, and the ones left out for want of a total, or
+        :class:`ErpListingIncomplete`.
+
+        A PO with no ``PurchaseOrderNumber`` is dropped. One with a number but
+        no usable ``Total`` is skipped, never synced at 0, and named in
+        ``skipped`` as ``unpriceable``: at 0 every invoice against it read as
+        over-billed, and a total an earlier sync stored for it must stop being
+        matched against (decisions §323, §325). The total is never summed from
+        ``LineItems`` (§325's rule): lines omit what the header carries beyond
+        them, and Xero's line amounts may be tax-exclusive.
 
         Read whole or not at all (:meth:`_paged_complete`): it used to end at a
         failed page with what it had (nothing, on the first) and stop silently
         at 10 pages, which the PO sync read as the whole list (decisions §329).
         """
         rows = await self._paged_complete("PurchaseOrders", {}, "PurchaseOrders")
-        return [_xero_po_to_payload(raw) for raw in rows if raw.get("PurchaseOrderNumber")]
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
+        for raw in rows:
+            number = raw.get("PurchaseOrderNumber")
+            if not number:
+                continue
+            po = _xero_po_to_payload(raw)
+            if po is None:
+                skipped.append(SkippedPo(str(number), PoSkipReason.unpriceable))
+            else:
+                pos.append(po)
+        return PoListing(pos=pos, skipped=skipped)
 
 
 class _HttpFailure(Exception):
@@ -691,7 +717,27 @@ def _contact_to_vendor(raw: dict) -> VendorPayload:
     )
 
 
-def _xero_po_to_payload(raw: dict) -> PoPayload:
+def _po_total(value: object) -> Decimal | None:
+    """A PO ``Total`` stated as an exact, finite number, else None.
+
+    Unlike :func:`_decimal` this never raises: an unreadable total on one PO
+    is that PO's problem (reported ``unpriceable``), not the whole listing's.
+    A stated ``0`` is a figure and is returned as one."""
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        total = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return total if total.is_finite() else None
+
+
+def _xero_po_to_payload(raw: dict) -> PoPayload | None:
+    """A Xero PurchaseOrder as a PoPayload, or None when it states no usable
+    ``Total`` (``list_pos_report`` names it ``unpriceable``)."""
+    total = _po_total(raw.get("Total"))
+    if total is None:
+        return None
     delivery = None
     delivery_str = raw.get("DeliveryDateString")
     if delivery_str:
@@ -703,7 +749,7 @@ def _xero_po_to_payload(raw: dict) -> PoPayload:
         po_number=str(raw["PurchaseOrderNumber"]),
         vendor_name=(raw.get("Contact") or {}).get("Name"),
         vendor_erp_id=(raw.get("Contact") or {}).get("ContactID") or None,
-        total=_decimal(raw.get("Total")) or Decimal("0"),
+        total=total,
         status=_PO_STATUS_MAP.get(str(raw.get("Status") or "").upper(), "open"),
         expected_delivery_date=delivery,
         currency=raw.get("CurrencyCode") or None,

@@ -587,10 +587,17 @@ class PoSkipReason(enum.StrEnum):
 
 @dataclass(frozen=True)
 class SkippedPo:
-    """A PO the ERP has and ``list_pos`` deliberately did not return."""
+    """A PO the ERP has and ``list_pos`` deliberately did not return.
+
+    ``legacy_po_numbers`` mirrors :attr:`PoPayload.legacy_po_numbers`: the keys
+    an earlier build of the adapter stored this PO under (Merge: its record id,
+    decisions §328). The sync marks the row under one of them when none is
+    stored under ``po_number`` yet, so a PO that was never re-keyed is not left
+    trusted at its old total."""
 
     po_number: str
     reason: PoSkipReason
+    legacy_po_numbers: tuple[str, ...] = ()
 
 
 @dataclass

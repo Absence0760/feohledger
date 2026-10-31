@@ -92,7 +92,10 @@ from app.services.erp_adapters.base import (
     ListingGap,
     PaymentPayload,
     PoLinePayload,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_failure_message,
     erp_http_failure,
@@ -443,6 +446,9 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
     #: ``changed_bills``) and our payments are written back as BillPayments
     #: (``post_payment``) — decisions §295.
     supports_status_sync = True
+    #: A PO with neither ``DocNumber`` nor ``Id`` used to be filed under the
+    #: literal number ``"None"``, every such PO overwriting one row (§328).
+    retired_po_numbers = ("None",)
 
     @classmethod
     async def resolve_external_tenant_id(
@@ -1245,7 +1251,37 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         than 50 pages raises :class:`ErpListingIncomplete`, never "no POs" or
         the first 50,000 (decisions §329).
         """
-        return [_po_payload(p) for p in await self._query_all("PurchaseOrder")]
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
+        """:meth:`list_pos`, and the POs left out for want of a total.
+
+        A PO with neither a ``DocNumber`` nor an ``Id`` is dropped (it used to
+        sync under the literal number ``"None"``, one row every such PO
+        overwrote). One with a number but no usable ``TotalAmt`` is skipped,
+        never synced at 0, and named in ``skipped`` as ``unpriceable``: at 0
+        every invoice against it read as over-billed, and a total an earlier
+        sync stored for it must stop being matched against (decisions §323,
+        §325). The total is never summed from ``Line`` (§325's rule): the
+        lines omit what the header carries beyond them, such as tax.
+        """
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
+        unnumbered = 0
+        for raw in await self._query_all("PurchaseOrder"):
+            number = _po_number(raw)
+            if number is None:
+                unnumbered += 1
+                continue
+            po = _po_payload(raw)
+            if po is None:
+                skipped.append(SkippedPo(number, PoSkipReason.unpriceable))
+            else:
+                pos.append(po)
+        if unnumbered:
+            # A count only: a PO record carries vendor names and amounts.
+            logger.warning("QuickBooks PO sync skipped %d PO(s) with no number or id", unnumbered)
+        return PoListing(pos=pos, skipped=skipped)
 
 
 #: QuickBooks BillPayment ``PayType`` → our ``Payment.method``. ``Check`` is
@@ -1510,7 +1546,20 @@ def _vendor_payload(raw: dict) -> VendorPayload:
     )
 
 
-def _po_payload(raw: dict) -> PoPayload:
+def _po_number(raw: dict) -> str | None:
+    """The PO's ``DocNumber``, else its ``Id``; None when it has neither."""
+    number = raw.get("DocNumber") or raw.get("Id")
+    return str(number) if number not in (None, "") else None
+
+
+def _po_payload(raw: dict) -> PoPayload | None:
+    """A QuickBooks PurchaseOrder as a PoPayload, or None when it has no
+    number or no usable ``TotalAmt`` (absent, unreadable or not finite; a
+    stated 0 is a figure and is kept)."""
+    number = _po_number(raw)
+    total = _dec(raw.get("TotalAmt"))
+    if number is None or total is None or not total.is_finite():
+        return None
     lines: list[PoLinePayload] = []
     for line in raw.get("Line") or []:
         if not isinstance(line, dict):
@@ -1531,10 +1580,10 @@ def _po_payload(raw: dict) -> PoPayload:
         )
     status = str(raw.get("POStatus") or "Open").lower()
     return PoPayload(
-        po_number=str(raw.get("DocNumber") or raw.get("Id")),
+        po_number=number,
         vendor_name=(raw.get("VendorRef") or {}).get("name"),
         vendor_erp_id=(raw.get("VendorRef") or {}).get("value") or None,
-        total=_dec(raw.get("TotalAmt")) or Decimal("0"),
+        total=total,
         status="closed" if status == "closed" else "open",
         line_items=lines,
         currency=(raw.get("CurrencyRef") or {}).get("value"),
