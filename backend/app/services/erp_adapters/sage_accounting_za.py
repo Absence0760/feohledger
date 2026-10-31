@@ -130,9 +130,9 @@ TAX_TYPE_NOT_RESOLVED = "tax_type_not_resolved"
 TAX_MISMATCH = "tax_mismatch"
 TAX_NOT_STATED = "tax_not_stated"
 
-#: Sage returns at most 100 rows per request; the PO list stops at 10 pages.
-#: The chart and vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise
-#: past it.
+#: Sage returns at most 100 rows per request. The sync listings (chart,
+#: vendors, POs) read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it;
+#: ``_MAX_PAGES`` bounds only the lookups made while posting a bill.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
@@ -365,15 +365,23 @@ class SageAccountingZaAdapter(ErpAdapter):
 
         None when the first page fails (so a caller can tell "no rows" from
         "couldn't ask"); a later page failing ends the walk with what was read.
-        With ``complete`` any failing page, or more rows than ``max_pages``
-        reach, raises :class:`ErpListingIncomplete` instead.
+        With ``complete`` any failing page — a transport error included — or
+        more rows than ``max_pages`` reach, raises :class:`ErpListingIncomplete`
+        instead.
         """
         rows: list[dict] = []
         for page in range(max_pages):
             query = {**(params or {}), "$top": str(page_size), "$skip": str(page * page_size)}
-            resp = await self._call(
-                client, base, "GET", f"{resource}/Get", step, query, company=company
-            )
+            try:
+                resp = await self._call(
+                    client, base, "GET", f"{resource}/Get", step, query, company=company
+                )
+            except SageZaError:
+                if complete:
+                    raise ErpListingIncomplete(
+                        PROVIDER, resource, ListingGap.fetch_failed
+                    ) from None
+                raise
             payload = _json(resp) if resp.status_code == 200 else None
             batch = _results(payload)
             if batch is None:
@@ -661,26 +669,25 @@ class SageAccountingZaAdapter(ErpAdapter):
 
     # -- syncs ----------------------------------------------------------------
 
-    async def _list(
-        self, resource: str, params: dict[str, str] | None = None, *, complete: bool = False
-    ):
+    async def _list(self, resource: str) -> list[dict]:
+        """Every row of ``resource``, or :class:`ErpListingIncomplete`: the
+        syncs read what a pull lacks as gone (chart, vendors, §284) or read its
+        ``skipped`` report (POs, §323), so a partial pull is never returned."""
         base = await self._base()
         async with self._client(30) as client:
-            if complete:
-                return await self._get_list(
-                    client,
-                    base,
-                    resource,
-                    f"{resource} sync",
-                    params,
-                    max_pages=sync_listing_pages(_PAGE_SIZE),
-                    complete=True,
-                )
-            return await self._get_list(client, base, resource, f"{resource} sync", params)
+            rows = await self._get_list(
+                client,
+                base,
+                resource,
+                f"{resource} sync",
+                max_pages=sync_listing_pages(_PAGE_SIZE),
+                complete=True,
+            )
+        return rows or []
 
     async def list_vendors(self) -> list[VendorPayload]:
         """Every supplier, or :class:`ErpListingIncomplete`; never a partial list."""
-        rows = await self._list("Supplier", complete=True)
+        rows = await self._list("Supplier")
         vendors = []
         for row in rows or []:
             supplier_id = _int_id(row.get("ID"))
@@ -706,7 +713,7 @@ class SageAccountingZaAdapter(ErpAdapter):
         a line against one, so the sync never creates a row for it, but it
         still exists and a row linked to it is not a dead link (§284).
         """
-        rows = await self._list("Account", complete=True)
+        rows = await self._list("Account")
         accounts = []
         for row in rows or []:
             account_id = _int_id(row.get("ID"))
@@ -739,11 +746,12 @@ class SageAccountingZaAdapter(ErpAdapter):
         A PO with no number is dropped. One with a number but no usable
         ``Total`` is skipped, never synced at 0, and named in ``skipped`` as
         ``unpriceable``, so a total an earlier sync stored for it stops being
-        matched against (decisions §323)."""
-        try:
-            rows = await self._list("PurchaseOrder")
-        except Exception:
-            return PoListing(pos=[])
+        matched against (decisions §323).
+
+        Read whole or not at all: a failed or truncated read raises
+        :class:`ErpListingIncomplete`, never "no purchase orders", which would
+        hide every skip the report exists to carry."""
+        rows = await self._list("PurchaseOrder")
         pos: list[PoPayload] = []
         skipped: list[SkippedPo] = []
         for row in rows or []:

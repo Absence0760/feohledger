@@ -539,17 +539,65 @@ def test_list_pos_carries_the_vendor_id_list_vendors_reports():
     assert "vendor.id" in po_query["fields"]
 
 
-def test_chart_and_vendor_listings_raise_on_failure_the_po_list_degrades():
+def test_every_sync_listing_raises_on_failure_the_po_list_included():
     """The chart and vendor syncs read absence as evidence, so a failed listing
-    raises instead of returning [] (§284). The PO list keeps degrading."""
+    raises instead of returning [] (§284). The PO listing raises too: an empty
+    answer would hide every PO it would have reported skipped, leaving a stored
+    total trusted after the ERP stopped pricing it (§323)."""
     fake = FakeIntacct()
     fake.query_status = 500
     adapter = SageIntacctAdapter(CONFIG)
-    for listing in (adapter.list_vendors, adapter.list_gl_accounts):
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts, adapter.list_pos_report):
         with pytest.raises(ErpListingIncomplete) as exc:
             _run(fake, listing)
         assert exc.value.gap is ListingGap.fetch_failed
-    assert _run(fake, adapter.list_pos) == []
+    with pytest.raises(ErpListingIncomplete):
+        _run(fake, adapter.list_pos)
+
+
+def test_a_po_listing_is_read_whole_or_raises():
+    """A later page failing, a transport error, an unreadable page, or more POs
+    than ``SYNC_LISTING_MAX_ROWS`` raises; the POs read so far are never
+    returned."""
+    obj = "purchasing/document::Purchase Order"
+    adapter = SageIntacctAdapter(CONFIG)
+
+    fake = FakeIntacct()
+    fake.query_rows[obj] = [
+        [{"documentNumber": f"PO-{p}-{i}", "txnTotal": "1"} for i in range(100)] for p in range(12)
+    ]
+    # Past the old 10-page cap, read whole.
+    assert len(_run(fake, adapter.list_pos_report).pos) == 1200
+
+    fake.query_fail_from_page = 1
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, adapter.list_pos_report)
+    assert exc.value.gap is ListingGap.fetch_failed
+    assert exc.value.collection == "purchase orders"
+
+    fake = FakeIntacct()
+    fake.query_rows[obj] = [[{"documentNumber": "PO-1", "txnTotal": "1"}]] * (
+        SYNC_LISTING_MAX_ROWS // 100 + 1
+    )
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, adapter.list_pos_report)
+    assert exc.value.gap is ListingGap.truncated
+
+    for broken in (
+        lambda request: (_ for _ in ()).throw(httpx.ConnectError("refused")),
+        lambda request: httpx.Response(200, content=b"not json"),
+    ):
+        fake = FakeIntacct()
+
+        def handler(request, _orig=fake.handler, _broken=broken):
+            if request.url.path.endswith("/services/core/query"):
+                return _broken(request)
+            return _orig(request)
+
+        fake.handler = handler
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(fake, adapter.list_pos_report)
+        assert exc.value.gap is ListingGap.fetch_failed
 
 
 def test_a_later_page_failing_raises_never_returns_the_first_pages():
@@ -684,3 +732,21 @@ def test_bill_lines_refuses_unitemised_tax_on_several_exclusive_lines():
         ],
     )
     assert bill_lines(payload) == "tax_not_itemised"
+
+
+def test_a_transport_error_on_any_sync_listing_is_an_incomplete_listing():
+    """A refused connection is a coded incomplete listing on the chart, vendor
+    and PO listings alike, never a raw ``httpx`` error (an uncoded 502)."""
+    fake = FakeIntacct()
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/services/core/query"):
+            raise httpx.ConnectError("refused")
+        return _orig(request)
+
+    fake.handler = handler
+    adapter = SageIntacctAdapter(CONFIG)
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts, adapter.list_pos_report):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(fake, listing)
+        assert exc.value.gap is ListingGap.fetch_failed

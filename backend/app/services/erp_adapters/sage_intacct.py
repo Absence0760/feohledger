@@ -78,8 +78,9 @@ BILL_OBJECT = "accounts-payable/bill"
 VENDOR_OBJECT = "accounts-payable/vendor"
 GL_ACCOUNT_OBJECT = "general-ledger/account"
 
-#: Query page size and the PO list's page cap (10 × 100 rows). The chart and
-#: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it.
+#: Query page size, and the page cap of a lookup made while posting a bill.
+#: The sync listings (chart, vendors, POs) read up to ``SYNC_LISTING_MAX_ROWS``
+#: and raise past it.
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
@@ -219,8 +220,9 @@ class SageIntacctAdapter(ErpAdapter):
         read so far.
 
         ``complete`` (the collection's name) asks for the whole collection
-        instead: any failing page, or more rows than ``max_pages`` reach,
-        raises :class:`ErpListingIncomplete` rather than returning part of it.
+        instead: any failing page — a transport error or an unreadable body
+        included — or more rows than ``max_pages`` reach, raises
+        :class:`ErpListingIncomplete` rather than returning part of it.
         """
         rows: list[dict] = []
         start = 1
@@ -228,16 +230,30 @@ class SageIntacctAdapter(ErpAdapter):
             body: dict = {"object": obj, "fields": fields, "start": start, "size": size}
             if filters:
                 body["filters"] = filters
-            resp = await client.post(
-                f"{self._base()}/services/core/query",
-                content=json.dumps(body),
-                headers=self._headers(token),
-            )
+            try:
+                resp = await client.post(
+                    f"{self._base()}/services/core/query",
+                    content=json.dumps(body),
+                    headers=self._headers(token),
+                )
+            except httpx.HTTPError:
+                if complete is not None:
+                    raise ErpListingIncomplete(
+                        PROVIDER, complete, ListingGap.fetch_failed
+                    ) from None
+                raise
             if resp.status_code != 200:
                 if complete is not None:
                     raise ErpListingIncomplete(PROVIDER, complete, ListingGap.fetch_failed)
                 return None if page == 0 else rows
-            data = resp.json() or {}
+            try:
+                data = resp.json() or {}
+            except ValueError:
+                if complete is not None:
+                    raise ErpListingIncomplete(
+                        PROVIDER, complete, ListingGap.fetch_failed
+                    ) from None
+                raise
             rows.extend(r for r in data.get("ia::result") or [] if isinstance(r, dict))
             nxt = (data.get("ia::meta") or {}).get("next")
             if not nxt:
@@ -439,19 +455,22 @@ class SageIntacctAdapter(ErpAdapter):
         skipped and named in ``skipped`` as ``unpriceable``: it used to sync
         at 0, which every invoice against it then over-billed, and a total an
         earlier sync stored for it must stop being matched against (decisions
-        §323)."""
+        §323).
+
+        Read whole or not at all: a failed or truncated read raises
+        :class:`ErpListingIncomplete`, never "no purchase orders", which would
+        hide every skip the report exists to carry."""
         doc_type = self.config.get("po_document_type") or "Purchase Order"
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                token = await self._token(client)
-                rows = await self._query(
-                    client,
-                    token,
-                    f"purchasing/document::{doc_type}",
-                    _PO_FIELDS,
-                )
-        except Exception:
-            return PoListing(pos=[])
+        async with httpx.AsyncClient(timeout=30) as client:
+            token = await self._token(client)
+            rows = await self._query(
+                client,
+                token,
+                f"purchasing/document::{doc_type}",
+                _PO_FIELDS,
+                max_pages=sync_listing_pages(_PAGE_SIZE),
+                complete="purchase orders",
+            )
         pos: list[PoPayload] = []
         skipped: list[SkippedPo] = []
         for raw in rows or []:

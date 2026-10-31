@@ -21,6 +21,7 @@ import pytest
 
 from app.config import settings
 from app.services.erp_adapters.base import (
+    SYNC_LISTING_MAX_ROWS,
     ErpInvoiceStatus,
     ErpListingIncomplete,
     InvoicePayload,
@@ -774,18 +775,61 @@ def test_list_paging_walks_skip_until_the_total():
     assert [r.url.params["$skip"] for r in fake.requests] == ["0", "100", "200"]
 
 
-def test_chart_and_vendor_listings_raise_on_failure_the_po_list_degrades():
+def test_every_sync_listing_raises_on_failure_the_po_list_included():
     """The chart and vendor syncs read absence as evidence, so a failed listing
-    raises instead of returning [] (§284). The PO list keeps degrading."""
+    raises instead of returning [] (§284). The PO listing raises too: an empty
+    answer would hide every PO it would have reported skipped, leaving a stored
+    total trusted after the ERP stopped pricing it (§323)."""
     fake = FakeSage()
     for resource in ("Supplier", "Account", "PurchaseOrder"):
         fake.status[resource] = 500
     adapter = SageAccountingZaAdapter(CONFIG)
-    for listing in (adapter.list_vendors, adapter.list_gl_accounts):
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts, adapter.list_pos_report):
         with pytest.raises(ErpListingIncomplete) as exc:
             _run(fake, listing)
         assert exc.value.gap is ListingGap.fetch_failed
-    assert _run(fake, adapter.list_pos) == []
+    with pytest.raises(ErpListingIncomplete):
+        _run(fake, adapter.list_pos)
+
+
+def test_a_po_listing_is_read_whole_or_raises():
+    """A later page failing, a transport error, or more POs than
+    ``SYNC_LISTING_MAX_ROWS`` raises; the POs read so far are never returned."""
+    fake = FakeSage()
+    mode = {"fail_from": None, "transport": False, "rows": 250}
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/PurchaseOrder/Get"):
+            skip, top = int(request.url.params["$skip"]), int(request.url.params["$top"])
+            if mode["transport"]:
+                raise httpx.ConnectError("refused")
+            if mode["fail_from"] is not None and skip >= mode["fail_from"]:
+                return httpx.Response(503, json={})
+            page = [
+                {"DocumentNumber": f"PO-{i}", "Total": 1}
+                for i in range(skip, min(skip + top, mode["rows"]))
+            ]
+            return httpx.Response(200, json={"TotalResults": mode["rows"], "Results": page})
+        return _orig(request)
+
+    fake.handler = handler
+    adapter = SageAccountingZaAdapter(CONFIG)
+    assert len(_run(fake, adapter.list_pos_report).pos) == 250
+
+    mode["fail_from"] = 100
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, adapter.list_pos_report)
+    assert exc.value.gap is ListingGap.fetch_failed
+
+    mode.update(fail_from=None, transport=True)
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, adapter.list_pos_report)
+    assert exc.value.gap is ListingGap.fetch_failed
+
+    mode.update(transport=False, rows=SYNC_LISTING_MAX_ROWS + 1)
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run(fake, adapter.list_pos_report)
+    assert exc.value.gap is ListingGap.truncated
 
 
 def test_a_later_page_failing_raises_never_returns_the_first_pages():
@@ -833,3 +877,21 @@ def test_test_connection_requires_the_configured_company():
     fake = FakeSage()
     fake.status["Company"] = 401
     assert _run(fake, SageAccountingZaAdapter(CONFIG).test_connection) is False
+
+
+def test_a_transport_error_on_any_sync_listing_is_an_incomplete_listing():
+    """A refused connection is a coded incomplete listing on the chart, vendor
+    and PO listings alike, never ``SageZaError`` (an uncoded 502)."""
+    fake = FakeSage()
+
+    def handler(request, _orig=fake.handler):
+        if request.url.path.endswith("/Get"):
+            raise httpx.ConnectError("refused")
+        return _orig(request)
+
+    fake.handler = handler
+    adapter = SageAccountingZaAdapter(CONFIG)
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts, adapter.list_pos_report):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(fake, listing)
+        assert exc.value.gap is ListingGap.fetch_failed

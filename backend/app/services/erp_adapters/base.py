@@ -713,6 +713,11 @@ class ErpListingIncomplete(RuntimeError):
     (docs/decisions.md §284). So a listing either returns everything or raises
     this, and the sync endpoints answer 502 without syncing anything.
 
+    An adapter's ``list_pos_report`` raises it too: nothing judges a link by a
+    PO's absence, but its ``skipped`` report covers only the part it read, so a
+    failed or capped read would leave a no-longer-priceable PO's stored total
+    trusted (decisions §323).
+
     PII-free by construction: the provider literal, the collection and the
     :class:`ListingGap` — never a response body, URL or credential.
     """

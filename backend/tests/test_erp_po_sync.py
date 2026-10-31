@@ -8,8 +8,9 @@ pagination cursor) and the response → `PoPayload` mapping that drives
 real customer syncs.
 
 NetSuite (one SuiteQL query) and Business Central (`purchaseOrders` with
-lines expanded) are HTTP-mocked the same way: the mapping, the 1000-row
-bound, and the best-effort degradation the sync endpoint relies on.
+lines expanded) are HTTP-mocked the same way: the mapping, and a listing read
+whole or not at all — a failed or capped read raises `ErpListingIncomplete`
+rather than hiding the skips in the part it never read.
 """
 
 from __future__ import annotations
@@ -214,24 +215,59 @@ def test_bc_list_pos_maps_orders_and_lines(monkeypatch):
     )
 
 
-def test_bc_list_pos_is_bounded_and_degrades(monkeypatch):
+def test_bc_po_listing_is_read_whole_or_raises(monkeypatch):
+    """A failed or capped PO read raises instead of returning what it had: a
+    PO that became unpriceable in the unread part would otherwise keep its
+    stored total trusted (decisions §323, the PR #670 follow-up)."""
     import httpx
 
-    def page(n: int) -> MagicMock:
-        rows = [{"number": f"PO-{n}-{i}", "totalAmountIncludingTax": 1} for i in range(100)]
-        return _make_mock_response(200, {"value": rows, "@odata.nextLink": f"{_BC_API}/n{n}"})
+    from app.services.erp_adapters.base import (
+        SYNC_LISTING_MAX_ROWS,
+        ErpListingIncomplete,
+        ListingGap,
+    )
 
+    def page(n: int, *, more: bool = True) -> MagicMock:
+        rows = [{"number": f"PO-{n}-{i}", "totalAmountIncludingTax": 1} for i in range(100)]
+        if n == 11:
+            rows[0] = {"number": "PO-NO-TOTAL"}
+        body: dict = {"value": rows}
+        if more:
+            body["@odata.nextLink"] = f"{_BC_API}/n{n}"
+        return _make_mock_response(200, body)
+
+    pages = SYNC_LISTING_MAX_ROWS // 100
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_make_mock_response(200, {"access_token": "tok"}))
-        client.get = AsyncMock(side_effect=[page(n) for n in range(12)])
-        assert len(_run(_bc_adapter(monkeypatch).list_pos())) == 1000
-        assert client.get.await_count == 10
+
+        # Past the old 10-page cap: read whole, the skip on page twelve reported.
+        client.get = AsyncMock(side_effect=[page(n, more=n < 11) for n in range(12)])
+        listing = _run(_bc_adapter(monkeypatch).list_pos_report())
+        assert len(listing.pos) == 1199
+        assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
+
+        # A collection past SYNC_LISTING_MAX_ROWS: truncated, nothing returned.
+        client.get = AsyncMock(side_effect=[page(n) for n in range(pages + 1)])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_bc_adapter(monkeypatch).list_pos_report())
+        assert exc.value.gap is ListingGap.truncated
+        assert client.get.await_count == pages
+
+        # A later page failing: never the first page's POs.
+        client.get = AsyncMock(side_effect=[page(0), _make_mock_response(503, {"error": "busy"})])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_bc_adapter(monkeypatch).list_pos())
+        assert exc.value.gap is ListingGap.fetch_failed
 
         client.get = AsyncMock(return_value=_make_mock_response(503, {"error": "busy"}))
-        assert _run(_bc_adapter(monkeypatch).list_pos()) == []
+        with pytest.raises(ErpListingIncomplete):
+            _run(_bc_adapter(monkeypatch).list_pos_report())
         client.get = AsyncMock(side_effect=httpx.ReadTimeout("slow"))
-        assert _run(_bc_adapter(monkeypatch).list_pos()) == []
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_bc_adapter(monkeypatch).list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
+        assert exc.value.collection == "purchase orders"
 
 
 def test_bc_list_pos_carries_the_vendor_id_list_vendors_reports(monkeypatch):
@@ -376,23 +412,55 @@ def test_netsuite_po_links_to_the_vendor_id_list_vendors_reports_even_after_a_re
     assert by_id[po.vendor_erp_id].name == "Acme Holdings (renamed)"
 
 
-def test_netsuite_list_pos_is_bounded_and_degrades():
+def test_netsuite_po_listing_is_read_whole_or_raises():
+    """A failed or capped PO read raises instead of returning what it had: a
+    PO that became unpriceable in the unread part would otherwise keep its
+    stored total trusted (decisions §323, the PR #670 follow-up)."""
     import httpx
 
-    def page(n: int) -> MagicMock:
-        rows = [{"tranid": f"PO-{n}-{i}", "foreigntotal": 1} for i in range(100)]
-        return _make_mock_response(200, {"items": rows, "hasMore": True})
+    from app.services.erp_adapters.base import (
+        SYNC_LISTING_MAX_ROWS,
+        ErpListingIncomplete,
+        ListingGap,
+    )
 
+    def page(n: int, *, more: bool = True) -> MagicMock:
+        rows = [{"tranid": f"PO-{n}-{i}", "foreigntotal": 1} for i in range(100)]
+        if n == 11:
+            rows[0] = {"tranid": "PO-NO-TOTAL", "foreigntotal": None}
+        return _make_mock_response(200, {"items": rows, "hasMore": more})
+
+    pages = SYNC_LISTING_MAX_ROWS // 100
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.post = AsyncMock(side_effect=[page(n) for n in range(12)])
-        assert len(_run(_netsuite_adapter().list_pos())) == 1000
-        assert client.post.await_count == 10
 
-        client.post = AsyncMock(return_value=_make_mock_response(400, {"detail": "bad"}))
-        assert _run(_netsuite_adapter().list_pos()) == []
+        # Past the old 10-page cap: read whole, the skip on page twelve reported.
+        client.post = AsyncMock(side_effect=[page(n, more=n < 11) for n in range(12)])
+        listing = _run(_netsuite_adapter().list_pos_report())
+        assert len(listing.pos) == 1199
+        assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
+
+        # A collection past SYNC_LISTING_MAX_ROWS: truncated, nothing returned.
+        client.post = AsyncMock(side_effect=[page(n) for n in range(pages + 1)])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_netsuite_adapter().list_pos_report())
+        assert exc.value.gap is ListingGap.truncated
+        assert client.post.await_count == pages
+
+        # A later page failing: never the first page's POs.
+        client.post = AsyncMock(side_effect=[page(0), _make_mock_response(400, {"detail": "x"})])
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_netsuite_adapter().list_pos())
+        assert exc.value.gap is ListingGap.fetch_failed
+
+        client.post = AsyncMock(return_value=_raw_json_response(200, "not json"))
+        with pytest.raises(ErpListingIncomplete):
+            _run(_netsuite_adapter().list_pos_report())
         client.post = AsyncMock(side_effect=httpx.ConnectError("dns"))
-        assert _run(_netsuite_adapter().list_pos()) == []
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(_netsuite_adapter().list_pos_report())
+        assert exc.value.gap is ListingGap.fetch_failed
+        assert exc.value.collection == "purchase orders"
 
 
 # ---------- Merge.dev adapter -------------------------------------------

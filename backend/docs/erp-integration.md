@@ -1317,8 +1317,12 @@ connection gone — revoked, never consented, expired — answers the coded **40
 naming the exception class; a token refresh that could not reach the provider
 stays a 502, since the connection is still good (`api/refusals.erp_pull_failure`,
 the one place all three routes turn an adapter failure into HTTP). An empty pull
-changes nothing either. PO listings keep their bounded best-effort reads, since
-nothing is unlinked by a PO's absence.
+changes nothing either. A PO listing is read whole too: nothing is unlinked by
+a PO's absence, but the listing's `skipped` report (below) only covers the part
+it read, so a failed or capped PO read raises `ErpListingIncomplete` and
+`POST /api/purchase-orders/sync-erp` answers the same coded 502 and syncs
+nothing. Every adapter that overrides `list_pos_report` (SYSPRO, Blackbaud FE
+NXT, NetSuite, Business Central, Sage Accounting (ZA), Sage Intacct) does.
 
 **A sync with no realm never touches another company's rows.** `mock`, and an
 OAuth ERP with no consent, have no realm. A sync under one leaves alone every
@@ -1505,7 +1509,11 @@ Intacct report the same way: a numbered PO with no usable total (`order_total`,
 `unpriceable`. Intacct used to sync such a PO at 0. A PO with no number is
 dropped without a report, since there is no row to mark. Merge.dev, Xero and
 QuickBooks Online do not override `list_pos_report` and report nothing skipped
-(decisions §325).
+(decisions §325). Each of the six that report skips reads its PO listing whole
+or raises `ErpListingIncomplete`: a read that ended at a failed page or a page
+cap would silently drop the skips in the part it never read, leaving those
+stored totals trusted. NetSuite and Business Central used to return what they
+had read (capped at 1,000 POs), and the two Sage adapters an empty list.
 
 **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
@@ -1934,7 +1942,7 @@ form. JSON throughout — no XML parser on this path.
 | `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`) or any GL account ERP id (`account_not_linked`) → `POST services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` |
 | `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` only — never `totalTxnAmountDue = 0` (decisions §303) |
 | `void_invoice` | deletes a draft / posted-unpaid bill; a bill that is paid, partially paid, selected for payment or reversed returns `False` (reversal with its payment is an accountant's call) |
-| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors and accounts up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort; a PO's vendor is linked by `vendor.id` (the vendor ID `list_vendors` stamps) before `vendor.name` |
+| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors, accounts and POs up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`, a transport error or unreadable page included); a PO's vendor is linked by `vendor.id` (the vendor ID `list_vendors` stamps) before `vendor.name` |
 | `test_connection` | token + a one-row vendor query |
 
 Request rules worth knowing:
@@ -2324,9 +2332,10 @@ separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
 Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
 HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows a
 page) and filter with `$filter`. The supplier and account listings read up to
-`SYNC_LISTING_MAX_ROWS` and raise `ErpListingIncomplete` on a failed page or
-past it; an inactive account is emitted `active=False`. Other lists stop at 10
-pages.
+`SYNC_LISTING_MAX_ROWS` and raise `ErpListingIncomplete` on a failed page (a
+transport error included) or past it; an inactive account is emitted
+`active=False`. The purchase-order listing is read the same way. The lookups
+made while posting a bill stop at 10 pages.
 
 | Operation | Calls |
 |---|---|
@@ -2657,8 +2666,8 @@ wire, never a float. The chart and vendor listings read up to
 `SYNC_LISTING_MAX_ROWS` and raise on any failure (a token failure as itself; a
 non-200, network error, unparseable page or longer collection as
 `ErpListingIncomplete`), since the syncs read absence as evidence. The PO
-listing stays best-effort: it stops at 10 pages / 1,000 rows, and a failure ends
-the pull with what it read. An admin `base_url` stays behind the SSRF guard on
+listing is read the same way, since its `skipped` report covers only what it
+read. An admin `base_url` stays behind the SSRF guard on
 every call, and that refusal is raised, not swallowed.
 
 ## NetSuite sign-in: OAuth 2.0 client credentials or TBA
@@ -2759,8 +2768,8 @@ NetSuite account proves Oracle accepts the assertion (`docs/followups.md`).
 (`POST …/services/rest/query/v1/suiteql`, `Prefer: transient`, `ORDER BY id`
 for stable `offset` paging, 100 rows a page), parsed exactly like BC's. The
 chart and vendor queries read up to `SYNC_LISTING_MAX_ROWS` and raise
-`ErpListingIncomplete` on a failed page or past it; the PO query stops at 10
-pages, best-effort.
+`ErpListingIncomplete` on a failed page or past it; the PO query is read the
+same way, since its `skipped` report covers only what it read.
 
 | Sync | Query | Notes |
 |---|---|---|
