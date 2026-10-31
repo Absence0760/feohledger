@@ -1916,14 +1916,16 @@ exception row, no notification, no persisted marker.
 
 Two things changed:
 
-- **Every failed leg opens a de-duped `erp_reconciliation` exception** naming
-  the payment, the run, and the retry endpoint, so the strand lands in the queue
-  an AP manager already works. `erp_reconciliation` is the type
-  `api/erp_webhook` already raises for "the ERP and our ledger disagree and a
-  human must reconcile" — the same situation, so no new taxonomy entry. The
-  description is PII-free (identifiers, the failure's exception *class*, the
-  invoice's current status) — never the raw error message, which can embed
-  partial account data.
+- **Every failed leg opens a de-duped `erp_reconciliation` exception**, so the
+  strand lands in the queue an AP manager already works. `erp_reconciliation` is
+  the type `api/erp_webhook` already raises for "the ERP and our ledger disagree
+  and a human must reconcile" — the same situation, so no new taxonomy entry.
+  Its description is the catalogue sentence `exception.erp_sync_back_failed`
+  (what happened, and to use **Retry ERP sync** on the run in Payments); the
+  payment and run ids, the failure's exception *class* and the invoice's status
+  ride `erp_report` (`kind: payment_sync_back_failed`) — never the raw error
+  message, which can embed partial account data
+  ([invoice-warnings.md](invoice-warnings.md) § ERP reconciliation sentences).
 - **Each leg commits on its own.** The loop used to run every payment inside one
   transaction with a single commit at the end; a leg that failed with a DB error
   poisoned that transaction, so the final commit raised, the outer handler

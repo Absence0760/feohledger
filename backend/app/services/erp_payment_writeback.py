@@ -48,7 +48,7 @@ from app.models.payment import Payment
 from app.services.audit_dispatch import dispatch_audit
 from app.services.erp_adapters.base import ErpAdapter, ErpPostResult, PaymentPayload
 from app.services.erp_link_realm import connection_realm, legacy_links_trusted
-from app.services.erp_status_sync import open_erp_reconciliation_exception
+from app.services.erp_status_sync import erp_finding, open_erp_reconciliation_exception
 from app.services.payment_methods import CARD_PAYMENT_METHODS
 from app.utils.dates import utc_today
 
@@ -58,6 +58,36 @@ logger = logging.getLogger(__name__)
 #: booked from: one for bank rails, one for card rails.
 BANK_ACCOUNT_KEY = "bill_payment_bank_account"
 CARD_ACCOUNT_KEY = "bill_payment_card_account"
+
+#: ``erp_report["kind"]`` of the rows this module opens. The sentence is for an
+#: AP user (``invoice_warning_catalog``); the payment, its run, the bill and the
+#: refusal ride the report as data, never the sentence (decisions §319, §331).
+ERP_REPORT_WRITEBACK_FAILED = "payment_writeback_failed"
+ERP_REPORT_WRITEBACK_BALANCE_OPEN = "payment_writeback_balance_open"
+ERP_REPORT_VOID_WRITEBACK_FAILED = "payment_void_writeback_failed"
+
+
+def _writeback_report(
+    kind: str,
+    *,
+    erp_type: str,
+    payment_id: uuid.UUID,
+    payment_run_id: uuid.UUID | None,
+    bill_id: str,
+    **extra: object,
+) -> dict:
+    """The PII-free machine detail of a write-back row: ids, the provider and,
+    on a failure, the coded refusal (``erp_refusal_record``: a code and its
+    params, never the ERP's text)."""
+    return {
+        "kind": kind,
+        "erp_type": erp_type,
+        "erp_document_id": bill_id,
+        "payment_id": str(payment_id),
+        "payment_run_id": str(payment_run_id) if payment_run_id else None,
+        **extra,
+    }
+
 
 #: Outcomes of :func:`write_back_payment`.
 WROTE = "wrote"
@@ -201,11 +231,20 @@ async def write_back_payment(
                     db,
                     invoice,
                     org_id=invoice.organization_id,
-                    description=(
-                        f"Payment {payment.id} was written back to the ERP, but the bill "
-                        f"still shows {result.bill_balance_after} {invoice.currency or ''} "
-                        "open there (a discount or credit taken in FeohLedger). Close the "
-                        f"difference in the ERP (bill={bill_id})."
+                    finding=erp_finding(
+                        "erp_payment_writeback_balance_open",
+                        adapter.erp_type,
+                        amount=result.bill_balance_after,
+                        currency=invoice.currency,
+                    ),
+                    erp_report=_writeback_report(
+                        ERP_REPORT_WRITEBACK_BALANCE_OPEN,
+                        erp_type=adapter.erp_type,
+                        payment_id=payment.id,
+                        payment_run_id=payment.payment_run_id,
+                        bill_id=bill_id,
+                        erp_payment_id=result.erp_document_id,
+                        bill_balance_after=str(result.bill_balance_after),
                     ),
                 )
             await db.commit()
@@ -230,16 +269,20 @@ async def write_back_payment(
                 **({"refusal": refusal} if refusal else {}),
             },
         )
-        code = refusal["code"] if refusal else "erp_post_failed"
         await open_erp_reconciliation_exception(
             db,
             invoice,
             org_id=invoice.organization_id,
-            description=(
-                f"Payment {payment.id} settled but could not be written back to the ERP "
-                f"as a payment of its bill ({code}). The bill still reads as unpaid there. "
-                f"Fix the cause, then retry with POST /api/payments/runs/"
-                f"{payment.payment_run_id or '-'}/sync-erp (bill={bill_id})."
+            finding=erp_finding("erp_payment_writeback_failed", adapter.erp_type),
+            erp_report=_writeback_report(
+                ERP_REPORT_WRITEBACK_FAILED,
+                erp_type=adapter.erp_type,
+                payment_id=payment.id,
+                payment_run_id=payment.payment_run_id,
+                bill_id=bill_id,
+                failure=refusal["code"] if refusal else "erp_post_failed",
+                refusal=refusal,
+                retryable=result.retryable,
             ),
         )
         await db.commit()
@@ -448,6 +491,7 @@ async def void_written_payment(org_id: uuid.UUID, payment_id: uuid.UUID) -> str:
             )
             correlation = invoice.correlation_id or payment.correlation_id or invoice.id
             invoice_id = invoice.id
+            run_id = payment.payment_run_id
             # Nothing held across the ERP call. A rollback expires the loaded
             # rows, so what is needed after it was read above.
             await db.rollback()
@@ -478,15 +522,20 @@ async def void_written_payment(org_id: uuid.UUID, payment_id: uuid.UUID) -> str:
             if result.success:
                 await _clear_pending(db, invoice_id, payment_id)
             else:
-                code = refusal["code"] if refusal else "erp_void_failed"
                 await open_erp_reconciliation_exception(
                     db,
                     invoice,
                     org_id=invoice.organization_id,
-                    description=(
-                        f"Payment {payment_id} was voided in FeohLedger, but its payment of "
-                        f"the bill in the ERP could not be voided ({code}). The ERP still "
-                        f"shows the bill paid; void that payment there (bill={bill_id})."
+                    finding=erp_finding("erp_payment_void_writeback_failed", adapter.erp_type),
+                    erp_report=_writeback_report(
+                        ERP_REPORT_VOID_WRITEBACK_FAILED,
+                        erp_type=adapter.erp_type,
+                        payment_id=payment_id,
+                        payment_run_id=run_id,
+                        bill_id=bill_id,
+                        failure=refusal["code"] if refusal else "erp_void_failed",
+                        refusal=refusal,
+                        retryable=result.retryable,
                     ),
                 )
             await db.commit()

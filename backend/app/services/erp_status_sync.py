@@ -220,8 +220,7 @@ async def open_erp_reconciliation_exception(
     invoice: Invoice,
     *,
     org_id,
-    finding: dict | None = None,
-    description: str | None = None,
+    finding: dict,
     exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
     erp_report: dict | None = None,
 ) -> bool:
@@ -240,18 +239,9 @@ async def open_erp_reconciliation_exception(
     ``description`` and its code + params let each client render it in the
     reader's language. It carries nothing from the ERP's payload, which may
     include vendor bank / tax / address fields. ``erp_report`` is the PII-free
-    machine detail, as data (decisions §319).
-
-    ``description`` (plain English, no code) remains only for the QuickBooks
-    write-back's sync-failure sentences (``erp_payment_writeback``), which carry
-    machine codes like the other sync-back failures and are not catalogued yet
-    (``backend/docs/invoice-warnings.md`` § What is NOT localized). Pass exactly
-    one of the two.
+    machine detail, as data (decisions §319). Every caller passes a catalogue
+    finding, the QuickBooks write-back's included (``erp_payment_writeback``).
     """
-    if (finding is None) == (description is None):
-        raise TypeError("pass exactly one of `finding` or `description`")
-    if finding is None:
-        finding = {"message": description, "code": None, "params": None}
     if (erp_report or {}).get("kind") == ERP_REPORT_PAID_NOT_RECORDED:
         return await _keep_erp_paid_report(
             db,

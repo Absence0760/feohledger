@@ -799,6 +799,26 @@ _ERP_NAMED_SENTENCES: dict[str, str] = {
         "payment, so it was not cancelled here. Check whether a payment is on its way to "
         "the supplier, and stop or recover it if the bill is really void."
     ),
+    # The payment write-back (`erp_payment_writeback`, decisions §295). The
+    # refusal code, payment, run and bill are in `exceptions.erp_report`.
+    "erp_payment_writeback_failed": (
+        "did not record this invoice's payment, so the bill still shows as unpaid there "
+        "although the money was paid. Resolve what stopped it, then use Retry ERP sync on "
+        "the payment's run in Payments."
+    ),
+    "erp_payment_writeback_balance_open": (
+        "recorded this invoice's payment, but the bill still shows {amount} {currency} open "
+        "there (a discount or credit taken in FeohLedger). Close the difference in the ERP."
+    ),
+    "erp_payment_void_writeback_failed": (
+        "still shows this bill paid by a payment that was voided in FeohLedger, because "
+        "voiding it in the ERP failed. Void that payment in the ERP so the books agree."
+    ),
+}
+
+#: Params a named sentence carries besides ``erp`` (both twins carry them).
+_ERP_NAMED_PARAMS: dict[str, dict[str, ParamKind]] = {
+    "erp_payment_writeback_balance_open": {"amount": "money", "currency": "currency"},
 }
 
 _DISPATCH_STOPPED_TAIL = (
@@ -879,6 +899,14 @@ _ERP_UNNAMED_ONLY: dict[str, str] = {
         "the bill paid. FeohLedger will not pay it again until someone confirms the ERP's "
         "payment is undone."
     ),
+    # `payment_erp_sync`'s failed leg. It need not be the ERP that failed (the
+    # tenant may have none), so it never names one. The failure class, payment,
+    # run and the invoice's status are in `exceptions.erp_report`.
+    "erp_sync_back_failed": (
+        "This invoice's payment settled, but FeohLedger could not finish recording it, so "
+        "the invoice has not moved to Paid although the money has gone. Nothing retries "
+        "this automatically: use Retry ERP sync on the payment's run in Payments."
+    ),
 }
 
 #: ERP reconciliation descriptions (decisions §319): the sentence an AP user
@@ -891,13 +919,16 @@ ERP_RECONCILIATION_SPECS: tuple[WarningSpec, ...] = (
         for name, rest in _ERP_NAMED_SENTENCES.items()
         for spec in (
             WarningSpec(
-                EXCEPTION_PREFIX + name, ERP_RECONCILIATION_TYPE, "{erp} " + rest, {"erp": "text"}
+                EXCEPTION_PREFIX + name,
+                ERP_RECONCILIATION_TYPE,
+                "{erp} " + rest,
+                {"erp": "text", **_ERP_NAMED_PARAMS.get(name, {})},
             ),
             WarningSpec(
                 EXCEPTION_PREFIX + name + ERP_UNNAMED_SUFFIX,
                 ERP_RECONCILIATION_TYPE,
                 "Your ERP " + rest,
-                {},
+                dict(_ERP_NAMED_PARAMS.get(name, {})),
             ),
         )
     ),

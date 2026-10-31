@@ -275,8 +275,8 @@ Both columns are NULL — and clients render `description` — for a human-autho
 description (`review_rejected`'s reason), for every row raised before 0103 (no
 backfill), and for the `create_exception` sites still composing unkeyed English
 (Positive Pay returns, the vendor bank-change flag, payment compliance holds,
-the reconciler's aged-out payment, settlement discrepancies, ERP sync-back and
-QuickBooks write-back failures, extraction failures). The code families, the composite
+the reconciler's aged-out payment, settlement discrepancies, extraction
+failures). The code families, the composite
 convention and the client fallback order are in
 [invoice-warnings.md](invoice-warnings.md) § Exception descriptions.
 

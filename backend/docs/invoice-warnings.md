@@ -255,7 +255,17 @@ re-attempt failed, FeohLedger's own payment settled short, a bill voided after
 it was sent on, and the QuickBooks status sync-back / pre-dispatch check cases
 (credit settlement, paid while scheduled, paid twice, part-paid outside, bill
 deleted, a bill this connection cannot read, the payment stopped by bill state,
-an ERP-reported payment voided here).
+an ERP-reported payment voided here). The payment write-back
+(`services/erp_payment_writeback`) and `services/payment_erp_sync`'s failed leg
+use the same family: `erp_payment_writeback_failed`,
+`erp_payment_writeback_balance_open` (`amount` money + `currency`),
+`erp_payment_void_writeback_failed`, and `erp_sync_back_failed` (no ERP name —
+the leg that failed need not be the ERP's, and the tenant may have none). Their
+`erp_report.kind` is `payment_writeback_failed` /
+`payment_writeback_balance_open` / `payment_void_writeback_failed` /
+`payment_sync_back_failed`, carrying the payment and run ids, the bill, and the
+coded refusal (`refusal`, `failure`) or exception class that used to be spliced
+into the English.
 
 - **The ERP's product name is a `text` param, and its absence is a code.** A
   sentence that opens with the ERP is declared twice: `{erp} reports …` with
@@ -270,9 +280,9 @@ an ERP-reported payment voided here).
   a withdrawal or a failed re-attempt rewrites `description`,
   `description_code` and `description_params` as one, so a row can never pair
   new English with an old code.
-- `open_erp_reconciliation_exception` takes the finding as `finding=`; a plain
-  `description=` (exactly one of the two) remains only for the QuickBooks
-  write-back failures below.
+- `open_erp_reconciliation_exception` takes the finding as `finding=`, and
+  only that: the plain-English `description=` it kept for the write-back
+  failures is gone now they are catalogued.
 
 `test_every_erp_code_is_reachable` drives the builders, since the
 refusal-chosen codes and the `_unnamed` twins have no literal call site for the
@@ -292,8 +302,6 @@ English and no code, so the queue renders them raw:
 | `api/payments.py` | `payment_compliance_hold` | the payment's `failure_reason` |
 | `services/payment_reconciler.py` | `payment_reconciliation` | the aged-out in-flight payment paragraph |
 | `services/payment_settlement_record.py` | `fraud_flag` | `describe_discrepancy(...)` |
-| `services/payment_erp_sync.py` | `erp_reconciliation` | the failed ERP sync-back paragraph |
-| `services/erp_payment_writeback.py` | `erp_reconciliation` | the QuickBooks write-back failure / open-balance / void-failure paragraphs (passed to `open_erp_reconciliation_exception` as `description=`; they carry the adapter's error code, the payment id and a retry path, the same family as the sync-back paragraph above) |
 
 `services/review.py`'s `review_rejected` exception is not on this list on
 purpose: its description is the reviewer's own words, which have no code by

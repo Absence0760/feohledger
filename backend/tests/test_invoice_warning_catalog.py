@@ -193,7 +193,12 @@ def test_every_code_has_a_call_site():
 
 
 #: The modules that open ERP reconciliation exceptions (decisions §319).
-ERP_PRODUCER_MODULES = ("app/services/erp_status_sync.py", "app/api/erp_webhook.py")
+ERP_PRODUCER_MODULES = (
+    "app/services/erp_status_sync.py",
+    "app/api/erp_webhook.py",
+    "app/services/erp_payment_writeback.py",
+    "app/services/payment_erp_sync.py",
+)
 
 
 def test_every_erp_code_is_reachable():
@@ -225,8 +230,14 @@ def test_every_erp_code_is_reachable():
         if "erp" in spec.params or name.endswith(cat.ERP_UNNAMED_SUFFIX):
             # A named sentence: `erp_finding("<base>", …)` yields both twins.
             assert base in stems, f"{spec.code}: no erp_finding({base!r}) call site"
-            assert erp_finding(base, "xero")["code"] == cat.EXCEPTION_PREFIX + base
-            unnamed = erp_finding(base, None)["code"]
+            # The params a twin carries besides `erp` (a money figure, say).
+            extra = {
+                k: {"money": "1.00", "currency": "USD"}.get(kind, "x")
+                for k, kind in spec.params.items()
+                if k != "erp"
+            }
+            assert erp_finding(base, "xero", **extra)["code"] == cat.EXCEPTION_PREFIX + base
+            unnamed = erp_finding(base, None, **extra)["code"]
             assert unnamed == cat.EXCEPTION_PREFIX + base + cat.ERP_UNNAMED_SUFFIX
             continue
         assert name in stems or any(name.startswith(s + "_") for s in stems), (

@@ -299,7 +299,9 @@ those sentences comes from `erp_status_sync.erp_product_name` ("Your ERP" when
 an adapter has none). Every one of those sentences — and the QuickBooks status
 sync-back and pre-dispatch bill-check sentences, whose bill / event / payment
 ids now ride `erp_report` too (`kind` `bill_state` / `dispatch_stopped` /
-`bill_unlinked` / `erp_payment_voided`) — is an `exception.erp_*` code in
+`bill_unlinked` / `erp_payment_voided`), and the payment write-back and
+sync-back failures (`payment_writeback_failed` / `payment_writeback_balance_open`
+/ `payment_void_writeback_failed` / `payment_sync_back_failed`) — is an `exception.erp_*` code in
 `invoice_warning_catalog`, so each client renders it in the reader's language
 (`invoice-warnings.md` § ERP reconciliation sentences).
 

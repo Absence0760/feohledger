@@ -169,20 +169,24 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   from `Message` / `Detail`.
 - Outcomes are audited on the payment (`payment.erp_posted` /
   `payment.erp_post_failed` with the coded refusal); a failure opens a de-duped
-  `erp_reconciliation` naming the code and the retry
-  (`POST /api/payments/runs/{id}/sync-erp`). It never undoes the transition: the
-  money moved.
+  `erp_reconciliation` (`exception.erp_payment_writeback_failed`: the bill still
+  reads unpaid in QuickBooks; fix the cause, then **Retry ERP sync** on the run,
+  which is `POST /api/payments/runs/{id}/sync-erp`). The coded refusal, payment,
+  run and bill are on its `erp_report`, not in the sentence. It never undoes the
+  transition: the money moved.
 - **Open question 3 (early-pay discounts) is answered conservatively:** the
   BillPayment is for what was actually paid; when the bill keeps a balance in
   QuickBooks afterwards (a discount or credit taken in FeohLedger), an
-  `erp_reconciliation` exception names the balance for the bookkeeper. No
+  `erp_reconciliation` exception (`exception.erp_payment_writeback_balance_open`)
+  states the balance for the bookkeeper. No
   vendor credit is created on their behalf.
 - Voiding a settled payment (`POST /api/payments/{id}/void`) records the
   pending ERP void on the invoice's workflow state IN the void's transaction
   (`erp_payment_voids_pending`), then voids our BillPayment after the commit
   (sparse update, `include=void`, current `SyncToken`). A process that dies
   before that task, or an ERP that refuses, leaves the marker for the next
-  status-sync pass; a refusal also opens `erp_reconciliation`. "Nothing of ours
+  status-sync pass; a refusal also opens `erp_reconciliation`
+  (`exception.erp_payment_void_writeback_failed`). "Nothing of ours
   there" is audited as `payment.erp_void_not_needed`, not as a void.
 - **Voiding a payment the ERP REPORTED** (`provider = external`, referencing the
   bill) sends the invoice back to `approved` while QuickBooks still shows the
