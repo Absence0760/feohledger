@@ -13,6 +13,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { submitDsar, submitErasure, listPrivacyRequests } from '#lib/api/privacy.ts';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
 	import type { StepUpProof } from '#lib/stores/auth.svelte.ts';
@@ -310,10 +311,7 @@
 	{#if loading}
 		<p class="state" data-testid="privacy-loading">Loading…</p>
 	{:else if error}
-		<div class="state error" data-testid="privacy-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn-cancel" onclick={loadRequests}>Retry</button>
-		</div>
+		<LoadError message={error} onretry={loadRequests} testId="privacy-error" />
 	{:else}
 		<DataTable columns={COLUMNS} isEmpty={requests.length === 0} empty="No requests yet.">
 			{#snippet body()}
@@ -475,10 +473,6 @@
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
 	}
 
 	.request-card {

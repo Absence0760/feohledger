@@ -311,7 +311,6 @@ export const messages = {
 	'portal.home.heading': '概要',
 	'portal.home.subtitle': '対応が必要な項目と、その他の請求書の状況です。',
 	'portal.home.loadFailed': '概要を読み込めませんでした',
-	'portal.home.retry': '再試行',
 	'portal.home.kpi.actionRequired': '対応が必要',
 	'portal.home.kpi.inProgress': '取引先で処理中',
 	'portal.home.kpi.paid': '支払済み',

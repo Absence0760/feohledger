@@ -284,6 +284,11 @@ export interface Payment {
 	/** The same, for `POST /{id}/compliance/dismiss` (`payment.void` + the
 	 *  same hold gate). */
 	dismiss_refusal?: ActionRefusal;
+	/** The same, for `POST /{id}/settlement/accept` (`payment.execute` +
+	 *  `payment_controls.settlement_accept_refusal`: completed, the recorded
+	 *  settlement does NOT cover the invoice, and the invoice is still held at
+	 *  `payment_scheduled`). */
+	accept_settlement_refusal?: ActionRefusal;
 	correlation_id: string | null;
 	invoice_id: string;
 	payment_run_id: string | null;

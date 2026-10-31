@@ -23,7 +23,10 @@ this plan:
   compare-and-swap write.
 - Routes are `GET /api/organization/erp/oauth/{provider}/authorize` (JSON
   `authorize_url`) and one shared `GET /api/erp/oauth/callback`, so every
-  OAuth ERP registers one redirect URI.
+  OAuth ERP registers one redirect URI. The callback is bound to the browser
+  that called authorize (a nonce cookie), and the `realmId` it carries is
+  linked only after `companyinfo/{realmId}` answers under the new token
+  (`erp-integration.md` § Connecting an OAuth ERP).
 - Open question 1 is answered conservatively: `void_invoice` deletes only a
   bill with no payment applied (`Balance == TotalAmt`).
 - Open question 2 is answered by the shared line rules: the lines come from
@@ -169,20 +172,24 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   from `Message` / `Detail`.
 - Outcomes are audited on the payment (`payment.erp_posted` /
   `payment.erp_post_failed` with the coded refusal); a failure opens a de-duped
-  `erp_reconciliation` naming the code and the retry
-  (`POST /api/payments/runs/{id}/sync-erp`). It never undoes the transition: the
-  money moved.
+  `erp_reconciliation` (`exception.erp_payment_writeback_failed`: the bill still
+  reads unpaid in QuickBooks; fix the cause, then **Retry ERP sync** on the run,
+  which is `POST /api/payments/runs/{id}/sync-erp`). The coded refusal, payment,
+  run and bill are on its `erp_report`, not in the sentence. It never undoes the
+  transition: the money moved.
 - **Open question 3 (early-pay discounts) is answered conservatively:** the
   BillPayment is for what was actually paid; when the bill keeps a balance in
   QuickBooks afterwards (a discount or credit taken in FeohLedger), an
-  `erp_reconciliation` exception names the balance for the bookkeeper. No
+  `erp_reconciliation` exception (`exception.erp_payment_writeback_balance_open`)
+  states the balance for the bookkeeper. No
   vendor credit is created on their behalf.
 - Voiding a settled payment (`POST /api/payments/{id}/void`) records the
   pending ERP void on the invoice's workflow state IN the void's transaction
   (`erp_payment_voids_pending`), then voids our BillPayment after the commit
   (sparse update, `include=void`, current `SyncToken`). A process that dies
   before that task, or an ERP that refuses, leaves the marker for the next
-  status-sync pass; a refusal also opens `erp_reconciliation`. "Nothing of ours
+  status-sync pass; a refusal also opens `erp_reconciliation`
+  (`exception.erp_payment_void_writeback_failed`). "Nothing of ours
   there" is audited as `payment.erp_void_not_needed`, not as a void.
 - **Voiding a payment the ERP REPORTED** (`provider = external`, referencing the
   bill) sends the invoice back to `approved` while QuickBooks still shows the
@@ -337,7 +344,7 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
 | `test_connection` | `GET companyinfo/{realmId}` | Also records the company's country and home currency for the checks below |
 | `list_vendors` | `query: select * from Vendor where Active IN (true, false)` | Inactive vendors too (a plain select returns active ones only), emitted `active=False`, `DisplayName` without QuickBooks' ` (deleted)` suffix. `STARTPOSITION`/`MAXRESULTS 1000` paging; `Id` → `erp_vendor_id`. `code` is left unset: `Vendor.AcctNum` is the company's account number *at* the vendor, not an id for it — it rides as `legacy_code` so the sync clears it from vendors the pre-§284 mapping created (§284) |
 | `list_gl_accounts` | `query: select * from Account where Active IN (true, false)` | Inactive accounts too, emitted `active=False` (the sync retires a linked row and creates none), with the ` (deleted)` QuickBooks appends to an inactive record's `Name` / `FullyQualifiedName` stripped (`_undeleted`). `parent_erp_account_id` = `ParentRef`, and `reports_parent` is set, so the sync names the parent by our code and clears it for a top-level account. **`code` = `AcctNum`, else `FullyQualifiedName`** — never the bare `Name`, which QuickBooks repeats across parents (the sandbox has "Job Materials" under both "Job Expenses" and "Landscaping Services"). `name` is the path; a path over 100 characters ends `…#<Id>`. `legacy_codes` carries the old `Name` key so the sync can unlink a row a pre-§284 sync collapsed. Map `Classification` to the asset/liability/equity/revenue/expense vocabulary. See erp-integration.md § GL accounts and vendors are linked by the ERP's unique key |
-| `list_pos` | `query: select * from PurchaseOrder` | Plus/Advanced plans only; an empty list on Simple Start is correct. PO lines carry no GL account: nothing persists or reads one, so there is no chart read, and the `AccountRef` name is never taken as one (§284) |
+| `list_pos` | `query: select * from PurchaseOrder` | Plus/Advanced plans only; an empty list on Simple Start is correct. Read whole like the chart and vendor listings: a failed page (non-200, transport error, unreadable body) or more than 50 pages of 1000 raises `ErpListingIncomplete` (the PO sync answers the coded 502 and syncs nothing), never "no POs" or the first pages (§329). PO lines carry no GL account: nothing persists or reads one, so there is no chart read, and the `AccountRef` name is never taken as one (§284) |
 | `post_invoice` | `POST bill?requestid=<correlation_id>` | See below |
 | `get_invoice_status` | `GET bill/{id}` | `Balance == 0` with a `BillPaymentCheck` / `BillPaymentCreditCard` `LinkedTxn` and a non-zero `TotalAmt` → `paid`, without one → `settled_no_payment` (decisions §303); `0 < Balance < TotalAmt` → `partially_paid`; else `open`. (Status sync-back reads `bill_report`, not this.) |
 | `void_invoice` | `POST bill?operation=delete` | QuickBooks has no bill void, only delete. See open question 1 |

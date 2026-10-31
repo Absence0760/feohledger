@@ -28,7 +28,21 @@ pnpm ollama:logs               # follow logs;  pnpm ollama:down to stop
 Host port is **11435** (not the native default 11434) so the container coexists
 with a natively-installed Ollama. `FEOH_OLLAMA_BASE_URL` is the global fallback the
 `ollama` extraction adapter uses when an org's extraction config doesn't set its
-own `base_url` (the per-org `base_url` always wins). The container is CPU-only by
+own `base_url` (the per-org `base_url` always wins).
+
+**A per-org `base_url` is SSRF-guarded** (`OllamaAdapter._client` →
+`url_safety.org_host_client`, decisions §334): it is tenant-admin input, and the
+adapter posts the invoice and echoes the model server's response into its error.
+Locally nothing changes — outside a deployed `FEOH_ENVIRONMENT` loopback is
+allowed, so `http://localhost:11435` (or `:11434`) works as a per-org value,
+though the connection is pinned to the address resolved. In a deployed
+environment a per-org `base_url` must resolve only to public addresses, or
+extraction fails with "The Ollama base_url configured for this organization is
+not a publicly routable http(s) URL" without a request being sent.
+`FEOH_OLLAMA_BASE_URL` is operator configuration, trusted, and is not checked —
+an operator-run Ollama on a private address is set there, not per org.
+
+The container is CPU-only by
 default; uncomment the `deploy:` GPU block in `docker-compose.yml` (needs
 nvidia-container-toolkit) for NVIDIA acceleration.
 

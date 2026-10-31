@@ -56,12 +56,15 @@ import {
 	ERP_CALL_BUDGET_EXHAUSTED,
 	EXCEPTION_BLOCKS_ERP_EXPORT,
 	PAYMENT_BLOCKS_ERP_EXPORT,
+	VENDOR_BLOCKS_ERP_EXPORT,
 	erpRefusalText
 } from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
 import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
+import { vendorStatusLabelKey } from '#lib/types/vendor.ts';
+import { expenseReportStatusLabelKey } from '#lib/types/expense.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
@@ -318,8 +321,31 @@ const BUILDERS: Record<string, Builder> = {
 	approval_not_named_approver: fixed('refusal.approvalNotNamedApprover'),
 	// `services/review.py::refuse_unless_in_review`
 	invoice_not_in_review: fixed('refusal.invoiceNotInReview'),
+	// `api/workflow.py` — `/complete`'s status and entry gates, and
+	// `services/erp_send.erp_send_status_refusal` for `/send-to-erp` /
+	// `/retry-erp`; the invoice modal's Submit / Retry ERP verdicts.
+	invoice_not_completable: fixed('refusal.invoiceNotCompletable'),
+	invoice_entry_window_closed: fixed('refusal.invoiceEntryWindowClosed'),
+	invoice_not_erp_sendable: fixed('refusal.invoiceNotErpSendable'),
+	invoice_not_erp_retryable: fixed('refusal.invoiceNotErpRetryable'),
 	// `services/payment_controls.py` — the run dialog's `actions` verdict
-	payment_run_segregation: fixed('refusal.paymentRunSegregation'),
+	// Maker-checker names the step it refuses in `params.step` for the two
+	// that are not approve / execute (`payment_controls._segregation_for`).
+	payment_run_segregation: (p, t) => {
+		const step = str(p, 'step');
+		if (step === 'nacha_export') return t('refusal.paymentRunSegregationExport');
+		if (step === 'record_outside') return t('refusal.paymentRunSegregationRecord');
+		return t('refusal.paymentRunSegregation');
+	},
+	payment_run_awaiting_cfo: fixed('refusal.paymentRunAwaitingCfo'),
+	payment_run_nothing_to_retry: fixed('refusal.paymentRunNothingToRetry'),
+	payment_run_nothing_settled: fixed('refusal.paymentRunNothingSettled'),
+	payment_run_not_recordable: fixed('refusal.paymentRunNotRecordable'),
+	payment_run_nothing_to_record: fixed('refusal.paymentRunNothingToRecord'),
+	// …and the History row's `accept_settlement_refusal`
+	payment_settlement_not_completed: fixed('refusal.paymentSettlementNotCompleted'),
+	payment_settlement_covered: fixed('refusal.paymentSettlementCovered'),
+	payment_settlement_not_held: fixed('refusal.paymentSettlementNotHeld'),
 	// `api/vendors.py::change_request_approve_refusal` — the queue's verdict
 	vendor_change_self_requested: fixed('refusal.vendorChangeSelfRequested'),
 	vendor_change_self_provisioned: fixed('refusal.vendorChangeSelfProvisioned'),
@@ -328,8 +354,32 @@ const BUILDERS: Record<string, Builder> = {
 	approval_max_amount_misconfigured: fixed('refusal.approvalMaxMisconfigured'),
 	approval_cfo_required: (p, t) =>
 		approvalGate(p, t, 'refusal.approvalCfoRequired', 'refusal.approvalCfoRequiredUnknownLimit'),
-	// `api/expenses.py` — the report approval CFO gate
+	// `services/expense_controls.py` — the report approval CFO gate, and the
+	// report / card-transaction gates the expenses page's `actions` verdicts
+	// are read from
 	expense_cfo_required: expenseCfoGate,
+	expense_report_not_owner: fixed('refusal.expenseReportNotOwner'),
+	expense_report_not_draft: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.expenseReportNotDraft', {
+					status: statusLabel(status, expenseReportStatusLabelKey, t)
+				});
+	},
+	expense_report_not_submitted: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.expenseReportNotSubmitted', {
+					status: statusLabel(status, expenseReportStatusLabelKey, t)
+				});
+	},
+	expense_report_self_reject: fixed('refusal.expenseReportSelfReject'),
+	card_txn_already_matched: fixed('refusal.cardTxnAlreadyMatched'),
+	card_txn_not_matched: fixed('refusal.cardTxnNotMatched'),
+	card_txn_matched_not_ignorable: fixed('refusal.cardTxnMatchedNotIgnorable'),
+	card_txn_already_ignored: fixed('refusal.cardTxnAlreadyIgnored'),
 	// `services/exception_lifecycle.py` — the SAME codes `/bulk/resolve`
 	// reports per skipped row, so the two doors agree on the names.
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),
@@ -388,6 +438,10 @@ const BUILDERS: Record<string, Builder> = {
 	// virtual card), the same way.
 	[PAYMENT_BLOCKS_ERP_EXPORT]: (p, t) =>
 		erpRefusalText({ code: PAYMENT_BLOCKS_ERP_EXPORT, params: p }, t),
+	// ...and for a vendor the payment path will not pay (blocked,
+	// sanctions-held, rejected), the same way.
+	[VENDOR_BLOCKS_ERP_EXPORT]: (p, t) =>
+		erpRefusalText({ code: VENDOR_BLOCKS_ERP_EXPORT, params: p }, t),
 	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
 	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
 	// or whose listing could not be read whole, so nothing synced.
@@ -515,6 +569,12 @@ const BUILDERS: Record<string, Builder> = {
 	// names the invoice and the one remedy, which is the same for every reason.
 	nacha_payment_not_payable: nachaForInvoice('refusal.nachaPaymentNotPayable'),
 	nacha_already_exported: fixed('refusal.nachaAlreadyExported'),
+	// `services/payment_controls.py::run_nacha_export_refusal` /
+	// `run_nacha_void_refusal` — the run dialog's bank-file verdicts
+	nacha_run_not_exportable: fixed('refusal.nachaRunNotExportable'),
+	nacha_nothing_to_regenerate: fixed('refusal.nachaNothingToRegenerate'),
+	nacha_nothing_to_export: fixed('refusal.nachaNothingToExport'),
+	nacha_run_not_exported: fixed('refusal.nachaRunNotExported'),
 	// `api/deps.py::plan_feature_refusal` — every plan-feature gate (decisions
 	// §258). `params.feature` is a `FEATURE_*` key; one this build does not
 	// know (a newer backend) falls back to the server's sentence.
@@ -582,7 +642,66 @@ const BUILDERS: Record<string, Builder> = {
 	workspace_close_in_progress: fixed('refusal.workspaceCloseInProgress'),
 	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
 	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
-	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete')
+	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete'),
+	// A CSV invoice row whose number is the same payable as another once
+	// formatting is ignored (`services/csv_import`, decisions §77) — a row error.
+	csv_invoice_number_matches_existing: (p, t) => {
+		const number = str(p, 'invoice_number');
+		const existing = str(p, 'existing_invoice_number');
+		return number === null || existing === null
+			? null
+			: t('refusal.csvInvoiceNumberMatchesExisting', { number, existing });
+	},
+	// The match is another entity's invoice: stated as existence only (§40).
+	csv_invoice_number_matches_other_entity: (p, t) => {
+		const number = str(p, 'invoice_number');
+		return number === null ? null : t('refusal.csvInvoiceNumberMatchesOtherEntity', { number });
+	},
+	csv_invoice_number_matches_row: (p, t) => {
+		const number = str(p, 'invoice_number');
+		const other = str(p, 'other_invoice_number');
+		const row = p.other_row;
+		return number === null || other === null || typeof row !== 'number'
+			? null
+			: t('refusal.csvInvoiceNumberMatchesRow', { number, other, row });
+	},
+	// Why `POST /api/cards/generate` minted nothing for one invoice
+	// (`services/card_issuance.CARD_SKIP_MESSAGES`) — one per gate.
+	card_skip_not_found: fixed('refusal.cardSkipNotFound'),
+	card_skip_not_payable: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.cardSkipNotPayable', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	},
+	card_skip_vendor_changed: fixed('refusal.cardSkipVendorChanged'),
+	card_skip_lock_timeout: fixed('refusal.cardSkipLockTimeout'),
+	card_skip_already_carded: fixed('refusal.cardSkipAlreadyCarded'),
+	card_skip_blocked: (p, t) => {
+		const type = str(p, 'exception_type');
+		if (type === null) return null;
+		const key = exceptionTypeLabelKey(type);
+		return t('refusal.cardSkipBlocked', { type: key ? t(key) : exceptionTypeFallback(type) });
+	},
+	card_skip_vendor_not_payable: (p, t) => {
+		const status = str(p, 'vendor_status');
+		return status === null
+			? null
+			: t('refusal.cardSkipVendorNotPayable', {
+					status: statusLabel(status, vendorStatusLabelKey, t)
+				});
+	},
+	card_skip_live_payment: fixed('refusal.cardSkipLivePayment'),
+	card_skip_credit_conflict: fixed('refusal.cardSkipCreditConflict'),
+	card_skip_nothing_owed: fixed('refusal.cardSkipNothingOwed'),
+	card_skip_vendor_unscreenable: fixed('refusal.cardSkipVendorUnscreenable'),
+	card_skip_compliance_hold: fixed('refusal.cardSkipComplianceHold'),
+	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
+	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed'),
+	// The whole `/cards/generate` call, on a tenant whose programme is off.
+	cards_not_enabled: fixed('refusal.cardsNotEnabled')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

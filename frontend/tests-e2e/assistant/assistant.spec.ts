@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/helpers';
 
 /**
@@ -112,5 +113,80 @@ test.describe('/assistant', () => {
 		// message bubbles.
 		await expect(page.locator('.prompt-btn')).toHaveCount(3);
 		await expect(page.locator('.msg')).toHaveCount(0);
+	});
+});
+
+/**
+ * A pre-stream 429 is one of two different refusals, and the page must tell
+ * them apart (`#lib/api/assistantBudget.ts`). The stream endpoint is stubbed —
+ * the real budget needs a spent org and the real limiter a burst of turns —
+ * matching the exact pathname so the stub cannot answer a module request.
+ * Both cases also pin that the non-streaming `/chat` fallback is NOT tried:
+ * it would refuse the same turn (and, for the limiter, spend another attempt).
+ */
+test.describe('/assistant — a 429 from the stream', () => {
+	async function stubStream(page: Page, detail: unknown): Promise<() => number> {
+		let fallback = 0;
+		await page.route(
+			(url) => url.pathname === '/api/assistant/chat/stream',
+			(route) => route.fulfill({ status: 429, json: { detail } })
+		);
+		await page.route(
+			(url) => url.pathname === '/api/assistant/chat',
+			(route) => {
+				fallback += 1;
+				return route.fallback();
+			}
+		);
+		return () => fallback;
+	}
+
+	async function send(page: Page) {
+		await page.goto('/assistant');
+		await page.getByLabel('Message the assistant').fill('show me approved invoices');
+		const stream = page.waitForResponse(
+			(r) => new URL(r.url()).pathname === '/api/assistant/chat/stream'
+		);
+		await page.getByRole('button', { name: 'Send' }).click();
+		await stream;
+	}
+
+	test('the AI budget refusal shows the budget notice with its figures', async ({ page }) => {
+		// The body the backend sends (`api/assistant.py::_budget_exceeded_http`).
+		const fallbackCalls = await stubStream(page, {
+			detail: 'Monthly AI assistant token budget exceeded.',
+			code: 'assistant_budget_exceeded',
+			used: 1500,
+			budget: 1000,
+			period: '2026-10'
+		});
+		await send(page);
+
+		await expect(page.locator('.budget-notice')).toHaveText(
+			'Monthly AI budget reached (1,500 / 1,000 tokens). Resets next period.'
+		);
+		// The empty in-progress bubble is dropped, not left with an error.
+		await expect(page.locator('.msg.assistant')).toHaveCount(0);
+		await expect(page.getByLabel('Message the assistant')).toBeEnabled();
+		expect(fallbackCalls()).toBe(0);
+	});
+
+	test('the rate limiter’s 429 is its localized refusal, not "budget reached"', async ({
+		page
+	}) => {
+		const fallbackCalls = await stubStream(page, {
+			code: 'rate_limited',
+			message: 'Too many requests. Please wait 90 seconds before trying again.',
+			params: { retry_after_seconds: 90 }
+		});
+		await send(page);
+
+		// `api/codedRefusals.ts` rounds 90 s UP to whole minutes.
+		await expect(page.locator('.msg.assistant .msg-error')).toHaveText(
+			'Too many attempts. Wait 2 minutes and try again.'
+		);
+		await expect(page.locator('.budget-notice')).toHaveCount(0);
+		await expect(page.getByLabel('Message the assistant')).toBeEnabled();
+		expect(fallbackCalls()).toBe(0);
 	});
 });

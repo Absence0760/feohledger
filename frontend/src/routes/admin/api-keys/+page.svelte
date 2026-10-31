@@ -13,6 +13,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -195,10 +196,7 @@
 	{#if loading}
 		<p class="state" data-testid="api-keys-loading">{m('admin.apiKeys.loading')}</p>
 	{:else if error}
-		<div class="state error" data-testid="api-keys-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn-cancel" onclick={load}>{m('admin.apiKeys.retry')}</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="api-keys-error" />
 	{:else}
 		<DataTable
 			columns={COLUMNS}
@@ -327,10 +325,11 @@
 			{#if usageLoading}
 				<p class="state" data-testid="usage-loading">{m('admin.apiKeys.usage.loading')}</p>
 			{:else if usageError}
-				<div class="state error" role="alert">
-					<p>{usageError}</p>
-					<button type="button" class="btn-cancel" onclick={() => openUsage(usageKey!)}>{m('admin.apiKeys.retry')}</button>
-				</div>
+				<LoadError
+					message={usageError}
+					onretry={() => openUsage(usageKey!)}
+					testId="usage-error"
+				/>
 			{:else if usage}
 				<div class="usage-totals" data-testid="usage-totals">
 					<div class="usage-stat">
@@ -396,10 +395,6 @@
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
 	}
 
 	.mono {

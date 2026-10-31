@@ -120,7 +120,7 @@ export const PAYMENT_GUIDES: Guide[] = [
 					{
 						type: 'list',
 						items: [
-							'**Some payments failed.** The run shows {ui:paymentRuns.status.partial} or {ui:paymentRuns.status.failed}, and each failed payment shows why. {ui:payments.runs.retry} on the {ui:payments.tab.runs} tab sends again only the payments that provably never reached the processor. A payment that might have gone through is skipped for a person to check, so a retry can\'t pay twice.',
+							'**Some payments failed.** The run shows {ui:paymentRuns.status.partial} or {ui:paymentRuns.status.failed}, and each failed payment shows why. Open the run and click {ui:paymentRuns.runDetail.retryFailed}, then {ui:paymentRuns.runDetail.confirmRetryFailed}. Only a payment that provably never reached the processor is sent again. A payment that might have gone through is skipped for a person to check with the processor, so a retry can\'t pay twice. The run says which payments were skipped and why. The button is turned off, with the reason beside it, if you created the run, if it is still waiting for CFO sign-off, or if every failure needs checking first.',
 							'**The processor settled less than you authorized.** The invoice stays at {ui:invoices.status.paymentScheduled}. Once you have agreed the shortfall with the vendor, {ui:payments.history.settlementAccept} on the {ui:payments.tab.history} tab releases it to {ui:invoices.status.paid}. A settled amount that differs from what you authorized also raises a fraud flag.',
 							'**An invoice is stuck at Payment Scheduled after the money moved.** {ui:payments.runs.erpSync} on the {ui:payments.tab.runs} tab runs the sync-back again. It doesn\'t move any money, and it\'s safe to repeat.'
 						]
@@ -249,7 +249,7 @@ export const PAYMENT_GUIDES: Guide[] = [
 						type: 'list',
 						items: [
 							'A {ui:payments.status.failed} payment never moved money, so there is nothing to void.',
-							'A payment on {ui:payments.status.pendingCompliance} never reached the processor. Use {ui:payments.history.complianceDismiss} instead, which also closes its compliance exception.',
+							'A payment on {ui:payments.status.pendingCompliance} is held for a compliance check, so it can\'t be voided. Use {ui:payments.history.complianceDismiss} instead, which also closes its compliance exception.',
 							'A draft run that hasn\'t been executed is canceled from the run itself with {ui:paymentRuns.runDetail.cancelRun}.'
 						]
 					},

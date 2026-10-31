@@ -175,6 +175,12 @@ async def test_a_bill_paid_in_quickbooks_after_feohledger_paid_it_is_flagged(rea
     [flag] = await _exceptions(realdb, inv_id)
     assert flag.exception_type == "erp_reconciliation"
     assert "paid twice" in flag.description
+    assert flag.description_code == "exception.erp_paid_twice"
+    # The bill and the source are data now, never spliced into the sentence.
+    assert "bill=" not in flag.description and BILL not in flag.description
+    assert flag.erp_report["kind"] == "bill_state"
+    assert flag.erp_report["erp_document_id"] == BILL
+    assert flag.erp_report["bill_state"] == "paid"
 
 
 async def test_a_bill_recorded_paid_outside_and_paid_in_quickbooks_is_one_payment(realdb):
@@ -229,6 +235,8 @@ async def test_a_deleted_bill_blocks_a_payable_invoice(realdb):
     [flag] = await _exceptions(realdb, inv_id)
     assert flag.exception_type == "payment_reconciliation"
     assert "deleted or voided" in flag.description
+    assert flag.description_code == "exception.erp_bill_deleted_blocking"
+    assert flag.erp_report["source"] == "webhook" and flag.erp_report["event_id"] == "ev-1"
 
 
 async def test_a_deleted_bill_of_a_closed_invoice_is_surfaced_not_blocking(realdb):
@@ -560,6 +568,52 @@ async def test_voiding_an_erp_reported_payment_holds_the_invoice_out_of_runs(rea
     # QuickBooks may still show the bill paid: a person confirms before re-paying.
     flags = [e for e in await _exceptions(realdb, inv_id) if e.status == "open"]
     assert [f.exception_type for f in flags] == ["payment_reconciliation"]
+    assert flags[0].description_code == "exception.erp_reported_payment_voided"
+    assert "bill=" not in flags[0].description
+    assert flags[0].erp_report == {
+        "kind": "erp_payment_voided",
+        "erp_document_id": BILL,
+        "payment_id": str(payment.id),
+    }
+
+
+async def test_a_reconciliation_row_takes_a_finding_or_a_description_never_both():
+    """The catalogued `finding` is the norm; plain English is kept only for the
+    write-back's uncatalogued failures. Both, or neither, is a programming error
+    caught before anything is written."""
+    invoice = Invoice(id=uuid.uuid4())
+    for kwargs in ({}, {"finding": {"message": "x"}, "description": "x"}):
+        with pytest.raises(TypeError):
+            await erp_status_sync.open_erp_reconciliation_exception(
+                AsyncMock(), invoice, org_id=uuid.uuid4(), **kwargs
+            )
+
+
+@pytest.mark.parametrize(
+    ("erp_type", "code", "params"),
+    [
+        (
+            "quickbooks_online",
+            "exception.erp_paid_unrecorded_card_live",
+            {"erp": "QuickBooks Online"},
+        ),
+        ("merge_dev", "exception.erp_paid_unrecorded_card_live_unnamed", {}),
+        (None, "exception.erp_paid_unrecorded_card_live_unnamed", {}),
+    ],
+)
+def test_the_unrecorded_sentence_names_the_erp_only_when_it_has_a_product_name(
+    erp_type, code, params
+):
+    out = erp_status_sync.unrecorded_payment_finding(erp_type, "external_payment_card_live")
+    assert out["code"] == code and out["params"] == params
+    assert "external_payment_" not in out["message"]
+
+
+def test_an_unlisted_refusal_reads_the_generic_clause():
+    out = erp_status_sync.unrecorded_payment_finding("xero", "external_payment_from_the_future")
+    assert out["code"] == "exception.erp_paid_unrecorded_other"
+    out = erp_status_sync.unrecorded_payment_finding("xero", "not_even_prefixed")
+    assert out["code"] == "exception.erp_paid_unrecorded_other"
 
 
 # ---------------------------------------------------------------------------
@@ -629,3 +683,5 @@ async def test_a_payment_the_erp_withdrew_is_not_recorded_when_the_blocker_clear
     assert row.erp_report["kind"] == "paid_withdrawn"
     assert row.erp_report["withdrawn_as"] == state.value
     assert "no longer shows it paid" in row.description
+    assert row.description_code == "exception.erp_paid_withdrawn"
+    assert row.description_params == {"erp": "QuickBooks Online"}

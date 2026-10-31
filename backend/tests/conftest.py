@@ -928,6 +928,23 @@ async def _ensure_test_tenants() -> dict:
             await s.execute(
                 delete(ProviderCredential).where(ProviderCredential.organization_id.in_(org_ids))
             )
+            # The seeded users' second factors are the same kind of state: a
+            # test that enrols TOTP or a passkey on the harness admin (e.g.
+            # `test_mfa_enrollment_audit`) otherwise leaves every later test in
+            # the process facing an account that HAS a factor — which turned
+            # `test_privacy_unmasked_step_up`'s "no second factor" 403 into a
+            # 400 whenever the two shared a shard.
+            from app.models.webauthn_credential import WebAuthnCredential
+
+            seeded_user_ids = [uid for t in tenants.values() for uid in t.users.values()]
+            await s.execute(
+                update(User)
+                .where(User.id.in_(seeded_user_ids))
+                .values(mfa_secret=None, mfa_enabled=False, mfa_enrolled_at=None)
+            )
+            await s.execute(
+                delete(WebAuthnCredential).where(WebAuthnCredential.user_id.in_(seeded_user_ids))
+            )
             await s.commit()
         return tenants
     finally:
@@ -1332,7 +1349,36 @@ def provider_store_from_settings(monkeypatch, request):
     monkeypatch.setattr(provider_credentials, "resolve_block", _from_settings)
 
 
+@pytest.fixture
+def no_auth_audit_write(monkeypatch, request):
+    """For a DB-FREE test of an endpoint that writes a control-plane-originated
+    audit row (`audit_dispatch.dispatch_auth_audit` / `queue_auth_audit` /
+    `record_auth_audit_or_raise`): stub the one writer behind all three.
+
+    That writer resolves the tenant through its own `control_session_factory()`
+    session and opens the tenant engine — neither of which a mocked request
+    session can stand in for — so without this a mock test reaches the real
+    database and the fire-and-forget wrappers swallow the outcome
+    (`_refuse_real_engine_in_mock_tests` fails the test instead). A test that
+    asserts on the audit row patches the wrapper it calls, which still wins.
+    Returns the stub so a test can inspect what would have been written. A
+    `realdb` test is left alone.
+    """
+    from unittest.mock import AsyncMock
+
+    stub = AsyncMock()
+    if "realdb" not in request.fixturenames:
+        monkeypatch.setattr("app.services.audit_dispatch._write_auth_audit", stub)
+    return stub
+
+
 def pytest_configure(config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "real_db_engine: a non-realdb test that deliberately opens its own real database "
+        "connection, exempt from _refuse_real_engine_in_mock_tests. Never the fix for a "
+        "mock test that reached an engine by accident.",
+    )
     config.addinivalue_line(
         "markers",
         "plan(code): bind both realdb harness orgs to this catalog plan for the test "
@@ -1448,6 +1494,106 @@ async def _dispose_module_global_engines() -> None:
     from app.database import dispose_all_engines
 
     await dispose_all_engines()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Keep the call-phase report on the item, so a teardown-time check can
+    tell a test that already failed (and reported why) from one that passed
+    over a swallowed error (`_refuse_real_engine_in_mock_tests`)."""
+    outcome = yield
+    if call.when == "call":
+        item._feoh_call_report = outcome.get_result()
+
+
+class RealEngineInMockTestError(Exception):
+    """A mock-DB test opened a real database connection. See
+    ``_refuse_real_engine_in_mock_tests``.
+
+    Deliberately not a ``RuntimeError``: a test asserting
+    ``pytest.raises(RuntimeError)`` around the code under test would otherwise
+    accept this as the failure it expected."""
+
+
+@pytest.fixture(autouse=True)
+def _refuse_real_engine_in_mock_tests(request, monkeypatch):
+    """A test that is not on the ``realdb`` harness must not open a real
+    database connection — fail it loudly, at the call that tried.
+
+    The module-global engines in ``app.database`` (``control_engine``, the
+    ``_tenant_engines`` cache) pool asyncpg connections bound to the event loop
+    of the first test that touches them. A mock-DB test that silently reaches
+    one (an accessor that opens its own ``control_session_factory()`` session
+    when no ``db`` is passed — ``provider_credentials.resolve_block`` was the
+    case that found this) passes on its own and then poisons whichever later
+    test draws the pooled connection on a new loop: ``got Future … attached to
+    a different loop`` / ``another operation is in progress``, raised far from
+    the cause and only when the files share a process (``docs/known-issues.md``).
+    It also means the "mock" test was reading the developer's real
+    ``feohledger`` control plane.
+
+    Every SQLAlchemy checkout — fresh or pooled, any engine, sync or async —
+    goes through ``Engine.raw_connection``, so that is the one place to refuse.
+    The hit is also recorded and re-raised at teardown, so an application path
+    that swallows the error (a best-effort side effect) still fails the test.
+
+    Exempt: any test requesting ``realdb`` (directly or via another fixture),
+    which brings its own engines and disposes the globals afterwards; and a
+    test marked ``@pytest.mark.real_db_engine`` that deliberately connects
+    itself (it owns disposing what it opened). The fix for a mock test that
+    trips this is to inject or patch what it reaches — e.g.
+    ``provider_store_from_settings`` for provider credentials — never the
+    marker.
+    """
+    if "realdb" in request.fixturenames or request.node.get_closest_marker("real_db_engine"):
+        yield
+        return
+
+    import traceback
+
+    import greenlet
+    from sqlalchemy.engine import Engine
+
+    hits: list[str] = []
+    # Exposed so the guard's own test can assert on, then clear, its hit.
+    request.node._feoh_real_engine_hits = hits
+
+    def _rel(path: str) -> str:
+        return path.rsplit("/backend/", 1)[-1]
+
+    def _refuse(self, *args, **kwargs):  # noqa: ARG001
+        url = self.url.render_as_string(hide_password=True)
+        # The app frames that led here — the only pointer to the culprit when
+        # the code under test swallows the error below.
+        # Under an AsyncEngine this runs in SQLAlchemy's worker greenlet, whose
+        # stack starts fresh; the awaiting coroutine chain is on its parent.
+        stack = traceback.extract_stack()
+        parent = getattr(greenlet.getcurrent(), "parent", None)
+        if parent is not None and parent.gr_frame is not None:
+            stack = traceback.extract_stack(parent.gr_frame) + stack
+        app_frames = [
+            _rel(f.filename) + f":{f.lineno} {f.name}"
+            for f in stack
+            if "/backend/app/" in f.filename
+        ]
+        hits.append(f"{url} via " + " -> ".join(app_frames[-4:]))
+        raise RealEngineInMockTestError(
+            f"{request.node.nodeid} is not a realdb test but opened a real database "
+            f"connection ({url}). A mock-DB test must inject or patch every database "
+            "access it reaches (provider credentials: the provider_store_from_settings "
+            "fixture). Use the realdb fixture to test against Postgres."
+        )
+
+    monkeypatch.setattr(Engine, "raw_connection", _refuse)
+    yield
+    call_report = getattr(request.node, "_feoh_call_report", None)
+    if hits and (call_report is None or call_report.passed):
+        pytest.fail(
+            f"Opened a real database connection from a mock-DB test ({hits[0]}); "
+            "the error was raised at the call site but swallowed by the code under "
+            "test. See _refuse_real_engine_in_mock_tests in tests/conftest.py.",
+            pytrace=False,
+        )
 
 
 @pytest.fixture(autouse=True)

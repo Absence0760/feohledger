@@ -186,7 +186,12 @@ class SageAccountingAdapter(OAuthErpAdapter):
 
     @classmethod
     async def resolve_external_tenant_id(
-        cls, *, access_token: str, token_response: dict, callback_params: dict[str, str]
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
     ) -> str | None:
         """The business this consent connected (``GET /businesses``).
 

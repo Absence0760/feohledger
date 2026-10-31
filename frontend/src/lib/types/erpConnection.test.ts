@@ -18,6 +18,8 @@ import {
 	withoutOAuthReturn,
 	type ErpOAuthStatus,
 	OAUTH_ERROR_KEYS,
+	CONNECT_FROM_PLATFORM_HOST,
+	platformConnectUrl,
 	destinationChanged,
 	erpTestResultText,
 	readOAuthReturn,
@@ -342,6 +344,41 @@ describe('OAUTH_ERROR_KEYS', () => {
 			}
 		}
 		expect(OAUTH_ERROR_KEYS.no_external_tenant).toBe('org.erp.oauth.error.noExternalTenant');
+		// The login-CSRF refusal: a callback from a browser that did not start it.
+		expect(OAUTH_ERROR_KEYS.browser_mismatch).toBe('org.erp.oauth.error.browserMismatch');
+	});
+
+	it('states the connect-from-platform refusal in every locale', async () => {
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
+			for (const key of [
+				'org.erp.oauth.connectFromPlatform',
+				'org.erp.oauth.connectUnavailableHere'
+			] as const) {
+				expect(messages[key], `${locale}: ${key}`).toContain('{erp}');
+			}
+			expect(messages['org.erp.oauth.connectFromPlatformLink'], locale).toBeTruthy();
+		}
+	});
+});
+
+describe('platformConnectUrl', () => {
+	it('is the code the backend refuses a vanity-host connect with', () => {
+		expect(CONNECT_FROM_PLATFORM_HOST).toBe('erp_connect_platform_host');
+	});
+
+	it('links only an absolute http(s) URL', () => {
+		expect(platformConnectUrl({ url: 'https://acme.feohledger.com/organization?section=erp' })).toBe(
+			'https://acme.feohledger.com/organization?section=erp'
+		);
+		expect(platformConnectUrl({ url: 'http://acme.localhost:7777/organization' })).toBe(
+			'http://acme.localhost:7777/organization'
+		);
+		expect(platformConnectUrl({})).toBeNull();
+		expect(platformConnectUrl({ url: 42 })).toBeNull();
+		expect(platformConnectUrl({ url: '/organization' })).toBeNull();
+		expect(platformConnectUrl({ url: 'javascript:alert(1)' })).toBeNull();
 	});
 });
 

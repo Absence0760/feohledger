@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { api, streamAssistantChat, AssistantBudgetError } from '#lib/api.ts';
+	import { api, streamAssistantChat, ApiError, budgetErrorOf, type AssistantBudgetError } from '#lib/api.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import ChatMessage from '#lib/components/assistant/ChatMessage.svelte';
 	import ExamplePrompts from '#lib/components/assistant/ExamplePrompts.svelte';
@@ -143,6 +143,15 @@
 		applyFinal(payload, assistantId);
 	}
 
+	/** The over-budget notice, in place of the empty in-progress bubble. */
+	function showBudgetNotice(err: AssistantBudgetError, assistantId: string) {
+		budgetNotice = m('assistant.budget.reached', {
+			used: err.used.toLocaleString(),
+			budget: err.budget.toLocaleString()
+		});
+		dropMessage(assistantId);
+	}
+
 	async function send() {
 		const message = input.trim();
 		if (!message || busy) return;
@@ -202,33 +211,35 @@
 				}
 			);
 		} catch (err) {
-			if (err instanceof AssistantBudgetError) {
-				budgetNotice = m('assistant.budget.reached', {
-					used: err.used.toLocaleString(),
-					budget: err.budget.toLocaleString()
-				});
-				// Drop the empty in-progress assistant bubble.
-				dropMessage(assistantId);
+			const budgetErr = budgetErrorOf(err);
+			if (budgetErr) {
+				showBudgetNotice(budgetErr, assistantId);
+			} else if (err instanceof ApiError) {
+				// A refusal from the stream endpoint itself — the shared rate
+				// limiter's `rate_limited`, already localized. `/chat` would
+				// refuse the same turn, so state it instead of falling back.
+				const msg = assistantMessage(assistantId);
+				if (msg) {
+					msg.error = err.message;
+					msg.streaming = false;
+				}
 			} else if (!sawContent) {
 				// Stream unavailable / failed before any content → non-streaming
 				// fallback so the page works against `/chat` alone.
 				try {
 					await fallbackChat(message, assistantId);
 				} catch (fallbackErr) {
-					if (fallbackErr instanceof AssistantBudgetError) {
-						budgetNotice = m('assistant.budget.reached', {
-								used: fallbackErr.used.toLocaleString(),
-								budget: fallbackErr.budget.toLocaleString()
-							});
-						dropMessage(assistantId);
+					const fallbackBudget = budgetErrorOf(fallbackErr);
+					if (fallbackBudget) {
+						showBudgetNotice(fallbackBudget, assistantId);
 					} else {
 						const msg = assistantMessage(assistantId);
 						const detail =
-							fallbackErr instanceof Error ? fallbackErr.message : m('assistant.error.somethingWrong');
+							fallbackErr instanceof Error
+								? fallbackErr.message
+								: m('assistant.error.somethingWrong');
 						if (msg) {
-							msg.error = detail.includes('budget')
-								? detail
-								: m('assistant.error.couldNotAnswer', { detail });
+							msg.error = m('assistant.error.couldNotAnswer', { detail });
 							msg.streaming = false;
 						}
 					}

@@ -334,7 +334,8 @@ appears when one or more rows are selected:
         <BulkDeleteButton
             onconfirm={handleBulkDelete}
             disabled={busy}
-            label={`Delete ${selected.size}`}
+            label={m('things.bulk.delete', { n: selected.size })}
+            confirmLabel={m('things.bulk.confirmDelete')}
         />
         <!-- additional .bulk-action-btn buttons go here -->
     {/snippet}
@@ -349,6 +350,11 @@ appears when one or more rows are selected:
   their `<td class="checkbox-col">` empty rather than disabled.
 - Delete is always armed-confirm (one click arms; outside-click or
   second click un-arms or commits). `BulkDeleteButton` does this.
+  Pass `confirmLabel` (the armed label) from the catalogue too — its
+  fallback, `"Confirm " + label`, is English-only. `title` sets a native
+  tooltip; wrap the button in a `<span title>` instead when the tooltip
+  must show while it is `disabled` (`/invoices` does). Never restyle a
+  local `.bulk-delete-btn` copy — `/invoices` carried one until it drifted.
 - Bulk endpoints return a partial-success shape — `{deleted: [],
   failed: [{id, reason, ...}]}` — and the page surfaces the per-row
   reason in a toast. See `bulk_delete_users` in `backend/app/api/admin.py`
@@ -818,19 +824,31 @@ Where each verdict lives (backend gate → field):
 | Page | Field | Gate(s) the endpoint raises from |
 |---|---|---|
 | Payment queue | `record_outside_refusal` | `services/external_payment.record_outside_refusals` (#573) |
-| Payment history | `void_refusal`, `release_refusal`, `dismiss_refusal` | `payment_controls.payment_void_refusal`, `.compliance_hold_refusal` |
-| Run dialog | `actions.{approve,execute,cancel}` | `payment_controls.run_{approve,execute,cancel}_refusal` |
-| Invoice modal | `GET /api/invoices/{id}/review-actions` | `review.review_refusals` (the approve gates, on a scratch chain) |
+| Payment history | `void_refusal`, `release_refusal`, `dismiss_refusal`, `accept_settlement_refusal` | `payment_controls.payment_void_refusal`, `.compliance_hold_refusal`, `.settlement_accept_refusal` |
+| Payment runs list | `actions.sync_erp` | `payment_controls.run_sync_erp_refusal` |
+| Run dialog | `actions.{approve,execute,cancel,retry_failed}` | `payment_controls.run_{approve,execute,cancel,retry_failed}_refusal` |
+| Run dialog (paying outside) | `actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}` | `payment_controls.run_record_outside_refusal`, `.run_nacha_export_refusal`, `.run_nacha_void_refusal` |
+| Invoice modal | `GET /api/invoices/{id}/review-actions` → `approve`, `reject` | `review.review_refusals` (the approve gates, on a scratch chain) |
+| Invoice modal (Submit / Send to ERP, Retry ERP) | same read → `complete`, `retry_erp` (and `send_to_erp`) | `api/workflow.workflow_action_refusals`: `complete_status_refusal`, `complete_entry_refusal`, `erp_send.erp_send_refusal` (plan, status, ERP export gate). `invoice_not_completable` / `invoice_not_erp_retryable` hide the control (about the status); the required-fields check stays a form check |
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
 | Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
+| Expense reports (list + detail) | `actions.{submit,approve,reject,compose}` | `services/expense_controls.report_{submit,approve,reject,compose}_refusal` |
+| Expense card transactions | `actions.{match,create_expense,unmatch,ignore}` | `services/expense_controls.card_txn_{link,unmatch,ignore}_refusal` |
 
 Each is pinned by a backend parity test that, for every seeded role and row
 state, asks both sides — the verdict and the real POST — and fails unless they
 agree (`tests/test_payment_action_verdicts.py`,
 `tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
-`tests/test_payment_queue_blocked.py`). A new verdict ships with one.
+`tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`).
+A new verdict ships with one.
+
+Which refusals a page *explains* beside a disabled control, rather than hiding
+the control, is a presentation choice keyed on the verdict's `code` — never a
+restated rule. The expenses page explains only `expense_cfo_required` (Approve
+stays visible, disabled, naming the CFO gate) and hides every other refusal,
+the reader's own report included.
 
 ### Clickable rows (`RowLink` + `isRowOpenClick`)
 

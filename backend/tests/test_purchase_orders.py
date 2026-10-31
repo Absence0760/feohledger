@@ -1162,9 +1162,112 @@ async def test_sync_erp_marks_a_blackbaud_po_that_lost_its_order_total(realdb, m
     assert await mark() == (Decimal("120.00"), None)
 
 
+async def test_sync_erp_never_stores_a_po_with_no_total_at_zero(realdb, monkeypatch):
+    """Xero end to end, through the real adapter. Xero, Merge.dev and
+    QuickBooks Online used to sync a PO with no total at 0, so every invoice
+    citing it read as over-billed: a ``po_mismatch`` raised on an amount
+    variance against a figure the ERP never stated. Now the PO is reported
+    ``unpriceable`` (decisions §323, §325): a PO the sync has never seen is not
+    created at all, and one it stored earlier keeps its total, is marked, and
+    holds its invoice as ``po_total_unverifiable`` — the hold §323 wants —
+    never as an over-bill against 0. The other two mappers are covered in
+    their adapter tests; the listing contract they share is the same."""
+    import httpx
+
+    from app.models.exception import Exception as ExceptionRow
+    from app.services.erp_adapters.xero import XeroAdapter
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    records: list[dict] = []
+
+    async def token(self):
+        return "tok"
+
+    def xero(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/PurchaseOrders")
+        return httpx.Response(200, json={"PurchaseOrders": records})
+
+    def client(self, *, timeout):
+        return httpx.AsyncClient(timeout=timeout, transport=httpx.MockTransport(xero))
+
+    monkeypatch.setattr(XeroAdapter, "access_token", token)
+    monkeypatch.setattr(XeroAdapter, "oauth_client", client)
+    await _set_org_erp(
+        realdb,
+        org_id,
+        {"type": "xero", "integration_method": "direct", "oauth": {"external_tenant_id": "t-1"}},
+    )
+
+    async def sync() -> dict:
+        async with realdb.client(key="a", role="ap_manager") as c:
+            resp = await c.post("/api/purchase-orders/sync-erp")
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    async def row(number: str) -> PurchaseOrder | None:
+        async with mk() as s:
+            return (
+                await s.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == number))
+            ).scalar_one_or_none()
+
+    # A PO first seen with no total: reported, never created at 0.
+    records[:] = [{"PurchaseOrderNumber": "PO-NEW-NOTOTAL", "CurrencyCode": "USD"}]
+    body = await sync()
+    assert body["created"] == 0 and body["not_priced"] == 1
+    assert await row("PO-NEW-NOTOTAL") is None
+
+    # A PO synced at 100.00 with a matching invoice, which then loses its total.
+    records[:] = [{"PurchaseOrderNumber": "PO-XERO", "Total": 100.00, "CurrencyCode": "USD"}]
+    assert (await sync())["created"] == 1
+    async with mk() as s:
+        inv = Invoice(
+            invoice_number="INV-XERO-1",
+            vendor_name="Anyone",
+            amount=Decimal("100.00"),
+            currency="USD",
+            po_number="PO-XERO",
+            status=InvoiceStatus.ready_for_review,
+            organization_id=org_id,
+        )
+        s.add(inv)
+        await s.commit()
+        inv_id = inv.id
+
+    records[:] = [{"PurchaseOrderNumber": "PO-XERO", "CurrencyCode": "USD"}]
+    body = await sync()
+    assert body["not_priced"] == 1 and body["unverifiable"] == 1
+
+    po = await row("PO-XERO")
+    assert po is not None
+    assert po.total == Decimal("100.00")  # never overwritten with 0
+    assert po.total_unverifiable_reason == "unpriceable"
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        # The matcher compared nothing: no variance, so no over-bill against 0.
+        assert inv.po_match["amount_variance"] is None
+        assert inv.po_match["po_total_unverifiable_reason"] == "unpriceable"
+        codes = [w["code"] for w in inv.warnings or []]
+        assert "po_total_unverifiable" in codes
+        assert "po_amount_variance" not in codes
+        rows = (
+            (
+                await s.execute(
+                    select(ExceptionRow).where(
+                        ExceptionRow.invoice_id == inv_id,
+                        ExceptionRow.exception_type == "po_mismatch",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [r.status for r in rows] == ["open"]
+
+
 def test_an_adapter_that_never_skips_reports_nothing_skipped():
     """The additive contract: an adapter that only implements ``list_pos``
-    (Merge.dev, NetSuite today) works unchanged."""
+    works unchanged."""
     import asyncio
 
     from app.services.erp_adapters.base import ErpAdapter, PoPayload
@@ -1837,6 +1940,61 @@ async def test_sync_erp_rekeys_a_row_an_earlier_build_stored_under_another_key(r
     assert numbers == ["PO-0042"]
 
 
+async def test_sync_erp_marks_an_unpriceable_po_still_stored_under_its_legacy_key(
+    realdb, monkeypatch
+):
+    """Only a priced PO re-keys (§328). A Merge PO an earlier build stored under
+    its UUID that the ERP now lists with no total used to sync at 0 under the
+    real number; reported ``unpriceable`` instead, it would leave the UUID row
+    trusted at its old total unless the mark follows the legacy key. It does,
+    and the priced sync that later re-keys the row clears it. A legacy key the
+    listing reports as another PO's real number is never taken."""
+    from app.services.erp_adapters.base import PoPayload, PoSkipReason, SkippedPo
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _add_po(mk, org_id, po_number="7c1d-uuid", total=Decimal("500.00"), currency="USD")
+    await _add_po(mk, org_id, po_number="PO-OWNED", total=Decimal("80.00"), currency="USD")
+
+    async def reason_of(number: str) -> str | None:
+        async with mk() as s:
+            return (
+                await s.execute(
+                    select(PurchaseOrder.total_unverifiable_reason).where(
+                        PurchaseOrder.po_number == number
+                    )
+                )
+            ).scalar_one()
+
+    body = await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-OWNED", total=Decimal("80.00"), currency="USD")],
+        [
+            SkippedPo("PO-0077", PoSkipReason.unpriceable, legacy_po_numbers=("7c1d-uuid",)),
+            # Its legacy key is another listed PO's number: not this PO's row.
+            SkippedPo("PO-0078", PoSkipReason.unpriceable, legacy_po_numbers=("PO-OWNED",)),
+        ],
+    )
+    assert body["unverifiable"] == 1
+    assert await reason_of("7c1d-uuid") == "unpriceable"
+    assert await reason_of("PO-OWNED") is None
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(
+                po_number="PO-0077",
+                total=Decimal("520.00"),
+                currency="USD",
+                legacy_po_numbers=("7c1d-uuid",),
+            )
+        ],
+    )
+    assert await reason_of("PO-0077") is None
+
+
 async def test_sync_erp_marks_a_retired_placeholder_row(realdb, monkeypatch):
     """Every unnumbered Merge PO used to be filed under one "UNKNOWN" row, a
     total no single order has. The sync marks it, so it is never matched or
@@ -1856,6 +2014,43 @@ async def test_sync_erp_marks_a_retired_placeholder_row(realdb, monkeypatch):
             await s.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == "UNKNOWN"))
         ).scalar_one()
     assert po.total_unverifiable_reason == "unpriceable"
+
+
+async def test_sync_erp_retires_quickbooks_none_row_but_never_a_listed_po_so_numbered(
+    realdb, monkeypatch
+):
+    """QuickBooks Online filed a PO with neither DocNumber nor Id under the
+    literal number "None"; it retires that row like Merge's "UNKNOWN" (§328).
+    A placeholder the listing reports as a real PO number is that PO's: the
+    upsert prices it and the retirement leaves it unmarked."""
+    from app.services.erp_adapters.base import PoPayload
+    from app.services.erp_adapters.mock_adapter import MockAdapter
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+
+    assert QuickBooksOnlineAdapter.retired_po_numbers == ("None",)
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _add_po(mk, org_id, po_number="None", total=Decimal("900.00"))
+    await _add_po(mk, org_id, po_number="UNKNOWN", total=Decimal("40.00"))
+    monkeypatch.setattr(MockAdapter, "retired_po_numbers", ("None", "UNKNOWN"))
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="UNKNOWN", total=Decimal("40.00"), currency="USD")],
+    )
+
+    async with mk() as s:
+        reasons = dict(
+            (
+                await s.execute(
+                    select(PurchaseOrder.po_number, PurchaseOrder.total_unverifiable_reason).where(
+                        PurchaseOrder.po_number.in_(["None", "UNKNOWN"])
+                    )
+                )
+            ).all()
+        )
+    assert reasons == {"None": "unpriceable", "UNKNOWN": None}
 
 
 async def test_sync_erp_never_rekeys_a_row_another_listed_po_owns(realdb, monkeypatch):

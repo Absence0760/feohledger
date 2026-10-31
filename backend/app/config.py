@@ -594,7 +594,8 @@ class Settings(BaseSettings):
     # via the subdomain regex. Empty in local dev so we never silently
     # match a third-party host; deploys must set it to the real domain
     # (e.g. ``app.example.com``). Comma-separated list of multiple domains
-    # is supported.
+    # is supported. A deployed environment admits no loopback origin unless
+    # `cors_origins` is set explicitly (`app/main.py::_cors_allow_origins`).
     cors_origins: list[str] = ["http://localhost:7777", "http://localhost:5173"]
     cors_production_domain: str = ""
 

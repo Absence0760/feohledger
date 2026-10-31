@@ -52,7 +52,8 @@
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
-	import { isAllowed } from '#lib/api/actionVerdicts.ts';
+	import GenerateCardsModal from '#lib/components/payments/GenerateCardsModal.svelte';
+	import { isAllowed, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
 	import {
 		acceptPaymentSettlement,
 		getExecutionMode,
@@ -84,6 +85,7 @@
 		type RebateListResponse,
 		type RebateTransition
 	} from '#lib/types/cardRebate.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
@@ -1119,59 +1121,32 @@
 	// re-pay — and only void was wired here, which is the wrong action: the
 	// money already left, and a void invites a second payment for it.
 	//
-	// Whether a reported figure actually covers the invoice is the SERVER's
-	// call (it needs both authorized legs and the invoice currency, neither of
-	// which is on this wire) — and comparing two amounts client-side is barred
-	// outright by frontend/CLAUDE.md § Money formatting. So the row offers the
-	// action wherever a figure was reported at all, and the dialog asks the
-	// backend the one question it can answer cheaply and without money math:
-	// is the invoice still HELD? An invoice past `payment_scheduled` has
-	// nothing to accept, and the confirm stays out of reach rather than
-	// becoming a button that can only 409.
+	// Whether the row offers Accept is the SERVER's verdict
+	// (`accept_settlement_refusal`, from `payment.execute` and the gate the
+	// endpoint raises from — `payment_controls.settlement_accept_refusal`),
+	// never a rule restated here (issue #575). That gate needs what this wire
+	// cannot answer without money math: whether the reported figure covers the
+	// invoice (both authorized legs, the invoice currency), and whether the
+	// invoice is still HELD at `payment_scheduled`. The row used to offer the
+	// action wherever any figure was reported, and the dialog then fetched the
+	// invoice to discover whether there was anything to accept.
 	let settlementTarget = $state<Payment | null>(null);
 	let settlementReason = $state('');
 	// The reason field's own error — set on submit, cleared as it is edited.
 	let settlementReasonError = $state('');
 	let settlementReasonInput = $state<HTMLInputElement | null>(null);
 	let settlementBusy = $state(false);
-	// Invoice status behind the target payment: `null` while in flight,
-	// `'?'` when we could not read it (fail OPEN — the backend re-checks).
-	let settlementInvoiceStatus = $state<string | null>(null);
 	let settlementError = $state<string | null>(null);
 
-	/** The invoice status the backend's own release guard requires. */
-	const SETTLEMENT_HELD_STATUS = 'payment_scheduled';
-
 	function canAcceptSettlement(p: Payment): boolean {
-		// Presence, never a comparison: `settled_amount` is null when no rail
-		// ever reported a figure, which the backend treats as "nothing
-		// contradicts this invoice" — there is no shortfall to accept.
-		return (
-			p.status === 'completed' &&
-			p.settled_amount !== null &&
-			p.settled_amount !== undefined &&
-			!!auth.user &&
-			auth.can(PERM_PAYMENT_EXECUTE)
-		);
+		return isAllowed(p.accept_settlement_refusal);
 	}
 
-	async function openSettlement(p: Payment) {
+	function openSettlement(p: Payment) {
 		settlementTarget = p;
 		settlementReason = '';
 		settlementReasonError = '';
 		settlementError = null;
-		settlementInvoiceStatus = null;
-		const invoiceId = p.invoice_id;
-		try {
-			const inv = await api.get<{ status: string }>(`/api/invoices/${invoiceId}`);
-			// Guard against a slow response landing after the dialog moved on.
-			if (settlementTarget?.invoice_id === invoiceId) settlementInvoiceStatus = inv.status;
-		} catch {
-			// Could not read the invoice — say so rather than guessing either
-			// way. `'?'` renders the unknown state, which still offers the
-			// confirm because the backend re-checks and 409s if it isn't held.
-			if (settlementTarget?.invoice_id === invoiceId) settlementInvoiceStatus = '?';
-		}
 	}
 
 	function closeSettlement() {
@@ -1179,7 +1154,6 @@
 		settlementReason = '';
 		settlementReasonError = '';
 		settlementError = null;
-		settlementInvoiceStatus = null;
 	}
 
 	async function commitSettlement() {
@@ -1226,17 +1200,14 @@
 	let erpSyncResult = $state<RunErpSyncResult | null>(null);
 	let erpSyncError = $state<string | null>(null);
 
-	// Statuses that can't hold a settled payment: `draft` has never been
-	// dispatched and `cancelled` has no payments left, so the endpoint would
-	// 409 on both. Everything else may carry one — the backend counts.
-	const ERP_SYNC_INELIGIBLE_RUN_STATUSES = new Set(['draft', 'cancelled']);
-
+	// Offered from the server's verdict (`actions.sync_erp`, from
+	// `payment.execute` and `payment_controls.run_sync_erp_refusal`, the gate
+	// the endpoint raises from): a run with at least one settled payment. The
+	// page used to offer it on every run that was not `draft` / `cancelled`,
+	// so a `failed` run, or one still `executing`, got a button that could
+	// only 409.
 	function canSyncRunErp(run: RunItem): boolean {
-		return (
-			!ERP_SYNC_INELIGIBLE_RUN_STATUSES.has(run.status) &&
-			!!auth.user &&
-			auth.can(PERM_PAYMENT_EXECUTE)
-		);
+		return isAllowed(run.actions?.sync_erp);
 	}
 
 	function openErpSync(run: RunItem) {
@@ -1300,6 +1271,11 @@
 		executed_at: string | null;
 		created_at: string;
 		payment_count: number;
+		/** The CALLER's verdict on the row action, from
+		 *  `schemas/payment.py::PaymentRunListItem`: `actions.sync_erp` is
+		 *  `null` when `POST /runs/{id}/sync-erp` would accept, else the coded
+		 *  refusal it would answer with. */
+		actions?: { sync_erp?: ActionRefusal };
 	}
 	let runs = $state<RunItem[]>([]);
 	// Three states, not two — the same rule the Queue and History tabs in this
@@ -1627,6 +1603,20 @@
 
 	async function loadMoreCards() {
 		await loadCards({ append: true, nextPage: cardsPage + 1 });
+	}
+
+	// --- Generate a card directly (`POST /api/cards/generate`) ---------------
+	// Gated on what the endpoint itself checks first: `payment.execute` (the
+	// permission, not a role — a custom role can hold or lose it) and a tenant
+	// whose payments FeohLedger dispatches (`refuse_record_only`; the
+	// execution-mode read the Execute controls already use, failing closed
+	// while unknown). Whether the card programme is switched on is not exposed
+	// to this page; the endpoint's coded `cards_not_enabled` is stated in the
+	// dialog instead. Per-invoice gates are the server's, reported as skips.
+	let generateOpen = $state(false);
+
+	function canGenerateCards(): boolean {
+		return !!auth.user && auth.can(PERM_PAYMENT_EXECUTE) && canDispatchPayments(executionMode);
 	}
 
 	// The AP-side reveal renders exactly what `CardDetailsResponse` declares
@@ -2630,12 +2620,12 @@
 	{:else if activeTab === 'runs'}
 		{#if runsErrored}
 			<!-- A failed load is a dead end without a way back: the toast that
-			     reported it has already faded. Same error-with-retry block
-			     `/admin/api-keys` uses. -->
-			<div class="state error" data-testid="runs-error" role="alert">
-				<p>{m('payments.runs.empty.errored')}</p>
-				<button type="button" class="btn-cancel" onclick={loadRuns}>{m('payments.runs.retry')}</button>
-			</div>
+			     reported it has already faded. -->
+			<LoadError
+				message={m('payments.runs.empty.errored')}
+				onretry={loadRuns}
+				testId="runs-error"
+			/>
 		{:else}
 		<DataTable
 			columns={RUNS_COLUMNS}
@@ -2835,6 +2825,16 @@
 		<div class="help-row section-title-row">
 			<h2 class="section-heading">{m('payments.rebates.cardsTitle')}</h2>
 			<HelpTip term="virtual-card" />
+			{#if canGenerateCards()}
+				<button
+					type="button"
+					class="btn-primary cards-generate"
+					data-testid="cards-generate"
+					onclick={() => (generateOpen = true)}
+				>
+					{m('payments.cards.generate')}
+				</button>
+			{/if}
 		</div>
 
 		<!-- The Cards tab stacks TWO tables (rebates above, cards here), so a
@@ -2899,6 +2899,15 @@
 	{/if}
 	</div>
 </PageHeader>
+
+{#if generateOpen}
+	<GenerateCardsModal
+		onclose={() => (generateOpen = false)}
+		ongenerated={() => {
+			void loadCards();
+		}}
+	/>
+{/if}
 
 {#if activeRunId}
 	<RunDetailModal
@@ -3274,66 +3283,46 @@
 			</div>
 		</dl>
 
-		{#if settlementInvoiceStatus === null}
-			<p class="modal-hint" data-testid="settlement-checking">
-				{m('payments.settlement.checking')}
-			</p>
-		{:else if settlementInvoiceStatus !== SETTLEMENT_HELD_STATUS && settlementInvoiceStatus !== '?'}
-			<!-- Nothing to accept: the invoice is no longer held. Say so instead
-			     of offering a confirm the backend would 409. -->
-			<p class="modal-warn" role="alert" data-testid="settlement-not-held">
-				{m('payments.settlement.notHeld')}
-				<StatusBadge
-					status={settlementInvoiceStatus as import('#lib/types/invoice.ts').InvoiceStatus}
+		<p class="modal-warn" data-testid="settlement-warning">
+			{m('payments.settlement.warning')}
+			<HelpTip term="settlement" />
+		</p>
+		{#if settlementError}
+			<p class="state error" role="alert" data-testid="settlement-error">{settlementError}</p>
+		{/if}
+		<form onsubmit={(e) => { e.preventDefault(); commitSettlement(); }}>
+			<label>
+				<span>{m('payments.settlement.reason')}</span>
+				<input
+					type="text"
+					bind:value={settlementReason}
+					bind:this={settlementReasonInput}
+					oninput={() => (settlementReasonError = '')}
+					placeholder={m('payments.settlement.reasonPlaceholder')}
+					maxlength="1000"
+					data-testid="settlement-reason"
+					aria-invalid={settlementReasonError ? 'true' : undefined}
+					aria-describedby="settlement-reason-error"
+					autofocus
 				/>
-			</p>
+			</label>
+			<p class="field-error" id="settlement-reason-error" data-testid="settlement-reason-error">{settlementReasonError}</p>
 			<div class="modal-footer">
 				<button type="button" class="btn-cancel" onclick={closeSettlement}>
-					{m('payments.close')}
+					{m('common.cancel')}
+				</button>
+				<button
+					type="submit"
+					class="btn-danger"
+					data-testid="settlement-confirm"
+					disabled={settlementBusy}
+				>
+					{settlementBusy
+						? m('payments.settlement.busy')
+						: m('payments.settlement.confirm')}
 				</button>
 			</div>
-		{:else}
-			<p class="modal-warn" data-testid="settlement-warning">
-				{m('payments.settlement.warning')}
-				<HelpTip term="settlement" />
-			</p>
-			{#if settlementError}
-				<p class="state error" role="alert" data-testid="settlement-error">{settlementError}</p>
-			{/if}
-			<form onsubmit={(e) => { e.preventDefault(); commitSettlement(); }}>
-				<label>
-					<span>{m('payments.settlement.reason')}</span>
-					<input
-						type="text"
-						bind:value={settlementReason}
-						bind:this={settlementReasonInput}
-						oninput={() => (settlementReasonError = '')}
-						placeholder={m('payments.settlement.reasonPlaceholder')}
-						maxlength="1000"
-						data-testid="settlement-reason"
-						aria-invalid={settlementReasonError ? 'true' : undefined}
-						aria-describedby="settlement-reason-error"
-						autofocus
-					/>
-				</label>
-				<p class="field-error" id="settlement-reason-error" data-testid="settlement-reason-error">{settlementReasonError}</p>
-				<div class="modal-footer">
-					<button type="button" class="btn-cancel" onclick={closeSettlement}>
-						{m('common.cancel')}
-					</button>
-					<button
-						type="submit"
-						class="btn-danger"
-						data-testid="settlement-confirm"
-						disabled={settlementBusy}
-					>
-						{settlementBusy
-							? m('payments.settlement.busy')
-							: m('payments.settlement.confirm')}
-					</button>
-				</div>
-			</form>
-		{/if}
+		</form>
 	{/if}
 </Modal>
 
@@ -3568,7 +3557,6 @@
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
 
-	/* Error-with-retry block — same shape as `/admin/api-keys`. */
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
@@ -3576,10 +3564,6 @@
 
 	.state.error {
 		color: var(--danger);
-	}
-
-	.state.error p {
-		margin: 0 0 8px;
 	}
 
 	/* --- Summary --- */
@@ -4264,6 +4248,10 @@
 
 	.section-title-row > .section-heading {
 		margin: 0;
+	}
+
+	.section-title-row > .cards-generate {
+		margin-left: auto;
 	}
 
 	.review-title-row {

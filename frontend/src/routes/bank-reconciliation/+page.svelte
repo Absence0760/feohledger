@@ -58,6 +58,7 @@
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -536,12 +537,11 @@
 			{#if outstandingLoading}
 				<p class="state-note muted" data-testid="outstanding-loading">{m('common.loading')}</p>
 			{:else if outstandingError}
-				<p class="state-note" role="alert" data-testid="outstanding-error">
-					{m('bankRecon.error.load')}
-					<button class="link-btn" onclick={() => loadOutstanding()}>
-						{m('bankRecon.error.retry')}
-					</button>
-				</p>
+				<LoadError
+					message={m('bankRecon.error.load')}
+					onretry={() => loadOutstanding()}
+					testId="outstanding-error"
+				/>
 			{:else if outstanding}
 				<!-- Bucket 1 — we sent it; no bank line claims it. -->
 				<section class="bucket">
@@ -734,12 +734,11 @@
 			</div>
 
 			{#if statementsError}
-				<p class="state-note" role="alert" data-testid="statements-error">
-					{m('bankRecon.error.statements')}
-					<button class="link-btn" onclick={() => loadStatements()}>
-						{m('bankRecon.error.retry')}
-					</button>
-				</p>
+				<LoadError
+					message={m('bankRecon.error.statements')}
+					onretry={() => loadStatements()}
+					testId="statements-error"
+				/>
 			{:else if !statementsLoading && statements.length === 0 && !statementTerm}
 				<!-- The onboarding affordance is for a tenant that has imported
 				     NOTHING. A search that matched nothing is a different claim,
@@ -908,16 +907,6 @@
 	.mono {
 		font-variant-numeric: tabular-nums;
 		font-family: var(--font-mono);
-	}
-
-	.link-btn {
-		background: none;
-		border: none;
-		padding: 0;
-		color: var(--accent-on-tint);
-		text-decoration: underline;
-		cursor: pointer;
-		font: inherit;
 	}
 
 </style>

@@ -2968,6 +2968,211 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedBlockingException(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書の別の例外が支払いをブロックしています。その例外を解決すると、FeohLedger が支払いを自動的に記録します。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書の別の例外が支払いをブロックしています。その例外を解決すると、FeohLedger が支払いを自動的に記録します。';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedInRun(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書は FeohLedger の支払ランにも含まれているため、仕入先に二重に支払われるおそれがあります。ランから外すかランをキャンセルしてから、この例外から ERP の支払いを記録してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedInRunUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書は FeohLedger の支払ランにも含まれているため、仕入先に二重に支払われるおそれがあります。ランから外すかランをキャンセルしてから、この例外から ERP の支払いを記録してください。';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedPaymentLive(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。FeohLedger 自身の支払いがこの請求書に対して進行中のため、仕入先に二重に支払われるおそれがあります。ERP の支払いが正しい場合はその支払いを無効にしてから、この例外から ERP の支払いを記録してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。FeohLedger 自身の支払いがこの請求書に対して進行中のため、仕入先に二重に支払われるおそれがあります。ERP の支払いが正しい場合はその支払いを無効にしてから、この例外から ERP の支払いを記録してください。';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCardLive(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書のバーチャルカードがまだ有効なため、仕入先に二重に支払われるおそれがあります。カードをキャンセルしてから、この例外から ERP の支払いを記録してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書のバーチャルカードがまだ有効なため、仕入先に二重に支払われるおそれがあります。カードをキャンセルしてから、この例外から ERP の支払いを記録してください。';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedCreditConflict(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。適用済みの貸方票がこの請求書の仕入先または通貨と一致しなくなったため、支払額を確定できません。貸方票を修正してから、この例外から ERP の支払いを記録してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。適用済みの貸方票がこの請求書の仕入先または通貨と一致しなくなったため、支払額を確定できません。貸方票を修正してから、この例外から ERP の支払いを記録してください。';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNothingToPay(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。貸方票が請求書の全額にすでに充当されているため、記録する支払いはありません。ERP で請求書を確認してから、この例外を解決してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。貸方票が請求書の全額にすでに充当されているため、記録する支払いはありません。ERP で請求書を確認してから、この例外を解決してください。';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedNotPayable(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書は支払済みにできるステータスではありません。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書は支払済みにできるステータスではありません。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。FeohLedger が記録を拒否しました。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedOtherUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。FeohLedger が記録を拒否しました。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
+
+  @override
+  String exceptionDescriptionErpPaidWithdrawn(String erp) {
+    return '$erp はこの請求書を支払済みと報告しましたが、現在は支払済みと表示していません。FeohLedger はその支払いを記録していません。ERP で請求書を確認し、まだ未払いであればこの例外を解決して通常どおり支払ってください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidWithdrawnUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告しましたが、現在は支払済みと表示していません。FeohLedger はその支払いを記録していません。ERP で請求書を確認し、まだ未払いであればこの例外を解決して通常どおり支払ってください。';
+
+  @override
+  String exceptionDescriptionErpPaidRetryFailed(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを自動的に記録できませんでした。内容を確認してから、この例外から ERP の支払いを記録してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidRetryFailedUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを自動的に記録できませんでした。内容を確認してから、この例外から ERP の支払いを記録してください。';
+
+  @override
+  String exceptionDescriptionErpSettledShort(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger 自身の支払いが買掛金担当の承認額より少なく決済されたため、請求書は「支払予定」で保留されています。支払いを開き、決済額を受け入れるか支払いを無効にしてください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpSettledShortUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger 自身の支払いが買掛金担当の承認額より少なく決済されたため、請求書は「支払予定」で保留されています。支払いを開き、決済額を受け入れるか支払いを無効にしてください。';
+
+  @override
+  String exceptionDescriptionErpVoidedAfterPost(String erp) {
+    return '$erp はこの請求書を無効または取消と報告していますが、FeohLedger はすでに支払いへ回していたため、ここでは取り消していません。仕入先への支払いが進行中か確認し、請求書が本当に無効なら停止または回収してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpVoidedAfterPostUnnamed =>
+      'ご利用の ERP はこの請求書を無効または取消と報告していますが、FeohLedger はすでに支払いへ回していたため、ここでは取り消していません。仕入先への支払いが進行中か確認し、請求書が本当に無効なら停止または回収してください。';
+
+  @override
+  String get exceptionDescriptionErpCreditSettlement =>
+      'ERP ではこの請求書が、少なくとも一部は ERP 側で適用された仕入先の貸方票で消し込まれています。未払い額を誰かが確認するまで、FeohLedger はこれを支払いません。';
+
+  @override
+  String get exceptionDescriptionErpPaidWhileScheduled =>
+      'ERP ではこの請求書が FeohLedger 以外の支払いで支払済みになっていますが、FeohLedger でも支払いが予定されています。両方が仕入先に届く前に、どちらかを停止または無効にしてください。';
+
+  @override
+  String get exceptionDescriptionErpPaidTwice =>
+      'FeohLedger がこの請求書を支払いましたが、ERP では FeohLedger 以外の支払いでも支払済みになっています。仕入先に二重に支払われた可能性があります。どちらかの支払いを回収してください。';
+
+  @override
+  String get exceptionDescriptionErpPartlyPaidOutside =>
+      'ERP ではこの請求書の一部が FeohLedger の外で支払いまたは貸方処理されています。FeohLedger で全額を支払うと過払いになります。支払う前に未払い額を照合してください。';
+
+  @override
+  String get exceptionDescriptionErpRecordedPaymentWithdrawn =>
+      'ERP がこの請求書を支払済みと報告し、FeohLedger はその支払いを記録しましたが、ERP では支払済みと表示されなくなりました（支払いが ERP 側で削除または無効化されました）。まだ未払いかどうかを確認してください。';
+
+  @override
+  String get exceptionDescriptionErpBillDeletedBlocking =>
+      'この請求書の転記先である ERP の伝票が削除または無効化されました。まだ未払いであることを誰かが確認するまで、FeohLedger はこれを支払いません。';
+
+  @override
+  String get exceptionDescriptionErpBillDeleted =>
+      'この請求書の転記先である ERP の伝票が削除または無効化されました。帳簿が一致しているか確認してください。';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoDocument =>
+      'FeohLedger はこの請求書の ERP 伝票を確認できません。転記時に ERP がどの伝票を作成したかを返さなかったためです。FeohLedger はこれを支払いません。ERP でまだ未払いか確認し、FeohLedger 外で支払済みとして記録するか、再転記してください。';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedNoCompany =>
+      'FeohLedger はこの請求書の ERP 伝票を確認できません。転記時に送信先の ERP 会社が記録されなかったためです。FeohLedger はこれを支払いません。ERP でまだ未払いか確認し、FeohLedger 外で支払済みとして記録するか、再転記してください。';
+
+  @override
+  String get exceptionDescriptionErpBillUnlinkedOtherCompany =>
+      'FeohLedger はこの請求書の ERP 伝票を確認できません。現在接続している会社とは別の ERP 会社に転記されたためです。FeohLedger はこれを支払いません。ERP でまだ未払いか確認し、FeohLedger 外で支払済みとして記録するか、再転記してください。';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPaid =>
+      'FeohLedger はこの請求書を支払おうとしていましたが、ERP ではその伝票がすでに支払済みです。支払いは資金が動く前に停止されました。支払う前に未払い額を確認し、この請求書のバーチャルカードがすでに発行されている場合はキャンセルしてください。';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedPartiallyPaid =>
+      'FeohLedger はこの請求書を支払おうとしていましたが、ERP ではその伝票が一部支払済みです。支払いは資金が動く前に停止されました。支払う前に未払い額を確認し、この請求書のバーチャルカードがすでに発行されている場合はキャンセルしてください。';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedDeleted =>
+      'FeohLedger はこの請求書を支払おうとしていましたが、ERP ではその伝票が削除または無効化されています。支払いは資金が動く前に停止されました。支払う前に未払い額を確認し、この請求書のバーチャルカードがすでに発行されている場合はキャンセルしてください。';
+
+  @override
+  String get exceptionDescriptionErpDispatchStoppedUnconfirmed =>
+      'FeohLedger はこの請求書を支払おうとしていましたが、ERP はその伝票がまだ未払いのまま開いていることを確認できませんでした。支払いは資金が動く前に停止されました。支払う前に未払い額を確認し、この請求書のバーチャルカードがすでに発行されている場合はキャンセルしてください。';
+
+  @override
+  String get exceptionDescriptionErpReportedPaymentVoided =>
+      'ERP が報告した支払いが FeohLedger で無効化されましたが、ERP ではまだ請求書が支払済みと表示されている可能性があります。ERP の支払いが取り消されたことを誰かが確認するまで、FeohLedger はこれを再び支払いません。';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp) {
+    return '$erp はこの請求書の支払いを記録しなかったため、資金は支払済みにもかかわらず、ERP では請求書が未払いのまま表示されています。原因を解消してから、「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed =>
+      'ご利用の ERP はこの請求書の支払いを記録しなかったため、資金は支払済みにもかかわらず、ERP では請求書が未払いのまま表示されています。原因を解消してから、「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。';
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  ) {
+    return '$erp はこの請求書の支払いを記録しましたが、請求書にはまだ $amount の未決済残高が表示されています（FeohLedger で適用した割引またはクレジット）。ERP で差額を解消してください。';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  ) {
+    return 'ご利用の ERP はこの請求書の支払いを記録しましたが、請求書にはまだ $amount の未決済残高が表示されています（FeohLedger で適用した割引またはクレジット）。ERP で差額を解消してください。';
+  }
+
+  @override
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp) {
+    return '$erp では、FeohLedger で無効化された支払いによってこの請求書がまだ支払済みと表示されています。ERP での無効化に失敗したためです。帳簿を一致させるため、ERP でその支払いを無効化してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed =>
+      'ご利用の ERP では、FeohLedger で無効化された支払いによってこの請求書がまだ支払済みと表示されています。ERP での無効化に失敗したためです。帳簿を一致させるため、ERP でその支払いを無効化してください。';
+
+  @override
+  String get exceptionDescriptionErpSyncBackFailed =>
+      'この請求書の支払いは決済されましたが、FeohLedger が記録を完了できなかったため、資金は出金済みにもかかわらず請求書は「支払済み」になっていません。自動では再試行されません。「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。';
+
+  @override
   String get warningsPoMatchStatusMatched => '一致';
 
   @override

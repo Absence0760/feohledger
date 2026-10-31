@@ -59,6 +59,11 @@ so a status this build does not know (NULL included) is refused too:
 | `/retry-failed` | skipped with `vendor_not_active` |
 | `POST /api/cards/generate` | no card is minted for the invoice |
 | a card **already minted** | cancelled by the write that made the vendor un-payable — see § Leaving `active` cancels the vendor's live cards |
+| the ERP push (`/complete`, `/send-to-erp`, `/retry-erp`, auto-send, `_call_erp`) | refused (`vendor_blocks_erp_export`) for `rejected` or an unknown status, and for a vendor that is `payments_blocked` or whose last screen is `match` / `review` — but an **`unverified` or `inactive` vendor's approved bill still books**: it is a real debt, and only paying it needs a verified vendor. See [erp-integration.md](erp-integration.md) § A vendor the payment path will not pay refuses the push |
+
+`inactive_vendor_statuses` reads through `payment_runs.vendor_payability`, the
+one vendor read (status, `payments_blocked`, `screening_status`) the ERP push
+shares, so the two gates cannot read a vendor differently.
 
 Verifying the vendor (`POST /api/vendors/{id}/verify`) is the sign-off that
 releases its invoices — the gate reads the vendor's current status, never the

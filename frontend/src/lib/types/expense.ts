@@ -3,6 +3,7 @@
 // `ExpenseResponse` / `ExpenseReportResponse`). Money fields arrive as
 // numbers (backend `float(...)`); date/datetime fields are ISO strings.
 
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
@@ -297,6 +298,21 @@ export interface ExpenseReport {
 	expenses: Expense[];
 	created_at: string;
 	updated_at: string;
+	// The caller's verdict on each report action — on the list and
+	// `GET /expense-reports/{id}` only, never on a mutation response
+	// (decisions §305). Absent is a refusal: read it through
+	// `#lib/api/actionVerdicts.ts`, never beside a restated rule.
+	actions?: ExpenseReportActions;
+}
+
+/** `ExpenseReportActions` (backend `api/expenses.report_action_refusals`):
+ *  `null` = the endpoint would accept the caller, else its coded refusal.
+ *  `compose` is attach / detach. */
+export interface ExpenseReportActions {
+	submit: ActionRefusal;
+	approve: ActionRefusal;
+	reject: ActionRefusal;
+	compose: ActionRefusal;
 }
 
 export interface ExpenseReportListResponse {
@@ -532,6 +548,17 @@ export interface CorporateCardTransaction {
 	import_batch: string | null;
 	created_at: string;
 	updated_at: string;
+	// The caller's verdict on each row action — list rows only (absent on a
+	// mutation response, which reads as a refusal).
+	actions?: CorporateCardTransactionActions;
+}
+
+/** Backend `api/expense_cards.card_txn_action_refusals`. */
+export interface CorporateCardTransactionActions {
+	match: ActionRefusal;
+	create_expense: ActionRefusal;
+	unmatch: ActionRefusal;
+	ignore: ActionRefusal;
 }
 
 export interface CardTransactionListResponse {

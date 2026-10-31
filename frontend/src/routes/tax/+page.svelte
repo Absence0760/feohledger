@@ -14,6 +14,7 @@
 	import { formatMoney, isPositiveAmount, sumMoney } from '#lib/utils/money.ts';
 	import { get1099Report, file1099Batch } from '#lib/api/tax.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import type {
@@ -344,10 +345,7 @@
 	</div>
 
 	{#if error}
-		<div class="state-card error" role="alert">
-			<p>{error}</p>
-			<button class="btn-primary" onclick={load}>{m('tax.retry')}</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="tax-load-error" />
 	{:else if loading && !report}
 		<div class="state-card" aria-busy="true">{m('tax.loadingReport', { year })}</div>
 	{:else if report}
@@ -756,14 +754,6 @@
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: 8px;
-	}
-
-	.state-card.error {
-		color: var(--danger);
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 12px;
 	}
 
 	.toolbar-row {

@@ -317,7 +317,6 @@ export const enPortal = {
 	'portal.home.heading': 'Overview',
 	'portal.home.subtitle': 'What needs you, and where the rest of your invoices stand.',
 	'portal.home.loadFailed': 'Could not load your overview',
-	'portal.home.retry': 'Try again',
 	'portal.home.kpi.actionRequired': 'Needs your attention',
 	'portal.home.kpi.inProgress': 'With your customer',
 	'portal.home.kpi.paid': 'Paid',

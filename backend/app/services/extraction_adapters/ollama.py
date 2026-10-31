@@ -30,6 +30,14 @@ from app.services.extraction_adapters.statement_extraction import (
     STATEMENT_EXTRACTION_PROMPT,
     parse_statement_payload,
 )
+from app.utils.url_safety import UnsafeUrlError, org_host_client
+
+#: Shown when a per-org ``base_url`` is not publicly routable in a deployed
+#: environment. Names the field, never the URL or what it resolved to.
+UNSAFE_BASE_URL_ERROR = (
+    "The Ollama base_url configured for this organization is not a publicly routable "
+    "http(s) URL, so it was not called."
+)
 
 
 def _parse_ollama_json(content: str) -> dict | None:
@@ -155,12 +163,38 @@ class OllamaAdapter(ExtractionAdapter):
             images = auto_rotate_pages(images)
         return images
 
+    def _org_base_url(self) -> str:
+        """The per-org ``base_url`` (BYOK config), or "" when none is set."""
+        return str(self.config.get("base_url") or "").strip()
+
     def _base_url(self) -> str:
         # Per-org config wins; otherwise fall back to the global FEOH_OLLAMA_BASE_URL
         # (lets the Compose container on :11435 be selected without per-org config).
         from app.config import settings
 
-        return self.config.get("base_url") or settings.ollama_base_url
+        return self._org_base_url() or settings.ollama_base_url
+
+    async def _client(self, timeout: float) -> httpx.AsyncClient:
+        """The HTTP client for every Ollama call.
+
+        A per-org ``base_url`` (BYOK extraction config, writable by any tenant
+        admin) is SSRF-guarded: checked up front and pinned at connect
+        (``url_safety.org_host_client``). Loopback is allowed outside a
+        deployed environment, so the local Compose model server on :11435 and a
+        native ``ollama serve`` on :11434 keep working. The adapter posts the
+        invoice image and echoes the response body into its error, so an
+        internal target would be a read-back channel. The operator's
+        ``FEOH_OLLAMA_BASE_URL`` is trusted and keeps a plain client
+        (decisions §334). Raises :class:`UnsafeUrlError`.
+        """
+        from app.config import settings
+
+        org_url = self._org_base_url()
+        if not org_url:
+            return httpx.AsyncClient(timeout=timeout)
+        return await org_host_client(
+            org_url, allow_private=not settings.is_deployed, timeout=timeout
+        )
 
     def _model(self) -> str:
         return self.config.get("model", "llama3.2-vision:11b")
@@ -255,11 +289,17 @@ class OllamaAdapter(ExtractionAdapter):
         # start running. 600s lets the queue drain even with ~10 invoices
         # batched on an 11B vision model (~30–60s each).
         try:
-            async with httpx.AsyncClient(timeout=600) as client:
+            async with await self._client(600) as client:
                 resp = await client.post(
                     f"{self._base_url()}/api/chat",
                     json=body,
                 )
+        except UnsafeUrlError:
+            return ExtractionResult(
+                success=False,
+                error=UNSAFE_BASE_URL_ERROR,
+                provider=self.provider_name,
+            )
         except httpx.ConnectError:
             return ExtractionResult(
                 success=False,
@@ -395,7 +435,7 @@ class OllamaAdapter(ExtractionAdapter):
             message["images"] = [base64.b64encode(file_bytes).decode("utf-8")]
 
         try:
-            async with httpx.AsyncClient(timeout=600) as client:
+            async with await self._client(600) as client:
                 resp = await client.post(
                     f"{self._base_url()}/api/chat",
                     json={
@@ -406,6 +446,13 @@ class OllamaAdapter(ExtractionAdapter):
                         "options": {"num_predict": 8192},
                     },
                 )
+        except UnsafeUrlError:
+            return StatementExtractionResult(
+                available=True,
+                provider=self.provider_name,
+                reason=STATEMENT_REASON_PROVIDER_ERROR,
+                error=UNSAFE_BASE_URL_ERROR,
+            )
         except Exception as exc:
             return StatementExtractionResult(
                 available=True,
@@ -435,7 +482,7 @@ class OllamaAdapter(ExtractionAdapter):
 
     async def test_connection(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with await self._client(5) as client:
                 resp = await client.get(f"{self._base_url()}/api/tags")
             if resp.status_code != 200:
                 return False

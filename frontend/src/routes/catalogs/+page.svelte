@@ -24,6 +24,7 @@
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
 	const canCreate = $derived(auth.isManager); // admin | ap_manager
@@ -309,12 +310,8 @@
 
 	{#if errored}
 		<!-- A failed load is a dead end without a way back: the toast that
-		     reported it has already faded. Same error-with-retry block
-		     `/admin/api-keys` uses. -->
-		<div class="state error" data-testid="catalogs-error" role="alert">
-			<p>{m('catalogs.empty.errored')}</p>
-			<button type="button" class="btn-cancel" onclick={() => load()}>{m('catalogs.retry')}</button>
-		</div>
+		     reported it has already faded. -->
+		<LoadError message={m('catalogs.empty.errored')} onretry={() => load()} testId="catalogs-error" />
 	{:else}
 	<DataTable
 		columns={COLUMNS}
@@ -403,20 +400,6 @@
 {/if}
 
 <style>
-	/* Error-with-retry block — same shape as `/admin/api-keys`. */
-	.state {
-		color: var(--text-muted);
-		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
-	}
-
-	.state.error p {
-		margin: 0 0 8px;
-	}
-
 	.toolbar-row {
 		display: flex;
 		gap: 10px;

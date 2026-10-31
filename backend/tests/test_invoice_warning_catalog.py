@@ -180,11 +180,69 @@ def test_every_code_has_a_call_site():
     """
     sources = "\n".join(
         (_BACKEND / rel).read_text(encoding="utf-8")
-        for rel in (*PRODUCER_MODULES, "app/services/po_matching.py")
+        for rel in (*PRODUCER_MODULES, "app/services/po_matching.py", *ERP_PRODUCER_MODULES)
     )
+    erp_built = {s.code for s in cat.ERP_RECONCILIATION_SPECS}
     for code in codes():
         name = code.split(".")[-1]
+        if code in erp_built:
+            # Built by `erp_finding` (which adds the `_unnamed` twin) or from a
+            # computed suffix; `test_every_erp_code_is_reachable` drives those.
+            continue
         assert f'"{name}"' in sources or f"'{name}'" in sources, f"{code} has no call site"
+
+
+#: The modules that open ERP reconciliation exceptions (decisions §319).
+ERP_PRODUCER_MODULES = (
+    "app/services/erp_status_sync.py",
+    "app/api/erp_webhook.py",
+    "app/services/erp_payment_writeback.py",
+    "app/services/payment_erp_sync.py",
+)
+
+
+def test_every_erp_code_is_reachable():
+    """Every `exception.erp_*` code is produced by something.
+
+    The paid-not-recorded family is chosen by refusal code and the named /
+    `_unnamed` pick by the ERP's product name, so a literal scan cannot see
+    them; drive the builders instead. Everything else is a literal bare name
+    (or a literal stem plus a computed suffix) in an ERP producer module.
+    """
+    from app.services.erp_status_sync import erp_finding, unrecorded_payment_finding
+
+    produced: set[str] = set()
+    for reason in cat.ERP_UNRECORDED_REASONS:
+        code = f"external_payment_{reason}" if reason != "other" else "something_new"
+        produced.add(unrecorded_payment_finding("xero", code)["code"])
+        produced.add(unrecorded_payment_finding("merge_dev", code)["code"])
+
+    sources = "\n".join(
+        (_BACKEND / rel).read_text(encoding="utf-8") for rel in ERP_PRODUCER_MODULES
+    )
+    # `"erp_x"`, `f"erp_x_{…}"` and `"erp_x_" + …` all name a stem.
+    stems = set(re.findall(r'"(erp_[a-z_]*[a-z])_?(?=["{])', sources))
+    for spec in cat.ERP_RECONCILIATION_SPECS:
+        name = spec.code.removeprefix(cat.EXCEPTION_PREFIX)
+        if spec.code in produced:
+            continue
+        base = name.removesuffix(cat.ERP_UNNAMED_SUFFIX)
+        if "erp" in spec.params or name.endswith(cat.ERP_UNNAMED_SUFFIX):
+            # A named sentence: `erp_finding("<base>", …)` yields both twins.
+            assert base in stems, f"{spec.code}: no erp_finding({base!r}) call site"
+            # The params a twin carries besides `erp` (a money figure, say).
+            extra = {
+                k: {"money": "1.00", "currency": "USD"}.get(kind, "x")
+                for k, kind in spec.params.items()
+                if k != "erp"
+            }
+            assert erp_finding(base, "xero", **extra)["code"] == cat.EXCEPTION_PREFIX + base
+            unnamed = erp_finding(base, None, **extra)["code"]
+            assert unnamed == cat.EXCEPTION_PREFIX + base + cat.ERP_UNNAMED_SUFFIX
+            continue
+        assert name in stems or any(name.startswith(s + "_") for s in stems), (
+            f"{spec.code} has no call site"
+        )
 
 
 def test_every_ensure_exception_call_passes_a_finding_not_prose():

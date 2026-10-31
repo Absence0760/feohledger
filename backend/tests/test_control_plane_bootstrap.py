@@ -289,6 +289,8 @@ async def test_a_failed_tenant_migration_fails_the_run(monkeypatch):
     assert attempted == ["feoh_ok", "feoh_broken"]
 
 
+# Builds its own engine against the scratch control-plane database.
+@pytest.mark.real_db_engine
 async def test_initialise_is_all_or_nothing(scratch_control_db, monkeypatch):
     """A failure after the tables are built must leave NO tables behind —
     otherwise the next run calls the database PRESENT with no roles and no

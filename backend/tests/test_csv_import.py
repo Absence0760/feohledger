@@ -740,6 +740,168 @@ async def test_import_live_row_flags_duplicate_on_import(realdb):
         assert exc.status == "open"
 
 
+async def test_import_reports_a_normalized_number_match_naming_the_existing_invoice(realdb):
+    """`INV-1` against an `INV-001` already imported for the same vendor is the
+    same payable to the duplicate gate (`normalize_invoice_number`, decisions
+    §77). The importer neither skips it silently nor imports it: the row is an
+    error naming the invoice it collides with. A byte-exact repeat is still the
+    silent skip it always was, and another vendor's `INV-1` still imports."""
+    from sqlalchemy import func, select
+
+    from app.models.invoice import Invoice
+    from app.services.csv_import import import_invoices_csv
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        first = await import_invoices_csv(
+            s, org_id, "invoice_number,vendor_name,amount,status\nINV-001,Norm Co,10.00,new\n"
+        )
+        await s.commit()
+    assert first.imported == 1
+    async with mk() as s:
+        existing_id = (
+            await s.execute(select(Invoice.id).where(Invoice.invoice_number == "INV-001"))
+        ).scalar_one()
+
+    async with mk() as s:
+        res = await import_invoices_csv(
+            s,
+            org_id,
+            "invoice_number,vendor_name,amount,status\n"
+            "INV-1,Norm Co,10.00,new\n"
+            "INV-001,Norm Co,10.00,new\n"
+            "INV-1,Other Co,10.00,new\n",
+        )
+        await s.commit()
+
+    assert res.imported == 1  # only Other Co's INV-1
+    assert res.skipped == 2  # the near match (an error) + the exact repeat (silent)
+    assert [e.to_dict() for e in res.errors] == [
+        {
+            "code": "csv_invoice_number_matches_existing",
+            "params": {
+                "invoice_number": "INV-1",
+                "existing_invoice_id": str(existing_id),
+                "existing_invoice_number": "INV-001",
+            },
+            "row": 2,
+            "message": (
+                "invoice_number 'INV-1' is the same invoice number as existing invoice "
+                "'INV-001' for this vendor once formatting is ignored; not imported"
+            ),
+        }
+    ]
+    async with mk() as s:
+        norm_co_rows = (
+            await s.execute(
+                select(func.count()).select_from(Invoice).where(Invoice.vendor_name == "Norm Co")
+            )
+        ).scalar_one()
+    assert norm_co_rows == 1
+
+
+async def test_a_near_match_in_another_entity_is_refused_without_naming_it(realdb):
+    """A vendor shared by two entities: entity B already holds `INV-001`, and an
+    importer working in entity A sends `INV-1`. The row is still refused — it is
+    the same payable — but stated as existence only, never B's invoice id or
+    number (decisions §40)."""
+    from sqlalchemy import select
+
+    from app.models.entity import Entity
+    from app.models.invoice import Invoice
+    from app.models.vendor import Vendor
+    from app.services.csv_import import (
+        CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY,
+        import_invoices_csv,
+    )
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        entity_a = (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
+        other = Entity(organization_id=org_id, name="Sibling Co", slug="csv-sib", is_default=False)
+        vendor = Vendor(
+            organization_id=org_id, entity_id=entity_a, name="Shared Co", status="active"
+        )
+        s.add_all([other, vendor])
+        await s.flush()
+        s.add(
+            Invoice(
+                organization_id=org_id,
+                entity_id=other.id,
+                invoice_number="INV-001",
+                vendor_name="Shared Co",
+                vendor_id=vendor.id,
+                amount=Decimal("10.00"),
+                currency="USD",
+                status="new",
+            )
+        )
+        await s.commit()
+
+    async with mk() as s:
+        res = await import_invoices_csv(
+            s,
+            org_id,
+            "invoice_number,vendor_name,amount,status\nINV-1,Shared Co,10.00,new\n",
+            entity_id=entity_a,
+        )
+        await s.commit()
+
+    assert (res.imported, res.skipped) == (0, 1)
+    (err,) = res.errors
+    assert err.structured == {
+        "code": CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY,
+        "params": {"invoice_number": "INV-1"},
+    }
+    assert "INV-001" not in err.message
+
+
+async def test_import_reports_two_rows_of_one_file_that_normalize_equal(realdb):
+    """Neither row exists yet, so only the batch can see the collision: the
+    first row imports and the second is an error naming it by row."""
+    from sqlalchemy import select
+
+    from app.models.invoice import Invoice
+    from app.services.csv_import import CSV_INVOICE_NUMBER_MATCHES_ROW, import_invoices_csv
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        res = await import_invoices_csv(
+            s,
+            org_id,
+            "invoice_number,vendor_name,amount,status\n"
+            "2026-0007,Batch Co,10.00,new\n"
+            "2026 7,Batch Co,10.00,new\n",
+        )
+        await s.commit()
+
+    assert (res.imported, res.skipped) == (1, 1)
+    (err,) = res.errors
+    assert err.row == 3
+    assert err.structured == {
+        "code": CSV_INVOICE_NUMBER_MATCHES_ROW,
+        "params": {
+            "invoice_number": "2026 7",
+            "other_row": 2,
+            "other_invoice_number": "2026-0007",
+        },
+    }
+    async with mk() as s:
+        numbers = (
+            (
+                await s.execute(
+                    select(Invoice.invoice_number).where(Invoice.vendor_name == "Batch Co")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert numbers == ["2026-0007"]
+
+
 async def test_import_historical_row_is_not_flagged(realdb):
     """The same duplicate imported as settled history (`paid`) raises nothing:
     it never reaches a payment run, and a Day-0 load of years of history must

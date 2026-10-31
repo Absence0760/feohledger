@@ -82,11 +82,11 @@ def _qbo_chart() -> list[dict]:
 
 
 async def _qbo_payloads(rows: list[dict]) -> list[GLAccountPayload]:
-    async def query_all(self, entity, *, include_inactive=False, complete=False):
+    async def query_all(self, entity, *, include_inactive=False):
         # The chart read must include inactive accounts (§284): QuickBooks'
-        # plain select returns active ones only. And it must be the whole
-        # chart: a truncated one raises rather than reaching the sync.
-        assert (entity, include_inactive, complete) == ("Account", True, True)
+        # plain select returns active ones only. It is always the whole chart:
+        # `_query_all` reads whole or raises (§332), so there is no flag to ask.
+        assert (entity, include_inactive) == ("Account", True)
         return rows
 
     with patch.object(QuickBooksOnlineAdapter, "_query_all", query_all):

@@ -18,6 +18,7 @@ These tests pin the three closed gaps:
 from __future__ import annotations
 
 import asyncio
+import uuid
 from decimal import Decimal
 
 import pytest
@@ -73,6 +74,11 @@ async def _seed_invoice(mk, org_id, *, status: InvoiceStatus, vendor_id=None, nu
         return inv.id
 
 
+def _skips(body: dict) -> dict:
+    """``{invoice_id: (code, params)}`` from a generate response's ``skipped``."""
+    return {s["invoice_id"]: (s["code"], s["params"]) for s in body.get("skipped", [])}
+
+
 async def _seed_vendor(mk, org_id, *, name="Card Vendor Co"):
     async with mk() as s:
         ent = await _default_entity_id(s)
@@ -80,6 +86,32 @@ async def _seed_vendor(mk, org_id, *, name="Card Vendor Co"):
         s.add(v)
         await s.commit()
         return v.id
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_with_cards_off_is_refused_with_a_code(realdb):
+    """The payments Cards tab offers Generate before it knows whether the
+    programme is switched on, so the refusal carries a code the dialog
+    localizes (`cards_not_enabled`) — same 400, same English, nothing minted."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _seed_vendor(mk, org_id)
+    inv_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="CARDSOFF"
+    )
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(inv_id)]})
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == {
+        "code": "cards_not_enabled",
+        "message": "Virtual cards are not enabled. Configure in Organization Settings.",
+        "params": {},
+    }
+    async with mk() as s:
+        cards = (await s.execute(select(VirtualCard).where(VirtualCard.invoice_id == inv_id))).all()
+    assert cards == []
 
 
 @pytest.mark.asyncio
@@ -112,6 +144,10 @@ async def test_non_payable_invoice_is_not_minted_a_card(realdb):
     # Only the approved invoice got a card.
     assert body["total"] == 1
     assert body["items"][0]["invoice_id"] == str(payable_id)
+    # ...and the one that was not says why, by its status.
+    assert _skips(body) == {
+        str(not_payable_id): ("card_skip_not_payable", {"status": "ready_for_review"})
+    }
 
     async with mk() as s:
         carded_invoice_ids = (await s.execute(select(VirtualCard.invoice_id))).scalars().all()
@@ -153,6 +189,9 @@ async def test_blocked_vendor_is_not_minted_a_card(realdb):
     body = resp.json()
     assert body["total"] == 0
     assert body["items"] == []
+    code, params = _skips(body)[str(invoice_id)]
+    assert code == "card_skip_compliance_hold"
+    assert params["verdict"] != "allow"
 
     async with mk() as s:
         cards = (
@@ -185,6 +224,7 @@ async def test_sanctioned_vendor_name_is_not_minted_a_card(realdb):
         resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
     assert resp.status_code == 201, resp.text
     assert resp.json()["total"] == 0
+    assert _skips(resp.json())[str(invoice_id)][0] == "card_skip_compliance_hold"
 
     async with mk() as s:
         cards = (
@@ -369,6 +409,9 @@ async def test_a_vendor_that_is_not_active_is_not_minted_a_card(realdb, vendor_s
         resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
     assert resp.status_code == 201, resp.text
     assert resp.json()["total"] == 0
+    assert _skips(resp.json()) == {
+        str(invoice_id): ("card_skip_vendor_not_payable", {"vendor_status": vendor_status})
+    }
     assert await _cards_for(mk, invoice_id) == []
 
 
@@ -406,6 +449,9 @@ async def test_an_invoice_with_a_payment_blocking_exception_is_not_minted_a_card
         resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(held), str(clean)]})
     assert resp.status_code == 201, resp.text
     assert resp.json()["total"] == 1
+    assert _skips(resp.json()) == {
+        str(held): ("card_skip_blocked", {"exception_type": "quality_hold"})
+    }
     assert await _cards_for(mk, held) == []
     assert len(await _cards_for(mk, clean)) == 1
 
@@ -554,6 +600,13 @@ async def test_concurrent_generates_mint_one_card(realdb, monkeypatch):
     assert second["queued"], "the second request must queue on the lock, not race past it"
     assert loser.status_code == 201, loser.text
     assert loser.json()["total"] == 0
+    # The loser names the winner's card rather than an unexplained `total: 0`.
+    assert _skips(loser.json()) == {
+        str(invoice_id): (
+            "card_skip_already_carded",
+            {"card_id": first.json()["items"][0]["id"]},
+        )
+    }
     assert calls == [str(invoice_id)], "the provider must be asked for exactly one card"
     assert len(await _cards_for(mk, invoice_id)) == 1
 
@@ -682,6 +735,7 @@ async def test_a_locked_invoice_does_not_cost_its_siblings_their_cards(realdb, m
             resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(held), str(free)]})
     assert resp.status_code == 201, resp.text
     assert [i["invoice_id"] for i in resp.json()["items"]] == [str(free)]
+    assert _skips(resp.json()) == {str(held): ("card_skip_lock_timeout", {})}
     assert calls == [str(free)]
     assert await _cards_for(mk, held) == []
 
@@ -752,6 +806,7 @@ async def test_an_invoice_already_being_paid_is_not_minted_a_card(
         resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
     assert resp.status_code == 201, resp.text
     assert resp.json()["total"] == 0
+    assert _skips(resp.json()) == {str(invoice_id): ("card_skip_live_payment", {})}
     assert calls == []
     assert await _cards_for(mk, invoice_id) == []
 
@@ -790,6 +845,7 @@ async def test_a_generate_that_waits_out_a_dispatch_sees_its_payment(realdb, mon
 
     assert resp.status_code == 201, resp.text
     assert resp.json()["total"] == 0
+    assert _skips(resp.json()) == {str(invoice_id): ("card_skip_live_payment", {})}
     assert calls == []
     assert await _cards_for(mk, invoice_id) == []
 
@@ -819,6 +875,8 @@ async def test_an_invoice_outside_the_selected_entity_is_not_minted_a_card(reald
         )
         assert outside.status_code == 201, outside.text
         assert outside.json()["total"] == 0
+        # The same answer a nonexistent invoice gets: no probing across entities.
+        assert _skips(outside.json()) == {str(invoice_id): ("card_skip_not_found", {})}
         assert await _cards_for(mk, invoice_id) == []
 
         inside = await c.post(
@@ -826,3 +884,257 @@ async def test_an_invoice_outside_the_selected_entity_is_not_minted_a_card(reald
         )
     assert inside.status_code == 201, inside.text
     assert inside.json()["total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Every invoice that gets no card is named on `skipped`, with its gate
+# ---------------------------------------------------------------------------
+#
+# The response used to be `total: 0` whatever the reason, and a retry of a mint
+# that had already succeeded read exactly like a refusal. The gates above
+# assert their own code inline; these cover the rest of
+# `card_issuance.CARD_SKIP_MESSAGES`.
+
+
+@pytest.mark.asyncio
+async def test_a_retry_names_the_card_its_first_attempt_minted(realdb, monkeypatch):
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="RETRY"
+    )
+    calls = _count_card_mints(monkeypatch)
+    payload = {"invoice_ids": [str(invoice_id)]}
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        first = await c.post("/api/cards/generate", json=payload)
+        retry = await c.post("/api/cards/generate", json=payload)
+    assert first.status_code == 201, first.text
+    assert first.json()["skipped"] == []
+    assert retry.status_code == 201, retry.text
+    body = retry.json()
+    # Backward compatible: `items` / `total` still count only what THIS request minted.
+    assert body["total"] == 0
+    assert body["items"] == []
+    assert body["skipped"] == [
+        {
+            "invoice_id": str(invoice_id),
+            "code": "card_skip_already_carded",
+            "message": "The invoice already has a live virtual card.",
+            "params": {"card_id": first.json()["items"][0]["id"]},
+        }
+    ]
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_invoice_is_not_found(realdb):
+    org_id = realdb.info(TENANT).org_id
+    await _enable_cards(realdb, org_id=org_id)
+    missing = uuid.uuid4()
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(missing)]})
+    assert resp.status_code == 201, resp.text
+    assert _skips(resp.json()) == {str(missing): ("card_skip_not_found", {})}
+
+
+@pytest.mark.asyncio
+async def test_an_invoice_with_no_vendor_record_is_unscreenable(realdb):
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=None, number="NOVENDOR"
+    )
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    assert _skips(resp.json()) == {str(invoice_id): ("card_skip_vendor_unscreenable", {})}
+    assert await _cards_for(mk, invoice_id) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("memo_currency", "memo_amount", "code"),
+    [
+        # Credits cover the whole invoice: nothing is owed.
+        ("USD", Decimal("250.00"), "card_skip_nothing_owed"),
+        # A credit in another currency no longer pairs with the invoice (§214).
+        ("EUR", Decimal("50.00"), "card_skip_credit_conflict"),
+    ],
+)
+async def test_applied_credits_that_leave_nothing_to_card_are_named(
+    realdb, memo_currency, memo_amount, code
+):
+    from app.models.credit_memo import CreditMemo
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number=f"CM-{code}"
+    )
+    async with mk() as s:
+        s.add(
+            CreditMemo(
+                memo_number=f"CM-{code}",
+                vendor_id=vendor_id,
+                invoice_id=invoice_id,
+                amount=memo_amount,
+                currency=memo_currency,
+                status="applied",
+                organization_id=org_id,
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    assert _skips(resp.json()) == {str(invoice_id): (code, {})}
+    assert await _cards_for(mk, invoice_id) == []
+
+
+@pytest.mark.asyncio
+async def test_an_erp_bill_that_is_not_open_is_named_by_its_family(realdb, monkeypatch):
+    """The ERP gate's refusal carries a detail suffix (`erp_bill_not_open:paid`);
+    the skip carries only the family a sentence keys on."""
+    from app.services import erp_status_sync
+
+    async def refuse(db, *, invoice, org, payment=None):
+        return "erp_bill_not_open:paid"
+
+    monkeypatch.setattr(erp_status_sync, "erp_bill_dispatch_refusal", refuse)
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="ERPPAID"
+    )
+    calls = _count_card_mints(monkeypatch)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    assert _skips(resp.json()) == {
+        str(invoice_id): ("card_skip_erp_bill", {"erp_reason": "erp_bill_not_open"})
+    }
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_provider_that_issues_nothing_is_named(realdb, monkeypatch):
+    from app.services.card_adapters.base import CardResult
+    from app.services.card_adapters.mock_adapter import MockCardAdapter
+
+    async def decline(self, payload):
+        return CardResult(success=False, failure_reason="insufficient_funds")
+
+    monkeypatch.setattr(MockCardAdapter, "create_card", decline)
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="DECLINED"
+    )
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    # The provider's own reason is not echoed: it is free-form adapter output.
+    assert _skips(resp.json()) == {str(invoice_id): ("card_skip_issue_failed", {})}
+    assert await _cards_for(mk, invoice_id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_payable_invoice_the_lock_left_out_is_a_moved_vendor(realdb):
+    """`lock_invoices_for_mint` drops a payable, in-scope invoice only when its
+    vendor changed between the unlocked read and the lock. That window cannot
+    be opened deterministically over HTTP, so the classifier is driven directly
+    on such an invoice."""
+    from app.api.cards import _unlocked_skip
+    from app.api.payments import PAYABLE_INVOICE_STATUSES
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="MOVED"
+    )
+    async with mk() as s:
+        skip = await _unlocked_skip(s, invoice_id, PAYABLE_INVOICE_STATUSES, None)
+    assert (skip.code, skip.params) == ("card_skip_vendor_changed", {})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("same_provider_card", "code"),
+    [
+        # The winner is the very card the provider handed back (same
+        # idempotency key): "already carded", naming it, is the whole truth.
+        (True, "card_skip_already_carded"),
+        # A different provider card holds the slot: ours exists at the provider
+        # with no row here, so it must not read as the clean "already carded".
+        (False, "card_skip_issue_failed"),
+    ],
+)
+async def test_a_lost_insert_race_is_named_by_whose_card_won(
+    realdb, monkeypatch, same_provider_card, code
+):
+    """A writer that does not take the mint lock can still claim the live-card
+    slot between the provider call and our insert; the partial unique index then
+    refuses our row (`persist_card` → False)."""
+    from app.services import card_issuance
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number=f"LOST-{code}"
+    )
+    real_persist = card_issuance.persist_card
+    winner: dict = {}
+
+    async def a_competitor_lands_first(db, card):
+        async with mk() as s:
+            rival = VirtualCard(
+                invoice_id=card.invoice_id,
+                vendor_id=card.vendor_id,
+                card_provider=card.card_provider,
+                provider_card_id=(
+                    card.provider_card_id if same_provider_card else "someone-elses-card"
+                ),
+                amount_limit=card.amount_limit,
+                currency=card.currency,
+                status="created",
+                organization_id=card.organization_id,
+            )
+            s.add(rival)
+            await s.commit()
+            winner["id"] = str(rival.id)
+        return await real_persist(db, card)
+
+    monkeypatch.setattr(card_issuance, "persist_card", a_competitor_lands_first)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    expected_params = {"card_id": winner["id"]} if same_provider_card else {}
+    assert _skips(resp.json()) == {str(invoice_id): (code, expected_params)}
+    # The loser's row never landed: exactly the competitor's card exists.
+    assert [str(c.id) for c in await _cards_for(mk, invoice_id)] == [winner["id"]]
+
+
+def test_every_skip_code_has_an_english_fallback_and_rejects_strangers():
+    from app.services import card_issuance as ci
+
+    codes = {v for k, v in vars(ci).items() if k.startswith("CARD_SKIP_") and isinstance(v, str)}
+    assert codes == set(ci.CARD_SKIP_MESSAGES) == ci.CARD_SKIP_CODES
+    assert all(ci.CARD_SKIP_MESSAGES[c].strip() for c in codes)
+    with pytest.raises(ValueError):
+        ci.card_skip(uuid.uuid4(), "card_skip_made_up")
+    assert ci.erp_refusal_family("erp_bill_unlinked:no_realm") == "erp_bill_unlinked"
+    assert ci.erp_refusal_family("erp_bill_unverified") == "erp_bill_unverified"

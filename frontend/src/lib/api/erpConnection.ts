@@ -16,8 +16,19 @@ export const getErpCatalog = () => api.get<ErpCatalog>(`${BASE}/providers`);
 
 export const getErpOAuthStatus = () => api.get<ErpOAuthStatus>(`${BASE}/oauth/status`);
 
+/**
+ * The provider's consent URL. A CREDENTIALED request (`credentials: 'include'`):
+ * the response sets the HttpOnly nonce cookie on the API host that the OAuth
+ * callback compares against the signed `state`, binding the connect to this
+ * browser (login-CSRF — `docs/authentication.md` § ERP OAuth connections).
+ * Without it the browser discards the cookie and every callback answers
+ * `erp_error=browser_mismatch`.
+ */
 export const startErpOAuth = (provider: string) =>
-	api.get<{ authorize_url: string }>(`${BASE}/oauth/${encodeURIComponent(provider)}/authorize`);
+	api.get<{ authorize_url: string }>(
+		`${BASE}/oauth/${encodeURIComponent(provider)}/authorize`,
+		{ credentials: 'include' }
+	);
 
 export const disconnectErpOAuth = () => api.post<unknown>(`${BASE}/oauth/disconnect`, {});
 

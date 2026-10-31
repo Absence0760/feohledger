@@ -43,6 +43,24 @@ class CardListResponse(PageMeta):
     total: int
 
 
+class CardGenerateSkip(BaseModel):
+    """An invoice `POST /api/cards/generate` minted nothing for — the
+    coded-refusal shape (`code` / English `message` / typed `params`) plus the
+    invoice id. Codes: `services/card_issuance.CARD_SKIP_MESSAGES`."""
+
+    invoice_id: str
+    code: str
+    message: str
+    params: dict = Field(default_factory=dict)
+
+
+class CardGenerateResponse(CardListResponse):
+    """`CardListResponse` (``items`` / ``total`` = cards minted by THIS request,
+    unchanged) plus why every other requested invoice got none."""
+
+    skipped: list[CardGenerateSkip] = Field(default_factory=list)
+
+
 class CardDetailsResponse(BaseModel):
     card_number: str
     exp_month: int

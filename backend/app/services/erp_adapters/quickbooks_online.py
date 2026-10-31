@@ -63,6 +63,7 @@ any other read failure fails the push without creating anything.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
@@ -91,7 +92,10 @@ from app.services.erp_adapters.base import (
     ListingGap,
     PaymentPayload,
     PoLinePayload,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_failure_message,
     erp_http_failure,
@@ -113,6 +117,8 @@ from app.services.erp_adapters.posted_total import (
 from app.utils.json_money import dumps_exact_json
 
 PROVIDER = "QuickBooks Online"
+logger = logging.getLogger(__name__)
+
 MINOR_VERSION = "75"
 #: Intuit's ``requestid`` limit (characters).
 REQUEST_ID_MAX = 50
@@ -160,6 +166,55 @@ QBO_OAUTH = erp_oauth.register_oauth_provider(
         revoke_url_setting="erp_qbo_revoke_url",
     )
 )
+
+
+def _api_base(erp_settings: dict | None) -> str:
+    """The v3 API host for an org's ``settings.erp`` (no trailing slash)."""
+    if settings.erp_qbo_api_base:
+        # OPERATOR-controlled override (env, not tenant config) pointing
+        # local dev + e2e at fake-erp; trusted, like erp_d365_api_base.
+        return settings.erp_qbo_api_base.rstrip("/")
+    if ((erp_settings or {}).get("environment") or "production") == "sandbox":
+        return _SANDBOX_BASE
+    return _PRODUCTION_BASE
+
+
+#: What a realm id may look like before it goes into a URL path. Intuit's are
+#: digits; the fake ERP's carry letters and dashes. Anything else is refused at
+#: consent rather than spliced into ``/v3/company/{realm}/…``.
+_REALM_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+async def confirm_realm(access_token: str, realm: str, erp_settings: dict | None) -> bool:
+    """Does the token just issued reach company ``realm``?
+
+    ``GET /v3/company/{realm}/companyinfo/{realm}`` under the new token: Intuit
+    answers it only for the company the consent authorised, and refuses
+    (401/403, Fault 3100) any other. A 200 carrying a ``CompanyInfo`` object is
+    the only yes; a network error, any other status or another body is no.
+    Nothing is logged but the status.
+    """
+    if not _REALM_ID.fullmatch(realm):
+        return False
+    url = f"{_api_base(erp_settings)}/v3/company/{realm}/companyinfo/{realm}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                url,
+                params={"minorversion": MINOR_VERSION},
+                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            )
+    except httpx.HTTPError:
+        logger.warning("quickbooks_online: realm confirmation unreachable")
+        return False
+    if resp.status_code != 200:
+        logger.warning("quickbooks_online: realm confirmation refused (HTTP %s)", resp.status_code)
+        return False
+    try:
+        body = _json(resp)
+    except ValueError:
+        return False
+    return isinstance(body, dict) and isinstance(body.get("CompanyInfo"), dict)
 
 
 class QboRequestError(RuntimeError):
@@ -391,19 +446,44 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
     #: ``changed_bills``) and our payments are written back as BillPayments
     #: (``post_payment``) — decisions §295.
     supports_status_sync = True
+    #: A PO with neither ``DocNumber`` nor ``Id`` used to be filed under the
+    #: literal number ``"None"``, every such PO overwriting one row (§328).
+    retired_po_numbers = ("None",)
+
+    @classmethod
+    async def resolve_external_tenant_id(
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
+    ) -> str | None:
+        """The ``realmId`` the redirect names, once the new token confirms it.
+
+        Intuit puts the company id in the callback query, which nothing signs:
+        a tenant admin could consent to their own company while naming another
+        company's realm, and that realm would then read ``already_linked`` for
+        its real owner (squatting, not a leak — the token only ever reaches the
+        consenting company). So the realm counts only after one call under the
+        new token reaches it (:func:`confirm_realm`), the way Xero's and Sage's
+        come from an API call rather than the URL. Unconfirmed → None, which
+        refuses the link (``no_external_tenant``).
+        """
+        realm = await super().resolve_external_tenant_id(
+            access_token=access_token,
+            token_response=token_response,
+            callback_params=callback_params,
+            erp_settings=erp_settings,
+        )
+        if not realm or not await confirm_realm(access_token, realm, erp_settings):
+            return None
+        return realm
 
     # -- transport ---------------------------------------------------------
 
     def _company_url(self, path: str) -> str:
-        if settings.erp_qbo_api_base:
-            # OPERATOR-controlled override (env, not tenant config) pointing
-            # local dev + e2e at fake-erp; trusted, like erp_d365_api_base.
-            base = settings.erp_qbo_api_base.rstrip("/")
-        elif (self.config.get("environment") or "production") == "sandbox":
-            base = _SANDBOX_BASE
-        else:
-            base = _PRODUCTION_BASE
-        return f"{base}/v3/company/{self.external_tenant_id()}/{path}"
+        return f"{_api_base(self.config)}/v3/company/{self.external_tenant_id()}/{path}"
 
     async def _request(
         self,
@@ -445,38 +525,39 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             raise QboRequestError(resp.status_code)
         return _json(resp).get("QueryResponse") or {}
 
-    async def _query_all(
-        self, entity: str, *, include_inactive: bool = False, complete: bool = False
-    ) -> list[dict]:
-        """Every row of ``entity``, paged. A failed page raises
-        (``QboRequestError``).
+    async def _query_all(self, entity: str, *, include_inactive: bool = False) -> list[dict]:
+        """Every row of ``entity``, paged, or :class:`ErpListingIncomplete`.
+
+        Read whole or not at all: a failed page (a non-200, a transport error,
+        an unreadable body) raises ``fetch_failed`` and an entity longer than
+        ``_MAX_PAGES`` pages raises ``truncated`` — never the rows read so far.
+        The chart and vendor syncs read absence as evidence (base), and the PO
+        sync reads the listing's skips, which a partial read would silently
+        shorten (decisions §329). A lost connection still raises
+        ``ErpNotConnectedError`` from the token read, for the coded 409.
 
         ``include_inactive``: a plain ``select`` returns only ACTIVE accounts and
         vendors, so an account the company made inactive simply vanished from
         the pull — and a row still linked to it looked like a link to a deleted
         account. ``where Active IN (true, false)`` is QuickBooks' documented way
         to read both.
-
-        ``complete``: an entity longer than ``_MAX_PAGES`` pages raises
-        :class:`ErpListingIncomplete` instead of returning the first pages —
-        the chart and vendor syncs read absence as evidence (base).
         """
         where = " where Active IN (true, false)" if include_inactive else ""
         rows: list[dict] = []
         start = 1
         for _ in range(_MAX_PAGES):
-            page = (
-                await self._query(
-                    f"select * from {entity}{where} STARTPOSITION {start} MAXRESULTS {_PAGE_SIZE}"
-                )
-            ).get(entity) or []
+            statement = (
+                f"select * from {entity}{where} STARTPOSITION {start} MAXRESULTS {_PAGE_SIZE}"
+            )
+            try:
+                page = (await self._query(statement)).get(entity) or []
+            except (QboRequestError, httpx.HTTPError, ValueError):
+                raise ErpListingIncomplete(PROVIDER, entity, ListingGap.fetch_failed) from None
             rows.extend(r for r in page if isinstance(r, dict))
             if len(page) < _PAGE_SIZE:
                 return rows
             start += _PAGE_SIZE
-        if complete:
-            raise ErpListingIncomplete(PROVIDER, entity, ListingGap.truncated)
-        return rows
+        raise ErpListingIncomplete(PROVIDER, entity, ListingGap.truncated)
 
     # -- post --------------------------------------------------------------
 
@@ -1117,11 +1198,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         return resp.status_code == 200
 
     async def list_vendors(self) -> list[VendorPayload]:
-        rows = [
-            v
-            for v in await self._query_all("Vendor", include_inactive=True, complete=True)
-            if v.get("Id")
-        ]
+        rows = [v for v in await self._query_all("Vendor", include_inactive=True) if v.get("Id")]
         return [_vendor_payload(v) for v in _undeleted_all(rows, _vendor_name_key)]
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
@@ -1134,11 +1211,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         the sync recognises a row that collapsed two accounts into one.
         """
         rows = _undeleted_all(
-            [
-                a
-                for a in await self._query_all("Account", include_inactive=True, complete=True)
-                if a.get("Id")
-            ],
+            [a for a in await self._query_all("Account", include_inactive=True) if a.get("Id")],
             _account_code,
         )
         code_by_id = {str(a["Id"]): _account_code(a) for a in rows}
@@ -1173,8 +1246,42 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         discarded. ``gl_account`` stays None — and is never taken from the
         ref's ``name``, which two sub-accounts can share. Persist it by id,
         through the chart sync's code, when a consumer needs it.
+
+        Read whole or not at all (:meth:`_query_all`): a failed page or more
+        than 50 pages raises :class:`ErpListingIncomplete`, never "no POs" or
+        the first 50,000 (decisions §329).
         """
-        return [_po_payload(p) for p in await self._query_all("PurchaseOrder")]
+        return (await self.list_pos_report()).pos
+
+    async def list_pos_report(self) -> PoListing:
+        """:meth:`list_pos`, and the POs left out for want of a total.
+
+        A PO with neither a ``DocNumber`` nor an ``Id`` is dropped (it used to
+        sync under the literal number ``"None"``, one row every such PO
+        overwrote). One with a number but no usable ``TotalAmt`` is skipped,
+        never synced at 0, and named in ``skipped`` as ``unpriceable``: at 0
+        every invoice against it read as over-billed, and a total an earlier
+        sync stored for it must stop being matched against (decisions §323,
+        §325). The total is never summed from ``Line`` (§325's rule): the
+        lines omit what the header carries beyond them, such as tax.
+        """
+        pos: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
+        unnumbered = 0
+        for raw in await self._query_all("PurchaseOrder"):
+            number = _po_number(raw)
+            if number is None:
+                unnumbered += 1
+                continue
+            po = _po_payload(raw)
+            if po is None:
+                skipped.append(SkippedPo(number, PoSkipReason.unpriceable))
+            else:
+                pos.append(po)
+        if unnumbered:
+            # A count only: a PO record carries vendor names and amounts.
+            logger.warning("QuickBooks PO sync skipped %d PO(s) with no number or id", unnumbered)
+        return PoListing(pos=pos, skipped=skipped)
 
 
 #: QuickBooks BillPayment ``PayType`` → our ``Payment.method``. ``Check`` is
@@ -1439,7 +1546,20 @@ def _vendor_payload(raw: dict) -> VendorPayload:
     )
 
 
-def _po_payload(raw: dict) -> PoPayload:
+def _po_number(raw: dict) -> str | None:
+    """The PO's ``DocNumber``, else its ``Id``; None when it has neither."""
+    number = raw.get("DocNumber") or raw.get("Id")
+    return str(number) if number not in (None, "") else None
+
+
+def _po_payload(raw: dict) -> PoPayload | None:
+    """A QuickBooks PurchaseOrder as a PoPayload, or None when it has no
+    number or no usable ``TotalAmt`` (absent, unreadable or not finite; a
+    stated 0 is a figure and is kept)."""
+    number = _po_number(raw)
+    total = _dec(raw.get("TotalAmt"))
+    if number is None or total is None or not total.is_finite():
+        return None
     lines: list[PoLinePayload] = []
     for line in raw.get("Line") or []:
         if not isinstance(line, dict):
@@ -1460,10 +1580,10 @@ def _po_payload(raw: dict) -> PoPayload:
         )
     status = str(raw.get("POStatus") or "Open").lower()
     return PoPayload(
-        po_number=str(raw.get("DocNumber") or raw.get("Id")),
+        po_number=number,
         vendor_name=(raw.get("VendorRef") or {}).get("name"),
         vendor_erp_id=(raw.get("VendorRef") or {}).get("value") or None,
-        total=_dec(raw.get("TotalAmt")) or Decimal("0"),
+        total=total,
         status="closed" if status == "closed" else "open",
         line_items=lines,
         currency=(raw.get("CurrencyRef") or {}).get("value"),

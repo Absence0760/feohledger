@@ -63,6 +63,10 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   dialog names the run (created date + payment count) and its total; the
   server's own refusal sentence (409 wrong state / 403 maker-checker) surfaces
   verbatim. Approving moves no money — execution stays a separate action.
+  **Retrying a run's failed payments is web-only** (the run dialog's *Retry
+  failed payments*): mobile has no run-detail surface, and the runs list it
+  reads (`GET /api/payments/runs/`) carries no `actions` verdict to offer the
+  control from — only `GET /runs/{id}` does.
   Money is rendered as server-supplied display strings — the device never does float arithmetic on money (totals are server-computed)
 - Quality inspections (4-way matching) — `InspectionsScreen` + `InspectionStore`
   over `GET /api/inspections` with **server-side** outcome chips (`?result=`;

@@ -71,9 +71,7 @@ def _capture_client(calls: list, body_of):
 
 @pytest.mark.asyncio
 async def test_stripe_treasury_rounds_half_up():
-    adapter = StripeTreasuryAdapter(
-        {"api_key": "k", "financial_account_id": "fa_1", "api_base": "https://x"}
-    )
+    adapter = StripeTreasuryAdapter({"api_key": "k", "financial_account_id": "fa_1"})
     calls: list = []
     client = _capture_client(calls, lambda kw: kw["data"]["amount"])
     with patch("app.services.payment_adapters.stripe_treasury.httpx.AsyncClient", client):

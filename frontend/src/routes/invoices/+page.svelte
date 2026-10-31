@@ -19,6 +19,7 @@
 	import ImportCsvModal from '#lib/components/modals/ImportCsvModal.svelte';
 	import type { ImportResult } from '#lib/types/csvImport.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
@@ -850,7 +851,6 @@
 
 	let deletingId = $state<string | null>(null);
 	let confirmDeleteId = $state<string | null>(null);
-	let confirmBulkDelete = $state(false);
 
 	async function deleteInvoice(id: string) {
 		deletingId = id;
@@ -871,9 +871,6 @@
 		const target = e.target as HTMLElement;
 		if (confirmDeleteId && !target.closest('.row-action')) {
 			confirmDeleteId = null;
-		}
-		if (confirmBulkDelete && !target.closest('.bulk-delete-btn')) {
-			confirmBulkDelete = false;
 		}
 		if (showBulkStatusSelect && !target.closest('.bulk-status-wrapper')) {
 			showBulkStatusSelect = false;
@@ -1010,27 +1007,12 @@
 			{#if canManageInvoices}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<span class="bulk-btn-wrap" title={hasImmutableSelected ? m('invoices.bulk.cannotDelete') : ''}>
-					<button
-						class="bulk-delete-btn"
-						class:armed={confirmBulkDelete}
+					<BulkDeleteButton
+						onconfirm={bulkDelete}
 						disabled={bulkBusy || hasImmutableSelected}
-						onclick={(e) => {
-							e.stopPropagation();
-							if (confirmBulkDelete) {
-								bulkDelete();
-							} else {
-								confirmBulkDelete = true;
-							}
-						}}
-					>
-						{#if confirmBulkDelete}
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-							{m('invoices.bulk.confirmDelete')}
-						{:else}
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-							{m('invoices.bulk.delete')}
-						{/if}
-					</button>
+						label={m('invoices.bulk.delete')}
+						confirmLabel={m('invoices.bulk.confirmDelete')}
+					/>
 				</span>
 			{/if}
 
@@ -1586,38 +1568,6 @@
 	}
 
 	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.bulk-delete-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 5px 12px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		transition: border-color 0.15s;
-	}
-
-	.bulk-delete-btn:hover {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.bulk-delete-btn.armed {
-		border-color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-		color: var(--danger);
-	}
-
-	.bulk-delete-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
 	}

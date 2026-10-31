@@ -2236,6 +2236,167 @@
       }
     }
   },
+  "exceptionDescriptionErpPaidUnrecordedBlockingException": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.",
+  "@exceptionDescriptionErpPaidUnrecordedBlockingException": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.",
+  "exceptionDescriptionErpPaidUnrecordedInRun": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP's payment from this exception.",
+  "@exceptionDescriptionErpPaidUnrecordedInRun": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedInRunUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP's payment from this exception.",
+  "exceptionDescriptionErpPaidUnrecordedPaymentLive": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP's payment is the real one, then record the ERP's payment from this exception.",
+  "@exceptionDescriptionErpPaidUnrecordedPaymentLive": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP's payment is the real one, then record the ERP's payment from this exception.",
+  "exceptionDescriptionErpPaidUnrecordedCardLive": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP's payment from this exception.",
+  "@exceptionDescriptionErpPaidUnrecordedCardLive": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP's payment from this exception.",
+  "exceptionDescriptionErpPaidUnrecordedCreditConflict": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because an applied credit memo no longer matches this invoice's supplier or currency, so the amount owed can't be stated. Correct the credit memo, then record the ERP's payment from this exception.",
+  "@exceptionDescriptionErpPaidUnrecordedCreditConflict": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because an applied credit memo no longer matches this invoice's supplier or currency, so the amount owed can't be stated. Correct the credit memo, then record the ERP's payment from this exception.",
+  "exceptionDescriptionErpPaidUnrecordedNothingToPay": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.",
+  "@exceptionDescriptionErpPaidUnrecordedNothingToPay": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.",
+  "exceptionDescriptionErpPaidUnrecordedNotPayable": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP's payment from this exception or resolve it.",
+  "@exceptionDescriptionErpPaidUnrecordedNotPayable": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP's payment from this exception or resolve it.",
+  "exceptionDescriptionErpPaidUnrecordedOther": "{erp} reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP's payment from this exception or resolve it.",
+  "@exceptionDescriptionErpPaidUnrecordedOther": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidUnrecordedOtherUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP's payment from this exception or resolve it.",
+  "exceptionDescriptionErpPaidWithdrawn": "{erp} reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.",
+  "@exceptionDescriptionErpPaidWithdrawn": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidWithdrawnUnnamed": "Your ERP reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.",
+  "exceptionDescriptionErpPaidRetryFailed": "{erp} reports this bill paid, but FeohLedger couldn't record that payment automatically. Check the details, then record the ERP's payment from this exception.",
+  "@exceptionDescriptionErpPaidRetryFailed": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaidRetryFailedUnnamed": "Your ERP reports this bill paid, but FeohLedger couldn't record that payment automatically. Check the details, then record the ERP's payment from this exception.",
+  "exceptionDescriptionErpSettledShort": "{erp} reports this bill paid, but FeohLedger's own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.",
+  "@exceptionDescriptionErpSettledShort": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpSettledShortUnnamed": "Your ERP reports this bill paid, but FeohLedger's own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.",
+  "exceptionDescriptionErpVoidedAfterPost": "{erp} reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.",
+  "@exceptionDescriptionErpVoidedAfterPost": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpVoidedAfterPostUnnamed": "Your ERP reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.",
+  "exceptionDescriptionErpCreditSettlement": "The ERP shows this bill settled, at least in part by a vendor credit applied there. FeohLedger will not pay it until someone confirms what is still owed.",
+  "exceptionDescriptionErpPaidWhileScheduled": "The ERP shows this bill paid by a payment FeohLedger did not make, while a FeohLedger payment is scheduled for it. Stop or void one of them before both reach the supplier.",
+  "exceptionDescriptionErpPaidTwice": "FeohLedger paid this invoice, and the ERP shows the bill also paid by a payment FeohLedger did not make — the supplier may have been paid twice. Recover one of the payments.",
+  "exceptionDescriptionErpPartlyPaidOutside": "The ERP shows part of this bill paid or credited outside FeohLedger; a FeohLedger payment for the full amount would overpay it. Reconcile what is still owed before paying.",
+  "exceptionDescriptionErpRecordedPaymentWithdrawn": "The ERP reported this bill paid, and FeohLedger recorded that payment, but the ERP no longer shows it paid (the payment was deleted or voided there). Confirm whether it is still owed.",
+  "exceptionDescriptionErpBillDeletedBlocking": "The bill this invoice was posted as has been deleted or voided in the ERP; FeohLedger will not pay it until someone confirms it is still owed.",
+  "exceptionDescriptionErpBillDeleted": "The bill this invoice was posted as has been deleted or voided in the ERP. Confirm the books still agree.",
+  "exceptionDescriptionErpBillUnlinkedNoDocument": "FeohLedger cannot check this invoice's bill in the ERP, because the ERP did not say which bill it created when the invoice was posted, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.",
+  "exceptionDescriptionErpBillUnlinkedNoCompany": "FeohLedger cannot check this invoice's bill in the ERP, because the posting did not record which ERP company it went to, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.",
+  "exceptionDescriptionErpBillUnlinkedOtherCompany": "FeohLedger cannot check this invoice's bill in the ERP, because it was posted to a different ERP company than the one now connected, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.",
+  "exceptionDescriptionErpDispatchStoppedPaid": "FeohLedger was about to pay this invoice, but the ERP shows its bill already paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.",
+  "exceptionDescriptionErpDispatchStoppedPartiallyPaid": "FeohLedger was about to pay this invoice, but the ERP shows its bill partly paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.",
+  "exceptionDescriptionErpDispatchStoppedDeleted": "FeohLedger was about to pay this invoice, but the ERP shows its bill deleted or voided. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.",
+  "exceptionDescriptionErpDispatchStoppedUnconfirmed": "FeohLedger was about to pay this invoice, but the ERP could not confirm its bill is still open and unpaid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.",
+  "exceptionDescriptionErpReportedPaymentVoided": "A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP's payment is undone.",
+  "exceptionDescriptionErpPaymentWritebackFailed": "{erp} did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.",
+  "@exceptionDescriptionErpPaymentWritebackFailed": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentWritebackFailedUnnamed": "Your ERP did not record this invoice's payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment's run in Payments.",
+  "exceptionDescriptionErpPaymentWritebackBalanceOpen": "{erp} recorded this invoice's payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.",
+  "@exceptionDescriptionErpPaymentWritebackBalanceOpen": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed": "Your ERP recorded this invoice's payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.",
+  "@exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentVoidWritebackFailed": "{erp} still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.",
+  "@exceptionDescriptionErpPaymentVoidWritebackFailed": {
+    "placeholders": {
+      "erp": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed": "Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.",
+  "exceptionDescriptionErpSyncBackFailed": "This invoice's payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment's run in Payments.",
   "warningsPoMatchStatusMatched": "Matched",
   "warningsPoMatchStatusMismatch": "Mismatch",
   "warningsPoMatchStatusPartial": "Partial",

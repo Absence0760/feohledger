@@ -353,6 +353,19 @@ before either is called.
 Per-org overrides live on `Organization.settings.peppol` and win over the
 process-level defaults.
 
+**A per-org `gateway_url` is SSRF-guarded; the operator's is not.** Any tenant
+admin can write `settings.peppol.gateway_url`, and every gateway call carries the
+API key, so `as4_gateway._client` sends it through `url_safety.org_host_client`:
+in a deployed `FEOH_ENVIRONMENT` the URL must resolve only to public addresses
+(checked up front, then pinned at connect so a rebinding DNS answer cannot reach
+an internal host — decisions §334). A refusal sends nothing and reads as the
+PII-free `gateway_url_not_public` (send's `failure_reason`, resolve's
+`unregistered_reason`; `test_connection` is `False`). Outside a deployed
+environment loopback is allowed, still pinned, so a local Access Point emulator
+on `localhost` works. `FEOH_PEPPOL_GATEWAY_URL` is operator configuration, trusted
+like every operator override, and keeps a plain client. Guarded by
+`tests/test_url_safety.py`.
+
 ## Local-first
 
 The mock adapter is in-process, so there is **no** new long-running service and

@@ -12,6 +12,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import {
@@ -226,10 +227,7 @@
 	{#if loading}
 		<p class="state" data-testid="entities-loading">{m('admin.entities.loading')}</p>
 	{:else if error}
-		<div class="state error" data-testid="entities-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn-cancel" onclick={load}>{m('admin.entities.retry')}</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="entities-error" />
 	{:else}
 		<DataTable columns={COLUMNS} isEmpty={entities.length === 0} empty={m('admin.entities.empty')}>
 			{#snippet body()}

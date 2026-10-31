@@ -15,6 +15,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
+# Mock-DB tests: role changes write an audit row through their own control-plane/tenant sessions
+# (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_auth_audit_write")
+
 
 def _ctx():
     """Build the (db, user, org_id) triple every endpoint takes. The

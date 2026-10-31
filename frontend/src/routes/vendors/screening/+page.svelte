@@ -38,6 +38,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import { untrack } from 'svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -648,16 +649,11 @@
 		     empty claim, so a timeline in flight for the open vendor can't be
 		     read as an answer about it either. -->
 		{#if historyError}
-			<p class="history-error" role="alert" data-testid="screening-history-error">
-				{m('vendors.screening.queue.history.error')}
-				<button
-					type="button"
-					class="btn-retry"
-					onclick={() => selected && loadHistory(selected.vendor_id)}
-				>
-					{m('vendors.screening.queue.history.retry')}
-				</button>
-			</p>
+			<LoadError
+				message={m('vendors.screening.queue.history.error')}
+				onretry={() => selected && loadHistory(selected.vendor_id)}
+				testId="screening-history-error"
+			/>
 		{:else if historyLoading || !historyIsForSelected}
 			<p class="muted" data-testid="screening-history-loading">{m('common.loading')}</p>
 		{:else if history.length === 0}
@@ -813,24 +809,6 @@
 	h3 {
 		font-size: 0.95rem;
 		margin: 0 0 8px;
-	}
-	.history-error {
-		display: flex;
-		align-items: baseline;
-		gap: 8px;
-		flex-wrap: wrap;
-		font-size: 0.85rem;
-		color: var(--danger);
-		margin: 0 0 8px;
-	}
-	.btn-retry {
-		border: none;
-		background: none;
-		padding: 0;
-		font: inherit;
-		color: var(--accent-strong);
-		text-decoration: underline;
-		cursor: pointer;
 	}
 	.history {
 		list-style: none;

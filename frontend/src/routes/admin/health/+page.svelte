@@ -9,6 +9,7 @@
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { getSweepHealth, type SweepHealth, type SweepHealthReport } from '#lib/api/sweepHealth.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
 	// RBAC parity with the backend: `GET /api/health/sweeps` is
@@ -187,10 +188,7 @@
 	{#if loading && report === null}
 		<p class="state" data-testid="sweep-health-loading">{m('common.loading')}</p>
 	{:else if error}
-		<div class="state error" data-testid="sweep-health-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn-cancel" onclick={load}>{m('sweepHealth.retry')}</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="sweep-health-error" />
 	{:else if report}
 		<DataTable columns={COLUMNS} isEmpty={sweeps.length === 0} empty={m('sweepHealth.empty')}>
 			{#snippet body()}
@@ -253,10 +251,6 @@
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
 	}
 
 	.kpi-row {

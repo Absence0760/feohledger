@@ -37,11 +37,13 @@ from app.api.deps import (
     ROLE_AP_MANAGER,
     ROLE_CFO,
     get_org_id,
+    holds_any_role,
     require_roles,
 )
 from app.api.expenses import _refresh_policy_violations
 from app.api.expenses import _to_response as _expense_to_response
 from app.api.pagination import PaginationParams, pagination_params
+from app.api.refusals import role_not_permitted
 from app.models.expense import (
     CorporateCardTransaction,
     Expense,
@@ -53,12 +55,18 @@ from app.models.user import User
 from app.schemas.expense import (
     CorporateCardMatchRequest,
     CorporateCardMatchSuggestion,
+    CorporateCardTransactionListItem,
     CorporateCardTransactionListResponse,
     CorporateCardTransactionResponse,
 )
 from app.services.audit_dispatch import dispatch_audit
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_corporate_card_csv
 from app.services.expense_card_reconciliation import suggest_matches, sync_virtual_cards
+from app.services.expense_controls import (
+    card_txn_ignore_refusal,
+    card_txn_link_refusal,
+    card_txn_unmatch_refusal,
+)
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -94,6 +102,35 @@ def _to_response(t: CorporateCardTransaction) -> CorporateCardTransactionRespons
         created_at=t.created_at.isoformat() if t.created_at else "",
         updated_at=t.updated_at.isoformat() if t.updated_at else "",
     )
+
+
+#: Who may match, unmatch or ignore a transaction — those endpoints'
+#: dependency, and what `card_txn_action_refusals` asks.
+CARD_RECONCILE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
+#: Who may mint an expense from a transaction — wider: a clerk files the
+#: expense a card charge stands for.
+CARD_CREATE_EXPENSE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)
+
+
+def card_txn_action_refusals(t: CorporateCardTransaction, user: User) -> dict:
+    """What match, create-expense, unmatch and ignore would answer ``user`` for
+    this transaction — each a coded refusal or ``None`` (issue #575): the
+    endpoint's role predicate, then the gate it raises from
+    (``services/expense_controls``)."""
+
+    def verdict(roles, refusal):
+        # The card gates are pure reads of the row (no logging, no lookups), so
+        # evaluating them before the role predicate costs nothing.
+        if not holds_any_role(user, roles):
+            return role_not_permitted()
+        return refusal.verdict() if refusal is not None else None
+
+    return {
+        "match": verdict(CARD_RECONCILE_ROLES, card_txn_link_refusal(t)),
+        "create_expense": verdict(CARD_CREATE_EXPENSE_ROLES, card_txn_link_refusal(t)),
+        "unmatch": verdict(CARD_RECONCILE_ROLES, card_txn_unmatch_refusal(t)),
+        "ignore": verdict(CARD_RECONCILE_ROLES, card_txn_ignore_refusal(t)),
+    }
 
 
 async def _get_txn_or_404(
@@ -223,7 +260,12 @@ async def list_card_transactions(
     )
     rows = (await db.execute(paged)).scalars().all()
     return CorporateCardTransactionListResponse(
-        items=[_to_response(t) for t in rows],
+        items=[
+            CorporateCardTransactionListItem(
+                **_to_response(t).model_dump(), actions=card_txn_action_refusals(t, user)
+            )
+            for t in rows
+        ],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
@@ -340,7 +382,7 @@ async def match_card_transaction(
     txn_id: uuid.UUID,
     body: CorporateCardMatchRequest,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*CARD_RECONCILE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -354,11 +396,9 @@ async def match_card_transaction(
         raise HTTPException(status_code=400, detail="Invalid expense_id") from None
     expense = await _get_expense_or_404(db, expense_uuid, entity_id)
 
-    if (
-        txn.matched_expense_id is not None
-        or txn.reconciliation_status == ReconciliationStatus.matched
-    ):
-        raise HTTPException(status_code=409, detail="Transaction is already matched")
+    refusal = card_txn_link_refusal(txn)
+    if refusal is not None:
+        raise refusal.http()
     if expense.card_transaction_id is not None:
         raise HTTPException(status_code=409, detail="Expense is already matched")
     # Re-checked here, not just filtered out of `suggest_matches`: the client
@@ -384,14 +424,15 @@ async def match_card_transaction(
 async def unmatch_card_transaction(
     txn_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*CARD_RECONCILE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Clear a reconciliation — both sides back to unlinked, txn → unmatched."""
     txn = await _get_txn_or_404(db, txn_id, entity_id, for_update=True)
-    if txn.reconciliation_status != ReconciliationStatus.matched:
-        raise HTTPException(status_code=409, detail="Transaction is not matched")
+    refusal = card_txn_unmatch_refusal(txn)
+    if refusal is not None:
+        raise refusal.http()
     linked_expense_id = txn.matched_expense_id
 
     if linked_expense_id is not None:
@@ -442,7 +483,7 @@ async def unmatch_card_transaction(
 async def ignore_card_transaction(
     txn_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*CARD_RECONCILE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -454,17 +495,14 @@ async def ignore_card_transaction(
     "matched", which stranded the pair: ``/unmatch`` 409s ("not matched"),
     ``/match`` and ``/create-expense`` 409 ("already matched"). Every sibling
     mutation on this router declares its legal source state; this one was the
-    exception. Unmatch first, then ignore.
+    exception. Unmatch first, then ignore. An already-ignored transaction is
+    refused too (409): a repeat ignore used to succeed and write a second
+    ``card_txn.ignored`` audit row for nothing.
     """
     txn = await _get_txn_or_404(db, txn_id, entity_id, for_update=True)
-    if (
-        txn.reconciliation_status == ReconciliationStatus.matched
-        or txn.matched_expense_id is not None
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="Transaction is matched — unmatch it before ignoring.",
-        )
+    refusal = card_txn_ignore_refusal(txn)
+    if refusal is not None:
+        raise refusal.http()
     txn.reconciliation_status = ReconciliationStatus.ignored
     await dispatch_audit(
         db,
@@ -485,7 +523,7 @@ async def ignore_card_transaction(
 async def create_expense_from_card(
     txn_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
+    user: User = Depends(require_roles(*CARD_CREATE_EXPENSE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
     org: Organization = Depends(get_tenant),
@@ -496,11 +534,9 @@ async def create_expense_from_card(
     currency, and entity from the txn; ``payment_method`` follows the
     virtual/corporate split. Rejects (409) if the txn is already matched."""
     txn = await _get_txn_or_404(db, txn_id, entity_id, for_update=True)
-    if (
-        txn.matched_expense_id is not None
-        or txn.reconciliation_status == ReconciliationStatus.matched
-    ):
-        raise HTTPException(status_code=409, detail="Transaction is already matched")
+    refusal = card_txn_link_refusal(txn)
+    if refusal is not None:
+        raise refusal.http()
 
     expense = Expense(
         expense_date=txn.txn_date,

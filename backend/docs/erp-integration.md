@@ -296,7 +296,14 @@ refusal codes) and the machine facts in `exceptions.erp_report` (migration
 ERP type, document id and event id, plus per kind the payment facts, the
 settling payment and shortfall, or the ERP status. The ERP's product name in
 those sentences comes from `erp_status_sync.erp_product_name` ("Your ERP" when
-an adapter has none).
+an adapter has none). Every one of those sentences — and the QuickBooks status
+sync-back and pre-dispatch bill-check sentences, whose bill / event / payment
+ids now ride `erp_report` too (`kind` `bill_state` / `dispatch_stopped` /
+`bill_unlinked` / `erp_payment_voided`), and the payment write-back and
+sync-back failures (`payment_writeback_failed` / `payment_writeback_balance_open`
+/ `payment_void_writeback_failed` / `payment_sync_back_failed`) — is an `exception.erp_*` code in
+`invoice_warning_catalog`, so each client renders it in the reader's language
+(`invoice-warnings.md` § ERP reconciliation sentences).
 
 **Dedup key is `event_id` only — no fallback to `erp_document_id` /
 `correlation_id`.** Both of those are constant for an invoice's entire
@@ -1198,7 +1205,12 @@ reasoning).
   modal's "Send to ERP" on an approved invoice), `/send-to-erp` and
   `/retry-erp` return **409** with that coded refusal before they move the
   invoice, so it stays `approved` / `failed` and nothing is queued
-  (`erp_export_gate.refuse_blocked_erp_export`).
+  (`erp_export_gate.refuse_blocked_erp_export`). The invoice modal reads the
+  same answer first, from `GET /api/invoices/{id}/review-actions`
+  (`complete` / `send_to_erp` / `retry_erp`, built by
+  `erp_send.erp_send_refusal` over `blocked_erp_export_detail`), and shows
+  "Send to ERP" / "Retry" disabled with the reason instead of a button that
+  409s (`frontend/docs/ui-patterns.md` § Whether to offer an action).
 - **What the user does:** resolve or dismiss the exception in Exceptions, then
   send again. Clearing it goes through `exception_lifecycle.record_decision`,
   so someone implicated in the invoice cannot clear it for themselves.
@@ -1241,6 +1253,10 @@ the three cannot disagree about what is live (decisions §309).
   `params = {claim: "payment" | "virtual_card"}`, plus `possibly_posted: true`
   on the same terms as above. 409 at the doors, `failed` on the first attempt
   at `_call_erp`.
+- **A run staged during a push cannot slip past it.** The run builder locks its
+  invoices `FOR NO KEY UPDATE` before any check (`payment_runs.lock_run_invoices`),
+  which waits on the send's `FOR UPDATE`; whichever commits first, the other
+  sees it and refuses (`payments.md` § The ERP is a third rail).
 - **What the user does:** cancel the run (`POST /api/payments/runs/{id}/cancel`;
   an exported run first needs `/nacha/void`) or void the payment, or cancel the
   card, then send again. A voided, failed or cancelled payment and a cancelled
@@ -1255,6 +1271,45 @@ the three cannot disagree about what is live (decisions §309).
   QuickBooks while FeohLedger also holds a payment is still the status sync's
   `payment_reconciliation` exception. The supported order with an ERP is
   therefore *push, then pay*.
+
+### A vendor the payment path will not pay refuses the push
+
+A bill in the ERP is paid against the ERP's own vendor record, past our
+screening, so the same gate refuses an invoice whose vendor FeohLedger would
+refuse to pay in a way that matters there. It reads the payment path's own
+vendor read, `payment_runs.vendor_payability` (the one `inactive_vendor_statuses`
+— the run gate — now goes through too), and decides per state
+(`erp_export_gate.erp_export_vendor_hold`):
+
+| Vendor state | Push? | `hold` | Why |
+|---|---|---|---|
+| `payments_blocked` (a sanctions match or a manual block) | refused | `payments_blocked` | dispatch's compliance check refuses it first; paid from the ERP it would be paid anyway |
+| last stored screen `match` (block lifted) | refused | `sanctions_match` | the verdict dispatch's live pre-payment screen refuses on |
+| last stored screen `review` | refused | `sanctions_review` | the verdict dispatch's live pre-payment screen holds at `pending_compliance` on; re-screening the vendor rewrites it |
+| status `rejected` | refused | `vendor_rejected` | an invalid or duplicate vendor record: the bill would book a liability to a payee AP declared invalid |
+| any status this build does not know | refused | `vendor_status_unknown` | fail-closed, as the run gate names its one payable status |
+| `unverified` | **books** | — | the approved bill is a real debt; verification is a pre-PAYMENT control, and the run gate still refuses to pay it here |
+| `inactive` | **books** | — | a deactivated supplier's approved bill is still owed; the ERP applies its own inactive-vendor rule |
+| `active`, last screen `clear` / `unscreened` | books | — | the pre-payment screen backstops an unscreened vendor |
+| no linked vendor | books | — | nothing to judge; the adapter's own vendor resolution answers it |
+
+Code `vendor_blocks_erp_export`, `params = {hold}` plus `possibly_posted: true`
+on the same terms as above; checked after the two refusals above, at the same
+places (409 at `/complete`, `/send-to-erp`, `/retry-erp`; an
+`invoice.erp_auto_send_refused` row on the auto-send; `failed` on the first
+attempt at `_call_erp`, before any adapter, so a vendor blocked after the push
+was queued is stopped too). The gate reads the **last stored** screen
+(`Vendor.screening_status`), while dispatch screens **live**; it never calls
+the sanctions adapter (no provider charge and no `sanctions_checks` row per
+push). So the two share a read, not a verdict: a pre-payment screen does not
+rewrite the stored status, and a stale `review` (a provider misconfiguration
+since fixed, say) is cleared by re-screening — one vendor via
+`POST /api/vendors/{id}/screen`, many via `/bulk/screen` or the periodic sweep.
+A vendor whose screen keeps returning `review` / `match` is neither payable
+nor bookable; there is no recorded false-positive adjudication yet. What the user does: unblock the vendor (`POST /api/vendors/{id}/unblock`),
+re-screen it, or re-link the invoice to the right vendor, then send again.
+Tests: `tests/test_erp_export_blocking_exceptions.py` (each state × each door,
+`_call_erp`, the shared-read parity with the run gate).
 
 ## GL accounts and vendors are linked by the ERP's unique key
 
@@ -1307,8 +1362,7 @@ syncs count codes and names across the pull. So every adapter's chart and
 vendor listing returns the whole collection or raises: up to
 `base.SYNC_LISTING_MAX_ROWS` (10,000 rows; QuickBooks reads 50 pages of 1000,
 50,000), and any failed page or a collection past the bound raises
-`ErpListingIncomplete` (`fetch_failed` / `truncated`; QuickBooks raises its own
-request error on a failed page). `POST /api/gl-accounts/sync-erp` and
+`ErpListingIncomplete` (`fetch_failed` / `truncated`). `POST /api/gl-accounts/sync-erp` and
 `POST /api/vendors/sync-erp` answer **502** and change nothing, with the coded
 detail `erp_listing_incomplete` (`params: {provider, gap}`) the browser states
 in the reader's language. Every sync (chart, vendors, POs) that finds the OAuth
@@ -1317,8 +1371,13 @@ connection gone — revoked, never consented, expired — answers the coded **40
 naming the exception class; a token refresh that could not reach the provider
 stays a 502, since the connection is still good (`api/refusals.erp_pull_failure`,
 the one place all three routes turn an adapter failure into HTTP). An empty pull
-changes nothing either. PO listings keep their bounded best-effort reads, since
-nothing is unlinked by a PO's absence.
+changes nothing either. A PO listing is read whole too: nothing is unlinked by
+a PO's absence, but the listing's `skipped` report (below) only covers the part
+it read, so a failed or capped PO read raises `ErpListingIncomplete` and
+`POST /api/purchase-orders/sync-erp` answers the same coded 502 and syncs
+nothing. Every adapter with a PO listing does: SYSPRO, Blackbaud FE NXT,
+NetSuite, Business Central, Sage Accounting (ZA), Sage Intacct, Merge.dev, Xero
+and QuickBooks Online.
 
 **A sync with no realm never touches another company's rows.** `mock`, and an
 OAuth ERP with no consent, have no realm. A sync under one leaves alone every
@@ -1499,13 +1558,29 @@ the purchase-orders page says so in a warning toast and in place of the figure.
 The supplier portal shows no figure for such a PO and refuses to flip it into an
 invoice (409); budgets and the CFO accruals leave it out and count it
 (`po-matching.md` § A PO total the ERP no longer vouches for).
-Blackbaud FE NXT, NetSuite, Business Central, Sage Accounting (ZA) and Sage
-Intacct report the same way: a numbered PO with no usable total (`order_total`,
-`foreigntotal`, `totalAmountIncludingTax`, `Total`, `txnTotal`) is
-`unpriceable`. Intacct used to sync such a PO at 0. A PO with no number is
-dropped without a report, since there is no row to mark. Merge.dev, Xero and
-QuickBooks Online do not override `list_pos_report` and report nothing skipped
-(decisions §325).
+Blackbaud FE NXT, NetSuite, Business Central, Sage Accounting (ZA), Sage
+Intacct, Merge.dev, Xero and QuickBooks Online report the same way: a numbered
+PO with no usable total (`order_total`, `foreigntotal`,
+`totalAmountIncludingTax`, `Total`, `txnTotal`, `total_amount`, Xero's `Total`,
+`TotalAmt`) is `unpriceable`. "No usable total" is absent, empty, unreadable or
+not finite (`NaN`); a stated `0` is the ERP's figure and syncs as one. The total
+is never summed from the PO's lines, which can omit tax, charges or discounts
+the header carries. Intacct, Merge.dev, Xero and QuickBooks Online used to sync
+such a PO at 0, so every invoice against it read as over-billed (decisions
+§325 and its follow-up). A PO with no number is dropped without a report, since
+there is no row to mark; QuickBooks Online used to file one with neither a
+`DocNumber` nor an `Id` under the literal number `"None"`. A Merge.dev skip carries
+the key an earlier build stored the PO under (`SkippedPo.legacy_po_numbers`,
+§328): only a priced PO re-keys, so when no row is stored under the real number
+yet the sync marks the legacy row where it stands (never a key the listing
+reports as another PO's number), and the priced sync that later re-keys it
+clears the mark. Every PO listing, theirs included, is read whole or raises
+`ErpListingIncomplete`: a read that ended at a failed page or a page cap would
+silently drop the skips in the part it never read, leaving those stored totals
+trusted. NetSuite, Business Central and Xero used to return what they had read
+(capped at 1,000 POs), Merge.dev and the two Sage adapters an empty list on a
+failure (Merge.dev also stopped at 1,000), and QuickBooks Online the first
+50,000 (decisions §329 and its follow-up).
 
 **Run the vendor sync before the PO sync** on a new
 connection. A PO synced first has no vendor, and the next PO sync fills that
@@ -1527,8 +1602,14 @@ ones under `"UNKNOWN"`. No manual step is needed: the next PO sync re-keys each
 id-keyed row to its real number instead of creating a second row
 (`PoPayload.legacy_po_numbers`), and marks the `"UNKNOWN"` row unverifiable
 (`ErpAdapter.retired_po_numbers`), so accruals and budgets stop summing it.
-The sync's audit row counts both (`rekeyed`, `retired`). Run one PO sync per
-Merge.dev tenant after deploying; until then `/cfo` can count such a PO twice.
+The sync's audit row counts both (`rekeyed`, `retired`). Only a priced PO
+re-keys: one the ERP now lists with no total, still stored under its record id,
+is marked `unpriceable` where it stands, and the sync that next prices it
+re-keys the row and clears the mark. Run one PO sync per Merge.dev tenant after
+deploying; until then `/cfo` can count such a PO twice. QuickBooks Online
+retires `"None"` the same way, the number it filed a PO with neither a
+`DocNumber` nor an `Id` under. A placeholder the listing reports as a real PO
+number is that PO's and is never marked.
 
 **Repairing a chart synced before §284.** On a QuickBooks Online tenant, every
 invoice push is refused after migration 0115, with `account_not_linked` for the
@@ -1735,7 +1816,11 @@ carry committed, non-secret local-dev values in `backend/.env.development`:
 (TRUSTED), so they bypass the SSRF guard that screens *tenant-admin-supplied*
 config. An admin-entered `base_url` in Organization settings is still guarded
 — only the operator who owns the process env can point an adapter at an
-arbitrary host.
+arbitrary host. NetSuite has no admin `base_url`: its host is built from
+`account_id`, which must be one hostname label (`[A-Za-z0-9_-]+`, so no dot,
+port, `@`, `/` or non-ASCII) before it reaches a URL — the token only ever goes
+to `<account>.suitetalk.api.netsuite.com`. Every adapter's host class is in
+`adapter-patterns.md` § Where an adapter's host comes from.
 
 ### Running the suite
 
@@ -1934,7 +2019,7 @@ form. JSON throughout — no XML parser on this path.
 | `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`) or any GL account ERP id (`account_not_linked`) → `POST services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` |
 | `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` only — never `totalTxnAmountDue = 0` (decisions §303) |
 | `void_invoice` | deletes a draft / posted-unpaid bill; a bill that is paid, partially paid, selected for payment or reversed returns `False` (reversal with its payment is an accountant's call) |
-| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors and accounts up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`), POs 10 pages best-effort; a PO's vendor is linked by `vendor.id` (the vendor ID `list_vendors` stamps) before `vendor.name` |
+| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows a page; vendors, accounts and POs up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`, a transport error or unreadable page included); a PO's vendor is linked by `vendor.id` (the vendor ID `list_vendors` stamps) before `vendor.name` |
 | `test_connection` | token + a one-row vendor query |
 
 Request rules worth knowing:
@@ -2049,8 +2134,13 @@ query-string parameters, which is how the WCF REST host takes them:
   tax id or address.
 - **https only, SSRF-guarded.** An admin `base_url` must be `https` (the
   password would otherwise travel in clear text) and passes
-  `assert_public_url_async` before any request; `FEOH_ERP_SYSPRO_API_BASE` is
-  the operator override for fake-erp and skips both. A SYSPRO server on a
+  `assert_public_url_async` before any request, and every request then goes
+  through `url_safety.pinned_async_client` (`SysproAdapter._client`): the host
+  is re-vetted inside the connect and the socket opens to the vetted IP, so a
+  DNS-rebinding record cannot pass the check and then send the operator
+  password to an internal host. `FEOH_ERP_SYSPRO_API_BASE` is the operator
+  override for fake-erp and skips the https rule, the check and the pin. A
+  SYSPRO server on a
   private network therefore has to be published (reverse proxy with TLS) before
   it can be connected.
 - **Failure messages** never echo the response: SYSPRO's error text quotes the
@@ -2120,7 +2210,7 @@ which apps created on or after 2026-03-02 must use.
 | `test_connection` | `GET Organisation` | |
 | `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False`. Xero sets `IsSupplier` only once a contact has a bill, so a supplier you have only sent purchase orders to is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone |
 | `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
-| `list_pos` | `GET PurchaseOrders` | `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open |
+| `list_pos` | `GET PurchaseOrders` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`, a 429, transport error or unreadable page included); `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open; a numbered PO with no usable `Total` skipped and named `unpriceable` (`list_pos_report`), never synced at 0 |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
 | `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
 | `void_invoice` | `POST Invoices/{id}` | DRAFT/SUBMITTED → `DELETED`; unpaid, uncredited AUTHORISED → `VOIDED`; anything with money applied → `False` |
@@ -2324,9 +2414,10 @@ separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
 Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
 HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows a
 page) and filter with `$filter`. The supplier and account listings read up to
-`SYNC_LISTING_MAX_ROWS` and raise `ErpListingIncomplete` on a failed page or
-past it; an inactive account is emitted `active=False`. Other lists stop at 10
-pages.
+`SYNC_LISTING_MAX_ROWS` and raise `ErpListingIncomplete` on a failed page (a
+transport error included) or past it; an inactive account is emitted
+`active=False`. The purchase-order listing is read the same way. The lookups
+made while posting a bill stop at 10 pages.
 
 | Operation | Calls |
 |---|---|
@@ -2657,8 +2748,8 @@ wire, never a float. The chart and vendor listings read up to
 `SYNC_LISTING_MAX_ROWS` and raise on any failure (a token failure as itself; a
 non-200, network error, unparseable page or longer collection as
 `ErpListingIncomplete`), since the syncs read absence as evidence. The PO
-listing stays best-effort: it stops at 10 pages / 1,000 rows, and a failure ends
-the pull with what it read. An admin `base_url` stays behind the SSRF guard on
+listing is read the same way, since its `skipped` report covers only what it
+read. An admin `base_url` stays behind the SSRF guard on
 every call, and that refusal is raised, not swallowed.
 
 ## NetSuite sign-in: OAuth 2.0 client credentials or TBA
@@ -2759,8 +2850,8 @@ NetSuite account proves Oracle accepts the assertion (`docs/followups.md`).
 (`POST …/services/rest/query/v1/suiteql`, `Prefer: transient`, `ORDER BY id`
 for stable `offset` paging, 100 rows a page), parsed exactly like BC's. The
 chart and vendor queries read up to `SYNC_LISTING_MAX_ROWS` and raise
-`ErpListingIncomplete` on a failed page or past it; the PO query stops at 10
-pages, best-effort.
+`ErpListingIncomplete` on a failed page or past it; the PO query is read the
+same way, since its `skipped` report covers only what it read.
 
 | Sync | Query | Notes |
 |---|---|---|
@@ -2846,8 +2937,8 @@ and calls `await self.access_token()`.
 
 | Route | Auth | Contract |
 |---|---|---|
-| `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan | `200 {"authorize_url"}`; the page navigates the browser to it. `404` unknown provider, `409` no app configured, `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
-| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>`. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant`, `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
+| `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan; called **credentialed** (`credentials: 'include'`) | `200 {"authorize_url"}` plus the HttpOnly nonce cookie `__Host-feoh_erp_oauth_nonce` on the API host (§ Bound to the browser that started it); the page navigates the browser to the URL. `404` unknown provider, `409` no app configured, `409` coded `erp_connect_platform_host` (`params.url` when there is a platform address to offer) when this host cannot carry the cookie — a custom domain, or an `Origin` not same-site with the API; `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
+| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant platform origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>` (the `FEOH_TENANT_URL_TEMPLATE` address, not a vanity one — that is where a connect starts; the vanity URL only when no template is set). Every answer given after the nonce cookie matched clears it; a forged, expired or mismatched state leaves it alone, so a junk-state link cannot break a connect in flight. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `browser_mismatch` (the browser lacks the nonce cookie the state's hash names — checked right after the state is burned, before the provider's answer or the code is looked at), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant` (no company id, or — QuickBooks — a `realmId` the new token cannot reach), `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
 | `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
 | `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
@@ -2857,6 +2948,50 @@ changed by name — never a token) BEFORE anything is saved, through
 `record_auth_audit_or_raise`; a row that cannot be written means nothing is
 linked or cleared. The revoke outcome, known only after the commit, follows as
 `organization.erp_token_revoked`.
+
+**Bound to the browser that started it (login-CSRF).** The callback is
+public and carries no JWT, so a signed single-use `state` alone let a rogue
+tenant admin start a connect, hand the consent URL to someone with access to
+other books, and have the victim's consent link those books to the admin's
+tenant. Now `/authorize` (bearer-authenticated, so only the admin's own
+browser can make it) sets `__Host-feoh_erp_oauth_nonce` — 32 random bytes,
+HttpOnly, `Secure`, `SameSite=Lax`, host-only on the API host, `Path=/` (the
+`__Host-` prefix makes the browser refuse a version a sibling subdomain tries to
+plant, so the value cannot be tossed in by another host on the same site),
+alive for `FEOH_ERP_OAUTH_STATE_TTL_SECONDS` — and the state carries the
+cookie's SHA-256 (`b`), never the value. The callback compares the two in
+constant time and refuses `browser_mismatch` otherwise, writing a best-effort
+`organization.erp_connect_refused` audit row (`{provider, reason}`) on the
+starting admin's trail — the evidence of an attempted login-CSRF. One cookie
+slot per browser: two connects started in two tabs within the TTL leave only the
+later one finishable. It is set on the
+bearer request deliberately: any later bearer-less hop (a "start" redirect)
+would be a transferable link again.
+
+Two consequences of where the cookie lives:
+
+- **The app and the API must be same-site** (`acme.feohledger.com` and
+  `api.feohledger.com`), because a browser refuses a `SameSite=Lax` cookie set
+  by a cross-site fetch. `/authorize` checks this up front from `Origin`
+  against the domains in `FEOH_CORS_PRODUCTION_DOMAIN` and answers the coded
+  409 rather than letting a connect fail after the consent screen. The check is
+  UX; the callback's comparison is the control, and fails closed regardless.
+- **A white-label custom domain cannot start a connect.** Its `/api` is a
+  same-origin proxy, so a cookie set there never reaches the callback on
+  `FEOH_API_PUBLIC_URL`. `/authorize` sees a `Host` that is not the API's and
+  refuses with `params.url` = the tenant's `<slug>.<app domain>` settings page;
+  the panel shows it as a link. The callback sends the admin back there too.
+
+**Local dev is the one exception to `SameSite=Lax`.** `acme.localhost` and
+`localhost` are different sites, and Chromium drops a Lax cookie set by that
+cross-site fetch (measured). When `FEOH_API_PUBLIC_URL` is a loopback host the
+cookie is `SameSite=None; Secure` instead — browsers accept `Secure` from
+`http://localhost` — so the Connect button works on a laptop. Firefox and
+Safari partition or block such third-party cookies, so test a local connect in
+Chromium (Playwright's `page.request` and Chromium both carry it). No deployed
+API can take this branch: it needs both a loopback `FEOH_API_PUBLIC_URL` and a
+non-deployed `FEOH_ENVIRONMENT`, so a misconfigured deployment keeps `Lax` and
+fails closed at the callback.
 
 The callback's query (`code`, `state`, `realmId`) never reaches the uvicorn
 access log: `app/utils/access_log.py` strips the query of every path in
@@ -2901,13 +3036,31 @@ tenant lookups (no stored connection to refresh yet), pinned by
 end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
 
 **Per-provider hooks on the spec.** The company id comes from
-`external_tenant_id_param` (a callback query parameter: QBO `realmId`), from
+`external_tenant_id_param` (a callback query parameter: QBO `realmId` — which
+nothing signs, so QuickBooks overrides the resolver to confirm it, below), from
 `external_tenant_id_token_field` (a token-response field: Blackbaud
 `environment_id`), or from an override of
 `OAuthErpAdapter.resolve_external_tenant_id` (Xero `GET /connections`, Sage's
 business lookup). `extra_token_headers(erp_settings)` adds headers to every
 token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
-or `body`. `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
+or `body`. The resolver also receives the org's saved `settings.erp`
+(`erp_settings`), which QuickBooks reads for its `environment`.
+
+**QuickBooks' realm is confirmed, not taken from the URL.** A tenant admin
+could consent to their own company while naming another company's `realmId`,
+which would then read `already_linked` for its real owner (squatting — the
+token only ever reaches the consenting company). So
+`QuickBooksOnlineAdapter.resolve_external_tenant_id` makes one call under the
+new token, `GET /v3/company/{realmId}/companyinfo/{realmId}`
+(`quickbooks_online.confirm_realm`, sandbox or production host by the saved
+`environment`, or `FEOH_ERP_QBO_API_BASE`), and links the realm only on a 200
+carrying a `CompanyInfo` object. Anything else — Intuit's 403 Fault 3100 for
+another company, a 401, an outage, a malformed realm (only
+`[A-Za-z0-9-]{1,64}` reaches a URL) — refuses with `no_external_tenant`.
+fake-erp answers it the same way: `companyinfo` for any realm but its own is
+the 403, so `tests-e2e/erp/quickbooks-online.spec.ts` drives the refusal.
+
+`revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
 which documents that) instead of RFC 7009's form body; sent a form, Intuit may
 refuse it, and Disconnect would then leave the grant live behind a
 `revoked: false` the user never sees. **Which providers revoke:** QuickBooks

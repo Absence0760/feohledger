@@ -718,6 +718,15 @@ own `issuer`, and this mirrors the check `api/auth_sso.py` already applied to
 `authorization_endpoint`, so a compromised or mis-served document cannot
 redirect either fetch off-host.
 
+The three fetches themselves go through `sso._sso_http_client`, a
+`url_safety.pinned_async_client`. Without it the check above resolves the host
+once and `httpx` resolves it again at connect, so a DNS-rebinding record could
+pass the check and still receive the token `POST`. The pinned client re-vets
+the host inside the connect and dials the vetted IP (the `Host` header, SNI and
+certificate verification still name the hostname); a refusal raises the
+caller's `SSOConfigError` / `SSOValidationError`. Outside a deployed
+environment it allows loopback, as the check does, so local Keycloak works.
+
 **Local-first carve-out** (guard rail 7): the documented local IdP is Keycloak
 on `http://localhost:8088`, and a loopback address is exactly what the guard
 rejects. Outside a deployed environment (`settings.is_deployed`, the same
@@ -1032,6 +1041,20 @@ the account row, independent of the org's SSO settings) and
 contract, defaulting to `true` so a stale caller fails open rather than hiding
 the card for an ordinary member). `frontend/tests-e2e/auth/profile-no-password.spec.ts`
 pins the page, beside `profile-sso-only-step-up.spec.ts` for the org-level case.
+
+## ERP OAuth connections are bound to the browser that started them
+
+Connecting QuickBooks Online, Xero, Sage Accounting or Blackbaud is an OAuth
+authorization-code flow whose callback is public, so it is authenticated by a
+signed single-use `state` — and, since the login-CSRF fix, by the browser too:
+`GET /api/organization/erp/oauth/{provider}/authorize` is a credentialed fetch
+that sets an HttpOnly nonce cookie on the API host, the state carries its
+hash, and the callback refuses (`erp_error=browser_mismatch`) a browser without
+it. A consent link handed to someone else therefore links nothing. The app and
+the API must be same-site, and a custom-domain tenant connects from its
+`<slug>.<app domain>` address. QuickBooks' unsigned `realmId` is confirmed with
+one API call under the new token before it is linked. Full reference:
+`backend/docs/erp-integration.md` § Connecting an OAuth ERP.
 
 ## Frontend Implementation
 
@@ -1789,9 +1812,11 @@ wrong for one of them. The live example is expense reports
 The `/expenses` Reports tab gated BOTH buttons on one manager-only predicate,
 so an over-threshold report 403'd for the `ap_manager` **and** showed the CFO no
 Approve button at all — the exact person the threshold escalates to could not
-act from the UI. The page now derives `canApproveReport` (the wider set) and
-`canDecideReport` (reject) separately; both keep the same SoD self-check, since
-the decider must never be the submitting employee. When adding a decision pair,
+act from the UI. The page no longer derives either: it reads the server's
+`actions.approve` / `actions.reject` verdicts on the report
+(`services/expense_controls`, decisions §305), so the two role sets, the CFO
+gate and the segregation check (the decider is never the submitting employee —
+the reject endpoint now enforces that too) each have one definition. When adding a decision pair,
 check the two backends' `require_roles` independently rather than assuming they
 match. Guarded by `frontend/tests-e2e/expenses/cfo-report-approval.spec.ts`.
 

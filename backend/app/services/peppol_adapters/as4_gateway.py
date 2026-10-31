@@ -11,6 +11,10 @@ it is empty the adapter returns the PII-free ``peppol_not_configured`` outcome
 (mirrors ``increase``'s ``increase_not_configured``) instead of attempting a
 networked call. The live key is supplied via sops in deployed envs.
 
+A per-org ``gateway_url`` is SSRF-guarded (``_client``); in a deployed
+environment one that is not publicly routable yields the PII-free
+``gateway_url_not_public`` outcome without a request being sent.
+
 SBDH (Standard Business Document Header) wrapping happens HERE, in the adapter
 layer — never in the e_invoice generator (which only emits clean UBL). Most
 hosted APs accept the raw UBL plus the participant/doc-type/process metadata
@@ -35,10 +39,15 @@ from app.services.peppol_adapters.base import (
     TransmissionResult,
 )
 from app.services.peppol_adapters.dispatcher import register_peppol_adapter
+from app.utils.url_safety import UnsafeUrlError, org_host_client
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 20.0
+
+#: The PII-free outcome when a per-org ``gateway_url`` is not publicly routable
+#: (or was rebound to an internal address at connect) in a deployed environment.
+GATEWAY_URL_NOT_PUBLIC = "gateway_url_not_public"
 
 
 @register_peppol_adapter("as4_gateway")
@@ -49,10 +58,34 @@ class AS4GatewayAdapter(PeppolAdapter):
         super().__init__(config)
         # Per-org config wins; fall back to the process-level setting. The API
         # key has NO hardcoded fallback — empty means "not configured".
-        self.gateway_url: str = (config.get("gateway_url") or settings.peppol_gateway_url).rstrip(
-            "/"
-        )
+        org_url = (config.get("gateway_url") or "").strip()
+        # Who supplied the host decides how it is reached (`_client`): a tenant
+        # admin's URL is untrusted, the operator's FEOH_PEPPOL_GATEWAY_URL is not.
+        self.gateway_url_from_org: bool = bool(org_url)
+        self.gateway_url: str = (org_url or settings.peppol_gateway_url).rstrip("/")
         self.api_key: str = config.get("api_key") or settings.peppol_gateway_api_key
+
+    async def _client(self) -> httpx.AsyncClient:
+        """The HTTP client for every gateway call.
+
+        A per-org ``gateway_url`` is SSRF-guarded: checked up front and pinned at
+        connect (``url_safety.org_host_client``), with loopback allowed outside a
+        deployed environment so a local Access Point emulator still works. Every
+        call carries the gateway API key, and ``resolve_participant`` reflects
+        part of the answer back to the caller, so an internal target is both a
+        credential leak and a read-back channel. The operator's process-level
+        ``FEOH_PEPPOL_GATEWAY_URL`` is trusted and keeps a plain client
+        (decisions §334). Raises :class:`UnsafeUrlError`.
+        """
+        if not self.gateway_url_from_org:
+            return httpx.AsyncClient(timeout=TIMEOUT)
+        return await org_host_client(
+            self.gateway_url, allow_private=not settings.is_deployed, timeout=TIMEOUT
+        )
+
+    def _refused(self) -> None:
+        # PII-free: names the field, never the URL or the address it resolved to.
+        logger.warning("PEPPOL gateway_url is not publicly routable; refusing to call it")
 
     def _headers(self) -> dict:
         return {
@@ -68,11 +101,18 @@ class AS4GatewayAdapter(PeppolAdapter):
                 unregistered_reason="peppol_not_configured",
             )
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            async with await self._client() as client:
                 response = await client.get(
                     f"{self.gateway_url}/smp/participants/{participant_id.format()}",
                     headers=self._headers(),
                 )
+        except UnsafeUrlError:
+            self._refused()
+            return ParticipantCapability(
+                participant_id=participant_id,
+                registered=False,
+                unregistered_reason=GATEWAY_URL_NOT_PUBLIC,
+            )
         except httpx.RequestError as exc:
             # PII-free: class name only, never the participant value.
             return ParticipantCapability(
@@ -121,12 +161,19 @@ class AS4GatewayAdapter(PeppolAdapter):
         }
         headers = {**self._headers(), "Idempotency-Key": request.business_message_id}
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            async with await self._client() as client:
                 response = await client.post(
                     f"{self.gateway_url}/as4/outbound",
                     json=body,
                     headers=headers,
                 )
+        except UnsafeUrlError:
+            self._refused()
+            return TransmissionResult(
+                success=False,
+                status="failed",
+                failure_reason=GATEWAY_URL_NOT_PUBLIC,
+            )
         except httpx.RequestError as exc:
             return TransmissionResult(
                 success=False,
@@ -168,11 +215,14 @@ class AS4GatewayAdapter(PeppolAdapter):
         if not self.api_key or not self.gateway_url:
             return False
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            async with await self._client() as client:
                 response = await client.get(
                     f"{self.gateway_url}/health",
                     headers=self._headers(),
                 )
+        except UnsafeUrlError:
+            self._refused()
+            return False
         except httpx.RequestError:
             return False
         return response.status_code < 400

@@ -12,7 +12,6 @@ import logging
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
@@ -27,6 +26,7 @@ from app.api.deps import (
     ROLE_CFO,
     get_current_user,
     get_org_id,
+    holds_any_role,
     require_roles,
 )
 from app.api.file_proxy import serve_owned_file
@@ -36,7 +36,7 @@ from app.api.pagination import (
     PaginationParams,
     pagination_params,
 )
-from app.api.refusals import coded_refusal
+from app.api.refusals import role_not_permitted
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.expense import (
     CorporateCardTransaction,
@@ -61,6 +61,7 @@ from app.schemas.expense import (
     ExpenseReportAttach,
     ExpenseReportCreate,
     ExpenseReportDecision,
+    ExpenseReportDetail,
     ExpenseReportListResponse,
     ExpenseReportResponse,
     ExpenseReportSummary,
@@ -69,10 +70,18 @@ from app.schemas.expense import (
     ExpenseSummaryResponse,
     ExpenseUpdate,
 )
-from app.schemas.money import json_money, json_money_string
-from app.services.approval_chain import check_segregation
+from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
+from app.services.expense_controls import (
+    report_approve_check,
+    report_approve_refusal,
+    report_compose_refusal,
+    report_draft_refusal,
+    report_owner_refusal,
+    report_reject_refusal,
+    report_submit_refusal,
+)
 from app.services.expense_currency import (
     ExpenseConversionError,
     ReportRollup,
@@ -82,7 +91,6 @@ from app.services.expense_currency import (
     lock_expense_conversion,
     lock_report_reporting_amount,
     normalize_currency,
-    report_amount_for_gate,
     rollup_report_lines,
 )
 from app.services.expense_policy import (
@@ -197,6 +205,62 @@ def _report_to_response(r: ExpenseReport) -> ExpenseReportResponse:
     )
 
 
+#: Who may compose (attach / detach) or submit a report — those endpoints'
+#: dependency, and what `report_action_refusals` asks. Ownership narrows it to
+#: the report's owner.
+EXPENSE_REPORT_AUTHOR_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)
+#: Who may approve a report. Wider than reject: above the CFO threshold the
+#: gate escalates TO the CFO.
+EXPENSE_REPORT_APPROVE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
+#: Who may reject a report.
+EXPENSE_REPORT_REJECT_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
+
+
+def report_action_refusals(report: ExpenseReport, user: User, org_settings: dict | None) -> dict:
+    """What submit, approve, reject and attach / detach would answer ``user``
+    for this report — each a coded refusal or ``None`` (issue #575). Each is
+    the endpoint's role predicate (``holds_any_role``, what ``require_roles``
+    enforces) followed by the gate it raises from
+    (``services/expense_controls``), so the page and the endpoint cannot
+    disagree. The page used to restate them, and offered an ap_manager an
+    Approve the CFO gate refused."""
+    role_names = [r.name for r in (user.roles or [])]
+
+    def verdict(roles, gate):
+        # The gate runs only for a caller the role predicate admits, as the
+        # endpoint's dependency would — so a clerk's list read never evaluates
+        # (or logs from) the CFO gate.
+        if not holds_any_role(user, roles):
+            return role_not_permitted()
+        refusal = gate()
+        return refusal.verdict() if refusal is not None else None
+
+    return {
+        "submit": verdict(
+            EXPENSE_REPORT_AUTHOR_ROLES, lambda: report_submit_refusal(report, user.id)
+        ),
+        "approve": verdict(
+            EXPENSE_REPORT_APPROVE_ROLES,
+            lambda: report_approve_refusal(report, user.id, role_names, org_settings),
+        ),
+        "reject": verdict(
+            EXPENSE_REPORT_REJECT_ROLES, lambda: report_reject_refusal(report, user.id)
+        ),
+        "compose": verdict(
+            EXPENSE_REPORT_AUTHOR_ROLES, lambda: report_compose_refusal(report, user.id)
+        ),
+    }
+
+
+def _report_detail(r: ExpenseReport, user: User, org_settings: dict | None) -> ExpenseReportDetail:
+    """A report as the list and ``GET /{id}`` read it: with the caller's
+    verdicts (mutation responses carry none — decisions §305)."""
+    return ExpenseReportDetail(
+        **_report_to_response(r).model_dump(),
+        actions=report_action_refusals(r, user, org_settings),
+    )
+
+
 async def _get_expense_or_404(db: AsyncSession, expense_id: uuid.UUID) -> Expense:
     expense = (
         await db.execute(select(Expense).where(Expense.id == expense_id))
@@ -268,14 +332,11 @@ _LOCKED_REPORT_STATUSES = frozenset(
 
 
 def _require_draft_report(report: ExpenseReport) -> None:
-    """A report can only be *built up* (attach new expenses) while it's a draft;
-    a report already submitted/approved/terminal never accepts new lines (issue
-    #155)."""
-    if report.status != ExpenseReportStatus.draft:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot modify a report in '{report.status}' state; it has left draft.",
-        )
+    """A report can only be *built up* (attach new expenses) while it's a draft
+    (`expense_controls.report_draft_refusal`, issue #155)."""
+    refusal = report_draft_refusal(report)
+    if refusal is not None:
+        raise refusal.http()
 
 
 def _require_report_unlocked(report: ExpenseReport) -> None:
@@ -313,14 +374,9 @@ def _require_report_owner(report: ExpenseReport, user: User) -> None:
     from the card feed). ``backend/docs/expense-management.md`` § Report
     ownership.
     """
-    if report.employee_user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=coded_refusal(
-                "expense_report_not_owner",
-                "Only the report's owner can change its lines or submit it.",
-            ),
-        )
+    refusal = report_owner_refusal(report, user.id)
+    if refusal is not None:
+        raise refusal.http()
 
 
 async def _report_rollup(db: AsyncSession, report: ExpenseReport) -> ReportRollup:
@@ -1274,6 +1330,7 @@ async def delete_expense(
 async def list_reports(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    org: Organization = Depends(get_tenant),
     status_filter: str | None = Query(None, alias="status"),
     pagination: PaginationParams = Depends(pagination_params),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -1292,7 +1349,7 @@ async def list_reports(
     )
     rows = (await db.execute(paged)).scalars().all()
     return ExpenseReportListResponse(
-        items=[_report_to_response(r) for r in rows],
+        items=[_report_detail(r, user, org.settings) for r in rows],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
@@ -1343,17 +1400,18 @@ async def create_report(
     return _report_to_response(fresh)
 
 
-@reports_router.get("/{report_id}", response_model=ExpenseReportResponse)
+@reports_router.get("/{report_id}", response_model=ExpenseReportDetail)
 async def get_report(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    org: Organization = Depends(get_tenant),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     await ensure_in_entity_scope(
         db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
     )
-    return _report_to_response(await _get_report_or_404(db, report_id))
+    return _report_detail(await _get_report_or_404(db, report_id), user, org.settings)
 
 
 @reports_router.get("/{report_id}/summary", response_model=ExpenseReportSummary)
@@ -1512,7 +1570,7 @@ async def attach_expenses(
     report_id: uuid.UUID,
     body: ExpenseReportAttach,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
+    user: User = Depends(require_roles(*EXPENSE_REPORT_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -1557,9 +1615,11 @@ async def attach_expenses(
     await _lock_reports(db, (report_id, *source_ids))
     report = await _get_report_or_404(db, report_id, for_update=True)
     # The target report's composition can only change while it's a draft, and
-    # only its owner may change it (attach and detach alike).
-    _require_draft_report(report)
-    _require_report_owner(report, user)
+    # only its owner may change it (attach and detach alike) — the gate the
+    # row's `actions.compose` verdict is read from.
+    refusal = report_compose_refusal(report, user.id)
+    if refusal is not None:
+        raise refusal.http()
 
     # Track every *other* report an expense is moving off of, so its
     # total_amount is recomputed too — otherwise reassigning an expense from
@@ -1634,20 +1694,12 @@ async def attach_expenses(
 # CFO-threshold role gate. Every transition is audited.
 # ---------------------------------------------------------------------------
 
-# Platform default CFO threshold; per-org override in
-# Organization.settings.expense_approval.cfo_threshold.
-_DEFAULT_CFO_THRESHOLD = Decimal("5000")
-
-#: The expense-report CFO gate's refusal code (`api/refusals.coded_refusal`) —
-#: the report-side sibling of `services/review.APPROVAL_CFO_REQUIRED`.
-EXPENSE_CFO_REQUIRED = "expense_cfo_required"
-
 
 @reports_router.post("/{report_id}/submit", response_model=ExpenseReportResponse)
 async def submit_report(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
+    user: User = Depends(require_roles(*EXPENSE_REPORT_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -1669,14 +1721,12 @@ async def submit_report(
         db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
     )
     report = await _get_report_or_404(db, report_id, for_update=True)
-    # "The owner submits" — and only the owner. A non-owner's submit would make
-    # them the report's author in every sense but the one column SoD reads.
-    _require_report_owner(report, user)
-    if report.status != ExpenseReportStatus.draft:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Cannot submit a report in '{report.status}' state",
-        )
+    # "The owner submits" — and only the owner, and only a draft. A non-owner's
+    # submit would make them the report's author in every sense but the one
+    # column SoD reads. The gate the row's `actions.submit` is read from.
+    refusal = report_submit_refusal(report, user.id)
+    if refusal is not None:
+        raise refusal.http()
 
     # Fail closed on an un-summable line rather than submitting an understated
     # total into the approval chain.
@@ -1793,7 +1843,7 @@ async def submit_report(
 async def approve_report(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*EXPENSE_REPORT_APPROVE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -1810,80 +1860,16 @@ async def approve_report(
         db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
     )
     report = await _get_report_or_404(db, report_id, for_update=True)
-    if report.status != ExpenseReportStatus.submitted:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Cannot approve a report in '{report.status}' state",
-        )
-
-    # SoD — approver ≠ submitting employee. Reuse the invoice helper via a tiny
-    # attribute shim so the rule + 403 detail stay shared with the invoice path.
-    check_segregation(
-        SimpleNamespace(
-            uploaded_by_id=report.employee_user_id,
-            # No second implicated actor exists to name: only the owner may
-            # compose, edit or submit a report (`_require_report_owner`), so
-            # the owner IS the complete author set. Stated rather than left
-            # absent: a missing attribute on a fraud control reads as an
-            # oversight, and `violates_segregation`'s getattr default would
-            # silently supply it.
-            segregation_actor_ids=None,
-        ),
-        user.id,
-        {"require_segregation": True},
-    )
-
-    # CFO-threshold role gate (Decimal math, never float). `cfo_gate_applies` is
-    # the shared fail-CLOSED parse: a malformed `cfo_threshold` demands CFO/admin
-    # sign-off rather than raising an InvalidOperation that would 500 the approval.
-    from app.services.approval_chain import _to_decimal, cfo_gate_applies
-
-    expense_cfg = (org.settings or {}).get("expense_approval") or {}
-    cfo_threshold_raw = expense_cfg.get("cfo_threshold", _DEFAULT_CFO_THRESHOLD)
-
-    # The threshold is a bare number denominated in the ORG REPORTING currency,
-    # so the comparison uses the report total expressed in that currency — the
-    # figure locked at submit — not the report's own-currency total (issue
-    # #157). Without this a 4 900 EUR report slips under a 5 000 USD threshold.
-    # `None` means we could not establish it → fail CLOSED (gate applies).
-    reporting_currency = resolve_reporting_currency(org.settings)
-    gate_total = report_amount_for_gate(report, reporting_currency=reporting_currency)
-    gate_applies = gate_total is None or cfo_gate_applies(cfo_threshold_raw, gate_total)
-    if gate_applies:
-        held = {r.name for r in user.roles} if user.roles else set()
-        if ROLE_CFO not in held and ROLE_ADMIN not in held:
-            threshold_dec = _to_decimal(cfo_threshold_raw)
-            if threshold_dec is not None and not threshold_dec.is_finite():
-                threshold_dec = None
-            limit = f"{threshold_dec}" if threshold_dec is not None else "the configured limit"
-            report_currency = normalize_currency(report.currency)
-            if gate_total is None:
-                message = (
-                    f"Report total cannot be expressed in {reporting_currency} "
-                    f"(no rate from {report_currency}), so it cannot be "
-                    f"cleared against the {limit} limit. CFO approval required."
-                )
-            else:
-                message = (
-                    f"Report total {gate_total} {reporting_currency} exceeds {limit}. "
-                    "CFO approval required."
-                )
-            # Coded (`api/refusals.coded_refusal`) so a client states it in the
-            # reader's language; every figure is an exact string beside its
-            # currency. `amount` is None exactly when the total could not be
-            # expressed in the reporting currency, `limit` when the threshold
-            # itself is malformed.
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=coded_refusal(
-                    EXPENSE_CFO_REQUIRED,
-                    message,
-                    amount=json_money_string(gate_total),
-                    currency=reporting_currency,
-                    limit=json_money_string(threshold_dec),
-                    report_currency=report_currency,
-                ),
-            )
+    # The gates the row's `actions.approve` is read from, in this order: the
+    # report must be submitted; approver ≠ owner (`check_segregation`, shared
+    # with the invoice path); above the CFO threshold only cfo / admin
+    # (`expense_controls.report_cfo_gate` — Decimal math in the org REPORTING
+    # currency, fail-closed on a missing rate or a malformed threshold).
+    held = [r.name for r in (user.roles or [])]
+    refusal, cfo = report_approve_check(report, user.id, held, org.settings)
+    if refusal is not None:
+        raise refusal.http()
+    gate_total, reporting_currency = cfo.gate_total, cfo.reporting_currency
 
     report.status = ExpenseReportStatus.approved
     report.approved_at = datetime.now(UTC)
@@ -1918,23 +1904,24 @@ async def reject_report(
     report_id: uuid.UUID,
     body: ExpenseReportDecision | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*EXPENSE_REPORT_REJECT_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject a submitted report: ``submitted → rejected``.
 
     The child expenses are returned to ``draft`` so they can be corrected and
-    re-reported. ``rejected`` is terminal for this report row."""
+    re-reported. ``rejected`` is terminal for this report row. The report's
+    owner may not reject it (403 ``expense_report_self_reject``): the decider is never
+    the submitting employee, for reject as for approve."""
     await ensure_in_entity_scope(
         db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
     )
     report = await _get_report_or_404(db, report_id, for_update=True)
-    if report.status != ExpenseReportStatus.submitted:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Cannot reject a report in '{report.status}' state",
-        )
+    # The gate the row's `actions.reject` is read from.
+    refusal = report_reject_refusal(report, user.id)
+    if refusal is not None:
+        raise refusal.http()
 
     report.status = ExpenseReportStatus.rejected
     for child in report.expenses:

@@ -318,6 +318,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "exception_blocks_erp_export",
         # `services/erp_export_gate`: FeohLedger is already paying it (§309)
         "payment_blocks_erp_export",
+        # `services/erp_export_gate`: the vendor is blocked, sanctions-held or rejected
+        "vendor_blocks_erp_export",
         # `services/erp` itself: the invoice is due before it is dated
         "invoice_due_before_date",
         # A payment written back to the ERP (`post_payment`, decisions §295)
@@ -585,10 +587,17 @@ class PoSkipReason(enum.StrEnum):
 
 @dataclass(frozen=True)
 class SkippedPo:
-    """A PO the ERP has and ``list_pos`` deliberately did not return."""
+    """A PO the ERP has and ``list_pos`` deliberately did not return.
+
+    ``legacy_po_numbers`` mirrors :attr:`PoPayload.legacy_po_numbers`: the keys
+    an earlier build of the adapter stored this PO under (Merge: its record id,
+    decisions §328). The sync marks the row under one of them when none is
+    stored under ``po_number`` yet, so a PO that was never re-keyed is not left
+    trusted at its old total."""
 
     po_number: str
     reason: PoSkipReason
+    legacy_po_numbers: tuple[str, ...] = ()
 
 
 @dataclass
@@ -712,6 +721,11 @@ class ErpListingIncomplete(RuntimeError):
     good link the missing pages held and could link a name that is not unique
     (docs/decisions.md §284). So a listing either returns everything or raises
     this, and the sync endpoints answer 502 without syncing anything.
+
+    An adapter's ``list_pos_report`` raises it too: nothing judges a link by a
+    PO's absence, but its ``skipped`` report covers only the part it read, so a
+    failed or capped read would leave a no-longer-priceable PO's stored total
+    trusted (decisions §323).
 
     PII-free by construction: the provider literal, the collection and the
     :class:`ListingGap` — never a response body, URL or credential.

@@ -247,6 +247,17 @@ bind — and have it approved with no second person involved. Their `/complete`
 also takes only `new` → `ready_for_review`, and only where the snapshot has an
 approval step (with none, `/complete` closes a `new` invoice to `done`).
 
+**`/complete` advances `new` and `approved` only** (`api/workflow.complete_status_refusal`,
+409 `invoice_not_completable`). Any other status used to fall through to
+`→ done`, so `sent_to_erp`, `posted_in_erp` and `paid` could be closed by a door
+the modal never offered there — `posted_in_erp → done` past the payment.
+`POST /bulk/status` can still set `done` from those statuses: it is a deliberate
+manager action with its own audit row, and it checks neither the source status
+nor a live payment, so this narrowing does not by itself close
+`posted_in_erp → done` — it removes the door that did it silently. The modal offers
+Submit from `GET /api/invoices/{id}/review-actions`' `complete` verdict, built
+from this gate, the entry gate and the ERP push gates.
+
 **Nor does extraction for anyone else's read of a document they chose.** The
 read that would approve can be a manager's: re-extracting after a clerk swapped
 the file in. `run_extraction` therefore also suppresses on its own, from the row

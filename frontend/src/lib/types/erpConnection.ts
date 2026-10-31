@@ -423,7 +423,31 @@ export const OAUTH_ERROR_KEYS = {
 	already_linked: 'org.erp.oauth.error.alreadyLinked',
 	credentials_unavailable: 'org.erp.oauth.error.credentialsUnavailable',
 	audit_unavailable: 'org.erp.oauth.error.auditUnavailable',
+	// The callback came from a browser without the nonce cookie the authorize
+	// call set (login-CSRF binding, `backend/app/api/erp_oauth.py`).
+	browser_mismatch: 'org.erp.oauth.error.browserMismatch',
 } as const satisfies Record<string, MessageKey>;
+
+/** The 409 `GET …/oauth/{provider}/authorize` answers when this host cannot
+ *  carry the browser-binding cookie — a white-label custom domain, whose `/api`
+ *  is a same-origin proxy, never the API host the callback is on. */
+export const CONNECT_FROM_PLATFORM_HOST = 'erp_connect_platform_host';
+
+/**
+ * Where that refusal says to connect from instead: `params.url`, only when it
+ * is an absolute http(s) URL, else null (the server offered none, or sent
+ * something this page will not turn into a link).
+ */
+export function platformConnectUrl(params: Record<string, unknown>): string | null {
+	const raw = params.url;
+	if (typeof raw !== 'string') return null;
+	try {
+		const url = new URL(raw);
+		return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+	} catch {
+		return null;
+	}
+}
 
 /** Bounded so a crafted URL can't put a paragraph into the status line. */
 const RETURN_PARAM_LIMIT = 64;

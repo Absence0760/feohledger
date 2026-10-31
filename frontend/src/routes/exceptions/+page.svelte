@@ -51,6 +51,7 @@
 	} from '#lib/api/exceptionDescription.ts';
 	import {
 		erpPrefill,
+		erpRefusalNote,
 		isErpPaidReport,
 		poRematchNote,
 		type ErpReport
@@ -652,6 +653,12 @@
 	 *  clear it. Null on every other row. */
 	function rematchNote(exc: ExceptionItem): string | null {
 		return poRematchNote(exc.erp_report, erpName(exc), m, (day) => formatDate(day));
+	}
+
+	/** Why the ERP refused a payment write-back, in the reader's words, for the
+	 *  resolve dialog. Null on every other row. */
+	function refusalNote(exc: ExceptionItem): string | null {
+		return erpRefusalNote(exc.erp_report, m);
 	}
 
 	async function commitRecordErpPayment() {
@@ -1323,6 +1330,11 @@
 		{#if rematchNote(resolveTarget)}
 			<p class="modal-hint rematch-note" data-testid="exception-rematch-note-detail">
 				{rematchNote(resolveTarget)}
+			</p>
+		{/if}
+		{#if refusalNote(resolveTarget)}
+			<p class="modal-hint" data-testid="exception-erp-refusal-detail">
+				{refusalNote(resolveTarget)}
 			</p>
 		{/if}
 		{#if isErpPaidReport(resolveTarget.erp_report) && isOffered(resolveTarget.record_erp_payment_refusal)}

@@ -972,6 +972,9 @@ async def _database_exists(db_name: str) -> bool:
         await conn.close()
 
 
+# Deliberately end to end against the configured server, on its own loop-local
+# engine (`_provision_on_test_loop`) and maintenance connection.
+@pytest.mark.real_db_engine
 async def test_provision_tenant_drops_orphan_db_when_provisioning_fails(
     throwaway_slug, _provision_on_test_loop
 ):
@@ -1005,6 +1008,8 @@ async def test_provision_tenant_drops_orphan_db_when_provisioning_fails(
 # ---------------------------------------------------------------------------
 
 
+# Builds its own engine against a scratch control-plane database.
+@pytest.mark.real_db_engine
 async def test_provisioning_refuses_a_control_plane_without_the_system_roles(throwaway_slug):
     """The #566 state: control-plane tables, no system roles. Provisioning used
     to skip the admin grant silently and create an admin with no role; it now
@@ -1149,6 +1154,12 @@ async def test_a_failed_orphan_drop_never_masks_the_provisioning_error(monkeypat
     monkeypatch.setattr(tenant_provisioning, "_provision_into", _boom)
     monkeypatch.setattr(tenant_provisioning, "_drop_postgres_database", _drop_fails)
     monkeypatch.setattr(tenant_provisioning, "_require_system_admin_role", AsyncMock())
+    # The closed-slug hold check reads the control plane; this test is DB-free.
+    ctrl = MagicMock()
+    ctrl.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+    ctrl.return_value.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(tenant_provisioning, "control_session_factory", ctrl)
+    monkeypatch.setattr(tenant_provisioning, "ensure_slug_not_held", AsyncMock())
 
     with pytest.raises(RuntimeError, match="the real provisioning failure"):
         await provision_tenant(

@@ -286,7 +286,6 @@ export const messages = {
 	'portal.home.heading': 'Übersicht',
 	'portal.home.subtitle': 'Was Ihre Aufmerksamkeit braucht — und wo Ihre übrigen Rechnungen stehen.',
 	'portal.home.loadFailed': 'Übersicht konnte nicht geladen werden',
-	'portal.home.retry': 'Erneut versuchen',
 	'portal.home.kpi.actionRequired': 'Erfordert Ihre Aufmerksamkeit',
 	'portal.home.kpi.inProgress': 'Bei Ihrem Kunden',
 	'portal.home.kpi.paid': 'Bezahlt',

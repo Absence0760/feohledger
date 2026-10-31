@@ -10,9 +10,16 @@ It FAILS CLOSED — without both a ``base_url`` and an ``api_key`` in
 or returns False (``test_connection``), exactly like the
 ``financing_adapters/c2fo`` skeleton. There is no hardcoded credential
 fallback (project invariant — secrets via sops + KMS, never a literal
-default). A live integration fills in the ``httpx`` body behind the
+default). A live integration fills in the HTTP body behind the
 credential guard and maps the provider's JSON into
 ``QMSInspectionRecord``s.
+
+``base_url`` is a per-org host (any tenant admin writes ``settings.qms``), so
+the live call MUST go through ``url_safety.org_host_client`` — the up-front
+SSRF check plus the pinned connect (decisions §339) — never a plain
+``httpx.AsyncClient``. ``tests/test_url_safety.py`` holds this module in
+``_ORG_HOST_NOT_YET_SENT`` and fails the day it builds an HTTP client, so the
+module moves to ``_ORG_HOST_MODULES`` in the same change.
 """
 
 from __future__ import annotations
@@ -57,7 +64,15 @@ class GenericQMSAdapter:
         # disposition vocabulary onto pass/fail/partial). Not implemented in
         # the skeleton.
         #
-        #   async with httpx.AsyncClient(timeout=self.timeout) as client:
+        #   from app.utils.url_safety import org_host_client
+        #
+        #   client = await org_host_client(
+        #       self.base_url,
+        #       allow_private=not settings.is_deployed,  # a local QMS emulator
+        #       timeout=self.timeout,
+        #       follow_redirects=False,
+        #   )
+        #   async with client:
         #       resp = await client.get(
         #           f"{self.base_url}/inspections",
         #           params={"since": since.isoformat()} if since else None,

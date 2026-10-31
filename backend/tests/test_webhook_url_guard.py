@@ -11,7 +11,10 @@ Covers:
     generic non-enumerating message;
   * the delivery path — a subscription whose host resolves private at SEND time
     (TOCTOU / DNS rebinding) is refused before any POST fires and the delivery
-    is marked failed.
+    is marked failed;
+  * the pinned send — `_post` dials only an address `resolve_pinned_addresses`
+    vetted in the same connect, so a record that flips between the check and
+    the connect cannot reach an internal host.
 
 Hostname resolution is monkeypatched (`url_guard._resolve_host`) for
 determinism — no real DNS. The escape hatch is forced OFF in every blocking
@@ -24,7 +27,9 @@ import ipaddress
 import socket
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
+import httpcore
 import pytest
 
 from app.config import settings
@@ -425,3 +430,125 @@ async def test_delivery_proceeds_when_target_resolves_public(realdb, monkeypatch
             assert row.attempt_count == 1
     finally:
         await _cleanup(control_mk, sub.id)
+
+
+# ---------------------------------------------------------------------------
+# The send is PINNED: the socket opens to an address url_guard vetted.
+# ---------------------------------------------------------------------------
+#
+# `ensure_public_webhook_target` runs just before `_post`, but httpx would make
+# its own lookup when it connects. `_post` uses url_safety.pinned_async_client
+# with `url_guard.resolve_pinned_addresses`, so the address dialled is one that
+# this module's rule passed in the same connect. The socket layer is replaced by
+# a recorder so the dialled address is observable without a network.
+
+
+class _Stream(httpcore.AsyncNetworkStream):
+    def __init__(self):
+        self._pending = b"HTTP/1.1 204 No Content\r\n\r\n"
+
+    async def read(self, max_bytes, timeout=None):
+        out, self._pending = self._pending[:max_bytes], self._pending[max_bytes:]
+        return out
+
+    async def write(self, buffer, timeout=None):
+        pass
+
+    async def aclose(self):
+        pass
+
+    async def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        return self
+
+    def get_extra_info(self, info):
+        return None
+
+
+class _Recorder(httpcore.AsyncNetworkBackend):
+    def __init__(self):
+        self.dialled: list[tuple[str, int]] = []
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        self.dialled.append((host, port))
+        return _Stream()
+
+    async def connect_unix_socket(self, *a, **k):
+        raise AssertionError("never a unix socket")
+
+    async def sleep(self, seconds):
+        pass
+
+
+@pytest.fixture
+def recorder(monkeypatch):
+    from app.utils import url_safety
+
+    rec = _Recorder()
+    monkeypatch.setattr(url_safety.httpcore, "AnyIOBackend", lambda: rec)
+    return rec
+
+
+def _delivery_stub():
+    return SimpleNamespace(event_id="evt_1", event_type=EVENT_INVOICE_APPROVED)
+
+
+class _Rebinding:
+    """`_resolve_host` stand-in: a public answer once, then an internal one."""
+
+    def __init__(self, later: str):
+        self.later, self.calls = later, 0
+
+    async def __call__(self, host):
+        self.calls += 1
+        return [ipaddress.ip_address(PUBLIC_V4 if self.calls == 1 else self.later)]
+
+
+@pytest.mark.asyncio
+async def test_post_dials_the_vetted_address_not_a_rebound_one(monkeypatch, recorder):
+    dns = _Rebinding("169.254.169.254")
+    monkeypatch.setattr(url_guard, "_resolve_host", dns)
+    code = await delivery_mod._post("https://hooks.example.com/x", b"{}", "sig", _delivery_stub())
+    assert code == 204
+    assert recorder.dialled == [(PUBLIC_V4, 443)]
+    assert dns.calls == 1  # no second lookup exists for the record to flip
+
+
+@pytest.mark.asyncio
+async def test_check_then_rebind_is_refused_at_connect(monkeypatch, recorder):
+    """The TOCTOU the send-time re-check alone left open: the check sees the
+    public answer, the connect sees loopback, and nothing is dialled."""
+    monkeypatch.setattr(url_guard, "_resolve_host", _Rebinding("127.0.0.1"))
+    target = "https://hooks.example.com/x"
+    await url_guard.ensure_public_webhook_target(target)  # passes on answer one
+    with pytest.raises(url_guard.WebhookTargetNotAllowed):
+        await delivery_mod._post(target, b"{}", "sig", _delivery_stub())
+    assert recorder.dialled == []
+
+
+@pytest.mark.asyncio
+async def test_pinned_resolver_applies_the_webhook_rule_not_the_generic_one(monkeypatch):
+    """CGNAT 100.64/10 is not global: the webhook rule blocks it (the generic
+    url_safety policy does not), and the pinned resolver must use THIS rule."""
+    _stub_resolve(monkeypatch, addresses=["100.64.0.1"])
+    with pytest.raises(url_guard.WebhookTargetNotAllowed):
+        await url_guard.resolve_pinned_addresses("hooks.example.com", 443)
+    _stub_resolve(monkeypatch, error=socket.gaierror("nope"))
+    with pytest.raises(url_guard.WebhookTargetNotAllowed):
+        await url_guard.resolve_pinned_addresses("hooks.example.com", 443)
+    _stub_resolve(monkeypatch, addresses=[PUBLIC_V4, PUBLIC_V6])
+    assert await url_guard.resolve_pinned_addresses("hooks.example.com", 443) == [
+        PUBLIC_V4,
+        PUBLIC_V6,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_escape_hatch_still_pins_but_allows_loopback(monkeypatch, recorder):
+    """FEOH_WEBHOOKS_ALLOW_PRIVATE_TARGETS keeps local delivery to Mailpit /
+    127.0.0.1 working; the connection is still pinned to what resolved."""
+    monkeypatch.setattr(settings, "webhooks_allow_private_targets", True)
+    _stub_resolve(monkeypatch, addresses=["127.0.0.1"])
+    assert await url_guard.resolve_pinned_addresses("mailpit.localdomain", 8025) == ["127.0.0.1"]
+    code = await delivery_mod._post("http://127.0.0.1:8025/hook", b"{}", "sig", _delivery_stub())
+    assert code == 204
+    assert recorder.dialled == [("127.0.0.1", 8025)]

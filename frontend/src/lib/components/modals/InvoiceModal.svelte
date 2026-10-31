@@ -39,13 +39,14 @@
 		getInvoiceSuggestions,
 		type FieldSuggestion,
 	} from '#lib/api/enrichment.ts';
-	import { getReviewActions, routeIntercompany } from '#lib/api/invoices.ts';
 	import {
-		isAllowed,
-		isOffered,
-		refusalText,
-		type ActionRefusal
-	} from '#lib/api/actionVerdicts.ts';
+		getReviewActions,
+		INVOICE_NOT_COMPLETABLE,
+		INVOICE_NOT_ERP_RETRYABLE,
+		routeIntercompany,
+		type InvoiceActionVerdicts
+	} from '#lib/api/invoices.ts';
+	import { isAllowed, isOffered, refusalText } from '#lib/api/actionVerdicts.ts';
 	import { listInvoiceChart } from '#lib/api/glAccounts.ts';
 	import { glAccountOptionLabel, type GlAccountOption } from '#lib/types/glAccount.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
@@ -494,8 +495,6 @@
 
 	let saving = $state(false);
 	let submitting = $state(false);
-	let deleting = $state(false);
-	let confirmDelete = $state(false);
 	let reviewing = $state(false);
 	let uploadingFile = $state(false);
 	let confirmDeleteFile = $state(false);
@@ -652,8 +651,6 @@
 		status === 'sending_to_erp' || status === 'sent_to_erp' || status === 'posted_in_erp' ||
 		status === 'payment_scheduled' || status === 'paid'
 	);
-	// `/retry-erp` and the contract link routes are admin/ap_manager/cfo.
-	let canRetryErp = $derived(status === 'failed' && canManageInvoice && invoice.approved_by);
 	let retryingErp = $state(false);
 	let canExtract = $derived(
 		canWrite &&
@@ -663,36 +660,37 @@
 	let extracting = $state(false);
 	let canManageFile = $derived(canWrite && status !== 'done');
 	let isReadyForReview = $derived(status === 'ready_for_review');
-	// Whether to offer Approve / Reject is the SERVER's verdict
-	// (`GET /api/invoices/{id}/review-actions` → `review.review_refusals`, run
-	// from the very gates `/approve` and `/reject` enforce), never a rule
-	// restated here. The page used to check only the status and the
-	// `invoice.approve` permission, so the uploader, a non-named approver and an
-	// ap_manager over the CFO limit were all shown an Approve that could only
-	// 403 (issue #575). `undefined` = not yet answered = offer nothing.
-	let reviewActions = $state<{ approve: ActionRefusal; reject: ActionRefusal } | undefined>(
-		undefined
-	);
-	const reviewActionsSequence = createRequestSequencer();
-	async function loadReviewActions() {
-		const ticket = reviewActionsSequence.start();
-		reviewActions = undefined;
+	// Whether to offer Approve / Reject / Submit / Retry ERP is the SERVER's
+	// verdict (`GET /api/invoices/{id}/review-actions`, run from the very gates
+	// `/approve`, `/reject`, `/complete` and `/retry-erp` enforce), never a rule
+	// restated here. The page used to check only the status and a role, so the
+	// uploader, a non-named approver and an ap_manager over the CFO limit were
+	// all shown an Approve that could only 403 (issue #575), and a manager was
+	// offered "Send to ERP" / "Retry" on an invoice the ERP export gate refuses
+	// (an open duplicate, a live payment, a held vendor) and learned why only
+	// from the 409. `undefined` = not yet answered = offer nothing.
+	let verdicts = $state<InvoiceActionVerdicts | undefined>(undefined);
+	const verdictsSequence = createRequestSequencer();
+	async function loadVerdicts() {
+		const ticket = verdictsSequence.start();
+		verdicts = undefined;
 		try {
 			const verdict = await getReviewActions(invoice.id);
-			if (reviewActionsSequence.canCommit(ticket)) reviewActions = verdict;
+			if (verdictsSequence.canCommit(ticket)) verdicts = verdict;
 		} catch {
 			// Unknown stays unknown: no decision is offered on a verdict the
 			// server never gave.
 		}
 	}
 	// Re-asked whenever the version this modal holds moves (`loadedVersion`
-	// advances on every save here): a corrected amount or PO can change the
-	// approval gates' answer, and the approve POST carries no corrections of
-	// its own — it signs the saved version.
+	// advances on every save here) or its status does: a corrected amount or PO
+	// can change the approval gates' answer, and the approve POST carries no
+	// corrections of its own — it signs the saved version.
 	$effect(() => {
 		void loadedVersion;
-		if (isReadyForReview && invoice.id) void loadReviewActions();
-		else reviewActions = undefined;
+		void status;
+		if (invoice.id) void loadVerdicts();
+		else verdicts = undefined;
 	});
 	// The assignee clause is presentation, not a server rule: the endpoint
 	// accepts any approver, and docs/followups.md tracks deciding whether
@@ -703,22 +701,29 @@
 	let canReview = $derived(
 		isReadyForReview &&
 			!isAssignedElsewhere &&
-			(isOffered(reviewActions?.approve) || isOffered(reviewActions?.reject))
+			(isOffered(verdicts?.approve) || isOffered(verdicts?.reject))
 	);
 	// The reason to show beside a DISABLED Approve — never for
 	// `role_not_permitted`, where the button is not rendered at all.
 	let approveRefusal = $derived(
-		isOffered(reviewActions?.approve) ? (reviewActions?.approve ?? null) : null
+		isOffered(verdicts?.approve) ? (verdicts?.approve ?? null) : null
 	);
-	// `POST /{id}/complete`: a manager advances `new` and `approved`; an
-	// entry-only caller only submits a `new` invoice for review — and only
-	// where the workflow has an approval step (the server refuses otherwise).
-	let canSubmitStatus = $derived(
-		canEnterInvoice &&
-			(canManageInvoice
-				? status === 'new' || status === 'approved'
-				: status === 'new' && inEntryWindow && !!activeSteps.approval)
+	// `POST /{id}/complete` (Submit / Send to ERP / Mark Complete). Hidden for
+	// a status it does not advance — not something the reader can act on, like
+	// `role_not_permitted` — and otherwise rendered, disabled with the reason
+	// when refused (a clerk past the entry window, an ERP export refusal).
+	let completeVerdict = $derived(verdicts?.complete);
+	let submitOffered = $derived(
+		isOffered(completeVerdict) && completeVerdict?.code !== INVOICE_NOT_COMPLETABLE
 	);
+	let submitRefusal = $derived(submitOffered ? (completeVerdict ?? null) : null);
+	// `POST /{id}/retry-erp`, the same way: hidden unless this is an approved
+	// invoice's failed push.
+	let retryVerdict = $derived(verdicts?.retry_erp);
+	let retryOffered = $derived(
+		isOffered(retryVerdict) && retryVerdict?.code !== INVOICE_NOT_ERP_RETRYABLE
+	);
+	let retryRefusal = $derived(retryOffered ? (retryVerdict ?? null) : null);
 
 	let submitLabel = $derived.by(() => {
 		if (status === 'new' && activeSteps.approval) return m('invoices.modal.submit.forReview');
@@ -736,7 +741,7 @@
 		return missing;
 	});
 
-	let canSubmit = $derived(canSubmitStatus && missingFields.length === 0);
+	let canSubmit = $derived(submitOffered && missingFields.length === 0);
 
 	// Financial fields are frozen once an invoice is approved: the backend 409s
 	// a PATCH that includes any of them (the signed-off amount is what the
@@ -865,6 +870,10 @@
 			// fields already. Keyed on the code, not the (localized) text.
 			if (err instanceof ApiError && err.code === INVOICE_REQUIRED_FIELDS_MISSING) return;
 			toast(err instanceof Error ? err.message : m('invoices.modal.toast.submitFailed'), 'error');
+			// Whatever changed since the verdict (a duplicate `/complete` just
+			// found, a payment staged meanwhile) — re-ask, so the footer states
+			// the refusal instead of offering the button again.
+			void loadVerdicts();
 		} finally {
 			submitting = false;
 		}
@@ -923,7 +932,7 @@
 			// Whatever changed between the verdict and the click (a colleague's
 			// approval, a delegation ending) — re-ask, so the panel stops
 			// offering what the server just refused.
-			void loadReviewActions();
+			void loadVerdicts();
 		} finally {
 			reviewing = false;
 		}
@@ -953,6 +962,7 @@
 			onclose();
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('invoices.modal.toast.retryFailed'), 'error');
+			void loadVerdicts();
 		} finally {
 			retryingErp = false;
 		}
@@ -1059,21 +1069,6 @@
 		extractionStatus = '';
 		toast(m('invoices.modal.toast.extractionTimeout'), 'warning');
 		await refreshList();
-	}
-
-	async function deleteInvoice() {
-		deleting = true;
-		try {
-			await api.delete(`/api/invoices/${invoice.id}`);
-			toast(m('invoices.modal.toast.deleted'), 'success');
-			// The host refetches with its filters on close — see `submitDone`.
-			onclose();
-		} catch (err) {
-			toast(err instanceof Error ? err.message : m('invoices.modal.toast.deleteFailed'), 'error');
-		} finally {
-			deleting = false;
-			confirmDelete = false;
-		}
 	}
 
 	async function handleFileSelected(e: Event) {
@@ -1926,15 +1921,15 @@
 					{/if}
 
 					<div class="form-grid">
-						<label class:field-error={canSubmitStatus && !vendor.trim()}>
+						<label class:field-error={submitOffered && !vendor.trim()}>
 							<span>{m('invoices.modal.field.vendor')} <em class="required">*</em> {#if dot('vendor_name', vendor)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_name)}" data-tip="{Math.round(fieldConfidence.vendor_name * 100)}% — {confidenceLabel(fieldConfidence.vendor_name)}"></span>{/if}</span>
 							<input type="text" bind:value={vendor} required />
 						</label>
-						<label class:field-error={canSubmitStatus && !invoice_number.trim()}>
+						<label class:field-error={submitOffered && !invoice_number.trim()}>
 							<span>{m('invoices.modal.field.invoiceNumber')} <em class="required">*</em> {#if dot('invoice_number', invoice_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.invoice_number)}" data-tip="{Math.round(fieldConfidence.invoice_number * 100)}% — {confidenceLabel(fieldConfidence.invoice_number)}"></span>{/if}</span>
 							<input type="text" bind:value={invoice_number} required />
 						</label>
-						<label class:field-error={canSubmitStatus && !isPositiveAmount(amount)}>
+						<label class:field-error={submitOffered && !isPositiveAmount(amount)}>
 							<span>{m('invoices.modal.field.amount')} <em class="required">*</em> {#if dot('amount', amount)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.amount)}" data-tip="{Math.round(fieldConfidence.amount * 100)}% — {confidenceLabel(fieldConfidence.amount)}"></span>{/if}</span>
 							<input type="number" step="0.01" bind:value={amount} required />
 						</label>
@@ -2338,7 +2333,7 @@
 						</div>
 					{/if}
 
-					{#if canSubmitStatus && missingFields.length > 0}
+					{#if submitOffered && missingFields.length > 0}
 						<div class="validation-hint">{m('invoices.modal.requiredHint', { fields: formatList(missingFields) })}</div>
 					{/if}
 
@@ -2427,11 +2422,26 @@
 									</div>
 								{/if}
 							</div>
-							{#if canRetryErp}
-								<button type="button" class="btn-retry-erp" disabled={retryingErp} onclick={handleRetryErp}>
+							{#if retryOffered}
+								<button
+									type="button"
+									class="btn-retry-erp"
+									data-testid="retry-erp"
+									disabled={retryingErp || !isAllowed(retryVerdict)}
+									aria-describedby={retryRefusal ? 'retry-erp-refusal' : undefined}
+									onclick={handleRetryErp}
+								>
 									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
 									{retryingErp ? m('invoices.modal.erp.retrying') : m('invoices.modal.erp.retrySend')}
 								</button>
+								{#if retryRefusal}
+									<!-- Why Retry is disabled, from the server's verdict: the same
+									     sentence the retry would 409 with (an open exception, a live
+									     payment, a held vendor, the plan). -->
+									<p class="review-refusal" id="retry-erp-refusal" data-testid="retry-erp-refusal">
+										{refusalText(retryRefusal, m)}
+									</p>
+								{/if}
 							{/if}
 						</div>
 					{/if}
@@ -2852,11 +2862,11 @@
 								</div>
 							{:else}
 								<div class="review-actions">
-									{#if isOffered(reviewActions?.approve)}
+									{#if isOffered(verdicts?.approve)}
 										<button
 											type="button"
 											class="btn-approve"
-											disabled={reviewing || !isAllowed(reviewActions?.approve)}
+											disabled={reviewing || !isAllowed(verdicts?.approve)}
 											aria-describedby={approveRefusal ? 'approve-refusal' : undefined}
 											onclick={handleApprove}
 										>
@@ -2864,11 +2874,11 @@
 											{reviewing ? m('invoices.modal.review.approving') : m('invoices.modal.review.approve')}
 										</button>
 									{/if}
-									{#if isOffered(reviewActions?.reject)}
+									{#if isOffered(verdicts?.reject)}
 										<button
 											type="button"
 											class="btn-reject-outline"
-											disabled={reviewing || !isAllowed(reviewActions?.reject)}
+											disabled={reviewing || !isAllowed(verdicts?.reject)}
 											onclick={() => (showRejectForm = true)}
 										>
 											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -2931,13 +2941,24 @@
 								<button
 									type="button"
 									class="btn-submit"
-									disabled={submitting || awaitingApprover}
-									aria-describedby={awaitingApprover ? 'approver-required-hint' : undefined}
+									disabled={submitting || awaitingApprover || !isAllowed(completeVerdict)}
+									aria-describedby={submitRefusal
+										? 'submit-refusal'
+										: awaitingApprover
+											? 'approver-required-hint'
+											: undefined}
 									onclick={submitDone}
 								>
 									{submitting ? m('invoices.modal.submitting') : submitLabel}
 								</button>
-								{#if awaitingApprover}
+								{#if submitRefusal}
+									<!-- The server's reason Submit would be refused (an ERP export
+									     gate, a clerk past the entry window), localized from its
+									     code, instead of a 409 after the click. -->
+									<p class="approver-hint" id="submit-refusal" data-testid="submit-refusal">
+										{refusalText(submitRefusal, m)}
+									</p>
+								{:else if awaitingApprover}
 									<!-- The one reason Submit is disabled that the reader can fix
 									     here: say so beside the button rather than leaving it greyed. -->
 									<p class="approver-hint" id="approver-required-hint" data-testid="approver-required-hint">
@@ -3261,39 +3282,6 @@
 
 	.btn-cancel:hover {
 		background: var(--bg);
-	}
-
-	.btn-delete-outline {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 8px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		background: var(--surface);
-		color: var(--text-muted);
-		border: 1px solid var(--border);
-		transition: border-color 0.15s;
-	}
-
-	.btn-delete-outline:hover {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.btn-delete-outline.armed {
-		border-color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-		color: var(--danger);
-	}
-
-	.btn-delete-outline:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	/* --- Line items --- */

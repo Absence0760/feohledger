@@ -1,4 +1,5 @@
 <script lang="ts">
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -139,10 +140,7 @@
 	{#if loading}
 		<p class="state" data-testid="access-review-loading">Loading…</p>
 	{:else if error}
-		<div class="state error" data-testid="access-review-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn-cancel" onclick={load}>Retry</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="access-review-error" />
 	{:else if review}
 		<DataTable columns={COLUMNS} isEmpty={reviewUsers.length === 0} empty="No elevated users.">
 			{#snippet body()}
@@ -196,10 +194,6 @@
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
 	}
 
 	.kpi-row {

@@ -2,6 +2,7 @@ import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import { apiErrorCode, formatApiDetail } from '#lib/utils/apiError.ts';
 import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
+import { AssistantBudgetError, assistantBudgetError } from '#lib/api/assistantBudget.ts';
 import {
 	loginPathFor,
 	revokeRejectedSession,
@@ -234,21 +235,19 @@ function authHeaders(): Record<string, string> {
 	return headers;
 }
 
-/** Raised by `streamAssistantChat` (and surfaced to callers) when the backend
- *  rejects the turn for exceeding the monthly AI token budget — HTTP 429 with
- *  `code: "assistant_budget_exceeded"`. Carries the budget figures so the page
- *  can render a friendly notice. */
-export class AssistantBudgetError extends Error {
-	used: number;
-	budget: number;
-	period: string;
-	constructor(detail: string, used: number, budget: number, period: string) {
-		super(detail);
-		this.name = 'AssistantBudgetError';
-		this.used = used;
-		this.budget = budget;
-		this.period = period;
-	}
+// The budget refusal and its recogniser live in a pure module (vitest reaches
+// it); re-exported so the chat pages keep importing from `#lib/api`.
+export { AssistantBudgetError, assistantBudgetError };
+
+/** The budget refusal an error from either chat path carries, or `null`: the
+ *  stream throws `AssistantBudgetError` itself, while the non-streaming
+ *  fallback goes through `request()` and so arrives as an `ApiError` whose raw
+ *  `detail` holds the budget. Branches on the structure, never the message
+ *  (which is localized). */
+export function budgetErrorOf(err: unknown): AssistantBudgetError | null {
+	if (err instanceof AssistantBudgetError) return err;
+	if (err instanceof ApiError && err.status === 429) return assistantBudgetError(err.detail);
+	return null;
 }
 
 export interface StreamCallbacks {
@@ -265,9 +264,12 @@ export interface StreamCallbacks {
  * the Authorization / tenant / entity headers). Parses SSE frames
  * (`event: <name>\ndata: <json>\n\n`) and dispatches to the callbacks.
  *
- * Throws `AssistantBudgetError` on a pre-stream HTTP 429, or a plain `Error`
- * on any other non-OK status / network failure / missing-body — the caller is
- * expected to fall back to the non-streaming `/chat` endpoint in that case.
+ * Throws `AssistantBudgetError` on a pre-stream HTTP 429 whose body carries
+ * the AI budget, an `ApiError` (localized, `code` set) on any other 429 — the
+ * shared limiter's `rate_limited` — and a plain `Error` on any other non-OK
+ * status / network failure / missing-body. Only the plain `Error` means the
+ * stream is unavailable; the caller falls back to the non-streaming `/chat`
+ * endpoint for that one, not for a refusal `/chat` would repeat.
  * Resolves once the stream ends (after a `done` or `error` frame).
  */
 export async function streamAssistantChat(
@@ -283,9 +285,10 @@ export async function streamAssistantChat(
  *
  * The copilot rides the SAME orchestrator + SSE contract as the assistant
  * (`tool`/`delta`/`done`/`error` frames), so it reuses the exact SSE parser and
- * header logic below — only the endpoint path differs. Throws `AssistantBudgetError`
- * on a pre-stream HTTP 429, or a plain `Error` on any other non-OK / network
- * failure — the `/cash-flow` page falls back to the non-streaming `/copilot`.
+ * header logic below — only the endpoint path differs. Throws exactly what
+ * `streamAssistantChat` throws (budget 429, other 429 as `ApiError`, plain
+ * `Error`) — the `/cash-flow` page falls back to the non-streaming `/copilot`
+ * on the plain `Error` only.
  */
 export async function streamCashFlowCopilot(
 	body: { message: string; conversation_id?: string },
@@ -330,13 +333,13 @@ async function streamChatTurn(
 		if (endSessionIfRejected(res.status, j.detail)) throw new Error('Unauthorized');
 	}
 	if (res.status === 429) {
-		const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-		throw new AssistantBudgetError(
-			(j.detail as string) || 'Monthly AI budget reached',
-			Number(j.used ?? 0),
-			Number(j.budget ?? 0),
-			String(j.period ?? '')
-		);
+		// Two different refusals share this status: the AI token budget (a
+		// detail carrying `budget`) and the shared rate limiter's coded
+		// `rate_limited`. Only the first is a budget error; the second goes
+		// through `apiErrorFromBody` so it is localized like every other
+		// coded refusal (`api/codedRefusals.ts`).
+		const j = (await res.json().catch(() => ({}))) as { detail?: unknown };
+		throw assistantBudgetError(j.detail) ?? apiErrorFromBody(j, m('assistant.error.generic'), 429);
 	}
 	if (!res.ok || !res.body) {
 		throw new Error(`Stream error ${res.status}`);
@@ -397,7 +400,9 @@ async function streamChatTurn(
 }
 
 export const api = {
-	get: <T>(path: string) => request<T>(path),
+	// `init.credentials`: send and accept cookies on the API host. Every other
+	// request is bearer-only, so this stays opt-in per call.
+	get: <T>(path: string, init?: Pick<RequestInit, 'credentials'>) => request<T>(path, init),
 	// `headers` is for the few writes that carry a per-request header of their
 	// own — today the `Idempotency-Key` on recording a goods receipt.
 	post: <T>(path: string, body: unknown, headers?: Record<string, string>) =>

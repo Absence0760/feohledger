@@ -15,6 +15,7 @@
 import { api } from '#lib/api.ts';
 import type { Payment, PaymentMethod } from '#lib/types/payment.ts';
 import type { ExecutionModeResponse, NachaSecCode } from '#lib/types/paymentExecution.ts';
+import type { RetryFailedResult } from '#lib/types/runRetry.ts';
 import { triggerDownload } from '#lib/utils/download.ts';
 
 /**
@@ -224,4 +225,15 @@ export function voidRunNachaExport(
 	return api.post<{ id: string; status: string }>(`/api/payments/runs/${runId}/nacha/void`, {
 		reason
 	});
+}
+
+/**
+ * Re-attempt a `partial` / `failed` run's failed payments
+ * (`POST /api/payments/runs/{id}/retry-failed`, `payment.execute`). Unlike the
+ * recovery exits above this DOES move money: it books a new attempt for each
+ * failure that provably never reached the processor and dispatches it. Offer it
+ * only from the run's `actions.retry_failed` verdict (`#lib/types/runRetry.ts`).
+ */
+export function retryFailedRunPayments(runId: string): Promise<RetryFailedResult> {
+	return api.post<RetryFailedResult>(`/api/payments/runs/${runId}/retry-failed`, {});
 }

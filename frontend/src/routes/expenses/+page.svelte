@@ -31,6 +31,7 @@
 	} from '#lib/types/expense.ts';
 	import { expenseStore } from '#lib/stores/expenses.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { isAllowed, refusalText, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listGlAccounts,
@@ -107,11 +108,6 @@
 		{ key: 'preapprovals', label: m('expenses.tab.preapprovals') },
 		{ key: 'cards', label: m('expenses.tab.cards') }
 	]);
-	// Report APPROVE is admin | ap_manager | cfo — and above the org's
-	// `expense_approval.cfo_threshold` the backend demands cfo/admin, so the CFO
-	// must be able to see the button. `auth.isCfo` = admin|cfo, so the union with
-	// `isManager` is exactly those three roles.
-	const canApproveReports = $derived(auth.isManager || auth.isCfo);
 
 	// --- Tabs ---
 	type Tab = 'expenses' | 'reports' | 'policies' | 'preapprovals' | 'cards';
@@ -642,6 +638,18 @@
 		}
 	}
 
+	// A decision's response carries no verdicts (decisions §305), so the detail
+	// is re-read to learn what the reader may do next. If that read fails the
+	// response is shown without them, and every control stays hidden (an
+	// absent verdict is a refusal) until the report is reopened.
+	async function adoptReport(updated: ExpenseReport) {
+		try {
+			activeReport = await getExpenseReport(updated.id);
+		} catch {
+			activeReport = updated;
+		}
+	}
+
 	function closeReport() {
 		activeReport = null;
 		activeSummary = null;
@@ -678,7 +686,7 @@
 		reportBusy = true;
 		try {
 			const updated = await attachExpenses(activeReport.id, [attachId.trim()], false);
-			activeReport = updated;
+			await adoptReport(updated);
 			attachId = '';
 			toast(m('expenses.reports.toast.attached'), 'success');
 			await refreshSummary();
@@ -695,7 +703,7 @@
 		reportBusy = true;
 		try {
 			const updated = await attachExpenses(activeReport.id, [expenseId], true);
-			activeReport = updated;
+			await adoptReport(updated);
 			toast(m('expenses.reports.toast.detached'), 'success');
 			await refreshSummary();
 			await loadReports();
@@ -720,7 +728,7 @@
 			// pre-approval) without transitioning — surfaced inline + as a toast.
 			const result = await apiSubmitReport(activeReport.id);
 			if (result.ok) {
-				activeReport = result.report;
+				await adoptReport(result.report);
 				toast(m('expenses.reports.toast.submitted'), 'success');
 				await refreshSummary();
 				await loadReports();
@@ -740,7 +748,7 @@
 		reportBusy = true;
 		try {
 			const updated = await approveReport(activeReport.id);
-			activeReport = updated;
+			await adoptReport(updated);
 			toast(m('expenses.reports.toast.approved'), 'success');
 			await refreshSummary();
 			await loadReports();
@@ -759,7 +767,7 @@
 		reportBusy = true;
 		try {
 			const updated = await rejectReport(activeReport.id, rejectReason.trim());
-			activeReport = updated;
+			await adoptReport(updated);
 			showReject = false;
 			rejectReason = '';
 			toast(m('expenses.reports.toast.rejected'), 'success');
@@ -772,29 +780,17 @@
 		}
 	}
 
-	// Reject is admin | ap_manager (`POST /expense-reports/{id}/reject`), and never
-	// by the report's own owner (segregation of duties — decider != submitter).
-	function canDecideReport(r: ExpenseReport): boolean {
-		return canManagePolicies && r.status === 'submitted' && auth.user?.id !== r.employee_user_id;
-	}
-
-	// Approve is a WIDER role set than reject: admin | ap_manager | cfo
-	// (`POST /expense-reports/{id}/approve`). Above
-	// `settings.expense_approval.cfo_threshold` the backend REQUIRES cfo/admin —
-	// so gating Approve on the manager-only predicate hid the button from the
-	// exact person the CFO gate escalates to, leaving a large report with no
-	// approver at all. Same SoD self-check.
-	function canApproveReport(r: ExpenseReport): boolean {
-		return canApproveReports && r.status === 'submitted' && auth.user?.id !== r.employee_user_id;
-	}
-
-	// Composition (attach / detach) and submit are the OWNER's alone
-	// (`employee_user_id`), whatever the viewer's role: report segregation refuses
-	// only the owner at approval, so a manager who could build or submit a
-	// clerk's report could then approve it. The server refuses a non-owner with
-	// 403 `expense_report_not_owner`; this only stops offering the buttons.
-	function canComposeReport(r: ExpenseReport): boolean {
-		return canCreate && r.status === 'draft' && auth.user?.id === r.employee_user_id;
+	// Whether to offer Submit / Approve / Reject / Attach / Detach is the
+	// server's verdict on the report (`actions`, built from the gates each
+	// endpoint raises from — `frontend/docs/ui-patterns.md` § Whether to offer an
+	// action). The page used to restate them (role + status + `employee_user_id`
+	// against the reader) and offered an ap_manager an Approve the CFO gate
+	// refused. A refused control is hidden, except where the reader can act on
+	// the reason: above the CFO threshold Approve stays visible, disabled, with
+	// the gate's sentence (someone with the CFO role must approve).
+	const EXPLAINED_APPROVE_REFUSALS = new Set(['expense_cfo_required']);
+	function approveExplained(verdict: ActionRefusal | undefined): verdict is NonNullable<ActionRefusal> {
+		return !!verdict && EXPLAINED_APPROVE_REFUSALS.has(verdict.code);
 	}
 
 	function exportReportCsv() {
@@ -1345,13 +1341,16 @@
 					</div>
 					<div class="report-detail-actions">
 						<button class="btn-secondary" onclick={exportReportCsv}>{m('expenses.reports.exportCsv')}</button>
-						{#if canComposeReport(activeReport)}
+						{#if isAllowed(activeReport.actions?.submit)}
 							<button class="btn-primary" disabled={reportBusy} onclick={submitReport}>{m('expenses.reports.submit')}</button>
 						{/if}
-						{#if canApproveReport(activeReport)}
+						{#if isAllowed(activeReport.actions?.approve)}
 							<button class="btn-primary" disabled={reportBusy} onclick={approveActiveReport}>{m('expenses.reports.approve')}</button>
+						{:else if approveExplained(activeReport.actions?.approve)}
+							<span class="refusal-note" id="approve-refusal">{refusalText(activeReport.actions.approve, m)}</span>
+							<button class="btn-primary" disabled aria-describedby="approve-refusal">{m('expenses.reports.approve')}</button>
 						{/if}
-						{#if canDecideReport(activeReport)}
+						{#if isAllowed(activeReport.actions?.reject)}
 							<button class="btn-secondary danger" disabled={reportBusy} onclick={() => (showReject = true)}>{m('expenses.reports.reject')}</button>
 						{/if}
 					</div>
@@ -1432,7 +1431,7 @@
 					</div>
 				{/if}
 
-				{#if canComposeReport(activeReport)}
+				{#if isAllowed(activeReport.actions?.compose)}
 					<div class="attach-row">
 						<input
 							type="text"
@@ -1474,7 +1473,7 @@
 									</span>
 								</td>
 								<td class="actions">
-									{#if activeReport && canComposeReport(activeReport)}
+									{#if isAllowed(activeReport?.actions?.compose)}
 										<RowAction variant="default" onclick={() => detachFromReport(exp.id)}>{m('expenses.reports.detach')}</RowAction>
 									{/if}
 								</td>
@@ -1693,16 +1692,20 @@
 						     the same flag: choosing a target while another mutation is
 						     retiring the row is the same stale-row problem. -->
 						<td class="actions">
-							{#if canManagePolicies && txn.reconciliation_status === 'unmatched'}
+							<!-- Each action is offered from the row's server verdict
+							     (`txn.actions`, the gate its endpoint raises from), never a
+							     restated role + status check. An `ignored` row is offered
+							     Match / Create expense: that is how an ignore is undone. -->
+							{#if isAllowed(txn.actions?.match)}
 								<RowAction variant="default" disabled={cardBusy} onclick={() => openMatchPicker(txn)}>{m('expenses.cards.match')}</RowAction>
 							{/if}
-							{#if canCreate && txn.reconciliation_status === 'unmatched'}
+							{#if isAllowed(txn.actions?.create_expense)}
 								<RowAction variant="default" disabled={cardBusy} onclick={() => createExpenseForCard(txn)}>{m('expenses.cards.createExpense')}</RowAction>
 							{/if}
-							{#if canManagePolicies && txn.reconciliation_status === 'matched'}
+							{#if isAllowed(txn.actions?.unmatch)}
 								<RowAction variant="default" disabled={cardBusy} onclick={() => unmatchCard(txn)}>{m('expenses.cards.unmatch')}</RowAction>
 							{/if}
-							{#if canManagePolicies && txn.reconciliation_status === 'unmatched'}
+							{#if isAllowed(txn.actions?.ignore)}
 								<RowAction variant="default" disabled={cardBusy} onclick={() => ignoreCard(txn)}>{m('expenses.cards.ignore')}</RowAction>
 							{/if}
 						</td>
@@ -1986,7 +1989,14 @@
 	.report-detail-actions {
 		margin-left: auto;
 		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
 		gap: 8px;
+	}
+	.refusal-note {
+		font-size: 0.74rem;
+		color: var(--text-muted);
+		max-width: 32ch;
 	}
 	.btn-back {
 		border: none;

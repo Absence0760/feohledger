@@ -27,6 +27,7 @@
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import { WORKSPACE_CLOSED_LOGIN_PATH } from '#lib/api/sessionRejection.ts';
 	import { closeWorkspace, getClosurePreflight } from '#lib/api/workspaceClosure.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type { StepUpProof } from '#lib/stores/auth.svelte.ts';
 	import {
@@ -141,8 +142,7 @@
 	{:else if loading || (!preflight && !loadFailed)}
 		<p class="card-hint" role="status">{m('org.close.checking')}</p>
 	{:else if loadFailed || !preflight}
-		<p class="close-error" role="alert">{m('org.close.loadFailed')}</p>
-		<button type="button" class="btn-cancel" onclick={load}>{m('org.close.retry')}</button>
+		<LoadError message={m('org.close.loadFailed')} onretry={load} testId="close-workspace-load-error" />
 	{:else if !preflight.closable}
 		<div class="blocked" data-testid="close-workspace-blocked">
 			<h3>{m('org.close.blockedTitle')}</h3>
