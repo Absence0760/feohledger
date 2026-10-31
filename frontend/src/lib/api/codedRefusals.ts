@@ -56,6 +56,7 @@ import {
 	ERP_CALL_BUDGET_EXHAUSTED,
 	EXCEPTION_BLOCKS_ERP_EXPORT,
 	PAYMENT_BLOCKS_ERP_EXPORT,
+	VENDOR_BLOCKS_ERP_EXPORT,
 	erpRefusalText
 } from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
@@ -388,6 +389,10 @@ const BUILDERS: Record<string, Builder> = {
 	// virtual card), the same way.
 	[PAYMENT_BLOCKS_ERP_EXPORT]: (p, t) =>
 		erpRefusalText({ code: PAYMENT_BLOCKS_ERP_EXPORT, params: p }, t),
+	// ...and for a vendor the payment path will not pay (blocked,
+	// sanctions-held, rejected), the same way.
+	[VENDOR_BLOCKS_ERP_EXPORT]: (p, t) =>
+		erpRefusalText({ code: VENDOR_BLOCKS_ERP_EXPORT, params: p }, t),
 	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
 	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
 	// or whose listing could not be read whole, so nothing synced.
